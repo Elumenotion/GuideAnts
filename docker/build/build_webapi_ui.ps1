@@ -1,4 +1,6 @@
 param(
+    [ValidateSet('Full', 'Slim')]
+    [string]$Flavor = 'Full',
     [switch]$NoCache,
     [switch]$NoRecreate,
     [switch]$UseAppBuildCache
@@ -13,6 +15,12 @@ $dockerfilePath = Join-Path $PSScriptRoot 'webapi-ui\Dockerfile'
 $clientRoot = Join-Path $repoRoot 'src\client'
 $clientNodeModules = Join-Path $clientRoot 'node_modules'
 $clientDistBrowser = Join-Path $clientRoot 'dist-browser'
+$isSlimFlavor = $Flavor -eq 'Slim'
+$dockerTarget = if ($isSlimFlavor) { 'runtime-slim' } else { 'runtime' }
+$imageRepository = if ($isSlimFlavor) { 'guideants-webapi-ui-slim' } else { 'guideants-webapi-ui' }
+$imageEnvKey = if ($isSlimFlavor) { 'GA_WEBAPI_UI_SLIM_IMAGE' } else { 'GA_WEBAPI_UI_IMAGE' }
+$composeFileName = if ($isSlimFlavor) { 'docker-compose.slim.yml' } else { 'docker-compose.yml' }
+$serviceName = if ($isSlimFlavor) { 'guideants-webapi-ui-slim' } else { 'guideants-webapi-ui' }
 
 if (-not (Test-Path $dockerfilePath)) {
     Write-Error "Dockerfile not found at $dockerfilePath"
@@ -22,12 +30,13 @@ if (-not (Test-Path $dockerfilePath)) {
 # Julian date (2-digit year + day-of-year) + time tag: e.g. 26099.1530
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
-$imageTag = "guideants-webapi-ui:${julianDay}.${timeStamp}"
+$imageTag = "${imageRepository}:${julianDay}.${timeStamp}"
 
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Building GuideAnts API + Browser UI" -ForegroundColor Cyan
+Write-Host "  Building GuideAnts API + Browser UI ($Flavor)" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Image tag: $imageTag"
+Write-Host "Target:    $dockerTarget"
 Write-Host "No cache:  $NoCache"
 Write-Host "App cache: $UseAppBuildCache"
 Write-Host "Recreate: $(-not $NoRecreate)"
@@ -79,6 +88,7 @@ elseif (-not $UseAppBuildCache) {
 }
 
 $dockerArgs += @(
+    '--target', $dockerTarget,
     '-t', $imageTag,
     '-f', $dockerfilePath,
     $buildContext
@@ -91,7 +101,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $envFile = Join-Path $dockerRoot '.env'
-$envLine = "GA_WEBAPI_UI_IMAGE=$imageTag"
+$envLine = "${imageEnvKey}=$imageTag"
 
 if (Test-Path $envFile) {
     $raw = Get-Content -Path $envFile -Raw
@@ -116,7 +126,7 @@ if (Test-Path $envFile) {
         }
     }
 
-    $entries['GA_WEBAPI_UI_IMAGE'] = $imageTag
+    $entries[$imageEnvKey] = $imageTag
     $lines = @($entries.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
     Set-Content -Path $envFile -Value (($lines -join "`r`n") + "`r`n") -Encoding UTF8
 }
@@ -134,8 +144,8 @@ foreach ($line in ($envRawAfterWrite -split "`r?`n")) {
     }
 }
 
-if (-not $envEntriesAfterWrite.ContainsKey('GA_WEBAPI_UI_IMAGE') -or $envEntriesAfterWrite['GA_WEBAPI_UI_IMAGE'] -ne $imageTag) {
-    Write-Error "Failed to persist GA_WEBAPI_UI_IMAGE=$imageTag to $envFile"
+if (-not $envEntriesAfterWrite.ContainsKey($imageEnvKey) -or $envEntriesAfterWrite[$imageEnvKey] -ne $imageTag) {
+    Write-Error "Failed to persist ${imageEnvKey}=$imageTag to $envFile"
     exit 1
 }
 
@@ -143,17 +153,29 @@ Write-Host "Image built: $imageTag" -ForegroundColor Green
 Write-Host "Wrote $envLine to $envFile" -ForegroundColor Green
 Write-Host ""
 
-$composeFile = Join-Path $dockerRoot 'docker-compose.yml'
-$serviceName = 'guideants-webapi-ui'
+$composeFile = Join-Path $dockerRoot $composeFileName
 
 if (-not $NoRecreate -and (Test-Path $composeFile)) {
     Write-Host "Recreating $serviceName to apply the new image tag..." -ForegroundColor Cyan
     Push-Location $dockerRoot
     try {
-        docker compose --profile webapi-ui up -d --no-deps --force-recreate $serviceName
+        $composeArgs = @('compose')
+        if ($isSlimFlavor) {
+            $composeArgs += @('-f', $composeFileName)
+        }
+        else {
+            $composeArgs += @('--profile', 'webapi-ui')
+        }
+        $composeArgs += @('up', '-d', '--no-deps', '--force-recreate', $serviceName)
+        docker @composeArgs
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Failed to recreate $serviceName (exit code $LASTEXITCODE)."
-            Write-Host "Use: docker compose --profile webapi-ui up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+            if ($isSlimFlavor) {
+                Write-Host "Use: docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "Use: docker compose --profile webapi-ui up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+            }
             exit 1
         }
     }
@@ -166,8 +188,13 @@ if (-not $NoRecreate -and (Test-Path $composeFile)) {
 elseif ($NoRecreate) {
     Write-Host "Skipping compose service recreate (-NoRecreate)." -ForegroundColor Yellow
     Write-Host "To apply this image to an existing container, run:" -ForegroundColor Yellow
-    Write-Host "docker compose --profile webapi-ui up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+    if ($isSlimFlavor) {
+        Write-Host "docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "docker compose --profile webapi-ui up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+    }
 }
 else {
-    Write-Host "docker-compose.yml not found at $composeFile; image was built but not applied to a running service." -ForegroundColor Yellow
+    Write-Host "$composeFileName not found at $composeFile; image was built but not applied to a running service." -ForegroundColor Yellow
 }

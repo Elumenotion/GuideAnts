@@ -1,0 +1,27 @@
+services:
+  guideants-webapi-ui-slim:
+    image: ${GA_WEBAPI_UI_SLIM_IMAGE:-guideants-webapi-ui-slim:latest}
+    container_name: guideants-webapi-ui-slim
+    ports:
+      - "5107:8080"
+    volumes:
+      - guideants_slim_mssql:/var/opt/mssql
+      - guideants_slim_content_files:/app/ContentFiles
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
+      MSSQL_DB_NAME: ${GA_DB_NAME:-guideants-dev}
+      ASPNETCORE_ENVIRONMENT: Development
+      API_RUNTIME_CONTEXT: compose-slim
+      ALLOWED_ORIGINS: "*"
+      FileStorage__Path: /app/ContentFiles
+      Ui__RootPath: /app/ui
+      SettingsSecrets__ActiveKeyId: local-dev
+      "SettingsSecrets__Keys__local-dev": MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
+      LlamaCpp__BaseUrl: http://127.0.0.1:9/llama-cpp
+      "ServiceRouting__Containers__guideants-ai__BaseUrl": http://127.0.0.1:9/sandbox
+    restart: unless-stopped
+
+volumes:
+  guideants_slim_mssql:
+  guideants_slim_content_files:
