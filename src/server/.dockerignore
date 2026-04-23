@@ -1,0 +1,114 @@
+# Visual Studio temporary files
+.vs/
+*.vsidx
+*.vsidx.lock
+
+# Build outputs
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.log
+
+# Git
+.git/
+.gitignore
+
+# Environment files
+.env
+.env.*
+*.env
+
+# IDE files
+.vscode/
+*.sln.docstates
+*.userprefs
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test results
+TestResults/
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Database files
+*.db
+*.sqlite
+*.mdf
+*.ldf
+
+# Backup files
+*.bak
+*.backup
+
+# Package files
+*.nupkg
+packages/
+
+# Node modules (if any)
+node_modules/
+npm-debug.log*
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+
+# Large directories not needed for GuideAntsApi build
+ContentFiles/
+qdrant-data/
+TestResults/
+AssistantDefinitions/
+NotebookTemplates/
+ScriptExecutionAgent/publish/
+
+# Exclude parts of AntRunner.Chat but keep essential projects
+AntRunner.Chat/OpenAI-DotNet/
+AntRunner.Chat/Sandboxes/
+AntRunner.Chat/TestResults/
+AntRunner.Chat/ProjectTemplate/
+AntRunner.Chat/TestConsole/
+AntRunner.Chat/Coverage.xml
+AntRunner.Chat/*.ps1
+
+# Azure deployment files
+Azure/
+*.bicep
+*.ps1
+*.sh
+
+# Docker compose and other scripts
+docker-compose.yml
+*.md
+build_all_images.ps1
+rebuild_server.ps1
+test-*.ps1
+
+# Additional large directories (keep required dependencies)
+DatabaseSeeder/
+GuideAntsApi.DataModel.Tests/
+GuideAntsApi.IntegrationTests/
+GuideAntsApi.Tests/
+
+# Keep essential project files
+!Dockerfile
+!*.csproj
+!*.sln
+!GuideAntsApi/appsettings*.json
+!GuideAntsApi.DataModel/appsettings*.json 

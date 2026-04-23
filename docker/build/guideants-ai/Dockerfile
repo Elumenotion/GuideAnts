@@ -1,0 +1,294 @@
+# syntax=docker/dockerfile:1.7-labs
+
+# =============================================================================
+# stable-diffusion.cpp builders (baked by target choice)
+# =============================================================================
+ARG SDCPP_REF=master
+ARG SD_CUDA_ARCHITECTURES="75;80;86;89;90"
+ARG BUILDKIT_INLINE_CACHE=1
+ARG GA_DEPS_CPU_IMAGE=deps-cpu
+ARG GA_DEPS_CUDA13_IMAGE=deps-cuda13
+
+FROM ubuntu:24.04 AS sd-cli-cpu-builder
+ARG SDCPP_REF
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends build-essential cmake git \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} https://github.com/leejet/stable-diffusion.cpp /src/stable-diffusion.cpp \
+    && cmake -S /src/stable-diffusion.cpp -B /src/stable-diffusion.cpp/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSD_BUILD_EXAMPLES=ON \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DSD_WEBP=OFF \
+        -DSD_WEBM=OFF \
+    && cmake --build /src/stable-diffusion.cpp/build --config Release -j"$(nproc)" \
+    && mkdir -p /out \
+    && if [ -f /src/stable-diffusion.cpp/build/bin/sd-cli ]; then cp /src/stable-diffusion.cpp/build/bin/sd-cli /out/sd-cli; \
+       elif [ -f /src/stable-diffusion.cpp/build/bin/sd ]; then cp /src/stable-diffusion.cpp/build/bin/sd /out/sd-cli; \
+       else echo "sd-cli binary was not produced by stable-diffusion.cpp CPU build" && exit 1; fi \
+    && if [ -f /src/stable-diffusion.cpp/build/bin/sd-server ]; then cp /src/stable-diffusion.cpp/build/bin/sd-server /out/sd-server; \
+       else echo "sd-server binary was not produced by stable-diffusion.cpp CPU build" && exit 1; fi \
+    && strip /out/sd-cli /out/sd-server || true
+
+FROM nvidia/cuda:13.0.0-devel-ubuntu24.04 AS sd-cli-cuda-builder
+ARG SDCPP_REF
+ARG SD_CUDA_ARCHITECTURES
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends build-essential cmake git \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} https://github.com/leejet/stable-diffusion.cpp /src/stable-diffusion.cpp \
+    && cmake -S /src/stable-diffusion.cpp -B /src/stable-diffusion.cpp/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSD_BUILD_EXAMPLES=ON \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DSD_WEBP=OFF \
+        -DSD_WEBM=OFF \
+        -DSD_CUDA=ON \
+        -DGGML_CUDA=ON \
+        "-DCMAKE_CUDA_ARCHITECTURES=${SD_CUDA_ARCHITECTURES}" \
+    && cmake --build /src/stable-diffusion.cpp/build --config Release -j"$(nproc)" \
+    && mkdir -p /out \
+    && if [ -f /src/stable-diffusion.cpp/build/bin/sd-cli ]; then cp /src/stable-diffusion.cpp/build/bin/sd-cli /out/sd-cli; \
+       elif [ -f /src/stable-diffusion.cpp/build/bin/sd ]; then cp /src/stable-diffusion.cpp/build/bin/sd /out/sd-cli; \
+       else echo "sd-cli binary was not produced by stable-diffusion.cpp CUDA build" && exit 1; fi \
+    && if [ -f /src/stable-diffusion.cpp/build/bin/sd-server ]; then cp /src/stable-diffusion.cpp/build/bin/sd-server /out/sd-server; \
+       else echo "sd-server binary was not produced by stable-diffusion.cpp CUDA build" && exit 1; fi \
+    && strip /out/sd-cli /out/sd-server || true
+
+# =============================================================================
+# CPU backend (runtime base + python deps builder + dependency image)
+# =============================================================================
+FROM ghcr.io/ggml-org/llama.cpp:server AS runtime-cpu-base
+ARG BUILDKIT_INLINE_CACHE
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common ca-certificates curl \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-venv python3.11-distutils \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && chmod +x /tmp/dotnet-install.sh \
+    && /tmp/dotnet-install.sh --channel 9.0 --runtime aspnetcore --install-dir /usr/share/dotnet \
+    && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet \
+    && rm /tmp/dotnet-install.sh
+ENV DOTNET_ROOT=/usr/share/dotnet
+
+ARG PWSH_VERSION=7.4.7
+RUN curl -sSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/powershell-${PWSH_VERSION}-linux-x64.tar.gz" \
+        -o /tmp/pwsh.tar.gz \
+    && mkdir -p /opt/microsoft/powershell/${PWSH_VERSION} \
+    && tar zxf /tmp/pwsh.tar.gz -C /opt/microsoft/powershell/${PWSH_VERSION} \
+    && ln -s /opt/microsoft/powershell/${PWSH_VERSION}/pwsh /usr/bin/pwsh \
+    && chmod +x /usr/bin/pwsh \
+    && rm /tmp/pwsh.tar.gz
+
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+FROM runtime-cpu-base AS pydeps-cpu-builder
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential cmake git \
+        graphviz graphviz-dev \
+        libopenblas-dev liblapack-dev libboost-python-dev \
+        python3.11-dev ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.11 -m venv $VIRTUAL_ENV
+
+COPY asr-requirements.txt /tmp/asr-requirements.txt
+COPY tts-requirements.txt /tmp/tts-requirements.txt
+COPY emb-requirements.txt /tmp/emb-requirements.txt
+COPY requirements.txt /tmp/requirements.txt
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel \
+    && pip install \
+        torch==2.11.0 torchaudio==2.11.0 torchvision==0.26.0 \
+        --index-url https://download.pytorch.org/whl/cpu \
+    && pip install -r /tmp/asr-requirements.txt \
+    && pip install -r /tmp/tts-requirements.txt \
+    && pip install vibevoice==0.0.1 \
+    && pip install accelerate==1.12.0 transformers==4.57.6 tokenizers==0.22.2 \
+    && pip install -r /tmp/emb-requirements.txt \
+    && pip install -r /tmp/requirements.txt \
+    && rm -f /tmp/asr-requirements.txt /tmp/tts-requirements.txt /tmp/emb-requirements.txt /tmp/requirements.txt
+
+FROM runtime-cpu-base AS deps-cpu
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        graphviz ffmpeg bash sqlite3 nginx util-linux passwd \
+        libopenblas0-pthread liblapack3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=pydeps-cpu-builder /opt/venv /opt/venv
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install playwright \
+    && playwright install --with-deps chromium
+
+FROM ${GA_DEPS_CPU_IMAGE} AS final-cpu
+
+COPY --from=sd-cli-cpu-builder /out/sd-cli /usr/local/bin/sd-cli
+COPY --from=sd-cli-cpu-builder /out/sd-server /usr/local/bin/sd-server
+RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server
+
+COPY ScriptExecutionAgent/ /app/script-agent/
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY entrypoint.sh /entrypoint.sh
+COPY start-llama.sh /app/start-llama.sh
+COPY start-llama-admin.sh /app/start-llama-admin.sh
+COPY start-asr.sh /app/start-asr.sh
+COPY start-sd.sh /app/start-sd.sh
+COPY start-tts.sh /app/start-tts.sh
+COPY start-emb.sh /app/start-emb.sh
+COPY start-media.sh /app/start-media.sh
+COPY router-models.seed.ini /opt/seed/router-models.ini
+COPY llama-admin-service/ /app/llama-admin-service/
+COPY asr-service/ /app/asr-service/
+COPY sd-service/ /app/sd-service/
+COPY tts-service/ /app/tts-service/
+COPY emb-service/ /app/emb-service/
+COPY media-service/ /app/media-service/
+RUN chmod +x /entrypoint.sh /app/start-llama.sh /app/start-llama-admin.sh /app/start-asr.sh /app/start-sd.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl -fsS http://localhost/sandbox/health || curl -fsS http://localhost/llama-cpp/health || curl -fsS http://localhost/asr/health || curl -fsS http://localhost/sd/health || curl -fsS http://localhost/tts/health || curl -fsS http://localhost/emb/health || curl -fsS http://localhost/media/health || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]
+
+# =============================================================================
+# CUDA 13 backend (runtime base + python deps builder + dependency image)
+# =============================================================================
+FROM ghcr.io/ggml-org/llama.cpp:server-cuda13 AS runtime-cuda13-base
+ARG BUILDKIT_INLINE_CACHE
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common ca-certificates curl \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-venv python3.11-distutils \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && chmod +x /tmp/dotnet-install.sh \
+    && /tmp/dotnet-install.sh --channel 9.0 --runtime aspnetcore --install-dir /usr/share/dotnet \
+    && ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet \
+    && rm /tmp/dotnet-install.sh
+ENV DOTNET_ROOT=/usr/share/dotnet
+
+ARG PWSH_VERSION=7.4.7
+RUN curl -sSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/powershell-${PWSH_VERSION}-linux-x64.tar.gz" \
+        -o /tmp/pwsh.tar.gz \
+    && mkdir -p /opt/microsoft/powershell/${PWSH_VERSION} \
+    && tar zxf /tmp/pwsh.tar.gz -C /opt/microsoft/powershell/${PWSH_VERSION} \
+    && ln -s /opt/microsoft/powershell/${PWSH_VERSION}/pwsh /usr/bin/pwsh \
+    && chmod +x /usr/bin/pwsh \
+    && rm /tmp/pwsh.tar.gz
+
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+FROM runtime-cuda13-base AS pydeps-cuda13-builder
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential cmake git \
+        graphviz graphviz-dev \
+        libopenblas-dev liblapack-dev libboost-python-dev \
+        python3.11-dev ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.11 -m venv $VIRTUAL_ENV
+
+COPY asr-requirements.txt /tmp/asr-requirements.txt
+COPY tts-requirements.txt /tmp/tts-requirements.txt
+COPY emb-requirements.txt /tmp/emb-requirements.txt
+COPY requirements.txt /tmp/requirements.txt
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel \
+    && pip install \
+        torch==2.11.0 torchaudio==2.11.0 torchvision==0.26.0 \
+        --index-url https://download.pytorch.org/whl/cu130 \
+    && pip install -r /tmp/asr-requirements.txt \
+    && pip install -r /tmp/tts-requirements.txt \
+    && pip install vibevoice==0.0.1 \
+    && pip install accelerate==1.12.0 transformers==4.57.6 tokenizers==0.22.2 \
+    && pip install -r /tmp/emb-requirements.txt \
+    && pip install -r /tmp/requirements.txt \
+    && rm -f /tmp/asr-requirements.txt /tmp/tts-requirements.txt /tmp/emb-requirements.txt /tmp/requirements.txt
+
+FROM runtime-cuda13-base AS deps-cuda13
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        graphviz ffmpeg bash sqlite3 nginx util-linux passwd \
+        libopenblas0-pthread liblapack3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=pydeps-cuda13-builder /opt/venv /opt/venv
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install playwright \
+    && playwright install --with-deps chromium
+
+FROM ${GA_DEPS_CUDA13_IMAGE} AS final-cuda13
+
+COPY --from=sd-cli-cuda-builder /out/sd-cli /usr/local/bin/sd-cli
+COPY --from=sd-cli-cuda-builder /out/sd-server /usr/local/bin/sd-server
+RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server
+
+COPY ScriptExecutionAgent/ /app/script-agent/
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY entrypoint.sh /entrypoint.sh
+COPY start-llama.sh /app/start-llama.sh
+COPY start-llama-admin.sh /app/start-llama-admin.sh
+COPY start-asr.sh /app/start-asr.sh
+COPY start-sd.sh /app/start-sd.sh
+COPY start-tts.sh /app/start-tts.sh
+COPY start-emb.sh /app/start-emb.sh
+COPY start-media.sh /app/start-media.sh
+COPY router-models.seed.ini /opt/seed/router-models.ini
+COPY llama-admin-service/ /app/llama-admin-service/
+COPY asr-service/ /app/asr-service/
+COPY sd-service/ /app/sd-service/
+COPY tts-service/ /app/tts-service/
+COPY emb-service/ /app/emb-service/
+COPY media-service/ /app/media-service/
+RUN chmod +x /entrypoint.sh /app/start-llama.sh /app/start-llama-admin.sh /app/start-asr.sh /app/start-sd.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl -fsS http://localhost/sandbox/health || curl -fsS http://localhost/llama-cpp/health || curl -fsS http://localhost/asr/health || curl -fsS http://localhost/sd/health || curl -fsS http://localhost/tts/health || curl -fsS http://localhost/emb/health || curl -fsS http://localhost/media/health || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,99 @@
+@import "driver.js/dist/driver.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Prevent body/html scroll issues */
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+}
+
+/* Responsive table styles for markdown content */
+@layer components {
+  .prose table {
+    @apply w-full border-collapse;
+  }
+  
+  .prose th,
+  .prose td {
+    @apply border border-gray-300 px-3 py-2;
+  }
+  
+  .prose th {
+    @apply bg-gray-100 font-semibold text-left;
+  }
+  
+  .prose tbody tr:hover {
+    @apply bg-gray-50;
+  }
+  
+  /* Responsive table wrapper - applied directly in component */
+  .table-wrapper {
+    @apply overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0;
+  }
+  
+  /* Ensure tables don't break layout */
+  .prose table {
+    @apply min-w-full md:min-w-0;
+  }
+}
+
+/* Fullscreen image viewer animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+/* Gentle attention pulse: lasts ~2s within a 5s cycle, with smoother steps */
+@keyframes gentlePulseOnce {
+  0% { transform: scale(1); }
+  5% { transform: scale(1.01); }
+  10% { transform: scale(1.02); }
+  15% { transform: scale(1.035); }
+  20% { transform: scale(1.05); }
+  25% { transform: scale(1.045); }
+  30% { transform: scale(1.03); }
+  35% { transform: scale(1.015); }
+  40% { transform: scale(1); }
+  100% { transform: scale(1); }
+}
+
+.animate-gentle-pulse-5s {
+  animation: gentlePulseOnce 5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* Tour button: stronger halo + scale within a 5s cycle, with smoother steps */
+@keyframes tourPulseOnce {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+  5% { transform: scale(1.02); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12); }
+  10% { transform: scale(1.04); box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18); }
+  15% { transform: scale(1.06); box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.24); }
+  20% { transform: scale(1.08); box-shadow: 0 0 0 8px rgba(37, 99, 235, 0.30); }
+  25% { transform: scale(1.065); box-shadow: 0 0 0 6px rgba(37, 99, 235, 0.24); }
+  30% { transform: scale(1.045); box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18); }
+  35% { transform: scale(1.02); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12); }
+  40% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+}
+
+.animate-tour-pulse-5s {
+  animation: tourPulseOnce 5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  transform-origin: center;
+  will-change: transform, box-shadow;
+}

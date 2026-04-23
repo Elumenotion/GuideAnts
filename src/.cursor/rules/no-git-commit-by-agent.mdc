@@ -1,0 +1,11 @@
+---
+description: Keep git commits user-owned
+alwaysApply: true
+---
+
+# Commit Ownership
+
+- Never run `git commit` in any form.
+- Never run `git commit --amend`.
+- Stage files and propose a commit message when helpful, then stop and ask the user to run the commit.
+- If asked to commit, explain that commits are user-owned in this project and hand off the exact command/message for the user to run.

@@ -1,0 +1,5 @@
+fastapi==0.111.0
+python-multipart==0.0.20
+qwen-asr
+soundfile==0.12.1
+uvicorn[standard]==0.30.6

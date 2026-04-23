@@ -1,0 +1,54 @@
+**/.classpath
+**/.dockerignore
+**/.env
+**/.git
+**/.gitignore
+**/.project
+**/.settings
+**/.toolstarget
+**/.vs
+**/.vscode
+**/*.*proj.user
+**/*.dbmdl
+**/*.jfm
+**/azds.yaml
+**/bin
+**/charts
+**/docker-compose*
+**/Dockerfile*
+**/node_modules
+**/npm-debug.log
+**/obj
+**/secrets.dev.yaml
+**/values.dev.yaml
+LICENSE
+!**/.gitignore
+!.git/HEAD
+!.git/config
+!.git/packed-refs
+!.git/refs/heads/**
+#MACOS - Ignore files created by macOS
+
+__pycache__/
+*.py[cod]
+*.log
+.env
+.env.*
+.vscode/
+.DS_Store
+.Thumbs.db
+
+# macOS-specific
+.AppleDouble
+.LSOverride
+**/._*
+
+
+# Python virtual environments (common on Mac)
+venv/
+.venv/
+Pipfile.lock
+
+# Docker leftovers
+docker-compose.override.yml
+docker-compose.dev.yml

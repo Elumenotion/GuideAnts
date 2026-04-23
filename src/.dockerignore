@@ -1,0 +1,24 @@
+# Node.js dependencies and build output
+client/node_modules/
+client/dist/
+client/coverage/
+
+# .NET build output
+**/bin/
+**/obj/
+server/TestResults/
+
+# IDE and git
+**/.vs/
+**/.vscode/
+**/.git/
+**/*.user
+**/*.suo
+**/*.cache
+**/*.log
+
+# Local environment and temporary artifacts
+**/.env
+**/.env.*
+**/*.tmp
+**/*.temp

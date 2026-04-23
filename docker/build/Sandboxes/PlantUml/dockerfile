@@ -1,0 +1,48 @@
+# Use Eclipse Temurin (recommended replacement for deprecated OpenJDK images)
+# Using the standard 11-jre tag which is actively maintained
+FROM eclipse-temurin:11-jre AS base 
+
+# Set the working directory
+WORKDIR /app
+
+# Install dependencies (GraphViz and .NET runtime)
+RUN apt-get update && \
+    apt-get install -y graphviz wget util-linux passwd bash && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create a directory for PlantUML in /usr/local/lib
+RUN mkdir -p /usr/local/lib/plantuml
+
+# Download the PlantUML jar file to /usr/local/lib/plantuml
+RUN wget https://github.com/plantuml/plantuml/releases/download/v1.2025.10/plantuml-1.2025.10.jar -O /usr/local/lib/plantuml/plantuml.jar --no-check-certificate
+
+# Verify the jar file
+RUN ls -l /usr/local/lib/plantuml/plantuml.jar
+
+# Create a symbolic link or script to run PlantUML
+RUN echo '#!/bin/sh\nexec java -jar /usr/local/lib/plantuml/plantuml.jar "$@"' > /usr/local/bin/plantuml && \
+    chmod +x /usr/local/bin/plantuml
+
+# Install .NET runtime
+RUN apt-get update && \
+    apt-get install -y wget && \
+    wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
+    dpkg -i packages-microsoft-prod.deb && \
+    rm packages-microsoft-prod.deb && \
+    apt-get update && \
+    apt-get install -y aspnetcore-runtime-9.0 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy the pre-built ScriptExecutionAgent publish output
+COPY ScriptExecutionAgent/ /app/script-agent/
+
+# Expose the agent's port
+EXPOSE 80
+
+# Set the URL to listen on port 80
+ENV ASPNETCORE_URLS=http://+:80
+
+# The agent manages per-project users and drops privileges per-request
+
+# Start the ScriptExecutionAgent
+CMD ["dotnet", "/app/script-agent/ScriptExecutionAgent.dll"]

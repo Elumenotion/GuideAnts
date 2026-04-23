@@ -1,0 +1,17 @@
+{
+  "name": "Diagram Ants",
+  "description": "Draws PlantUml diagrams",
+  "instructions": "",
+  "tools": [
+    { "type": "file_search" }
+  ],
+  "tool_resources": {
+    "code_interpreter": { "file_ids": [] },
+    "file_search": { "vector_store_ids": [ "PlantUml" ] }
+  },
+  "top_p": 0.7,
+  "response_format": "auto",
+  "metadata": {},
+  "model": "gpt-4o",
+  "temperature": 0.5
+}

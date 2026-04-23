@@ -1,0 +1,42 @@
+@startuml
+!theme cerulean
+actor User
+participant ChatRunner
+participant "RequestBuilderCache Manager" as CacheManager
+participant "ToolCalling.Functions.ToolCaller" as ToolCaller
+participant "External Web API" as WebAPI
+participant "Local Function" as LocalFunc
+participant "AssistantDefinitions.AssistantDefinition" as AssistantDefinition
+participant "OpenAI Chat API" as OpenAI
+
+User -> ChatRunner: RunThread(chatRunOptions, config)
+activate ChatRunner
+ChatRunner -> AssistantDefinition: GetAssistantCreateRequest(assistantName)
+AssistantDefinition --> ChatRunner: assistantDef
+ChatRunner -> ChatRunner: Load tools from assistantDef.Tools
+ChatRunner -> OpenAI: Prepare ChatRequest with tools
+loop Chat loop
+    ChatRunner -> OpenAI: ChatEndpoint.GetCompletionAsync(chatRequest)
+    OpenAI --> ChatRunner: ChatResponse
+    alt if tool_calls
+        ChatRunner -> CacheManager: EnsureRequestBuilderCache(assistantName)
+        activate CacheManager
+        CacheManager --> ChatRunner: requestBuilders
+        deactivate CacheManager
+
+        loop for each toolCall
+            ChatRunner -> ToolCaller: Clone()
+            ToolCaller --> ChatRunner: clonedToolCaller
+            alt if WebApi
+                ChatRunner -> WebAPI: ExecuteWebApiAsync()
+                WebAPI --> ChatRunner: HttpResponse
+            else if LocalFunction
+                ChatRunner -> LocalFunc: ExecuteLocalFunctionAsync()
+                LocalFunc --> ChatRunner: functionResult
+            end
+        end
+        ChatRunner -> ChatRunner: Add tool outputs to messages
+    end
+end
+ChatRunner --> User: ChatRunOutput
+@enduml

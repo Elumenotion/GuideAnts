@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Specs\**" />
+    <Content Remove="Specs\**" />
+    <EmbeddedResource Remove="Specs\**" />
+    <None Remove="Specs\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\EmailTemplates\*.html" />
+    <EmbeddedResource Include="Resources\EmailTemplates\*.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CliWrap" Version="3.10.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.22" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.22" />
+    <PackageReference Include="Microsoft.AspNetCore.SpaServices.Extensions" Version="8.0.22" />
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.4.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.11">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Identity.Web" Version="3.14.1" />
+    <PackageReference Include="Microsoft.Identity.Web.UI" Version="3.14.1" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.6" />
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.47.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.Abstractions\AntRunner.Chat.Abstractions.csproj">
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.Anthropic\AntRunner.Chat.Anthropic.csproj">
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.LlamaCpp\AntRunner.Chat.LlamaCpp.csproj">
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.OpenAI\AntRunner.Chat.OpenAI.csproj">
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat\AntRunner.Chat.csproj">
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.ToolCalling\AntRunner.ToolCalling.csproj">
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\HtmlAgilityPackExtensions\HtmlAgilityPackExtensions.csproj">
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\GuideAntsApi.DataModel\GuideAntsApi.DataModel.csproj" />
+    <ProjectReference Include="..\GuideAnts.Usage\GuideAnts.Usage.csproj" />
+    <ProjectReference Include="..\GuideAntsApi.BackgroundJobs\GuideAntsApi.BackgroundJobs.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,15 @@
+{
+  "profiles": {
+    "Docker Remote Debug": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "applicationUrl": "http://localhost:5105",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "remoteDebugEnabled": true,
+      "remoteDebugMachine": "localhost",
+      "remoteDebugPort": 4711
+    }
+  }
+} 

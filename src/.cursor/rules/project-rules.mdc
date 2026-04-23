@@ -1,0 +1,213 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# GuideAnts Project Rules
+
+## Project Structure
+```
+root/
+  ├── client/                  # Frontend Electron application
+  │   ├── src/                # Source code for React application
+  │   ├── electron/           # Electron-specific code
+  │   ├── public/             # Static assets
+  │   ├── dist/               # Build output
+  │   └── resources/          # Application resources
+  └── server/                 # Backend .NET application
+      ├── GuideAntsApi/       # Main API project
+      ├── GuideAntsApi.DataModel/  # Data models and EF Core
+      └── code-interpreter/   # Code interpretation services
+```
+
+## Technology Stack Requirements
+### Frontend
+- Electron: ^36.3.1
+- Vite: ^6.3.5
+- React: ^19.1.0
+- TypeScript: ^5.8.3
+- TailwindCSS: ^3.4.1
+
+### Backend
+- ASP.NET Core: ^8.0
+- Entity Framework Core: ^8.0
+- SQL Server Database
+- Azure AD Authentication
+
+## Development Standards
+
+### General
+1. All new code must be written in TypeScript (frontend) or C# (backend)
+2. Use UTF-8 encoding for all text files
+3. Use LF (\n) for line endings
+4. Maximum line length: 120 characters
+5. Follow semantic versioning (MAJOR.MINOR.PATCH)
+
+### Frontend Standards
+1. Component Structure:
+   - One component per file
+   - Use functional components with hooks
+   - Follow React best practices
+
+2. TypeScript Usage:
+   - Strict mode enabled
+   - No 'any' types unless absolutely necessary
+   - Define interfaces for all props
+
+3. Styling:
+   - Use TailwindCSS for styling
+   - Follow utility-first approach
+   - Maintain consistent spacing
+
+4. State Management:
+   - Use React Context for global state
+   - Prefer hooks for local state
+   - Implement proper error boundaries
+
+### Backend Standards
+1. API Design:
+   - RESTful principles
+   - Proper HTTP methods
+   - Consistent endpoint naming
+   - Version control in URL
+
+2. Database:
+   - Use data annotations
+   - UTC timestamps
+   - Proper cascade rules
+   - Initialize collections
+
+3. Security:
+   - HTTPS only
+   - JWT authentication
+   - Input validation
+   - XSS prevention
+   - CORS configuration
+
+4. Error Handling:
+   - Global exception handling
+   - Structured error responses
+   - Proper logging
+   - Status codes adherence
+
+## Security Requirements
+1. Authentication:
+   - Azure AD OAuth 2.0
+   - Secure token handling
+   - Claims-based authorization
+
+2. API Security:
+   - CORS whitelisting
+   - Content Security Policy
+   - Input sanitization
+   - Rate limiting
+
+3. Electron Security:
+   - Context isolation
+   - Secure IPC communication
+   - Protected URL handling
+   - Restricted file access
+
+## Testing Requirements
+1. Frontend:
+   - Unit tests for components
+   - Integration tests for flows
+   - E2E tests for critical paths
+   - >= 80% code coverage
+
+2. Backend:
+   - Unit tests for services
+   - Integration tests for APIs
+   - Database tests
+   - >= 85% code coverage
+
+## Documentation Requirements
+1. Code Documentation:
+   - JSDoc for TypeScript
+   - XML comments for C#
+   - README for each directory
+   - Architecture updates
+
+2. API Documentation:
+   - OpenAPI/Swagger
+   - Example requests/responses
+   - Authentication details
+   - Error scenarios
+
+## Git Workflow
+1. Branch Naming:
+   - feature/[feature-name]
+   - bugfix/[bug-name]
+   - hotfix/[fix-name]
+   - release/[version]
+
+2. Commit Messages:
+   - Conventional Commits format
+   - Clear descriptions
+   - Reference issues
+
+3. Pull Requests:
+   - Detailed description
+   - Linked issues
+   - Tests included
+   - Documentation updated
+
+## Build and Deployment
+1. Frontend:
+   - Vite build process
+   - Electron packaging
+   - Resource optimization
+   - Environment configs
+
+2. Backend:
+   - .NET publish profile
+   - Docker containerization
+   - Database migrations
+   - Configuration management
+
+## Performance Requirements
+1. Frontend:
+   - First load < 3s
+   - Route changes < 300ms
+   - Memory usage < 200MB
+   - Optimized assets
+
+2. Backend:
+   - API response < 200ms
+   - Connection pooling
+   - Proper caching
+   - Resource optimization
+
+## Monitoring and Logging
+1. Application Monitoring:
+   - Performance metrics
+   - Error tracking
+   - User analytics
+   - Resource usage
+
+2. Logging:
+   - Structured logging
+   - Log levels
+   - Correlation IDs
+   - Audit trails
+
+## Accessibility Requirements
+1. Frontend:
+   - WCAG 2.1 compliance
+   - Keyboard navigation
+   - Screen reader support
+   - Color contrast
+
+## Maintenance
+1. Dependencies:
+   - Regular updates
+   - Security patches
+   - Compatibility checks
+   - Version control
+
+2. Code Quality:
+   - Regular refactoring
+   - Technical debt tracking
+   - Performance optimization
+
+   - Security audits 

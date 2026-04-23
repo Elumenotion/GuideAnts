@@ -1,0 +1,495 @@
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.EntityFrameworkCore;
+using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models.Guides;
+using GuideAntsApi.Services.Routing;
+
+namespace GuideAntsApi.Services.LlamaCpp;
+
+public class NotebookModelRuntimeService : INotebookModelRuntimeService
+{
+    private readonly ApplicationDbContext _context;
+    private readonly ILlamaServerRuntimeClient _llamaClient;
+    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
+    private readonly IMemoryCache _cache;
+    private readonly ILlamaRuntimeCoordinator _coordinator;
+    private readonly IChatModelResolver _chatModelResolver;
+    private readonly ILogger<NotebookModelRuntimeService> _logger;
+
+    // Singleton state for operations. In a multi-node deployment, this would need to be distributed.
+    private static readonly ConcurrentDictionary<string, ModelLoadOperationDto> _operations = new();
+    private static readonly SemaphoreSlim _loadLock = new(1, 1);
+    private const string RouterModelsCacheKey = "llama.runtime.router-models";
+    // Router model state is generally stable; keep a longer cache window and invalidate on explicit load/unload operations.
+    private static readonly TimeSpan RouterModelsCacheTtl = TimeSpan.FromMinutes(5);
+
+    public NotebookModelRuntimeService(
+        ApplicationDbContext context,
+        ILlamaServerRuntimeClient llamaClient,
+        IRuntimeProfileResolver runtimeProfileResolver,
+        IMemoryCache cache,
+        ILlamaRuntimeCoordinator coordinator,
+        IChatModelResolver chatModelResolver,
+        ILogger<NotebookModelRuntimeService> logger)
+    {
+        _context = context;
+        _llamaClient = llamaClient;
+        _runtimeProfileResolver = runtimeProfileResolver;
+        _cache = cache;
+        _coordinator = coordinator;
+        _chatModelResolver = chatModelResolver;
+        _logger = logger;
+    }
+
+    public async Task<NotebookLlamaRuntimeStatusDto> GetRuntimeStatusAsync(Guid notebookId, Guid? assistantId = null, CancellationToken cancellationToken = default)
+    {
+        var notebook = await _context.Notebooks
+            .Include(n => n.Guide)
+                .ThenInclude(g => g!.CrewMembers)
+                    .ThenInclude(cm => cm.Assistant)
+            .FirstOrDefaultAsync(n => n.Id == notebookId, cancellationToken);
+
+        if (notebook == null)
+            throw new ArgumentException("Notebook not found", nameof(notebookId));
+
+        List<ModelDto> requiredModels;
+        try
+        {
+            requiredModels = await GetRequiredLlamaModelsAsync(notebook, assistantId, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new NotebookLlamaRuntimeStatusDto
+            {
+                State = "invalid",
+                SelectedAssistantId = assistantId,
+                Conflicts = { ex.Message }
+            };
+        }
+        
+        var status = new NotebookLlamaRuntimeStatusDto
+        {
+            SelectedAssistantId = assistantId,
+            RequiredModels = requiredModels
+        };
+
+        // Short-circuit if no local models are required
+        if (!requiredModels.Any(m => m.LocalRuntime != null))
+        {
+            status.State = "ready";
+            return status;
+        }
+
+        // Check compatibility
+        var envelopes = requiredModels
+            .Where(m => m.LocalRuntime != null)
+            .Select(m => m.LocalRuntime!.ResourceGroupKey)
+            .Distinct()
+            .ToList();
+
+        if (envelopes.Count > 1)
+        {
+            status.State = "invalid";
+            status.Conflicts.Add($"Incompatible models detected. Found multiple resourceGroupKey values: {string.Join(", ", envelopes)}");
+            return status;
+        }
+
+        // Check current router state
+        try
+        {
+            var routerState = await GetRouterModelsAsync(useCache: true, cancellationToken);
+            var loadedRouterIds = routerState.Data
+                .Where(IsRouterModelLoaded)
+                .Select(d => NormalizeRouterModelId(d.Id))
+                .ToHashSet();
+
+            var allModels = await GetLlamaModelsFromCatalogAsync(cancellationToken);
+            status.LoadedModels = allModels
+                .Where(m => m.LocalRuntime != null && loadedRouterIds.Contains(NormalizeRouterModelId(m.LocalRuntime.RouterModelId)))
+                .ToList();
+
+            var requiredRouterIds = requiredModels
+                .Where(m => m.LocalRuntime != null)
+                .Select(m => NormalizeRouterModelId(m.LocalRuntime!.RouterModelId))
+                .ToHashSet();
+
+            // Check if any active operation
+            var activeOp = _operations.Values.FirstOrDefault(o => o.State == "queued" || o.State == "unloading" || o.State == "loading" || o.State == "verifying");
+            if (activeOp != null)
+            {
+                status.State = "loading";
+                status.ActiveOperation = activeOp;
+            }
+            else if (requiredRouterIds.IsSubsetOf(loadedRouterIds))
+            {
+                status.State = "ready";
+            }
+            else
+            {
+                status.State = "requires_load";
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get router state");
+            status.State = "failed";
+            status.Conflicts.Add("Failed to communicate with local llama server.");
+        }
+
+        return status;
+    }
+
+    public async Task<ModelLoadOperationDto> StartLoadOperationAsync(Guid notebookId, Guid? assistantId = null, CancellationToken cancellationToken = default)
+    {
+        var status = await GetRuntimeStatusAsync(notebookId, assistantId, cancellationToken);
+        
+        if (status.State == "invalid")
+            throw new InvalidOperationException("Cannot load incompatible models: " + string.Join(", ", status.Conflicts));
+
+        if (status.State == "ready")
+        {
+            return new ModelLoadOperationDto
+            {
+                OperationId = Guid.NewGuid().ToString(),
+                State = "ready",
+                StartedAt = DateTime.UtcNow,
+                CompletedAt = DateTime.UtcNow,
+                TargetAssistantId = assistantId
+            };
+        }
+
+        if (status.State == "loading" && status.ActiveOperation != null)
+            return status.ActiveOperation;
+
+        var op = new ModelLoadOperationDto
+        {
+            OperationId = Guid.NewGuid().ToString(),
+            State = "queued",
+            StartedAt = DateTime.UtcNow,
+            TargetAssistantId = assistantId
+        };
+
+        _operations[op.OperationId] = op;
+
+        // Fire and forget the actual load process
+        _ = Task.Run(async () => await ProcessLoadOperationAsync(op, status.RequiredModels));
+
+        return op;
+    }
+
+    public Task<ModelLoadOperationDto?> GetOperationStatusAsync(Guid notebookId, string operationId, CancellationToken cancellationToken = default)
+    {
+        _operations.TryGetValue(operationId, out var op);
+        return Task.FromResult(op);
+    }
+
+    public async Task<ModelLoadOperationDto> StartUnloadForNotebookContextAsync(
+        Guid notebookId,
+        Guid? assistantId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var notebook = await _context.Notebooks
+            .Include(n => n.Guide)
+                .ThenInclude(g => g!.CrewMembers)
+                    .ThenInclude(cm => cm.Assistant)
+            .FirstOrDefaultAsync(n => n.Id == notebookId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (notebook == null)
+        {
+            throw new ArgumentException("Notebook not found", nameof(notebookId));
+        }
+
+        List<ModelDto> requiredModels;
+        try
+        {
+            requiredModels = await GetRequiredLlamaModelsAsync(notebook, assistantId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException("Cannot determine models to unload: " + ex.Message, ex);
+        }
+
+        var op = new ModelLoadOperationDto
+        {
+            OperationId = Guid.NewGuid().ToString(),
+            State = "queued",
+            StartedAt = DateTime.UtcNow,
+            TargetAssistantId = assistantId
+        };
+        _operations[op.OperationId] = op;
+
+        _ = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    await _loadLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                    op.State = "unloading";
+                    InvalidateRouterModelsCache();
+
+                    var requiredRouterIds = requiredModels
+                        .Where(m => m.LocalRuntime != null)
+                        .Select(m => NormalizeRouterModelId(m.LocalRuntime!.RouterModelId))
+                        .ToHashSet();
+
+                    foreach (var id in requiredRouterIds)
+                    {
+                        await using var _ = await _coordinator.AcquireAliasLockAsync(id, CancellationToken.None)
+                            .ConfigureAwait(false);
+                        await _llamaClient.UnloadModelAsync(id, CancellationToken.None).ConfigureAwait(false);
+                    }
+
+                    op.State = "ready";
+                    op.CompletedAt = DateTime.UtcNow;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Notebook llama unload failed");
+                    op.State = "failed";
+                    op.ErrorDetails = ex.Message;
+                    op.CompletedAt = DateTime.UtcNow;
+                }
+                finally
+                {
+                    _loadLock.Release();
+                }
+            },
+            CancellationToken.None);
+
+        return op;
+    }
+
+    private async Task ProcessLoadOperationAsync(ModelLoadOperationDto op, List<ModelDto> requiredModels)
+    {
+        try
+        {
+            await _loadLock.WaitAsync();
+            InvalidateRouterModelsCache();
+            
+            var requiredRouterIds = requiredModels
+                .Where(m => m.LocalRuntime != null)
+                .Select(m => NormalizeRouterModelId(m.LocalRuntime!.RouterModelId))
+                .ToHashSet();
+
+            var routerStateAtStart = await GetRouterModelsAsync(useCache: false, CancellationToken.None);
+            var loadedRouterIds = routerStateAtStart.Data
+                .Where(IsRouterModelLoaded)
+                .Select(d => NormalizeRouterModelId(d.Id))
+                .ToHashSet();
+
+            var toUnload = loadedRouterIds.Except(requiredRouterIds).ToList();
+            var toLoad = requiredModels
+                .Where(m => m.LocalRuntime != null && !loadedRouterIds.Contains(NormalizeRouterModelId(m.LocalRuntime.RouterModelId)))
+                .ToList();
+
+            if (toUnload.Any())
+            {
+                op.State = "unloading";
+                foreach (var id in toUnload)
+                {
+                    // R-12.10: per-alias coordinator lock prevents the settings-UI from
+                    // racing an unload while we're serving this notebook's load request.
+                    await using var _unloadLock = await _coordinator.AcquireAliasLockAsync(id, CancellationToken.None);
+                    await _llamaClient.UnloadModelAsync(id);
+                }
+            }
+
+            if (toLoad.Any())
+            {
+                op.State = "loading";
+                foreach (var model in toLoad)
+                {
+                    var routerModelId = NormalizeRouterModelId(model.LocalRuntime!.RouterModelId);
+                    await using var _loadAliasLock = await _coordinator.AcquireAliasLockAsync(routerModelId, CancellationToken.None);
+                    await _llamaClient.LoadModelAsync(routerModelId, model.LocalRuntime.LoadParams);
+                }
+            }
+
+            op.State = "verifying";
+            if (requiredRouterIds.Count > 0)
+            {
+                var verifyStartedAt = DateTime.UtcNow;
+                var verifyTimeout = TimeSpan.FromMinutes(5);
+                var pollInterval = TimeSpan.FromSeconds(2);
+                var isReady = false;
+                List<string> missingRouterIds = [];
+
+                while (DateTime.UtcNow - verifyStartedAt < verifyTimeout)
+                {
+                    var routerState = await GetRouterModelsAsync(useCache: false, CancellationToken.None);
+                    var loadedNow = routerState.Data
+                        .Where(IsRouterModelLoaded)
+                        .Select(d => NormalizeRouterModelId(d.Id))
+                        .ToHashSet();
+
+                    missingRouterIds = requiredRouterIds.Except(loadedNow).ToList();
+                    if (missingRouterIds.Count == 0)
+                    {
+                        isReady = true;
+                        break;
+                    }
+
+                    await Task.Delay(pollInterval);
+                }
+
+                if (!isReady)
+                {
+                    throw new TimeoutException(
+                        $"Timed out waiting for local models to report loaded. Missing: {string.Join(", ", missingRouterIds)}");
+                }
+            }
+
+            op.State = "ready";
+            op.CompletedAt = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Load operation failed");
+            op.State = "failed";
+            op.ErrorDetails = ex.Message;
+            op.CompletedAt = DateTime.UtcNow;
+        }
+        finally
+        {
+            _loadLock.Release();
+        }
+    }
+
+    private async Task<LlamaModelsResponse> GetRouterModelsAsync(bool useCache, CancellationToken cancellationToken)
+    {
+        if (useCache && _cache.TryGetValue<LlamaModelsResponse>(RouterModelsCacheKey, out var cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var fresh = await _llamaClient.ListModelsAsync(cancellationToken);
+        _cache.Set(
+            RouterModelsCacheKey,
+            fresh,
+            new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = RouterModelsCacheTtl,
+                Size = 1
+            });
+        return fresh;
+    }
+
+    private void InvalidateRouterModelsCache()
+    {
+        _cache.Remove(RouterModelsCacheKey);
+    }
+
+    private async Task<List<ModelDto>> GetLlamaModelsFromCatalogAsync(CancellationToken cancellationToken)
+    {
+        var models = await _context.Models
+            .Where(m => m.Provider == "llama-cpp" && m.IsActive)
+            .Select(m => new
+            {
+                m.ModelId,
+                m.DisplayName,
+                m.Description,
+                m.ReasoningChoicesJson,
+                m.IsActive,
+                m.DisplayOrder,
+                m.LocalRuntimeJson
+            })
+            .ToListAsync(cancellationToken);
+
+        return models.Select(m => new ModelDto(
+            m.ModelId,
+            m.DisplayName,
+            m.Description,
+            m.ReasoningChoicesJson,
+            m.IsActive,
+            m.DisplayOrder,
+            string.IsNullOrEmpty(m.LocalRuntimeJson)
+                ? null
+                : ToLocalRuntimeDescriptor(m.ModelId, m.LocalRuntimeJson),
+            SamplingParameterPolicy: null,
+            ReasoningChoices: null,
+            DefaultReasoningChoice: null
+        )).ToList();
+    }
+
+    private async Task<List<ModelDto>> GetRequiredLlamaModelsAsync(Notebook notebook, Guid? assistantId, CancellationToken cancellationToken)
+    {
+        // R-1.6 / R-9.1: go through IChatModelResolver for every entity-level model id so the
+        // preload path is identical to the dispatch path. Without this the notebook would
+        // pre-load the assistant's stored ModelId even when OverrideAllChatModels=true or when
+        // the assistant has no ModelId set (defaulted-to case), silently contradicting the
+        // user's Settings → Overview → Default Chat Model choice.
+        var candidateEntityModelIds = new List<string?>();
+
+        candidateEntityModelIds.Add(notebook.Guide?.ModelId);
+
+        if (notebook.Guide?.CrewMembers != null)
+        {
+            foreach (var member in notebook.Guide.CrewMembers)
+            {
+                candidateEntityModelIds.Add(member.Assistant?.ModelId);
+            }
+        }
+
+        if (assistantId.HasValue)
+        {
+            var assistant = await _context.Assistants.FindAsync(new object[] { assistantId.Value }, cancellationToken);
+            candidateEntityModelIds.Add(assistant?.ModelId);
+        }
+
+        var resolvedModelIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entityId in candidateEntityModelIds)
+        {
+            try
+            {
+                var resolved = _chatModelResolver.Resolve(entityId);
+                if (!string.IsNullOrWhiteSpace(resolved.ModelId))
+                {
+                    resolvedModelIds.Add(resolved.ModelId);
+                }
+            }
+            catch (RoutingException)
+            {
+                // Empty entity id + no default configured: no model to preload for this
+                // candidate. Surface the real error at dispatch time rather than blocking
+                // notebook open; preload is best-effort.
+            }
+        }
+
+        var allLlamaModels = await GetLlamaModelsFromCatalogAsync(cancellationToken);
+        return allLlamaModels.Where(m => resolvedModelIds.Contains(m.ModelId)).ToList();
+    }
+
+    private string NormalizeRouterModelId(string routerModelId)
+    {
+        return routerModelId;
+    }
+
+    private static bool IsRouterModelLoaded(LlamaModelData model)
+    {
+        if (!string.IsNullOrWhiteSpace(model.Status?.Value))
+        {
+            return string.Equals(model.Status.Value, "loaded", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.State))
+        {
+            return string.Equals(model.State, "loaded", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private LocalRuntimeDescriptorDto ToLocalRuntimeDescriptor(string modelId, string localRuntimeJson)
+    {
+        var parsed = LocalRuntimeConfigurationParser.Parse(modelId, localRuntimeJson);
+        _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
+        return new LocalRuntimeDescriptorDto(
+            parsed.RouterModelId,
+            parsed.ResourceGroupKey,
+            parsed.RuntimeProfileId,
+            parsed.LoadParams);
+    }
+}

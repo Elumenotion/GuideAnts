@@ -1,0 +1,5 @@
+accelerate
+git+https://github.com/huggingface/transformers.git
+huggingface_hub
+transformers
+pyannote.audio

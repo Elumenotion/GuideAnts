@@ -1,0 +1,278 @@
+using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Nodes;
+using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models.Settings;
+using GuideAntsApi.Options;
+
+namespace GuideAntsApi.Settings;
+
+public sealed partial class ApplicationSettingsService
+{
+    public async Task<IReadOnlyList<SettingsSectionSummaryDto>> GetSectionSummariesAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
+
+        return _registry.All
+            .OrderBy(x => x.DisplayOrder)
+            .Select(x => new SettingsSectionSummaryDto(x.SectionName, x.DisplayName, x.DisplayOrder, x.HasSecrets))
+            .ToList();
+    }
+
+    public async Task<SettingsSectionDto?> GetSectionAsync(string sectionName, CancellationToken cancellationToken = default)
+    {
+        if (!_registry.TryGet(sectionName, out var definition))
+        {
+            return null;
+        }
+
+        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
+
+        var row = await _db.ApplicationSettings
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                x => x.SectionName == definition.SectionName,
+                cancellationToken);
+
+        if (row == null)
+        {
+            return null;
+        }
+
+        return ToSectionDto(definition, row);
+    }
+
+    public async Task<(SettingsSectionDto? Section, IReadOnlyList<string> ValidationErrors, bool ConcurrencyConflict)> UpdateSectionAsync(
+        string sectionName,
+        UpdateSettingsSectionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_registry.TryGet(sectionName, out var definition))
+        {
+            return (null, [$"Unsupported section '{sectionName}'."], false);
+        }
+
+        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
+
+        var row = await _db.ApplicationSettings
+            .SingleOrDefaultAsync(
+                x => x.SectionName == definition.SectionName,
+                cancellationToken);
+
+        if (row == null)
+        {
+            return (null, [$"Section '{sectionName}' not found."], false);
+        }
+
+        var currentRowVersion = Convert.ToBase64String(row.RowVersion);
+        if (!string.Equals(currentRowVersion, request.RowVersion, StringComparison.Ordinal))
+        {
+            return (null, [], true);
+        }
+
+        var protector = GetProtector();
+        var decryptedCurrent = ApplicationSettingsJson.DecryptSecrets(
+            definition,
+            ApplicationSettingsJson.DeserializeObject(row.JsonValue),
+            _settingsSecretsOptionsMonitor.CurrentValue,
+            protector.Protect);
+
+        var merged = ApplicationSettingsJson.MergeForUpdate(definition, decryptedCurrent, request.Payload ?? new JsonObject());
+        var validationErrors = definition.Validate(merged);
+        if (validationErrors.Count > 0)
+        {
+            return (null, validationErrors, false);
+        }
+
+        var encrypted = ApplicationSettingsJson.EncryptSecrets(
+            definition,
+            merged,
+            _settingsSecretsOptionsMonitor.CurrentValue);
+        row.JsonValue = ApplicationSettingsJson.Serialize(encrypted);
+        row.SchemaVersion = definition.SchemaVersion;
+        row.UpdatedUtc = DateTime.UtcNow;
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return (null, [], true);
+        }
+
+        ReloadConfiguration();
+
+        var refreshed = await _db.ApplicationSettings
+            .AsNoTracking()
+            .SingleAsync(
+                x => x.SectionName == definition.SectionName,
+                cancellationToken);
+
+        return (ToSectionDto(definition, refreshed), [], false);
+    }
+
+    public async Task<SettingsSchemaDto> GetSchemaAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
+
+        var rowsBySection = await _db.ApplicationSettings
+            .AsNoTracking()
+            .ToDictionaryAsync(x => x.SectionName, x => x, StringComparer.OrdinalIgnoreCase, cancellationToken);
+
+        var sectionSchemas = _registry.All
+            .OrderBy(x => x.DisplayOrder)
+            .Select(definition =>
+            {
+                var schemaVersion = rowsBySection.TryGetValue(definition.SectionName, out var row)
+                    ? row.SchemaVersion
+                    : definition.SchemaVersion;
+
+                var properties = definition.Properties
+                    .Select(property => new SettingsSectionPropertyDefinitionDto(
+                        Name: property.Name,
+                        ValueType: ToApiValueType(property.ValueType),
+                        IsSecret: property.IsSecret,
+                        IsEditable: true,
+                        IsRequired: false,
+                        DefaultValue: ToJsonNode(property.DefaultValue)))
+                    .ToList();
+
+                return new SettingsSectionSchemaDto(
+                    SectionName: definition.SectionName,
+                    DisplayName: definition.DisplayName,
+                    DisplayOrder: definition.DisplayOrder,
+                    SchemaVersion: schemaVersion,
+                    HasSecrets: definition.HasSecrets,
+                    Properties: properties);
+            })
+            .ToList();
+
+        var services = ServiceContracts
+            .Select(contract => new SettingsServiceDefinitionDto(
+                ServiceId: contract.ServiceId,
+                DisplayName: contract.DisplayName,
+                SectionName: contract.SectionName,
+                ProviderIds: contract.Providers.Select(p => p.ProviderId).ToList(),
+                ServiceFields: contract.ServiceFieldNames
+                    .Select(fieldName => new SettingsDependencyFieldDto(
+                        SectionName: contract.SectionName,
+                        FieldName: fieldName,
+                        DisplayName: HumanizeKey(fieldName)))
+                    .ToList()))
+            .ToList();
+
+        var providers = ServiceContracts
+            .SelectMany(contract => contract.Providers.Select(provider => new SettingsProviderDefinitionDto(
+                ProviderId: provider.ProviderId,
+                ServiceId: contract.ServiceId,
+                DisplayName: provider.DisplayName,
+                Kind: provider.Kind,
+                ProviderSectionKey: provider.ProviderSectionKey,
+                ProviderSettingsSection: provider.ProviderSettingsSection,
+                MarketingSummary: provider.MarketingSummary,
+                SectionName: provider.SectionName,
+                RuntimeSectionName: provider.RequiredRuntimeKeys.Count > 0
+                    ? LocalServiceHostsOptions.SectionName
+                    : null,
+                RequiredSectionFields: provider.RequiredSectionFields
+                    .Select(field => new SettingsDependencyFieldDto(
+                        SectionName: field.SectionName,
+                        FieldName: field.FieldName,
+                        DisplayName: field.DisplayName))
+                    .ToList(),
+                RequiredRuntimeKeys: provider.RequiredRuntimeKeys
+                    .Select(key => new SettingsRuntimeKeyRequirementDto(
+                        Key: key.Key,
+                        DisplayName: key.DisplayName,
+                        ChangeHint: key.ChangeHint))
+                    .ToList())))
+            .ToList();
+
+        var runtimeDependencies = BuildRuntimeDependencies();
+
+        return new SettingsSchemaDto(
+            Sections: sectionSchemas,
+            Services: services,
+            Providers: providers,
+            RuntimeDependencies: runtimeDependencies);
+    }
+
+    private SettingsSectionDto ToSectionDto(SettingsSectionDefinition definition, ApplicationSetting row)
+    {
+        var protector = GetProtector();
+        var decrypted = ApplicationSettingsJson.DecryptSecrets(
+            definition,
+            ApplicationSettingsJson.DeserializeObject(row.JsonValue),
+            _settingsSecretsOptionsMonitor.CurrentValue,
+            protector.Protect);
+
+        var (maskedPayload, metadata) = ApplicationSettingsJson.MaskSecrets(definition, decrypted);
+
+        return new SettingsSectionDto(
+            SectionName: definition.SectionName,
+            DisplayName: definition.DisplayName,
+            SchemaVersion: row.SchemaVersion,
+            RowVersion: Convert.ToBase64String(row.RowVersion),
+            UpdatedUtc: row.UpdatedUtc,
+            Payload: maskedPayload,
+            SecretHasValue: metadata);
+    }
+
+    private static bool JsonObjectsEquivalent(JsonObject left, JsonObject right)
+    {
+        return string.Equals(
+            ApplicationSettingsJson.Serialize(left),
+            ApplicationSettingsJson.Serialize(right),
+            StringComparison.Ordinal);
+    }
+
+    private static string ToApiValueType(SettingsValueType valueType)
+    {
+        return valueType switch
+        {
+            SettingsValueType.Int => "int",
+            SettingsValueType.Bool => "bool",
+            _ => "string"
+        };
+    }
+
+    private static JsonNode? ToJsonNode(object? value)
+    {
+        return value switch
+        {
+            null => null,
+            int i => JsonValue.Create(i),
+            long l => JsonValue.Create(l),
+            double d => JsonValue.Create(d),
+            decimal m => JsonValue.Create(m),
+            bool b => JsonValue.Create(b),
+            _ => JsonValue.Create(value.ToString())
+        };
+    }
+
+    private static string HumanizeKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var buffer = new List<char>(value.Length + 8);
+        for (var i = 0; i < value.Length; i++)
+        {
+            var current = value[i];
+            var previous = i > 0 ? value[i - 1] : '\0';
+            var shouldInsertSpace = i > 0
+                                    && char.IsUpper(current)
+                                    && (char.IsLower(previous) || char.IsDigit(previous));
+            if (shouldInsertSpace)
+            {
+                buffer.Add(' ');
+            }
+
+            buffer.Add(current is '_' or '-' ? ' ' : current);
+        }
+
+        return new string(buffer.ToArray());
+    }
+}

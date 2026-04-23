@@ -1,0 +1,117 @@
+{
+    "openapi": "3.0.1",
+    "info": {
+      "title": "AntRunner.Services",
+      "version": "1.0"
+    },
+    "servers": [
+      {
+        "url": "https://localhost"
+      }
+    ],
+    "paths": {
+      "/sandbox/bash/run/plantuml": {
+        "post": {
+          "tags": ["BashScript"],
+          "operationId": "runScript",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "script": {
+                      "type": "string",
+                      "description": "Bash script with echo of a plantuml diagram to a puml file, followed by execution of plantuml"
+                    }
+                  },
+                  "required": ["script"],
+                  "additionalProperties": false
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "script": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["script"],
+                  "additionalProperties": false
+                }
+              },
+              "application/*+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "script": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["script"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "OK",
+              "content": {
+                "text/plain": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "standardOutput": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "standardError": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "standardOutput": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "standardError": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "text/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "standardOutput": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "standardError": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  

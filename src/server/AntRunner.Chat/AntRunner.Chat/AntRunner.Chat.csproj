@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <Version>0.9.0</Version>
+    <PackageReadmeFile>readme.md</PackageReadmeFile>
+    <Title>AntRunner Chat-based Agents</Title>
+    <Description>Toolbased AI Agents via Chat Completions compatible with AntRunner assistant definitions</Description>
+    <Authors>Doug Ware</Authors>
+    <Company>Elumenotion</Company>
+    <PackageProjectUrl>https://github.com/douglasware/AntRunner</PackageProjectUrl>
+    <PackageIcon>favicon-32x32.png</PackageIcon>
+    <PackageReadmeFile>readme.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/douglasware/AntRunner</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReleaseNotes>Streaming support, intelligent model parameters to support thinking models and non with the same definition, lots of tests added.</PackageReleaseNotes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="readme.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AntRunner.Chat.Abstractions\AntRunner.Chat.Abstractions.csproj" />
+    <ProjectReference Include="..\AntRunner.ToolCalling\AntRunner.ToolCalling.csproj" />
+    <ProjectReference Include="..\..\GuideAnts.Usage\GuideAnts.Usage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="ResourceFile.cs">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="favicon-32x32.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Update="readme.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+</Project>

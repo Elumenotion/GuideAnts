@@ -1,0 +1,75 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using GuideAntsApi.Services;
+using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace GuideAntsApi.Tests.Services;
+
+[TestClass]
+public class AssistantDefinitionsTests
+{
+    private static ApplicationDbContext InMem(string name) => new(new DbContextOptionsBuilder<ApplicationDbContext>()
+        .UseInMemoryDatabase(name).Options);
+
+    [TestMethod]
+    public async Task AssistantsListingReturnsCrewWithAvatarUrl()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var asstRoot = Path.Combine(tmp, "AssistantDefinitions");
+        var pyDir = Path.Combine(asstRoot, "Python Ants", "HostExtensions", "UI");
+        Directory.CreateDirectory(pyDir);
+        File.WriteAllBytes(Path.Combine(pyDir, "avatar.png"), new byte[] { 0x89,0x50 });
+        File.WriteAllText(Path.Combine(asstRoot, "Python Ants", "manifest.json"), "{}");
+
+        var db = InMem("crew");
+        var template = new NotebookTemplate { Id = Guid.NewGuid(), TemplateName = "Code Notebook" };
+        db.NotebookTemplates.Add(template);
+
+        var owner = new User { Id = Guid.NewGuid(), Email = "owner@example.com", Name = "Owner" };
+        db.Users.Add(owner);
+
+        var pythonAnts = new Assistant
+        {
+            Name = "Python Ants",
+            Kind = AssistantKind.Assistant,
+            IsActive = true,
+            IsGlobal = true,
+            AvatarImageBytes = new byte[] { 0x89, 0x50 }
+        };
+        var codeNotebookGuide = new Assistant
+        {
+            Name = "Code Notebook",
+            Kind = AssistantKind.Guide,
+            IsActive = true,
+            IsGlobal = true
+        };
+        db.Assistants.AddRange(pythonAnts, codeNotebookGuide);
+        db.SaveChanges();
+
+        db.GuideMembers.Add(new GuideMember
+        {
+            GuideId = codeNotebookGuide.Id,
+            AssistantId = pythonAnts.Id,
+            DisplayOrder = 0
+        });
+        db.SaveChanges();
+
+        var providerMock = new Mock<IServiceProvider>();
+        providerMock.Setup(p => p.GetService(typeof(ApplicationDbContext))).Returns(db);
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.SetupGet(s => s.ServiceProvider).Returns(providerMock.Object);
+        var scopeFactoryMock2 = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock2.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+
+        var svc = new NotebookTemplateService(
+            scopeFactoryMock2.Object,
+            NullLogger<NotebookTemplateService>.Instance);
+        var crew = await svc.GetAssistantsAsync(template.Id, owner.Id);
+        Assert.AreEqual(2, crew.Count);
+        var pythonAntsDto = crew.Single(a => a.Name == "Python Ants");
+        Assert.IsTrue(pythonAntsDto.AvatarUrl.Contains("/api/assistants/avatar/Python%20Ants"));
+    }
+} 

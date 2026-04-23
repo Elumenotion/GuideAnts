@@ -1,0 +1,686 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Presentation API",
+    "description": "API for creating and managing presentations stored as structured data, with on-demand generation of markdown and PowerPoint files.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "sandbox://__init__.py",
+      "description": "Sandbox execution environment - Python functions in crew-Slide-Shows module"
+    }
+  ],
+  "paths": {
+    "/create_presentation": {
+      "post": {
+        "operationId": "create_presentation",
+        "summary": "Create a new presentation",
+        "description": "Creates a new presentation with the given name and optional initial markdown content.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Presentation name"
+                  },
+                  "initial_content": {
+                    "type": "string",
+                    "description": "Optional initial markdown content for the presentation"
+                  }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Presentation created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "presentation_id": {
+                      "type": "string",
+                      "description": "UUID of the created presentation"
+                    },
+                    "presentation": {
+                      "type": "object",
+                      "description": "Full presentation data"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/list_presentations": {
+      "post": {
+        "operationId": "list_presentations",
+        "summary": "List all presentations",
+        "description": "Returns a list of all presentations with their metadata.",
+        "responses": {
+          "200": {
+            "description": "List of presentations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "updated_at": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/add_slide": {
+      "post": {
+        "operationId": "add_slide",
+        "summary": "Add a new slide to a presentation",
+        "description": "Adds a new slide with optional title, subtitle, content, and position. Layout is auto-detected from content.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "H1 header text for the slide"
+                  },
+                  "subtitle": {
+                    "type": "string",
+                    "description": "H2 header text for the slide"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "Markdown content for the slide body (bullets, tables, code, images, etc.)",
+                    "default": ""
+                  },
+                  "position": {
+                    "type": "integer",
+                    "description": "Insert position (0-based). Omit to append at end."
+                  }
+                },
+                "required": ["presentation_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slide added successfully"
+          }
+        }
+      }
+    },
+    "/update_slide": {
+      "post": {
+        "operationId": "update_slide",
+        "summary": "Update an existing slide",
+        "description": "Updates slide content. Only provided fields are updated. Pass null to clear a field.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "slide_index": {
+                    "type": "integer",
+                    "description": "Zero-based slide index"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "New title (null to clear)"
+                  },
+                  "subtitle": {
+                    "type": "string",
+                    "description": "New subtitle (null to clear)"
+                  },
+                  "content": {
+                    "type": "string",
+                    "description": "New markdown content (null to clear)"
+                  }
+                },
+                "required": ["presentation_id", "slide_index"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slide updated successfully"
+          }
+        }
+      }
+    },
+    "/delete_slide": {
+      "post": {
+        "operationId": "delete_slide",
+        "summary": "Delete a slide from a presentation",
+        "description": "Removes the slide at the specified index from the presentation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "slide_index": {
+                    "type": "integer",
+                    "description": "Zero-based slide index to delete"
+                  }
+                },
+                "required": ["presentation_id", "slide_index"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slide deleted successfully"
+          }
+        }
+      }
+    },
+    "/get_slide": {
+      "post": {
+        "operationId": "get_slide",
+        "summary": "Get a single slide",
+        "description": "Returns the content and metadata for a specific slide.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "slide_index": {
+                    "type": "integer",
+                    "description": "Zero-based slide index"
+                  }
+                },
+                "required": ["presentation_id", "slide_index"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slide data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "subtitle": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "raw_markdown": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_all_slides": {
+      "post": {
+        "operationId": "get_all_slides",
+        "summary": "Get all slides in a presentation",
+        "description": "Returns all slides with their content and metadata.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  }
+                },
+                "required": ["presentation_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of all slides"
+          }
+        }
+      }
+    },
+    "/get_slide_count": {
+      "post": {
+        "operationId": "get_slide_count",
+        "summary": "Get the number of slides",
+        "description": "Returns the total number of slides in the presentation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  }
+                },
+                "required": ["presentation_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slide count"
+          }
+        }
+      }
+    },
+    "/duplicate_slide": {
+      "post": {
+        "operationId": "duplicate_slide",
+        "summary": "Duplicate a slide",
+        "description": "Creates a copy of the slide at the specified index, inserting it immediately after the original.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "slide_index": {
+                    "type": "integer",
+                    "description": "Zero-based index of slide to duplicate"
+                  }
+                },
+                "required": ["presentation_id", "slide_index"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slide duplicated successfully"
+          }
+        }
+      }
+    },
+    "/reorder_slides": {
+      "post": {
+        "operationId": "reorder_slides",
+        "summary": "Reorder slides in a presentation",
+        "description": "Rearranges slides according to the provided order. The new_order array must contain all slide indices exactly once.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "new_order": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "List of slide indices in the desired new order"
+                  }
+                },
+                "required": ["presentation_id", "new_order"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Slides reordered successfully"
+          }
+        }
+      }
+    },
+    "/append_to_slide": {
+      "post": {
+        "operationId": "append_to_slide",
+        "summary": "Append content to a slide",
+        "description": "Adds markdown content to the end of an existing slide's content.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "slide_index": {
+                    "type": "integer",
+                    "description": "Zero-based slide index"
+                  },
+                  "markdown_content": {
+                    "type": "string",
+                    "description": "Markdown content to append"
+                  }
+                },
+                "required": ["presentation_id", "slide_index", "markdown_content"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Content appended successfully"
+          }
+        }
+      }
+    },
+    "/prepend_to_slide": {
+      "post": {
+        "operationId": "prepend_to_slide",
+        "summary": "Prepend content to a slide",
+        "description": "Adds markdown content to the beginning of an existing slide's content.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "slide_index": {
+                    "type": "integer",
+                    "description": "Zero-based slide index"
+                  },
+                  "markdown_content": {
+                    "type": "string",
+                    "description": "Markdown content to prepend"
+                  }
+                },
+                "required": ["presentation_id", "slide_index", "markdown_content"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Content prepended successfully"
+          }
+        }
+      }
+    },
+    "/search_slides": {
+      "post": {
+        "operationId": "search_slides",
+        "summary": "Search slides for text",
+        "description": "Searches all slides in the presentation for the given text, returning indices of matching slides.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "search_text": {
+                    "type": "string",
+                    "description": "Text to search for"
+                  }
+                },
+                "required": ["presentation_id", "search_text"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of matching slide indices"
+          }
+        }
+      }
+    },
+    "/generate_markdown": {
+      "post": {
+        "operationId": "generate_markdown",
+        "summary": "Generate markdown file from presentation",
+        "description": "Exports the presentation as a markdown file at the specified path.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "output_file": {
+                    "type": "string",
+                    "description": "Path for output .md file (relative to working directory)"
+                  }
+                },
+                "required": ["presentation_id", "output_file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Markdown file generated successfully"
+          }
+        }
+      }
+    },
+    "/generate_pptx": {
+      "post": {
+        "operationId": "generate_pptx",
+        "summary": "Generate PowerPoint file from presentation",
+        "description": "Exports the presentation as a PowerPoint file at the specified path, optionally using a theme file.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID"
+                  },
+                  "output_file": {
+                    "type": "string",
+                    "description": "Path for output .pptx file (relative to working directory)"
+                  },
+                  "theme_file": {
+                    "type": "string",
+                    "description": "Optional path to theme JSON file"
+                  }
+                },
+                "required": ["presentation_id", "output_file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PowerPoint file generated successfully"
+          }
+        }
+      }
+    },
+    "/delete_presentation": {
+      "post": {
+        "operationId": "delete_presentation",
+        "summary": "Delete a presentation",
+        "description": "Permanently deletes a presentation and all its slides.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Presentation UUID to delete"
+                  }
+                },
+                "required": ["presentation_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Presentation deleted successfully"
+          }
+        }
+      }
+    },
+    "/copy_presentation": {
+      "post": {
+        "operationId": "copy_presentation",
+        "summary": "Copy a presentation",
+        "description": "Creates a complete copy of an existing presentation with a new name.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "presentation_id": {
+                    "type": "string",
+                    "description": "Source presentation UUID"
+                  },
+                  "new_name": {
+                    "type": "string",
+                    "description": "Name for the copied presentation"
+                  }
+                },
+                "required": ["presentation_id", "new_name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New presentation UUID"
+          }
+        }
+      }
+    },
+    "/import_from_markdown": {
+      "post": {
+        "operationId": "import_from_markdown",
+        "summary": "Import presentation from markdown file",
+        "description": "Creates a new presentation by importing content from an existing markdown file.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "markdown_file": {
+                    "type": "string",
+                    "description": "Path to markdown file to import"
+                  },
+                  "presentation_name": {
+                    "type": "string",
+                    "description": "Name for new presentation (defaults to filename)"
+                  }
+                },
+                "required": ["markdown_file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New presentation UUID"
+          }
+        }
+      }
+    }
+  }
+}
+
+
+
+

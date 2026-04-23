@@ -1,0 +1,91 @@
+# Stage 1: Base image with .NET SDK, PowerShell, and Python
+FROM python:3.11.11-bullseye AS base
+
+# Set environment variables
+ENV DOTNET_RUNNING_IN_CONTAINER=true \
+    DOTNET_VERSION=9.0.3 \
+    DOTNET_SDK_VERSION=9.0.202 \
+    DOTNET_USE_POLLING_FILE_WATCHER=true \
+    NUGET_XMLDOC_MODE=skip \
+    POWERSHELL_DISTRIBUTION_CHANNEL=PSDocker-DotnetSDK-Debian-11
+
+# Install necessary packages and dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       curl \
+       apt-transport-https \
+       gnupg2 \
+       ca-certificates \
+       git \
+       build-essential \
+       cmake \
+       libssl-dev \
+       zlib1g-dev \
+       libbz2-dev \
+       liblz4-dev \
+       libsnappy-dev \
+       libzstd-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install .NET SDK and runtime
+RUN curl -fSL --output dotnet.tar.gz https://dotnetcli.azureedge.net/dotnet/Sdk/$DOTNET_SDK_VERSION/dotnet-sdk-$DOTNET_SDK_VERSION-linux-x64.tar.gz \
+    && mkdir -p /usr/share/dotnet \
+    && tar -zxf dotnet.tar.gz -C /usr/share/dotnet \
+    && ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet \
+    && rm dotnet.tar.gz
+
+# Install PowerShell
+RUN powershell_version=7.2.23 \
+    && curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v${powershell_version}/powershell-${powershell_version}-linux-x64.tar.gz -o /tmp/powershell.tar.gz \
+    && mkdir -p /opt/microsoft/powershell/${powershell_version} \
+    && tar zxf /tmp/powershell.tar.gz -C /opt/microsoft/powershell/${powershell_version} \
+    && ln -s /opt/microsoft/powershell/${powershell_version}/pwsh /usr/bin/pwsh \
+    && chmod +x /usr/bin/pwsh \
+    && rm /tmp/powershell.tar.gz
+
+# Stage 2: Python dependencies and additional tools
+FROM base AS final
+
+WORKDIR /app
+COPY requirements.txt .
+
+RUN pip install --upgrade pip
+
+# Install additional dependencies and Python 3.11 from the official repositories
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        graphviz \
+        graphviz-dev \
+        build-essential \
+        cmake \
+        libopenblas-dev \
+        liblapack-dev \
+        libboost-python-dev \
+        python3-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN pip install torch==2.3.1 -f https://download.pytorch.org/whl/torch_stable.html && \
+    pip install torchaudio==2.3.1 -f https://download.pytorch.org/whl/torch_stable.html
+
+# Added the following dependency so that dependencies in requirements.txt can be installed without issues.
+RUN apt-get update && apt-get install -y \
+    gdal-bin \
+    libgdal-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add environment variables so pip install can find GDAL
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+ENV GDAL_VERSION=3.2.2
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create a non-root user and set permissions
+RUN useradd --create-home --shell /bin/bash appuser \
+    && chown -R appuser:appuser /app
+
+# Switch to the non-root user
+USER appuser
+
+SHELL ["/bin/bash", "-c"]
+CMD ["tail", "-f", "/dev/null"]

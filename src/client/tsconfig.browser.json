@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "vite/client",
+      "node"
+    ],
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ES6"
+    ]
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-browser",
+    "electron",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
+  ]
+}

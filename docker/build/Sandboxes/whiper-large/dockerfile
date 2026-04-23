@@ -1,0 +1,14 @@
+FROM python-3.11-dotnet-9-torch
+
+WORKDIR /app
+
+COPY requirements.txt ./
+COPY huggingface /root/.cache/huggingface
+COPY torch /root/.cache/torch
+COPY scripts /app/scripts
+
+RUN apt-get update && apt-get install -y ffmpeg
+RUN pip install --no-cache-dir -r requirements.txt
+RUN touch /app/logfile.log
+
+CMD ["tail", "-f", "/app/logfile.log"]

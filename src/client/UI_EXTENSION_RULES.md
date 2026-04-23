@@ -1,0 +1,359 @@
+# Rules for Extending UI Features with Backend Changes
+
+## 1. Analysis Phase
+
+### 1.1 Feature Scope Assessment
+- [ ] Identify the specific UI components that need to be added/modified
+- [ ] Determine what data needs to be persisted or retrieved
+- [ ] Map out any new user interactions or workflows
+- [ ] Identify affected existing components and potential side effects
+
+### 1.2 Data Model Impact
+- [ ] Check if existing entities can support the new feature
+- [ ] If new data is needed, determine if it requires:
+  - New entity
+  - Extension of existing entity
+  - New relationships
+  - New computed properties
+- [ ] Verify cascade delete implications
+- [ ] Consider data migration needs
+
+### 1.3 API Requirements
+- [ ] List required CRUD operations
+- [ ] Identify new DTOs needed
+- [ ] Map authentication/authorization requirements
+- [ ] Consider rate limiting needs
+- [ ] Plan API versioning impact
+
+## 2. Implementation Order
+
+### 2.1 Data Layer Changes
+1. Add/modify entity classes in `GuideAntsApi.DataModel`
+2. Configure relationships in `ApplicationDbContext`
+3. Create migration using `dotnet ef migrations`
+4. Verify migration SQL for unexpected changes
+5. Update any affected repository methods
+
+### 2.2 API Layer Changes
+1. Create/update DTOs in `GuideAntsApi/Models`
+2. Add/modify service interfaces and implementations
+3. Configure new endpoints in appropriate endpoint class
+4. Add authorization requirements
+5. Implement validation
+
+### 2.3 Frontend Changes
+1. Add new types/interfaces in TypeScript
+2. Create/update API client methods
+3. Implement UI components
+4. Add state management code
+5. Implement error handling
+6. Add loading states
+
+## 3. Required Files to Modify
+
+### 3.1 Backend Files
+```
+GuideAntsApi.DataModel/
+  Models/                    # Add/modify entity classes
+  ApplicationDbContext.cs    # Configure relationships
+  
+GuideAntsApi/
+  Models/                    # Add DTOs
+  Services/                  # Add/modify services
+  Endpoints/                 # Add endpoint configurations
+```
+
+### 3.2 Frontend Files
+```
+src/
+  types/                     # TypeScript interfaces
+  api/                      # API client methods
+  components/               # UI components
+  hooks/                    # React hooks
+  store/                    # State management
+```
+
+## 4. Standards to Follow
+
+### 4.1 Data Model Standards
+- Use data annotations for validation
+- Initialize collections in constructors
+- Follow existing naming conventions
+- Configure appropriate delete behaviors
+- Add audit fields if needed
+
+### 4.2 API Standards
+```csharp
+// DTO Example
+public record NewFeatureDto(
+    [Required] string Name,
+    string? Description,
+    [Required] Guid RelatedEntityId
+);
+
+// Endpoint Example
+group.MapPost("/", async (ClaimsPrincipal user, NewFeatureDto dto, IFeatureService service) =>
+{
+    var result = await service.CreateFeatureAsync(user, dto);
+    return Results.Created($"/api/features/{result.Id}", result);
+})
+.WithName("CreateFeature")
+.Produces<FeatureDto>(StatusCodes.Status201Created)
+.Produces(StatusCodes.Status401Unauthorized);
+```
+
+### 4.3 Frontend Standards
+```typescript
+// API Client
+export const featureApi = {
+  create: async (data: NewFeatureDto): Promise<FeatureDto> => {
+    const response = await fetch('/api/features', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error('Failed to create feature');
+    return response.json();
+  },
+  // ... other methods
+};
+
+// Component
+const FeatureComponent: React.FC = () => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // ... implementation
+};
+```
+
+## 5. Common Pitfalls to Avoid
+
+### 5.1 Data Layer
+- ❌ Don't add non-nullable columns without default values
+- ❌ Don't change existing column types without migration strategy
+- ❌ Don't remove columns used by existing features
+- ❌ Don't break existing relationships
+- ✅ Do add indices for frequently queried columns
+- ✅ Do implement soft delete where appropriate
+
+### 5.2 API Layer
+- ❌ Don't expose entity classes directly
+- ❌ Don't implement business logic in endpoints
+- ❌ Don't return sensitive data in DTOs
+- ✅ Do validate inputs
+- ✅ Do handle errors consistently
+- ✅ Do maintain backward compatibility
+
+### 5.3 Frontend Layer
+- ❌ Don't store sensitive data in local storage
+- ❌ Don't skip loading/error states
+- ❌ Don't ignore TypeScript warnings
+- ✅ Do handle token refresh
+- ✅ Do implement proper cleanup
+- ✅ Do follow component composition patterns
+
+## 6. Testing Requirements
+
+### 6.1 Backend Testing
+- Unit test new services
+- Integration test new endpoints
+- Verify migration reversibility
+- Test authorization rules
+- Validate error responses
+
+### 6.2 Frontend Testing
+- Test component rendering
+- Verify error handling
+- Test loading states
+- Validate form submissions
+- Test integration with API
+
+## 7. Documentation Updates
+
+### 7.1 Required Updates
+- Update API documentation
+- Add migration notes if needed
+- Document new DTOs
+- Update architecture diagrams if needed
+- Add new component documentation
+
+### 7.2 Optional Updates
+- Add usage examples
+- Document edge cases
+- Update test documentation
+- Add performance considerations
+
+## 8. Deployment Considerations
+
+### 8.1 Database Updates
+- Plan migration timing
+- Consider downtime requirements
+- Prepare rollback strategy
+- Verify data integrity
+
+### 8.2 API Deployment
+- Deploy API changes first
+- Maintain backward compatibility
+- Monitor for errors
+- Update API documentation
+
+### 8.3 Frontend Deployment
+- Deploy after API changes
+- Verify integration
+- Monitor for errors
+- Update documentation
+
+## 9. Checklist for Completion
+
+### 9.1 Backend Checklist
+- [ ] Entity changes implemented
+- [ ] Migration created and tested
+- [ ] DTOs defined
+- [ ] Services implemented
+- [ ] Endpoints configured
+- [ ] Authorization rules applied
+- [ ] Tests passing
+
+### 9.2 Frontend Checklist
+- [ ] Types defined
+- [ ] API client updated
+- [ ] Components implemented
+- [ ] State management working
+- [ ] Error handling tested
+- [ ] Loading states verified
+- [ ] Integration tested
+
+### 9.3 Documentation Checklist
+- [ ] API documentation updated
+- [ ] Migration notes added
+- [ ] Component documentation updated
+- [ ] Architecture diagrams current
+- [ ] Deployment notes added 
+
+## 10. Entity Framework Commands and Guidelines
+
+### 10.1 Project Structure Rules
+```
+/UI/                                # Base directory for all commands
+    /GuideAntsApi/                 # API project (startup)
+    /GuideAntsApi.DataModel/       # DataModel project
+    /src/                          # Frontend source
+```
+
+### 10.2 Critical Path Rules
+- ❌ NEVER use `../` in paths
+- ❌ NEVER use absolute paths unless absolutely necessary
+- ✅ ALWAYS run commands from the UI directory
+- ✅ ALWAYS use relative paths from the UI directory
+
+### 10.3 Migration Commands
+
+#### Creating Migrations
+```powershell
+# Standard migration
+dotnet ef migrations add FeatureName --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+
+# Migration with output
+dotnet ef migrations add FeatureName --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj -v
+```
+
+#### Applying Migrations
+```powershell
+# Update to latest
+dotnet ef database update --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+
+# Update to specific migration
+dotnet ef database update MigrationName --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+```
+
+### 10.4 Migration Best Practices
+
+#### Do's ✅
+- Name migrations descriptively (e.g., `AddUserPreferences`, `ExtendProjectMetadata`)
+- Review migration code before applying
+- Generate and review SQL scripts for complex changes
+- Keep migrations focused and atomic
+- Test both up and down migrations
+- Include migration in the same PR as model changes
+
+#### Don'ts ❌
+- Don't combine multiple feature changes in one migration
+- Don't modify existing migration files
+- Don't create migrations without corresponding model changes
+- Don't forget to update database after pulling new migrations
+- Don't use migrations for data seeding (use separate scripts)
+
+### 10.5 Common Migration Scenarios
+
+#### Adding New Entity
+```powershell
+# 1. Create entity and configure relationships
+# 2. Create migration
+dotnet ef migrations add Add{EntityName} --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+
+# 3. Review migration code
+# 4. Apply migration
+dotnet ef database update --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+```
+
+#### Modifying Existing Entity
+```powershell
+# 1. Modify entity
+# 2. Create migration with descriptive name
+dotnet ef migrations add Update{EntityName}{Feature} --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+
+# 3. Generate SQL script to review changes
+dotnet ef migrations script --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+
+# 4. Apply migration
+dotnet ef database update --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+```
+
+### 10.6 Troubleshooting Migrations
+
+#### Migration Not Applied
+1. Verify you're in the UI directory
+2. Check migration exists in migration folder
+3. Check migration history:
+```powershell
+dotnet ef migrations list --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+```
+
+#### Reset Migration History
+```powershell
+# Revert all migrations
+dotnet ef database update 0 --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+
+# Apply all migrations
+dotnet ef database update --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+```
+
+### 10.7 Development Workflow Integration
+
+#### After Pulling Changes
+```powershell
+git pull
+dotnet ef database update --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj --startup-project GuideAntsApi/GuideAntsApi.csproj
+```
+
+#### Before Creating PR
+1. Ensure migrations are properly named
+2. Test migration application
+3. Test migration rollback
+4. Include migration files in PR
+5. Document any manual steps needed
+
+### 10.8 Migration Checklist
+- [ ] Created migration from UI directory
+- [ ] Used correct project paths
+- [ ] Named migration descriptively
+- [ ] Reviewed migration code
+- [ ] Generated and reviewed SQL script
+- [ ] Tested migration up
+- [ ] Tested migration down
+- [ ] Updated database
+- [ ] Included migration in PR
+- [ ] Documented any special steps 

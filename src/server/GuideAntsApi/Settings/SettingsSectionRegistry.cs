@@ -1,0 +1,475 @@
+using System.Text.Json.Nodes;
+
+namespace GuideAntsApi.Settings;
+
+public enum SettingsValueType
+{
+    String,
+    Int,
+    Bool
+}
+
+public sealed record SettingsPropertyDefinition(
+    string Name,
+    string CanonicalKey,
+    SettingsValueType ValueType = SettingsValueType.String,
+    bool IsSecret = false,
+    object? DefaultValue = null,
+    params string[] LegacyAliasKeys);
+
+public sealed class SettingsSectionDefinition
+{
+    public required string SectionName { get; init; }
+    public required string DisplayName { get; init; }
+    public required int DisplayOrder { get; init; }
+    public int SchemaVersion { get; init; } = 1;
+    public required IReadOnlyList<SettingsPropertyDefinition> Properties { get; init; }
+
+    /// <summary>
+    /// When set, <see cref="BuildBootstrapPayload"/> uses this instead of mapping flat <see cref="Properties"/>.
+    /// Used for nested JSON (e.g. <c>ServiceRouting:Containers:*:BaseUrl</c>) that must match DB shape.
+    /// </summary>
+    public Func<IConfiguration, JsonObject>? BootstrapPayloadFactory { get; init; }
+
+    public bool HasSecrets => Properties.Any(p => p.IsSecret);
+
+    public JsonObject BuildBootstrapPayload(IConfiguration configuration)
+    {
+        if (BootstrapPayloadFactory is not null)
+        {
+            return BootstrapPayloadFactory(configuration);
+        }
+
+        var payload = new JsonObject();
+        foreach (var property in Properties)
+        {
+            var raw = ReadFromConfiguration(configuration, property);
+            var node = ParseRawValue(property, raw, fallbackToDefault: true);
+            if (node != null)
+            {
+                payload[property.Name] = node;
+            }
+        }
+
+        return payload;
+    }
+
+    public IReadOnlyList<string> Validate(JsonObject payload)
+    {
+        var errors = new List<string>();
+
+        foreach (var property in Properties)
+        {
+            if (!payload.TryGetPropertyValue(property.Name, out var node) || node is null)
+            {
+                continue;
+            }
+
+            switch (property.ValueType)
+            {
+                case SettingsValueType.Int:
+                    if (node.GetValueKind() == System.Text.Json.JsonValueKind.String
+                        && !int.TryParse(node.GetValue<string>(), out _))
+                    {
+                        errors.Add($"{property.Name} must be an integer.");
+                    }
+                    else if (node.GetValueKind() != System.Text.Json.JsonValueKind.Number
+                             && node.GetValueKind() != System.Text.Json.JsonValueKind.String)
+                    {
+                        errors.Add($"{property.Name} must be an integer.");
+                    }
+                    break;
+
+                case SettingsValueType.Bool:
+                    if (node.GetValueKind() == System.Text.Json.JsonValueKind.String
+                        && !bool.TryParse(node.GetValue<string>(), out _))
+                    {
+                        errors.Add($"{property.Name} must be true or false.");
+                    }
+                    else if (node.GetValueKind() != System.Text.Json.JsonValueKind.True
+                             && node.GetValueKind() != System.Text.Json.JsonValueKind.False
+                             && node.GetValueKind() != System.Text.Json.JsonValueKind.String)
+                    {
+                        errors.Add($"{property.Name} must be true or false.");
+                    }
+                    break;
+            }
+        }
+
+        AddPositiveIntegerValidation(payload, errors, "TimeoutSeconds");
+        AddPositiveIntegerValidation(payload, errors, "MaxConcurrentConversions");
+        AddPositiveIntegerValidation(payload, errors, "AsyncStatusPollIntervalMs");
+        AddPositiveIntegerValidation(payload, errors, "PollIntervalSeconds");
+        AddPositiveIntegerValidation(payload, errors, "PollTimeoutSeconds");
+        AddPositiveIntegerValidation(payload, errors, "DefaultMaxTokens");
+        AddPositiveIntegerValidation(payload, errors, "ThinkingBudgetMinimal");
+        AddPositiveIntegerValidation(payload, errors, "ThinkingBudgetLow");
+        AddPositiveIntegerValidation(payload, errors, "ThinkingBudgetMedium");
+        AddPositiveIntegerValidation(payload, errors, "ThinkingBudgetHigh");
+
+        return errors;
+    }
+
+    public IEnumerable<string> GetCanonicalAndAliasKeys(string propertyName)
+    {
+        var property = Properties.FirstOrDefault(p =>
+            p.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase)
+            || p.LegacyAliasKeys.Any(alias =>
+                GetLeafName(alias).Equals(propertyName, StringComparison.OrdinalIgnoreCase)));
+        if (property == null)
+        {
+            return [];
+        }
+
+        return [property.CanonicalKey, .. property.LegacyAliasKeys];
+    }
+
+    private static string GetLeafName(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        var lastSeparator = key.LastIndexOf(':');
+        return lastSeparator >= 0 ? key[(lastSeparator + 1)..] : key;
+    }
+
+    private static string? ReadFromConfiguration(IConfiguration configuration, SettingsPropertyDefinition property)
+    {
+        var raw = configuration[property.CanonicalKey];
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            return raw;
+        }
+
+        foreach (var alias in property.LegacyAliasKeys)
+        {
+            var aliasRaw = configuration[alias];
+            if (!string.IsNullOrWhiteSpace(aliasRaw))
+            {
+                return aliasRaw;
+            }
+        }
+
+        return null;
+    }
+
+    private static JsonNode? ParseRawValue(SettingsPropertyDefinition property, string? raw, bool fallbackToDefault)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            if (!fallbackToDefault)
+            {
+                return null;
+            }
+
+            return property.DefaultValue switch
+            {
+                null => null,
+                int i => JsonValue.Create(i),
+                bool b => JsonValue.Create(b),
+                _ => JsonValue.Create(property.DefaultValue?.ToString())
+            };
+        }
+
+        return property.ValueType switch
+        {
+            SettingsValueType.Int => int.TryParse(raw, out var i)
+                ? JsonValue.Create(i)
+                : JsonValue.Create(raw),
+            SettingsValueType.Bool => bool.TryParse(raw, out var b)
+                ? JsonValue.Create(b)
+                : JsonValue.Create(raw),
+            _ => JsonValue.Create(raw)
+        };
+    }
+
+    private static void AddPositiveIntegerValidation(JsonObject payload, List<string> errors, string propertyName)
+    {
+        if (!payload.TryGetPropertyValue(propertyName, out var node) || node is null)
+        {
+            return;
+        }
+
+        int? value = node.GetValueKind() switch
+        {
+            System.Text.Json.JsonValueKind.Number => node.GetValue<int>(),
+            System.Text.Json.JsonValueKind.String when int.TryParse(node.GetValue<string>(), out var i) => i,
+            _ => null
+        };
+
+        if (value.HasValue && value.Value <= 0)
+        {
+            errors.Add($"{propertyName} must be greater than 0.");
+        }
+    }
+}
+
+public interface ISettingsSectionRegistry
+{
+    IReadOnlyList<SettingsSectionDefinition> All { get; }
+    bool TryGet(string sectionName, out SettingsSectionDefinition definition);
+}
+
+public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
+{
+    /// <summary>
+    /// Builds <c>{"Containers":{ "containerId": {"BaseUrl":"..."} }}</c> for DB seeding.
+    /// Starts from in-code defaults (local dev), then overlays <c>ServiceRouting:Containers:*:BaseUrl</c>
+    /// from configuration (environment / compose) so overrides win without duplicating values in appsettings.
+    /// </summary>
+    private static JsonObject BuildServiceRoutingBootstrapPayload(IConfiguration configuration)
+    {
+        var containers = new JsonObject();
+        foreach (var (containerId, baseUrl) in DefaultServiceRoutingContainers)
+        {
+            containers[containerId] = new JsonObject { ["BaseUrl"] = baseUrl };
+        }
+
+        foreach (var containerSection in configuration.GetSection("ServiceRouting:Containers").GetChildren())
+        {
+            var configured = containerSection["BaseUrl"];
+            if (string.IsNullOrWhiteSpace(configured))
+            {
+                continue;
+            }
+
+            containers[containerSection.Key] = new JsonObject { ["BaseUrl"] = configured.Trim() };
+        }
+
+        return new JsonObject { ["Containers"] = containers };
+    }
+
+    /// <summary>Default container base URLs for new installs; configuration overlays these keys.</summary>
+    private static readonly (string ContainerId, string BaseUrl)[] DefaultServiceRoutingContainers =
+    [
+        ("guideants-ai", "http://localhost:8110/sandbox"),
+        ("plantuml", "http://localhost:8111"),
+    ];
+
+    public IReadOnlyList<SettingsSectionDefinition> All { get; } =
+    [
+        new()
+        {
+            SectionName = "AzureDocumentIntelligence",
+            DisplayName = "Azure Document Intelligence",
+            DisplayOrder = 10,
+            Properties =
+            [
+                new("Endpoint", "AzureDocumentIntelligence:Endpoint"),
+                new("ApiKey", "AzureDocumentIntelligence:ApiKey", IsSecret: true),
+                new("ApiVersion", "AzureDocumentIntelligence:ApiVersion", DefaultValue: "2024-11-30"),
+                new("TimeoutSeconds", "AzureDocumentIntelligence:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
+                new("MaxRetries", "AzureDocumentIntelligence:MaxRetries", SettingsValueType.Int, DefaultValue: 3)
+            ]
+        },
+        new()
+        {
+            SectionName = "DocumentIntelligence",
+            DisplayName = "Markdown Extraction",
+            DisplayOrder = 11,
+            Properties =
+            [
+                new("TimeoutSeconds", "DocumentIntelligence:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
+                new("MaxConcurrentConversions", "DocumentIntelligence:MaxConcurrentConversions", SettingsValueType.Int, DefaultValue: 1),
+                new("AsyncStatusPollIntervalMs", "DocumentIntelligence:AsyncStatusPollIntervalMs", SettingsValueType.Int, DefaultValue: 2000)
+            ]
+        },
+        new()
+        {
+            SectionName = "AzureSpeechService",
+            DisplayName = "Azure Speech Service",
+            DisplayOrder = 20,
+            Properties =
+            [
+                new("Endpoint", "AzureSpeechService:Endpoint"),
+                new("ApiKey", "AzureSpeechService:ApiKey", IsSecret: true),
+                new("Region", "AzureSpeechService:Region", DefaultValue: "eastus"),
+                new("TimeoutSeconds", "AzureSpeechService:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 600),
+                new("MaxRetries", "AzureSpeechService:MaxRetries", SettingsValueType.Int, DefaultValue: 3)
+            ]
+        },
+        new()
+        {
+            SectionName = "SpeechTranscription",
+            DisplayName = "Speech Transcription",
+            DisplayOrder = 25,
+            Properties =
+            [
+                new("TimeoutSeconds", "SpeechTranscription:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300)
+            ]
+        },
+        new()
+        {
+            SectionName = "SpeechSynthesis",
+            DisplayName = "Speech Synthesis",
+            DisplayOrder = 27,
+            Properties =
+            [
+                new("TimeoutSeconds", "SpeechSynthesis:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300)
+            ]
+        },
+        new()
+        {
+            SectionName = "AzureOpenAI",
+            DisplayName = "Azure OpenAI",
+            DisplayOrder = 30,
+            Properties =
+            [
+                new("Resource", "AzureOpenAI:Resource", LegacyAliasKeys: ["AZURE_OPENAI_RESOURCE"]),
+                new("ApiKey", "AzureOpenAI:ApiKey", IsSecret: true, LegacyAliasKeys: ["AZURE_OPENAI_API_KEY"]),
+                new("Deployment", "AzureOpenAI:Deployment", LegacyAliasKeys: ["AZURE_OPENAI_DEPLOYMENT"]),
+                new("ApiVersion", "AzureOpenAI:ApiVersion", DefaultValue: "2025-04-01-preview", LegacyAliasKeys: ["AZURE_OPENAI_API_VERSION"])
+            ]
+        },
+        new()
+        {
+            SectionName = "AzureOpenAiImages",
+            DisplayName = "Azure OpenAI Images",
+            DisplayOrder = 40,
+            Properties =
+            [
+                new("Endpoint", "AzureOpenAiImages:Endpoint"),
+                new("ApiKey", "AzureOpenAiImages:ApiKey", IsSecret: true),
+                new("Deployment", "AzureOpenAiImages:Deployment"),
+                new("EditModelDeployment", "AzureOpenAiImages:EditModelDeployment"),
+                new("ApiVersion", "AzureOpenAiImages:ApiVersion", DefaultValue: "2025-04-01-preview")
+            ]
+        },
+        new()
+        {
+            SectionName = "ImageGeneration",
+            DisplayName = "Image Generation",
+            DisplayOrder = 45,
+            Properties =
+            [
+                new("TimeoutSeconds", "ImageGeneration:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 600),
+                new("LocalOutputFormat", "ImageGeneration:LocalOutputFormat", DefaultValue: "png")
+            ]
+        },
+        new()
+        {
+            SectionName = "Embeddings",
+            DisplayName = "Embeddings",
+            DisplayOrder = 55,
+            Properties =
+            [
+                new("TimeoutSeconds", "Embeddings:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
+                new("LocalMinIntervalMs", "Embeddings:LocalMinIntervalMs", SettingsValueType.Int, DefaultValue: 5000)
+            ]
+        },
+        new()
+        {
+            SectionName = "AzureOpenAiEmbedding",
+            DisplayName = "Azure OpenAI Embedding",
+            DisplayOrder = 60,
+            Properties =
+            [
+                new("Endpoint", "AzureOpenAiEmbedding:Endpoint"),
+                new("ApiKey", "AzureOpenAiEmbedding:ApiKey", IsSecret: true),
+                new("Deployment", "AzureOpenAiEmbedding:Deployment")
+            ]
+        },
+        new()
+        {
+            SectionName = "OpenAI",
+            DisplayName = "OpenAI",
+            DisplayOrder = 70,
+            Properties =
+            [
+                new("ApiKey", "OpenAI:ApiKey", IsSecret: true),
+                new("Endpoint", "OpenAI:Endpoint"),
+                new("Deployment", "OpenAI:Deployment")
+            ]
+        },
+        new()
+        {
+            SectionName = "Anthropic",
+            DisplayName = "Anthropic",
+            DisplayOrder = 80,
+            Properties =
+            [
+                new("BaseUrl", "Anthropic:BaseUrl", LegacyAliasKeys: ["ANTHROPIC_BASE_URL"]),
+                new("ApiKey", "Anthropic:ApiKey", IsSecret: true, LegacyAliasKeys: ["ANTHROPIC_API_KEY"]),
+                new("AuthToken", "Anthropic:AuthToken", IsSecret: true, LegacyAliasKeys: ["ANTHROPIC_AUTH_TOKEN"]),
+                new("DefaultModel", "Anthropic:DefaultModel", LegacyAliasKeys: ["ANTHROPIC_DEFAULT_MODEL"]),
+                new("DefaultMaxTokens", "Anthropic:DefaultMaxTokens", SettingsValueType.Int, DefaultValue: 64000, LegacyAliasKeys: ["ANTHROPIC_DEFAULT_MAX_TOKENS"]),
+                new("ThinkingBudgetMinimal", "Anthropic:ThinkingBudgetMinimal", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_MINIMAL"]),
+                new("ThinkingBudgetLow", "Anthropic:ThinkingBudgetLow", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_LOW"]),
+                new("ThinkingBudgetMedium", "Anthropic:ThinkingBudgetMedium", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_MEDIUM"]),
+                new("ThinkingBudgetHigh", "Anthropic:ThinkingBudgetHigh", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_HIGH"])
+            ]
+        },
+        // Single source of truth for the Hugging Face token used by every HF
+        // download path in the app (llama quants + mmproj, Stable Diffusion
+        // bundles, Whisper ASR, Kokoro TTS). Stored encrypted in the DB and
+        // edited on Settings → Connections → Hugging Face. On first bootstrap
+        // the value is seeded from the HF_TOKEN environment variable (via the
+        // legacy alias) so existing compose / host env setups work without
+        // manual re-entry. After seeding the DB value wins unconditionally —
+        // there is no per-request override and no per-provider duplicate.
+        new()
+        {
+            SectionName = "HuggingFace",
+            DisplayName = "Hugging Face",
+            DisplayOrder = 87,
+            Properties =
+            [
+                new(
+                    "Token",
+                    "HuggingFace:Token",
+                    IsSecret: true,
+                    LegacyAliasKeys: ["HF_TOKEN", "LlamaCpp:HfToken", "LlamaModelManagement:HfToken"])
+            ]
+        },
+        new()
+        {
+            SectionName = "ServiceRouting",
+            DisplayName = "Service routing",
+            DisplayOrder = 86,
+            BootstrapPayloadFactory = BuildServiceRoutingBootstrapPayload,
+            Properties = []
+        },
+        // Non-chat routing mode matrix (R-1.3). Chat is deliberately NOT represented here —
+        // chat routing is assistant-driven (R-1.1). The Modes property is a JSON object keyed
+        // by service name ("Embeddings", "ImageGeneration", "SpeechTranscription",
+        // "SpeechSynthesis", "DocumentIntelligence"); each value carries a defaultModeId plus
+        // a list of ServiceMode rows. Persisted as a JSON blob so the schema can evolve
+        // without a new section property per service.
+        new()
+        {
+            SectionName = "ServiceModes",
+            DisplayName = "Service Modes",
+            DisplayOrder = 90,
+            Properties =
+            [
+                new("Modes", "ServiceModes:Modes")
+            ]
+        },
+        // Global default chat model (R-9). Not a ServiceModes matrix row — chat stays assistant-driven
+        // except when OverrideAllChatModels forces this catalog model id for every turn.
+        new()
+        {
+            SectionName = "ChatDefaults",
+            DisplayName = "Default Chat Model",
+            DisplayOrder = 89,
+            Properties =
+            [
+                new("DefaultModelId", "ChatDefaults:DefaultModelId"),
+                new("OverrideAllChatModels", "ChatDefaults:OverrideAllChatModels", SettingsValueType.Bool, DefaultValue: false),
+                new("Temperature", "ChatDefaults:Temperature"),
+                new("TopP", "ChatDefaults:TopP"),
+                new("ReasoningEffort", "ChatDefaults:ReasoningEffort"),
+                new("SamplingParametersJson", "ChatDefaults:SamplingParametersJson")
+            ]
+        }
+    ];
+
+    public bool TryGet(string sectionName, out SettingsSectionDefinition definition)
+    {
+        definition = All.FirstOrDefault(x => x.SectionName.Equals(sectionName, StringComparison.OrdinalIgnoreCase))
+                     ?? null!;
+        return definition != null;
+    }
+}

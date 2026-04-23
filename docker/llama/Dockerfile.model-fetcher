@@ -1,0 +1,4 @@
+FROM curlimages/curl:8.12.1
+
+WORKDIR /work
+ENTRYPOINT ["/bin/sh", "-lc"]
