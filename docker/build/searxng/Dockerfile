@@ -1,4 +1,5 @@
-FROM docker.io/searxng/searxng:latest AS searxng-source
+# Pinned from docker.io/searxng/searxng:latest on 2026-04-24 for reproducible GHCR builds.
+FROM docker.io/searxng/searxng@sha256:c9100c29c14a77d5289263a671580226c3b8a396a1a0130d2f500f57076a0119 AS searxng-source
 
 FROM mcr.microsoft.com/playwright/python:v1.56.0-noble
 

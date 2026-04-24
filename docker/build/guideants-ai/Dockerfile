@@ -14,7 +14,7 @@ ARG SDCPP_REF
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
-    && apt-get install -y --no-install-recommends build-essential cmake git \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates cmake git \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} https://github.com/leejet/stable-diffusion.cpp /src/stable-diffusion.cpp \
     && cmake -S /src/stable-diffusion.cpp -B /src/stable-diffusion.cpp/build \
@@ -38,7 +38,7 @@ ARG SD_CUDA_ARCHITECTURES
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
-    && apt-get install -y --no-install-recommends build-essential cmake git \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates cmake git \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} https://github.com/leejet/stable-diffusion.cpp /src/stable-diffusion.cpp \
     && cmake -S /src/stable-diffusion.cpp -B /src/stable-diffusion.cpp/build \

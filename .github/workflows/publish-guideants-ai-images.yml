@@ -1,0 +1,135 @@
+name: Publish GuideAnts AI Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Select which GuideAnts AI variant(s) to publish
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - cpu
+          - cuda13
+
+concurrency:
+  group: publish-guideants-ai-images-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    if: ${{ github.event.inputs.variant == 'all' || github.event.inputs.variant == matrix.variant }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            image_name: guideants-ai-cpu
+            target: final-cpu
+            requirements_path: docker/build/Sandboxes/python311TorchCPU/requirements.txt
+            cache_scope: guideants-ai-cpu
+            image_title: GuideAnts AI CPU
+            image_description: GuideAnts AI container image with the CPU backend
+          - variant: cuda13
+            image_name: guideants-ai-cuda13
+            target: final-cuda13
+            requirements_path: docker/build/Sandboxes/python311TorchCUDA/requirements.txt
+            cache_scope: guideants-ai-cuda13
+            image_title: GuideAnts AI CUDA 13
+            image_description: GuideAnts AI container image with the CUDA 13 backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Normalize image owner
+        shell: bash
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Publish ScriptExecutionAgent
+        run: dotnet publish src/server/ScriptExecutionAgent/ScriptExecutionAgent.csproj -c Release -o ./artifacts/ScriptExecutionAgent
+
+      - name: Stage GuideAnts AI build context artifacts
+        shell: bash
+        env:
+          REQUIREMENTS_PATH: ${{ matrix.requirements_path }}
+        run: |
+          rm -rf docker/build/guideants-ai/ScriptExecutionAgent
+          mkdir -p docker/build/guideants-ai/ScriptExecutionAgent
+          cp -R ./artifacts/ScriptExecutionAgent/. docker/build/guideants-ai/ScriptExecutionAgent/
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("${{ matrix.requirements_path }}")
+          destination = Path("docker/build/guideants-ai/requirements.txt")
+          blocked = {"torch", "torchaudio", "torchvision", "torchtext"}
+
+          lines = source.read_text(encoding="utf-8").splitlines()
+          filtered: list[str] = []
+          for line in lines:
+              stripped = line.strip()
+              if not stripped or stripped.startswith("#"):
+                  filtered.append(line)
+                  continue
+
+              token = stripped
+              for separator in ("[", "=", "<", ">", "!", "~"):
+                  token = token.split(separator, 1)[0]
+              if token.strip().lower() in blocked:
+                  continue
+
+              filtered.append(line)
+
+          destination.write_text("\n".join(filtered) + "\n", encoding="utf-8")
+          PY
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.OWNER_LC }}/${{ matrix.image_name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image_title }}
+            org.opencontainers.image.description=${{ matrix.image_description }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build and push ${{ matrix.variant }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./docker/build/guideants-ai
+          file: ./docker/build/guideants-ai/Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}

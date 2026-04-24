@@ -28,6 +28,33 @@ The build system is optimized for local iterative development:
 - backend selected interactively (CPU or CUDA 13)
 - deterministic dependency-image tags derived from dependency file hashes
 
+## GHCR Publishing
+
+GitHub Actions publish the runtime images to GHCR as separate packages:
+
+- `ghcr.io/<owner>/guideants-ai-cpu`
+- `ghcr.io/<owner>/guideants-ai-cuda13`
+
+Workflow:
+
+- `.github/workflows/publish-guideants-ai-images.yml`
+
+Manual dispatch options:
+
+- `all` publishes both variants
+- `cpu` publishes only the CPU image
+- `cuda13` publishes only the CUDA 13 image
+
+Workflow implementation details:
+
+- publishes `src/server/ScriptExecutionAgent` with `dotnet publish`
+- stages that output into `docker/build/guideants-ai/ScriptExecutionAgent`
+- copies backend-specific sandbox requirements into `docker/build/guideants-ai/requirements.txt`
+- strips `torch`, `torchaudio`, `torchvision`, and `torchtext` so the Dockerfile remains the single owner of backend torch installation
+- builds `final-cpu` or `final-cuda13`
+- runs by manual GitHub Actions dispatch and pushes branch, `sha-*`, and `latest` tags to GHCR
+- uses GitHub Actions cache scopes per backend instead of publishing `guideants-ai-deps:*` cache images
+
 ## Current Design
 
 ### One Dockerfile, backend-specific dependency stages

@@ -11,10 +11,32 @@ This document covers the active Docker build paths under `docker/` and explains 
 | `guideants-webapi-ui:<YYDDD>.<HHmm>` | `docker/build/webapi-ui/Dockerfile` | `docker/build/build_webapi_ui.ps1` | `guideants-webapi-ui` profile service (`GA_WEBAPI_UI_IMAGE`) |
 | `mssql2025-express-fts` | `docker/build/mssql-fts/Dockerfile` | `docker/build/build_guideants_ai.ps1 -All` | `mssql-express` service |
 | `plantuml-1.2025.2` | `docker/build/Sandboxes/PlantUml/dockerfile` | `docker/build/build_guideants_ai.ps1 -All` | `plantuml` service |
+| `guideants-searxng:latest` | `docker/build/searxng/Dockerfile` | `docker compose build searxng` | `searxng` service (`GA_SEARXNG_IMAGE`) |
 
 Notes:
 - `docker/docker-compose.yml` references image tags via `docker/.env` (`GA_AI_IMAGE`, `GA_WEBAPI_UI_IMAGE`).
 - `guideants-webapi-ui` is optional and only starts when compose profile `webapi-ui` is enabled.
+- GitHub Actions now publish GHCR copies of the AI, PlantUML, SearXNG, webapi slim, and webapi mssql images without changing the local compose image-selection flow.
+
+## GHCR Publish Workflows
+
+The repo publishes the following GHCR packages from GitHub Actions:
+
+| GHCR package | Workflow | Notes |
+|---|---|---|
+| `ghcr.io/<owner>/guideants-ai-cpu` | `publish-guideants-ai-images.yml` | `final-cpu` target |
+| `ghcr.io/<owner>/guideants-ai-cuda13` | `publish-guideants-ai-images.yml` | `final-cuda13` target |
+| `ghcr.io/<owner>/guideants-plantuml` | `publish-plantuml-image.yml` | includes staged `ScriptExecutionAgent` publish output |
+| `ghcr.io/<owner>/guideants-searxng` | `publish-searxng-image.yml` | repo-root build context; upstream SearXNG base pinned by digest |
+| `ghcr.io/<owner>/guideants-webapi-ui-slim` | `publish-slim-image.yml` | standalone API/UI image |
+| `ghcr.io/<owner>/guideants-webapi-ui-mssql` | `publish-mssql-image.yml` | API/UI image with bundled SQL Server |
+
+All publish workflows:
+
+- trigger by manual dispatch only
+- emit branch, tag, `sha-*`, and `latest` (for `main`) tags
+- target `linux/amd64`
+- push to GHCR with the repository `GITHUB_TOKEN`
 
 ## 2) GuideAnts AI Build (`build_guideants_ai.ps1`)
 
