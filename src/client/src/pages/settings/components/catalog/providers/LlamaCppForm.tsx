@@ -112,6 +112,7 @@ export function LlamaCppAddForm({
   profiles,
   profilesLoading,
   inventory,
+  inventoryError,
   onCreateRuntimeProfile,
   onCreateCustomRuntimeProfile,
 }: ProviderAddForm) {
@@ -125,6 +126,11 @@ export function LlamaCppAddForm({
   const chosenHfAlias = value.llamaRouterModelId.trim();
   const chosenAliasRow = inventory.find((row) => row.routerModelId === chosenHfAlias);
   const chosenAliasTaken = !!chosenAliasRow && chosenAliasRow.catalogModelIds.length > 0;
+  const llamaRuntimeUnavailable =
+    typeof inventoryError === 'string' &&
+    (inventoryError.toLowerCase().includes('no local llama server')
+      || inventoryError.includes('127.0.0.1:9')
+      || inventoryError.toLowerCase().includes('connection refused'));
   const selectedProfile = profiles.find((profile) => profile.profileId === value.llamaRuntimeProfileId.trim());
   const derivedReasoningChoices = (() => {
     if (!selectedProfile?.thinkingControlJson) {
@@ -162,6 +168,13 @@ export function LlamaCppAddForm({
 
   return (
     <div className="space-y-4">
+      {llamaRuntimeUnavailable ? (
+        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          No local llama server is configured for this container yet. Live alias adoption and runtime inventory stay
+          unavailable until one is added.
+        </div>
+      ) : null}
+
       <div className="space-y-2">
         <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Install Source</label>
         <select
@@ -319,15 +332,18 @@ export function LlamaCppAddForm({
               })
             }
             className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            disabled={llamaRuntimeUnavailable}
           >
-            <option value="">Select orphaned alias</option>
+            <option value="">{llamaRuntimeUnavailable ? 'No live aliases available' : 'Select orphaned alias'}</option>
             {existingAliasRows.map((row) => (
               <option key={row.routerModelId} value={row.routerModelId}>
                 {row.routerModelId}
               </option>
             ))}
           </select>
-          {selectedAttachAlias && !selectedAttachRow ? (
+          {llamaRuntimeUnavailable ? (
+            <p className="text-xs text-amber-700">Attach existing alias requires a configured local llama server.</p>
+          ) : selectedAttachAlias && !selectedAttachRow ? (
             <p className="text-xs text-amber-700">Choose an alias with model/mmproj files and no catalog model bindings.</p>
           ) : null}
         </div>

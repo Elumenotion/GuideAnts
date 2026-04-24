@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using GuideAntsApi.Configuration;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -37,6 +38,10 @@ public static class LocalServiceAdminRouting
             _ => null
         };
         if (string.IsNullOrWhiteSpace(host))
+        {
+            return null;
+        }
+        if (!RuntimeConfigurationPlaceholders.HasUsableUrl(host))
         {
             return null;
         }

@@ -8,12 +8,6 @@ import { IconActionButton } from './ActionButtons';
  * service editors. Renders a consistent heading and the non-product states
  * (hidden, loading, error) so each bespoke manager only has to implement
  * the product UI itself.
- *
- * Deliberately has no "unavailable" phase. Any failure to reach the local
- * service admin endpoint — whether a network error, an ASP.NET 404 for the
- * settings route itself, or an upstream proxy failure — is a real error and
- * is surfaced verbatim with the upstream target, status, and body so the
- * operator can see exactly what happened.
  */
 export type LocalCapabilityPhase = 'hidden' | 'loading' | 'available' | 'error';
 
@@ -63,10 +57,18 @@ export function LocalCapabilityFrame({
   }
 
   if (phase === 'error') {
+    const unavailable = classifyUnavailableFailure(messageOrFallback(errorMessage), upstream);
     return (
       <div className="space-y-2 border-t border-gray-100 pt-4">
         {heading}
-        <UpstreamFailureDetails message={errorMessage} upstream={upstream} />
+        {unavailable ? (
+          <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+            <p className="font-semibold">{unavailable.title}</p>
+            <p className="mt-1">{unavailable.detail}</p>
+          </div>
+        ) : (
+          <UpstreamFailureDetails message={errorMessage} upstream={upstream} />
+        )}
       </div>
     );
   }
@@ -77,6 +79,48 @@ export function LocalCapabilityFrame({
       {children}
     </div>
   );
+}
+
+function messageOrFallback(message?: string): string {
+  return message?.trim() || 'Request failed.';
+}
+
+function classifyUnavailableFailure(
+  message: string,
+  upstream?: LocalModelsUpstreamFailure,
+): { title: string; detail: string } | null {
+  const normalizedMessage = message.toLowerCase();
+  const normalizedTarget = upstream?.upstreamTarget.toLowerCase() ?? '';
+
+  if (normalizedMessage.includes('no local ') && normalizedMessage.includes('configured for this container yet')) {
+    return {
+      title: 'Local runtime unavailable',
+      detail: message,
+    };
+  }
+
+  if (normalizedMessage.includes('does not expose local model operations')) {
+    return {
+      title: 'Local runtime unavailable',
+      detail: 'This container does not currently have the matching local service server configured.',
+    };
+  }
+
+  if (upstream?.upstreamStatus === 0) {
+    if (normalizedTarget.includes('127.0.0.1:9')) {
+      return {
+        title: 'Local runtime unavailable',
+        detail: 'This container is using the placeholder local-runtime URL, so no local service server is configured yet.',
+      };
+    }
+
+    return {
+      title: 'Local runtime unavailable',
+      detail: 'The local service server is not reachable right now.',
+    };
+  }
+
+  return null;
 }
 
 /**

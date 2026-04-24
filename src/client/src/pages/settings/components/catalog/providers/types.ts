@@ -31,6 +31,7 @@ export interface ProviderAddForm {
   profiles: SettingsRuntimeProfileDto[];
   profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
+  inventoryError?: string | null;
   onCreateRuntimeProfile?: (
     template: 'qwen3_5' | 'qwen3_6' | 'gemma4',
     suggestedProfileId?: string

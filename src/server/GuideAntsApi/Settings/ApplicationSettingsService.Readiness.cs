@@ -123,7 +123,7 @@ public sealed partial class ApplicationSettingsService
         // IS the configuration key; the field list is just the key itself.
         if (sectionName.StartsWith("LocalServiceHosts:", StringComparison.OrdinalIgnoreCase))
         {
-            var value = _configuration[sectionName];
+            var value = RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(_configuration[sectionName]);
             if (string.IsNullOrWhiteSpace(value))
             {
                 missing.Add(sectionName);
@@ -139,7 +139,10 @@ public sealed partial class ApplicationSettingsService
         {
             foreach (var field in required)
             {
-                var value = _configuration[$"{sectionName}:{field}"];
+                var rawValue = _configuration[$"{sectionName}:{field}"];
+                var value = string.Equals(field, "BaseUrl", StringComparison.OrdinalIgnoreCase)
+                    ? RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(rawValue)
+                    : rawValue;
                 if (string.IsNullOrWhiteSpace(value))
                 {
                     missing.Add(field);

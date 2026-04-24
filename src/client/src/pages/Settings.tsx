@@ -146,6 +146,7 @@ export default function Settings() {
       const items = await api.settings.getLlamaInventory();
       setLlamaInventory(items);
     } catch (error) {
+      setLlamaInventory([]);
       setLlamaInventoryError(getErrorMessage(error, 'Failed to load llama runtime inventory.'));
     } finally {
       if (mode === 'refresh') {
@@ -804,6 +805,7 @@ export default function Settings() {
         profiles={profiles}
         profilesLoading={profilesLoading}
         inventory={llamaInventory}
+        inventoryError={llamaInventoryError}
         onClose={() => setWizardOpen(false)}
         onCreateRuntimeProfileTemplate={createRuntimeProfileFromTemplate}
         onCreateCustomRuntimeProfile={createCustomRuntimeProfile}

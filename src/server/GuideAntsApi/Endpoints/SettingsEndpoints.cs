@@ -7,6 +7,7 @@ using GuideAntsApi.Services.HuggingFace;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
+using GuideAntsApi.Configuration;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -419,6 +420,26 @@ public static class SettingsEndpoints
         static bool TryGetNonEmptyString(JsonElement payload, string propertyName, out string value) =>
             LocalServiceAdminRouting.TryGetNonEmptyString(payload, propertyName, out value);
 
+        static IResult LocalServiceUnavailable(string serviceId)
+        {
+            var displayName = serviceId switch
+            {
+                "SpeechTranscription" => "local ASR server",
+                "SpeechSynthesis" => "local TTS server",
+                "Embeddings" => "local embeddings server",
+                "ImageGeneration" => "local image-generation server",
+                _ => "local service server",
+            };
+
+            return Results.Json(
+                new
+                {
+                    error = $"No {displayName} is configured for this container yet.",
+                    code = "LOCAL_SERVICE_UNAVAILABLE",
+                },
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
         serviceEditorsGroup.MapGet("/{serviceId}", async (
             string serviceId,
             IApplicationSettingsService settingsService,
@@ -511,7 +532,7 @@ public static class SettingsEndpoints
             var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
-                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose local model operations." });
+                return LocalServiceUnavailable(serviceId);
             }
 
             var path = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
@@ -542,7 +563,7 @@ public static class SettingsEndpoints
             var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
-                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose local model operations." });
+                return LocalServiceUnavailable(serviceId);
             }
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}/ready");
             return await LocalServiceAdminRouting.ProxyAsync(
@@ -561,7 +582,7 @@ public static class SettingsEndpoints
             var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
-                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose local model operations." });
+                return LocalServiceUnavailable(serviceId);
             }
 
             if (string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal))
@@ -645,7 +666,7 @@ public static class SettingsEndpoints
             var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
-                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose local model operations." });
+                return LocalServiceUnavailable(serviceId);
             }
 
             var path = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
@@ -688,7 +709,7 @@ public static class SettingsEndpoints
             var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
-                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose local model operations." });
+                return LocalServiceUnavailable(serviceId);
             }
 
             HttpContent? content = null;
@@ -742,7 +763,7 @@ public static class SettingsEndpoints
             var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
-                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose local model operations." });
+                return LocalServiceUnavailable(serviceId);
             }
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{adminBase}/admin/unload");
             return await LocalServiceAdminRouting.ProxyAsync(
@@ -760,7 +781,7 @@ public static class SettingsEndpoints
             var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
-                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose local model operations." });
+                return LocalServiceUnavailable(serviceId);
             }
 
             HttpRequestMessage request;
@@ -802,7 +823,7 @@ public static class SettingsEndpoints
             var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
-                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose local model operations." });
+                return LocalServiceUnavailable(serviceId);
             }
 
             var path = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
@@ -824,7 +845,7 @@ public static class SettingsEndpoints
             var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
             if (string.IsNullOrWhiteSpace(adminBase))
             {
-                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose local model operations." });
+                return LocalServiceUnavailable(serviceId);
             }
 
             var path = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
@@ -1071,7 +1092,18 @@ public static class SettingsEndpoints
             var readinessDto = await settingsService.GetReadinessAsync(cancellationToken);
             var providerIssues = BuildProviderIssues(readinessDto);
 
-            var inventoryItems = await inventoryService.GetInventoryAsync(cancellationToken);
+            IReadOnlyList<LlamaRuntimeInventoryItemDto> inventoryItems = [];
+            if (RuntimeConfigurationPlaceholders.HasUsableUrl(configuration["LlamaCpp:BaseUrl"]))
+            {
+                try
+                {
+                    inventoryItems = await inventoryService.GetInventoryAsync(cancellationToken);
+                }
+                catch
+                {
+                    inventoryItems = [];
+                }
+            }
             var loadedAliases = inventoryItems.Count(i => string.Equals(i.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase));
             var missingArtifacts = inventoryItems
                 .Where(i => !i.HasModelFile)
@@ -1154,10 +1186,28 @@ public static class SettingsEndpoints
             .WithTags("SettingsLlama")
             .WithOpenApi();
 
+        static bool HasConfiguredLlamaRuntime(IConfiguration configuration) =>
+            RuntimeConfigurationPlaceholders.HasUsableUrl(configuration["LlamaCpp:BaseUrl"]);
+
+        static IResult LlamaRuntimeUnavailable() =>
+            Results.Json(
+                new
+                {
+                    error = "No local llama server is configured for this container yet.",
+                    code = "LLAMA_RUNTIME_UNAVAILABLE",
+                },
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+
         llamaGroup.MapGet("/runtime/inventory", async (
+            IConfiguration configuration,
             ILlamaRuntimeInventoryService inventoryService,
             CancellationToken cancellationToken) =>
         {
+            if (!HasConfiguredLlamaRuntime(configuration))
+            {
+                return LlamaRuntimeUnavailable();
+            }
+
             var items = await inventoryService.GetInventoryAsync(cancellationToken);
             return Results.Ok(items);
         })
@@ -1166,10 +1216,16 @@ public static class SettingsEndpoints
 
         llamaGroup.MapPost("/runtime/load", async (
             [FromBody] LlamaRuntimeLoadRequest request,
+            IConfiguration configuration,
             ILlamaServerRuntimeClient llamaClient,
             ILlamaRuntimeCoordinator coordinator,
             CancellationToken cancellationToken) =>
         {
+            if (!HasConfiguredLlamaRuntime(configuration))
+            {
+                return LlamaRuntimeUnavailable();
+            }
+
             // R-12.10 + Phase F (R-6.10): serialize per-alias, AND reject an
             // incoming concurrent request with 409 instead of stalling the caller
             // behind the existing lock. The settings UI relies on this to render
@@ -1209,10 +1265,16 @@ public static class SettingsEndpoints
 
         llamaGroup.MapPost("/runtime/unload", async (
             [FromBody] LlamaRuntimeUnloadRequest request,
+            IConfiguration configuration,
             ILlamaServerRuntimeClient llamaClient,
             ILlamaRuntimeCoordinator coordinator,
             CancellationToken cancellationToken) =>
         {
+            if (!HasConfiguredLlamaRuntime(configuration))
+            {
+                return LlamaRuntimeUnavailable();
+            }
+
             var handle = coordinator.TryAcquireAliasLock(request.RouterModelId);
             if (handle == null)
             {
@@ -1250,10 +1312,16 @@ public static class SettingsEndpoints
         // Runtime tab. Read-only; uses the inventory service + coordinator
         // lock-state without mutating any state.
         llamaGroup.MapGet("/runtime/status", async (
+            IConfiguration configuration,
             ILlamaRuntimeInventoryService inventoryService,
             ILlamaRuntimeCoordinator coordinator,
             CancellationToken cancellationToken) =>
         {
+            if (!HasConfiguredLlamaRuntime(configuration))
+            {
+                return LlamaRuntimeUnavailable();
+            }
+
             var inventory = await inventoryService.GetInventoryAsync(cancellationToken);
             var statuses = new List<LlamaRuntimeAliasStatusDto>(inventory.Count);
             foreach (var item in inventory)
@@ -1538,13 +1606,13 @@ public static class SettingsEndpoints
         }
 
         if (string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-            && string.IsNullOrWhiteSpace(configuration["LlamaCpp:BaseUrl"]))
+            && !RuntimeConfigurationPlaceholders.HasUsableUrl(configuration["LlamaCpp:BaseUrl"]))
         {
             throw new AddModelException(
                 code: "PROVIDER_CREDENTIALS_MISSING",
                 step: "validation",
-                message: "Provider section 'LlamaCpp' is not ready: LlamaCpp:BaseUrl is not configured.",
-                remediation: "Open Connections → LlamaCpp and fill in the missing fields.");
+                message: "Provider section 'LlamaCpp' is not ready: no local llama server is configured for this container yet.",
+                remediation: "Configure a llama server base URL for this container, or choose a cloud chat provider instead.");
         }
 
         try

@@ -34,6 +34,7 @@ interface AddModelWizardProps {
   profiles: SettingsRuntimeProfileDto[];
   profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
+  inventoryError?: string | null;
   onClose: () => void;
   onCreateRuntimeProfileTemplate: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => Promise<void>;
   onCreateCustomRuntimeProfile: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>;
@@ -47,6 +48,7 @@ function renderProviderForm(
   profiles: SettingsRuntimeProfileDto[],
   profilesLoading: boolean,
   inventory: LlamaRuntimeInventoryItemDto[],
+  inventoryError: string | null | undefined,
   onCreateRuntimeProfileTemplate: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => Promise<void>,
   onCreateCustomRuntimeProfile: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>
 ) {
@@ -56,6 +58,7 @@ function renderProviderForm(
     profiles,
     profilesLoading,
     inventory,
+    inventoryError,
     onCreateRuntimeProfile: onCreateRuntimeProfileTemplate,
     onCreateCustomRuntimeProfile,
   };
@@ -185,6 +188,7 @@ export function AddModelWizard({
   profiles,
   profilesLoading,
   inventory,
+  inventoryError,
   onClose,
   onCreateRuntimeProfileTemplate,
   onCreateCustomRuntimeProfile,
@@ -514,6 +518,7 @@ export function AddModelWizard({
             profiles,
             profilesLoading,
             inventory,
+            inventoryError,
             onCreateRuntimeProfileTemplate,
             onCreateCustomRuntimeProfile
           )}

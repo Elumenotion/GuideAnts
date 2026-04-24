@@ -157,6 +157,9 @@ function buildLocalModelsFailureFromResponse(
                     `Upstream ${upstream.upstreamTarget || '(unknown target)'} returned ${upstream.upstreamStatus} ${upstream.upstreamStatusText}.`;
                 return { kind: 'error', message, upstream };
             }
+            if (typeof parsed?.error === 'string' && parsed.error.trim().length > 0) {
+                return { kind: 'error', message: parsed.error.trim() };
+            }
         } catch {
             // Fall through to the generic failure below — we will preserve
             // whatever raw body we received so the operator can see it.

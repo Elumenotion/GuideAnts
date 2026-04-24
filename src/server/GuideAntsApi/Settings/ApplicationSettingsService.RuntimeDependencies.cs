@@ -1,5 +1,6 @@
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
+using GuideAntsApi.Configuration;
 
 namespace GuideAntsApi.Settings;
 
@@ -43,7 +44,7 @@ public sealed partial class ApplicationSettingsService
         return RuntimeDependencyCatalog
             .Select(dependency =>
             {
-                var value = _configuration[dependency.Key];
+                var value = RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(_configuration[dependency.Key]);
                 var hasValue = !string.IsNullOrWhiteSpace(value);
                 var isSecret = LooksLikeSecretKey(dependency.Key);
                 // Secret-adjacent keys are masked server-side; today's catalog

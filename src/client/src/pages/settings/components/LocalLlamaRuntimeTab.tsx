@@ -29,6 +29,25 @@ interface LocalLlamaRuntimeTabProps {
   focusedAlias?: string | null;
 }
 
+function isLlamaRuntimeUnavailable(error: string | null): boolean {
+  if (!error) {
+    return false;
+  }
+
+  const normalized = error.toLowerCase();
+  return normalized.includes('no local llama server')
+    || error.includes('127.0.0.1:9')
+    || normalized.includes('connection refused');
+}
+
+function getLlamaRuntimeUnavailableMessage(error: string | null): string {
+  if (error && error.trim()) {
+    return error;
+  }
+
+  return 'No local llama server is configured for this container yet.';
+}
+
 export function LocalLlamaRuntimeTab({
   inventory,
   inventoryLoading,
@@ -53,6 +72,7 @@ export function LocalLlamaRuntimeTab({
 
   const [highlightedAlias, setHighlightedAlias] = useState<string | null>(null);
   const aliasRowRefsRef = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const runtimeUnavailable = isLlamaRuntimeUnavailable(inventoryError);
 
   const hasLoadingRuntime = useMemo(
     () => inventory.some((row) => row.runtimeState === 'loading'),
@@ -65,6 +85,12 @@ export function LocalLlamaRuntimeTab({
   );
 
   const refreshAliasStatus = useCallback(async () => {
+    if (runtimeUnavailable) {
+      setAliasStatus([]);
+      setAliasStatusError(null);
+      return;
+    }
+
     try {
       const list = await api.settings.getLlamaRuntimeStatus();
       setAliasStatus(list);
@@ -72,11 +98,17 @@ export function LocalLlamaRuntimeTab({
     } catch (error) {
       setAliasStatusError(getErrorMessage(error, 'Failed to load runtime status.'));
     }
-  }, []);
+  }, [runtimeUnavailable]);
 
   useEffect(() => {
+    if (runtimeUnavailable) {
+      setAliasStatus([]);
+      setAliasStatusError(null);
+      return;
+    }
+
     void refreshAliasStatus();
-  }, [refreshAliasStatus]);
+  }, [refreshAliasStatus, runtimeUnavailable]);
 
   useEffect(() => {
     if (!hasLoadingRuntime && !hasInFlightAlias) {
@@ -156,11 +188,17 @@ export function LocalLlamaRuntimeTab({
           <div className="px-6 py-8">
             <LoadingSpinner message="Loading inventory..." />
           </div>
+        ) : runtimeUnavailable && inventory.length === 0 ? (
+          <div className="px-6 py-4">
+            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              {getLlamaRuntimeUnavailableMessage(inventoryError)}
+            </div>
+          </div>
         ) : inventoryError && inventory.length === 0 ? (
           <div className="px-6 py-4 text-sm text-red-700">{inventoryError}</div>
         ) : (
           <>
-            {inventoryError && (
+            {inventoryError && !runtimeUnavailable && (
               <div className="mx-6 mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {inventoryError}
               </div>
@@ -363,9 +401,13 @@ export function LocalLlamaRuntimeTab({
             Refresh
           </TextActionButton>
         </div>
-        {aliasStatusError && (
+        {runtimeUnavailable ? (
+          <div className="mx-6 mt-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            Runtime diagnostics stay unavailable until a local llama server is configured for this container.
+          </div>
+        ) : aliasStatusError ? (
           <div className="mx-6 mt-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{aliasStatusError}</div>
-        )}
+        ) : null}
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">

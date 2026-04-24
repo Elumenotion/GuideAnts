@@ -30,7 +30,17 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
 
     public async Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> GetInventoryAsync(CancellationToken cancellationToken = default)
     {
-        var routerEntries = await _routerModels.GetEntriesAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<RouterModelEntry> routerEntries;
+        try
+        {
+            routerEntries = await _routerModels.GetEntriesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to list llama router entries; inventory will omit live router state.");
+            routerEntries = [];
+        }
+
         var routerByAlias = routerEntries.ToDictionary(e => e.Alias, StringComparer.Ordinal);
 
         LlamaModelsResponse llamaList;

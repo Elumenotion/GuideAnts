@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.Json.Nodes;
 using GuideAntsApi.Models.Settings;
+using GuideAntsApi.Configuration;
 using GuideAntsApi.Services.Routing;
 
 namespace GuideAntsApi.Settings;
@@ -210,7 +211,7 @@ public sealed partial class ApplicationSettingsService
         var runtimeDependencies = provider.RequiredRuntimeKeys
             .Select(key =>
             {
-                var value = _configuration[key.Key];
+                var value = RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(_configuration[key.Key]);
                 return new RuntimeKeyDto(
                     Key: key.Key,
                     DisplayName: key.DisplayName,
@@ -235,7 +236,10 @@ public sealed partial class ApplicationSettingsService
     {
         var sectionName = ResolveFieldSection(provider, field.Name);
         var key = string.IsNullOrWhiteSpace(sectionName) ? null : $"{sectionName}:{field.Name}";
-        var value = key == null ? null : _configuration[key];
+        var rawValue = key == null ? null : _configuration[key];
+        var value = string.Equals(field.Kind, "url", StringComparison.OrdinalIgnoreCase)
+            ? RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(rawValue)
+            : rawValue;
         var isSecret = string.Equals(field.Kind, "secret", StringComparison.OrdinalIgnoreCase);
         return new ProviderFieldValueDto(
             Name: field.Name,
