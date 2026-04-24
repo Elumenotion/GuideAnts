@@ -1,4 +1,4 @@
-name: Publish Slim Container Image
+name: Publish MSSQL Container Image
 
 on:
   workflow_dispatch:
@@ -8,15 +8,15 @@ on:
     tags:
       - '*'
     paths:
-      - .github/workflows/publish-slim-image.yml
+      - .github/workflows/publish-mssql-image.yml
       - docker/build/build_webapi_ui.ps1
       - docker/build/webapi-ui/Dockerfile
-      - docker/docker-compose.slim.yml
+      - docker/docker-compose.mssql.yml
       - src/client/**
       - src/server/**
 
 concurrency:
-  group: publish-slim-image-${{ github.ref }}
+  group: publish-mssql-image-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -62,23 +62,23 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ env.OWNER_LC }}/guideants-webapi-ui-slim
+          images: ghcr.io/${{ env.OWNER_LC }}/guideants-webapi-ui-mssql
           tags: |
             type=ref,event=branch
             type=ref,event=tag
             type=sha,prefix=sha-
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
           labels: |
-            org.opencontainers.image.title=GuideAnts Web API UI Slim
-            org.opencontainers.image.description=GuideAnts slim standalone API/UI container without bundled SQL Server
+            org.opencontainers.image.title=GuideAnts Web API UI MSSQL
+            org.opencontainers.image.description=GuideAnts API/UI container with embedded SQL Server Express and FTS
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
-      - name: Build and push slim image
+      - name: Build and push mssql image
         uses: docker/build-push-action@v6
         with:
           context: ./src
           file: ./docker/build/webapi-ui/Dockerfile
-          target: runtime-slim
+          target: runtime-mssql
           platforms: linux/amd64
           push: true
           provenance: false

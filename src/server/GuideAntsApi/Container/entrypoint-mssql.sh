@@ -13,7 +13,7 @@ export MSSQL_PID
 export MSSQL_TCP_PORT
 
 if [[ -z "${MSSQL_SA_PASSWORD:-}" ]]; then
-  echo "MSSQL_SA_PASSWORD is required for the slim container image." >&2
+  echo "MSSQL_SA_PASSWORD is required for the mssql container image." >&2
   exit 1
 fi
 

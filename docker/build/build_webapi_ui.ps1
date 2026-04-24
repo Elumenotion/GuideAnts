@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Full', 'Slim')]
+    [ValidateSet('Full', 'Slim', 'Mssql')]
     [string]$Flavor = 'Full',
     [switch]$NoCache,
     [switch]$NoRecreate,
@@ -15,12 +15,33 @@ $dockerfilePath = Join-Path $PSScriptRoot 'webapi-ui\Dockerfile'
 $clientRoot = Join-Path $repoRoot 'src\client'
 $clientNodeModules = Join-Path $clientRoot 'node_modules'
 $clientDistBrowser = Join-Path $clientRoot 'dist-browser'
-$isSlimFlavor = $Flavor -eq 'Slim'
-$dockerTarget = if ($isSlimFlavor) { 'runtime-slim' } else { 'runtime' }
-$imageRepository = if ($isSlimFlavor) { 'guideants-webapi-ui-slim' } else { 'guideants-webapi-ui' }
-$imageEnvKey = if ($isSlimFlavor) { 'GA_WEBAPI_UI_SLIM_IMAGE' } else { 'GA_WEBAPI_UI_IMAGE' }
-$composeFileName = if ($isSlimFlavor) { 'docker-compose.slim.yml' } else { 'docker-compose.yml' }
-$serviceName = if ($isSlimFlavor) { 'guideants-webapi-ui-slim' } else { 'guideants-webapi-ui' }
+
+switch ($Flavor) {
+    'Slim' {
+        $dockerTarget = 'runtime-slim'
+        $imageRepository = 'guideants-webapi-ui-slim'
+        $imageEnvKey = 'GA_WEBAPI_UI_SLIM_IMAGE'
+        $composeFileName = 'docker-compose.slim.yml'
+        $serviceName = 'guideants-webapi-ui-slim'
+        $useComposeFile = $true
+    }
+    'Mssql' {
+        $dockerTarget = 'runtime-mssql'
+        $imageRepository = 'guideants-webapi-ui-mssql'
+        $imageEnvKey = 'GA_WEBAPI_UI_MSSQL_IMAGE'
+        $composeFileName = 'docker-compose.mssql.yml'
+        $serviceName = 'guideants-webapi-ui-mssql'
+        $useComposeFile = $true
+    }
+    default {
+        $dockerTarget = 'runtime'
+        $imageRepository = 'guideants-webapi-ui'
+        $imageEnvKey = 'GA_WEBAPI_UI_IMAGE'
+        $composeFileName = 'docker-compose.yml'
+        $serviceName = 'guideants-webapi-ui'
+        $useComposeFile = $false
+    }
+}
 
 if (-not (Test-Path $dockerfilePath)) {
     Write-Error "Dockerfile not found at $dockerfilePath"
@@ -160,7 +181,7 @@ if (-not $NoRecreate -and (Test-Path $composeFile)) {
     Push-Location $dockerRoot
     try {
         $composeArgs = @('compose')
-        if ($isSlimFlavor) {
+        if ($useComposeFile) {
             $composeArgs += @('-f', $composeFileName)
         }
         else {
@@ -170,7 +191,7 @@ if (-not $NoRecreate -and (Test-Path $composeFile)) {
         docker @composeArgs
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Failed to recreate $serviceName (exit code $LASTEXITCODE)."
-            if ($isSlimFlavor) {
+            if ($useComposeFile) {
                 Write-Host "Use: docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
             }
             else {
@@ -188,7 +209,7 @@ if (-not $NoRecreate -and (Test-Path $composeFile)) {
 elseif ($NoRecreate) {
     Write-Host "Skipping compose service recreate (-NoRecreate)." -ForegroundColor Yellow
     Write-Host "To apply this image to an existing container, run:" -ForegroundColor Yellow
-    if ($isSlimFlavor) {
+    if ($useComposeFile) {
         Write-Host "docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
     }
     else {

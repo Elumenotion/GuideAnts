@@ -23,7 +23,26 @@ RUN apt-get update && apt-get install -y \
 
 ENTRYPOINT ["dotnet", "GuideAntsApi.dll"]
 
-FROM mcr.microsoft.com/mssql/server:2025-RTM-ubuntu-22.04 AS runtime-slim
+FROM runtime-base AS runtime-slim
+RUN apt-get update && apt-get install -y \
+    ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV ASPNETCORE_URLS=http://+:8080 \
+    FileStorage__Path=/app/ContentFiles \
+    Ui__RootPath=/app/ui \
+    VideoAudioExtraction__FfmpegPath=/usr/bin/ffmpeg \
+    ALLOWED_ORIGINS=* \
+    SettingsSecrets__ActiveKeyId=local-dev \
+    SettingsSecrets__Keys__local-dev=MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY= \
+    LlamaCpp__BaseUrl=http://127.0.0.1:9/llama-cpp \
+    ServiceRouting__Containers__guideants-ai__BaseUrl=http://127.0.0.1:9/sandbox \
+    SearXngSearch__BaseUrl=http://127.0.0.1:8091 \
+    BrowserRendering__BaseUrl=http://127.0.0.1:8092
+
+ENTRYPOINT ["dotnet", "GuideAntsApi.dll"]
+
+FROM mcr.microsoft.com/mssql/server:2025-RTM-ubuntu-22.04 AS runtime-mssql
 USER root
 RUN apt-get update \
     && apt-get install -y curl gnupg ca-certificates \
@@ -41,7 +60,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=runtime-base /app/ /app/
-COPY --chmod=755 server/GuideAntsApi/Container/entrypoint-slim.sh /usr/local/bin/entrypoint-slim.sh
+COPY --chmod=755 server/GuideAntsApi/Container/entrypoint-mssql.sh /usr/local/bin/entrypoint-mssql.sh
 
 ENV ACCEPT_EULA=Y \
     MSSQL_PID=Express \
@@ -61,4 +80,4 @@ ENV ACCEPT_EULA=Y \
 
 EXPOSE 8080 1433
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint-slim.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint-mssql.sh"]

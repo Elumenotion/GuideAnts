@@ -4,18 +4,17 @@ services:
     container_name: guideants-webapi-ui-slim
     ports:
       - "5107:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - guideants_slim_mssql:/var/opt/mssql
       - guideants_slim_content_files:/app/ContentFiles
     environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
-      MSSQL_DB_NAME: ${GA_DB_NAME:-guideants-dev}
       ASPNETCORE_ENVIRONMENT: Development
       API_RUNTIME_CONTEXT: compose-slim
       ALLOWED_ORIGINS: "*"
       FileStorage__Path: /app/ContentFiles
       Ui__RootPath: /app/ui
+      ConnectionStrings__DefaultConnection: ${GA_SQL_CONNECTION_STRING:-Server=host.docker.internal,1434;Initial Catalog=guideants-dev;Persist Security Info=False;User ID=sa;Password=YourStrong!Passw0rd;MultipleActiveResultSets=True;Encrypt=False;TrustServerCertificate=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;}
       SettingsSecrets__ActiveKeyId: local-dev
       "SettingsSecrets__Keys__local-dev": MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
       LlamaCpp__BaseUrl: http://127.0.0.1:9/llama-cpp
@@ -23,5 +22,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  guideants_slim_mssql:
   guideants_slim_content_files:
