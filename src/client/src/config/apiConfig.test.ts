@@ -41,6 +41,26 @@ describe('apiConfig', () => {
     await expect(loadApiConfig()).rejects.toThrow('API URL not configured');
   });
 
+  test('supports same-origin relative VITE_API_URL values', async () => {
+    delete window.__RUNTIME_CONFIG__;
+    env.VITE_API_URL = '/api';
+    (window as any).electron = undefined;
+    const { getApiBaseUrl, getApiHost, getApiOrigin } = await loadApiConfig();
+
+    expect(getApiBaseUrl()).toBe('/api');
+    expect(getApiOrigin()).toBe(window.location.origin);
+    expect(getApiHost()).toBe(window.location.host);
+  });
+
+  test('normalizes trailing slashes from configured API URLs', async () => {
+    env.VITE_API_URL = 'http://env.example/api/';
+    window.__RUNTIME_CONFIG__ = { apiUrl: '/api/' };
+    (window as any).electron = undefined;
+    const { getApiBaseUrl } = await loadApiConfig();
+
+    expect(getApiBaseUrl()).toBe('/api');
+  });
+
   test('resolveAgainstApiBase handles relative API base safely', async () => {
     env.VITE_API_URL = 'http://env.example/api';
     const { resolveAgainstApiBase } = await loadApiConfig();

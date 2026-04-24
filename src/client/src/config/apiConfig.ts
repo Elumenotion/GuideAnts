@@ -22,6 +22,10 @@ function normalizeConfiguredApiUrl(value?: string): string | undefined {
     return undefined;
   }
 
+  if (trimmed.length > 1) {
+    return trimmed.replace(/\/+$/, '');
+  }
+
   return trimmed;
 }
 

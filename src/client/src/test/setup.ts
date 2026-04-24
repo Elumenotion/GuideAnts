@@ -8,8 +8,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// Provide a default API URL for modules that resolve API_BASE_URL at import time.
-window.__RUNTIME_CONFIG__ = { apiUrl: 'http://localhost:5107/api' };
+// Provide a default same-origin API URL for modules that resolve API_BASE_URL at import time.
+window.__RUNTIME_CONFIG__ = { apiUrl: '/api' };
 
 // Mock MSAL
 vi.mock('@azure/msal-react', () => ({

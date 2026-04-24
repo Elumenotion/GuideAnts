@@ -22,14 +22,41 @@ export default defineConfig(({ mode }) => {
     throw new Error(`VITE_API_URL is required for browser mode "${mode}".`)
   }
 
-  let proxyTarget: string
-  try {
-    proxyTarget = new URL(configuredApiUrl).origin
-  } catch {
-    throw new Error(`VITE_API_URL must be an absolute URL, got "${configuredApiUrl}".`)
+  let proxyTarget: string | undefined
+  if (/^https?:\/\//i.test(configuredApiUrl)) {
+    try {
+      proxyTarget = new URL(configuredApiUrl).origin
+    } catch {
+      throw new Error(`VITE_API_URL must be a valid absolute URL or a same-origin path like "/api", got "${configuredApiUrl}".`)
+    }
+  } else if (!configuredApiUrl.startsWith('/')) {
+    throw new Error(`VITE_API_URL must be an absolute URL or a root-relative path like "/api", got "${configuredApiUrl}".`)
   }
 
   const analyze = process.env.ANALYZE === 'true'
+  const serverConfig = proxyTarget
+    ? {
+        port: 5173,
+        host: true, // Allow external connections for browser testing
+        proxy: {
+          '/api': {
+            target: proxyTarget,
+            changeOrigin: true,
+          },
+          '/chat': {
+            target: proxyTarget,
+            changeOrigin: true,
+          },
+          '/sandbox': {
+            target: proxyTarget,
+            changeOrigin: true,
+          },
+        },
+      }
+    : {
+        port: 5173,
+        host: true,
+      }
   
   return {
     plugins: [
@@ -89,24 +116,7 @@ export default defineConfig(({ mode }) => {
       // Remove Electron-specific env vars for browser build
       'process.env.ELECTRON_ENABLE_LOGGING': JSON.stringify('false')
     },
-    server: {
-      port: 5173,
-      host: true, // Allow external connections for browser testing
-      proxy: {
-        '/api': {
-          target: proxyTarget,
-          changeOrigin: true,
-        },
-        '/chat': {
-          target: proxyTarget,
-          changeOrigin: true,
-        },
-        '/sandbox': {
-          target: proxyTarget,
-          changeOrigin: true,
-        },
-      },
-    },
+    server: serverConfig,
     preview: {
       port: 4173,
       host: true,
