@@ -403,12 +403,7 @@ FodyWeavers.xsd
 /docker/build/Sandboxes/whiper-large/huggingface/hub
 /docker/volumes/emb/models/harrier-oss-v1-0.6b
 /src/server/GuideAntsApi.IntegrationTests/docker/volumes/content-files
+/_tmp_compose_config.txt
+/build_errors.txt
 /.claude
 /.cursor/rules
-
-# Local application settings (use the committed *.example.* templates instead)
-/appsettings.json
-/appsettings.Development.json
-/src/server/GuideAntsApi/appsettings.json
-/src/server/GuideAntsApi/appsettings.Development.json
-/src/server/GuideAntsApi/appsettings.txt
