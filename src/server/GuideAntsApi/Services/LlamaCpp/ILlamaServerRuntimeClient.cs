@@ -81,17 +81,10 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
     {
         var requestPath = "models";
         var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
-        _logger.LogInformation(
-            "Llama runtime request: GET {RequestPath} (Url: {RequestUri})",
-            requestPath,
-            requestUri);
+        
         var response = await _httpClient.GetAsync(requestUri, cancellationToken);
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        _logger.LogInformation(
-            "Llama runtime response: GET {RequestPath} => {StatusCode}. Body: {ResponseBody}",
-            requestPath,
-            (int)response.StatusCode,
-            responseContent);
+        
         response.EnsureSuccessStatusCode();
         return JsonSerializer.Deserialize<LlamaModelsResponse>(responseContent) ?? new LlamaModelsResponse();
     }
@@ -100,17 +93,10 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
     {
         var requestPath = "v1/models";
         var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
-        _logger.LogInformation(
-            "Llama runtime request: GET {RequestPath} (Url: {RequestUri})",
-            requestPath,
-            requestUri);
+        
         var response = await _httpClient.GetAsync(requestUri, cancellationToken);
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        _logger.LogInformation(
-            "Llama runtime response: GET {RequestPath} => {StatusCode}. Body: {ResponseBody}",
-            requestPath,
-            (int)response.StatusCode,
-            responseContent);
+        
         response.EnsureSuccessStatusCode();
         return JsonSerializer.Deserialize<LlamaOpenAiModelsResponse>(responseContent) ?? new LlamaOpenAiModelsResponse();
     }
@@ -136,12 +122,7 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         var requestPath = "models/load";
         var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
         var requestJson = requestBody.ToJsonString();
-        _logger.LogInformation(
-            "Llama runtime request: POST {RequestPath} (Url: {RequestUri}). Body: {RequestBody}",
-            requestPath,
-            requestUri,
-            requestJson);
-
+        
         using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
         {
             Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
@@ -149,11 +130,7 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        _logger.LogInformation(
-            "Llama runtime response: POST {RequestPath} => {StatusCode}. Body: {ResponseBody}",
-            requestPath,
-            (int)response.StatusCode,
-            responseContent);
+        
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogError(
@@ -172,12 +149,7 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         var requestPath = "models/unload";
         var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
         var requestJson = JsonSerializer.Serialize(requestBody);
-        _logger.LogInformation(
-            "Llama runtime request: POST {RequestPath} (Url: {RequestUri}). Body: {RequestBody}",
-            requestPath,
-            requestUri,
-            requestJson);
-
+        
         using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
         {
             Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
@@ -185,11 +157,7 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        _logger.LogInformation(
-            "Llama runtime response: POST {RequestPath} => {StatusCode}. Body: {ResponseBody}",
-            requestPath,
-            (int)response.StatusCode,
-            responseContent);
+        
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogError(

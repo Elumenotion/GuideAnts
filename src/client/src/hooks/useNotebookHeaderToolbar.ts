@@ -3,7 +3,6 @@ import { api } from '../services/api';
 import type { NotebookHeaderToolbarDto } from '../types/notebookToolbar';
 import { useToast } from '../components/common/Toast';
 
-const POLL_NORMAL_MS = 45_000;
 const POLL_ACTIVE_MS = 2_000;
 const POLL_ACTIVE_COOLDOWN_MS = 15_000;
 
@@ -29,6 +28,21 @@ export function useNotebookHeaderToolbar(
   const visible = useRef(true);
   const inFlightCooldownUntilMs = useRef(0);
   const previousInFlight = useRef(false);
+
+  const hasActiveOperation = (dto: NotebookHeaderToolbarDto | null): boolean => {
+    if (!dto) return false;
+
+    if (dto.chat.inProgressOperationId && dto.chat.inProgressState && dto.chat.inProgressState !== 'ready' && dto.chat.inProgressState !== 'failed') {
+      return true;
+    }
+
+    return dto.services.some(service =>
+      !!service.inProgressOperationId &&
+      !!service.inProgressState &&
+      service.inProgressState !== 'ready' &&
+      service.inProgressState !== 'failed'
+    );
+  };
 
   const refresh = useCallback(async () => {
     if (!notebookId) return;
@@ -81,8 +95,13 @@ export function useNotebookHeaderToolbar(
       pollTimer.current = null;
     }
     if (!notebookId) return undefined;
+
     const inCooldown = Date.now() < inFlightCooldownUntilMs.current;
-    const tick = inFlight || inCooldown ? POLL_ACTIVE_MS : POLL_NORMAL_MS;
+    const shouldPoll = inFlight || inCooldown || hasActiveOperation(data);
+    if (!shouldPoll) {
+      return undefined;
+    }
+
     pollTimer.current = setInterval(() => {
       if (!visible.current) return;
       void (async () => {
@@ -96,11 +115,11 @@ export function useNotebookHeaderToolbar(
           // keep last good snapshot
         }
       })();
-    }, tick);
+    }, POLL_ACTIVE_MS);
     return () => {
       if (pollTimer.current) clearInterval(pollTimer.current);
     };
-  }, [notebookId, conversationId, inFlight]);
+  }, [notebookId, conversationId, inFlight, data]);
 
   return {
     data,
