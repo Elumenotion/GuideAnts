@@ -259,13 +259,14 @@ if ($All) {
         exit 1
     }
 
-    $mssqlDockerfilePath = Join-Path $PSScriptRoot "mssql-fts\Dockerfile"
+    $mssqlBuildContext = Join-Path $PSScriptRoot "mssql-fts"
+    $mssqlDockerfilePath = Join-Path $mssqlBuildContext "Dockerfile"
     if (-not (Test-Path $mssqlDockerfilePath)) {
         Write-Error "MSSQL Dockerfile not found at $mssqlDockerfilePath"
         exit 1
     }
     Write-Host "Building mssql image: mssql2025-express-fts"
-    docker build -t mssql2025-express-fts -f $mssqlDockerfilePath --build-arg MSSQL_PID=Express $serverPath
+    docker build -t mssql2025-express-fts -f $mssqlDockerfilePath --build-arg MSSQL_PID=Express $mssqlBuildContext
     if ($LASTEXITCODE -ne 0) {
         Write-Error "MSSQL image build failed with exit code $LASTEXITCODE"
         exit 1

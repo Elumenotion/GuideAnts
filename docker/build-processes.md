@@ -26,15 +26,17 @@ The repo publishes the following GHCR packages from GitHub Actions:
 |---|---|---|
 | `ghcr.io/<owner>/guideants-ai-cpu` | `publish-guideants-ai-images.yml` | `final-cpu` target |
 | `ghcr.io/<owner>/guideants-ai-cuda13` | `publish-guideants-ai-images.yml` | `final-cuda13` target |
+| `ghcr.io/<owner>/mssql2025-express-fts` | `publish-mssql-fts-image.yml` | standalone SQL Server 2025 Express + FTS image used by GHCR compose stacks |
 | `ghcr.io/<owner>/guideants-plantuml` | `publish-plantuml-image.yml` | includes staged `ScriptExecutionAgent` publish output |
 | `ghcr.io/<owner>/guideants-searxng` | `publish-searxng-image.yml` | repo-root build context; upstream SearXNG base pinned by digest |
 | `ghcr.io/<owner>/guideants-webapi-ui-slim` | `publish-slim-image.yml` | standalone API/UI image |
 | `ghcr.io/<owner>/guideants-webapi-ui-mssql` | `publish-mssql-image.yml` | API/UI image with bundled SQL Server |
 
-All publish workflows:
+Publish workflow behavior:
 
-- trigger by manual dispatch only
-- emit branch, tag, `sha-*`, and `latest` (for `main`) tags
+- `publish-guideants-ai-images.yml` and `publish-plantuml-image.yml` trigger by manual dispatch
+- `publish-mssql-fts-image.yml`, `publish-slim-image.yml`, and `publish-mssql-image.yml` also trigger on `main`/tag pushes when relevant files change
+- all emit branch, tag, `sha-*`, and `latest` (for `main`) tags
 - target `linux/amd64`
 - push to GHCR with the repository `GITHUB_TOKEN`
 
