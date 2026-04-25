@@ -139,7 +139,7 @@ public sealed partial class ApplicationSettingsService(
                 currentPayload,
                 _settingsSecretsOptionsMonitor.CurrentValue,
                 protector.Protect);
-            var merged = ApplicationSettingsJson.MergeMissingProperties(decryptedCurrent, bootstrapPayload);
+            var merged = ApplicationSettingsJson.MergeMissingProperties(section, decryptedCurrent, bootstrapPayload);
 
             var needsPayloadUpdate = !JsonObjectsEquivalent(decryptedCurrent, merged);
             var needsSchemaVersionUpdate = row.SchemaVersion != section.SchemaVersion;

@@ -93,6 +93,24 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
     }
 
     [TestMethod]
+    public async Task GetSectionSummariesAsync_TreatsAzureDocumentIntelligencePlaceholdersAsUnconfigured()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["AzureDocumentIntelligence:Endpoint"] = "https://example.cognitiveservices.azure.com/",
+            ["AzureDocumentIntelligence:ApiKey"] = "replace-with-azure-document-intelligence-api-key",
+        });
+        var service = CreateService(db, configuration);
+
+        var summaries = await service.GetSectionSummariesAsync();
+        var docIntel = summaries.Single(section => string.Equals(section.SectionName, "AzureDocumentIntelligence", StringComparison.Ordinal));
+
+        docIntel.ReadinessStatus.Should().Be("unconfigured");
+        docIntel.MissingFields.Should().BeEquivalentTo(["Endpoint", "ApiKey"]);
+    }
+
+    [TestMethod]
     public async Task BootstrapAsync_DoesNotRecreateLlamaCppApplicationSettingsRow()
     {
         await using var db = CreateDbContext();
@@ -112,6 +130,35 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
 
         db.ApplicationSettings.Should().NotContain(row =>
             string.Equals(row.SectionName, "LlamaCpp", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task BootstrapAsync_ScrubsRetiredFields_FromFlatSectionRows()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration(new Dictionary<string, string?>());
+        db.ApplicationSettings.Add(new GuideAntsApi.DataModel.Models.ApplicationSetting
+        {
+            SectionName = "SpeechTranscription",
+            JsonValue = """{"TimeoutSeconds":300,"ActiveProviderId":"SpeechTranscription.AzureSpeech.Batch"}""",
+            SchemaVersion = 1,
+            CreatedUtc = DateTime.UtcNow,
+            UpdatedUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, configuration);
+
+        await service.BootstrapAsync(configuration);
+
+        var row = await db.ApplicationSettings
+            .AsNoTracking()
+            .SingleAsync(x => x.SectionName == "SpeechTranscription");
+        var payload = ApplicationSettingsJson.DeserializeObject(row.JsonValue);
+
+        payload.ContainsKey("TimeoutSeconds").Should().BeTrue();
+        payload["TimeoutSeconds"]!.GetValue<int>().Should().Be(300);
+        payload.ContainsKey("ActiveProviderId").Should().BeFalse();
     }
 
     [TestMethod]

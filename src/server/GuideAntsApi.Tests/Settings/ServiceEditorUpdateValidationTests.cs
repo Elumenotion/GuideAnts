@@ -95,6 +95,52 @@ public sealed class ServiceEditorUpdateValidationTests
         provider.Fields["ModelId"].HasValue.Should().BeTrue();
     }
 
+    [TestMethod]
+    public async Task SetServiceActiveProviderAsync_PreservesInactiveCloudModes_WhenSwitchingProviders()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+
+        await service.UpdateServiceProviderFieldsAsync(
+            "SpeechTranscription",
+            ServiceProviderIds.SpeechTranscriptionGoogleSpeechToText,
+            new ProviderFieldsUpdateRequest(
+                new Dictionary<string, string?>
+                {
+                    ["ApiKey"] = "gemini-key",
+                    ["ModelId"] = "gemini-2.5-flash"
+                }),
+            CancellationToken.None);
+
+        await service.SetServiceActiveProviderAsync(
+            "SpeechTranscription",
+            ServiceProviderIds.SpeechTranscriptionGoogleSpeechToText,
+            CancellationToken.None);
+
+        await service.SetServiceActiveProviderAsync(
+            "SpeechTranscription",
+            ServiceProviderIds.SpeechTranscriptionLocalAsrHttp,
+            CancellationToken.None);
+
+        var modesAfterLocalSwitch = await service.GetServiceModesAsync("SpeechTranscription", CancellationToken.None);
+        modesAfterLocalSwitch.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "GoogleGeminiApi", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "gemini-2.5-flash", StringComparison.Ordinal)
+            && !mode.IsDefault);
+
+        await service.SetServiceActiveProviderAsync(
+            "SpeechTranscription",
+            ServiceProviderIds.SpeechTranscriptionGoogleSpeechToText,
+            CancellationToken.None);
+
+        var modesAfterSwitchBack = await service.GetServiceModesAsync("SpeechTranscription", CancellationToken.None);
+        modesAfterSwitchBack.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "GoogleGeminiApi", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "gemini-2.5-flash", StringComparison.Ordinal)
+            && mode.IsDefault);
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -131,6 +177,7 @@ public sealed class ServiceEditorUpdateValidationTests
             ["AzureOpenAiImages:EditModelDeployment"] = "flux-1-edit",
             ["AzureDocumentIntelligence:Endpoint"] = "https://doc-intel.example.com/",
             ["AzureDocumentIntelligence:ApiKey"] = "test-doc-intel-key",
+            ["GoogleGeminiApi:ApiKey"] = "test-gemini-key",
             ["HuggingFace:Token"] = "hf_test_token",
             ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1"
         };

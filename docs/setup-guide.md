@@ -18,7 +18,7 @@ six services:
 
 | Service | Image / source | Role |
 |---------|----------------|------|
-| `mssql-express` | `mssql2025-express-fts` | SQL Server database. |
+| `mssql-express` | `${GA_MSSQL_IMAGE:-mssql2025-express-fts}` | SQL Server database. |
 | `guideants-ai` | `${GA_AI_IMAGE}` | Consolidated GPU service hosting llama.cpp + Script Execution Agent + local ASR / TTS / Stable Diffusion / embeddings behind a single gateway on port `8110`. |
 | `docling-serve-{cpu,cuda}` | `quay.io/docling-project/docling-serve*` | Local document intelligence (Markdown extraction). |
 | `guideants-webapi-ui` | `${GA_WEBAPI_UI_IMAGE}` | Web API + bundled browser UI. Published on `http://localhost:5107`. |
@@ -71,10 +71,12 @@ time (they are not on a public registry):
 - `${GA_AI_IMAGE}` — set in `docker/.env`. Build instructions live in
   [`docker/guideants-ai-build.md`](../docker/guideants-ai-build.md) and
   [`docker/build-processes.md`](../docker/build-processes.md).
-- `${GA_WEBAPI_UI_IMAGE}` — built from the root Dockerfile; see the same
-  build docs.
-- `mssql2025-express-fts` and `plantuml-1.2025.2` are also locally built
-  helper images; recipes are under `docker/build/`.
+- `${GA_WEBAPI_UI_IMAGE}` — built from `docker/build/webapi-ui/Dockerfile`;
+  see the same build docs.
+- `mssql2025-express-fts` and `plantuml-1.2025.2` are also helper images
+  under `docker/build/`. Local compose uses the local SQL tag by default;
+  the GHCR compose variants default `GA_MSSQL_IMAGE` to
+  `ghcr.io/<owner>/mssql2025-express-fts:<tag>`.
 
 The docling-serve images (`quay.io/docling-project/docling-serve-cpu` and
 `docling-serve-cu130`) pull from a public registry on first run.

@@ -197,7 +197,7 @@ public static class ApplicationSettingsJson
         JsonObject incomingPayload)
     {
         var merged = existingDecryptedPayload != null
-            ? CloneObject(existingDecryptedPayload)
+            ? CanonicalizeToDefinition(definition, existingDecryptedPayload)
             : new JsonObject();
 
         foreach (var property in definition.Properties)
@@ -220,6 +220,35 @@ public static class ApplicationSettingsJson
         }
 
         return merged;
+    }
+
+    public static JsonObject CanonicalizeToDefinition(SettingsSectionDefinition definition, JsonObject payload)
+    {
+        if (definition.Properties.Count == 0)
+        {
+            return CloneObject(payload);
+        }
+
+        var canonical = new JsonObject();
+        foreach (var property in definition.Properties)
+        {
+            if (!TryGetPropertyValue(payload, property, out var node))
+            {
+                continue;
+            }
+
+            canonical[property.Name] = node?.DeepClone();
+        }
+
+        return canonical;
+    }
+
+    public static JsonObject MergeMissingProperties(
+        SettingsSectionDefinition definition,
+        JsonObject existingPayload,
+        JsonObject bootstrapPayload)
+    {
+        return MergeMissingProperties(CanonicalizeToDefinition(definition, existingPayload), bootstrapPayload);
     }
 
     public static JsonObject MergeMissingProperties(JsonObject existingPayload, JsonObject bootstrapPayload)
@@ -286,6 +315,45 @@ public static class ApplicationSettingsJson
     public static JsonObject CloneObject(JsonObject source)
     {
         return DeserializeObject(source.ToJsonString());
+    }
+
+    private static bool TryGetPropertyValue(
+        JsonObject payload,
+        SettingsPropertyDefinition property,
+        out JsonNode? node)
+    {
+        if (payload.TryGetPropertyValue(property.Name, out node))
+        {
+            return true;
+        }
+
+        foreach (var alias in property.LegacyAliasKeys)
+        {
+            var leafName = GetLeafName(alias);
+            if (string.IsNullOrWhiteSpace(leafName))
+            {
+                continue;
+            }
+
+            if (payload.TryGetPropertyValue(leafName, out node))
+            {
+                return true;
+            }
+        }
+
+        node = null;
+        return false;
+    }
+
+    private static string GetLeafName(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        var lastSeparator = key.LastIndexOf(':');
+        return lastSeparator >= 0 ? key[(lastSeparator + 1)..] : key;
     }
 
     private static (string ActiveKeyId, byte[] ActiveKeyBytes) GetActiveEncryptionKeyOrThrow(SettingsSecretsOptions options)

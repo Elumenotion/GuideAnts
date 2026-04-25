@@ -165,7 +165,7 @@ public sealed partial class ApplicationSettingsService
             var rawValue = _configuration[$"{sectionName}:{field}"];
             var value = string.Equals(field, "BaseUrl", StringComparison.OrdinalIgnoreCase)
                 ? RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(rawValue)
-                : rawValue;
+                : RuntimeConfigurationPlaceholders.NormalizeConfiguredValueOrNull(rawValue);
             if (string.IsNullOrWhiteSpace(value))
             {
                 missing.Add(field);
@@ -179,7 +179,7 @@ public sealed partial class ApplicationSettingsService
                 var rawValue = _configuration[$"{sectionName}:{field}"];
                 var value = string.Equals(field, "BaseUrl", StringComparison.OrdinalIgnoreCase)
                     ? RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(rawValue)
-                    : rawValue;
+                    : RuntimeConfigurationPlaceholders.NormalizeConfiguredValueOrNull(rawValue);
                 return !string.IsNullOrWhiteSpace(value);
             });
 
@@ -218,6 +218,12 @@ public sealed partial class ApplicationSettingsService
 
             if (node.GetValueKind() == System.Text.Json.JsonValueKind.String
                 && string.IsNullOrWhiteSpace(node.GetValue<string>()))
+            {
+                continue;
+            }
+
+            if (node.GetValueKind() == System.Text.Json.JsonValueKind.String
+                && RuntimeConfigurationPlaceholders.IsKnownPlaceholderValue(node.GetValue<string>()))
             {
                 continue;
             }

@@ -60,14 +60,24 @@ public sealed partial class ApplicationSettingsService
                 IsDefault: true);
         }
 
-        var normalized = new[]
+        var normalized = modes
+            .Select(mode => mode with
+            {
+                IsDefault = string.Equals(mode.ModeId, selectedMode.ModeId, StringComparison.Ordinal),
+                Enabled = string.Equals(mode.ModeId, selectedMode.ModeId, StringComparison.Ordinal)
+                    ? true
+                    : mode.Enabled
+            })
+            .ToList();
+
+        if (!normalized.Any(mode => string.Equals(mode.ModeId, selectedMode.ModeId, StringComparison.Ordinal)))
         {
-            selectedMode with
+            normalized.Add(selectedMode with
             {
                 Enabled = true,
                 IsDefault = true
-            }
-        };
+            });
+        }
 
         ServiceModesPayload.WriteModesFor(payload, canonicalService, normalized, defaultModeId: selectedMode.ModeId);
         await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);

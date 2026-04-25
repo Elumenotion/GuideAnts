@@ -90,6 +90,40 @@ public sealed class ApplicationSettingsJsonTests
         errors.Should().Contain(error => error.Contains("ActiveKeyId", StringComparison.Ordinal));
     }
 
+    [TestMethod]
+    public void MergeForUpdate_RemovesRetiredFieldsFromExistingPayload()
+    {
+        var definition = new SettingsSectionDefinition
+        {
+            SectionName = "SpeechTranscription",
+            DisplayName = "Speech Transcription",
+            DisplayOrder = 1,
+            Properties =
+            [
+                new SettingsPropertyDefinition(
+                    Name: "TimeoutSeconds",
+                    CanonicalKey: "SpeechTranscription:TimeoutSeconds",
+                    ValueType: SettingsValueType.Int)
+            ]
+        };
+
+        var merged = ApplicationSettingsJson.MergeForUpdate(
+            definition,
+            new JsonObject
+            {
+                ["TimeoutSeconds"] = 300,
+                ["ActiveProviderId"] = "SpeechTranscription.AzureSpeech.Batch"
+            },
+            new JsonObject
+            {
+                ["TimeoutSeconds"] = 600
+            });
+
+        merged.ContainsKey("TimeoutSeconds").Should().BeTrue();
+        merged["TimeoutSeconds"]!.GetValue<int>().Should().Be(600);
+        merged.ContainsKey("ActiveProviderId").Should().BeFalse();
+    }
+
     private static SettingsSectionDefinition CreateSectionDefinition()
     {
         return new SettingsSectionDefinition

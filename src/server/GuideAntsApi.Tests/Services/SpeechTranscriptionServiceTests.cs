@@ -105,6 +105,44 @@ public sealed class SpeechTranscriptionServiceTests
     }
 
     [TestMethod]
+    public async Task TranscribeAudioWithDurationAsync_StripsAudioContentTypeParameters_ForAzureSpeechProvider()
+    {
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"durationMilliseconds\":1200,\"phrases\":[{\"offsetMilliseconds\":0,\"durationMilliseconds\":1200,\"text\":\"hello azure\",\"speaker\":0}]}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(
+            httpClient,
+            providerSection: AzureProviderSection,
+            azureOptions: new AzureSpeechServiceOptions
+            {
+                Endpoint = "https://azure-speech.example.com/",
+                ApiKey = "azure-key",
+                TimeoutSeconds = 90
+            },
+            transcriptionOptions: new SpeechTranscriptionOptions
+            {
+                TimeoutSeconds = 120
+            },
+            localServiceHostsOptions: new LocalServiceHostsOptions
+            {
+                SpeechTranscriptionBaseUrl = "http://guideants-ai:80"
+            });
+
+        await using var audio = new MemoryStream(new byte[1024]);
+        await service.TranscribeAudioWithDurationAsync(audio, "recording.webm", "audio/webm;codecs=opus");
+
+        handler.LastRequestBody.Should().Contain("Content-Type: audio/webm");
+        handler.LastRequestBody.Should().NotContain("audio/webm;codecs=opus");
+    }
+
+    [TestMethod]
     public async Task TranscribeAudioWithDurationAsync_ExtractsVideoViaSharedStorageFlow()
     {
         var handler = new CapturingHandler(_ =>

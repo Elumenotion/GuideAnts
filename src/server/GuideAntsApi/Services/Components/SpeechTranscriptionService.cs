@@ -192,6 +192,7 @@ namespace GuideAntsApi.Services.Components
             var requestId = Guid.NewGuid().ToString("N");
             var payloadSizeBytes = TryGetStreamLength(audioContent);
             var payloadSizeBucket = BuildPayloadSizeBucket(payloadSizeBytes);
+            var normalizedContentType = NormalizeAudioContentType(fileName, contentType);
 
             _logger.LogWarning(
                 "asr_api_request_start provider={Provider} requestId={RequestId} fileName={FileName} contentType={ContentType} diarization={Diarization} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket}",
@@ -205,14 +206,14 @@ namespace GuideAntsApi.Services.Components
 
             return mode.ProviderSection switch
             {
-                LocalProviderSection => await TranscribeViaLocalAsrWithDurationAsync(audioContent, fileName, contentType, requestId, payloadSizeBytes, payloadSizeBucket, cancellationToken),
-                AzureProviderSection => await TranscribeViaAzureSpeechWithDurationAsync(audioContent, fileName, contentType, enableDiarization, requestId, payloadSizeBytes, payloadSizeBucket, cancellationToken),
+                LocalProviderSection => await TranscribeViaLocalAsrWithDurationAsync(audioContent, fileName, normalizedContentType, requestId, payloadSizeBytes, payloadSizeBucket, cancellationToken),
+                AzureProviderSection => await TranscribeViaAzureSpeechWithDurationAsync(audioContent, fileName, normalizedContentType, enableDiarization, requestId, payloadSizeBytes, payloadSizeBucket, cancellationToken),
                 GoogleGeminiProviderSection => await TranscribeViaGoogleGeminiWithDurationAsync(
-                    audioContent, fileName, contentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
+                    audioContent, fileName, normalizedContentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
                 HuggingFaceProviderSection => await TranscribeViaHuggingFaceWithDurationAsync(
-                    audioContent, fileName, contentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
+                    audioContent, fileName, normalizedContentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
                 OpenRouterProviderSection => await TranscribeViaOpenRouterWithDurationAsync(
-                    audioContent, fileName, contentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
+                    audioContent, fileName, normalizedContentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
                 _ => throw RoutingException.ProviderNotReady(
                     mode.ProviderSection,
                     new[]
@@ -610,6 +611,27 @@ namespace GuideAntsApi.Services.Components
                 "m4a" => "audio/mp4",
                 _ => "application/octet-stream"
             };
+        }
+
+        private static string NormalizeAudioContentType(string fileName, string? contentType)
+        {
+            if (!string.IsNullOrWhiteSpace(contentType))
+            {
+                var candidate = contentType.Trim();
+                var separatorIndex = candidate.IndexOf(';');
+                if (separatorIndex >= 0)
+                {
+                    candidate = candidate[..separatorIndex];
+                }
+
+                candidate = candidate.Trim();
+                if (candidate.Length > 0)
+                {
+                    return candidate;
+                }
+            }
+
+            return ResolveGoogleGeminiAudioMimeType(fileName, contentType ?? string.Empty);
         }
 
         private async Task<TranscriptionResult> TranscribeViaLocalAsrWithDurationAsync(
