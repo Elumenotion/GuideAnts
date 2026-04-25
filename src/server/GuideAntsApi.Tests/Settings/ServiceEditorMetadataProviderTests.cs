@@ -73,7 +73,12 @@ public sealed class ServiceEditorMetadataProviderTests
             ["AzureOpenAiImages:Deployment"] = "flux-1",
             ["AzureOpenAiImages:EditModelDeployment"] = "flux-1-edit",
             ["AzureDocumentIntelligence:Endpoint"] = "https://doc-intel.example.com/",
-            ["AzureDocumentIntelligence:ApiKey"] = "test-doc-intel-key"
+            ["AzureDocumentIntelligence:ApiKey"] = "test-doc-intel-key",
+            ["GoogleGeminiApi:ApiKey"] = "test-gemini-key",
+            ["OpenRouter:ApiKey"] = "test-openrouter-key",
+            ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1",
+            ["HuggingFace:Token"] = "hf_test_token",
+            ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1"
         };
 
         return new ConfigurationBuilder()

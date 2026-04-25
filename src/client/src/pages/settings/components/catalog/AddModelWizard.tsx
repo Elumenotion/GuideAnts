@@ -15,9 +15,12 @@ import { SettingsModal } from '../shared/SettingsModal';
 import { AnthropicAddForm } from './providers/AnthropicForm';
 import { AzureOpenAiChatAddForm } from './providers/AzureOpenAiChatForm';
 import { AzureOpenAiResponsesAddForm } from './providers/AzureOpenAiResponsesForm';
+import { GoogleGeminiAddForm } from './providers/GoogleGeminiForm';
+import { HuggingFaceInferenceAddForm } from './providers/HuggingFaceInferenceForm';
 import { LlamaCppAddForm } from './providers/LlamaCppForm';
 import { OpenAiChatAddForm } from './providers/OpenAiChatForm';
 import { OpenAiResponsesAddForm } from './providers/OpenAiResponsesForm';
+import { OpenRouterAddForm } from './providers/OpenRouterForm';
 
 const ADD_MODEL_STEPS = [
   { id: 'queued', label: 'Queued', help: 'Waiting for install worker.' },
@@ -75,6 +78,12 @@ function renderProviderForm(
       return <AnthropicAddForm {...props} />;
     case 'llama-cpp':
       return <LlamaCppAddForm {...props} />;
+    case 'google-gemini-chat':
+      return <GoogleGeminiAddForm {...props} />;
+    case 'hf-inference-chat':
+      return <HuggingFaceInferenceAddForm {...props} />;
+    case 'openrouter-chat':
+      return <OpenRouterAddForm {...props} />;
     default:
       return <p className="text-sm text-gray-600">Pick a provider to continue.</p>;
   }
@@ -443,6 +452,9 @@ export function AddModelWizard({
             <option value="azure-openai-responses">azure-openai-responses</option>
             <option value="anthropic">anthropic</option>
             <option value="llama-cpp">llama-cpp</option>
+            <option value="google-gemini-chat">google-gemini-chat</option>
+            <option value="hf-inference-chat">hf-inference-chat</option>
+            <option value="openrouter-chat">openrouter-chat</option>
           </select>
         </div>
       ) : null}

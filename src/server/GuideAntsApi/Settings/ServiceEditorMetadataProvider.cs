@@ -26,6 +26,22 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [
                     Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Local request timeout in seconds.", operative: true),
                     Field("LocalMinIntervalMs", "Local Min Interval (ms)", "int", true, "Minimum pacing interval between local calls.", operative: true),
+                ],
+                [ServiceProviderIds.EmbeddingsGoogleEmbedding] =
+                [
+                    Field("ApiKey", "API Key", "secret", true, "Google Gemini API key.", operative: true),
+                    Field("ModelId", "Embedding Model ID", "text", true, "Gemini embedding model id routed through ServiceModes.", operative: true),
+                ],
+                [ServiceProviderIds.EmbeddingsHuggingFaceInference] =
+                [
+                    Field("Token", "Token", "secret", true, "Hugging Face token for inference APIs.", operative: true),
+                    Field("ModelId", "Embedding Model ID", "text", true, "Model id routed through ServiceModes for Hugging Face embeddings.", operative: true),
+                ],
+                [ServiceProviderIds.EmbeddingsOpenRouterEmbeddings] =
+                [
+                    Field("ApiKey", "API Key", "secret", true, "OpenRouter API key.", operative: true),
+                    Field("BaseUrl", "Base URL", "url", false, "OpenRouter API base URL.", operative: true),
+                    Field("ModelId", "Embedding Model ID", "text", true, "Model id routed through ServiceModes for OpenRouter embeddings.", operative: true),
                 ]
             },
             [RoutedServiceNames.ImageGeneration] = new Dictionary<string, IReadOnlyList<ProviderFieldMetadataDto>>(StringComparer.Ordinal)
@@ -51,6 +67,22 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                         operative: true),
                     Field("modelId", "Model", "text", false, "Legacy mode model binding (non-operative).", operative: false),
                     Field("requestPresetJson", "Request Preset", "text", false, "Legacy mode request preset (non-operative).", operative: false),
+                ],
+                [ServiceProviderIds.ImageGenerationGoogleImagen] =
+                [
+                    Field("ApiKey", "API Key", "secret", true, "Google Gemini API key.", operative: true),
+                    Field("ModelId", "Image Model ID", "text", true, "Gemini image-capable model id routed through ServiceModes.", operative: true),
+                ],
+                [ServiceProviderIds.ImageGenerationHuggingFaceInference] =
+                [
+                    Field("Token", "Token", "secret", true, "Hugging Face token for inference APIs.", operative: true),
+                    Field("ModelId", "Image Model ID", "text", true, "Model id routed through ServiceModes for Hugging Face image generation.", operative: true),
+                ],
+                [ServiceProviderIds.ImageGenerationOpenRouterImage] =
+                [
+                    Field("ApiKey", "API Key", "secret", true, "OpenRouter API key.", operative: true),
+                    Field("BaseUrl", "Base URL", "url", false, "OpenRouter API base URL.", operative: true),
+                    Field("ModelId", "Image Model ID", "text", true, "Model id routed through ServiceModes for OpenRouter image generation.", operative: true),
                 ]
             },
             [RoutedServiceNames.DocumentIntelligence] = new Dictionary<string, IReadOnlyList<ProviderFieldMetadataDto>>(StringComparer.Ordinal)
@@ -90,6 +122,22 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [ServiceProviderIds.SpeechTranscriptionLocalAsrHttp] =
                 [
                     Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Local ASR timeout.", operative: true),
+                ],
+                [ServiceProviderIds.SpeechTranscriptionGoogleSpeechToText] =
+                [
+                    Field("ApiKey", "API Key", "secret", true, "Google Gemini API key.", operative: true),
+                    Field("ModelId", "Transcription Model ID", "text", true, "Gemini audio-capable model id routed through ServiceModes.", operative: true),
+                ],
+                [ServiceProviderIds.SpeechTranscriptionHuggingFaceInference] =
+                [
+                    Field("Token", "Token", "secret", true, "Hugging Face token for inference APIs.", operative: true),
+                    Field("ModelId", "ASR Model ID", "text", true, "Model id routed through ServiceModes for Hugging Face ASR.", operative: true),
+                ],
+                [ServiceProviderIds.SpeechTranscriptionOpenRouterAudio] =
+                [
+                    Field("ApiKey", "API Key", "secret", true, "OpenRouter API key.", operative: true),
+                    Field("BaseUrl", "Base URL", "url", false, "OpenRouter API base URL.", operative: true),
+                    Field("ModelId", "Transcription Model ID", "text", true, "Model id routed through ServiceModes for OpenRouter transcription.", operative: true),
                 ]
             },
             [RoutedServiceNames.SpeechSynthesis] = new Dictionary<string, IReadOnlyList<ProviderFieldMetadataDto>>(StringComparer.Ordinal)
@@ -108,6 +156,23 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [ServiceProviderIds.SpeechSynthesisLocalTtsHttp] =
                 [
                     Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Local TTS timeout.", operative: true),
+                ],
+                [ServiceProviderIds.SpeechSynthesisGoogleTextToSpeech] =
+                [
+                    Field("ApiKey", "API Key", "secret", true, "Google Gemini API key.", operative: true),
+                    Field("ModelId", "TTS Model ID", "text", true, "Gemini TTS model id routed through ServiceModes.", operative: true),
+                    Field("VoiceName", "Voice Name", "text", true, "Required Gemini prebuilt voice name stored in the service mode preset.", operative: true),
+                ],
+                [ServiceProviderIds.SpeechSynthesisHuggingFaceInference] =
+                [
+                    Field("Token", "Token", "secret", true, "Hugging Face token for inference APIs.", operative: true),
+                    Field("ModelId", "TTS Model ID", "text", true, "Model id routed through ServiceModes for Hugging Face TTS.", operative: true),
+                ],
+                [ServiceProviderIds.SpeechSynthesisOpenRouterTts] =
+                [
+                    Field("ApiKey", "API Key", "secret", true, "OpenRouter API key.", operative: true),
+                    Field("BaseUrl", "Base URL", "url", false, "OpenRouter API base URL.", operative: true),
+                    Field("ModelId", "TTS Model ID", "text", true, "Model id routed through ServiceModes for OpenRouter TTS.", operative: true),
                 ]
             },
         };

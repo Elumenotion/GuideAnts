@@ -4,15 +4,27 @@ namespace GuideAntsApi.Options
     {
         public const string SpeechTranscriptionAzureSpeechBatch = "SpeechTranscription.AzureSpeech.Batch";
         public const string SpeechTranscriptionLocalAsrHttp = "SpeechTranscription.LocalAsr.Http";
+        public const string SpeechTranscriptionGoogleSpeechToText = "SpeechTranscription.Google.SpeechToText";
+        public const string SpeechTranscriptionHuggingFaceInference = "SpeechTranscription.HuggingFace.Inference";
+        public const string SpeechTranscriptionOpenRouterAudio = "SpeechTranscription.OpenRouter.Audio";
 
         public const string SpeechSynthesisAzureSpeechSsml = "SpeechSynthesis.AzureSpeech.Ssml";
         public const string SpeechSynthesisLocalTtsHttp = "SpeechSynthesis.LocalTts.Http";
+        public const string SpeechSynthesisGoogleTextToSpeech = "SpeechSynthesis.Google.TextToSpeech";
+        public const string SpeechSynthesisHuggingFaceInference = "SpeechSynthesis.HuggingFace.Inference";
+        public const string SpeechSynthesisOpenRouterTts = "SpeechSynthesis.OpenRouter.Tts";
 
         public const string ImageGenerationAzureOpenAiImages = "ImageGeneration.AzureOpenAI.Images";
         public const string ImageGenerationLocalSdHttp = "ImageGeneration.LocalSd.Http";
+        public const string ImageGenerationGoogleImagen = "ImageGeneration.Google.Imagen";
+        public const string ImageGenerationHuggingFaceInference = "ImageGeneration.HuggingFace.Inference";
+        public const string ImageGenerationOpenRouterImage = "ImageGeneration.OpenRouter.Image";
 
         public const string EmbeddingsAzureOpenAiEmbedding = "Embeddings.AzureOpenAI.Embedding";
         public const string EmbeddingsLocalEmbHttp = "Embeddings.LocalEmb.Http";
+        public const string EmbeddingsGoogleEmbedding = "Embeddings.Google.Embedding";
+        public const string EmbeddingsHuggingFaceInference = "Embeddings.HuggingFace.Inference";
+        public const string EmbeddingsOpenRouterEmbeddings = "Embeddings.OpenRouter.Embeddings";
 
         public const string DocumentIntelligenceAzure = "DocumentIntelligence.Azure.DocumentIntelligence";
         public const string DocumentIntelligenceLocalDoclingHttp = "DocumentIntelligence.LocalDocling.Http";

@@ -186,7 +186,16 @@ describe('api.settings', () => {
   });
 
   it('getSections calls the settings sections endpoint', async () => {
-    const dto = [{ sectionName: 'OpenAI', displayName: 'OpenAI', displayOrder: 10, hasSecrets: true }];
+    const dto = [
+      {
+        sectionName: 'OpenAI',
+        displayName: 'OpenAI',
+        displayOrder: 10,
+        hasSecrets: true,
+        readinessStatus: 'configured',
+        missingFields: [],
+      },
+    ];
     mockFetch.mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue(dto) });
 
     const result = await api.settings.getSections();

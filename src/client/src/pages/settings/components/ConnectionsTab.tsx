@@ -68,13 +68,13 @@ const OWNERSHIP_CATEGORIES: readonly OwnershipCategory[] = [
     key: 'chat',
     label: 'Chat / LLM Providers',
     description: 'Connections used when dispatching chat completions to a catalog model.',
-    sectionNames: ['AzureOpenAI', 'OpenAI', 'Anthropic', 'LlamaCpp'],
+    sectionNames: ['AzureOpenAI', 'OpenAI', 'Anthropic', 'LlamaCpp', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace'],
   },
   {
     key: 'service',
     label: 'Service Providers',
     description: 'Connections referenced by non-chat service routing modes (speech, images, embeddings, markdown extraction).',
-    sectionNames: ['AzureSpeechService', 'AzureOpenAiImages', 'AzureOpenAiEmbedding', 'AzureDocumentIntelligence'],
+    sectionNames: ['AzureSpeechService', 'AzureOpenAiImages', 'AzureOpenAiEmbedding', 'AzureDocumentIntelligence', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace'],
   },
   // The Hugging Face token is the single source of truth for every Hugging
   // Face download in the app (llama quants + mmproj, Stable Diffusion
@@ -101,26 +101,6 @@ const EXCLUDED_SECTIONS = new Set<string>([
   'DocumentIntelligence',
 ]);
 
-/**
- * Client-side required-field map per provider section. The backend schema
- * exposes `isRequired` on each property, so we prefer that signal. This map
- * is only used as a last-resort client pin for sections where the schema does
- * not yet surface required flags — keep in sync with ProviderSectionRequiredFields /
- * ServiceRoutingStartupValidator on the server. Phase E is free to delete this
- * once the schema is authoritative for every section.
- */
-const REQUIRED_FIELD_FALLBACKS: Record<string, readonly string[]> = {
-  AzureOpenAI: ['Endpoint', 'ApiKey', 'Deployment'],
-  OpenAI: ['ApiKey'],
-  Anthropic: ['ApiKey'],
-  LlamaCpp: ['BaseUrl'],
-  AzureSpeechService: ['Endpoint', 'ApiKey', 'Region'],
-  AzureOpenAiImages: ['Endpoint', 'ApiKey', 'Deployment'],
-  AzureOpenAiEmbedding: ['Endpoint', 'ApiKey', 'Deployment'],
-  AzureDocumentIntelligence: ['Endpoint', 'ApiKey'],
-  HuggingFace: ['Token'],
-};
-
 const KNOWN_SERVICE_KEYS: readonly ServiceKey[] = [
   'Embeddings',
   'ImageGeneration',
@@ -133,16 +113,6 @@ function toServiceKey(value: string): ServiceKey | null {
   return (KNOWN_SERVICE_KEYS as readonly string[]).includes(value)
     ? (value as ServiceKey)
     : null;
-}
-
-function isFieldRequired(
-  sectionName: string,
-  property: SettingsSectionPropertyDefinitionDto
-): boolean {
-  if (property.isRequired) {
-    return true;
-  }
-  return (REQUIRED_FIELD_FALLBACKS[sectionName] ?? []).includes(property.name);
 }
 
 export function ConnectionsTab({
@@ -209,17 +179,6 @@ export function ConnectionsTab({
     return map;
   }, [providerSections]);
 
-  const providerIssuesBySection = useMemo(() => {
-    const map = new Map<string, string[]>();
-    if (!overview) {
-      return map;
-    }
-    for (const issue of overview.providerIssues) {
-      map.set(issue.section, issue.missingFields);
-    }
-    return map;
-  }, [overview]);
-
   /**
    * Cheap "Used by N services" count for the left pane badge: sum of mode
    * references whose providerSection matches, plus chat targets whose provider
@@ -247,29 +206,26 @@ export function ConnectionsTab({
     return counts;
   }, [overview]);
 
-  const sectionReadinessBySection = useMemo(() => {
-    const map = new Map<string, SectionReadiness>();
-    if (!overview) {
-      return map;
-    }
-    for (const summary of providerSections) {
-      if (providerIssuesBySection.has(summary.sectionName)) {
-        map.set(summary.sectionName, 'blocked');
-      } else {
-        map.set(summary.sectionName, 'configured');
-      }
-    }
-    return map;
-  }, [overview, providerSections, providerIssuesBySection]);
-
   const resolvedReadiness = useCallback(
     (sectionName: string): SectionReadiness => {
-      if (!overview && !overviewError) {
+      if (providerSections.length === 0 && !sectionSummariesError) {
         return 'loading';
       }
-      return sectionReadinessBySection.get(sectionName) ?? 'unconfigured';
+      const summary = sectionSummariesByName.get(sectionName);
+      if (!summary) {
+        return 'unconfigured';
+      }
+
+      switch (summary.readinessStatus) {
+        case 'configured':
+        case 'blocked':
+        case 'unconfigured':
+          return summary.readinessStatus;
+        default:
+          return 'unconfigured';
+      }
     },
-    [overview, overviewError, sectionReadinessBySection]
+    [providerSections.length, sectionSummariesError, sectionSummariesByName]
   );
 
   const loadSection = useCallback(
@@ -383,6 +339,7 @@ export function ConnectionsTab({
       setSectionData(updated);
       setSectionDraft(clonePayload(updated.payload));
       setSectionPreservedDraft(null);
+      onRefreshSectionSummaries();
       showToast({ type: 'success', title: `Saved ${updated.displayName}` });
       void loadOverview();
       void loadUsage(selectedSection);
@@ -395,6 +352,7 @@ export function ConnectionsTab({
           message: 'Latest server values are loaded and your draft was preserved.',
         });
         await loadSection(selectedSection, { preserveDraftAsPending: true });
+        onRefreshSectionSummaries();
       } else {
         showToast({
           type: 'error',
@@ -405,7 +363,7 @@ export function ConnectionsTab({
     } finally {
       setSectionSaving(false);
     }
-  }, [sectionData, selectedSection, sectionDraft, loadOverview, loadSection, loadUsage, showToast]);
+  }, [sectionData, selectedSection, sectionDraft, loadOverview, loadSection, loadUsage, onRefreshSectionSummaries, showToast]);
 
   const handleRefresh = useCallback(() => {
     if (!selectedSection) {
@@ -414,7 +372,8 @@ export function ConnectionsTab({
     void loadSection(selectedSection);
     void loadUsage(selectedSection);
     void loadOverview();
-  }, [selectedSection, loadSection, loadUsage, loadOverview]);
+    onRefreshSectionSummaries();
+  }, [selectedSection, loadSection, loadUsage, loadOverview, onRefreshSectionSummaries]);
 
   const selectedSummary = selectedSection ? sectionSummariesByName.get(selectedSection) : undefined;
   const selectedSchema = selectedSection ? getSectionSchema(schema, selectedSection) : undefined;
@@ -430,7 +389,7 @@ export function ConnectionsTab({
     const required: SettingsSectionPropertyDefinitionDto[] = [];
     const optional: SettingsSectionPropertyDefinitionDto[] = [];
     for (const property of selectedSchema.properties) {
-      if (isFieldRequired(selectedSection, property)) {
+      if (property.isRequired) {
         required.push(property);
       } else {
         optional.push(property);
@@ -661,6 +620,23 @@ function DetailsPanel({
       <div className="space-y-4 px-6 py-5">
         {error && (
           <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+        )}
+
+        {summary && summary.missingFields.length > 0 && (
+          <div
+            className={`rounded px-3 py-2 text-sm ${
+              summary.readinessStatus === 'blocked'
+                ? 'border border-amber-200 bg-amber-50 text-amber-900'
+                : 'border border-slate-200 bg-slate-50 text-slate-800'
+            }`}
+          >
+            <div className="font-medium">
+              {summary.readinessStatus === 'blocked' ? 'Connection incomplete' : 'Connection not configured'}
+            </div>
+            <div className="mt-1">
+              Missing: {summary.missingFields.join(', ')}
+            </div>
+          </div>
         )}
 
         {preservedDraft && (
@@ -942,4 +918,3 @@ function ReadinessDot({ status }: { status: SectionReadiness }) {
           : 'Unconfigured';
   return <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${className}`} title={title} aria-label={title} />;
 }
-

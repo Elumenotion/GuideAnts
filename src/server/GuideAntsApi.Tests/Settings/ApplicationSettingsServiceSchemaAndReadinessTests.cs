@@ -48,11 +48,48 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
                 "LocalServiceHosts:DocumentIntelligenceBaseUrl",
                 StringComparison.Ordinal)));
         schema.Providers.Should().Contain(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.EmbeddingsGoogleEmbedding, StringComparison.Ordinal)
+            && string.Equals(provider.ProviderSettingsSection, GoogleGeminiApiOptions.SectionName, StringComparison.Ordinal));
+        schema.Providers.Should().Contain(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.EmbeddingsOpenRouterEmbeddings, StringComparison.Ordinal)
+            && string.Equals(provider.ProviderSettingsSection, OpenRouterOptions.SectionName, StringComparison.Ordinal));
+        schema.Providers.Should().Contain(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.EmbeddingsHuggingFaceInference, StringComparison.Ordinal)
+            && string.Equals(provider.ProviderSettingsSection, "HuggingFace", StringComparison.Ordinal));
+        schema.Providers.Should().Contain(provider =>
             string.Equals(provider.ProviderId, ServiceProviderIds.SpeechTranscriptionLocalAsrHttp, StringComparison.Ordinal)
             && provider.RequiredRuntimeKeys.Any(key => string.Equals(
                 key.Key,
                 "LocalServiceHosts:MediaBaseUrl",
                 StringComparison.Ordinal)));
+
+        schema.Sections.Should().Contain(section =>
+            string.Equals(section.SectionName, GoogleGeminiApiOptions.SectionName, StringComparison.Ordinal)
+            && section.Properties.Any(property => property.Name == "ApiKey" && property.IsRequired)
+            && section.Properties.Count == 1);
+        schema.Sections.Should().Contain(section =>
+            string.Equals(section.SectionName, OpenRouterOptions.SectionName, StringComparison.Ordinal)
+            && section.Properties.Any(property => property.Name == "ApiKey" && property.IsRequired));
+        schema.Sections.Should().Contain(section =>
+            string.Equals(section.SectionName, "HuggingFace", StringComparison.Ordinal)
+            && section.Properties.Any(property => property.Name == "Token" && property.IsRequired));
+    }
+
+    [TestMethod]
+    public async Task GetSectionSummariesAsync_ReportsUnconfiguredGoogleGeminiProviderSection()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["GoogleGeminiApi:ApiKey"] = null,
+        });
+        var service = CreateService(db, configuration);
+
+        var summaries = await service.GetSectionSummariesAsync();
+        var google = summaries.Single(section => string.Equals(section.SectionName, GoogleGeminiApiOptions.SectionName, StringComparison.Ordinal));
+
+        google.ReadinessStatus.Should().Be("unconfigured");
+        google.MissingFields.Should().ContainSingle().Which.Should().Be("ApiKey");
     }
 
     [TestMethod]
@@ -507,7 +544,12 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
             ["AzureOpenAiImages:EditModelDeployment"] = "flux-1-edit",
 
             ["AzureDocumentIntelligence:Endpoint"] = "https://doc-intel.example.com/",
-            ["AzureDocumentIntelligence:ApiKey"] = "test-doc-intel-key"
+            ["AzureDocumentIntelligence:ApiKey"] = "test-doc-intel-key",
+            ["GoogleGeminiApi:ApiKey"] = "test-gemini-key",
+            ["OpenRouter:ApiKey"] = "test-openrouter-key",
+            ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1",
+            ["HuggingFace:Token"] = "hf_test_token",
+            ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1"
         };
 
         foreach (var pair in values)

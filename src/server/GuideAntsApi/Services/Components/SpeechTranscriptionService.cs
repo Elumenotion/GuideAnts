@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
@@ -12,6 +13,14 @@ namespace GuideAntsApi.Services.Components
     {
         private const string AzureProviderSection = "AzureSpeechService";
         private const string LocalProviderSection = "LocalServiceHosts:SpeechTranscriptionBaseUrl";
+        private const string GoogleGeminiProviderSection = "GoogleGeminiApi";
+        private const string HuggingFaceProviderSection = "HuggingFace";
+        private const string OpenRouterProviderSection = "OpenRouter";
+        private static readonly JsonSerializerOptions ProviderPayloadJson = new()
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
 
         private readonly HttpClient _httpClient;
         private readonly IOptionsMonitor<AzureSpeechServiceOptions> _speechOptionsMonitor;
@@ -20,6 +29,7 @@ namespace GuideAntsApi.Services.Components
         private readonly IOptionsMonitor<MarkdownExtractionOptions> _extractionOptionsMonitor;
         private readonly IVideoAudioExtractionService _videoAudioExtractionService;
         private readonly IServiceModeResolver _serviceModeResolver;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<SpeechTranscriptionService> _logger;
 
         public SpeechTranscriptionService(
@@ -30,6 +40,7 @@ namespace GuideAntsApi.Services.Components
             IOptionsMonitor<MarkdownExtractionOptions> extractionOptions,
             IVideoAudioExtractionService videoAudioExtractionService,
             IServiceModeResolver serviceModeResolver,
+            IConfiguration configuration,
             ILogger<SpeechTranscriptionService> logger)
         {
             _httpClient = httpClient;
@@ -39,6 +50,7 @@ namespace GuideAntsApi.Services.Components
             _extractionOptionsMonitor = extractionOptions;
             _videoAudioExtractionService = videoAudioExtractionService;
             _serviceModeResolver = serviceModeResolver;
+            _configuration = configuration;
             _logger = logger;
         }
 
@@ -195,15 +207,408 @@ namespace GuideAntsApi.Services.Components
             {
                 LocalProviderSection => await TranscribeViaLocalAsrWithDurationAsync(audioContent, fileName, contentType, requestId, payloadSizeBytes, payloadSizeBucket, cancellationToken),
                 AzureProviderSection => await TranscribeViaAzureSpeechWithDurationAsync(audioContent, fileName, contentType, enableDiarization, requestId, payloadSizeBytes, payloadSizeBucket, cancellationToken),
+                GoogleGeminiProviderSection => await TranscribeViaGoogleGeminiWithDurationAsync(
+                    audioContent, fileName, contentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
+                HuggingFaceProviderSection => await TranscribeViaHuggingFaceWithDurationAsync(
+                    audioContent, fileName, contentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
+                OpenRouterProviderSection => await TranscribeViaOpenRouterWithDurationAsync(
+                    audioContent, fileName, contentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
                 _ => throw RoutingException.ProviderNotReady(
                     mode.ProviderSection,
                     new[]
                     {
                         $"SpeechTranscription mode '{mode.ModeId}' references unsupported provider section '{mode.ProviderSection}'. " +
-                        $"Expected '{AzureProviderSection}' or '{LocalProviderSection}'."
+                        $"Expected '{AzureProviderSection}', '{LocalProviderSection}', '{GoogleGeminiProviderSection}', '{HuggingFaceProviderSection}', or '{OpenRouterProviderSection}'."
                     },
                     serviceId: RoutedServiceNames.SpeechTranscription,
                     modeId: mode.ModeId)
+            };
+        }
+
+        private async Task<TranscriptionResult> TranscribeViaGoogleGeminiWithDurationAsync(
+            Stream audioContent,
+            string fileName,
+            string contentType,
+            string requestId,
+            long payloadSizeBytes,
+            string payloadSizeBucket,
+            ServiceMode mode,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(mode.ModelId))
+            {
+                throw RoutingException.ProviderNotReady(
+                    GoogleGeminiProviderSection,
+                    new[] { $"SpeechTranscription mode '{mode.ModeId}' requires a Google Gemini transcription model id." },
+                    serviceId: RoutedServiceNames.SpeechTranscription,
+                    modeId: mode.ModeId);
+            }
+            ValidateGoogleGeminiTranscriptionModel(mode.ModelId!);
+
+            var apiKey = _configurationForSection("GoogleGeminiApi", "ApiKey");
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("GoogleGeminiApi:ApiKey is required.");
+            }
+            audioContent.Position = 0;
+            await using var memory = new MemoryStream();
+            await audioContent.CopyToAsync(memory, cancellationToken);
+            var endpoint = $"https://generativelanguage.googleapis.com/v1beta/{NormalizeGoogleGeminiModelName(mode.ModelId!)}:generateContent";
+            var requestBody = new GoogleGeminiGenerateContentRequest(
+                Contents:
+                [
+                    new GoogleGeminiContent(
+                        "user",
+                        [
+                            new GoogleGeminiPart(Text: "Transcribe this audio. Return only the transcript."),
+                            new GoogleGeminiPart(
+                                InlineData: new GoogleGeminiBlob(
+                                    ResolveGoogleGeminiAudioMimeType(fileName, contentType),
+                                    Convert.ToBase64String(memory.ToArray())))
+                        ])
+                ]);
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(requestBody, ProviderPayloadJson), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Add("x-request-id", requestId);
+            request.Headers.Add("x-goog-api-key", apiKey);
+
+            var startedAt = DateTime.UtcNow;
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var latencyMs = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"Google Gemini transcription failed ({(int)response.StatusCode}): {body}");
+            }
+
+            var parsed = JsonSerializer.Deserialize<GoogleGeminiGenerateContentResponse>(body, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            }) ?? new GoogleGeminiGenerateContentResponse(Array.Empty<GoogleGeminiCandidate>());
+            var transcript = string.Join(" ", parsed.Candidates
+                .SelectMany(candidate => candidate.Content?.Parts ?? [])
+                .Select(part => part.Text)
+                .Where(x => !string.IsNullOrWhiteSpace(x)));
+
+            _logger.LogWarning(
+                "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
+                GoogleGeminiProviderSection,
+                requestId,
+                latencyMs,
+                payloadSizeBytes,
+                payloadSizeBucket,
+                0,
+                transcript.Length);
+
+            return new TranscriptionResult(transcript, 0);
+        }
+
+        private async Task<TranscriptionResult> TranscribeViaHuggingFaceWithDurationAsync(
+            Stream audioContent,
+            string fileName,
+            string contentType,
+            string requestId,
+            long payloadSizeBytes,
+            string payloadSizeBucket,
+            ServiceMode mode,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(mode.ModelId))
+            {
+                throw RoutingException.ProviderNotReady(
+                    HuggingFaceProviderSection,
+                    new[] { $"SpeechTranscription mode '{mode.ModeId}' requires a Hugging Face ASR model id." },
+                    serviceId: RoutedServiceNames.SpeechTranscription,
+                    modeId: mode.ModeId);
+            }
+            ValidateHuggingFaceAsrModel(mode.ModelId!);
+
+            var token = _configurationForSection("HuggingFace", "Token");
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException("HuggingFace:Token is required.");
+            }
+
+            audioContent.Position = 0;
+            await using var memory = new MemoryStream();
+            await audioContent.CopyToAsync(memory, cancellationToken);
+            var endpoint = $"https://api-inference.huggingface.co/models/{mode.ModelId}";
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new ByteArrayContent(memory.ToArray())
+            };
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("x-request-id", requestId);
+
+            var startedAt = DateTime.UtcNow;
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var latencyMs = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"Hugging Face ASR failed ({(int)response.StatusCode}): {body}");
+            }
+
+            var parsed = JsonSerializer.Deserialize<HuggingFaceAsrResponse>(body, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            var text = parsed?.Text ?? string.Empty;
+            _logger.LogWarning(
+                "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
+                HuggingFaceProviderSection,
+                requestId,
+                latencyMs,
+                payloadSizeBytes,
+                payloadSizeBucket,
+                0,
+                text.Length);
+
+            return new TranscriptionResult(text, 0);
+        }
+
+        private async Task<TranscriptionResult> TranscribeViaOpenRouterWithDurationAsync(
+            Stream audioContent,
+            string fileName,
+            string contentType,
+            string requestId,
+            long payloadSizeBytes,
+            string payloadSizeBucket,
+            ServiceMode mode,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(mode.ModelId))
+            {
+                throw RoutingException.ProviderNotReady(
+                    OpenRouterProviderSection,
+                    new[] { $"SpeechTranscription mode '{mode.ModeId}' requires an OpenRouter model id." },
+                    serviceId: RoutedServiceNames.SpeechTranscription,
+                    modeId: mode.ModeId);
+            }
+
+            var apiKey = _configurationForSection("OpenRouter", "ApiKey");
+            var baseUrl = _configurationForSection("OpenRouter", "BaseUrl") ?? "https://openrouter.ai/api/v1";
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("OpenRouter:ApiKey is required.");
+            }
+
+            audioContent.Position = 0;
+            await using var memory = new MemoryStream();
+            await audioContent.CopyToAsync(memory, cancellationToken);
+            var audioBytes = memory.ToArray();
+            var maxBytes = ResolveOpenRouterAudioMaxBytes();
+            if (audioBytes.LongLength > maxBytes)
+            {
+                throw new InvalidOperationException(
+                    $"OpenRouter transcription payload exceeds configured limit ({audioBytes.LongLength} > {maxBytes} bytes).");
+            }
+            var endpoint = $"{baseUrl.TrimEnd('/')}/chat/completions";
+            var format = ResolveOpenRouterAudioFormat(fileName, contentType);
+            var requestBody = new OpenRouterTranscriptionRequest(
+                Model: mode.ModelId!,
+                Messages:
+                [
+                    new OpenRouterTranscriptionMessage(
+                        Role: "user",
+                        Content:
+                        [
+                            new OpenRouterTranscriptionContentText("text", "Transcribe this audio."),
+                            new OpenRouterTranscriptionContentAudio(
+                                "input_audio",
+                                new OpenRouterInputAudio(Convert.ToBase64String(audioBytes), format))
+                        ])
+                ]);
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(requestBody, ProviderPayloadJson), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            request.Headers.Add("x-request-id", requestId);
+
+            var startedAt = DateTime.UtcNow;
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var latencyMs = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"OpenRouter transcription failed ({(int)response.StatusCode}): {body}");
+            }
+
+            var parsed = JsonSerializer.Deserialize<OpenRouterTranscriptionResponse>(body, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            var text = parsed?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+            _logger.LogWarning(
+                "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
+                OpenRouterProviderSection,
+                requestId,
+                latencyMs,
+                payloadSizeBytes,
+                payloadSizeBucket,
+                0,
+                text.Length);
+
+            return new TranscriptionResult(text, 0);
+        }
+
+        private string? _configurationForSection(string section, string field)
+        {
+            return _configuration[$"{section}:{field}"];
+        }
+
+        private static string ResolveOpenRouterAudioFormat(string fileName, string contentType)
+        {
+            var ext = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
+            if (!string.IsNullOrWhiteSpace(ext))
+            {
+                if (IsOpenRouterAudioFormatSupported(ext))
+                {
+                    return ext;
+                }
+
+                throw new InvalidOperationException($"OpenRouter transcription does not support audio format '{ext}'.");
+            }
+
+            if (contentType.Contains("mpeg", StringComparison.OrdinalIgnoreCase)) return "mp3";
+            if (contentType.Contains("wav", StringComparison.OrdinalIgnoreCase)) return "wav";
+            if (contentType.Contains("ogg", StringComparison.OrdinalIgnoreCase)) return "ogg";
+            if (contentType.Contains("webm", StringComparison.OrdinalIgnoreCase)) return "webm";
+            if (contentType.Contains("flac", StringComparison.OrdinalIgnoreCase)) return "flac";
+            if (contentType.Contains("m4a", StringComparison.OrdinalIgnoreCase) || contentType.Contains("mp4", StringComparison.OrdinalIgnoreCase)) return "m4a";
+
+            throw new InvalidOperationException(
+                $"OpenRouter transcription content type '{contentType}' is not in the supported audio format set.");
+        }
+
+        private static bool IsOpenRouterAudioFormatSupported(string format) =>
+            format is "wav" or "mp3" or "ogg" or "webm" or "flac" or "m4a";
+
+        private long ResolveOpenRouterAudioMaxBytes()
+        {
+            var configured = _configuration["OpenRouter:TranscriptionMaxAudioBytes"];
+            if (long.TryParse(configured, out var value) && value > 0)
+            {
+                return value;
+            }
+
+            return 25L * 1024 * 1024;
+        }
+
+        private void ValidateHuggingFaceAsrModel(string modelId)
+        {
+            var configured = _configuration["HuggingFace:AsrAllowedModels"];
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                if (IsModelAllowed(modelId, configured))
+                {
+                    return;
+                }
+
+                throw new InvalidOperationException(
+                    $"Hugging Face ASR model '{modelId}' is not in HuggingFace:AsrAllowedModels.");
+            }
+
+            if (modelId.Contains("asr", StringComparison.OrdinalIgnoreCase)
+                || modelId.Contains("whisper", StringComparison.OrdinalIgnoreCase)
+                || modelId.Contains("wav2vec", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"Hugging Face model '{modelId}' is not recognized as ASR-capable. " +
+                "Set HuggingFace:AsrAllowedModels to explicitly allow it.");
+        }
+
+        private void ValidateGoogleGeminiTranscriptionModel(string modelId)
+        {
+            if (string.IsNullOrWhiteSpace(modelId))
+            {
+                throw new InvalidOperationException("Google Gemini transcription model id is required.");
+            }
+        }
+
+        private void ValidateOpenRouterAsrModel(string modelId)
+        {
+            var configured = _configuration["OpenRouter:TranscriptionAllowedModels"];
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                if (IsModelAllowed(modelId, configured))
+                {
+                    return;
+                }
+
+                throw new InvalidOperationException(
+                    $"OpenRouter transcription model '{modelId}' is not in OpenRouter:TranscriptionAllowedModels.");
+            }
+
+            if (modelId.Contains("transcribe", StringComparison.OrdinalIgnoreCase)
+                || modelId.Contains("whisper", StringComparison.OrdinalIgnoreCase)
+                || modelId.Contains("audio", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"OpenRouter model '{modelId}' is not recognized as transcription-capable. " +
+                "Set OpenRouter:TranscriptionAllowedModels to explicitly allow it.");
+        }
+
+        private static bool IsModelAllowed(string modelId, string allowlistCsv)
+        {
+            var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var entry in entries)
+            {
+                if (entry.EndsWith('*'))
+                {
+                    var prefix = entry[..^1];
+                    if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string NormalizeGoogleGeminiModelName(string modelId)
+        {
+            var trimmed = modelId.Trim();
+            return trimmed.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
+                ? trimmed
+                : $"models/{trimmed}";
+        }
+
+        private static string ResolveGoogleGeminiAudioMimeType(string fileName, string contentType)
+        {
+            if (!string.IsNullOrWhiteSpace(contentType))
+            {
+                return contentType;
+            }
+
+            var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
+            return extension switch
+            {
+                "wav" => "audio/wav",
+                "mp3" => "audio/mpeg",
+                "ogg" => "audio/ogg",
+                "flac" => "audio/flac",
+                "webm" => "audio/webm",
+                "aac" => "audio/aac",
+                "m4a" => "audio/mp4",
+                _ => "application/octet-stream"
             };
         }
 
@@ -532,4 +937,51 @@ namespace GuideAntsApi.Services.Components
         public int OffsetMilliseconds { get; set; }
         public int DurationMilliseconds { get; set; }
     }
+
+    public sealed record GoogleGeminiGenerateContentRequest(
+        IReadOnlyList<GoogleGeminiContent> Contents);
+
+    public sealed record GoogleGeminiContent(
+        string Role,
+        IReadOnlyList<GoogleGeminiPart> Parts);
+
+    public sealed record GoogleGeminiPart(
+        string? Text = null,
+        GoogleGeminiBlob? InlineData = null);
+
+    public sealed record GoogleGeminiBlob(string MimeType, string Data);
+
+    public sealed record GoogleGeminiGenerateContentResponse(
+        IReadOnlyList<GoogleGeminiCandidate> Candidates);
+
+    public sealed record GoogleGeminiCandidate(GoogleGeminiContent? Content);
+
+    public sealed record HuggingFaceAsrResponse(string? Text);
+
+    public sealed record OpenRouterTranscriptionRequest(
+        string Model,
+        IReadOnlyList<OpenRouterTranscriptionMessage> Messages);
+
+    public sealed record OpenRouterTranscriptionMessage(
+        string Role,
+        IReadOnlyList<object> Content);
+
+    public sealed record OpenRouterTranscriptionContentText(
+        string Type,
+        string Text);
+
+    public sealed record OpenRouterTranscriptionContentAudio(
+        string Type,
+        [property: JsonPropertyName("input_audio")] OpenRouterInputAudio InputAudio);
+
+    public sealed record OpenRouterInputAudio(
+        string Data,
+        string Format);
+
+    public sealed record OpenRouterTranscriptionResponse(
+        IReadOnlyList<OpenRouterTranscriptionChoice>? Choices);
+
+    public sealed record OpenRouterTranscriptionChoice(OpenRouterTranscriptionMessageOut? Message);
+
+    public sealed record OpenRouterTranscriptionMessageOut(string? Content);
 }

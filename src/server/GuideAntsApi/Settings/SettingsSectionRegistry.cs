@@ -385,6 +385,16 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         },
         new()
         {
+            SectionName = "GoogleGeminiApi",
+            DisplayName = "Google Gemini API",
+            DisplayOrder = 75,
+            Properties =
+            [
+                new("ApiKey", "GoogleGeminiApi:ApiKey", IsSecret: true)
+            ]
+        },
+        new()
+        {
             SectionName = "Anthropic",
             DisplayName = "Anthropic",
             DisplayOrder = 80,
@@ -399,6 +409,24 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
                 new("ThinkingBudgetLow", "Anthropic:ThinkingBudgetLow", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_LOW"]),
                 new("ThinkingBudgetMedium", "Anthropic:ThinkingBudgetMedium", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_MEDIUM"]),
                 new("ThinkingBudgetHigh", "Anthropic:ThinkingBudgetHigh", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_HIGH"])
+            ]
+        },
+        new()
+        {
+            SectionName = "OpenRouter",
+            DisplayName = "OpenRouter",
+            DisplayOrder = 85,
+            Properties =
+            [
+                new("ApiKey", "OpenRouter:ApiKey", IsSecret: true),
+                new("BaseUrl", "OpenRouter:BaseUrl", DefaultValue: "https://openrouter.ai/api/v1"),
+                new("HttpReferer", "OpenRouter:HttpReferer"),
+                new("AppTitle", "OpenRouter:AppTitle"),
+                new("EmbeddingAllowedModels", "OpenRouter:EmbeddingAllowedModels"),
+                new("ImageAllowedModels", "OpenRouter:ImageAllowedModels"),
+                new("TranscriptionAllowedModels", "OpenRouter:TranscriptionAllowedModels"),
+                new("TtsAllowedModels", "OpenRouter:TtsAllowedModels"),
+                new("TranscriptionMaxAudioBytes", "OpenRouter:TranscriptionMaxAudioBytes", SettingsValueType.Int, DefaultValue: 26214400)
             ]
         },
         // Single source of truth for the Hugging Face token used by every HF
@@ -420,7 +448,15 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
                     "Token",
                     "HuggingFace:Token",
                     IsSecret: true,
-                    LegacyAliasKeys: ["HF_TOKEN", "LlamaCpp:HfToken", "LlamaModelManagement:HfToken"])
+                    LegacyAliasKeys: ["HF_TOKEN", "LlamaCpp:HfToken", "LlamaModelManagement:HfToken"]),
+                new(
+                    "RouterBaseUrl",
+                    "HuggingFace:RouterBaseUrl",
+                    DefaultValue: "https://router.huggingface.co/v1"),
+                new("EmbeddingAllowedModels", "HuggingFace:EmbeddingAllowedModels"),
+                new("ImageAllowedModels", "HuggingFace:ImageAllowedModels"),
+                new("AsrAllowedModels", "HuggingFace:AsrAllowedModels"),
+                new("TtsAllowedModels", "HuggingFace:TtsAllowedModels")
             ]
         },
         new()

@@ -5,6 +5,9 @@ using GuideAntsApi.Services;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using Microsoft.EntityFrameworkCore;
+using AntRunner.ToolCalling.AssistantDefinitions.Storage;
+using System.Reflection;
+using FluentAssertions;
 
 namespace GuideAntsApi.Tests.Services;
 
@@ -71,5 +74,56 @@ public class AssistantDefinitionsTests
         Assert.AreEqual(2, crew.Count);
         var pythonAntsDto = crew.Single(a => a.Name == "Python Ants");
         Assert.IsTrue(pythonAntsDto.AvatarUrl.Contains("/api/assistants/avatar/Python%20Ants"));
+    }
+
+    [TestMethod]
+    public void DatabaseMaterialization_DoesNotCopyModelReasoningChoicesIntoAssistantMetadata()
+    {
+        var crewAssistant = new Assistant
+        {
+            Name = "Crew Helper",
+            Kind = AssistantKind.Assistant,
+            IsActive = true,
+            IsGlobal = true
+        };
+
+        var guide = new Assistant
+        {
+            Name = "Reasoning Guide",
+            Kind = AssistantKind.Guide,
+            IsActive = true,
+            IsGlobal = true,
+            ModelId = "gpt-5-mini",
+            Model = new Model
+            {
+                ModelId = "gpt-5-mini",
+                DisplayName = "GPT-5 mini",
+                Provider = "openai-chat",
+                ReasoningChoicesJson = "[\"minimal\",\"low\",\"medium\",\"high\"]",
+                IsActive = true
+            }
+        };
+
+        guide.CrewMembers.Add(new GuideMember
+        {
+            Guide = guide,
+            GuideId = guide.Id,
+            Assistant = crewAssistant,
+            AssistantId = crewAssistant.Id,
+            DisplayOrder = 0
+        });
+
+        var method = typeof(DatabaseStorage).GetMethod(
+            "MaterializeAssistant",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        method.Should().NotBeNull();
+
+        var storageMetadata = method!.Invoke(null, [guide]) as AssistantStorageMetadata;
+
+        storageMetadata.Should().NotBeNull();
+        storageMetadata!.AdditionalMetadata.Should().NotBeNull();
+        storageMetadata.AdditionalMetadata.Should().ContainKey("__crew_names__");
+        storageMetadata.AdditionalMetadata.Should().NotContainKey("__model_reasoning_choices__");
     }
 } 

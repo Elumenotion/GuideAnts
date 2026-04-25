@@ -3,6 +3,7 @@ import { api } from '../../services/api';
 import { ModelDto } from '../../types/guides';
 import { ModelSelector } from '../guides/editor/ModelSelector';
 import { ConfigParams } from '../guides/editor/ConfigParams';
+import { normalizeReasoningEffortForModel } from './reasoning';
 
 export interface ChatModelConfigValue {
   modelId: string;
@@ -79,14 +80,29 @@ export function ChatModelConfigurator({
   const paramsDisabled = !!disabledReason;
 
   const pushChange = (partial: Partial<ChatModelConfigValue>) => {
+    const nextReasoningEffort = Object.prototype.hasOwnProperty.call(partial, 'reasoningEffort')
+      ? partial.reasoningEffort
+      : reasoningEffort;
+
     onChange({
       modelId: partial.modelId ?? modelId ?? '',
       temperature: partial.temperature ?? temperature,
       topP: partial.topP ?? topP,
-      reasoningEffort: partial.reasoningEffort ?? reasoningEffort,
+      reasoningEffort: nextReasoningEffort,
       samplingOverrides: partial.samplingOverrides ?? overrides,
     });
   };
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    const normalizedReasoningEffort = normalizeReasoningEffortForModel(selectedModel, reasoningEffort);
+    if (normalizedReasoningEffort !== reasoningEffort) {
+      pushChange({ reasoningEffort: normalizedReasoningEffort });
+    }
+  }, [loading, selectedModel, reasoningEffort]);
 
   return (
     <div className="space-y-4">
@@ -96,7 +112,12 @@ export function ChatModelConfigurator({
         selectionMode={mode}
         selectedModelId={modelId}
         onChange={(id) => {
-          pushChange({ modelId: id ?? '' });
+          const nextModelId = id ?? '';
+          const nextModel = models.find((model) => model.modelId === nextModelId);
+          pushChange({
+            modelId: nextModelId,
+            reasoningEffort: normalizeReasoningEffortForModel(nextModel, reasoningEffort),
+          });
         }}
       />
 

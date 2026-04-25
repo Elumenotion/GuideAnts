@@ -67,14 +67,7 @@ export function SpeechTranscriptionEditor() {
           <div className="space-y-2 border-t border-gray-100 pt-4">
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Transcription behavior</div>
             {!isLocal ? (
-              <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
-                <li>
-                  Cloud batch transcription uses <span className="font-mono">AzureSpeechService:Endpoint</span>,{' '}
-                  <span className="font-mono">ApiKey</span>, and the Azure Speech section timeout for the transcription
-                  path.
-                </li>
-                <li>Diarization and structured output follow Azure Speech behavior when enabled in your workflows.</li>
-              </ul>
+              renderCloudTranscriptionBehavior(selectedProvider.providerId)
             ) : (
               <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
                 <li>
@@ -122,4 +115,64 @@ export function SpeechTranscriptionEditor() {
       }
     />
   );
+}
+
+function renderCloudTranscriptionBehavior(providerId: string) {
+  switch (providerId) {
+    case 'SpeechTranscription.AzureSpeech.Batch':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            Cloud batch transcription uses <span className="font-mono">AzureSpeechService:Endpoint</span>,{' '}
+            <span className="font-mono">ApiKey</span>, and the Azure Speech timeout stored for this path.
+          </li>
+          <li>Diarization and structured output follow Azure Speech behavior when enabled in your workflows.</li>
+        </ul>
+      );
+    case 'SpeechTranscription.Google.SpeechToText':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            Google Gemini transcription sends the uploaded audio to the selected{' '}
+            <span className="font-mono">Transcription Model ID</span> through the shared Gemini API connection.
+          </li>
+          <li>
+            The route submits an audio part plus a transcription prompt over <span className="font-mono">generateContent</span>,
+            so the selected model must support audio input.
+          </li>
+        </ul>
+      );
+    case 'SpeechTranscription.HuggingFace.Inference':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            Hugging Face ASR posts the uploaded audio to the selected <span className="font-mono">ASR Model ID</span> using
+            the shared <span className="font-mono">HuggingFace:Token</span>.
+          </li>
+          <li>
+            Use <span className="font-mono">HuggingFace:AsrAllowedModels</span> when you want to lock the route to an approved
+            model set.
+          </li>
+        </ul>
+      );
+    case 'SpeechTranscription.OpenRouter.Audio':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            OpenRouter transcription sends the audio payload to the configured <span className="font-mono">BaseUrl</span> using
+            the selected <span className="font-mono">Transcription Model ID</span>.
+          </li>
+          <li>
+            Audio format support and request size are constrained by the upstream adapter; the size cap comes from{' '}
+            <span className="font-mono">OpenRouter:TranscriptionMaxAudioBytes</span>.
+          </li>
+        </ul>
+      );
+    default:
+      return (
+        <p className="text-sm text-gray-700">
+          Cloud transcription uses the selected provider connection and any service-mode fields shown above.
+        </p>
+      );
+  }
 }

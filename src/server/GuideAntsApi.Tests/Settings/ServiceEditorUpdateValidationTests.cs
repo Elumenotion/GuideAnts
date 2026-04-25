@@ -61,6 +61,40 @@ public sealed class ServiceEditorUpdateValidationTests
             .Where(e => e.Message.Contains("URL", StringComparison.OrdinalIgnoreCase));
     }
 
+    [TestMethod]
+    public async Task UpdateServiceProviderFieldsAsync_PersistsModelIdIntoServiceModes_ForCloudProvidersThatNeedIt()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+
+        await service.UpdateServiceProviderFieldsAsync(
+            "Embeddings",
+            ServiceProviderIds.EmbeddingsHuggingFaceInference,
+            new ProviderFieldsUpdateRequest(
+                new Dictionary<string, string?>
+                {
+                    ["Token"] = "hf_test_token",
+                    ["ModelId"] = "sentence-transformers/all-MiniLM-L6-v2"
+                }),
+            CancellationToken.None);
+
+        await service.SetServiceActiveProviderAsync(
+            "Embeddings",
+            ServiceProviderIds.EmbeddingsHuggingFaceInference,
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "sentence-transformers/all-MiniLM-L6-v2", StringComparison.Ordinal));
+
+        var state = await service.GetServiceEditorStateAsync("Embeddings", CancellationToken.None);
+        var provider = state.Providers.Single(p => p.ProviderId == ServiceProviderIds.EmbeddingsHuggingFaceInference);
+        provider.Fields["ModelId"].Value.Should().Be("sentence-transformers/all-MiniLM-L6-v2");
+        provider.Fields["ModelId"].HasValue.Should().BeTrue();
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -96,7 +130,9 @@ public sealed class ServiceEditorUpdateValidationTests
             ["AzureOpenAiImages:Deployment"] = "flux-1",
             ["AzureOpenAiImages:EditModelDeployment"] = "flux-1-edit",
             ["AzureDocumentIntelligence:Endpoint"] = "https://doc-intel.example.com/",
-            ["AzureDocumentIntelligence:ApiKey"] = "test-doc-intel-key"
+            ["AzureDocumentIntelligence:ApiKey"] = "test-doc-intel-key",
+            ["HuggingFace:Token"] = "hf_test_token",
+            ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1"
         };
 
         return new ConfigurationBuilder()

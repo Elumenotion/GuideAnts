@@ -17,6 +17,9 @@ public sealed class NotebookImageServiceTests
 {
     private const string AzureProviderSection = "AzureOpenAiImages";
     private const string LocalProviderSection = "LocalServiceHosts:ImageGenerationBaseUrl";
+    private const string GoogleProviderSection = "GoogleGeminiApi";
+    private const string HuggingFaceProviderSection = "HuggingFace";
+    private const string OpenRouterProviderSection = "OpenRouter";
 
     private static readonly object EnvLock = new();
 
@@ -27,7 +30,7 @@ public sealed class NotebookImageServiceTests
         var handler = new CapturingHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(SuccessPayload(), Encoding.UTF8, "application/json")
+                Content = new StringContent(OpenRouterImageSuccessPayload(), Encoding.UTF8, "application/json")
             });
 
         using var httpClient = new HttpClient(handler);
@@ -103,10 +106,105 @@ public sealed class NotebookImageServiceTests
         ex.Which.ProviderSection.Should().Be("SomeBogusSection");
     }
 
+    [TestMethod]
+    public async Task GenerateImageAsync_UsesGoogleProvider_WhenModeSelectsGoogleGemini()
+    {
+        using var scope = CreateEnvironmentScope();
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"image/png\",\"data\":\"" + Convert.ToBase64String(Encoding.UTF8.GetBytes("fake-image")) + "\"}}]}}]}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(
+            httpClient,
+            providerSection: GoogleProviderSection,
+            new Dictionary<string, string?>
+            {
+                ["GoogleGeminiApi:ApiKey"] = "key"
+            },
+            modelId: "imagen-3.0-generate-002");
+
+        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var result = await service.GenerateImageAsync("a test image", "google-provider.png", context: context);
+
+        result.StandardError.Should().BeNullOrEmpty();
+        handler.LastRequestUri.Should().NotBeNull();
+        handler.LastRequestUri!.ToString().Should().Be("https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:generateContent");
+        handler.LastRequestBody.Should().Contain("\"responseModalities\":[\"IMAGE\"]");
+    }
+
+    [TestMethod]
+    public async Task GenerateImageAsync_UsesHuggingFaceProvider_WhenModeSelectsHuggingFace()
+    {
+        using var scope = CreateEnvironmentScope();
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(Encoding.UTF8.GetBytes("fake-image-binary"))
+            });
+
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(
+            httpClient,
+            providerSection: HuggingFaceProviderSection,
+            new Dictionary<string, string?>
+            {
+                ["HuggingFace:Token"] = "hf-token"
+            },
+            modelId: "stabilityai/stable-diffusion-xl-base-1.0");
+
+        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var result = await service.GenerateImageAsync("a test image", "hf-provider.png", context: context);
+
+        result.StandardError.Should().BeNullOrEmpty();
+        handler.LastRequestUri.Should().NotBeNull();
+        handler.LastRequestUri!.ToString().Should().Contain("api-inference.huggingface.co/models/");
+    }
+
+    [TestMethod]
+    public async Task GenerateImageAsync_UsesOpenRouterProvider_WhenModeSelectsOpenRouter()
+    {
+        using var scope = CreateEnvironmentScope();
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(SuccessPayload(), Encoding.UTF8, "application/json")
+            });
+
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(
+            httpClient,
+            providerSection: OpenRouterProviderSection,
+            new Dictionary<string, string?>
+            {
+                ["OpenRouter:ApiKey"] = "or-key",
+                ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1"
+            },
+            modelId: "openai/gpt-image-1");
+
+        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var result = await service.GenerateImageAsync("a test image", "openrouter-provider.png", context: context);
+
+        result.StandardError.Should().BeNullOrEmpty();
+        handler.LastRequestUri.Should().NotBeNull();
+        handler.LastRequestUri!.ToString().Should().Be("https://openrouter.ai/api/v1/chat/completions");
+        handler.LastRequestBody.Should().NotBeNullOrWhiteSpace();
+        using var requestJson = System.Text.Json.JsonDocument.Parse(handler.LastRequestBody);
+        requestJson.RootElement.GetProperty("modalities")[0].GetString().Should().Be("image");
+        requestJson.RootElement.GetProperty("messages")[0].GetProperty("content")[0].GetProperty("text").GetString()
+            .Should().Be("a test image");
+    }
+
     private static NotebookImageService CreateService(
         HttpClient httpClient,
         string providerSection,
-        IDictionary<string, string?> values)
+        IDictionary<string, string?> values,
+        string? modelId = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(values)
@@ -115,9 +213,18 @@ public sealed class NotebookImageServiceTests
         var httpClientFactory = new Mock<IHttpClientFactory>();
         httpClientFactory.Setup(factory => factory.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
-        var resolver = new FakeServiceModeResolver(
-            RoutedServiceNames.ImageGeneration,
-            providerSection: providerSection);
+        var resolver = modelId is null
+            ? new FakeServiceModeResolver(
+                RoutedServiceNames.ImageGeneration,
+                providerSection: providerSection)
+            : new FakeServiceModeResolver(
+                (RoutedServiceNames.ImageGeneration, new ServiceMode(
+                    ModeId: "default",
+                    ProviderSection: providerSection,
+                    ModelId: modelId,
+                    RequestPresetJson: null,
+                    Enabled: true,
+                    IsDefault: true)));
 
         return new NotebookImageService(
             httpClientFactory.Object,
@@ -131,6 +238,28 @@ public sealed class NotebookImageServiceTests
     {
         var bytes = Encoding.UTF8.GetBytes("fake-image-bytes");
         return $"{{\"data\":[{{\"b64_json\":\"{Convert.ToBase64String(bytes)}\"}}]}}";
+    }
+
+    private static string OpenRouterImageSuccessPayload()
+    {
+        var dataUrl = $"data:image/png;base64,{Convert.ToBase64String(Encoding.UTF8.GetBytes("fake-image-bytes"))}";
+        return $$"""
+        {
+          "choices": [
+            {
+              "message": {
+                "images": [
+                  {
+                    "image_url": {
+                      "url": "{{dataUrl}}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+        """;
     }
 
     private static IDisposable CreateEnvironmentScope()
@@ -180,11 +309,15 @@ public sealed class NotebookImageServiceTests
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
         public Uri? LastRequestUri { get; private set; }
+        public string LastRequestBody { get; private set; } = string.Empty;
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequestUri = request.RequestUri;
-            return Task.FromResult(_responder(request));
+            LastRequestBody = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            return _responder(request);
         }
     }
 }

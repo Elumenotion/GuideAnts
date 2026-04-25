@@ -111,6 +111,55 @@ public sealed class ChatTargetValidatorTests
     }
 
     [TestMethod]
+    public void Validate_AcceptsGoogleGeminiChat_WhenRequiredFieldsConfigured()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>
+        {
+            ["GoogleGeminiApi:ApiKey"] = "gemini-key"
+        });
+
+        Action act = () => validator.Validate(new ChatTarget("gemini-2.5-pro", "google-gemini-chat", LocalRuntimeJson: null));
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void Validate_Throws_ProviderNotReady_WhenGoogleGeminiChatMissingApiKey()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>
+        {
+        });
+
+        Action act = () => validator.Validate(new ChatTarget("gemini-2.5-pro", "google-gemini-chat", LocalRuntimeJson: null));
+        act.Should().Throw<RoutingException>()
+            .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
+                         && ex.ProviderSection == "GoogleGeminiApi");
+    }
+
+    [TestMethod]
+    public void Validate_AcceptsHfInferenceChat_WhenTokenConfigured()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>
+        {
+            ["HuggingFace:Token"] = "hf_xxx"
+        });
+
+        Action act = () => validator.Validate(new ChatTarget("meta-llama/llama-4-scout", "hf-inference-chat", LocalRuntimeJson: null));
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void Validate_AcceptsOpenRouterChat_WhenApiKeyConfigured()
+    {
+        var validator = CreateValidator(new Dictionary<string, string?>
+        {
+            ["OpenRouter:ApiKey"] = "or_xxx"
+        });
+
+        Action act = () => validator.Validate(new ChatTarget("openai/gpt-4o-mini", "openrouter-chat", LocalRuntimeJson: null));
+        act.Should().NotThrow();
+    }
+
+    [TestMethod]
     public void Validate_Throws_ModelNotReady_WhenLlamaCppHasNoLocalRuntimeJson()
     {
         var validator = CreateValidator(new Dictionary<string, string?>());

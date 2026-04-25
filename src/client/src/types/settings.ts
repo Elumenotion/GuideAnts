@@ -3,6 +3,8 @@ export interface SettingsSectionSummaryDto {
   displayName: string;
   displayOrder: number;
   hasSecrets: boolean;
+  readinessStatus: 'configured' | 'blocked' | 'unconfigured' | 'not-applicable' | string;
+  missingFields: string[];
 }
 
 export interface SettingsSectionDto {

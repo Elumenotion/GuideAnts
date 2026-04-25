@@ -158,6 +158,48 @@ public sealed class RoutingReadinessServiceTests
     }
 
     [TestMethod]
+    public async Task ProbeModeAsync_GoogleSpeechSynthesis_RequiresModelIdAndVoiceName()
+    {
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "gemini-2.5-flash-preview-tts",
+            DisplayName = "Gemini 2.5 Flash Preview TTS",
+            Provider = "google-gemini-chat",
+            IsActive = true,
+            Created = DateTime.UtcNow
+        });
+        db.SaveChanges();
+
+        SeedMode(db, RoutedServiceNames.SpeechSynthesis, new ServiceMode(
+            ModeId: "google",
+            ProviderSection: "GoogleGeminiApi",
+            ModelId: "gemini-2.5-flash-preview-tts",
+            RequestPresetJson: "{\"VoiceName\":\"Kore\"}",
+            Enabled: true,
+            IsDefault: true));
+
+        var configuration = BuildConfigurationWithDefaults();
+        var appSettings = CreateAppSettings(db, configuration);
+        var inventory = new Mock<ILlamaRuntimeInventoryService>();
+        inventory.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+
+        var service = new RoutingReadinessService(
+            appSettings,
+            inventory.Object,
+            new TestServiceScopeFactory(db, configuration),
+            Mock.Of<ILogger<RoutingReadinessService>>());
+
+        var result = await service.ProbeModeAsync(RoutedServiceNames.SpeechSynthesis, "google");
+
+        result.Status.Should().Be("ready");
+        result.Blockers.Should().BeEmpty();
+        result.ProviderSection.Should().Be("GoogleGeminiApi");
+        result.ModelId.Should().Be("gemini-2.5-flash-preview-tts");
+    }
+
+    [TestMethod]
     public async Task ProbeModeAsync_LlamaMode_Unloaded_ReturnsBlockerWithRuntimeStateKey()
     {
         using var db = CreateDb();
@@ -403,6 +445,9 @@ public sealed class RoutingReadinessServiceTests
     [DataRow("azure-openai-responses", "AzureOpenAI")]
     [DataRow("anthropic", "Anthropic")]
     [DataRow("llama-cpp", "LlamaCpp")]
+    [DataRow("google-gemini-chat", "GoogleGeminiApi")]
+    [DataRow("hf-inference-chat", "HuggingFace")]
+    [DataRow("openrouter-chat", "OpenRouter")]
     public void MapChatProviderToSection_CoversEveryProvider_KnownToChatTargetValidator(string provider, string expectedSection)
     {
         // Regression guard: MapChatProviderToSection must recognize every
@@ -852,7 +897,10 @@ public sealed class RoutingReadinessServiceTests
 
             ["OpenAI:ApiKey"] = "test-openai-key",
 
-            ["Anthropic:ApiKey"] = "test-anthropic-key"
+            ["Anthropic:ApiKey"] = "test-anthropic-key",
+            ["GoogleGeminiApi:ApiKey"] = "test-gemini-key",
+            ["HuggingFace:Token"] = "hf_test_token",
+            ["OpenRouter:ApiKey"] = "test-openrouter-key"
         };
 
         if (overrides != null)

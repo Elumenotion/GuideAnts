@@ -5,6 +5,8 @@ Date: 2026-04-14
 > Status: historical rollout checklist for the 2026-04-14 migration run.
 > This is not current install guidance and should not be used to infer
 > present-day default behavior.
+> For the current cloud provider contract and remediation status, see
+> `docs/cloud-provider-expansion-proposal.md`.
 
 ## 1) Pre-Migration Full DB Backup
 Run this before applying `20260414183022_RemoveApplicationSettingsConfigModeAndProviderRouting`.
@@ -12,7 +14,8 @@ Run this before applying `20260414183022_RemoveApplicationSettingsConfigModeAndP
 ```powershell
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $containerBackupPath = "/var/opt/mssql/data/backups/guideants-dev-$timestamp.bak"
-$hostBackupPath = "D:\Elumenotion\backups\guideants-dev-$timestamp.bak"
+$hostBackupRoot = Join-Path (Get-Location) "backups"
+$hostBackupPath = Join-Path $hostBackupRoot "guideants-dev-$timestamp.bak"
 
 sqlcmd -S "localhost,1434" -U "sa" -P "YourStrong!Passw0rd" -Q @"
 BACKUP DATABASE [guideants-dev]
@@ -20,7 +23,7 @@ TO DISK = N'$containerBackupPath'
 WITH FORMAT, INIT, CHECKSUM, STATS = 5;
 "@
 
-New-Item -ItemType Directory -Force -Path "D:\Elumenotion\backups" | Out-Null
+New-Item -ItemType Directory -Force -Path $hostBackupRoot | Out-Null
 docker cp "docker-mssql-express-1:$containerBackupPath" "$hostBackupPath"
 
 Write-Host "Backup created: $hostBackupPath"
@@ -42,7 +45,7 @@ sqlcmd -S "localhost,1434" -U "sa" -P "YourStrong!Passw0rd" -Q "RESTORE FILELIST
 
 ```powershell
 # Option A: apply from generated SQL script
-sqlcmd -S "localhost,1434" -U "sa" -P "YourStrong!Passw0rd" -d "guideants-dev" -i "D:\Elumenotion\repos\waterfall\docs\20260414-provider-routing-migration.sql"
+sqlcmd -S "localhost,1434" -U "sa" -P "YourStrong!Passw0rd" -d "guideants-dev" -i ".\docs\20260414-provider-routing-migration.sql"
 
 # Option B: EF migration update
 # dotnet ef database update --project src/server/GuideAntsApi.DataModel --startup-project src/server/GuideAntsApi
@@ -79,7 +82,7 @@ ORDER BY BackupId DESC;
 
 ## 6) Execution Record (2026-04-14)
 - Executed backup file:
-  - host: `D:\Elumenotion\backups\guideants-dev-20260414-144255.bak`
+  - host: `.\backups\guideants-dev-20260414-144255.bak`
   - container: `/var/opt/mssql/data/backups/guideants-dev-20260414-144255.bak`
 - SHA256:
   - `D8F70A631B191BADB192C865BB79C133B4C2AF1C2D5CBF1D776A84D68D1FE0EC`

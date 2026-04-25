@@ -22,7 +22,7 @@ interface NotebookLayoutProps {
     isMobileSidebarOpen?: boolean;
     onMobileSidebarToggle?: () => void;
     onMobileSidebarClose?: () => void;
-    /** Centered header area (e.g. service toolbar). Hidden on &lt; md when the child handles a compact mobile trigger. */
+    /** Centered header area (e.g. service toolbar). Placed in the true center column of the header grid. */
     headerCenter?: React.ReactNode;
 }
 
@@ -36,7 +36,6 @@ function NotebookHeader({
     tourScreenId,
     onMobileSidebarToggle,
     headerCenter,
-    isMobile,
 }: { 
     project: ProjectDetailsDto; 
     notebook: NotebookDetailsDto;
@@ -47,14 +46,13 @@ function NotebookHeader({
     tourScreenId?: string;
     onMobileSidebarToggle?: () => void;
     headerCenter?: React.ReactNode;
-    isMobile: boolean;
 }) {
     return (
         <div className="border-b bg-white">
             {/* Main Header */}
             <div className="py-2 px-2 md:px-4">
-                <div className="flex items-center justify-between gap-2 min-w-0">
-                    <div className="flex items-center min-w-0 flex-1 md:max-w-[40%]">
+                <div className="grid min-w-0 min-h-0 w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                    <div className="flex min-w-0 items-center">
                         {/* Mobile Hamburger Menu */}
                         <button
                             onClick={onMobileSidebarToggle}
@@ -88,19 +86,13 @@ function NotebookHeader({
                         })()}
                         <h1 className="text-lg font-bold truncate">{notebook.title}</h1>
                     </div>
-                    {headerCenter && (
-                        <div
-                            data-testid="notebook-header-center"
-                            className={
-                                isMobile
-                                    ? 'flex-shrink-0 flex items-center'
-                                    : 'hidden md:flex flex-1 min-w-0 justify-center items-center px-1'
-                            }
-                        >
-                            {headerCenter}
-                        </div>
-                    )}
-                    <div className="flex gap-1 sm:gap-2 flex-shrink-0 items-center">
+                    <div
+                        data-testid="notebook-header-center"
+                        className="flex min-w-0 max-w-full justify-center self-center justify-self-center px-0.5"
+                    >
+                        {headerCenter ?? null}
+                    </div>
+                    <div className="flex min-w-0 items-center justify-end justify-self-end gap-1 sm:gap-2">
                         {canEdit && onEdit && (
                             <button
                                 onClick={onEdit}
@@ -220,7 +212,6 @@ export function NotebookLayout({
                 tourScreenId={tourScreenId}
                 onMobileSidebarToggle={onMobileSidebarToggle}
                 headerCenter={headerCenter}
-                isMobile={isMobile}
             />
 
             <TwoColumnLayout

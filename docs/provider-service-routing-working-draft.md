@@ -40,7 +40,7 @@ Status as of 2026-04-14:
 - [x] Settings IA parity fix: Providers tab now includes non-service provider sections (`AzureOpenAI`, `OpenAI`, `Anthropic`, `LlamaCpp`, etc.) so endpoint/key/deployment settings are editable.
 
 Execution artifacts (2026-04-14):
-- backup file: `D:\Elumenotion\backups\guideants-dev-20260414-144255.bak`
+- backup file: `.\backups\guideants-dev-20260414-144255.bak`
 - backup metadata + checksum: `docs/20260414-provider-routing-backup-metadata.txt`
 - migration script executed: `docs/20260414-provider-routing-migration.sql`
 - compose runtime image: `guideants-webapi-ui:26104.1451` (deployed)

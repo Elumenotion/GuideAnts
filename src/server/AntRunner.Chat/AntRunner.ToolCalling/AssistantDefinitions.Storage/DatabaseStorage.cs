@@ -12,8 +12,6 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
     /// </summary>
     public class DatabaseStorage
     {
-        private const string ModelReasoningChoicesMetadataKey = "__model_reasoning_choices__";
-
         /// <summary>
         /// Creates a new ApplicationDbContext instance using connection string from environment.
         /// The connection string must be set in environment variables (done in Program.cs).
@@ -164,6 +162,63 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
         }
 
         /// <summary>
+        /// Resolves a requested reasoning effort against the authoritative model catalog row.
+        /// </summary>
+        public static async Task<string?> ResolveModelReasoningEffortAsync(
+            string? modelId,
+            string? reasoningEffort,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(modelId) || string.IsNullOrWhiteSpace(reasoningEffort))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var context = CreateContext();
+
+                var reasoningChoicesJson = await context.Models
+                    .AsNoTracking()
+                    .Where(m => m.ModelId == modelId)
+                    .Select(m => m.ReasoningChoicesJson)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                var requested = reasoningEffort.Trim();
+                var choices = ParseReasoningChoicesJson(reasoningChoicesJson);
+
+                return choices.FirstOrDefault(choice =>
+                    string.Equals(choice, requested, StringComparison.OrdinalIgnoreCase));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static List<string> ParseReasoningChoicesJson(string? reasoningChoicesJson)
+        {
+            if (string.IsNullOrWhiteSpace(reasoningChoicesJson))
+            {
+                return [];
+            }
+
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<string>>(reasoningChoicesJson);
+                return parsed?
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value.Trim())
+                    .ToList()
+                    ?? [];
+            }
+            catch
+            {
+                return [];
+            }
+        }
+
+        /// <summary>
         /// Materializes a database Assistant entity to AssistantStorageMetadata format.
         /// </summary>
         private static AssistantStorageMetadata MaterializeAssistant(Assistant assistant)
@@ -207,12 +262,6 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                         ["__crew_names__"] = string.Join(",", crewNames)
                     };
                 }
-            }
-
-            if (!string.IsNullOrWhiteSpace(assistant.Model?.ReasoningChoicesJson))
-            {
-                additionalMetadata ??= new Dictionary<string, string>();
-                additionalMetadata[ModelReasoningChoicesMetadataKey] = assistant.Model.ReasoningChoicesJson!;
             }
 
             // Build context options

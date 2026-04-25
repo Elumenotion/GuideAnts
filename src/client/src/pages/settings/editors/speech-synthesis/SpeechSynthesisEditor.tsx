@@ -67,16 +67,7 @@ export function SpeechSynthesisEditor() {
           <div className="space-y-2 border-t border-gray-100 pt-4">
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Synthesis behavior</div>
             {!isLocal ? (
-              <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
-                <li>
-                  Azure path sends SSML directly to Azure Speech (<span className="font-mono">SpeakSsmlAsync</span>). Region
-                  and API key are required; optional endpoint override is supported.
-                </li>
-                <li>
-                  The Azure Speech timeout field is stored for synthesis; verify runtime enforcement matches your deployment
-                  expectations.
-                </li>
-              </ul>
+              renderCloudSynthesisBehavior(selectedProvider.providerId)
             ) : (
               <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
                 <li>
@@ -123,4 +114,66 @@ export function SpeechSynthesisEditor() {
       }
     />
   );
+}
+
+function renderCloudSynthesisBehavior(providerId: string) {
+  switch (providerId) {
+    case 'SpeechSynthesis.AzureSpeech.Ssml':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            Azure sends SSML directly to Speech (<span className="font-mono">SpeakSsmlAsync</span>). Region and API key are
+            required; optional endpoint override is supported.
+          </li>
+          <li>
+            The Azure Speech timeout field is stored for synthesis; verify runtime enforcement matches your deployment
+            expectations.
+          </li>
+        </ul>
+      );
+    case 'SpeechSynthesis.Google.TextToSpeech':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            Google Gemini TTS strips SSML to plain text and calls <span className="font-mono">generateContent</span> with
+            audio output enabled.
+          </li>
+          <li>
+            Both <span className="font-mono">TTS Model ID</span> and <span className="font-mono">Voice Name</span> are required.
+            Voice selection is stored on the service mode preset, not inferred from the model id.
+          </li>
+        </ul>
+      );
+    case 'SpeechSynthesis.HuggingFace.Inference':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            Hugging Face TTS strips SSML to plain text and posts it to the selected <span className="font-mono">TTS Model ID</span>.
+          </li>
+          <li>
+            The shared <span className="font-mono">HuggingFace:Token</span> is required, and{' '}
+            <span className="font-mono">HuggingFace:TtsAllowedModels</span> can be used to limit allowed models.
+          </li>
+        </ul>
+      );
+    case 'SpeechSynthesis.OpenRouter.Tts':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            OpenRouter TTS strips SSML to plain text and sends it to <span className="font-mono">/tts</span> using the selected{' '}
+            <span className="font-mono">TTS Model ID</span>.
+          </li>
+          <li>
+            The route uses the configured <span className="font-mono">BaseUrl</span> and API key from the shared OpenRouter
+            connection section.
+          </li>
+        </ul>
+      );
+    default:
+      return (
+        <p className="text-sm text-gray-700">
+          Cloud synthesis uses the selected provider connection and any service-mode fields shown above.
+        </p>
+      );
+  }
 }

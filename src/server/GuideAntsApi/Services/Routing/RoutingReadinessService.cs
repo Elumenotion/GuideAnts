@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
@@ -91,6 +92,14 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
             blockers.Add($"{BlockerKeys.ProviderMissing}: mode '{modeId}' has no provider section.");
         }
 
+        if (RequiresExplicitModelId(service, mode.ProviderSection) && string.IsNullOrWhiteSpace(mode.ModelId))
+        {
+            blockers.Add(
+                $"{BlockerKeys.ModelMissing}: mode '{mode.ModeId}' for service '{service}' and provider '{mode.ProviderSection}' requires a model id.");
+        }
+
+        blockers.AddRange(AdditionalModeFieldBlockers(service, mode));
+
         string? runtimeState = null;
 
         if (!string.IsNullOrWhiteSpace(mode.ModelId))
@@ -98,6 +107,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
             var (catalogRow, catalogBlockers) = await LookupCatalogRowAsync(mode.ModelId!, cancellationToken)
                 .ConfigureAwait(false);
             blockers.AddRange(catalogBlockers);
+            blockers.AddRange(ModelCapabilityBlockers(service, mode.ProviderSection, mode.ModelId!));
 
             if (catalogRow != null
                 && string.Equals(mode.ProviderSection, "LlamaCpp", StringComparison.OrdinalIgnoreCase))
@@ -210,6 +220,9 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
             "azure-openai-responses" => "AzureOpenAI",
             "anthropic" => "Anthropic",
             "llama-cpp" => "LlamaCpp",
+            "google-gemini-chat" => "GoogleGeminiApi",
+            "hf-inference-chat" => "HuggingFace",
+            "openrouter-chat" => "OpenRouter",
             _ => null
         };
 
@@ -240,6 +253,259 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         }
 
         return Array.Empty<string>();
+    }
+
+    private static IReadOnlyList<string> AdditionalModeFieldBlockers(string service, ServiceModeDto mode)
+    {
+        if (!string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(mode.ProviderSection, "GoogleGeminiApi", StringComparison.OrdinalIgnoreCase))
+        {
+            return Array.Empty<string>();
+        }
+
+        if (TryReadServiceModePresetField(mode.RequestPresetJson, "VoiceName") is { Length: > 0 })
+        {
+            return Array.Empty<string>();
+        }
+
+        return
+        [
+            $"{BlockerKeys.ModelMissing}: mode '{mode.ModeId}' for service '{service}' and provider '{mode.ProviderSection}' requires VoiceName in RequestPresetJson."
+        ];
+    }
+
+    private static string? TryReadServiceModePresetField(string? requestPresetJson, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(requestPresetJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(requestPresetJson);
+            if (document.RootElement.TryGetProperty(fieldName, out var value)
+                && value.ValueKind == JsonValueKind.String)
+            {
+                return value.GetString()?.Trim();
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static bool RequiresExplicitModelId(string service, string providerSection)
+    {
+        if (string.IsNullOrWhiteSpace(providerSection))
+        {
+            return false;
+        }
+
+        if (string.Equals(providerSection, "GoogleGeminiApi", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(service, RoutedServiceNames.Embeddings, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(service, RoutedServiceNames.ImageGeneration, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(service, RoutedServiceNames.SpeechTranscription, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (string.Equals(providerSection, "HuggingFace", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(providerSection, "OpenRouter", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(service, RoutedServiceNames.Embeddings, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(service, RoutedServiceNames.ImageGeneration, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(service, RoutedServiceNames.SpeechTranscription, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private IReadOnlyList<string> ModelCapabilityBlockers(string service, string providerSection, string modelId)
+    {
+        if (string.IsNullOrWhiteSpace(providerSection) || string.IsNullOrWhiteSpace(modelId))
+        {
+            return Array.Empty<string>();
+        }
+
+        if (string.Equals(providerSection, "HuggingFace", StringComparison.OrdinalIgnoreCase))
+        {
+            return HuggingFaceCapabilityBlockers(service, modelId);
+        }
+
+        if (string.Equals(providerSection, "OpenRouter", StringComparison.OrdinalIgnoreCase))
+        {
+            return OpenRouterCapabilityBlockers(service, modelId);
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private IReadOnlyList<string> HuggingFaceCapabilityBlockers(string service, string modelId)
+    {
+        if (string.Equals(service, RoutedServiceNames.Embeddings, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                _configurationForSection("HuggingFace", "EmbeddingAllowedModels"),
+                m => m.Contains("embed", StringComparison.OrdinalIgnoreCase)
+                    || m.StartsWith("sentence-transformers/", StringComparison.OrdinalIgnoreCase)
+                    || m.StartsWith("intfloat/", StringComparison.OrdinalIgnoreCase)
+                    || m.StartsWith("BAAI/", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as embedding-capable for HuggingFace."
+                };
+        }
+
+        if (string.Equals(service, RoutedServiceNames.ImageGeneration, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                _configurationForSection("HuggingFace", "ImageAllowedModels"),
+                m => m.Contains("image", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("diffusion", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("flux", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as image-capable for HuggingFace."
+                };
+        }
+
+        if (string.Equals(service, RoutedServiceNames.SpeechTranscription, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                _configurationForSection("HuggingFace", "AsrAllowedModels"),
+                m => m.Contains("asr", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("whisper", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("wav2vec", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as ASR-capable for HuggingFace."
+                };
+        }
+
+        if (string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                _configurationForSection("HuggingFace", "TtsAllowedModels"),
+                m => m.Contains("tts", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("speech", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("kokoro", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as TTS-capable for HuggingFace."
+                };
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private IReadOnlyList<string> OpenRouterCapabilityBlockers(string service, string modelId)
+    {
+        if (string.Equals(service, RoutedServiceNames.Embeddings, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                _configurationForSection("OpenRouter", "EmbeddingAllowedModels"),
+                m => m.Contains("embed", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as embedding-capable for OpenRouter."
+                };
+        }
+
+        if (string.Equals(service, RoutedServiceNames.ImageGeneration, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                _configurationForSection("OpenRouter", "ImageAllowedModels"),
+                m => m.Contains("image", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("imagen", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("flux", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as image-capable for OpenRouter."
+                };
+        }
+
+        if (string.Equals(service, RoutedServiceNames.SpeechTranscription, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                _configurationForSection("OpenRouter", "TranscriptionAllowedModels"),
+                m => m.Contains("transcribe", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("whisper", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("audio", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as transcription-capable for OpenRouter."
+                };
+        }
+
+        if (string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                _configurationForSection("OpenRouter", "TtsAllowedModels"),
+                m => m.Contains("tts", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("audio", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("speech", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as TTS-capable for OpenRouter."
+                };
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private bool IsAllowedByConfigOrHeuristic(string modelId, string? allowlistCsv, Func<string, bool> heuristic)
+    {
+        if (!string.IsNullOrWhiteSpace(allowlistCsv))
+        {
+            var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var entry in entries)
+            {
+                if (entry.EndsWith('*'))
+                {
+                    var prefix = entry[..^1];
+                    if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return heuristic(modelId);
+    }
+
+    private string? _configurationForSection(string section, string field)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        return configuration[$"{section}:{field}"];
     }
 
     /// <summary>

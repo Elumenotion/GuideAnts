@@ -16,7 +16,6 @@ namespace AntRunner.Chat
     /// </summary>
     public static class ThreadRun
     {
-        private const string ModelReasoningChoicesMetadataKey = "__model_reasoning_choices__";
         static readonly HttpClient _httpClient = HttpClientUtility.Get();
 
         private static readonly ConcurrentDictionary<string, Dictionary<string, ToolCaller>> RequestBuilderCache = new();
@@ -183,6 +182,14 @@ namespace AntRunner.Chat
             // Prefer an explicit DeploymentId from the host (already resolved by IChatModelResolver in the API)
             // over the raw assistant manifest model so global default / override semantics apply consistently.
             options.DeploymentId = options.DeploymentId ?? assistantDef.Model ?? clientFactory.DefaultDeploymentId;
+            var resolvedModelId = options.DeploymentId ?? assistantDef.Model;
+            var reasoningEffortParam = await ResolveReasoningEffortAsync(
+                resolvedModelId,
+                assistantDef.ReasoningEffort,
+                token);
+            var suppressSamplingForReasoning =
+                !string.IsNullOrWhiteSpace(reasoningEffortParam)
+                && SupportsOpenAiReasoningEffortByModelId(resolvedModelId);
 
             var api = clientFactory.CreateClient(options.DeploymentId, httpClient);
 
@@ -286,12 +293,6 @@ namespace AntRunner.Chat
                 while (continueChat)
                 {
                     token.ThrowIfCancellationRequested();
-                    var modelId = options.DeploymentId ?? assistantDef.Model;
-                    var reasoningEffortParam = ResolveReasoningEffort(assistantDef);
-                    var suppressSamplingForReasoning =
-                        !string.IsNullOrWhiteSpace(reasoningEffortParam)
-                        && SupportsOpenAiReasoningEffortByModelId(modelId);
-
                     var tempParam = suppressSamplingForReasoning ? null : assistantDef.Temperature;
                     var topPParam = suppressSamplingForReasoning ? null : assistantDef.TopP;
 
@@ -1219,43 +1220,12 @@ namespace AntRunner.Chat
             PropertyNameCaseInsensitive = true
         };
 
-        private static string? ResolveReasoningEffort(AssistantDefinition assistantDef)
+        private static async Task<string?> ResolveReasoningEffortAsync(
+            string? modelId,
+            string? reasoningEffort,
+            CancellationToken token)
         {
-            var choices = ParseModelReasoningChoices(assistantDef.Metadata);
-            if (choices.Count == 0 || string.IsNullOrWhiteSpace(assistantDef.ReasoningEffort))
-            {
-                return null;
-            }
-
-            var requested = assistantDef.ReasoningEffort.Trim();
-            var matchedChoice = choices.FirstOrDefault(choice =>
-                string.Equals(choice, requested, StringComparison.OrdinalIgnoreCase));
-
-            return matchedChoice;
-        }
-
-        private static List<string> ParseModelReasoningChoices(Dictionary<string, string>? metadata)
-        {
-            if (metadata == null
-                || !metadata.TryGetValue(ModelReasoningChoicesMetadataKey, out var choicesJson)
-                || string.IsNullOrWhiteSpace(choicesJson))
-            {
-                return [];
-            }
-
-            try
-            {
-                var parsed = JsonSerializer.Deserialize<List<string>>(choicesJson);
-                return parsed?
-                    .Where(value => !string.IsNullOrWhiteSpace(value))
-                    .Select(value => value.Trim())
-                    .ToList()
-                    ?? [];
-            }
-            catch
-            {
-                return [];
-            }
+            return await DatabaseStorage.ResolveModelReasoningEffortAsync(modelId, reasoningEffort, token);
         }
 
         private static bool SupportsOpenAiReasoningEffortByModelId(string? modelId)

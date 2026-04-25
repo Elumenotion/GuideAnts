@@ -6,6 +6,7 @@ using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Tests.TestUtils;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -17,6 +18,9 @@ public sealed class SpeechTranscriptionServiceTests
 {
     private const string AzureProviderSection = "AzureSpeechService";
     private const string LocalProviderSection = "LocalServiceHosts:SpeechTranscriptionBaseUrl";
+    private const string GoogleProviderSection = "GoogleGeminiApi";
+    private const string HuggingFaceProviderSection = "HuggingFace";
+    private const string OpenRouterProviderSection = "OpenRouter";
 
     [TestMethod]
     public async Task TranscribeAudioWithDurationAsync_UsesLocalAsrProvider_WhenModeSelectsLocal()
@@ -170,13 +174,123 @@ public sealed class SpeechTranscriptionServiceTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [TestMethod]
+    public async Task TranscribeAudioWithDurationAsync_UsesGoogleProviderWithoutHuggingFaceValidationCrossWire()
+    {
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello google\"}]}}]}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(
+            httpClient,
+            providerSection: GoogleProviderSection,
+            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused", TimeoutSeconds = 90 },
+            transcriptionOptions: new SpeechTranscriptionOptions { TimeoutSeconds = 120 },
+            localServiceHostsOptions: new LocalServiceHostsOptions(),
+            configurationValues: new Dictionary<string, string?>
+            {
+                ["GoogleGeminiApi:ApiKey"] = "gemini-key",
+                ["HuggingFace:AsrAllowedModels"] = "some-other-model"
+            },
+            modelId: "gemini-2.5-flash");
+
+        await using var audio = new MemoryStream(new byte[1024]);
+        var result = await service.TranscribeAudioWithDurationAsync(audio, "recording.wav", "audio/wav");
+
+        result.Text.Should().Be("hello google");
+        handler.LastRequestUri.Should().NotBeNull();
+        handler.LastRequestUri!.ToString().Should().Be("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent");
+        handler.LastRequestBody.Should().Contain("Transcribe this audio. Return only the transcript.");
+        handler.LastRequestBody.Should().Contain("\"inlineData\"");
+    }
+
+    [TestMethod]
+    public async Task TranscribeAudioWithDurationAsync_UsesHuggingFaceProviderWithoutOpenRouterValidationCrossWire()
+    {
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"text\":\"hello hugging face\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(
+            httpClient,
+            providerSection: HuggingFaceProviderSection,
+            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused", TimeoutSeconds = 90 },
+            transcriptionOptions: new SpeechTranscriptionOptions { TimeoutSeconds = 120 },
+            localServiceHostsOptions: new LocalServiceHostsOptions(),
+            configurationValues: new Dictionary<string, string?>
+            {
+                ["HuggingFace:Token"] = "hf-token",
+                ["HuggingFace:AsrAllowedModels"] = "hf-asr-model",
+                ["OpenRouter:TranscriptionAllowedModels"] = "some-other-model"
+            },
+            modelId: "hf-asr-model");
+
+        await using var audio = new MemoryStream(new byte[1024]);
+        var result = await service.TranscribeAudioWithDurationAsync(audio, "recording.wav", "audio/wav");
+
+        result.Text.Should().Be("hello hugging face");
+        handler.LastRequestUri.Should().NotBeNull();
+        handler.LastRequestUri!.ToString().Should().Be("https://api-inference.huggingface.co/models/hf-asr-model");
+        handler.LastRequestHeaders.Should().ContainKey("Authorization");
+    }
+
+    [TestMethod]
+    public async Task TranscribeAudioWithDurationAsync_UsesOpenRouterProviderWithChatCompletionsAudioPayload()
+    {
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"choices\":[{\"message\":{\"content\":\"hello openrouter\"}}]}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(
+            httpClient,
+            providerSection: OpenRouterProviderSection,
+            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused", TimeoutSeconds = 90 },
+            transcriptionOptions: new SpeechTranscriptionOptions { TimeoutSeconds = 120 },
+            localServiceHostsOptions: new LocalServiceHostsOptions(),
+            configurationValues: new Dictionary<string, string?>
+            {
+                ["OpenRouter:ApiKey"] = "or-key",
+                ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1",
+                ["OpenRouter:TranscriptionAllowedModels"] = "openai/whisper-1"
+            },
+            modelId: "openai/whisper-1");
+
+        await using var audio = new MemoryStream(new byte[1024]);
+        var result = await service.TranscribeAudioWithDurationAsync(audio, "recording.wav", "audio/wav");
+
+        result.Text.Should().Be("hello openrouter");
+        handler.LastRequestUri.Should().NotBeNull();
+        handler.LastRequestUri!.ToString().Should().Be("https://openrouter.ai/api/v1/chat/completions");
+        handler.LastRequestBody.Should().Contain("\"input_audio\"");
+    }
+
     private static SpeechTranscriptionService CreateService(
         HttpClient httpClient,
         string providerSection,
         AzureSpeechServiceOptions azureOptions,
         SpeechTranscriptionOptions transcriptionOptions,
         LocalServiceHostsOptions localServiceHostsOptions,
-        Mock<IVideoAudioExtractionService>? videoService = null)
+        Mock<IVideoAudioExtractionService>? videoService = null,
+        IDictionary<string, string?>? configurationValues = null,
+        string? modelId = null)
     {
         var speechOptionsMonitor = new Mock<IOptionsMonitor<AzureSpeechServiceOptions>>();
         speechOptionsMonitor.SetupGet(x => x.CurrentValue).Returns(azureOptions);
@@ -202,9 +316,21 @@ public sealed class SpeechTranscriptionServiceTests
                 .Returns(false);
         }
 
-        var resolver = new FakeServiceModeResolver(
-            RoutedServiceNames.SpeechTranscription,
-            providerSection: providerSection);
+        var resolver = modelId is null
+            ? new FakeServiceModeResolver(
+                RoutedServiceNames.SpeechTranscription,
+                providerSection: providerSection)
+            : new FakeServiceModeResolver(
+                (RoutedServiceNames.SpeechTranscription, new ServiceMode(
+                    ModeId: "default",
+                    ProviderSection: providerSection,
+                    ModelId: modelId,
+                    RequestPresetJson: null,
+                    Enabled: true,
+                    IsDefault: true)));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configurationValues ?? new Dictionary<string, string?>())
+            .Build();
 
         return new SpeechTranscriptionService(
             httpClient,
@@ -214,6 +340,7 @@ public sealed class SpeechTranscriptionServiceTests
             extractionOptionsMonitor.Object,
             effectiveVideoService.Object,
             resolver,
+            configuration,
             NullLogger<SpeechTranscriptionService>.Instance);
     }
 
@@ -222,9 +349,10 @@ public sealed class SpeechTranscriptionServiceTests
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
 
         public Uri? LastRequestUri { get; private set; }
+        public string LastRequestBody { get; private set; } = string.Empty;
         public Dictionary<string, string> LastRequestHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequestUri = request.RequestUri;
             LastRequestHeaders.Clear();
@@ -233,7 +361,11 @@ public sealed class SpeechTranscriptionServiceTests
                 LastRequestHeaders[header.Key] = string.Join(",", header.Value);
             }
 
-            return Task.FromResult(_responder(request));
+            LastRequestBody = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+
+            return _responder(request);
         }
     }
 }

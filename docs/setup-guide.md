@@ -110,9 +110,9 @@ DOCLING_SERVE_MAX_SYNC_WAIT=600
 # Host paths that really are bind mounts (content files + searxng
 # config/data). The AI model stores are NOT bind mounts any more — see
 # the "Local AI model storage" note below.
-GA_CONTENT_FILES_HOST_PATH=D:/guideants/docker/volumes/content-files
-GA_SEARXNG_CONFIG_HOST_PATH=D:/guideants/docker/volumes/searxng/config
-GA_SEARXNG_DATA_HOST_PATH=D:/guideants/docker/volumes/searxng/data
+GA_CONTENT_FILES_HOST_PATH=./volumes/content-files
+GA_SEARXNG_CONFIG_HOST_PATH=./volumes/searxng/config
+GA_SEARXNG_DATA_HOST_PATH=./volumes/searxng/data
 
 # Single-instance SQL Server database name. Change per environment.
 GA_DB_NAME=guideants-dev

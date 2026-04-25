@@ -8,9 +8,12 @@ import { SettingsModal } from '../shared/SettingsModal';
 import { AnthropicEditForm } from './providers/AnthropicForm';
 import { AzureOpenAiChatEditForm } from './providers/AzureOpenAiChatForm';
 import { AzureOpenAiResponsesEditForm } from './providers/AzureOpenAiResponsesForm';
+import { GoogleGeminiEditForm } from './providers/GoogleGeminiForm';
+import { HuggingFaceInferenceEditForm } from './providers/HuggingFaceInferenceForm';
 import { LlamaCppEditForm } from './providers/LlamaCppForm';
 import { OpenAiChatEditForm } from './providers/OpenAiChatForm';
 import { OpenAiResponsesEditForm } from './providers/OpenAiResponsesForm';
+import { OpenRouterEditForm } from './providers/OpenRouterForm';
 
 interface CatalogRowEditModalProps {
   model: SettingsModelDto | null;
@@ -49,6 +52,12 @@ function renderEditForm(
       return <AnthropicEditForm {...props} />;
     case 'llama-cpp':
       return <LlamaCppEditForm {...props} />;
+    case 'google-gemini-chat':
+      return <GoogleGeminiEditForm {...props} />;
+    case 'hf-inference-chat':
+      return <HuggingFaceInferenceEditForm {...props} />;
+    case 'openrouter-chat':
+      return <OpenRouterEditForm {...props} />;
     default:
       return null;
   }

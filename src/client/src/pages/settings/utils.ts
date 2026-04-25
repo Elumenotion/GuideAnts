@@ -682,6 +682,12 @@ export function mapChatProviderToSection(provider: string): string | null {
       return 'Anthropic';
     case 'llama-cpp':
       return 'LlamaCpp';
+    case 'google-gemini-chat':
+      return 'GoogleGeminiApi';
+    case 'hf-inference-chat':
+      return 'HuggingFace';
+    case 'openrouter-chat':
+      return 'OpenRouter';
     default:
       return null;
   }

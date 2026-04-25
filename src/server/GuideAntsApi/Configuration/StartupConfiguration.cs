@@ -14,8 +14,11 @@ using GuideAntsApi.Extensions;
 using Microsoft.Extensions.Options;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.Anthropic;
+using AntRunner.Chat.GoogleGemini;
+using AntRunner.Chat.HuggingFace;
 using AntRunner.Chat.LlamaCpp;
 using AntRunner.Chat.OpenAI;
+using AntRunner.Chat.OpenRouter;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Services.Infrastructure;
 using GuideAntsApi.Services.LlamaCpp;
@@ -205,6 +208,36 @@ public static class StartupConfiguration
             var llamaConfig = new LlamaCppConfig();
             configuration.GetSection("LlamaCpp").Bind(llamaConfig);
             return new LlamaCppChatClientFactory(httpClientFactory, llamaConfig, loggerFactory);
+        });
+        services.AddSingleton(provider =>
+        {
+            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            var resolver = provider.GetRequiredService<IProviderConfigurationResolver>();
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+            return new OpenRouterChatClientFactory(
+                httpClientFactory,
+                configAccessor: resolver.GetOpenRouterChatConfig,
+                loggerFactory: loggerFactory);
+        });
+        services.AddSingleton(provider =>
+        {
+            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            var resolver = provider.GetRequiredService<IProviderConfigurationResolver>();
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+            return new HuggingFaceChatClientFactory(
+                httpClientFactory,
+                configAccessor: resolver.GetHuggingFaceChatConfig,
+                loggerFactory: loggerFactory);
+        });
+        services.AddSingleton(provider =>
+        {
+            var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+            var resolver = provider.GetRequiredService<IProviderConfigurationResolver>();
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+            return new GoogleGeminiChatClientFactory(
+                httpClientFactory,
+                configAccessor: resolver.GetGoogleGeminiChatConfig,
+                loggerFactory: loggerFactory);
         });
         // Routing resolvers + validator + llama runtime coordinator (Phase A of settings-and-llama-completion plan).
         services.AddSingleton<IChatTargetResolver, ChatTargetResolver>();
@@ -470,6 +503,8 @@ public static class StartupConfiguration
         services.Configure<MarkdownAttachmentOptions>(configuration.GetSection(MarkdownAttachmentOptions.SectionName));
         services.Configure<SearXngSearchOptions>(configuration.GetSection(SearXngSearchOptions.SectionName));
         services.Configure<BrowserRenderingOptions>(configuration.GetSection(BrowserRenderingOptions.SectionName));
+        services.Configure<GoogleGeminiApiOptions>(configuration.GetSection(GoogleGeminiApiOptions.SectionName));
+        services.Configure<OpenRouterOptions>(configuration.GetSection(OpenRouterOptions.SectionName));
         services.Configure<SettingsSecretsOptions>(configuration.GetSection(SettingsSecretsOptions.SectionName));
         services.Configure<LlamaModelManagementOptions>(configuration.GetSection(LlamaModelManagementOptions.SectionName));
     }

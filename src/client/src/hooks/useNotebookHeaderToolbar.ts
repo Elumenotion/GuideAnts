@@ -5,6 +5,7 @@ import { useToast } from '../components/common/Toast';
 
 const POLL_NORMAL_MS = 45_000;
 const POLL_ACTIVE_MS = 2_000;
+const POLL_ACTIVE_COOLDOWN_MS = 15_000;
 
 export interface UseNotebookHeaderToolbarResult {
   data: NotebookHeaderToolbarDto | null;
@@ -26,6 +27,8 @@ export function useNotebookHeaderToolbar(
   const [inFlight, setInFlight] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const visible = useRef(true);
+  const inFlightCooldownUntilMs = useRef(0);
+  const previousInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!notebookId) return;
@@ -66,12 +69,20 @@ export function useNotebookHeaderToolbar(
   }, []);
 
   useEffect(() => {
+    if (previousInFlight.current && !inFlight) {
+      inFlightCooldownUntilMs.current = Date.now() + POLL_ACTIVE_COOLDOWN_MS;
+    }
+    previousInFlight.current = inFlight;
+  }, [inFlight]);
+
+  useEffect(() => {
     if (pollTimer.current) {
       clearInterval(pollTimer.current);
       pollTimer.current = null;
     }
     if (!notebookId) return undefined;
-    const tick = inFlight ? POLL_ACTIVE_MS : POLL_NORMAL_MS;
+    const inCooldown = Date.now() < inFlightCooldownUntilMs.current;
+    const tick = inFlight || inCooldown ? POLL_ACTIVE_MS : POLL_NORMAL_MS;
     pollTimer.current = setInterval(() => {
       if (!visible.current) return;
       void (async () => {

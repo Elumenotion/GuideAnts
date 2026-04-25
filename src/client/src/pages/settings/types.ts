@@ -38,7 +38,10 @@ export type AddModelProvider =
   | 'azure-openai-chat'
   | 'azure-openai-responses'
   | 'anthropic'
-  | 'llama-cpp';
+  | 'llama-cpp'
+  | 'google-gemini-chat'
+  | 'hf-inference-chat'
+  | 'openrouter-chat';
 
 export interface AddModelWizardState {
   provider: AddModelProvider | '';

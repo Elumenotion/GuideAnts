@@ -1,7 +1,10 @@
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.Anthropic;
+using AntRunner.Chat.GoogleGemini;
+using AntRunner.Chat.HuggingFace;
 using AntRunner.Chat.LlamaCpp;
 using AntRunner.Chat.OpenAI;
+using AntRunner.Chat.OpenRouter;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 
@@ -21,6 +24,9 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
     private readonly OpenAiResponsesClientFactory _openAiPlatformResponsesFactory;
     private readonly OpenAiResponsesClientFactory _azureOpenAiResponsesFactory;
     private readonly AnthropicChatClientFactory _anthropicFactory;
+    private readonly GoogleGeminiChatClientFactory _googleGeminiFactory;
+    private readonly HuggingFaceChatClientFactory _huggingFaceFactory;
+    private readonly OpenRouterChatClientFactory _openRouterFactory;
     private readonly LlamaCppChatClientFactory _llamaCppFactory;
     private readonly IChatTargetResolver _chatTargetResolver;
     private readonly IChatTargetValidator _chatTargetValidator;
@@ -32,6 +38,9 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         [FromKeyedServices(OpenAiPlatformFactoryKey)] OpenAiResponsesClientFactory openAiPlatformResponsesFactory,
         [FromKeyedServices(AzureOpenAiFactoryKey)] OpenAiResponsesClientFactory azureOpenAiResponsesFactory,
         AnthropicChatClientFactory anthropicFactory,
+        GoogleGeminiChatClientFactory googleGeminiFactory,
+        HuggingFaceChatClientFactory huggingFaceFactory,
+        OpenRouterChatClientFactory openRouterFactory,
         LlamaCppChatClientFactory llamaCppFactory,
         IChatTargetResolver chatTargetResolver,
         IChatTargetValidator chatTargetValidator,
@@ -42,6 +51,9 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         _openAiPlatformResponsesFactory = openAiPlatformResponsesFactory ?? throw new ArgumentNullException(nameof(openAiPlatformResponsesFactory));
         _azureOpenAiResponsesFactory = azureOpenAiResponsesFactory ?? throw new ArgumentNullException(nameof(azureOpenAiResponsesFactory));
         _anthropicFactory = anthropicFactory ?? throw new ArgumentNullException(nameof(anthropicFactory));
+        _googleGeminiFactory = googleGeminiFactory ?? throw new ArgumentNullException(nameof(googleGeminiFactory));
+        _huggingFaceFactory = huggingFaceFactory ?? throw new ArgumentNullException(nameof(huggingFaceFactory));
+        _openRouterFactory = openRouterFactory ?? throw new ArgumentNullException(nameof(openRouterFactory));
         _llamaCppFactory = llamaCppFactory ?? throw new ArgumentNullException(nameof(llamaCppFactory));
         _chatTargetResolver = chatTargetResolver ?? throw new ArgumentNullException(nameof(chatTargetResolver));
         _chatTargetValidator = chatTargetValidator ?? throw new ArgumentNullException(nameof(chatTargetValidator));
@@ -82,6 +94,9 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
             Provider.OpenAiPlatformResponses => _openAiPlatformResponsesFactory.CreateClient(target.ModelId, httpClient),
             Provider.AzureOpenAiChat => _azureOpenAiChatFactory.CreateClient(target.ModelId, httpClient),
             Provider.AzureOpenAiResponses => _azureOpenAiResponsesFactory.CreateClient(target.ModelId, httpClient),
+            Provider.GoogleGeminiChat => _googleGeminiFactory.CreateClient(target.ModelId, httpClient),
+            Provider.HuggingFaceInferenceChat => _huggingFaceFactory.CreateClient(target.ModelId, httpClient),
+            Provider.OpenRouterChat => _openRouterFactory.CreateClient(target.ModelId, httpClient),
             _ => throw new RoutingException(
                 RoutingErrorCodes.ProviderNotReady,
                 $"Unsupported provider for model '{target.ModelId}'.",
@@ -100,9 +115,12 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         "azure-openai-responses" => Provider.AzureOpenAiResponses,
         "anthropic" => Provider.Anthropic,
         "llama-cpp" => Provider.LlamaCpp,
+        "google-gemini-chat" => Provider.GoogleGeminiChat,
+        "hf-inference-chat" => Provider.HuggingFaceInferenceChat,
+        "openrouter-chat" => Provider.OpenRouterChat,
         _ => throw new RoutingException(
             RoutingErrorCodes.ProviderNotReady,
-            $"Provider '{target.Provider}' is not supported. Expected openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, or llama-cpp.",
+            $"Provider '{target.Provider}' is not supported. Expected openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, llama-cpp, google-gemini-chat, hf-inference-chat, or openrouter-chat.",
             action: $"Change the provider for '{target.ModelId}' in Settings → Models & Runtime → Catalog.",
             serviceId: "Chat",
             modelId: target.ModelId,
@@ -116,7 +134,10 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         AzureOpenAiChat,
         AzureOpenAiResponses,
         Anthropic,
-        LlamaCpp
+        LlamaCpp,
+        GoogleGeminiChat,
+        HuggingFaceInferenceChat,
+        OpenRouterChat
     }
 
     private static LlamaCppRuntimeProfileData ToLlamaCppProfileData(RuntimeProfileData data)

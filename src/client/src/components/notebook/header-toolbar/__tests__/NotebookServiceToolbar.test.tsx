@@ -116,11 +116,10 @@ describe('NotebookServiceToolbar', () => {
       />
     );
 
-    const labels = screen.getAllByRole('button').map((element) => element.textContent ?? '');
-    expect(labels.join(' | ')).toContain('Chat');
-    expect(labels.join(' | ')).toContain('Image Generation');
-    expect(labels.join(' | ')).toContain('Speech Synthesis');
-    expect(labels.join(' | ')).toContain('Speech Transcription');
+    expect(screen.getByRole('button', { name: /^chat$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /image generation/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /speech synthesis \(tts\)/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /speech transcription \(asr\)/i })).toBeInTheDocument();
     expect(screen.queryByText(/Embeddings/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Document Intelligence/i)).not.toBeInTheDocument();
   });

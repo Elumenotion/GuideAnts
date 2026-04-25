@@ -686,8 +686,8 @@ All acceptance runs the live UI at `http://localhost:5107/settings`.
     (still accepts `*` wildcards) for HF outages or exotic filenames.
   - `targetDirectory`: `Qwen3.5-9B-Q5_K_M`
 
-The model card that sourced these values is preserved at
-`C:\Users\dougl\.cursor\projects\d-Elumenotion-repos-waterfall-major-refactor\uploads\Qwen3.5-9B-GGUF-0.md`
+The model card that sourced these values is preserved in the local upload
+staging area as `Qwen3.5-9B-GGUF-0.md`
 (see `Files and versions` → `Qwen3.5-9B-Q5_K_M.gguf`, 6.58 GB).
 
 ## Non-goals

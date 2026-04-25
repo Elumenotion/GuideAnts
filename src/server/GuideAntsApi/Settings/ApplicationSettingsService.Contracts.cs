@@ -4,25 +4,57 @@ namespace GuideAntsApi.Settings;
 
 public sealed partial class ApplicationSettingsService
 {
+    private sealed record ProviderSectionRequirement(
+        IReadOnlyList<string> RequiredFields,
+        IReadOnlyList<IReadOnlyList<string>> AlternativeFieldGroups);
+
     /// <summary>
-    /// Minimum required field set per provider section, used by
-    /// <see cref="GetProviderSectionReadinessAsync"/>. Fields that depend on the
-    /// caller's service context (e.g. <c>AzureSpeechService</c> needs
-    /// <c>Endpoint</c> for transcription but <c>Region</c> for synthesis) are
-    /// intentionally NOT listed here — the mode-level probe adds per-service
-    /// blockers on top of this common base.
+    /// Minimum required field contract per provider section, used by
+    /// <see cref="GetProviderSectionReadinessAsync"/> and <see cref="GetSchemaAsync"/>.
+    /// Fields that depend on the caller's service context (e.g.
+    /// <c>AzureSpeechService</c> needs <c>Endpoint</c> for transcription but
+    /// <c>Region</c> for synthesis) are intentionally not listed here — the
+    /// mode-level probe adds per-service blockers on top of this common base.
     /// </summary>
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> ProviderSectionRequiredFields =
-        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+    private static readonly IReadOnlyDictionary<string, ProviderSectionRequirement> ProviderSectionRequirements =
+        new Dictionary<string, ProviderSectionRequirement>(StringComparer.OrdinalIgnoreCase)
         {
-            ["AzureOpenAI"] = new[] { "Resource", "ApiKey", "Deployment" },
-            ["OpenAI"] = new[] { "ApiKey" },
-            ["Anthropic"] = new[] { "ApiKey", "AuthToken" },
-            ["LlamaCpp"] = new[] { "BaseUrl" },
-            ["AzureOpenAiEmbedding"] = new[] { "Endpoint", "ApiKey", "Deployment" },
-            ["AzureOpenAiImages"] = new[] { "Endpoint", "ApiKey", "Deployment", "EditModelDeployment" },
-            ["AzureSpeechService"] = new[] { "ApiKey" },
-            ["AzureDocumentIntelligence"] = new[] { "Endpoint", "ApiKey" }
+            ["AzureOpenAI"] = new(
+                RequiredFields: ["Resource", "ApiKey", "Deployment"],
+                AlternativeFieldGroups: []),
+            ["OpenAI"] = new(
+                RequiredFields: ["ApiKey"],
+                AlternativeFieldGroups: []),
+            ["Anthropic"] = new(
+                RequiredFields: [],
+                AlternativeFieldGroups:
+                [
+                    new[] { "ApiKey", "AuthToken" }
+                ]),
+            ["LlamaCpp"] = new(
+                RequiredFields: ["BaseUrl"],
+                AlternativeFieldGroups: []),
+            ["AzureOpenAiEmbedding"] = new(
+                RequiredFields: ["Endpoint", "ApiKey", "Deployment"],
+                AlternativeFieldGroups: []),
+            ["AzureOpenAiImages"] = new(
+                RequiredFields: ["Endpoint", "ApiKey", "Deployment", "EditModelDeployment"],
+                AlternativeFieldGroups: []),
+            ["AzureSpeechService"] = new(
+                RequiredFields: ["ApiKey"],
+                AlternativeFieldGroups: []),
+            ["AzureDocumentIntelligence"] = new(
+                RequiredFields: ["Endpoint", "ApiKey"],
+                AlternativeFieldGroups: []),
+            ["GoogleGeminiApi"] = new(
+                RequiredFields: ["ApiKey"],
+                AlternativeFieldGroups: []),
+            ["OpenRouter"] = new(
+                RequiredFields: ["ApiKey"],
+                AlternativeFieldGroups: []),
+            ["HuggingFace"] = new(
+                RequiredFields: ["Token"],
+                AlternativeFieldGroups: [])
         };
 
     private sealed record SectionFieldRequirement(
@@ -108,14 +140,53 @@ public sealed partial class ApplicationSettingsService
                             "LocalServiceHosts:MediaBaseUrl",
                             "Media Extraction Base URL",
                             RuntimeChangeHint)
-                    ])
+                    ]),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.SpeechTranscriptionGoogleSpeechToText,
+                    ProviderDisplayName: "Google Gemini Audio",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: GoogleGeminiApiOptions.SectionName,
+                    ProviderSettingsSection: GoogleGeminiApiOptions.SectionName,
+                    MarketingSummary: "Cloud transcription via the Google Gemini API.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement(GoogleGeminiApiOptions.SectionName, "ApiKey", "Google Gemini API Key")
+                    ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.SpeechTranscriptionHuggingFaceInference,
+                    ProviderDisplayName: "Hugging Face ASR",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: "HuggingFace",
+                    ProviderSettingsSection: "HuggingFace",
+                    MarketingSummary: "Cloud transcription through Hugging Face inference APIs.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement("HuggingFace", "Token", "Hugging Face Token")
+                    ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.SpeechTranscriptionOpenRouterAudio,
+                    ProviderDisplayName: "OpenRouter Audio",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: OpenRouterOptions.SectionName,
+                    ProviderSettingsSection: OpenRouterOptions.SectionName,
+                    MarketingSummary: "Cloud transcription through OpenRouter chat audio input.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement(OpenRouterOptions.SectionName, "ApiKey", "OpenRouter API Key")
+                    ],
+                    RequiredRuntimeKeys: [])
             ],
             ErrorKeys:
             [
                 "AzureSpeechService:Endpoint",
                 "AzureSpeechService:ApiKey",
                 "LocalServiceHosts:SpeechTranscriptionBaseUrl",
-                "LocalServiceHosts:MediaBaseUrl"
+                "LocalServiceHosts:MediaBaseUrl",
+                "GoogleGeminiApi:ApiKey",
+                "HuggingFace:Token",
+                "OpenRouter:ApiKey"
             ]),
         new(
             ServiceId: SpeechSynthesisOptions.SectionName,
@@ -151,13 +222,52 @@ public sealed partial class ApplicationSettingsService
                             "LocalServiceHosts:SpeechSynthesisBaseUrl",
                             "Speech Synthesis Base URL",
                             RuntimeChangeHint)
-                    ])
+                    ]),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.SpeechSynthesisGoogleTextToSpeech,
+                    ProviderDisplayName: "Google Gemini TTS",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: GoogleGeminiApiOptions.SectionName,
+                    ProviderSettingsSection: GoogleGeminiApiOptions.SectionName,
+                    MarketingSummary: "Cloud synthesis through the Google Gemini API.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement(GoogleGeminiApiOptions.SectionName, "ApiKey", "Google Gemini API Key")
+                    ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.SpeechSynthesisHuggingFaceInference,
+                    ProviderDisplayName: "Hugging Face TTS",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: "HuggingFace",
+                    ProviderSettingsSection: "HuggingFace",
+                    MarketingSummary: "Cloud synthesis through Hugging Face inference APIs.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement("HuggingFace", "Token", "Hugging Face Token")
+                    ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.SpeechSynthesisOpenRouterTts,
+                    ProviderDisplayName: "OpenRouter TTS",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: OpenRouterOptions.SectionName,
+                    ProviderSettingsSection: OpenRouterOptions.SectionName,
+                    MarketingSummary: "Cloud synthesis through OpenRouter TTS endpoint.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement(OpenRouterOptions.SectionName, "ApiKey", "OpenRouter API Key")
+                    ],
+                    RequiredRuntimeKeys: [])
             ],
             ErrorKeys:
             [
                 "AzureSpeechService:ApiKey",
                 "AzureSpeechService:Region",
-                "LocalServiceHosts:SpeechSynthesisBaseUrl"
+                "LocalServiceHosts:SpeechSynthesisBaseUrl",
+                "GoogleGeminiApi:ApiKey",
+                "HuggingFace:Token",
+                "OpenRouter:ApiKey"
             ]),
         new(
             ServiceId: ImageGenerationOptions.SectionName,
@@ -195,7 +305,43 @@ public sealed partial class ApplicationSettingsService
                             "LocalServiceHosts:ImageGenerationBaseUrl",
                             "Image Generation Base URL",
                             RuntimeChangeHint)
-                    ])
+                    ]),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.ImageGenerationGoogleImagen,
+                    ProviderDisplayName: "Google Gemini Image",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: GoogleGeminiApiOptions.SectionName,
+                    ProviderSettingsSection: GoogleGeminiApiOptions.SectionName,
+                    MarketingSummary: "Cloud image generation via the Google Gemini API.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement(GoogleGeminiApiOptions.SectionName, "ApiKey", "Google Gemini API Key")
+                    ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.ImageGenerationHuggingFaceInference,
+                    ProviderDisplayName: "Hugging Face Image",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: "HuggingFace",
+                    ProviderSettingsSection: "HuggingFace",
+                    MarketingSummary: "Cloud image generation through Hugging Face task APIs.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement("HuggingFace", "Token", "Hugging Face Token")
+                    ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.ImageGenerationOpenRouterImage,
+                    ProviderDisplayName: "OpenRouter Image",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: OpenRouterOptions.SectionName,
+                    ProviderSettingsSection: OpenRouterOptions.SectionName,
+                    MarketingSummary: "Cloud image generation through OpenRouter image-capable chat endpoints.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement(OpenRouterOptions.SectionName, "ApiKey", "OpenRouter API Key")
+                    ],
+                    RequiredRuntimeKeys: [])
             ],
             ErrorKeys:
             [
@@ -203,7 +349,10 @@ public sealed partial class ApplicationSettingsService
                 "AzureOpenAiImages:ApiKey",
                 "AzureOpenAiImages:Deployment",
                 "AzureOpenAiImages:EditModelDeployment",
-                "LocalServiceHosts:ImageGenerationBaseUrl"
+                "LocalServiceHosts:ImageGenerationBaseUrl",
+                "GoogleGeminiApi:ApiKey",
+                "HuggingFace:Token",
+                "OpenRouter:ApiKey"
             ]),
         new(
             ServiceId: "Embeddings",
@@ -240,14 +389,53 @@ public sealed partial class ApplicationSettingsService
                             "LocalServiceHosts:EmbeddingsBaseUrl",
                             "Embeddings Base URL",
                             RuntimeChangeHint)
-                    ])
+                    ]),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.EmbeddingsGoogleEmbedding,
+                    ProviderDisplayName: "Google Gemini Embeddings",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: GoogleGeminiApiOptions.SectionName,
+                    ProviderSettingsSection: GoogleGeminiApiOptions.SectionName,
+                    MarketingSummary: "Cloud embeddings through the Google Gemini API.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement(GoogleGeminiApiOptions.SectionName, "ApiKey", "Google Gemini API Key")
+                    ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.EmbeddingsHuggingFaceInference,
+                    ProviderDisplayName: "Hugging Face Embeddings",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: "HuggingFace",
+                    ProviderSettingsSection: "HuggingFace",
+                    MarketingSummary: "Cloud embeddings through Hugging Face feature-extraction APIs.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement("HuggingFace", "Token", "Hugging Face Token")
+                    ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.EmbeddingsOpenRouterEmbeddings,
+                    ProviderDisplayName: "OpenRouter Embeddings",
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: OpenRouterOptions.SectionName,
+                    ProviderSettingsSection: OpenRouterOptions.SectionName,
+                    MarketingSummary: "Cloud embeddings through OpenRouter embeddings endpoint.",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement(OpenRouterOptions.SectionName, "ApiKey", "OpenRouter API Key")
+                    ],
+                    RequiredRuntimeKeys: [])
             ],
             ErrorKeys:
             [
                 "AzureOpenAiEmbedding:Endpoint",
                 "AzureOpenAiEmbedding:ApiKey",
                 "AzureOpenAiEmbedding:Deployment",
-                "LocalServiceHosts:EmbeddingsBaseUrl"
+                "LocalServiceHosts:EmbeddingsBaseUrl",
+                "GoogleGeminiApi:ApiKey",
+                "HuggingFace:Token",
+                "OpenRouter:ApiKey"
             ]),
         new(
             ServiceId: DocumentIntelligenceOptions.SectionName,

@@ -1,15 +1,25 @@
-import { textButtonClassName } from '../../../pages/settings/components/shared/ActionButtons';
-import { statusDotClass } from './toolbarFormatters';
+import type { ReactElement } from 'react';
+import {
+  statusDotClass,
+  toolbarServiceButtonClass,
+  toolbarServiceStatusDotBorderClass,
+  withToolbarServiceIcon,
+  type ToolbarServiceColorKey,
+} from './toolbarFormatters';
 
 interface NotebookServiceButtonProps {
+  serviceId: ToolbarServiceColorKey;
   label: string;
+  icon: ReactElement;
   status: string;
   expanded: boolean;
   onClick: () => void;
 }
 
 export function NotebookServiceButton({
+  serviceId,
   label,
+  icon,
   status,
   expanded,
   onClick,
@@ -17,17 +27,20 @@ export function NotebookServiceButton({
   return (
     <button
       type="button"
-      className={`${textButtonClassName('neutral')} text-xs max-w-[8.5rem]`}
+      className={toolbarServiceButtonClass(serviceId, { expanded, minSize: 'md' })}
       aria-expanded={expanded}
       aria-haspopup="dialog"
+      aria-label={label}
       onClick={onClick}
       title={label}
     >
       <span
-        className={`inline-block h-2 w-2 min-w-[0.5rem] rounded-full ${statusDotClass(status)}`}
+        className={`absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full border ${toolbarServiceStatusDotBorderClass(
+          serviceId
+        )} ${statusDotClass(status)}`}
         aria-hidden="true"
       />
-      <span className="truncate">{label}</span>
+      {withToolbarServiceIcon(serviceId, icon)}
     </button>
   );
 }

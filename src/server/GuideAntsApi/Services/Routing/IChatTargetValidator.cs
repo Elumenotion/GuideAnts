@@ -1,4 +1,5 @@
 using GuideAntsApi.Services.LlamaCpp;
+using System.Text.Json;
 
 namespace GuideAntsApi.Services.Routing;
 
@@ -34,7 +35,10 @@ public sealed class ChatTargetValidator : IChatTargetValidator
         "azure-openai-chat",
         "azure-openai-responses",
         "anthropic",
-        "llama-cpp"
+        "llama-cpp",
+        "google-gemini-chat",
+        "hf-inference-chat",
+        "openrouter-chat"
     };
 
     private readonly IConfiguration _configuration;
@@ -58,7 +62,7 @@ public sealed class ChatTargetValidator : IChatTargetValidator
             throw new RoutingException(
                 RoutingErrorCodes.ProviderNotReady,
                 $"Provider '{target.Provider}' for model '{target.ModelId}' is not supported. "
-                + "Expected one of: openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, llama-cpp.",
+                + "Expected one of: openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, llama-cpp, google-gemini-chat, hf-inference-chat, openrouter-chat.",
                 action: $"Update model '{target.ModelId}' in Settings → Models & Runtime to one of the supported providers.",
                 serviceId: "Chat",
                 providerSection: target.Provider,
@@ -95,6 +99,27 @@ public sealed class ChatTargetValidator : IChatTargetValidator
 
             case "llama-cpp":
                 ValidateLlamaCpp(target);
+                break;
+
+            case "google-gemini-chat":
+                RequireFields(
+                    providerSection: "GoogleGeminiApi",
+                    fields: new[] { "ApiKey" },
+                    modelId: target.ModelId);
+                break;
+
+            case "hf-inference-chat":
+                RequireFields(
+                    providerSection: "HuggingFace",
+                    fields: new[] { "Token" },
+                    modelId: target.ModelId);
+                break;
+
+            case "openrouter-chat":
+                RequireFields(
+                    providerSection: "OpenRouter",
+                    fields: new[] { "ApiKey" },
+                    modelId: target.ModelId);
                 break;
         }
     }
@@ -133,6 +158,27 @@ public sealed class ChatTargetValidator : IChatTargetValidator
                 {
                     $"{providerSection} requires one of: {string.Join(", ", alternativeList)}."
                 },
+                serviceId: "Chat");
+        }
+    }
+
+    private void ValidateJsonFieldIfPresent(string providerSection, string field)
+    {
+        var value = _configuration[$"{providerSection}:{field}"];
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        try
+        {
+            _ = JsonDocument.Parse(value);
+        }
+        catch (Exception ex)
+        {
+            throw RoutingException.ProviderNotReady(
+                providerSection,
+                blockers: new[] { $"{providerSection}:{field} is not valid JSON: {ex.Message}" },
                 serviceId: "Chat");
         }
     }

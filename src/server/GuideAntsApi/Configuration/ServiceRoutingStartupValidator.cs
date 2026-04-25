@@ -89,7 +89,10 @@ public static class ServiceRoutingStartupValidator
             "AzureDocumentIntelligence:ApiKey",
             "OpenAI:ApiKey",
             "Anthropic:ApiKey",
-            "Anthropic:AuthToken"
+            "Anthropic:AuthToken",
+            "GoogleGeminiApi:ApiKey",
+            "HuggingFace:Token",
+            "OpenRouter:ApiKey"
         };
 
         foreach (var key in secretKeys)

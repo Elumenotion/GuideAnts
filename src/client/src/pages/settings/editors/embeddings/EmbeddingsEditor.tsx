@@ -50,9 +50,7 @@ export function EmbeddingsEditor() {
           <div>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">Runtime behavior</div>
             {provider.providerKind === 'Cloud' ? (
-              <p className="text-sm text-gray-700">
-                Azure OpenAI embedding requests use the configured endpoint and deployment. Credentials are stored securely and are not echoed back in API responses.
-              </p>
+              renderCloudEmbeddingsBehavior(provider)
             ) : (
               <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700">
                 <li>
@@ -86,4 +84,61 @@ export function EmbeddingsEditor() {
       }
     />
   );
+}
+
+function renderCloudEmbeddingsBehavior(provider: ProviderEditorStateDto) {
+  switch (provider.providerId) {
+    case 'Embeddings.AzureOpenAI.Embedding':
+      return (
+        <p className="text-sm text-gray-700">
+          Azure OpenAI embedding requests use the configured endpoint and deployment. Credentials are stored securely and are
+          not echoed back in API responses.
+        </p>
+      );
+    case 'Embeddings.Google.Embedding':
+      return (
+        <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700">
+          <li>
+            Google embeddings use the shared Gemini API connection (<span className="font-mono">ApiKey</span>) together
+            with the selected{' '}
+            <span className="font-mono">Embedding Model ID</span>.
+          </li>
+          <li>
+            The model id is stored on the active routing mode, so changing providers does not duplicate the Google connection.
+          </li>
+        </ul>
+      );
+    case 'Embeddings.HuggingFace.Inference':
+      return (
+        <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700">
+          <li>
+            Hugging Face embeddings call the selected <span className="font-mono">Embedding Model ID</span> with the shared{' '}
+            <span className="font-mono">HuggingFace:Token</span>.
+          </li>
+          <li>
+            Use <span className="font-mono">HuggingFace:EmbeddingAllowedModels</span> when you want to pin the route to an
+            approved model set.
+          </li>
+        </ul>
+      );
+    case 'Embeddings.OpenRouter.Embeddings':
+      return (
+        <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700">
+          <li>
+            OpenRouter embeddings use the shared connection settings plus the selected{' '}
+            <span className="font-mono">Embedding Model ID</span>.
+          </li>
+          <li>
+            Use <span className="font-mono">OpenRouter:EmbeddingAllowedModels</span> to constrain which embedding models are
+            allowed for this route.
+          </li>
+        </ul>
+      );
+    default:
+      return (
+        <p className="text-sm text-gray-700">
+          Cloud embeddings use the selected provider connection and any service-mode fields shown above.
+        </p>
+      );
+  }
 }

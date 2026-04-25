@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FaCog, FaPlay, FaSpinner, FaStop } from 'react-icons/fa';
 import { api } from '../../../services/api';
 import { textButtonClassName } from '../../../pages/settings/components/shared/ActionButtons';
 import type { ChatPanelProps } from './types';
 import { WORKSPACE_CONTROLS_COPY, statusToneClass } from './toolbarFormatters';
 import type { ChatDefaultsDto } from '../../../types/settings';
+import type { ModelDto } from '../../../types/guides';
+import { normalizeReasoningEffortForModel } from '../../chat-model/reasoning';
 
 const OP_POLL_MS = 2_000;
 
@@ -20,6 +22,7 @@ export function ChatToolbarPanel({
   showWorkspaceCopy = true,
 }: ChatPanelProps) {
   const [chatDefaults, setChatDefaults] = useState<ChatDefaultsDto | null>(null);
+  const [catalogModels, setCatalogModels] = useState<ModelDto[]>([]);
   const [chatDefaultsError, setChatDefaultsError] = useState<string | null>(null);
   const hasPendingOp =
     chat.inProgressState &&
@@ -38,25 +41,60 @@ export function ChatToolbarPanel({
     }
   }, []);
 
+  const loadCatalogModels = useCallback(async () => {
+    try {
+      const models = await api.guides.catalogs.models();
+      setCatalogModels(models);
+    } catch (error: any) {
+      setChatDefaultsError(error?.message ?? 'Failed to load catalog models.');
+    }
+  }, []);
+
   useEffect(() => {
     void loadChatDefaults();
-  }, [loadChatDefaults]);
+    void loadCatalogModels();
+  }, [loadChatDefaults, loadCatalogModels]);
+
+  const catalogModelById = useMemo(
+    () => new Map(catalogModels.map((model) => [model.modelId, model])),
+    [catalogModels]
+  );
+
+  const normalizeChatDefaults = useCallback((next: ChatDefaultsDto): ChatDefaultsDto => {
+    const normalizedModelId = next.defaultModelId ?? null;
+    const selectedModel = normalizedModelId ? catalogModelById.get(normalizedModelId) : undefined;
+    const modelChanged = normalizedModelId !== (chatDefaults?.defaultModelId ?? null);
+
+    return {
+      ...next,
+      defaultModelId: normalizedModelId,
+      reasoningEffort:
+        selectedModel
+          ? (normalizeReasoningEffortForModel(selectedModel, next.reasoningEffort) ?? null)
+          : modelChanged
+            ? null
+            : (next.reasoningEffort ?? null),
+    };
+  }, [catalogModelById, chatDefaults?.defaultModelId]);
 
   const updateChatDefaults = async (next: ChatDefaultsDto) => {
     setInFlight(true);
     try {
+      const normalized = normalizeChatDefaults(next);
       const updated = await api.settings.chatDefaults.update({
-        rowVersion: next.rowVersion,
-        defaultModelId: next.defaultModelId ?? null,
-        overrideAllChatModels: next.overrideAllChatModels,
-        temperature: next.temperature ?? null,
-        topP: next.topP ?? null,
-        reasoningEffort: next.reasoningEffort ?? null,
-        samplingParametersJson: next.samplingParametersJson ?? null,
+        rowVersion: normalized.rowVersion,
+        defaultModelId: normalized.defaultModelId ?? null,
+        overrideAllChatModels: normalized.overrideAllChatModels,
+        temperature: normalized.temperature ?? null,
+        topP: normalized.topP ?? null,
+        reasoningEffort: normalized.reasoningEffort ?? null,
+        samplingParametersJson: normalized.samplingParametersJson ?? null,
       });
       setChatDefaults(updated);
       setChatDefaultsError(null);
       await onRefresh();
+    } catch (error: any) {
+      setChatDefaultsError(error?.message ?? 'Failed to update chat defaults.');
     } finally {
       setInFlight(false);
     }

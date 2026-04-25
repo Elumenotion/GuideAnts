@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
@@ -12,9 +13,38 @@ public sealed partial class ApplicationSettingsService
     {
         await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
 
+        var rowsBySection = await _db.ApplicationSettings
+            .AsNoTracking()
+            .ToDictionaryAsync(x => x.SectionName, x => x, StringComparer.OrdinalIgnoreCase, cancellationToken);
+
         return _registry.All
             .OrderBy(x => x.DisplayOrder)
-            .Select(x => new SettingsSectionSummaryDto(x.SectionName, x.DisplayName, x.DisplayOrder, x.HasSecrets))
+            .Select(definition =>
+            {
+                var readinessStatus = "not-applicable";
+                IReadOnlyList<string> missingFields = [];
+
+                if (ProviderSectionRequirements.ContainsKey(definition.SectionName))
+                {
+                    var readiness = EvaluateProviderSectionReadiness(definition.SectionName);
+                    var hasMeaningfulValue = rowsBySection.TryGetValue(definition.SectionName, out var row)
+                        && SectionHasMeaningfulConfiguredValue(definition, row);
+                    readinessStatus = readiness.Configured
+                        ? "configured"
+                        : hasMeaningfulValue
+                            ? "blocked"
+                            : "unconfigured";
+                    missingFields = readiness.MissingFields;
+                }
+
+                return new SettingsSectionSummaryDto(
+                    definition.SectionName,
+                    definition.DisplayName,
+                    definition.DisplayOrder,
+                    definition.HasSecrets,
+                    readinessStatus,
+                    missingFields);
+            })
             .ToList();
     }
 
@@ -77,7 +107,10 @@ public sealed partial class ApplicationSettingsService
             protector.Protect);
 
         var merged = ApplicationSettingsJson.MergeForUpdate(definition, decryptedCurrent, request.Payload ?? new JsonObject());
-        var validationErrors = definition.Validate(merged);
+        var validationErrors = definition.Validate(merged)
+            .Concat(await ValidateSectionPayloadAsync(definition.SectionName, merged, cancellationToken).ConfigureAwait(false))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
         if (validationErrors.Count > 0)
         {
             return (null, validationErrors, false);
@@ -111,6 +144,53 @@ public sealed partial class ApplicationSettingsService
         return (ToSectionDto(definition, refreshed), [], false);
     }
 
+    private async Task<IReadOnlyList<string>> ValidateSectionPayloadAsync(
+        string sectionName,
+        JsonObject payload,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(sectionName, "ChatDefaults", StringComparison.Ordinal))
+        {
+            return [];
+        }
+
+        var defaultModelId = GetOptionalTrimmedString(payload, "DefaultModelId");
+        var reasoningEffort = GetOptionalTrimmedString(payload, "ReasoningEffort");
+
+        if (string.IsNullOrWhiteSpace(reasoningEffort))
+        {
+            return [];
+        }
+
+        if (string.IsNullOrWhiteSpace(defaultModelId))
+        {
+            return ["ReasoningEffort requires a default catalog model."];
+        }
+
+        var model = await _db.Models
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.ModelId == defaultModelId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (model == null)
+        {
+            return [$"ReasoningEffort cannot be set because catalog model '{defaultModelId}' does not exist."];
+        }
+
+        var reasoningChoices = ParseReasoningChoices(model.ReasoningChoicesJson);
+        if (reasoningChoices.Count == 0)
+        {
+            return [$"Catalog model '{defaultModelId}' does not declare any reasoning choices."];
+        }
+
+        if (!reasoningChoices.Contains(reasoningEffort, StringComparer.OrdinalIgnoreCase))
+        {
+            return [$"ReasoningEffort '{reasoningEffort}' is not valid for catalog model '{defaultModelId}' (allowed: {string.Join(", ", reasoningChoices)})."];
+        }
+
+        return [];
+    }
+
     public async Task<SettingsSchemaDto> GetSchemaAsync(CancellationToken cancellationToken = default)
     {
         await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
@@ -133,7 +213,8 @@ public sealed partial class ApplicationSettingsService
                         ValueType: ToApiValueType(property.ValueType),
                         IsSecret: property.IsSecret,
                         IsEditable: true,
-                        IsRequired: false,
+                        IsRequired: ProviderSectionRequirements.TryGetValue(definition.SectionName, out var requirement)
+                            && requirement.RequiredFields.Contains(property.Name, StringComparer.OrdinalIgnoreCase),
                         DefaultValue: ToJsonNode(property.DefaultValue)))
                     .ToList();
 
@@ -248,6 +329,43 @@ public sealed partial class ApplicationSettingsService
             bool b => JsonValue.Create(b),
             _ => JsonValue.Create(value.ToString())
         };
+    }
+
+    private static string? GetOptionalTrimmedString(JsonObject payload, string propertyName)
+    {
+        if (!payload.TryGetPropertyValue(propertyName, out var node) || node is not JsonValue value)
+        {
+            return null;
+        }
+
+        if (!value.TryGetValue<string>(out var parsed) || string.IsNullOrWhiteSpace(parsed))
+        {
+            return null;
+        }
+
+        return parsed.Trim();
+    }
+
+    private static IReadOnlyList<string> ParseReasoningChoices(string? reasoningChoicesJson)
+    {
+        if (string.IsNullOrWhiteSpace(reasoningChoicesJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(reasoningChoicesJson)?
+                .Where(choice => !string.IsNullOrWhiteSpace(choice))
+                .Select(choice => choice.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+                ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     private static string HumanizeKey(string value)

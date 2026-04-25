@@ -7,7 +7,10 @@ import { IconActionButton } from './ActionButtons';
  * Shared framing for the "local service admin" sections of the non-chat
  * service editors. Renders a consistent heading and the non-product states
  * (hidden, loading, error) so each bespoke manager only has to implement
- * the product UI itself.
+ * the product UI itself. Known placeholder / not-configured failures are
+ * normalized into a friendlier unavailable callout; everything else stays a
+ * verbatim upstream error so operators can still diagnose real runtime
+ * problems.
  */
 export type LocalCapabilityPhase = 'hidden' | 'loading' | 'available' | 'error';
 

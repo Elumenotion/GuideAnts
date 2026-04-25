@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Nodes;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Services.Routing;
+using GuideAntsApi.DataModel.Models;
 
 namespace GuideAntsApi.Settings;
 
@@ -117,6 +119,21 @@ public sealed partial class ApplicationSettingsService
             throw new ArgumentException("Section name is required.", nameof(sectionName));
         }
 
+        return Task.FromResult(EvaluateProviderSectionReadiness(sectionName));
+    }
+
+    private static bool IsErrorForService(ServiceContract contract, string error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+        {
+            return false;
+        }
+
+        return contract.ErrorKeys.Any(key => error.Contains(key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private ProviderSectionReadinessDto EvaluateProviderSectionReadiness(string sectionName)
+    {
         var missing = new List<string>();
 
         // LocalServiceHosts:*BaseUrl sections are runtime-owned. The section name
@@ -129,61 +146,91 @@ public sealed partial class ApplicationSettingsService
                 missing.Add(sectionName);
             }
 
-            return Task.FromResult(new ProviderSectionReadinessDto(
+            return new ProviderSectionReadinessDto(
                 SectionName: sectionName,
                 Configured: missing.Count == 0,
-                MissingFields: missing));
+                MissingFields: missing);
         }
 
-        if (ProviderSectionRequiredFields.TryGetValue(sectionName, out var required))
+        if (!ProviderSectionRequirements.TryGetValue(sectionName, out var requirement))
         {
-            foreach (var field in required)
+            return new ProviderSectionReadinessDto(
+                SectionName: sectionName,
+                Configured: false,
+                MissingFields: [$"{sectionName} has no registered field requirements."]);
+        }
+
+        foreach (var field in requirement.RequiredFields)
+        {
+            var rawValue = _configuration[$"{sectionName}:{field}"];
+            var value = string.Equals(field, "BaseUrl", StringComparison.OrdinalIgnoreCase)
+                ? RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(rawValue)
+                : rawValue;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                missing.Add(field);
+            }
+        }
+
+        foreach (var alternatives in requirement.AlternativeFieldGroups)
+        {
+            var hasAny = alternatives.Any(field =>
             {
                 var rawValue = _configuration[$"{sectionName}:{field}"];
                 var value = string.Equals(field, "BaseUrl", StringComparison.OrdinalIgnoreCase)
                     ? RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(rawValue)
                     : rawValue;
-                if (string.IsNullOrWhiteSpace(value))
-                {
-                    missing.Add(field);
-                }
-            }
-        }
-        else
-        {
-            // Unknown provider section — surface as a structured blocker so the UI
-            // can flag it rather than silently reporting "ready" (user rule: no fallback).
-            missing.Add($"{sectionName} has no registered field requirements.");
-        }
+                return !string.IsNullOrWhiteSpace(value);
+            });
 
-        // Anthropic is special: ApiKey OR AuthToken satisfies the requirement.
-        // If BOTH were reported missing above, replace with a single combined blocker
-        // describing the requirement.
-        if (string.Equals(sectionName, "Anthropic", StringComparison.OrdinalIgnoreCase))
-        {
-            var hasApiKey = !string.IsNullOrWhiteSpace(_configuration["Anthropic:ApiKey"]);
-            var hasAuthToken = !string.IsNullOrWhiteSpace(_configuration["Anthropic:AuthToken"]);
-            missing.RemoveAll(m => string.Equals(m, "ApiKey", StringComparison.Ordinal)
-                                   || string.Equals(m, "AuthToken", StringComparison.Ordinal));
-            if (!hasApiKey && !hasAuthToken)
+            if (!hasAny)
             {
-                missing.Add("ApiKey or AuthToken");
+                missing.Add(string.Join(" or ", alternatives));
             }
         }
 
-        return Task.FromResult(new ProviderSectionReadinessDto(
+        return new ProviderSectionReadinessDto(
             SectionName: sectionName,
             Configured: missing.Count == 0,
-            MissingFields: missing));
+            MissingFields: missing);
     }
 
-    private static bool IsErrorForService(ServiceContract contract, string error)
+    private bool SectionHasMeaningfulConfiguredValue(SettingsSectionDefinition definition, ApplicationSetting row)
     {
-        if (string.IsNullOrWhiteSpace(error))
+        var protector = GetProtector();
+        var decrypted = ApplicationSettingsJson.DecryptSecrets(
+            definition,
+            ApplicationSettingsJson.DeserializeObject(row.JsonValue),
+            _settingsSecretsOptionsMonitor.CurrentValue,
+            protector.Protect);
+
+        foreach (var property in definition.Properties)
         {
-            return false;
+            if (!decrypted.TryGetPropertyValue(property.Name, out var node) || node is null)
+            {
+                continue;
+            }
+
+            if (node.GetValueKind() == System.Text.Json.JsonValueKind.Null)
+            {
+                continue;
+            }
+
+            if (node.GetValueKind() == System.Text.Json.JsonValueKind.String
+                && string.IsNullOrWhiteSpace(node.GetValue<string>()))
+            {
+                continue;
+            }
+
+            var defaultNode = ToJsonNode(property.DefaultValue);
+            if (defaultNode != null && JsonNode.DeepEquals(node, defaultNode))
+            {
+                continue;
+            }
+
+            return true;
         }
 
-        return contract.ErrorKeys.Any(key => error.Contains(key, StringComparison.OrdinalIgnoreCase));
+        return false;
     }
 }

@@ -6,7 +6,9 @@ public sealed record SettingsSectionSummaryDto(
     string SectionName,
     string DisplayName,
     int DisplayOrder,
-    bool HasSecrets);
+    bool HasSecrets,
+    string ReadinessStatus,
+    IReadOnlyList<string> MissingFields);
 
 public sealed record SettingsSectionDto(
     string SectionName,

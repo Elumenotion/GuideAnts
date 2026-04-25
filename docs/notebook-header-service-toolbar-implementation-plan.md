@@ -1,9 +1,10 @@
 # Notebook Header Service Toolbar Implementation Plan
 
-Last updated: 2026-04-23
+Last updated: 2026-04-23 (reconciled with as-built code; see **§11**)
 
 Companion spec:
-- `docs/notebook-header-service-toolbar-spec.md`
+- `docs/notebook-header-service-toolbar-spec.md` (includes **§24** implementation
+  alignment and deviations)
 
 ## 1. Goal
 
@@ -27,18 +28,29 @@ flows, credentials editing, downloads, or model onboarding.
 
 ### 2.1 Chat semantics
 
-The chat segment must not edit assistant definitions and must not mutate
-`ChatDefaults`.
+**Original plan (superseded in the shipped UI):** conversation-scoped override
+via `ConversationCurrentState.CurrentModelDeploymentId` and threading through
+`SendMessageRequest`, with **no** `ChatDefaults` mutation from the header.
 
-The cleanest path with the current codebase is:
+**As built (2026-04-23):** The chat panel **does** call
+`api.settings.chatDefaults.update` to toggle **`overrideAllChatModels`** and, when
+that flag is on, to set the **global** `defaultModelId` from the catalog list.
+The aggregate read still passes `conversationId` into
+`GET /api/notebooks/{id}/header-toolbar` so the **displayed** effective model
+reflects assistant + resolver + config; the **header write path** the user can
+use for “pick a different catalog model” is **workspace-wide** (`ChatDefaults`),
+not a dedicated per-conversation `PUT …/current-model` from this panel.
 
-- treat the toolbar chat selector as a **conversation-scoped model override**
-- persist that override in `ConversationCurrentState.CurrentModelDeploymentId`
-- send the override through the existing `SendMessageRequest.ModelDeploymentId`
-  path
+Implications:
 
-This keeps the behavior notebook/conversation-relevant without turning the
-toolbar into assistant editing or global settings editing.
+- Assistant definitions are still not edited from the toolbar.
+- This diverges from the early “no `ChatDefaults`” risk mitigation below
+  (**§8.2**); the product choice is documented in the spec **§3** and **§10.1**.
+
+**Optional follow-up:** implement the originally planned
+`PUT …/conversations/{convoId}/current-model` and/or thread
+`modelDeploymentId` from context if product wants **conversation-only** quick
+switch without requiring “override all chat models.”
 
 ### 2.2 Runtime power semantics
 
@@ -58,16 +70,27 @@ reuse existing write endpoints wherever possible.
 
 ## 3. Delivery Shape
 
-The implementation should land in four workstreams:
+The implementation should land in four workstreams (status as of 2026-04-23):
 
-1. Backend aggregate read model for the toolbar
-2. Backend chat runtime / chat override mutations that do not exist yet
-3. Frontend toolbar shell + per-service popovers/sheet
-4. Tests for layout, notebook orchestration, toolbar UI, and new endpoints
+1. **Done:** Backend aggregate read model for the toolbar.
+2. **Partially as originally written:** dedicated **conversation** `current-model`
+   HTTP mutation was **not** required for the shipped chat UI (see **§2.1**);
+   notebook llama load/unload uses existing project/notebook conversation APIs
+   from the client.
+3. **Done:** Frontend toolbar shell + per-service popovers/sheet.
+4. **In progress / gaps:** unit tests exist under `header-toolbar/__tests__/` and
+   `useNotebookHeaderToolbar.test.ts`; backend test files listed in **§6.2** may
+   still be partially open—verify the tree before release.
 
 ## 4. Backend Plan
 
 ## 4.1 Add a notebook-scoped toolbar read model
+
+**Status:** Shipped. Route: `GET /api/notebooks/{notebookId}/header-toolbar?conversationId=…`.
+Client: `api.notebooks.headerToolbar` in `api.ts` + `useNotebookHeaderToolbar`. The
+C# DTOs gained additional fields (e.g. `EffectiveModelDisplayName`, `inProgress*`,
+`localModelOptions` on services) beyond the “suggested shape” in this section—see
+`NotebookHeaderToolbarDto.cs` and `src/client/src/types/notebookToolbar.ts`.
 
 ### New files
 
@@ -150,6 +173,11 @@ new business logic:
   Register the new toolbar service
 
 ## 4.2 Add notebook-scoped chat model override mutation
+
+**Status:** Not implemented as the **primary** toolbar write path. The current
+`ChatToolbarPanel` uses **ChatDefaults** (see **§2.1**). The endpoint below
+remains a **valid** future design if the product revokes global-default switching
+in favor of pure conversation overrides.
 
 ### Existing files touched
 
@@ -358,7 +386,8 @@ primitives and styling direction instead of introducing a new visual language.
 - `src/client/src/components/notebook/header-toolbar/AsrToolbarPanel.tsx`
 - `src/client/src/components/notebook/header-toolbar/types.ts`
 - `src/client/src/components/notebook/header-toolbar/toolbarFormatters.ts`
-- `src/client/src/components/notebook/header-toolbar/useToolbarA11y.ts` (optional helper)
+- `useToolbarA11y.ts` (optional) — **not** present in the repo; a11y handled inline
+  today.
 
 ### Responsibilities
 
@@ -398,10 +427,14 @@ toolbar cannot depend directly on `ConversationContext` as currently composed.
 The page-level hook should own:
 
 - initial load of the toolbar aggregate DTO
-- refresh and in-progress polling
-- currently selected conversation id
-- notebook-scoped chat model override state
-- mutation handlers that call API methods
+- refresh and in-progress polling (see `useNotebookHeaderToolbar`: 45s / 2s,
+  visibility-gated)
+- currently selected conversation id (passed into aggregate read)
+- **not** a separate “chat override” object in the hook—mutations live in panel
+  components (`ChatDefaults` API, settings services, llama calls)
+
+**As built:** `useNotebookHeaderToolbar` only loads/refreshes DTO + `inFlight`;
+`ChatToolbarPanel` performs mutations.
 
 It should pass:
 
@@ -410,6 +443,12 @@ It should pass:
 into `NotebookLayout`.
 
 ## 5.4 Thread chat override state into conversation send
+
+**Status:** **Not done** as specified. The toolbar does not thread a
+`modelDeploymentOverrideId` through `ConversationProvider` for send; chat model
+changes go through **`ChatDefaults`** when override is on. If **§4.2** is
+implemented later, this section is the right place to wire send + header
+together.
 
 ### Existing files touched
 
@@ -451,13 +490,16 @@ through the existing streaming request.
 
 ### New methods
 
-Notebook-scoped toolbar aggregate:
+Notebook-scoped toolbar aggregate (**as implemented**):
 
-- `api.notebooks.toolbar.get(notebookId, conversationId?)`
+- `api.notebooks.headerToolbar(notebookId, conversationId?)` → calls
+  `GET /api/notebooks/{notebookId}/header-toolbar?conversationId=…`
 
-Chat override:
+Chat override (from original plan — **not** exposed as a dedicated method in
+`ChatToolbarPanel` today; chat uses **`api.settings.chatDefaults`** instead):
 
-- `api.projects.notebooks.conversations.setCurrentModel(projectId, notebookId, convoId, modelDeploymentId)`
+- ~~`api.projects.notebooks.conversations.setCurrentModel(…)`~~ (not in client
+  API surface for toolbar)
 
 Notebook llama unload:
 
@@ -666,42 +708,45 @@ runtime endpoints.
 
 ## Phase 4: chat controls
 
-1. Add notebook-scoped current-model mutation
-2. Thread model override through `ConversationProvider`
-3. Add notebook llama unload endpoint
-4. Add chat toolbar panel
+**As built:**
+
+1. ~~Add notebook-scoped current-model mutation~~ — **deferred** (see **§4.2**);
+   **ChatDefaults** path used instead in `ChatToolbarPanel`.
+2. ~~Thread model override through `ConversationProvider`~~ — **not** done (see
+   **§5.4**).
+3. Notebook llama — client uses **existing** load / poll / unload calls from
+   `api.projects.notebooks.conversations` (verify unload matches **§4.3** server
+   surface; do not assume a new route unless added).
+4. **Done:** `ChatToolbarPanel` with override toggle, catalog rows, local power.
 
 ## Phase 5: mobile sheet + polish
 
-1. Mobile sheet
-2. Workspace-wide warning copy
-3. final error/loading polish
-4. accessibility pass
+1. **Done (baseline):** mobile `Services` + `NotebookServiceSheet` (copy and
+   layout polish still per spec **§24**).
+2. **Partial:** workspace copy in desktop popovers + `lg` “Workspace controls”
+   label; **mobile sheet** omits per-section workspace line.
+3. **Open:** final error/loading, density of collapsed bar, ASR duplicate line.
+4. **Open:** a11y pass (focus return, popover `aria-modal`, confirm flows).
 
 ## 8. Risk Areas
 
 ### 8.1 Header / context boundary
 
-Risk:
+Resolved approach:
 
-- header is outside `ConversationProvider`
-
-Mitigation:
-
-- keep toolbar orchestration in `NotebookDetails`
-- pass only the minimum model override prop into `ConversationProvider`
+- Toolbar orchestration stays in `NotebookDetails`; `activeConversationId` is
+  passed into `useNotebookHeaderToolbar` and into `NotebookServiceToolbar` for
+  llama assistant resolution—**no** `ConversationProvider` prop was required for
+  the shipped **ChatDefaults**-based model switching.
 
 ### 8.2 Chat semantics drift
 
-Risk:
-
-- accidentally turning toolbar chat controls into assistant editing or global
-  settings editing
-
-Mitigation:
-
-- lock the implementation to `ConversationCurrentState.CurrentModelDeploymentId`
-- do not mutate assistants or `ChatDefaults`
+**What happened:** The shipped panel **mutates `ChatDefaults`** (override + default
+model). That **reduces** assistant-definition drift but **increases** “global
+settings from header” surface area. Mitigation for production: treat **§2.1** and
+spec **§10.1** as the source of truth; if the team wants the original risk
+posture, revert to **§4.2** + **§5.4** and remove `ChatDefaults` writes from
+`ChatToolbarPanel`.
 
 ### 8.3 Local runtime symmetry gaps
 
@@ -770,11 +815,26 @@ This implementation is done when:
 2. The toolbar order is Chat, Image Generation, Speech Synthesis, Speech
    Transcription.
 3. Embeddings and Document Intelligence are absent.
-4. Chat model switching changes the effective model for subsequent notebook
-   turns without editing assistants or `ChatDefaults`.
+4. Chat model switching: **as built**, changing the model from the toolbar (when
+   “override all chat models” is on) updates **`ChatDefaults`**, not only
+   per-conversation state; assistants are not edited. For the **original** “no
+   `ChatDefaults`” criterion, this item is **not** satisfied—see **§2.1** and
+   spec **§24**.
 5. Local `Off` / `On` works for every in-scope local-capable service and
    actually releases/restores memory.
 6. No setup flows, downloads, credentials, or model onboarding appear in the
    toolbar.
 7. The desktop and mobile variants share the same data model and mutation
    semantics.
+
+## 11. Plan vs build (summary)
+
+| Topic | Original plan | As built (2026-04-23) |
+|-------|---------------|----------------------|
+| Chat model writes | `PUT …/current-model` on conversation | `api.settings.chatDefaults.update` + override toggle |
+| Send path threading | `modelDeploymentOverride` on `ConversationProvider` | Not implemented; global defaults affect routing when override on |
+| Aggregate read | New endpoint | `GET /api/notebooks/…/header-toolbar` + `api.notebooks.headerToolbar` |
+| Collapsed header UI | Rich “pill” summary | Status dot + short label; details in popover/sheet |
+| Confirmations | Blocked provider, some power actions | Chat llama unload only; see spec **§24.2** |
+
+**Authoritative deviation list:** `docs/notebook-header-service-toolbar-spec.md` **§24**.

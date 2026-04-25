@@ -39,8 +39,14 @@ public static class ServiceCollectionExtensions
         // Register embedding and indexing services
         services.AddHttpClient<AzureOpenAiEmbeddingService>();
         services.AddHttpClient<LocalEmbeddingService>();
+        services.AddHttpClient<GoogleGeminiEmbeddingService>();
+        services.AddHttpClient<HuggingFaceEmbeddingService>();
+        services.AddHttpClient<OpenRouterEmbeddingService>();
         services.AddSingleton<AzureOpenAiEmbeddingService>();
         services.AddSingleton<LocalEmbeddingService>();
+        services.AddSingleton<GoogleGeminiEmbeddingService>();
+        services.AddSingleton<HuggingFaceEmbeddingService>();
+        services.AddSingleton<OpenRouterEmbeddingService>();
         services.AddSingleton<IEmbeddingService, ProviderRoutedEmbeddingService>();
         services.AddScoped<IHybridIndexer, HybridIndexer>();
         services.AddScoped<IHybridSearcher, HybridSearcher>();

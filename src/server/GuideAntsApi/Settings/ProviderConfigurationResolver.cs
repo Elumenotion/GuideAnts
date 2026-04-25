@@ -1,5 +1,9 @@
 using AntRunner.Chat.Anthropic;
+using AntRunner.Chat.GoogleGemini;
+using AntRunner.Chat.HuggingFace;
 using AntRunner.Chat.OpenAI;
+using AntRunner.Chat.OpenRouter;
+using GuideAntsApi.Options;
 
 namespace GuideAntsApi.Settings;
 
@@ -18,6 +22,12 @@ public interface IProviderConfigurationResolver
     /// that motivated splitting this out.
     /// </summary>
     AzureOpenAiConfig GetOpenAiConfig();
+    OpenRouterChatConfig GetOpenRouterChatConfig();
+    HuggingFaceChatConfig GetHuggingFaceChatConfig();
+    GoogleGeminiChatConfig GetGoogleGeminiChatConfig();
+    GoogleGeminiApiConfig GetGoogleGeminiApiConfig();
+    OpenRouterOptions GetOpenRouterOptions();
+    HuggingFaceRouterOptions GetHuggingFaceOptions();
 
     AnthropicConfig GetAnthropicConfig();
     string? ResolveByLegacyVariableName(string variableName);
@@ -51,6 +61,62 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
             ApiKey = GetValue("OpenAI:ApiKey"),
             ApiVersion = null,
             DeploymentId = GetValue("OpenAI:Deployment")
+        };
+    }
+
+    public OpenRouterChatConfig GetOpenRouterChatConfig()
+    {
+        return new OpenRouterChatConfig
+        {
+            ApiKey = GetValue("OpenRouter:ApiKey") ?? string.Empty,
+            BaseUrl = GetValue("OpenRouter:BaseUrl") ?? "https://openrouter.ai/api/v1",
+            HttpReferer = GetValue("OpenRouter:HttpReferer"),
+            AppTitle = GetValue("OpenRouter:AppTitle")
+        };
+    }
+
+    public HuggingFaceChatConfig GetHuggingFaceChatConfig()
+    {
+        return new HuggingFaceChatConfig
+        {
+            Token = GetValue("HuggingFace:Token", "HF_TOKEN") ?? string.Empty,
+            RouterBaseUrl = GetValue("HuggingFace:RouterBaseUrl") ?? "https://router.huggingface.co/v1"
+        };
+    }
+
+    public GoogleGeminiApiConfig GetGoogleGeminiApiConfig()
+    {
+        return new GoogleGeminiApiConfig
+        {
+            ApiKey = GetValue("GoogleGeminiApi:ApiKey")
+        };
+    }
+
+    public GoogleGeminiChatConfig GetGoogleGeminiChatConfig()
+    {
+        return new GoogleGeminiChatConfig
+        {
+            ApiKey = GetValue("GoogleGeminiApi:ApiKey")
+        };
+    }
+
+    public OpenRouterOptions GetOpenRouterOptions()
+    {
+        return new OpenRouterOptions
+        {
+            ApiKey = GetValue("OpenRouter:ApiKey") ?? string.Empty,
+            BaseUrl = GetValue("OpenRouter:BaseUrl") ?? "https://openrouter.ai/api/v1",
+            HttpReferer = GetValue("OpenRouter:HttpReferer"),
+            AppTitle = GetValue("OpenRouter:AppTitle")
+        };
+    }
+
+    public HuggingFaceRouterOptions GetHuggingFaceOptions()
+    {
+        return new HuggingFaceRouterOptions
+        {
+            Token = GetValue("HuggingFace:Token", "HF_TOKEN") ?? string.Empty,
+            RouterBaseUrl = GetValue("HuggingFace:RouterBaseUrl") ?? "https://router.huggingface.co/v1"
         };
     }
 
@@ -131,4 +197,15 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
             ? value
             : null;
     }
+}
+
+public sealed record GoogleGeminiApiConfig
+{
+    public string? ApiKey { get; init; }
+}
+
+public sealed record HuggingFaceRouterOptions
+{
+    public string Token { get; init; } = string.Empty;
+    public string RouterBaseUrl { get; init; } = "https://router.huggingface.co/v1";
 }

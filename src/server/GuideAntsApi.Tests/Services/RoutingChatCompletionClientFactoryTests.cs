@@ -4,8 +4,11 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.Anthropic;
+using AntRunner.Chat.GoogleGemini;
+using AntRunner.Chat.HuggingFace;
 using AntRunner.Chat.LlamaCpp;
 using AntRunner.Chat.OpenAI;
+using AntRunner.Chat.OpenRouter;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Moq;
@@ -179,6 +182,63 @@ public sealed class RoutingChatCompletionClientFactoryTests
         var client = factory.CreateClient("qwen3.5-27b");
 
         client.Should().BeOfType<LlamaCppChatClient>();
+    }
+
+    [TestMethod]
+    public void CreateClient_UsesGoogleGemini_ForGoogleGeminiProvider()
+    {
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "gemini-2.5-pro",
+            DisplayName = "Gemini 2.5 Pro",
+            Provider = "google-gemini-chat",
+            IsActive = true
+        });
+        db.SaveChanges();
+
+        var factory = CreateFactory(db);
+        var client = factory.CreateClient("gemini-2.5-pro");
+
+        client.Should().BeOfType<GoogleGeminiChatClient>();
+    }
+
+    [TestMethod]
+    public void CreateClient_UsesHuggingFace_ForHfInferenceProvider()
+    {
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "meta-llama/llama-4-scout",
+            DisplayName = "Llama 4 Scout",
+            Provider = "hf-inference-chat",
+            IsActive = true
+        });
+        db.SaveChanges();
+
+        var factory = CreateFactory(db);
+        var client = factory.CreateClient("meta-llama/llama-4-scout");
+
+        client.Should().BeOfType<HuggingFaceChatClient>();
+    }
+
+    [TestMethod]
+    public void CreateClient_UsesOpenRouter_ForOpenRouterProvider()
+    {
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "openai/gpt-4o-mini",
+            DisplayName = "GPT-4o mini via OpenRouter",
+            Provider = "openrouter-chat",
+            IsActive = true
+        });
+        db.SaveChanges();
+
+        var factory = CreateFactory(db);
+        var client = factory.CreateClient("openai/gpt-4o-mini");
+
+        client.Should().BeOfType<OpenRouterChatClient>();
     }
 
     [TestMethod]
@@ -369,6 +429,26 @@ public sealed class RoutingChatCompletionClientFactoryTests
         var openAiPlatformResponsesFactory = new OpenAiResponsesClientFactory(httpFactory.Object, openAiConfig);
         var azureOpenAiResponsesFactory = new OpenAiResponsesClientFactory(httpFactory.Object, openAiConfig);
         var anthropicFactory = new AnthropicChatClientFactory(httpFactory.Object, anthropicConfig);
+        var googleGeminiFactory = new GoogleGeminiChatClientFactory(
+            httpFactory.Object,
+            new GoogleGeminiChatConfig
+            {
+                ApiKey = "test-gemini-key"
+            });
+        var huggingFaceFactory = new HuggingFaceChatClientFactory(
+            httpFactory.Object,
+            new HuggingFaceChatConfig
+            {
+                Token = "hf-token",
+                RouterBaseUrl = "https://router.huggingface.co/v1"
+            });
+        var openRouterFactory = new OpenRouterChatClientFactory(
+            httpFactory.Object,
+            new OpenRouterChatConfig
+            {
+                ApiKey = "or-key",
+                BaseUrl = "https://openrouter.ai/api/v1"
+            });
         var llamaCppFactory = new LlamaCppChatClientFactory(
             httpFactory.Object,
             new LlamaCppConfig
@@ -421,6 +501,9 @@ public sealed class RoutingChatCompletionClientFactoryTests
             openAiPlatformResponsesFactory,
             azureOpenAiResponsesFactory,
             anthropicFactory,
+            googleGeminiFactory,
+            huggingFaceFactory,
+            openRouterFactory,
             llamaCppFactory,
             chatTargetResolver,
             chatTargetValidator.Object,

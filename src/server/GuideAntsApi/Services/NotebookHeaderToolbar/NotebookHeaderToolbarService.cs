@@ -61,15 +61,19 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
 
         var generated = DateTime.UtcNow;
         var models = await _settings.GetModelsAsync(cancellationToken).ConfigureAwait(false);
-        var modelOptions = models
+        var orderedModels = models
             .OrderBy(m => m.DisplayOrder ?? int.MaxValue)
             .ThenBy(m => m.ModelId, StringComparer.Ordinal)
+            .ToList();
+        var allModelOptions = orderedModels
             .Select(m => new NotebookToolbarModelOptionDto(
                 m.ModelId,
                 m.DisplayName,
                 m.Provider,
                 m.IsActive))
             .ToList();
+        var modelOptions = await BuildSelectableChatModelOptionsAsync(orderedModels, cancellationToken)
+            .ConfigureAwait(false);
 
         string? effectiveModelId = null;
         string? effectiveModelDisplay = null;
@@ -120,7 +124,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
 
         if (!string.IsNullOrWhiteSpace(effectiveModelId))
         {
-            var row = modelOptions.FirstOrDefault(m => string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal));
+            var row = allModelOptions.FirstOrDefault(m => string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal));
             effectiveModelDisplay = row?.DisplayName ?? effectiveModelId;
 
             var referenceKind = chatReferenceKind switch
@@ -203,7 +207,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             effectiveModelId,
             effectiveModelDisplay,
             effectiveModelId != null
-                ? modelOptions.FirstOrDefault(m => m.ModelId == effectiveModelId)?.Provider
+                ? allModelOptions.FirstOrDefault(m => m.ModelId == effectiveModelId)?.Provider
                 : null,
             overrideAllChatModels,
             supportsLocalLlama,
@@ -217,6 +221,77 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             chat,
             new[] { image, tts, asr },
             generated);
+    }
+
+    private async Task<IReadOnlyList<NotebookToolbarModelOptionDto>> BuildSelectableChatModelOptionsAsync(
+        IReadOnlyList<SettingsModelDto> models,
+        CancellationToken cancellationToken)
+    {
+        var activeModels = models
+            .Where(m => m.IsActive)
+            .ToList();
+        if (activeModels.Count == 0)
+        {
+            return Array.Empty<NotebookToolbarModelOptionDto>();
+        }
+
+        var readinessTasks = activeModels.Select(async model =>
+        {
+            try
+            {
+                var readiness = await _readiness
+                    .ProbeChatTargetAsync(model.ModelId, cancellationToken, "direct")
+                    .ConfigureAwait(false);
+                return (Model: model, Readiness: readiness, Error: (Exception?)null);
+            }
+            catch (Exception ex)
+            {
+                return (Model: model, Readiness: (ChatTargetReadinessDto?)null, Error: ex);
+            }
+        });
+
+        var results = await Task.WhenAll(readinessTasks).ConfigureAwait(false);
+        var selectable = new List<NotebookToolbarModelOptionDto>(results.Length);
+        foreach (var result in results)
+        {
+            if (result.Error != null)
+            {
+                _logger.LogDebug(result.Error, "Failed to probe chat toolbar option readiness for {ModelId}", result.Model.ModelId);
+                continue;
+            }
+
+            if (result.Readiness == null
+                || !ShouldExposeChatModelOption(result.Model, result.Readiness))
+            {
+                continue;
+            }
+
+            selectable.Add(new NotebookToolbarModelOptionDto(
+                result.Model.ModelId,
+                result.Model.DisplayName,
+                result.Model.Provider,
+                result.Model.IsActive));
+        }
+
+        return selectable;
+    }
+
+    private static bool ShouldExposeChatModelOption(SettingsModelDto model, ChatTargetReadinessDto readiness)
+    {
+        if (!string.Equals(readiness.Status, "blocked", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.Equals(model.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return readiness.Blockers.Count > 0
+            && readiness.Blockers.All(blocker =>
+                blocker.StartsWith($"{RoutingReadinessService.BlockerKeys.RuntimeState}:", StringComparison.Ordinal)
+                || blocker.StartsWith($"{RoutingReadinessService.BlockerKeys.RuntimeArtifactMissing}:", StringComparison.Ordinal));
     }
 
     private static string MapChatToolbarStatus(ChatTargetReadinessDto r)

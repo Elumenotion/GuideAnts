@@ -14,7 +14,7 @@ vi.mock('../../../../services/api', () => ({
           overrideAllChatModels: true,
           temperature: null,
           topP: null,
-          reasoningEffort: null,
+          reasoningEffort: 'enabled',
           samplingParametersJson: null,
         })),
         update: vi.fn(async () => ({
@@ -26,6 +26,25 @@ vi.mock('../../../../services/api', () => ({
           reasoningEffort: null,
           samplingParametersJson: null,
         })),
+      },
+    },
+    guides: {
+      catalogs: {
+        models: vi.fn(async () => ([
+          {
+            modelId: 'gpt-5-mini',
+            displayName: 'GPT-5 mini',
+            provider: 'azure-openai',
+            isActive: true,
+            reasoningChoices: ['minimal', 'low', 'medium', 'high'],
+          },
+          {
+            modelId: 'gemini-2.5-flash',
+            displayName: 'Gemini 2.5 Flash',
+            provider: 'google-gemini-chat',
+            isActive: true,
+          },
+        ])),
       },
     },
     projects: {
@@ -56,7 +75,10 @@ describe('ChatToolbarPanel', () => {
           overrideAllChatModels: true,
           supportsLocalRuntimePower: false,
           localRuntimeOn: false,
-          modelOptions: [{ modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true }],
+          modelOptions: [
+            { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+            { modelId: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', provider: 'google-gemini-chat', isActive: true },
+          ],
           blockers: [],
           inProgressOperationId: null,
           inProgressState: null,
@@ -72,8 +94,14 @@ describe('ChatToolbarPanel', () => {
       />
     );
 
-    await user.click(screen.getByRole('option', { name: /GPT-5 mini/i }));
+    await user.click(screen.getByRole('option', { name: /Gemini 2.5 Flash/i }));
     expect(api.settings.chatDefaults.update).toHaveBeenCalled();
+    expect(api.settings.chatDefaults.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModelId: 'gemini-2.5-flash',
+        reasoningEffort: null,
+      })
+    );
     expect(onRefresh).toHaveBeenCalled();
   });
 });

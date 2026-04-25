@@ -7,6 +7,7 @@ using GuideAntsApi.BackgroundJobs.Options;
 using GuideAntsApi.BackgroundJobs.Services.Embeddings;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Tests.TestUtils;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -148,6 +149,15 @@ public sealed class LocalEmbeddingServiceTests
                     EmbeddingsBaseUrl = "http://localhost:8110"
                 }),
                 NullLogger<LocalEmbeddingService>.Instance),
+            new GoogleGeminiEmbeddingService(
+                new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
+                BuildConfiguration()),
+            new HuggingFaceEmbeddingService(
+                new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
+                BuildConfiguration()),
+            new OpenRouterEmbeddingService(
+                new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
+                BuildConfiguration()),
             new FakeServiceModeResolver(
                 RoutedServiceNames.Embeddings,
                 providerSection: "LocalServiceHosts:EmbeddingsBaseUrl"));
@@ -170,6 +180,15 @@ public sealed class LocalEmbeddingServiceTests
                 new StaticOptionsMonitor<EmbeddingsOptions>(new EmbeddingsOptions()),
                 new StaticOptionsMonitor<LocalServiceHostsOptions>(new LocalServiceHostsOptions()),
                 NullLogger<LocalEmbeddingService>.Instance),
+            new GoogleGeminiEmbeddingService(
+                new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
+                BuildConfiguration()),
+            new HuggingFaceEmbeddingService(
+                new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
+                BuildConfiguration()),
+            new OpenRouterEmbeddingService(
+                new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
+                BuildConfiguration()),
             new FakeServiceModeResolver(
                 RoutedServiceNames.Embeddings,
                 providerSection: "SomeBogusSection"));
@@ -292,5 +311,18 @@ public sealed class LocalEmbeddingServiceTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => handler(request, cancellationToken);
+    }
+
+    private static IConfiguration BuildConfiguration()
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["GoogleGeminiApi:ApiKey"] = "key",
+                ["HuggingFace:Token"] = "hf-token",
+                ["OpenRouter:ApiKey"] = "or-key",
+                ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1"
+            })
+            .Build();
     }
 }

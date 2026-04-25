@@ -43,6 +43,7 @@ export function ImageGenerationEditor() {
   }
 
   const isLocal = selectedProvider.providerKind !== 'Cloud';
+  const isAzureCloud = selectedProvider.providerId === 'ImageGeneration.AzureOpenAI.Images';
 
   return (
     <ServiceEditorShell
@@ -75,7 +76,7 @@ export function ImageGenerationEditor() {
             onClearFieldError={clearFieldError}
           />
 
-          {!isLocal ? (
+          {isAzureCloud ? (
             <div className="space-y-2 border-t border-gray-100 pt-4">
               <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Generation profile</div>
               <p className="text-sm text-gray-700">
@@ -90,6 +91,13 @@ export function ImageGenerationEditor() {
                 Cloud image generation does not honor an output-format field in the request payload for this stack — use PNG
                 unless the deployment documentation specifies otherwise.
               </p>
+            </div>
+          ) : null}
+
+          {!isLocal && !isAzureCloud ? (
+            <div className="space-y-2 border-t border-gray-100 pt-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Generation behavior</div>
+              {renderCloudImageBehavior(selectedProvider.providerId)}
             </div>
           ) : null}
 
@@ -121,14 +129,16 @@ export function ImageGenerationEditor() {
             </div>
           ) : null}
 
-          <div className="border-t border-gray-100 pt-4">
-            <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Runtime tuning (container)</div>
-            <p className="mt-1 text-sm text-gray-700">
-              Advanced Stable Diffusion engine variables (<span className="font-mono">GA_SD_*</span>) are configured on the
-              guideants-ai / SD container environment, not in Application Settings. Change them in compose or deployment
-              manifests when you need to adjust steps, CFG, sampling, warmup, or model paths on disk.
-            </p>
-          </div>
+          {isLocal ? (
+            <div className="border-t border-gray-100 pt-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Runtime tuning (container)</div>
+              <p className="mt-1 text-sm text-gray-700">
+                Advanced Stable Diffusion engine variables (<span className="font-mono">GA_SD_*</span>) are configured on the
+                guideants-ai / SD container environment, not in Application Settings. Change them in compose or deployment
+                manifests when you need to adjust steps, CFG, sampling, warmup, or model paths on disk.
+              </p>
+            </div>
+          ) : null}
         </div>
       }
       actions={
@@ -147,4 +157,52 @@ export function ImageGenerationEditor() {
       }
     />
   );
+}
+
+function renderCloudImageBehavior(providerId: string) {
+  switch (providerId) {
+    case 'ImageGeneration.Google.Imagen':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            Google Gemini image generation uses the selected <span className="font-mono">Image Model ID</span> through the
+            shared Gemini API key connection.
+          </li>
+          <li>
+            Requested image count, aspect ratio, and derived Gemini image size are forwarded through{' '}
+            <span className="font-mono">generateContent</span>. Output format remains provider-controlled on this adapter.
+          </li>
+        </ul>
+      );
+    case 'ImageGeneration.HuggingFace.Inference':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            Hugging Face image generation posts the prompt to the selected <span className="font-mono">Image Model ID</span>{' '}
+            using the shared <span className="font-mono">HuggingFace:Token</span>.
+          </li>
+          <li>
+            This adapter does not currently forward size, count, or output-format controls on the Hugging Face path.
+          </li>
+        </ul>
+      );
+    case 'ImageGeneration.OpenRouter.Image':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            OpenRouter image generation sends the selected <span className="font-mono">Image Model ID</span> through the
+            configured <span className="font-mono">BaseUrl</span> with image modality enabled.
+          </li>
+          <li>
+            Requested size and count are forwarded. Output format remains upstream-controlled on this adapter.
+          </li>
+        </ul>
+      );
+    default:
+      return (
+        <p className="text-sm text-gray-700">
+          Cloud image generation uses the selected provider connection and any service-mode fields shown above.
+        </p>
+      );
+  }
 }
