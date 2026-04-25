@@ -7,6 +7,7 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Core;
+using GuideAntsApi.Services.Routing;
 using AntRunner.Chat;
 using System.Text.Json;
 using GuideAntsApi.Tests.TestUtils;
@@ -47,8 +48,23 @@ public class TurnManagerTests
         var notebookFileServiceMock = new Mock<INotebookFileService>();
         var lineageServiceMock = new Mock<IFileLineageService>();
         var conversationManagerMock = new Mock<IConversationManager>();
+        var chatModelResolverMock = new Mock<IChatModelResolver>();
+        chatModelResolverMock
+            .Setup(x => x.Resolve(It.IsAny<string?>()))
+            .Returns(new ResolvedChatModel(
+                ModelId: "gpt-4.1",
+                ReferenceKind: ChatModelReferenceKind.Direct,
+                OverrideTemperature: null,
+                OverrideTopP: null,
+                OverrideReasoningEffort: null));
         var scopeFactory = new TestServiceScopeFactory(_context);
-        _manager = new TurnManager(scopeFactory, notebookFileServiceMock.Object, lineageServiceMock.Object, conversationManagerMock.Object, _loggerMock.Object);
+        _manager = new TurnManager(
+            scopeFactory,
+            notebookFileServiceMock.Object,
+            lineageServiceMock.Object,
+            conversationManagerMock.Object,
+            chatModelResolverMock.Object,
+            _loggerMock.Object);
 
         // Seed test data
         SeedTestData();
@@ -65,10 +81,10 @@ public class TurnManagerTests
     {
         var project = new Project { Id = _projectId, Title = "Test Project" };
         var template = new NotebookTemplate { Id = Guid.NewGuid(), TemplateName = "Test Template" };
-        var notebook = new Notebook 
-        { 
-            Id = _notebookId, 
-            Title = "Test Notebook", 
+        var notebook = new Notebook
+        {
+            Id = _notebookId,
+            Title = "Test Notebook",
             ProjectId = _projectId,
             NotebookTemplateId = template.Id
         };
@@ -153,7 +169,7 @@ public class TurnManagerTests
         var savedTurns = await _context.ConversationTurns
             .Where(t => t.NotebookConversationId == _conversationId)
             .ToListAsync();
-        
+
         savedTurns.Should().BeEmpty(); // Turn should not be persisted until CompleteTurnAsync
     }
     #endregion
@@ -172,7 +188,7 @@ public class TurnManagerTests
         // Assert
         var savedTurn = await _context.ConversationTurns
             .FirstOrDefaultAsync(t => t.NotebookConversationId == _conversationId);
-        
+
         savedTurn.Should().NotBeNull();
         savedTurn!.NotebookConversationId.Should().Be(_conversationId);
         savedTurn.AssistantName.Should().Be("assistant");
@@ -194,10 +210,10 @@ public class TurnManagerTests
         // Assert
         var savedTurn = await _context.ConversationTurns
             .FirstOrDefaultAsync(t => t.NotebookConversationId == _conversationId);
-        
+
         savedTurn.Should().NotBeNull();
         savedTurn!.UsageJson.Should().NotBeNullOrEmpty();
-        
+
         // Verify usage JSON is stored
         savedTurn.UsageJson.Should().Contain("total_tokens");
         savedTurn.UsageJson.Should().Contain("150");
@@ -216,10 +232,10 @@ public class TurnManagerTests
         // Assert
         var savedTurn = await _context.ConversationTurns
             .FirstOrDefaultAsync(t => t.NotebookConversationId == _conversationId);
-        
+
         savedTurn.Should().NotBeNull();
         savedTurn!.ChatRunOutputJson.Should().NotBeNullOrEmpty();
-        
+
         // Verify chat output JSON is stored  
         savedTurn.ChatRunOutputJson.Should().Contain("usage");
     }
@@ -281,10 +297,10 @@ public class TurnManagerTests
         // Assert
         var updatedTurn = await _context.ConversationTurns
             .FirstOrDefaultAsync(t => t.NotebookConversationId == _conversationId);
-        
+
         updatedTurn.Should().NotBeNull();
         updatedTurn!.FilesCreated.Should().NotBeNullOrEmpty();
-        
+
         var deserializedFiles = JsonSerializer.Deserialize<List<string>>(updatedTurn.FilesCreated);
         deserializedFiles.Should().NotBeNull();
         deserializedFiles.Should().BeEquivalentTo(createdFiles);
@@ -303,10 +319,10 @@ public class TurnManagerTests
         // Assert
         var updatedTurn = await _context.ConversationTurns
             .FirstOrDefaultAsync(t => t.NotebookConversationId == _conversationId);
-        
+
         updatedTurn.Should().NotBeNull();
         updatedTurn!.FilesModified.Should().NotBeNullOrEmpty();
-        
+
         var deserializedFiles = JsonSerializer.Deserialize<List<string>>(updatedTurn.FilesModified);
         deserializedFiles.Should().NotBeNull();
         deserializedFiles.Should().BeEquivalentTo(modifiedFiles);
@@ -346,7 +362,7 @@ public class TurnManagerTests
         // Arrange
         var turn1 = await CreateAndCompleteTurn(1);
         var turn2 = await CreateAndCompleteTurn(2);
-        
+
         await _manager.TrackFilesForTurnAsync(_conversationId, 1, new List<string> { "test1.txt" }, new List<string>());
         await _manager.TrackFilesForTurnAsync(_conversationId, 2, new List<string> { "test2.txt" }, new List<string>());
 
@@ -365,7 +381,7 @@ public class TurnManagerTests
         // Arrange
         var turn1 = await CreateAndCompleteTurn(1);
         var turn2 = await CreateAndCompleteTurn(2);
-        
+
         // Same file created in both turns
         await _manager.TrackFilesForTurnAsync(_conversationId, 1, new List<string> { "test1.txt" }, new List<string>());
         await _manager.TrackFilesForTurnAsync(_conversationId, 2, new List<string> { "test1.txt" }, new List<string>());
@@ -385,7 +401,7 @@ public class TurnManagerTests
     {
         // Arrange
         var turn = await CreateAndCompleteTurn(1);
-        
+
         // Create FileLineageEvent entries  
         var lineageEvent1 = new FileLineageEvent
         {
@@ -446,10 +462,10 @@ public class TurnManagerTests
             Instructions = $"Test instructions {turnIndex}",
             Created = DateTime.UtcNow
         };
-        
+
         _context.ConversationTurns.Add(turn);
         await _context.SaveChangesAsync();
-        
+
         return turn;
     }
 
@@ -457,13 +473,13 @@ public class TurnManagerTests
     {
         var turn = await _manager.CreateTurnAsync(_conversationId, "assistant", $"Test instructions {turnIndex}");
         var chatOutput = CreateTestChatRunOutput();
-        
+
         await _manager.CompleteTurnAsync(_conversationId, turn, chatOutput);
-        
+
         // Return the database entity, not the AntRunner.Chat.Turn
         var dbTurn = await _context.ConversationTurns
             .FirstOrDefaultAsync(t => t.NotebookConversationId == _conversationId && t.TurnIndex == turnIndex);
-        
+
         return dbTurn!;
     }
 
@@ -496,8 +512,8 @@ public class TurnManagerTests
                 }
             }
         };
-        
+
         return output;
     }
     #endregion
-} 
+}
