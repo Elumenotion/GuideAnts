@@ -192,8 +192,6 @@ services:
 volumes:
   guideants_mssql_runtime_state:
   ai_local_models:
-    external: true
-    name: ai_local_models
 
 networks:
   guideants-network:
