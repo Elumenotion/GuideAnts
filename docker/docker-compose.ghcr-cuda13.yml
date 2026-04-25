@@ -1,26 +1,4 @@
 services:
-  mssql-express:
-    image: ${GA_MSSQL_IMAGE:-mssql2025-express-fts}
-    container_name: mssql-express
-    environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}' -Q 'SELECT 1' -C -No | grep -q 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
-    ports:
-      - "1434:1433"
-    cpus: "4.0"
-    volumes:
-      - mssql_runtime_state:/var/opt/mssql
-      - mssql_data:/var/opt/mssql/data
-      - mssql_ftdata:/var/opt/mssql/FTData
-      - mssql_log:/var/opt/mssql/log
-    restart: unless-stopped
-
   guideants-ai:
     image: ${GA_AI_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-cuda13:main}
     pull_policy: always
@@ -146,25 +124,26 @@ services:
     restart: unless-stopped
 
   guideants-webapi-ui:
-    image: ${GA_WEBAPI_UI_SLIM_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-webapi-ui-slim:main}
+    image: ${GA_WEBAPI_UI_MSSQL_IMAGE:-ghcr.io/elumenotion/guideants-webapi-ui-mssql:main}
     pull_policy: always
     container_name: guideants-webapi-ui
     depends_on:
-      mssql-express:
-        condition: service_healthy
       guideants-ai:
         condition: service_started
     ports:
       - "5107:8080"
     volumes:
+      - guideants_mssql_runtime_state:/var/opt/mssql
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
     environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
+      - MSSQL_DB_NAME=${GA_DB_NAME:-guideants-dev}
       - ASPNETCORE_URLS=http://+:8080
       - ASPNETCORE_ENVIRONMENT=Development
       - API_RUNTIME_CONTEXT=compose-ghcr-cuda13
-      - ConnectionStrings__DefaultConnection=Server=mssql-express,1433;Initial Catalog=${GA_DB_NAME:-guideants-dev};Persist Security Info=False;User ID=sa;Password=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd};MultipleActiveResultSets=True;Encrypt=False;TrustServerCertificate=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;
       - FileStorage__Path=/app/ContentFiles
       - Ui__RootPath=/app/ui
       - Ui__DevServerUrl=
@@ -228,10 +207,7 @@ services:
       - guideants-network
 
 volumes:
-  mssql_runtime_state:
-  mssql_data:
-  mssql_ftdata:
-  mssql_log:
+  guideants_mssql_runtime_state:
   ai_local_models:
     external: true
     name: ai_local_models
