@@ -1,5 +1,4 @@
-# Pinned from docker.io/searxng/searxng:latest on 2026-04-24 for reproducible GHCR builds.
-FROM docker.io/searxng/searxng@sha256:c9100c29c14a77d5289263a671580226c3b8a396a1a0130d2f500f57076a0119 AS searxng-source
+FROM docker.io/searxng/searxng:latest AS searxng-source
 
 FROM mcr.microsoft.com/playwright/python:v1.56.0-noble
 
@@ -61,7 +60,9 @@ COPY --from=searxng-source /usr/local/searxng/entrypoint.sh /usr/local/searxng/e
 COPY docker/build/searxng/browser_api.py /opt/browser-render/browser_api.py
 COPY docker/build/searxng/entrypoint-with-browser.sh /usr/local/bin/entrypoint-with-browser.sh
 
-RUN chmod +x /usr/local/searxng/entrypoint.sh /usr/local/bin/entrypoint-with-browser.sh && \
+RUN mkdir -p /usr/local/searxng/.venv/bin && \
+    ln -sf /usr/local/bin/granian /usr/local/searxng/.venv/bin/granian && \
+    chmod +x /usr/local/searxng/entrypoint.sh /usr/local/bin/entrypoint-with-browser.sh && \
     chown -R searxng:searxng /usr/local/searxng /etc/searxng /var/cache/searxng /opt/browser-render
 
 ENV __SEARXNG_CONFIG_PATH=/etc/searxng \
