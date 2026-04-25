@@ -8,6 +8,10 @@ RUN groupadd -r searxng && \
     useradd -r -g searxng -d /usr/local/searxng -s /bin/sh searxng && \
     mkdir -p /etc/searxng /var/cache/searxng /opt/browser-render
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends nginx tini && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir \
         annotated-doc==0.0.4 \
         anyio==4.13.0 \
@@ -59,6 +63,7 @@ COPY --from=searxng-source /usr/local/searxng/searx /usr/local/searxng/searx
 COPY --from=searxng-source /usr/local/searxng/entrypoint.sh /usr/local/searxng/entrypoint.sh
 COPY docker/build/searxng/browser_api.py /opt/browser-render/browser_api.py
 COPY docker/build/searxng/entrypoint-with-browser.sh /usr/local/bin/entrypoint-with-browser.sh
+COPY docker/build/searxng/nginx.conf /etc/nginx/nginx.conf
 
 RUN mkdir -p /usr/local/searxng/.venv/bin && \
     ln -sf /usr/local/bin/granian /usr/local/searxng/.venv/bin/granian && \
@@ -73,14 +78,14 @@ ENV __SEARXNG_CONFIG_PATH=/etc/searxng \
     __SEARXNG_VERSION=custom-playwright \
     GRANIAN_PROCESS_NAME=searxng \
     GRANIAN_INTERFACE=wsgi \
-    GRANIAN_HOST=:: \
-    GRANIAN_PORT=8080 \
+    GRANIAN_HOST=127.0.0.1 \
+    GRANIAN_PORT=8081 \
     GRANIAN_WEBSOCKETS=false \
     GRANIAN_BLOCKING_THREADS=4 \
     GRANIAN_WORKERS_KILL_TIMEOUT=30s \
     GRANIAN_BLOCKING_THREADS_IDLE_TIMEOUT=5m \
     BROWSER_RENDER_PORT=3001
 
-EXPOSE 8080 3001
+EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/entrypoint-with-browser.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint-with-browser.sh"]

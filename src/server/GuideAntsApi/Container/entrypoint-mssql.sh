@@ -5,12 +5,14 @@ set -euo pipefail
 : "${MSSQL_PID:=Express}"
 : "${MSSQL_TCP_PORT:=1433}"
 : "${MSSQL_DB_NAME:=guideants-dev}"
+: "${ASPNETCORE_URLS:=http://127.0.0.1:8081}"
 : "${SQL_READY_RETRIES:=60}"
 : "${SQL_READY_SLEEP_SECONDS:=2}"
 
 export ACCEPT_EULA
 export MSSQL_PID
 export MSSQL_TCP_PORT
+export ASPNETCORE_URLS
 
 if [[ -z "${MSSQL_SA_PASSWORD:-}" ]]; then
   echo "MSSQL_SA_PASSWORD is required for the mssql container image." >&2
@@ -27,8 +29,27 @@ mkdir -p \
 
 chown -R mssql:mssql /var/opt/mssql
 
+nginx -g 'daemon off;' &
+nginx_pid=$!
+
 runuser -u mssql -- /opt/mssql/bin/sqlservr &
 sql_pid=$!
+
+shutdown() {
+  if [[ -n "${app_pid:-}" ]] && kill -0 "${app_pid}" 2>/dev/null; then
+    kill -TERM "${app_pid}" 2>/dev/null || true
+  fi
+
+  if [[ -n "${sql_pid:-}" ]] && kill -0 "${sql_pid}" 2>/dev/null; then
+    kill -TERM "${sql_pid}" 2>/dev/null || true
+  fi
+
+  if [[ -n "${nginx_pid:-}" ]] && kill -0 "${nginx_pid}" 2>/dev/null; then
+    kill -TERM "${nginx_pid}" 2>/dev/null || true
+  fi
+}
+
+trap shutdown TERM INT
 
 sql_ready=0
 for ((attempt = 1; attempt <= SQL_READY_RETRIES; attempt++)); do
@@ -66,25 +87,14 @@ fi
 dotnet /app/GuideAntsApi.dll &
 app_pid=$!
 
-shutdown() {
-  if [[ -n "${app_pid:-}" ]] && kill -0 "${app_pid}" 2>/dev/null; then
-    kill -TERM "${app_pid}" 2>/dev/null || true
-  fi
-
-  if [[ -n "${sql_pid:-}" ]] && kill -0 "${sql_pid}" 2>/dev/null; then
-    kill -TERM "${sql_pid}" 2>/dev/null || true
-  fi
-}
-
-trap shutdown TERM INT
-
 set +e
-wait -n "${app_pid}" "${sql_pid}"
+wait -n "${app_pid}" "${sql_pid}" "${nginx_pid}"
 exit_code=$?
 set -e
 
 shutdown
 wait "${app_pid}" 2>/dev/null || true
 wait "${sql_pid}" 2>/dev/null || true
+wait "${nginx_pid}" 2>/dev/null || true
 
 exit "${exit_code}"

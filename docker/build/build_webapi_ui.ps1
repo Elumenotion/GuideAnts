@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $dockerRoot = Split-Path $PSScriptRoot -Parent
-$buildContext = Join-Path $repoRoot 'src'
+$buildContext = $repoRoot
 $dockerfilePath = Join-Path $PSScriptRoot 'webapi-ui\Dockerfile'
 $clientRoot = Join-Path $repoRoot 'src\client'
 $clientNodeModules = Join-Path $clientRoot 'node_modules'

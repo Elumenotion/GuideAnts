@@ -278,6 +278,8 @@ public class Program
                 });
             });
         });
+
+        app.MapGet("/api/startup", () => Results.Ok(new { status = "ready" }));
         
         app.MapProjectEndpoints();
         app.MapGuidesMarkdownEndpoints();

@@ -76,7 +76,7 @@ jobs:
       - name: Build and push mssql image
         uses: docker/build-push-action@v6
         with:
-          context: ./src
+          context: .
           file: ./docker/build/webapi-ui/Dockerfile
           target: runtime-mssql
           platforms: linux/amd64

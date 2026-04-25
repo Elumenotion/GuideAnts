@@ -3,6 +3,7 @@ import { HashRouter, BrowserRouter } from 'react-router-dom';
 import AppContent from './components/AppContent';
 import ZoomControl from './components/ZoomControl';
 import ErrorBoundary from './components/ErrorBoundary';
+import StartupGate from './components/StartupGate';
 import { ToastProvider } from './components/common/Toast';
 import { useMermaidCleanup } from './hooks/useMermaidCleanup';
 import { useAppPort } from './hooks/useAppPort';
@@ -44,11 +45,13 @@ function App() {
       <ErrorBoundary>
         <ToastProvider>
           <DndProvider backend={HTML5Backend}>
-            <Router>
-              <UrlCorrector />
-              {isElectron() && <ZoomControl />}
-              <AppContent />
-            </Router>
+            <StartupGate enabled={routerType === 'browser'}>
+              <Router>
+                <UrlCorrector />
+                {isElectron() && <ZoomControl />}
+                <AppContent />
+              </Router>
+            </StartupGate>
           </DndProvider>
         </ToastProvider>
       </ErrorBoundary>

@@ -1,3 +1,5 @@
+name: guideants
+
 services:
   # SQL Server Database
   mssql-express:
@@ -191,7 +193,7 @@ services:
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
     environment:
-      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_URLS=http://127.0.0.1:8081
       - ASPNETCORE_ENVIRONMENT=Development
       - API_RUNTIME_CONTEXT=compose
       - ConnectionStrings__DefaultConnection=Server=mssql-express,1433;Initial Catalog=${GA_DB_NAME:-guideants-dev};Persist Security Info=False;User ID=sa;Password=YourStrong!Passw0rd;MultipleActiveResultSets=True;Encrypt=False;TrustServerCertificate=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;
@@ -201,7 +203,7 @@ services:
       - ALLOWED_ORIGINS=*
       - ANTRUNNER_SERVICES_HOST_URL=http://guideants-webapi-ui:8080/
       - SearXngSearch__BaseUrl=http://searxng:8080
-      - BrowserRendering__BaseUrl=http://searxng:3001
+      - BrowserRendering__BaseUrl=http://searxng:8080
       - LocalServiceHosts__SpeechTranscriptionBaseUrl=http://guideants-ai:80
       - LocalServiceHosts__SpeechSynthesisBaseUrl=http://guideants-ai:80
       - LocalServiceHosts__ImageGenerationBaseUrl=http://guideants-ai:80
@@ -246,7 +248,6 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8091:8080"
-      - "127.0.0.1:8092:3001"
     volumes:
       - type: bind
         source: ${GA_SEARXNG_CONFIG_HOST_PATH:-./volumes/searxng/config}
@@ -265,15 +266,7 @@ volumes:
   mssql_data:
   mssql_ftdata:
   mssql_log:
-  # One named volume holds every local AI model under per-service
-  # subdirs (llama/ asr/ sd/ tts/ emb/). Declared `external` so compose
-  # does NOT prefix it with the project name — the exact volume name
-  # `ai_local_models` is what
-  # docker/scripts/migrate-local-models-to-single-volume.ps1 creates
-  # and populates before `docker compose up` is ever run.
   ai_local_models:
-    external: true
-    name: ai_local_models
 
 networks:
   guideants-network:

@@ -45,6 +45,9 @@ PY
 
 ensure_json_format
 
+nginx -g 'daemon off;' &
+nginx_pid=$!
+
 python /opt/browser-render/browser_api.py &
 browser_pid=$!
 
@@ -52,15 +55,19 @@ browser_pid=$!
 searx_pid=$!
 
 cleanup() {
-  kill -TERM "$browser_pid" "$searx_pid" 2>/dev/null || true
+  kill -TERM "$nginx_pid" "$browser_pid" "$searx_pid" 2>/dev/null || true
 }
 
 trap cleanup INT TERM
 
-while kill -0 "$browser_pid" 2>/dev/null && kill -0 "$searx_pid" 2>/dev/null; do
-  sleep 1
-done
+set +e
+wait -n "$nginx_pid" "$browser_pid" "$searx_pid"
+exit_code=$?
+set -e
 
+cleanup
+wait "$nginx_pid" || true
 wait "$browser_pid" || true
 wait "$searx_pid" || true
-cleanup
+
+exit "$exit_code"

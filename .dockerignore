@@ -1,0 +1,29 @@
+# Node.js dependencies and build output
+node_modules/
+src/client/node_modules/
+src/client/dist/
+src/client/coverage/
+
+# .NET build output
+**/bin/
+**/obj/
+src/server/TestResults/
+
+# IDE and git
+.git/
+**/.vs/
+**/.vscode/
+**/*.user
+**/*.suo
+**/*.cache
+**/*.log
+
+# Local environment and temporary artifacts
+**/.env
+**/.env.*
+**/*.tmp
+**/*.temp
+
+# Local runtime data
+artifacts/
+docker/volumes/
