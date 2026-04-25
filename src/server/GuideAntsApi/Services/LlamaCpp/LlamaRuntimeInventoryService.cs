@@ -1,6 +1,7 @@
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GuideAntsApi.Services.LlamaCpp;
 
@@ -11,18 +12,18 @@ public interface ILlamaRuntimeInventoryService
 
 public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
 {
-    private readonly ApplicationDbContext _context;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IRouterModelsConfigService _routerModels;
     private readonly ILlamaServerRuntimeClient _llamaClient;
     private readonly ILogger<LlamaRuntimeInventoryService> _logger;
 
     public LlamaRuntimeInventoryService(
-        ApplicationDbContext context,
+        IServiceScopeFactory scopeFactory,
         IRouterModelsConfigService routerModels,
         ILlamaServerRuntimeClient llamaClient,
         ILogger<LlamaRuntimeInventoryService> logger)
     {
-        _context = context;
+        _scopeFactory = scopeFactory;
         _routerModels = routerModels;
         _llamaClient = llamaClient;
         _logger = logger;
@@ -30,6 +31,12 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
 
     public async Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> GetInventoryAsync(CancellationToken cancellationToken = default)
     {
+        // Use a fresh DbContext for this call. GetInventoryAsync is invoked in parallel
+        // from readiness probes (e.g. header toolbar) but DbContext is not thread-safe
+        // or re-entrant across concurrent async operations.
+        using var scope = _scopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
         IReadOnlyList<RouterModelEntry> routerEntries;
         try
         {
@@ -65,7 +72,7 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
             runtimeById[item.Id] = item;
         }
 
-        var catalogRows = await _context.Models
+        var catalogRows = await context.Models
             .AsNoTracking()
             .Where(m => m.Provider == "llama-cpp")
             .Select(m => new { m.ModelId, m.LocalRuntimeJson })
@@ -124,7 +131,10 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
             catalogByRouter.TryGetValue(routerId, out var catalogIds);
             catalogIds ??= [];
 
-            var notebookCount = await CountNotebookReferencesAsync(catalogIds, cancellationToken).ConfigureAwait(false);
+            var notebookCount = await CountNotebookReferencesAsync(
+                context,
+                catalogIds,
+                cancellationToken).ConfigureAwait(false);
 
             results.Add(new LlamaRuntimeInventoryItemDto(
                 RouterModelId: routerId,
@@ -162,7 +172,10 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
         return "unknown";
     }
 
-    private Task<int> CountNotebookReferencesAsync(IReadOnlyList<string> catalogModelIds, CancellationToken cancellationToken)
+    private static Task<int> CountNotebookReferencesAsync(
+        ApplicationDbContext context,
+        IReadOnlyList<string> catalogModelIds,
+        CancellationToken cancellationToken)
     {
         if (catalogModelIds.Count == 0)
         {
@@ -170,7 +183,7 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
         }
 
         var idSet = catalogModelIds.ToHashSet(StringComparer.Ordinal);
-        return _context.Notebooks
+        return context.Notebooks
             .AsNoTracking()
             .Where(n => n.Guide != null && (
                 (n.Guide!.ModelId != null && idSet.Contains(n.Guide.ModelId)) ||

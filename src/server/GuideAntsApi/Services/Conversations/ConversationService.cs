@@ -693,17 +693,19 @@ _logger.LogCritical("🚨 DELETING CONVERSATION {ConversationId} - THIS WILL CAS
                 await db.SaveChangesAsync(cancellationToken);
             }
             
-            // Sync before emitting complete so assistant-created files are in DB (OCR/indexing still async via sync).
-            if (_notebookFileSyncService != null && ctx.Conversation.Notebook != null)
+            // Do not block unlock on a full notebook walk. File-producing tools already reconcile
+            // synchronously before they return; if a turn reported changes, queue a best-effort
+            // follow-up sync for any stragglers instead of holding the conversation open.
+            if (_notebookFileSyncService != null && ctx.Conversation.Notebook != null && ctx.TurnReportedFileChanges)
             {
                 try
                 {
-                    await _notebookFileSyncService.SyncNotebookAsync(ctx.Conversation.Notebook.Id);
+                    await _notebookFileSyncService.QueueNotebookSyncAsync(ctx.Conversation.Notebook.Id, CancellationToken.None);
                 }
                 catch (Exception syncEx)
                 {
                     // Never let sync errors break the conversation flow
-                    _logger.LogWarning(syncEx, "Failed to sync notebook {NotebookId} after turn completion", ctx.Conversation.Notebook.Id);
+                    _logger.LogWarning(syncEx, "Failed to queue notebook sync for {NotebookId} after turn completion", ctx.Conversation.Notebook.Id);
                 }
             }
 
@@ -1672,6 +1674,7 @@ _logger.LogCritical("🚨 DELETING CONVERSATION {ConversationId} - THIS WILL CAS
         public int TurnIndex { get; set; }
         public ConversationTurn? DbTurn { get; set; }
         public NotebookConversationMessage? UserMessage { get; set; }
+        public bool TurnReportedFileChanges { get; set; }
     }
 
     private sealed class StreamingInfra
@@ -2410,6 +2413,10 @@ var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.co
                 // Update turn with completion details
                 if (output != null)
                 {
+                    ctx.TurnReportedFileChanges =
+                        (output.NewFiles?.Count > 0) ||
+                        (output.ModifiedFiles?.Count > 0);
+
                     using (var turnScope = _scopeFactory.CreateScope())
                     {
                         var turnDb = turnScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();

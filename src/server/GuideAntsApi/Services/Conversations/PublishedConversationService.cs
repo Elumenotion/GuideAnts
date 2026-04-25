@@ -1329,10 +1329,14 @@ public class PublishedConversationService : IPublishedConversationService
 						_logger.LogWarning(ex, "Failed to record tool call usage for turn {TurnIndex}", dbTurn!.TurnIndex);
 					}
 
-					if (_notebookFileSyncService != null && dbConversation.Notebook != null)
+					var turnReportedFileChanges =
+						(output?.NewFiles?.Count > 0) ||
+						(output?.ModifiedFiles?.Count > 0);
+
+					if (_notebookFileSyncService != null && dbConversation.Notebook != null && turnReportedFileChanges)
 					{
-						try { await _notebookFileSyncService.SyncNotebookAsync(dbConversation.Notebook.Id); }
-						catch (Exception ex) { _logger.LogWarning(ex, "Failed to sync notebook after published turn"); }
+						try { await _notebookFileSyncService.QueueNotebookSyncAsync(dbConversation.Notebook.Id, CancellationToken.None); }
+						catch (Exception ex) { _logger.LogWarning(ex, "Failed to queue notebook sync after published turn"); }
 					}
 
 					writer.TryWrite(new StreamingEvent(StreamingEventTypes.Complete, "{}"));
@@ -2191,4 +2195,3 @@ public class PublishedConversationService : IPublishedConversationService
 		}
 	}
 }
-
