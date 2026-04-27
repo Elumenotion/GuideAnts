@@ -45,7 +45,7 @@ namespace GuideAntsApi.DataModel.Models
         /// <summary>
         /// Optional JSON string containing local runtime configuration for local models (e.g., llama-cpp).
         /// Canonical shape for llama-cpp:
-        /// { routerModelId, resourceGroupKey, runtimeProfileId, loadParams?, parallelToolCalls? }.
+        /// { routerModelId, runtimeProfileId, loadParams?, parallelToolCalls? }.
         /// </summary>
         public string? LocalRuntimeJson { get; set; }
 

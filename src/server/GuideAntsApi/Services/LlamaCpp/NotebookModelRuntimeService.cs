@@ -82,20 +82,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             return status;
         }
 
-        // Check compatibility
-        var envelopes = requiredModels
-            .Where(m => m.LocalRuntime != null)
-            .Select(m => m.LocalRuntime!.ResourceGroupKey)
-            .Distinct()
-            .ToList();
-
-        if (envelopes.Count > 1)
-        {
-            status.State = "invalid";
-            status.Conflicts.Add($"Incompatible models detected. Found multiple resourceGroupKey values: {string.Join(", ", envelopes)}");
-            return status;
-        }
-
         // Check current router state
         try
         {
@@ -488,7 +474,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
         return new LocalRuntimeDescriptorDto(
             parsed.RouterModelId,
-            parsed.ResourceGroupKey,
             parsed.RuntimeProfileId,
             parsed.LoadParams);
     }

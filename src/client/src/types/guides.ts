@@ -262,7 +262,6 @@ export interface CrewMemberDto {
 // Catalog types
 export interface LocalRuntimeDescriptorDto {
   routerModelId: string;
-  resourceGroupKey: string;
   runtimeProfileId: string;
   loadParams?: Record<string, unknown>;
 }

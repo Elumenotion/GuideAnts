@@ -127,11 +127,6 @@ public sealed partial class ApplicationSettingsService
         }
 
         var parsed = LocalRuntimeConfigurationParser.ParseRequired(modelId, localRuntimeJson);
-        if (!string.Equals(parsed.ResourceGroupKey, "local", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Model '{modelId}' must use resourceGroupKey 'local'. Multi-pool scheduling is not available yet.");
-        }
         _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
         return LocalRuntimeConfigurationParser.SerializeCanonical(parsed);
     }

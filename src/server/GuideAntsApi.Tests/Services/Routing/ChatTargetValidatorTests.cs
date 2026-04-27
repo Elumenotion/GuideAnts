@@ -197,7 +197,6 @@ public sealed class ChatTargetValidatorTests
         var runtimeJson = """
         {
             "routerModelId": "qwen-model",
-            "resourceGroupKey": "qwen-env",
             "runtimeProfileId": "qwen3_5",
             "loadParams": { "model": "qwen-model" }
         }
@@ -244,7 +243,6 @@ public sealed class ChatTargetValidatorTests
         var runtimeJson = """
         {
             "routerModelId": "qwen-mid-load",
-            "resourceGroupKey": "local",
             "runtimeProfileId": "concurrency-profile",
             "loadParams": { "model": "qwen-mid-load" }
         }
@@ -276,7 +274,6 @@ public sealed class ChatTargetValidatorTests
         var runtimeJson = """
         {
             "routerModelId": "qwen-model",
-            "resourceGroupKey": "qwen-env",
             "runtimeProfileId": "qwen3_5",
             "loadParams": { "model": "qwen-model" }
         }

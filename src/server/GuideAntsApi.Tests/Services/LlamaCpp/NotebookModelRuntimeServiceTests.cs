@@ -101,7 +101,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local", 
             Provider = "llama-cpp", 
             IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"resourceGroupKey\":\"qwen-env\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -134,7 +134,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local", 
             Provider = "llama-cpp", 
             IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"resourceGroupKey\":\"qwen-env\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -154,49 +154,6 @@ public class NotebookModelRuntimeServiceTests
     }
 
     [TestMethod]
-    public async Task GetRuntimeStatusAsync_IncompatibleModels_ReturnsInvalid()
-    {
-        // Arrange
-        var notebookId = Guid.NewGuid();
-        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
-        var assistant = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Assistant, ModelId = "llama-local" };
-        var guideMember = new GuideMember { GuideId = guide.Id, AssistantId = assistant.Id, Assistant = assistant };
-        guide.CrewMembers.Add(guideMember);
-        
-        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
-        
-        _context.Assistants.Add(guide);
-        _context.Assistants.Add(assistant);
-        _context.Notebooks.Add(notebook);
-        
-        var model1 = new Model 
-        { 
-            ModelId = "qwen-local", 
-            Provider = "llama-cpp", 
-            IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"resourceGroupKey\":\"qwen-env\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
-        };
-        var model2 = new Model 
-        { 
-            ModelId = "llama-local", 
-            Provider = "llama-cpp", 
-            IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"llama-model\",\"resourceGroupKey\":\"llama-env\",\"runtimeProfileId\":\"gemma4\",\"loadParams\":{\"model\":\"llama-model\"}}"
-        };
-        _context.Models.Add(model1);
-        _context.Models.Add(model2);
-        await _context.SaveChangesAsync();
-
-        // Act
-        var status = await _service.GetRuntimeStatusAsync(notebookId);
-
-        // Assert
-        Assert.AreEqual("invalid", status.State);
-        Assert.AreEqual(2, status.RequiredModels.Count);
-        Assert.IsTrue(status.Conflicts.Count > 0);
-    }
-
-    [TestMethod]
     public async Task GetRuntimeStatusAsync_ReusesCachedRouterSnapshot_ForRepeatedChecks()
     {
         // Arrange
@@ -212,7 +169,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"resourceGroupKey\":\"qwen-env\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -262,7 +219,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"resourceGroupKey\":\"qwen-env\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();

@@ -179,9 +179,9 @@ knobs:
 Persistence / flow:
 
 1. Wizard/edit form captures the values under guided local-runtime config.
-2. API stores them in `LocalRuntimeJson` (`LocalRuntimeConfiguration`) and, for
-   HF installs, in `LlamaCatalogDownloadIntent` so async completion can register
-   with the same settings.
+2. API stores them in `LocalRuntimeJson` (`LocalRuntimeConfiguration`). For
+   HF installs, the live download poller keeps the pending catalog registration
+   request until the runtime-owned download reports completion.
 3. On llama-cpp model create/update, `ApplicationSettingsService` invokes
    `ILlamaRouterIniSyncService` to reconcile the matching alias in
    `router-models.ini` (when alias paths already exist).
@@ -213,7 +213,7 @@ Key behaviors:
   writes, per-alias download serialization, and atomic router registration
   are implemented by the admin service inside `guideants-ai`.
 - **Operation state machine.** `queued → resolvingFiles → downloading →
-  registeringAlias → registeringCatalog → completed | failed`, produced by the admin service and
+  registeringAlias → completed | failed`, produced by the admin service and
   polled via
   `GET /api/settings/llama/downloads/{operationId}`.
 
@@ -271,7 +271,7 @@ New model onboarding path:
     returns a synchronous catalog row create when the alias is orphaned and
     artifacts are present.
   - Async status is polled from `GET /api/settings/llama/downloads/{operationId}`
-    with the state machine segment `queued → resolvingFiles → downloading → registeringAlias → registeringCatalog → completed | failed`.
+    with the state machine segment `queued → resolvingFiles → downloading → registeringAlias → completed | failed`.
 
 The `ModelStorePath` and `RouterModelsConfigPath` appear in the tab header
 and also in Infrastructure → Runtime Dependencies (R-6.12 / R-5.7).

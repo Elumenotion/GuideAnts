@@ -324,7 +324,6 @@ export interface AddModelCatalogDto {
   modelId: string;
   displayName: string;
   description?: string;
-  resourceGroupKey: string;
   displayOrder?: number;
   isActive: boolean;
 }
@@ -346,9 +345,9 @@ export interface AddModelInstallDto {
   runtimeProfileId: string;
   huggingFace?: AddModelInstallHuggingFaceDto;
   existingAlias?: AddModelInstallExistingAliasDto;
-  /** Optional. Written to LocalRuntimeJson and, for HF, catalog download intent. */
+  /** Optional. Written to LocalRuntimeJson and included in HF catalog registration. */
   routerContextSize?: number;
-  /** Optional. Written to LocalRuntimeJson and, for HF, catalog download intent. */
+  /** Optional. Written to LocalRuntimeJson and included in HF catalog registration. */
   routerCacheRamMib?: number;
 }
 
@@ -462,17 +461,16 @@ export interface StartModelDownloadRequest {
   routerModelId: string;
   targetDirectory: string;
   /**
-   * Catalog auto-registration intent. When all three catalog fields are
-   * supplied, the API creates a matching catalog Model row as soon as the
-   * download completes, so the alias is immediately usable as a chat
-   * target. Leaving any of them blank skips auto-registration and the
-   * operator must create the row manually via Settings → Models.
+   * Catalog registration fields. When all three are supplied, the API creates
+   * a matching catalog Model row as soon as the download completes, so the
+   * alias is immediately usable as a chat target. Leaving any of them blank
+   * skips auto-registration and the operator must create the row manually via
+   * Settings → Models.
    */
   catalogModelId?: string;
   catalogDisplayName?: string;
   catalogRuntimeProfileId?: string;
   catalogDescription?: string;
-  catalogResourceGroupKey?: string;
   catalogIsActive?: boolean;
   catalogDisplayOrder?: number;
   catalogLoadParamsJson?: string;

@@ -302,11 +302,34 @@ public static class SettingsEndpoints
 
         group.MapDelete("/models/{modelId}", async (
             string modelId,
+            ILlamaRuntimeInventoryService inventoryService,
+            ILlamaServerRuntimeClient llamaClient,
+            ILlamaRuntimeCoordinator coordinator,
+            ILlamaRuntimeAdminClient adminClient,
             IApplicationSettingsService settingsService,
             CancellationToken cancellationToken) =>
         {
             try
             {
+                var models = await settingsService.GetModelsAsync(cancellationToken).ConfigureAwait(false);
+                var model = models.FirstOrDefault(m => string.Equals(m.ModelId, modelId, StringComparison.Ordinal));
+                if (model is null)
+                {
+                    return Results.NotFound();
+                }
+
+                if (TryGetLlamaRouterModelId(model, out var routerModelId))
+                {
+                    return await DeleteLlamaRouterEntryAsync(
+                        routerModelId,
+                        inventoryService,
+                        llamaClient,
+                        coordinator,
+                        adminClient,
+                        settingsService,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
                 var deleted = await settingsService.DeleteModelAsync(modelId, cancellationToken);
                 return deleted ? Results.NoContent() : Results.NotFound();
             }
@@ -318,7 +341,9 @@ public static class SettingsEndpoints
         .WithName("DeleteSettingsModel")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
-        .Produces(StatusCodes.Status404NotFound);
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status409Conflict)
+        .ProducesProblem(StatusCodes.Status502BadGateway);
 
         group.MapGet("/runtime-profiles", async (
             IApplicationSettingsService settingsService,
@@ -1450,93 +1475,14 @@ public static class SettingsEndpoints
             IApplicationSettingsService settingsService,
             CancellationToken cancellationToken) =>
         {
-            var trimmed = (routerModelId ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(trimmed))
-            {
-                return Results.BadRequest(new { error = "routerModelId is required" });
-            }
-
-            var inventory = await inventoryService.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
-            var row = inventory.FirstOrDefault(i =>
-                string.Equals(i.RouterModelId, trimmed, StringComparison.Ordinal));
-
-            if (row is null)
-            {
-                return Results.NotFound(new { error = $"No inventory entry for router alias '{trimmed}'." });
-            }
-
-            if (row.NotebookReferenceCount > 0)
-            {
-                return Results.Json(
-                    new
-                    {
-                        error = "Cannot delete this router alias while notebooks still reference one or more catalog rows that target it.",
-                        catalogModelIds = row.CatalogModelIds,
-                        notebookReferenceCount = row.NotebookReferenceCount,
-                    },
-                    statusCode: StatusCodes.Status409Conflict);
-            }
-
-            var handle = coordinator.TryAcquireAliasLock(trimmed);
-            if (handle is null)
-            {
-                var problem = new ProblemDetails
-                {
-                    Type = $"{RoutingProblemDetailsFactory.ProblemTypeBase}runtime-not-ready",
-                    Title = "Local runtime busy",
-                    Status = StatusCodes.Status409Conflict,
-                    Detail = $"A load or unload operation is already in progress for alias '{trimmed}'.",
-                };
-                problem.Extensions["code"] = RoutingErrorCodes.RuntimeNotReady;
-                problem.Extensions["action"] =
-                    "Wait for the in-flight operation on this alias to complete, then retry.";
-                problem.Extensions["modelId"] = trimmed;
-                return Results.Problem(problem);
-            }
-
-            await using var _ = handle;
-
-            if (string.Equals(row.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(row.RuntimeState, "loading", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    await llamaClient.UnloadModelAsync(trimmed, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    return Results.Problem($"Failed to unload model before delete: {ex.Message}");
-                }
-            }
-
-            try
-            {
-                var deleted = await adminClient.DeleteRouterEntryAsync(trimmed, cancellationToken).ConfigureAwait(false);
-                if (!deleted)
-                {
-                    return Results.NotFound(new { error = $"Router alias '{trimmed}' is not registered in llama-admin." });
-                }
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
-            }
-
-            try
-            {
-                foreach (var modelId in row.CatalogModelIds)
-                {
-                    await settingsService.DeleteModelAsync(modelId, cancellationToken).ConfigureAwait(false);
-                }
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem(
-                    detail: $"Router alias '{trimmed}' was deleted, but one or more catalog rows could not be removed: {ex.Message}",
-                    statusCode: StatusCodes.Status409Conflict);
-            }
-
-            return Results.NoContent();
+            return await DeleteLlamaRouterEntryAsync(
+                routerModelId,
+                inventoryService,
+                llamaClient,
+                coordinator,
+                adminClient,
+                settingsService,
+                cancellationToken).ConfigureAwait(false);
         })
         .WithName("DeleteLlamaRouterEntry")
         .Produces(StatusCodes.Status204NoContent)
@@ -1544,6 +1490,130 @@ public static class SettingsEndpoints
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status409Conflict)
         .ProducesProblem(StatusCodes.Status502BadGateway);
+    }
+
+    private static bool TryGetLlamaRouterModelId(SettingsModelDto model, out string routerModelId)
+    {
+        routerModelId = string.Empty;
+        if (!string.Equals(model.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(model.LocalRuntimeJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            routerModelId = LocalRuntimeConfigurationParser.Parse(model.ModelId, model.LocalRuntimeJson)
+                .RouterModelId
+                .Trim();
+            return routerModelId.Length > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<IResult> DeleteLlamaRouterEntryAsync(
+        string routerModelId,
+        ILlamaRuntimeInventoryService inventoryService,
+        ILlamaServerRuntimeClient llamaClient,
+        ILlamaRuntimeCoordinator coordinator,
+        ILlamaRuntimeAdminClient adminClient,
+        IApplicationSettingsService settingsService,
+        CancellationToken cancellationToken)
+    {
+        var trimmed = (routerModelId ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return Results.BadRequest(new { error = "routerModelId is required" });
+        }
+
+        var inventory = await inventoryService.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
+        var row = inventory.FirstOrDefault(i =>
+            string.Equals(i.RouterModelId, trimmed, StringComparison.Ordinal));
+
+        if (row is null)
+        {
+            return Results.NotFound(new { error = $"No inventory entry for router alias '{trimmed}'." });
+        }
+
+        if (row.NotebookReferenceCount > 0)
+        {
+            return Results.Json(
+                new
+                {
+                    error = "Cannot delete this router alias while notebooks still reference one or more catalog rows that target it.",
+                    catalogModelIds = row.CatalogModelIds,
+                    notebookReferenceCount = row.NotebookReferenceCount,
+                },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        var handle = coordinator.TryAcquireAliasLock(trimmed);
+        if (handle is null)
+        {
+            var problem = new ProblemDetails
+            {
+                Type = $"{RoutingProblemDetailsFactory.ProblemTypeBase}runtime-not-ready",
+                Title = "Local runtime busy",
+                Status = StatusCodes.Status409Conflict,
+                Detail = $"A load or unload operation is already in progress for alias '{trimmed}'.",
+            };
+            problem.Extensions["code"] = RoutingErrorCodes.RuntimeNotReady;
+            problem.Extensions["action"] =
+                "Wait for the in-flight operation on this alias to complete, then retry.";
+            problem.Extensions["modelId"] = trimmed;
+            return Results.Problem(problem);
+        }
+
+        await using var _ = handle;
+
+        if (string.Equals(row.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(row.RuntimeState, "loading", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await llamaClient.UnloadModelAsync(trimmed, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem($"Failed to unload model before delete: {ex.Message}");
+            }
+        }
+
+        try
+        {
+            var deleted = await adminClient.DeleteRouterEntryAsync(trimmed, cancellationToken).ConfigureAwait(false);
+            if (!deleted)
+            {
+                return Results.NotFound(new { error = $"Router alias '{trimmed}' is not registered in llama-admin." });
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        try
+        {
+            foreach (var modelId in row.CatalogModelIds)
+            {
+                await settingsService.DeleteModelAsync(modelId, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(
+                detail: $"Router alias '{trimmed}' was deleted, but one or more catalog rows could not be removed: {ex.Message}",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        return Results.NoContent();
     }
 
     private static async Task ValidateAddModelRequestAsync(
@@ -1594,7 +1664,6 @@ public static class SettingsEndpoints
                 remediation: "Enter a display name in Step 2.");
         }
 
-        var resourceGroupKey = NormalizeResourceGroupKey(request.Catalog.ResourceGroupKey);
         var existingModels = await settingsService.GetModelsAsync(cancellationToken).ConfigureAwait(false);
         if (existingModels.Any(model => string.Equals(model.ModelId, modelId, StringComparison.OrdinalIgnoreCase)))
         {
@@ -1621,7 +1690,7 @@ public static class SettingsEndpoints
                 ModelId: modelId,
                 Provider: provider,
                 LocalRuntimeJson: string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-                    ? BuildLlamaLocalRuntimeJson(request, resourceGroupKey)
+                    ? BuildLlamaLocalRuntimeJson(request)
                     : null));
         }
         catch (RoutingException ex)
@@ -1678,21 +1747,6 @@ public static class SettingsEndpoints
         }
     }
 
-    private static string NormalizeResourceGroupKey(string? value)
-    {
-        var trimmed = (value ?? string.Empty).Trim();
-        if (!string.Equals(trimmed, "local", StringComparison.Ordinal))
-        {
-            throw new AddModelException(
-                code: "RESOURCE_GROUP_UNKNOWN",
-                step: "validation",
-                message: "Resource group 'local' is required. Multi-pool scheduling is not available yet.",
-                remediation: "Use the read-only local resource group value and retry.");
-        }
-
-        return trimmed;
-    }
-
     private static CreateSettingsModelRequest BuildModelCreateRequest(
         AddModelRequest request,
         string? reasoningChoicesJson,
@@ -1712,12 +1766,6 @@ public static class SettingsEndpoints
     }
 
     private static string BuildLlamaLocalRuntimeJson(AddModelRequest request)
-    {
-        var resourceGroupKey = NormalizeResourceGroupKey(request.Catalog.ResourceGroupKey);
-        return BuildLlamaLocalRuntimeJson(request, resourceGroupKey);
-    }
-
-    private static string BuildLlamaLocalRuntimeJson(AddModelRequest request, string resourceGroupKey)
     {
         if (request.Install is null)
         {
@@ -1753,7 +1801,6 @@ public static class SettingsEndpoints
 
         var config = new LocalRuntimeConfiguration(
             RouterModelId: routerModelId,
-            ResourceGroupKey: resourceGroupKey,
             RuntimeProfileId: runtimeProfileId,
             LoadParams: new JsonObject
             {
@@ -1777,7 +1824,6 @@ public static class SettingsEndpoints
                 remediation: "Complete the Hugging Face source fields in Step 3.");
         }
 
-        var resourceGroupKey = NormalizeResourceGroupKey(request.Catalog.ResourceGroupKey);
         return new StartModelDownloadRequest(
             Repository: request.Install.HuggingFace.Repository.Trim(),
             QuantIncludePattern: request.Install.HuggingFace.QuantIncludePattern.Trim(),
@@ -1790,7 +1836,6 @@ public static class SettingsEndpoints
             CatalogDescription: string.IsNullOrWhiteSpace(request.Catalog.Description)
                 ? null
                 : request.Catalog.Description.Trim(),
-            CatalogResourceGroupKey: resourceGroupKey,
             CatalogIsActive: request.Catalog.IsActive,
             CatalogDisplayOrder: request.Catalog.DisplayOrder,
             CatalogLoadParamsJson: JsonSerializer.Serialize(new { model = request.Install.RouterModelId.Trim() }),

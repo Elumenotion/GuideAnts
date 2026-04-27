@@ -48,7 +48,6 @@ export interface AddModelWizardState {
   catalogModelId: string;
   catalogDisplayName: string;
   catalogDescription: string;
-  catalogResourceGroupKey: string;
   catalogDisplayOrder: string;
   catalogIsActive: boolean;
   openAiReasoningEffortEnabled: boolean;
@@ -77,7 +76,6 @@ export interface CatalogEditState {
   openAiReasoningEffortEnabled: boolean;
   anthropicThinkingEnabled: boolean;
   localRuntimeRouterModelId: string;
-  localRuntimeResourceGroupKey: string;
   localRuntimeProfileId: string;
   localRuntimeLoadParamsJson: string;
   localRuntimeParallelToolCalls: boolean;
@@ -93,7 +91,6 @@ export interface ActiveAddOperationState {
 
 export interface CanonicalLocalRuntimeConfig {
   routerModelId: string;
-  resourceGroupKey: string;
   runtimeProfileId: string;
   loadParams?: Record<string, unknown>;
   parallelToolCalls?: boolean;

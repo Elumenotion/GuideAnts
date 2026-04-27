@@ -210,7 +210,7 @@ public sealed class RoutingReadinessServiceTests
             ModelId = "qwen-local",
             DisplayName = "Qwen Local",
             Provider = "llama-cpp",
-            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"resourceGroupKey\":\"rg\",\"runtimeProfileId\":\"qwen3_5\"}}",
+            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
             IsActive = true,
             Created = DateTime.UtcNow
         });
@@ -547,7 +547,7 @@ public sealed class RoutingReadinessServiceTests
             ModelId = "qwen-local",
             DisplayName = "Qwen Local",
             Provider = "llama-cpp",
-            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"resourceGroupKey\":\"rg\",\"runtimeProfileId\":\"qwen3_5\"}}",
+            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
             IsActive = true,
             Created = DateTime.UtcNow
         });
@@ -608,7 +608,7 @@ public sealed class RoutingReadinessServiceTests
             ModelId = "qwen-local",
             DisplayName = "Qwen Local",
             Provider = "llama-cpp",
-            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"resourceGroupKey\":\"rg\",\"runtimeProfileId\":\"qwen3_5\"}}",
+            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
             IsActive = true,
             Created = DateTime.UtcNow
         });
@@ -666,7 +666,7 @@ public sealed class RoutingReadinessServiceTests
             ModelId = "qwen-local",
             DisplayName = "Qwen Local",
             Provider = "llama-cpp",
-            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"resourceGroupKey\":\"rg\",\"runtimeProfileId\":\"qwen3_5\"}}",
+            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
             IsActive = true,
             Created = DateTime.UtcNow
         });

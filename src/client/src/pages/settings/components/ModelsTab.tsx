@@ -56,11 +56,10 @@ function classifyLocalRuntime(model: SettingsModelDto): LocalRuntimeClassificati
     const raw = JSON.parse(model.localRuntimeJson) as Record<string, unknown>;
     const routerModelId = typeof raw.routerModelId === 'string' ? raw.routerModelId : null;
     const runtimeProfileId = typeof raw.runtimeProfileId === 'string' ? raw.runtimeProfileId : null;
-    const resourceGroupKey = typeof raw.resourceGroupKey === 'string' ? raw.resourceGroupKey : null;
-    if (!routerModelId || !runtimeProfileId || !resourceGroupKey) {
+    if (!routerModelId || !runtimeProfileId) {
       return {
         state: 'invalid-json',
-        detail: 'Missing required fields (routerModelId, runtimeProfileId, resourceGroupKey).',
+        detail: 'Missing required fields (routerModelId, runtimeProfileId).',
       };
     }
     return { state: 'ok', routerModelId, runtimeProfileId };

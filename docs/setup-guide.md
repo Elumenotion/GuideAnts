@@ -407,7 +407,6 @@ End-to-end flow for `Qwen3.5-9B-Q5_K_M-local` through the wizard:
    - `modelId`: `Qwen3.5-9B-Q5_K_M-local`
    - `displayName`: `Qwen3.5 9B Q5_K_M (Local)`
    - `description`: blank
-   - `resourceGroupKey`: `local` (read-only under current Option B design)
    - `displayOrder`: blank
    - `isActive`: on
 4. **Step 3 (Provider config).**
@@ -435,7 +434,7 @@ End-to-end flow for `Qwen3.5-9B-Q5_K_M-local` through the wizard:
      the largest matching file wins.
    - Target directory: `Qwen3.5-9B-Q5_K_M`
 5. **Step 4 (Review).** Click `Create model`.
-6. **Step 5 (Progress).** Watch `queued → resolvingFiles → downloading → registeringAlias → registeringCatalog → completed`.
+6. **Step 5 (Progress).** Watch `queued → resolvingFiles → downloading → registeringAlias → completed`.
 7. **Load + verify.**
    - Runtime Inventory shows `hasModelFile=Yes`, `hasMmprojFile=Yes`, `runtimeState=unloaded`.
    - Click `Load`; state transitions `unloaded → loading → loaded`.

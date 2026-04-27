@@ -173,7 +173,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             ModelId = "qwen3.5-27b",
             DisplayName = "Qwen 3.5 27B",
             Provider = "llama-cpp",
-            LocalRuntimeJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"resourceGroupKey\":\"local\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"Qwen3.5-27B-Q6_K\"}}",
+            LocalRuntimeJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"Qwen3.5-27B-Q6_K\"}}",
             IsActive = true
         });
         db.SaveChanges();
@@ -250,7 +250,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             ModelId = "qwen3.5-27b",
             DisplayName = "Qwen 3.5 27B",
             Provider = "llama-cpp",
-            LocalRuntimeJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"resourceGroupKey\":\"local\",\"runtimeProfileId\":\"qwen3_5\",\"parallelToolCalls\":true}",
+            LocalRuntimeJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\",\"parallelToolCalls\":true}",
             IsActive = true
         });
         db.SaveChanges();
@@ -313,7 +313,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             ModelId = "qwen3.5-27b",
             DisplayName = "Qwen 3.5 27B",
             Provider = "llama-cpp",
-            LocalRuntimeJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"resourceGroupKey\":\"local\",\"runtimeProfileId\":\"unknown_profile\"}",
+            LocalRuntimeJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"unknown_profile\"}",
             IsActive = true
         });
         db.SaveChanges();

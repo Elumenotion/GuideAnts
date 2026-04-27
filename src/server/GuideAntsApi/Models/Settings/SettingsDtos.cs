@@ -220,7 +220,6 @@ public sealed record AddModelCatalogDto(
     string ModelId,
     string DisplayName,
     string? Description,
-    string? ResourceGroupKey,
     int? DisplayOrder,
     bool IsActive);
 
@@ -320,16 +319,14 @@ public sealed record StartModelDownloadRequest(
     string MmprojIncludePattern,
     string RouterModelId,
     string TargetDirectory,
-    // Catalog intent: when provided, the API auto-creates a matching catalog
-    // Model row once the download completes so the alias is immediately
-    // selectable as a chat target. All four must be supplied together; any
-    // missing field disables auto-registration (operator must create the
-    // catalog row manually via Settings → Models).
+    // Catalog registration fields: when provided, the API auto-creates a
+    // matching catalog Model row once the download completes so the alias is
+    // immediately selectable as a chat target. Missing fields disable
+    // auto-registration; the operator can create the row manually via Settings.
     string? CatalogModelId = null,
     string? CatalogDisplayName = null,
     string? CatalogRuntimeProfileId = null,
     string? CatalogDescription = null,
-    string? CatalogResourceGroupKey = null,
     bool? CatalogIsActive = null,
     int? CatalogDisplayOrder = null,
     string? CatalogLoadParamsJson = null,

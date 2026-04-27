@@ -957,7 +957,6 @@ public class GuidesService(
     {
         var result = new GuideRuntimeValidationDto(
             IsValid: true,
-            ResourceGroupKey: null,
             Profiles: new List<string>(),
             Conflicts: new List<string>(),
             Warnings: new List<string>()
@@ -989,18 +988,12 @@ public class GuidesService(
             return result;
         }
 
-        var resourceGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var model in localModels)
         {
             try
             {
                 var runtime = LocalRuntimeConfigurationParser.ParseRequired(model.ModelId, model.LocalRuntimeJson);
                 var runtimeProfile = await _runtimeProfileResolver.ResolveAsync(runtime.RuntimeProfileId);
-
-                if (!string.IsNullOrEmpty(runtime.ResourceGroupKey))
-                {
-                    resourceGroups.Add(runtime.ResourceGroupKey);
-                }
 
                 if (!result.Profiles.Contains(runtimeProfile.ProfileId, StringComparer.OrdinalIgnoreCase))
                 {
@@ -1011,17 +1004,6 @@ public class GuidesService(
             {
                 result.Warnings.Add($"Model {model.DisplayName} has invalid local runtime configuration: {ex.Message}");
             }
-        }
-
-        if (resourceGroups.Count > 1)
-        {
-            result = result with { IsValid = false };
-            result.Conflicts.Add(
-                $"Incompatible local models detected. All local models in a guide must share the same resourceGroupKey. Found: {string.Join(", ", resourceGroups)}");
-        }
-        else if (resourceGroups.Count == 1)
-        {
-            result = result with { ResourceGroupKey = resourceGroups.First() };
         }
 
         return result;

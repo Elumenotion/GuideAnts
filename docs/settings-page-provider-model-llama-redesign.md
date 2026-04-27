@@ -289,10 +289,8 @@ avoid two components owning the same surface.
 
 ## Add-model refactor decisions
 
-- **Phase 0 decision (resource group):** Option B is in effect. For
-  llama-cpp add flows, `resourceGroupKey` is required on the wire and the
-  only accepted value is `local`. Any other value is rejected with
-  `RESOURCE_GROUP_UNKNOWN`.
+- **llama-cpp runtime contract:** llama-cpp add flows capture the router
+  alias and runtime profile used by the runtime.
 - **Add / Edit / Attach / Delete are split intentionally:**
   - **Add:** `POST /api/settings/models:add` is the only onboarding path.
     It supports cloud providers synchronously and llama-cpp in both async

@@ -148,7 +148,6 @@ export function createEmptyAddModelWizardState(preselectedProvider?: string | nu
     catalogModelId: '',
     catalogDisplayName: '',
     catalogDescription: '',
-    catalogResourceGroupKey: 'local',
     catalogDisplayOrder: '',
     catalogIsActive: true,
     openAiReasoningEffortEnabled: false,
@@ -263,7 +262,6 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
 
     if (
       typeof parsed.routerModelId !== 'string' ||
-      typeof parsed.resourceGroupKey !== 'string' ||
       typeof parsed.runtimeProfileId !== 'string'
     ) {
       return null;
@@ -271,7 +269,6 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
 
     const normalized: CanonicalLocalRuntimeConfig = {
       routerModelId: parsed.routerModelId,
-      resourceGroupKey: parsed.resourceGroupKey,
       runtimeProfileId: parsed.runtimeProfileId,
     };
 
@@ -317,7 +314,6 @@ export function createCatalogEditStateFromModel(model: SettingsModelDto): Catalo
       || reasoningChoices.includes('medium')
       || reasoningChoices.includes('high'),
     localRuntimeRouterModelId: parsedRuntime?.routerModelId ?? '',
-    localRuntimeResourceGroupKey: parsedRuntime?.resourceGroupKey ?? 'local',
     localRuntimeProfileId: parsedRuntime?.runtimeProfileId ?? '',
     localRuntimeLoadParamsJson: parsedRuntime?.loadParams ? JSON.stringify(parsedRuntime.loadParams, null, 2) : '',
     localRuntimeParallelToolCalls: parsedRuntime?.parallelToolCalls === true,
@@ -336,7 +332,6 @@ export function buildCanonicalLocalRuntimeFromGuidedForm(
   form: Pick<
     CatalogEditState,
     | 'localRuntimeRouterModelId'
-    | 'localRuntimeResourceGroupKey'
     | 'localRuntimeProfileId'
     | 'localRuntimeLoadParamsJson'
     | 'localRuntimeParallelToolCalls'
@@ -345,7 +340,6 @@ export function buildCanonicalLocalRuntimeFromGuidedForm(
   >
 ): string | undefined {
   const routerModelId = form.localRuntimeRouterModelId.trim();
-  const resourceGroupKey = form.localRuntimeResourceGroupKey.trim();
   const runtimeProfileId = form.localRuntimeProfileId.trim();
   const loadParamsText = form.localRuntimeLoadParamsJson.trim();
   const parallelToolCalls = form.localRuntimeParallelToolCalls;
@@ -354,7 +348,6 @@ export function buildCanonicalLocalRuntimeFromGuidedForm(
 
   const hasAnyGuidedValue =
     routerModelId.length > 0 ||
-    resourceGroupKey.length > 0 ||
     runtimeProfileId.length > 0 ||
     loadParamsText.length > 0 ||
     parallelToolCalls ||
@@ -369,17 +362,12 @@ export function buildCanonicalLocalRuntimeFromGuidedForm(
     throw new Error('Local runtime Router Model ID is required for llama-cpp models.');
   }
 
-  if (!resourceGroupKey) {
-    throw new Error('Local runtime Resource Group Key is required for llama-cpp models.');
-  }
-
   if (!runtimeProfileId) {
     throw new Error('Local runtime Runtime Profile ID is required for llama-cpp models.');
   }
 
   const canonical: CanonicalLocalRuntimeConfig = {
     routerModelId,
-    resourceGroupKey,
     runtimeProfileId,
   };
 
@@ -420,10 +408,6 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
   const displayName = state.catalogDisplayName.trim();
   if (!displayName) {
     throw new Error('Catalog display name is required.');
-  }
-  const resourceGroupKey = state.catalogResourceGroupKey.trim();
-  if (!resourceGroupKey) {
-    throw new Error('Resource group is required.');
   }
   let providerConfig: Record<string, unknown> | undefined;
   if (
@@ -499,7 +483,6 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
       modelId,
       displayName,
       description: normalizeOptionalString(state.catalogDescription),
-      resourceGroupKey,
       displayOrder: normalizeDisplayOrder(state.catalogDisplayOrder),
       isActive: state.catalogIsActive,
     },

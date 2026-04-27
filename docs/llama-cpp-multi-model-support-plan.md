@@ -9,7 +9,7 @@ The design is strict and fail-closed:
 - `provider = "llama-cpp"` models must use one canonical `LocalRuntimeJson` shape.
 - Guide Builder model parameter UI is a first-class part of this design, not an afterthought.
 
-This is a dev-only system. Existing data that does not conform to the canonical shape will be fixed as part of this plan — there is no legacy migration concern.
+This is a dev-only system. Runtime config is validated on read/write, and normal JSON deserialization ignores extra fields.
 
 ## Goals
 1. Keep current architecture and add Gemma as an option (not a replacement).
@@ -51,7 +51,6 @@ The following runtime check bugs must be verified as fixed before this work begi
 ```json
 {
   "routerModelId": "string",
-  "resourceGroupKey": "string",
   "runtimeProfileId": "string",
   "loadParams": { "model": "..." }
 }
@@ -59,19 +58,16 @@ The following runtime check bugs must be verified as fixed before this work begi
 
 ### Field Rules
 - `routerModelId` (required): router/model identifier used for runtime calls; `.gguf` suffix is not allowed.
-- `resourceGroupKey` (required): VRAM budget grouping key. Models sharing a key are expected to fit within the same hardware resource envelope. Used by the runtime orchestration to determine which models can be co-resident and which must be swapped. This is a resource constraint, not a model compatibility constraint — if the hardware has enough VRAM, models with different keys could theoretically coexist.
 - `runtimeProfileId` (required): stable ID that selects model-family request behavior (request shaping, reasoning mapping, sampling defaults, guide parameter policy).
 - `loadParams` (optional object): explicit `/models/load` parameters passed to the llama server. Serialized to JSON at the HTTP call boundary, not stored as a stringified JSON string.
-- Unknown fields are rejected. Only the fields defined above are permitted.
 
 ### Jinja Templates
 The `--jinja` flag is a server-level startup option, not a per-model setting. All current and planned model families (Qwen, Gemma) require Jinja for proper chat template and tool call support. The llama server must always be started with `--jinja`. There is no per-model `requiresJinja` field.
 
 ### Enforcement
 - Required for all `llama-cpp` models at create/update.
-- Unknown fields are rejected.
+- Unknown fields are ignored by normal JSON deserialization.
 - Invalid canonical shape blocks save and returns detailed validation errors.
-- Existing non-conforming data is fixed as part of this plan (step 11).
 
 ---
 
@@ -104,7 +100,6 @@ Per-family profiles handle the "how to talk to this model family" concern. Per-q
 ### 1) Backend: Canonical Local Runtime Validation
 - Add typed DTO/parser for canonical `LocalRuntimeJson`.
 - Validate in settings model create/update path for `provider="llama-cpp"`.
-- Reject unknown fields.
 - Return specific errors indicating missing/invalid field names.
 - Keep DB columns unchanged (`Model` entity remains as-is).
 
@@ -143,13 +138,12 @@ Per-family profiles handle the "how to talk to this model family" concern. Per-q
 ### 7) Backend: Runtime Load/Unload Orchestration
 - Keep current runtime orchestration endpoints and state machine.
 - Ensure load requests are catalog-driven from canonical `LocalRuntimeJson`.
-- Keep resource group conflict checks and readiness preflight as hard gates.
+- Keep readiness preflight as a hard gate.
 
 ### 8) Settings UI: Hybrid Form + JSON
 - Keep raw JSON capability for advanced edits.
 - Add guided fields for canonical required properties:
   - Router Model ID
-  - Resource Group Key
   - Runtime Profile
   - Load Params
 - Validate client-side for quick feedback; server remains source of truth.
@@ -213,7 +207,6 @@ Per-family profiles handle the "how to talk to this model family" concern. Per-q
 
 ## Acceptance Criteria
 - A `llama-cpp` model cannot be saved without canonical `LocalRuntimeJson`.
-- Unknown fields in `LocalRuntimeJson` are rejected at save.
 - Qwen and Gemma are both selectable and runnable through the same notebook flow.
 - Runtime profile selection controls request behavior without hardcoding per-model IDs.
 - Guide Builder shows model-specific parameter recommendations and enforces model-specific constraints.

@@ -188,11 +188,6 @@ export default function Settings() {
             return;
           }
           setActiveAddOperationStatus(op.status);
-          if (op.status === 'registeringCatalog') {
-            // Catalog row lands in this window. Refresh eagerly so the row/badge appears mid-flow.
-            await loadModels();
-            await loadLlamaInventory('refresh');
-          }
           if (op.status === 'completed') {
             setActiveAddOperation(null);
             setActiveAddOperationStatus('completed');
@@ -283,6 +278,7 @@ export default function Settings() {
         await api.settings.deleteModel(modelId);
         await loadModels();
         await loadLlamaInventory('refresh');
+        await loadSectionSummaries();
 
         showToast({ type: 'success', title: `Model ${modelId} deleted` });
       } catch (error) {
@@ -295,7 +291,7 @@ export default function Settings() {
         setDeletingModelId(null);
       }
     },
-    [loadLlamaInventory, loadModels, showToast]
+    [loadLlamaInventory, loadModels, loadSectionSummaries, showToast]
   );
 
   const handleProfileFormChange = useCallback(<K extends keyof ProfileFormState>(key: K, value: ProfileFormState[K]) => {
@@ -510,7 +506,9 @@ export default function Settings() {
       void (async () => {
         try {
           await api.settings.deleteLlamaRouterEntry(routerId);
+          await loadModels();
           await loadLlamaInventory('refresh');
+          await loadSectionSummaries();
           showToast({
             type: 'success',
             title: 'Router entry deleted',
@@ -527,7 +525,7 @@ export default function Settings() {
     }
 
     setPendingConfirmation(null);
-  }, [handleDeleteModel, handleDeleteProfile, handleRebuildEmbeddings, loadLlamaInventory, pendingConfirmation, showToast]);
+  }, [handleDeleteModel, handleDeleteProfile, handleRebuildEmbeddings, loadLlamaInventory, loadModels, loadSectionSummaries, pendingConfirmation, showToast]);
 
   const pendingConfirmationView = useMemo(() => {
     if (!pendingConfirmation) {
@@ -545,9 +543,9 @@ export default function Settings() {
 
     if (pendingConfirmation.kind === 'delete-model') {
       return {
-        title: 'Remove catalog row',
-        message: `Remove chat target '${pendingConfirmation.modelId}' from the catalog only. The runtime alias and files stay intact; delete those from Local Llama Runtime if you want to free disk.`,
-        confirmText: 'Remove row',
+        title: 'Delete model',
+        message: `Delete model '${pendingConfirmation.modelId}'? This cannot be undone.`,
+        confirmText: 'Delete',
         confirmButtonClass: 'bg-red-600 hover:bg-red-700 text-white',
       };
     }

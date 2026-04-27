@@ -189,7 +189,6 @@ public record GuideRuntimeValidationMember(
 
 public record GuideRuntimeValidationDto(
     bool IsValid,
-    string? ResourceGroupKey,
     List<string> Profiles,
     List<string> Conflicts,
     List<string> Warnings

@@ -5,7 +5,6 @@ namespace GuideAntsApi.Models.Guides;
 // Local runtime descriptor for local models
 public record LocalRuntimeDescriptorDto(
     string RouterModelId,
-    string ResourceGroupKey,
     string RuntimeProfileId,
     JsonObject? LoadParams
 );

@@ -369,7 +369,6 @@ public sealed class RuntimeConcurrencyTests : SettingsRoutingIntegrationTestBase
     private static string BuildLocalRuntimeJson(string alias) => $$"""
         {
           "routerModelId": "{{alias}}",
-          "resourceGroupKey": "local",
           "runtimeProfileId": "concurrency_profile"
         }
         """;

@@ -5,7 +5,6 @@ namespace GuideAntsApi.Services.LlamaCpp;
 
 public sealed record LocalRuntimeConfiguration(
     string RouterModelId,
-    string ResourceGroupKey,
     string RuntimeProfileId,
     JsonObject? LoadParams,
     bool ParallelToolCalls,
@@ -18,6 +17,11 @@ public static class LocalRuntimeConfigurationParser
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false
+    };
+
+    private static readonly JsonSerializerOptions DeserializeJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
     };
 
     public static LocalRuntimeConfiguration ParseRequired(string modelId, string? localRuntimeJson)
@@ -33,10 +37,12 @@ public static class LocalRuntimeConfigurationParser
 
     public static LocalRuntimeConfiguration Parse(string modelId, string localRuntimeJson)
     {
-        JsonDocument doc;
+        LocalRuntimeConfigurationPayload? parsed;
         try
         {
-            doc = JsonDocument.Parse(localRuntimeJson);
+            parsed = JsonSerializer.Deserialize<LocalRuntimeConfigurationPayload>(
+                localRuntimeJson,
+                DeserializeJsonOptions);
         }
         catch (JsonException ex)
         {
@@ -44,112 +50,46 @@ public static class LocalRuntimeConfigurationParser
                 $"Model '{modelId}' LocalRuntimeJson is invalid JSON.", ex);
         }
 
-        using (doc)
+        if (parsed is null)
         {
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                throw new InvalidOperationException(
-                    $"Model '{modelId}' LocalRuntimeJson must be a JSON object.");
-            }
-
-            var unknownFields = new List<string>();
-            string? routerModelId = null;
-            string? resourceGroupKey = null;
-            string? runtimeProfileId = null;
-            JsonObject? loadParams = null;
-            bool? parallelToolCalls = null;
-            int? routerContextSize = null;
-            int? routerCacheRamMib = null;
-
-            foreach (var property in root.EnumerateObject())
-            {
-                switch (property.Name)
-                {
-                    case "routerModelId":
-                        routerModelId = ReadRequiredString(property, modelId, "routerModelId");
-                        break;
-                    case "resourceGroupKey":
-                        resourceGroupKey = ReadRequiredString(property, modelId, "resourceGroupKey");
-                        break;
-                    case "runtimeProfileId":
-                        runtimeProfileId = ReadRequiredString(property, modelId, "runtimeProfileId");
-                        break;
-                    case "routerContextSize":
-                        routerContextSize = ReadOptionalPositiveInt(property, modelId, "routerContextSize", min: 1024, max: 1_048_576);
-                        break;
-                    case "routerCacheRamMib":
-                        routerCacheRamMib = ReadOptionalNonNegativeInt(property, modelId, "routerCacheRamMib", max: 262_144);
-                        break;
-                    case "loadParams":
-                        if (property.Value.ValueKind == JsonValueKind.Null)
-                        {
-                            loadParams = null;
-                            break;
-                        }
-
-                        if (property.Value.ValueKind != JsonValueKind.Object)
-                        {
-                            throw new InvalidOperationException(
-                                $"Model '{modelId}' LocalRuntimeJson property 'loadParams' must be a JSON object.");
-                        }
-
-                        loadParams = JsonNode.Parse(property.Value.GetRawText()) as JsonObject
-                                     ?? throw new InvalidOperationException(
-                                         $"Model '{modelId}' LocalRuntimeJson property 'loadParams' must be a JSON object.");
-                        break;
-                    case "parallelToolCalls":
-                        parallelToolCalls = ReadOptionalBoolean(property, modelId, "parallelToolCalls");
-                        break;
-                    default:
-                        unknownFields.Add(property.Name);
-                        break;
-                }
-            }
-
-            if (unknownFields.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    $"Model '{modelId}' LocalRuntimeJson contains unsupported field(s): {string.Join(", ", unknownFields)}.");
-            }
-
-            var missingFields = new List<string>();
-            if (string.IsNullOrWhiteSpace(routerModelId))
-            {
-                missingFields.Add("routerModelId");
-            }
-
-            if (string.IsNullOrWhiteSpace(resourceGroupKey))
-            {
-                missingFields.Add("resourceGroupKey");
-            }
-
-            if (string.IsNullOrWhiteSpace(runtimeProfileId))
-            {
-                missingFields.Add("runtimeProfileId");
-            }
-
-            if (missingFields.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    $"Model '{modelId}' LocalRuntimeJson is missing required field(s): {string.Join(", ", missingFields)}.");
-            }
-
-            if (routerModelId!.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    $"Model '{modelId}' LocalRuntimeJson field 'routerModelId' must not include '.gguf' suffix.");
-            }
-
-            return new LocalRuntimeConfiguration(
-                routerModelId.Trim(),
-                resourceGroupKey!.Trim(),
-                runtimeProfileId!.Trim(),
-                loadParams,
-                parallelToolCalls ?? false,
-                routerContextSize,
-                routerCacheRamMib);
+            throw new InvalidOperationException(
+                $"Model '{modelId}' LocalRuntimeJson must be a JSON object.");
         }
+
+        var missingFields = new List<string>();
+        if (string.IsNullOrWhiteSpace(parsed.RouterModelId))
+        {
+            missingFields.Add("routerModelId");
+        }
+
+        if (string.IsNullOrWhiteSpace(parsed.RuntimeProfileId))
+        {
+            missingFields.Add("runtimeProfileId");
+        }
+
+        if (missingFields.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelId}' LocalRuntimeJson is missing required field(s): {string.Join(", ", missingFields)}.");
+        }
+
+        var routerModelId = parsed.RouterModelId!.Trim();
+        if (routerModelId.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelId}' LocalRuntimeJson field 'routerModelId' must not include '.gguf' suffix.");
+        }
+
+        ValidateOptionalRange(modelId, "routerContextSize", parsed.RouterContextSize, min: 1024, max: 1_048_576);
+        ValidateOptionalRange(modelId, "routerCacheRamMib", parsed.RouterCacheRamMib, min: 0, max: 262_144);
+
+        return new LocalRuntimeConfiguration(
+            routerModelId,
+            parsed.RuntimeProfileId!.Trim(),
+            parsed.LoadParams,
+            parsed.ParallelToolCalls ?? false,
+            parsed.RouterContextSize,
+            parsed.RouterCacheRamMib);
     }
 
     public static string SerializeCanonical(LocalRuntimeConfiguration configuration)
@@ -157,7 +97,6 @@ public static class LocalRuntimeConfigurationParser
         var root = new JsonObject
         {
             ["routerModelId"] = configuration.RouterModelId,
-            ["resourceGroupKey"] = configuration.ResourceGroupKey,
             ["runtimeProfileId"] = configuration.RuntimeProfileId
         };
 
@@ -184,81 +123,25 @@ public static class LocalRuntimeConfigurationParser
         return root.ToJsonString(CanonicalJsonOptions);
     }
 
-    private static int? ReadOptionalPositiveInt(JsonProperty property, string modelId, string fieldName, int min, int max)
+    private static void ValidateOptionalRange(string modelId, string fieldName, int? value, int min, int max)
     {
-        if (property.Value.ValueKind == JsonValueKind.Null)
+        if (value is null)
         {
-            return null;
+            return;
         }
 
-        if (property.Value.ValueKind != JsonValueKind.Number || !property.Value.TryGetInt32(out var v))
-        {
-            throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson property '{fieldName}' must be a positive integer.");
-        }
-
-        if (v < min || v > max)
+        if (value.Value < min || value.Value > max)
         {
             throw new InvalidOperationException(
                 $"Model '{modelId}' LocalRuntimeJson property '{fieldName}' must be between {min} and {max}.");
         }
-
-        return v;
     }
 
-    private static int? ReadOptionalNonNegativeInt(JsonProperty property, string modelId, string fieldName, int max)
-    {
-        if (property.Value.ValueKind == JsonValueKind.Null)
-        {
-            return null;
-        }
-
-        if (property.Value.ValueKind != JsonValueKind.Number || !property.Value.TryGetInt32(out var v))
-        {
-            throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson property '{fieldName}' must be an integer.");
-        }
-
-        if (v < 0 || v > max)
-        {
-            throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson property '{fieldName}' must be between 0 and {max}.");
-        }
-
-        return v;
-    }
-
-    private static string ReadRequiredString(JsonProperty property, string modelId, string fieldName)
-    {
-        if (property.Value.ValueKind != JsonValueKind.String)
-        {
-            throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson property '{fieldName}' must be a string.");
-        }
-
-        var value = property.Value.GetString();
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson property '{fieldName}' must not be empty.");
-        }
-
-        return value;
-    }
-
-    private static bool ReadOptionalBoolean(JsonProperty property, string modelId, string fieldName)
-    {
-        if (property.Value.ValueKind == JsonValueKind.Null)
-        {
-            return false;
-        }
-
-        if (property.Value.ValueKind != JsonValueKind.True && property.Value.ValueKind != JsonValueKind.False)
-        {
-            throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson property '{fieldName}' must be a boolean.");
-        }
-
-        return property.Value.GetBoolean();
-    }
+    private sealed record LocalRuntimeConfigurationPayload(
+        string? RouterModelId,
+        string? RuntimeProfileId,
+        JsonObject? LoadParams,
+        bool? ParallelToolCalls,
+        int? RouterContextSize = null,
+        int? RouterCacheRamMib = null);
 }

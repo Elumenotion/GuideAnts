@@ -27,7 +27,6 @@ const ADD_MODEL_STEPS = [
   { id: 'resolvingFiles', label: 'Resolving files', help: 'Looking up repository artifacts.' },
   { id: 'downloading', label: 'Downloading', help: 'Downloading GGUF and mmproj bytes.' },
   { id: 'registeringAlias', label: 'Registering alias', help: 'Writing router alias mapping.' },
-  { id: 'registeringCatalog', label: 'Registering catalog', help: 'Creating catalog model row.' },
   { id: 'completed', label: 'Completed', help: 'Model is ready for runtime operations.' },
 ] as const;
 
@@ -122,9 +121,6 @@ function operationStep(status: string): (typeof ADD_MODEL_STEPS)[number]['id'] {
   }
   if (normalized === 'registering' || normalized === 'registeringAlias') {
     return 'registeringAlias';
-  }
-  if (normalized === 'registeringCatalog') {
-    return 'registeringCatalog';
   }
   if (normalized === 'completed') {
     return 'completed';
@@ -285,11 +281,10 @@ export function AddModelWizard({
     return (
       value.catalogModelId.trim().length > 0 &&
       value.catalogDisplayName.trim().length > 0 &&
-      value.catalogResourceGroupKey.trim().length > 0 &&
       !modelIdError &&
       !checkingModelId
     );
-  }, [checkingModelId, modelIdError, value.catalogDisplayName, value.catalogModelId, value.catalogResourceGroupKey]);
+  }, [checkingModelId, modelIdError, value.catalogDisplayName, value.catalogModelId]);
 
   const validateModelId = async () => {
     const candidate = value.catalogModelId.trim();
@@ -493,13 +488,6 @@ export function AddModelWizard({
               rows={2}
               className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-          </div>
-          <div className="space-y-2">
-            <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Resource Group</label>
-            <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
-              <span className="font-mono">local</span>
-              <span className="ml-2 text-xs text-gray-500">Resource grouping is reserved for future multi-pool scheduling.</span>
-            </div>
           </div>
           <div className="space-y-2">
             <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Display Order</label>

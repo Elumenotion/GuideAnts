@@ -1,7 +1,7 @@
 You're right. My previous answer had two corner cuts baked into it:
 
 1. I offered "if that's out of scope … a banner on Catalog" as a fallback for when the proper routing design is too much work. That's exactly the "fallback to hide a bug" pattern your rule calls out, just dressed as UX.
-2. I accepted the plan's Phase 3 ("delete the Catalog Create/Edit form") at face value and built around it, instead of questioning whether the plan's Phase 3 itself is a shortcut. It is. The plan is solving "the current Create/Edit form is broken for llama-cpp" by deleting the whole form, which also deletes the path for every other provider and for every non-create use of the form (rename, re-bind profile, change resource group, deactivate). That's scope-dumping, not design.
+2. I accepted the plan's Phase 3 ("delete the Catalog Create/Edit form") at face value and built around it, instead of questioning whether the plan's Phase 3 itself is a shortcut. It is. The plan is solving "the current Create/Edit form is broken for llama-cpp" by deleting the whole form, which also deletes the path for every other provider and for every non-create use of the form (rename, re-bind profile, deactivate). That's scope-dumping, not design.
 
 Let me redo this as a feature design, not a tweak to the existing plan.
 
@@ -14,12 +14,12 @@ Four distinct concepts are getting conflated:
 - **Runtime profile** — sampling/thinking presets for llama-cpp. Independent lifecycle. N:1 with catalog rows.
 - **Router alias** — llama-cpp-specific runtime handle with its own state (file present, loaded, in use). N:M with catalog rows in principle, 1:1 in current practice.
 
-Every UX problem in the current design comes from not respecting that these are four things. The "Download & Register" form is a catalog-row-creator, a runtime-profile-referencer, an alias-installer, and a file-downloader in one anonymous submit. That's also precisely where the Phase 1 server smells (hidden reasoning-choices default, hard-coded `ResourceGroupKey`, silent catalog auto-register catch) live. The UI structure and the server smells are the same bug.
+Every UX problem in the current design comes from not respecting that these are four things. The "Download & Register" form is a catalog-row-creator, a runtime-profile-referencer, an alias-installer, and a file-downloader in one anonymous submit. That's also precisely where the Phase 1 server smells (hidden reasoning-choices default, silent catalog auto-register catch) live. The UI structure and the server smells are the same bug.
 
 ## The user workflows, each deserving its own first-class surface
 
 1. **Add Model.** Primary. Provider-first wizard, lives on Catalog.
-2. **Edit model metadata.** Rename, swap runtime profile, change resource group, toggle active. Per-row on Catalog.
+2. **Edit model metadata.** Rename, swap runtime profile, toggle active. Per-row on Catalog.
 3. **Remove model from catalog.** Per-row on Catalog. For llama-cpp: *removes the catalog entry only*, leaves the alias. Because a user who set up both a "reasoning" and a "fast" catalog entry against the same alias needs to be able to delete one without wiping the install.
 4. **Operate a llama alias.** Load / Unload / Delete alias-and-its-files. Lives on Local Llama Runtime. This is the ops surface, not the add surface.
 5. **Diagnose an alias.** Runtime state + router mapping preview + file presence. Same tab as (4).
@@ -39,7 +39,6 @@ A single "Add Model" button on the Catalog tab. Wizard, not an inline form, beca
 - Catalog model id (validated unique)
 - Display name
 - Description
-- Resource group (select from defined domain, see §5 below)
 - Active toggle (default on)
 
 **Step 3 — Provider-specific configuration.** Contributed by the provider's UI contract.
@@ -62,9 +61,9 @@ Reasoning choices are derived from the chosen runtime profile's `thinkingControl
 5. Adding catalog entry
 6. Done
 
-Each of 2–5 can fail independently, and the UI surfaces which step failed with the error code and remediation. On step-5 failure the intent row stays (per your Phase 1.1) so the wizard offers **Retry registration** without re-downloading. On success the wizard offers **Load now** and **Open in Catalog**.
+Each of 2–5 can fail independently, and the UI surfaces which step failed with the error code and remediation. On success the wizard offers **Load now** and **Open in Catalog**.
 
-This is also the shape the server enum should take. `catalogRegistering` as a state name leaks the implementation. Rename to `registeringCatalogEntry` or use a step-number + step-name pair so the UI copy comes from one source of truth instead of being transliterated in the React layer.
+This is also the shape the server enum should take. The UI should render human steps from a single step table instead of transliterating implementation names.
 
 ### 2. Local Llama Runtime becomes pure ops
 
@@ -79,7 +78,7 @@ After (1), the tab has no reason to carry an "Add" form. It hosts:
 Phase 3 as written ("remove Catalog Create/Edit form and Edit button; keep table + row-delete") is the corner cut. Reasoned properly:
 
 - **Create** → moved to the wizard. Correct.
-- **Edit** → must stay. Per-row "Edit" opens a provider-scoped editor. Editable: display name, description, resource group, active, runtime profile (llama-cpp only, bounded by what the underlying alias supports). Non-editable: id, provider, router alias (identity). This is a smaller form than today's because the installer fields aren't in it.
+- **Edit** → must stay. Per-row "Edit" opens a provider-scoped editor. Editable: display name, description, active, runtime profile (llama-cpp only, bounded by what the underlying alias supports). Non-editable: id, provider, router alias (identity). This is a smaller form than today's because the installer fields aren't in it.
 - **Delete** → per-row. Catalog-only delete. Does **not** cascade to the alias. The explanatory copy on the confirm dialog states exactly that, and points at Local Llama Runtime → Runtime Inventory → Delete alias for the full teardown.
 
 This gives the two delete operations distinct homes that match their distinct semantics: Catalog delete removes a chat target, Runtime Inventory delete removes an installed alias. Today's plan has only the cascading one, which means a user who wants two catalog rows against one alias (reasonable — one for thinking, one for instruct) cannot delete one of them without a roundtrip.
@@ -94,19 +93,13 @@ The wizard's Step 3 "Runtime profile" selector exposes:
 
 Without this, "add Qwen3.5 for the first time" requires: go to Runtime Profiles, stamp template, back to Catalog, Add Model, pick the profile. That's the ordering the current setup-guide documents and it's the ordering the plan is trying to kill. If we don't offer inline creation in the wizard we've re-created the same bounce.
 
-### 5. Resource group is not promoted, it is designed
+### 5. Llama runtime contract
 
-The plan promotes `ResourceGroupKey` from hard-coded `"local"` to a wire-level field. That's not a fix, it's a relocation of the hidden default to the client. To actually remove the smell:
-
-- **Define the domain.** What is a resource group? My read: a logical pool that constrains where a model can load (e.g., which GPU group, which host). If that's right, say so in `settings-page-provider-model-llama-redesign.md` and seed a default pool (`local` on a single-host dev stack).
-- **Make it enumerable.** A new admin-service endpoint returns the known resource groups. The wizard's Step 2 selector reads from it. Unknown groups become a validation error, not a "we'll take whatever string you typed."
-- **Document the runtime effect.** When I pick resource group X for a catalog row, what changes at chat time? If the answer is "nothing yet, it's reserved for future scheduling," then say that in the field's helper text — but then keep the single `local` value and don't expose a picker that pretends to do something.
-
-Either it's a meaningful dimension and gets proper machinery, or it's not yet and gets a read-only `local` pin with a note. What it cannot be is a free-text input that looks like it does something.
+Runtime behavior is keyed by router alias and runtime profile.
 
 ### 6. State machine and error surface
 
-`queued → resolving → downloading → registering → catalogRegistering → completed | failed` is the right decomposition, but:
+`queued → resolving → downloading → registering → completed | failed` is the right decomposition, but:
 
 - The UI never renders enum names. It renders human steps and a failed-step indicator.
 - `failed` carries a structured `{ code, step, message, remediation }`, not a message the client has to substring-match.
@@ -131,7 +124,6 @@ The plan is mostly correct underneath — the server work in Phase 1 is sound an
 
 - **Phase 2** grows: it builds the Add Model wizard (Catalog-owned, provider-driven, with inline profile creation and the "Attach existing alias" source option), and shrinks Local Llama Runtime to ops-only.
 - **Phase 3** flips. Instead of "remove Catalog Create/Edit," it becomes "split the Catalog form into a wizard-only Create and a slim per-row Edit; remove the provider-picker from the list view because provider is picked in the wizard." Edit stays.
-- **New phase between 1 and 2**: resource-group design. Either build the enumeration + admin endpoint, or explicitly pin to `local` with docs and a non-interactive UI. Do not ship the free-text wire-level field without one of those.
 - **Phase 4 docs**: add `docs/setup-guide.md` rewrites of §6 Step 3 and §7 to the list, and author §7b and §7c.
 - **Phase 5 playwright**: add CP0 ("Add Model wizard from Catalog, llama-cpp, happy path" — same bytes as today's CP2, entered through the wizard), CP8 ("Add Model wizard, cloud provider, happy path" — proves the wizard is unified), CP9 ("Attach existing alias recovery"), CP10 ("Edit catalog row display name and runtime profile without touching the alias").
 

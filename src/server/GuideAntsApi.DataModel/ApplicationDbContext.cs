@@ -69,7 +69,6 @@ namespace GuideAntsApi.DataModel
         public DbSet<PublishedGuide> PublishedGuides { get; set; } = null!;
         public DbSet<ApplicationSetting> ApplicationSettings { get; set; } = null!;
         public DbSet<RuntimeProfile> RuntimeProfiles { get; set; } = null!;
-        public DbSet<LlamaCatalogDownloadIntent> LlamaCatalogDownloadIntents { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -371,26 +370,6 @@ namespace GuideAntsApi.DataModel
             {
                 b.Property(x => x.SamplingParametersJson).HasColumnType("nvarchar(max)").IsRequired();
                 b.Property(x => x.ThinkingControlJson).HasColumnType("nvarchar(max)").IsRequired();
-            });
-
-            modelBuilder.Entity<LlamaCatalogDownloadIntent>(b =>
-            {
-                b.HasKey(x => x.OperationId);
-                b.Property(x => x.OperationId).HasMaxLength(128).IsRequired();
-                b.Property(x => x.ModelId).HasMaxLength(128).IsRequired();
-                b.Property(x => x.DisplayName).HasMaxLength(255).IsRequired();
-                b.Property(x => x.RuntimeProfileId).HasMaxLength(64).IsRequired();
-                b.Property(x => x.RouterModelId).HasMaxLength(255).IsRequired();
-                b.Property(x => x.Description).HasMaxLength(1024);
-                b.Property(x => x.ResourceGroupKey).HasMaxLength(128).IsRequired();
-                b.Property(x => x.LoadParamsJson).HasColumnType("nvarchar(max)");
-                b.Property(x => x.LastErrorCode).HasMaxLength(128);
-                b.Property(x => x.LastErrorStep).HasMaxLength(64);
-                b.Property(x => x.LastErrorMessage).HasMaxLength(2048);
-                b.Property(x => x.LastErrorRemediation).HasMaxLength(1024);
-                b.Property(x => x.CreatedUtc).HasDefaultValueSql("GETUTCDATE()");
-                b.Property(x => x.UpdatedUtc).HasDefaultValueSql("GETUTCDATE()");
-                b.HasIndex(x => x.UpdatedUtc);
             });
 
             modelBuilder.Entity<Model>(b =>

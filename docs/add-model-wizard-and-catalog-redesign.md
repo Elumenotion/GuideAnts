@@ -11,10 +11,10 @@ is retained and integrated here. Design rationale lives in
 ## Why this document exists
 
 The llama-download-end-to-end plan correctly identifies the server-side smells
-(silent catalog auto-register, hard-coded reasoning choices, hard-coded
-`ResourceGroupKey`, non-persistent intent cache, broken delete cascade) and
-fixes them. Its client-side shape, however, bakes in three corners that this
-redesign explicitly refuses:
+(silent catalog auto-register, hard-coded reasoning choices, DB-backed download
+state, broken delete cascade)
+and fixes them. Its client-side shape, however, bakes in three corners that
+this redesign explicitly refuses:
 
 1. **The primary noun is wrong.** "Download & Register" is labelled as a file
    operation that happens to produce a catalog row. The user intent is "add a
@@ -84,7 +84,6 @@ wizard. Five steps, skippable progress header, never a multi-form page.
 | `modelId` | Non-empty, unique against existing catalog (live probe on blur). |
 | `displayName` | Non-empty. |
 | `description` | Optional. |
-| `resourceGroupKey` | See **D5**. Either enumerated select or read-only `local` pin; never free-text. |
 | `displayOrder` | Optional integer; null means "order by `modelId`". |
 | `isActive` | Toggle, default on. |
 
@@ -193,9 +192,8 @@ checklist with per-step spinners and a bytes-progress bar at the
   `POST /api/settings/llama/runtime/load` and then closes the wizard.
 - `Open in Catalog` — closes, scrolls to the new row.
 
-On failure the wizard offers `Retry from failed step` (requires Phase 1.1's
-persisted intent row — retry does **not** re-download if bytes are already
-on disk). Cancel closes the wizard; a **Catalog-row badge** labelled
+On failure the wizard shows the failed step and remediation. Cancel closes the
+wizard; a **Catalog-row badge** labelled
 `Installing…` remains on the catalog row so the user can re-open the
 progress view, including after a page reload.
 
@@ -229,7 +227,6 @@ than today's:
 | `provider` | **No** | Identity. Changing provider = different model. |
 | `displayName` | Yes | |
 | `description` | Yes | |
-| `resourceGroupKey` | Yes (if enumerable; see D5) | |
 | `displayOrder` | Yes | |
 | `isActive` | Yes | |
 | llama-cpp: `routerModelId` | **No** | Binding to an alias is identity of the catalog row's runtime shape. |
@@ -268,48 +265,10 @@ Without (2) and (3) inline, "add Qwen3.5 for the first time" still
 requires a round-trip. That's the exact trip the source plan is trying
 to kill. Inline creation keeps it killed.
 
-### D5. Resource group: design, don't relocate
+### D5. Llama runtime contract
 
-`ResourceGroupKey` is currently:
-
-- Hard-coded to `"local"` in
-  [`HuggingFaceModelDownloadService.cs`](../src/server/GuideAntsApi/Services/LlamaCpp/HuggingFaceModelDownloadService.cs)
-  line 192.
-- Free-text in
-  [`ModelsTab.tsx`](../src/client/src/pages/settings/components/ModelsTab.tsx)
-  lines 356-363.
-- Required by `LocalRuntimeConfiguration` (see
-  [`LocalRuntimeConfiguration.cs`](../src/server/GuideAntsApi/Services/LlamaCpp/LocalRuntimeConfiguration.cs)
-  line 8) and serialized at line 148.
-- Read by `NotebookModelRuntimeService` lines 85 and 400.
-
-Promoting it to wire-level on `StartModelDownloadRequest` (source plan
-Phase 1.2) without defining its domain would just move the hidden default
-from the server to the client. This plan takes a definitive position:
-
-**Decision point — make one of these two choices explicitly before any
-code ships:**
-
-- **Option A — treat it as a real scheduling dimension.** Define a
-  `ResourceGroup` aggregate backed by a new `ResourceGroups` table
-  (`Key PK`, `DisplayName`, `Description`, `CreatedUtc`), admin-service
-  endpoint `GET /llama-admin/resource-groups`, and a Settings UI sub-tab
-  for CRUD (deferrable, but the seed `local` row is written on startup).
-  Wizard Step 2 renders an enumerated `<select>` populated from that
-  endpoint. Runtime effect is documented in
-  [`settings-page-provider-model-llama-redesign.md`](settings-page-provider-model-llama-redesign.md).
-- **Option B — acknowledge it is a single-value pin today.** Keep the
-  field in the persisted shape (for forward-compat), but render it as
-  a read-only `local` badge on the wizard and the edit form with a
-  tooltip: *"Resource grouping is not yet used at runtime; reserved
-  for multi-pool scheduling."* Server rejects any other value with
-  `RESOURCE_GROUP_UNKNOWN`. This is explicit inactivity, not a
-  silent default.
-
-Ship **Option A** if multi-pool scheduling is on the 6-month roadmap;
-otherwise ship **Option B**. What we do **not** ship: a free-text
-input that looks like it does something. Pick before Phase 2 starts;
-document the decision in the commit message.
+Runtime behavior is keyed by router alias plus runtime profile. Settings UI,
+API payloads, and runtime validation should stay on those two concepts.
 
 ### D6. Unified `POST /api/settings/models:add` endpoint
 
@@ -334,7 +293,6 @@ Content-Type: application/json
     "modelId": string,
     "displayName": string,
     "description": string | null,
-    "resourceGroupKey": string | null,
     "displayOrder": number | null,
     "isActive": bool
   },
@@ -377,11 +335,10 @@ Internally:
 - Cloud providers → synchronous; calls `IApplicationSettingsService.CreateModelAsync`,
   returns the `SettingsModelDto`.
 - `llama-cpp` + `existingAlias` → synchronous; validates the alias exists
-  and has the GGUF+mmproj present, then calls `CreateModelAsync`. No
-  intent row needed.
-- `llama-cpp` + `huggingface` → asynchronous; writes the
-  `DownloadCatalogIntents` row (Phase 1.1), calls admin-service
-  `/downloads`, returns `operationId`.
+  and has the GGUF+mmproj present, then calls `CreateModelAsync`.
+- `llama-cpp` + `huggingface` → asynchronous; starts the admin-service
+  `/downloads` operation and keeps the pending catalog registration in the
+  live API process until completion polling returns `completed`.
 
 The existing `POST /api/settings/llama/downloads` endpoint stays
 internally but is called only by the unified endpoint; it is no longer
@@ -397,22 +354,16 @@ queued
   → resolvingFiles       (HF metadata lookup)
   → downloading          (bytes; emits progress fraction)
   → registeringAlias     (atomic router-ini write)
-  → registeringCatalog   (IApplicationSettingsService.CreateModelAsync)
   → completed
   | failed { code, step, message, remediation }
 ```
 
-- `catalogRegistering` (name used by the source plan) becomes
-  `registeringCatalog` for parallel construction with
-  `registeringAlias`.
 - The UI never reads the enum string directly. A single
   `ADD_MODEL_STEPS` table in the client maps step id → display label
   → short help copy. Server copy changes never require client
   re-translation.
 - Failures carry structured `{ code, step, message, remediation }` so
   the client maps `code` → UI banner without substring matching.
-- Phase 1.1's intent persistence means `Retry from failed step` after a
-  `registeringCatalog` failure does not re-download bytes.
 
 ### D8. `docs/setup-guide.md` is rewritten around the wizard
 
@@ -449,7 +400,6 @@ flowchart LR
   API -->|cloud: sync| DB[(ApplicationSettings Models)]
   API -->|llama-cpp existingAlias: verify + sync| Admin[llama-admin Python service]
   API -->|llama-cpp huggingface: enqueue| Admin
-  API -->|persist intent| DB
   Admin -->|HF HTTP| HF[Hugging Face]
   Admin -->|atomic write| Router[(/models-local/router-models.ini)]
   Admin -->|GGUF + mmproj files| Volume[(ai_local_models volume)]
@@ -462,12 +412,6 @@ Web API continues to never touch the model volume (R-7.5 / R-7.6).
 
 ## Plan
 
-### Phase 0 — Resource group decision (blocking)
-
-- **0.1** Pick **Option A** or **Option B** from **D5**. Document in
-  [`docs/settings-page-provider-model-llama-redesign.md`](settings-page-provider-model-llama-redesign.md).
-  Until this lands, Phase 2 does not start.
-
 ### Phase 1 — Server correctness (inherits from the llama-download-end-to-end plan)
 
 Phase 1.1-1.6 from the source plan are retained **with these amendments**:
@@ -476,16 +420,8 @@ Phase 1.1-1.6 from the source plan are retained **with these amendments**:
   profile's `thinkingControlJson.choiceActions`, or `null` when empty.
   No hard-coded fallback. `DisplayOrder` is `null` unless the request
   specifies one.
-- **1.2 amended.** `ResourceGroupKey` is required on the wire, value
-  enforced by Phase 0's decision:
-  - Option A: server validates against the `ResourceGroups` table;
-    unknown → 400 `RESOURCE_GROUP_UNKNOWN`.
-  - Option B: server accepts only `"local"`; any other → 400
-    `RESOURCE_GROUP_UNKNOWN` with remediation pointing at the roadmap
-    item.
-- **1.3 amended.** State enum renamed `catalogRegistering` →
-  `registeringCatalog`; matching rename in
-  [`llama_admin_service.py`](../docker/build/guideants-ai/llama-admin-service/llama_admin_service.py).
+- **1.3 amended.** Catalog registration is part of the API-side add flow;
+  the admin service owns only download and router-alias registration.
 - **1.5 amended.** Delete cascade from
   [`SettingsEndpoints.cs`](../src/server/GuideAntsApi/Endpoints/SettingsEndpoints.cs)
   lines 1211-1297 retained exactly. Clarify the confirm copy on the
@@ -502,7 +438,7 @@ Phase 1.1-1.6 from the source plan are retained **with these amendments**:
 - **2.2** Implement endpoint in
   [`SettingsEndpoints.cs`](../src/server/GuideAntsApi/Endpoints/SettingsEndpoints.cs):
   - Validates provider is known.
-  - Validates catalog block (unique `modelId`, resource group per Phase 0).
+  - Validates catalog block (unique `modelId` and provider fields).
   - Routes cloud providers to `IApplicationSettingsService.CreateModelAsync`
     synchronously; returns `AddModelResponse { kind: "sync", catalogModel }`.
   - Routes llama-cpp `existingAlias` to a new
@@ -618,7 +554,7 @@ Phase 1.1-1.6 from the source plan are retained **with these amendments**:
   recovery). Update §11 Troubleshooting.
 - **5.2** Update
   [`docs/llama-model-download-and-runtime-management.md`](llama-model-download-and-runtime-management.md):
-  describe the unified endpoint, the intent persistence, the cascading
+  describe the unified endpoint, the completion registration, the cascading
   alias delete, the state machine rename.
 - **5.3** Update
   [`docs/settings-and-llama-completion-requirements.md`](settings-and-llama-completion-requirements.md):
@@ -627,8 +563,7 @@ Phase 1.1-1.6 from the source plan are retained **with these amendments**:
   catalog delete is back).
 - **5.4** Update
   [`docs/settings-page-provider-model-llama-redesign.md`](settings-page-provider-model-llama-redesign.md)
-  with the resource-group decision from Phase 0 and the
-  Add/Edit/Attach/Delete separation.
+  with the Add/Edit/Attach/Delete separation.
 - **5.5** Update
   [`docker/llama/README.md`](../docker/llama/README.md) to point the
   "how do I add a model" section at Catalog → Add Model.
@@ -647,7 +582,7 @@ All acceptance runs the live UI at `http://localhost:5107/settings`.
 
 | CP | Scenario |
 |----|----------|
-| **CP0** | Add Model wizard from Catalog, provider `llama-cpp`, source `Install from Hugging Face`, `unsloth/Qwen3.5-9B-GGUF` Q5_K_M (see field map in §7). Catalog row auto-creates on `registeringCatalog → completed`. Same bytes as today's CP2 but entered through the wizard. |
+| **CP0** | Add Model wizard from Catalog, provider `llama-cpp`, source `Install from Hugging Face`, `unsloth/Qwen3.5-9B-GGUF` Q5_K_M (see field map in §7). Catalog row auto-creates when the download operation completes. Same bytes as today's CP2 but entered through the wizard. |
 | **CP1** | Guards. Submit with: empty runtime profile; missing HF token; unknown provider credentials; duplicate `modelId`. Each surfaces inline by `code`, no network call for the first two; network 400 with structured error for the rest. |
 | **CP2** | After CP0, Runtime Inventory shows `runtimeState=unloaded`, `hasModelFile=Yes`, `hasMmprojFile=Yes`, Catalog models column contains the wizard-created id. |
 | **CP3** | Runtime Inventory → `Load` transitions `unloaded → loading → loaded`. |
@@ -667,8 +602,6 @@ All acceptance runs the live UI at `http://localhost:5107/settings`.
   - `modelId`: `Qwen3.5-9B-Q5_K_M-local`
   - `displayName`: `Qwen3.5 9B Q5_K_M (Local)`
   - `description`: *(blank)*
-  - `resourceGroupKey`: per Phase 0 decision (`local` under Option B;
-    select `local` from the enumerated list under Option A)
   - `displayOrder`: *(blank)*
   - `isActive`: on
 - Step 3:
@@ -697,8 +630,7 @@ staging area as `Qwen3.5-9B-GGUF-0.md`
 - Cross-provider catalog editing that changes `provider` or `modelId` —
   identity is identity.
 - Migrating the router preset file format.
-- Any `| cat` usage. Any "fallback" logic. Any free-text
-  `resourceGroupKey` input.
+- Any `| cat` usage. Any "fallback" logic.
 
 ## Traceability to PlanNotes.md
 
@@ -710,10 +642,9 @@ staging area as `Qwen3.5-9B-GGUF-0.md`
 | §2 Local Llama Runtime → ops only | **D2**, Phase 3.5 |
 | §3 Catalog Edit stays | **D3**, Phase 3.3-3.4 |
 | §4 Inline profile creation | **D4**, Phase 4 |
-| §5 Resource group designed | **D5**, Phase 0 |
+| §5 Llama runtime contract | **D5** |
 | §6 State machine / error surface | **D7**, Phase 1.3 + Phase 3.1 |
 | §7 setup-guide.md rewrites | **D8**, Phase 5.1 |
-| Implications: new phase between 1 and 2 | Phase 0 (blocking on resource group) |
 | Implications: Phase 2 grows, Phase 3 flips | Phases 2, 3 |
 | Implications: Phase 4 docs adds setup-guide | Phase 5.1 |
 | Implications: CP0, CP8, CP9, CP10 | Phase 7 (also adds CP11) |

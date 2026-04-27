@@ -12,7 +12,6 @@ describe('buildAddModelRequest', () => {
     const state = createEmptyAddModelWizardState('openai-chat');
     state.catalogModelId = 'gpt-4o-chat';
     state.catalogDisplayName = 'GPT-4o Chat';
-    state.catalogResourceGroupKey = 'local';
     state.openAiReasoningEffortEnabled = true;
 
     const request = buildAddModelRequest(state);
@@ -26,7 +25,6 @@ describe('buildAddModelRequest', () => {
     const state = createEmptyAddModelWizardState('llama-cpp');
     state.catalogModelId = 'qwen3.5-local';
     state.catalogDisplayName = 'Qwen3.5 Local';
-    state.catalogResourceGroupKey = 'local';
     state.llamaInstallSource = 'huggingface';
     state.llamaRuntimeProfileId = 'qwen3_5';
     state.llamaRouterModelId = 'Qwen3.5-9B-Q5_K_M';
@@ -46,7 +44,6 @@ describe('buildAddModelRequest', () => {
     const state = createEmptyAddModelWizardState('llama-cpp');
     state.catalogModelId = 'adopted-alias-model';
     state.catalogDisplayName = 'Adopted Alias Model';
-    state.catalogResourceGroupKey = 'local';
     state.llamaInstallSource = 'existingAlias';
     state.llamaRuntimeProfileId = 'qwen3_5';
     state.llamaExistingAliasRouterModelId = 'Qwen3.5-9B-Q5_K_M';
@@ -70,7 +67,6 @@ describe('buildCatalogEditRequest', () => {
       openAiReasoningEffortEnabled: false,
       anthropicThinkingEnabled: false,
       localRuntimeRouterModelId: 'QwenAlias',
-      localRuntimeResourceGroupKey: 'local',
       localRuntimeProfileId: 'qwen3_5',
       localRuntimeLoadParamsJson: '{"model":"QwenAlias"}',
       localRuntimeParallelToolCalls: false,
@@ -80,7 +76,6 @@ describe('buildCatalogEditRequest', () => {
 
     expect(request.modelId).toBe('qwen-local');
     expect(request.localRuntimeJson).toContain('"routerModelId": "QwenAlias"');
-    expect(request.localRuntimeJson).toContain('"resourceGroupKey": "local"');
     expect(request.localRuntimeJson).toContain('"runtimeProfileId": "qwen3_5"');
   });
 });

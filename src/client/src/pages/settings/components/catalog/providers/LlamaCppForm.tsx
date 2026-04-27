@@ -423,15 +423,6 @@ export function LlamaCppEditForm({ value, onChange, profiles, profilesLoading, i
           />
           <p className="text-[11px] text-gray-500">Identity. Delete + re-add to rebind.</p>
         </div>
-        <div className="space-y-1">
-          <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Resource Group</label>
-          <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
-            <span className="font-mono">local</span>
-            <span className="ml-2 text-[11px] text-gray-500">
-              Reserved for future multi-pool scheduling. Server rejects other values.
-            </span>
-          </div>
-        </div>
       </div>
 
       <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
