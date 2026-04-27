@@ -57,10 +57,7 @@ public sealed class OpenAiChatClientFactory : IChatCompletionClientFactory
     private OpenAIClient CreateClientInstance(AzureOpenAiConfig config, string? deploymentId, HttpClient httpClient)
     {
         var auth = new OpenAIAuthentication(config.ApiKey);
-        var settings = new OpenAISettings(
-            resourceName: config.ResourceName,
-            deploymentId: deploymentId,
-            apiVersion: config.ApiVersion);
+        var settings = OpenAiClientSettingsFactory.Create(config, deploymentId);
         return new OpenAIClient(auth, settings, httpClient);
     }
 

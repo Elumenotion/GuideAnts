@@ -71,6 +71,27 @@ public sealed class RoutingChatCompletionClientFactoryTests
     }
 
     [TestMethod]
+    public void CreateClient_UsesOpenAiChat_ForOpenAiPlatformChatProvider()
+    {
+        // "openai-chat" targets the OpenAI platform (api.openai.com), so the
+        // platform factory must work without an Azure resource name.
+        using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "gpt-4.1-nano",
+            DisplayName = "GPT 4.1 Nano",
+            Provider = "openai-chat",
+            IsActive = true
+        });
+        db.SaveChanges();
+
+        var factory = CreateFactory(db);
+        var client = factory.CreateClient("gpt-4.1-nano");
+
+        client.Should().BeOfType<OpenAiChatClient>();
+    }
+
+    [TestMethod]
     public void CreateClient_UsesOpenAiResponses_ForOpenAiPlatformResponsesProvider()
     {
         // "openai-responses" targets the OpenAI platform (api.openai.com) via
@@ -400,7 +421,15 @@ public sealed class RoutingChatCompletionClientFactoryTests
             .Setup(factory => factory.CreateClient(It.IsAny<string>()))
             .Returns(new HttpClient());
 
-        var openAiConfig = new AzureOpenAiConfig
+        var openAiPlatformConfig = new AzureOpenAiConfig
+        {
+            ApiKey = "sk-test-openai-key",
+            ResourceName = null,
+            ApiVersion = null,
+            DeploymentId = null
+        };
+
+        var azureOpenAiConfig = new AzureOpenAiConfig
         {
             ApiKey = "test-key",
             ResourceName = "test-resource",
@@ -418,16 +447,12 @@ public sealed class RoutingChatCompletionClientFactoryTests
         };
 
         // In production these four registrations are keyed DI singletons, one
-        // per (platform, api) pair. Tests don't use keyed resolution because
-        // RoutingChatCompletionClientFactory is constructed positionally, so
-        // we just hand it four distinct instances. Using one shared config
-        // across all four is fine because these tests don't assert on which
-        // credentials flowed through — that's the domain of the integration
-        // tests against the running API.
-        var openAiPlatformChatFactory = new OpenAiChatClientFactory(httpFactory.Object, openAiConfig);
-        var azureOpenAiChatFactory = new OpenAiChatClientFactory(httpFactory.Object, openAiConfig);
-        var openAiPlatformResponsesFactory = new OpenAiResponsesClientFactory(httpFactory.Object, openAiConfig);
-        var azureOpenAiResponsesFactory = new OpenAiResponsesClientFactory(httpFactory.Object, openAiConfig);
+        // per (platform, api) pair. Keep platform configs resource-less so
+        // tests exercise the api.openai.com path instead of the Azure path.
+        var openAiPlatformChatFactory = new OpenAiChatClientFactory(httpFactory.Object, openAiPlatformConfig);
+        var azureOpenAiChatFactory = new OpenAiChatClientFactory(httpFactory.Object, azureOpenAiConfig);
+        var openAiPlatformResponsesFactory = new OpenAiResponsesClientFactory(httpFactory.Object, openAiPlatformConfig);
+        var azureOpenAiResponsesFactory = new OpenAiResponsesClientFactory(httpFactory.Object, azureOpenAiConfig);
         var anthropicFactory = new AnthropicChatClientFactory(httpFactory.Object, anthropicConfig);
         var googleGeminiFactory = new GoogleGeminiChatClientFactory(
             httpFactory.Object,

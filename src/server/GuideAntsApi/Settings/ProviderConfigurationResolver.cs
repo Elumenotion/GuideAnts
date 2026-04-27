@@ -51,10 +51,9 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
     public AzureOpenAiConfig GetOpenAiConfig()
     {
         // OpenAI platform (api.openai.com): ResourceName is intentionally left
-        // null so the underlying OpenAISettings constructor routes through
-        // the platform endpoint rather than an Azure resource host. The
-        // platform has no api-version concept, so ApiVersion is not read
-        // here — the registry's OpenAI section doesn't declare one either.
+        // null so the OpenAI client factories select platform settings instead
+        // of the Azure OpenAI resource constructor. The platform has no
+        // api-version concept, so ApiVersion is not read here.
         return new AzureOpenAiConfig
         {
             ResourceName = null,
