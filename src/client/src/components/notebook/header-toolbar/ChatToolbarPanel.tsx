@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FaCog, FaPlay, FaSpinner, FaStop } from 'react-icons/fa';
+import { FaCheck, FaCog, FaPlay, FaSpinner, FaStop } from 'react-icons/fa';
 import { api } from '../../../services/api';
 import { textButtonClassName } from '../../../pages/settings/components/shared/ActionButtons';
 import type { ChatPanelProps } from './types';
@@ -30,6 +30,11 @@ export function ChatToolbarPanel({
     chat.inProgressState !== 'failed';
   const overrideAllChatModels = chatDefaults?.overrideAllChatModels ?? chat.overrideAllChatModels;
   const currentModelId = chat.effectiveModelId;
+  const loadButtonLabel = hasPendingOp
+    ? 'Switching...'
+    : chat.localRuntimeOn
+      ? 'Loaded'
+      : 'Load model';
 
   const loadChatDefaults = useCallback(async () => {
     try {
@@ -188,27 +193,42 @@ export function ChatToolbarPanel({
       </div>
 
       {chat.supportsLocalRuntimePower && (
-        <div className="mt-2 border-t pt-2 flex items-center gap-2">
-          <span className="text-xs text-slate-700">Local runtime</span>
-          {hasPendingOp ? <FaSpinner className="w-3.5 h-3.5 animate-spin text-blue-600" /> : null}
+        <div className="mt-2 flex items-center gap-2 border-t pt-2">
+          <span className="text-xs text-slate-700">Local model</span>
           <button
             type="button"
-            className="p-1.5 rounded border border-emerald-300 text-emerald-700"
-            aria-label="Turn local chat runtime on"
-            title="On"
+            className={`inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium ${
+              chat.localRuntimeOn
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : 'border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50'
+            } disabled:cursor-not-allowed disabled:opacity-70`}
+            aria-label={chat.localRuntimeOn ? 'Selected local chat model is loaded' : 'Load selected local chat model'}
+            title={chat.localRuntimeOn ? 'Selected local chat model is loaded' : 'Load selected local chat model'}
+            disabled={Boolean(hasPendingOp) || chat.localRuntimeOn}
             onClick={() => void powerOn()}
           >
-            <FaPlay className="w-3.5 h-3.5" />
+            {hasPendingOp ? (
+              <FaSpinner className="h-3.5 w-3.5 animate-spin" />
+            ) : chat.localRuntimeOn ? (
+              <FaCheck className="h-3.5 w-3.5" />
+            ) : (
+              <FaPlay className="h-3.5 w-3.5" />
+            )}
+            {loadButtonLabel}
           </button>
-          <button
-            type="button"
-            className="p-1.5 rounded border border-slate-300 text-slate-700"
-            aria-label="Turn local chat runtime off"
-            title="Off"
-            onClick={onRequestUnloadConfirm}
-          >
-            <FaStop className="w-3.5 h-3.5" />
-          </button>
+          {chat.localRuntimeOn ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+              aria-label="Unload selected local chat model"
+              title="Unload selected local chat model"
+              disabled={Boolean(hasPendingOp)}
+              onClick={onRequestUnloadConfirm}
+            >
+              <FaStop className="h-3.5 w-3.5" />
+              Unload
+            </button>
+          ) : null}
         </div>
       )}
 

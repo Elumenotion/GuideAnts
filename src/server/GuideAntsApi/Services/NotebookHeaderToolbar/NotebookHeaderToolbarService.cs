@@ -81,6 +81,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         IReadOnlyList<string> chatBlockers = Array.Empty<string>();
         string chatStatus = "blocked";
         string chatSummary = "Chat model unavailable";
+        ChatTargetReadinessDto? chatReadiness = null;
         ChatModelReferenceKind chatReferenceKind = ChatModelReferenceKind.Direct;
         var overrideAllChatModels = _configuration.GetValue<bool>("ChatDefaults:OverrideAllChatModels");
         Guid? assistantId = null;
@@ -136,6 +137,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             var chatReady = await _readiness
                 .ProbeChatTargetAsync(effectiveModelId, cancellationToken, referenceKind)
                 .ConfigureAwait(false);
+            chatReadiness = chatReady;
             chatStatus = MapChatToolbarStatus(chatReady);
             chatSummary = BuildChatSummary(effectiveModelDisplay, chatReady, conversationId == null);
             if (chatReady.Blockers.Count > 0)
@@ -151,25 +153,37 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             m.IsActive
             && string.Equals(m.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
             && string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal));
-        var localRuntimeOn = supportsLocalLlama && string.Equals(llamaStatus.State, "ready", StringComparison.OrdinalIgnoreCase);
+        var selectedLocalModelLoaded = supportsLocalLlama
+            && !string.IsNullOrWhiteSpace(effectiveModelId)
+            && llamaStatus.LoadedModels.Any(m => string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal));
+        var localRuntimeOn = supportsLocalLlama
+            && (selectedLocalModelLoaded || string.Equals(llamaStatus.State, "ready", StringComparison.OrdinalIgnoreCase));
         var inProg = llamaStatus.ActiveOperation;
         var chatInProgressId = inProg is { State: not "ready" and not "failed" } ? inProg.OperationId : null;
         var chatInProgressState = inProg?.State;
 
         if (supportsLocalLlama)
         {
-            if (string.Equals(llamaStatus.State, "requires_load", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(llamaStatus.State, "loading", StringComparison.OrdinalIgnoreCase))
+            var hasActiveOperation = llamaStatus.ActiveOperation is { State: not "ready" and not "failed" };
+            if (hasActiveOperation)
             {
-                if (string.Equals(chatStatus, "ready", StringComparison.OrdinalIgnoreCase))
+                chatStatus = "inProgress";
+                chatSummary = BuildLocalLlamaOperationSummary(effectiveModelDisplay, llamaStatus.ActiveOperation);
+                chatBlockers = Array.Empty<string>();
+            }
+            else if (localRuntimeOn)
+            {
+                if (!string.Equals(chatStatus, "blocked", StringComparison.OrdinalIgnoreCase))
                 {
-                    chatStatus = "degraded";
+                    chatSummary = BuildLocalLlamaLoadedSummary(effectiveModelDisplay);
                 }
             }
-
-            chatSummary = localRuntimeOn
-                ? $"{chatSummary} - local runtime loaded"
-                : $"{chatSummary} - local runtime off";
+            else if (chatReadiness is not null && IsOnlyRuntimeStateUnloadedBlocker(chatReadiness))
+            {
+                chatStatus = "requiresLoad";
+                chatSummary = BuildLocalLlamaRequiresLoadSummary(effectiveModelDisplay, llamaStatus);
+                chatBlockers = Array.Empty<string>();
+            }
         }
 
         var image = await BuildRoutedServiceAsync(
@@ -322,6 +336,73 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         }
 
         return $"{name ?? "Chat"} — {r.Blockers[0]}";
+    }
+
+    private static bool IsOnlyRuntimeStateUnloadedBlocker(ChatTargetReadinessDto r)
+    {
+        if (r.Blockers.Count != 1)
+        {
+            return false;
+        }
+
+        var blocker = r.Blockers[0] ?? string.Empty;
+        return blocker.StartsWith($"{RoutingReadinessService.BlockerKeys.RuntimeState}:", StringComparison.Ordinal)
+            && blocker.Contains("'unloaded'", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildLocalLlamaLoadedSummary(string? displayName)
+    {
+        return $"{LocalModelDisplayName(displayName)} selected. Local model loaded.";
+    }
+
+    private static string BuildLocalLlamaOperationSummary(
+        string? displayName,
+        ModelLoadOperationDto? operation)
+    {
+        var name = LocalModelDisplayName(displayName);
+        var state = operation?.State?.Trim().ToLowerInvariant();
+        var detail = state switch
+        {
+            "queued" => "queued",
+            "unloading" => "unloading the current local model",
+            "loading" => "loading the selected local model",
+            "verifying" => "verifying the selected local model",
+            _ => "in progress"
+        };
+        return $"Switching to {name}: {detail}.";
+    }
+
+    private static string BuildLocalLlamaRequiresLoadSummary(
+        string? displayName,
+        NotebookLlamaRuntimeStatusDto llamaStatus)
+    {
+        var name = LocalModelDisplayName(displayName);
+        var loaded = llamaStatus.LoadedModels
+            .Where(m => m.LocalRuntime != null)
+            .Select(m => string.IsNullOrWhiteSpace(m.DisplayName) ? m.ModelId : m.DisplayName)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (loaded.Count == 0)
+        {
+            return $"{name} selected. No local model is loaded. Load {name} to start.";
+        }
+
+        if (loaded.Count == 1)
+        {
+            return $"{name} selected. {loaded[0]} is currently loaded. Load {name} to switch.";
+        }
+
+        var loadedSummary = loaded.Count == 2
+            ? $"{loaded[0]} and {loaded[1]} are currently loaded"
+            : $"{loaded[0]} and {loaded.Count - 1} others are currently loaded";
+
+        return $"{name} selected. {loadedSummary}. Load {name} to switch.";
+    }
+
+    private static string LocalModelDisplayName(string? displayName)
+    {
+        return string.IsNullOrWhiteSpace(displayName) ? "Local model" : displayName;
     }
 
     private async Task<NotebookToolbarServiceDto> BuildRoutedServiceAsync(

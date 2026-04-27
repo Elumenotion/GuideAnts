@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatToolbarPanel } from '../ChatToolbarPanel';
 import { api } from '../../../../services/api';
 
@@ -59,6 +59,10 @@ vi.mock('../../../../services/api', () => ({
 }));
 
 describe('ChatToolbarPanel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('changes global chat default model through settings API when override is enabled', async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn(async () => {});
@@ -103,5 +107,80 @@ describe('ChatToolbarPanel', () => {
       })
     );
     expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it('shows a load action without unload when selected local model is not loaded', async () => {
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'requiresLoad',
+          summary: 'Qwen selected. Mistral is currently loaded. Load Qwen to switch.',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'qwen-local',
+          effectiveModelDisplayName: 'Qwen',
+          effectiveProvider: 'llama-cpp',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'qwen-local', displayName: 'Qwen', provider: 'llama-cpp', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: /load selected local chat model/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /load selected local chat model/i })).toHaveTextContent('Load model');
+    expect(screen.queryByRole('button', { name: /unload selected local chat model/i })).not.toBeInTheDocument();
+  });
+
+  it('shows loaded state and unload action when selected local model is loaded', async () => {
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'ready',
+          summary: 'Qwen selected. Local model loaded.',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'qwen-local',
+          effectiveModelDisplayName: 'Qwen',
+          effectiveProvider: 'llama-cpp',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: true,
+          modelOptions: [
+            { modelId: 'qwen-local', displayName: 'Qwen', provider: 'llama-cpp', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: /selected local chat model is loaded/i })).toHaveTextContent('Loaded');
+    expect(screen.getByRole('button', { name: /unload selected local chat model/i })).toHaveTextContent('Unload');
   });
 });

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.LlamaCpp;
@@ -226,6 +227,142 @@ public sealed class NotebookHeaderToolbarServiceTests
 
         toolbar.Chat.ModelOptions.Select(option => option.ModelId).Should().Equal("qwen-local");
         toolbar.Chat.SupportsLocalRuntimePower.Should().BeTrue();
+        toolbar.Chat.Status.Should().Be("requiresLoad");
+        toolbar.Chat.Summary.Should().Contain("Qwen Local selected");
+        toolbar.Chat.Summary.Should().Contain("No local model is loaded");
+        toolbar.Chat.Summary.Should().NotContain("RUNTIME_STATE");
+        toolbar.Chat.Summary.Should().NotContain("runtime off");
+        toolbar.Chat.Blockers.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task GetToolbarAsync_ExplainsLocalModelSwitch_WhenAnotherLocalModelIsLoaded()
+    {
+        await using var db = CreateDb();
+        var project = new Project
+        {
+            Title = "Project",
+            Slug = "project"
+        };
+        var notebook = new Notebook
+        {
+            Title = "Notebook",
+            Slug = "notebook",
+            ProjectId = project.Id,
+            Project = project
+        };
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        await db.SaveChangesAsync();
+
+        var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        settings
+            .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new SettingsModelDto(
+                    ModelId: "qwen-local",
+                    DisplayName: "Qwen Local",
+                    Provider: "llama-cpp",
+                    Description: null,
+                    ReasoningChoicesJson: null,
+                    LocalRuntimeJson: "{\"routerModelId\":\"qwen-local\"}",
+                    IsActive: true,
+                    DisplayOrder: 1,
+                    Created: DateTime.UtcNow,
+                    Updated: null),
+                new SettingsModelDto(
+                    ModelId: "mistral-local",
+                    DisplayName: "Mistral Local",
+                    Provider: "llama-cpp",
+                    Description: null,
+                    ReasoningChoicesJson: null,
+                    LocalRuntimeJson: "{\"routerModelId\":\"mistral-local\"}",
+                    IsActive: true,
+                    DisplayOrder: 2,
+                    Created: DateTime.UtcNow,
+                    Updated: null)
+            ]);
+        settings
+            .Setup(x => x.GetServiceEditorStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string serviceId, CancellationToken _) => CreateReadyServiceState(serviceId));
+
+        var readiness = new Mock<IRoutingReadinessService>(MockBehavior.Strict);
+        readiness
+            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()))
+            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind) =>
+                string.Equals(modelId, "qwen-local", StringComparison.Ordinal)
+                    ? new ChatTargetReadinessDto(
+                        ModelId: modelId,
+                        Provider: "llama-cpp",
+                        Status: "blocked",
+                        Blockers:
+                        [
+                            "RUNTIME_STATE: alias 'qwen-local' runtime state is 'unloaded' (expected 'loaded')."
+                        ],
+                        RuntimeState: "unloaded",
+                        AssistantUsageCount: 0,
+                        ReferenceKind: referenceKind)
+                    : new ChatTargetReadinessDto(
+                        ModelId: modelId,
+                        Provider: "llama-cpp",
+                        Status: "ready",
+                        Blockers: Array.Empty<string>(),
+                        RuntimeState: "loaded",
+                        AssistantUsageCount: 0,
+                        ReferenceKind: referenceKind));
+
+        var chatModelResolver = new Mock<IChatModelResolver>(MockBehavior.Strict);
+        chatModelResolver
+            .Setup(x => x.Resolve(It.IsAny<string?>()))
+            .Returns(new ResolvedChatModel("qwen-local", ChatModelReferenceKind.Direct, null, null, null));
+
+        var conversations = new Mock<IConversationManager>(MockBehavior.Strict);
+
+        var llamaRuntime = new Mock<INotebookModelRuntimeService>(MockBehavior.Strict);
+        llamaRuntime
+            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NotebookLlamaRuntimeStatusDto
+            {
+                State = "requires_load",
+                LoadedModels =
+                [
+                    new ModelDto(
+                        "mistral-local",
+                        "Mistral Local",
+                        Description: null,
+                        ReasoningChoicesJson: null,
+                        IsActive: true,
+                        DisplayOrder: 2,
+                        LocalRuntime: new LocalRuntimeDescriptorDto("mistral-local", "default", null),
+                        SamplingParameterPolicy: null,
+                        ReasoningChoices: null,
+                        DefaultReasoningChoice: null)
+                ]
+            });
+
+        var configuration = new ConfigurationBuilder().Build();
+
+        var sut = new NotebookHeaderToolbarService(
+            db,
+            settings.Object,
+            readiness.Object,
+            chatModelResolver.Object,
+            conversations.Object,
+            llamaRuntime.Object,
+            configuration,
+            Mock.Of<IHttpClientFactory>(),
+            NullLogger<NotebookHeaderToolbarService>.Instance);
+
+        var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
+
+        toolbar.Chat.Status.Should().Be("requiresLoad");
+        toolbar.Chat.Summary.Should().Contain("Qwen Local selected");
+        toolbar.Chat.Summary.Should().Contain("Mistral Local is currently loaded");
+        toolbar.Chat.Summary.Should().Contain("Load Qwen Local to switch");
+        toolbar.Chat.Summary.Should().NotContain("runtime off");
+        toolbar.Chat.Summary.Should().NotContain("RUNTIME_STATE");
+        toolbar.Chat.Blockers.Should().BeEmpty();
     }
 
     private static ApplicationDbContext CreateDb()
