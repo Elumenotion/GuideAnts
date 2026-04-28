@@ -196,45 +196,16 @@ public sealed partial class ApplicationSettingsService
             return;
         }
 
-        var config = new ProviderConfigurationResolver(_configuration).GetAnthropicConfig();
         foreach (var choice in choices)
         {
-            if (string.Equals(choice, "none", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(choice))
             {
                 continue;
             }
 
-            var budget = config.ThinkingBudgets.ForEffort(choice);
-            if (!budget.HasValue)
-            {
-                throw new InvalidOperationException(
-                    $"Anthropic model '{modelId}' declares thinking choice '{choice}', but {GetAnthropicBudgetSettingName(choice)} is not configured.");
-            }
-
-            if (budget.Value < 1024)
-            {
-                throw new InvalidOperationException(
-                    $"Anthropic thinking budget for choice '{choice}' must be at least 1024 tokens.");
-            }
-
-            if (budget.Value >= config.DefaultMaxTokens)
-            {
-                throw new InvalidOperationException(
-                    $"Anthropic thinking budget for choice '{choice}' must be less than Anthropic:DefaultMaxTokens.");
-            }
+            throw new InvalidOperationException(
+                $"Anthropic model '{modelId}' declares an empty reasoning choice.");
         }
-    }
-
-    private static string GetAnthropicBudgetSettingName(string choice)
-    {
-        return choice.Trim().ToLowerInvariant() switch
-        {
-            "minimal" => "Anthropic:ThinkingBudgetMinimal",
-            "low" => "Anthropic:ThinkingBudgetLow",
-            "medium" => "Anthropic:ThinkingBudgetMedium",
-            "high" => "Anthropic:ThinkingBudgetHigh",
-            _ => $"an Anthropic thinking budget setting for '{choice}'"
-        };
     }
 
     private static SettingsModelDto ToSettingsModelDto(Model model)

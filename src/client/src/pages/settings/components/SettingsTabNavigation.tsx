@@ -9,9 +9,9 @@ interface SettingsTabNavigationProps {
 
 const tabs: Array<{ key: SettingsTab; label: string; icon: IconType }> = [
   { key: 'overview', label: 'Overview', icon: FaHome },
+  { key: 'connections', label: 'Connections', icon: FaDatabase },
   { key: 'models-runtime', label: 'Models & Runtime', icon: FaMicrochip },
   { key: 'services', label: 'Services', icon: FaThLarge },
-  { key: 'connections', label: 'Connections', icon: FaDatabase },
   { key: 'infrastructure', label: 'Infrastructure', icon: FaSlidersH },
 ];
 

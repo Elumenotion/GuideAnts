@@ -55,6 +55,7 @@ public sealed class SpeechSynthesisServiceTests
             var result = await service.SynthesizeToWavAsync("<speak><voice>Hello <break/>world</voice></speak>", outputPath);
 
             result.Success.Should().BeTrue();
+            result.ProviderId.Should().Be(ServiceProviderIds.SpeechSynthesisLocalTtsHttp);
             result.DurationSeconds.Should().Be(5);
             File.Exists(outputPath).Should().BeTrue();
             File.ReadAllBytes(outputPath).Should().Equal(wavBytes);
@@ -122,6 +123,7 @@ public sealed class SpeechSynthesisServiceTests
             var result = await service.SynthesizeToWavAsync("<speak>Hello Google</speak>", outputPath);
 
             result.Success.Should().BeTrue();
+            result.ProviderId.Should().Be(ServiceProviderIds.SpeechSynthesisGoogleTextToSpeech);
             handler.LastRequestUri.Should().NotBeNull();
             handler.LastRequestUri!.ToString().Should().Be("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent");
             handler.LastRequestBody.Should().Contain("\"responseModalities\":[\"AUDIO\"]");

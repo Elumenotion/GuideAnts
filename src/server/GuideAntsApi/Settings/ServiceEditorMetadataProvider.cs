@@ -18,9 +18,8 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
             {
                 [ServiceProviderIds.EmbeddingsAzureOpenAiEmbedding] =
                 [
-                    Field("Endpoint", "Endpoint", "url", true, "Azure OpenAI embeddings endpoint.", operative: true),
-                    Field("ApiKey", "API Key", "secret", true, "Credential for Azure OpenAI embeddings.", operative: true),
-                    Field("Deployment", "Deployment", "text", true, "Deployment name for embeddings.", operative: true),
+                    Field("Deployment", "Deployment", "text", true, "Deployment name for embeddings stored on the service mode.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Embedding request timeout in seconds.", operative: true),
                 ],
                 [ServiceProviderIds.EmbeddingsLocalEmbHttp] =
                 [
@@ -29,30 +28,29 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 ],
                 [ServiceProviderIds.EmbeddingsGoogleEmbedding] =
                 [
-                    Field("ApiKey", "API Key", "secret", true, "Google Gemini API key.", operative: true),
                     Field("ModelId", "Embedding Model ID", "text", true, "Gemini embedding model id routed through ServiceModes.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Embedding request timeout in seconds.", operative: true),
                 ],
                 [ServiceProviderIds.EmbeddingsHuggingFaceInference] =
                 [
-                    Field("Token", "Token", "secret", true, "Hugging Face token for inference APIs.", operative: true),
                     Field("ModelId", "Embedding Model ID", "text", true, "Model id routed through ServiceModes for Hugging Face embeddings.", operative: true),
+                    Field("AllowedModels", "Allowed Models", "text", false, "Comma-separated embedding model allowlist stored on the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Embedding request timeout in seconds.", operative: true),
                 ],
                 [ServiceProviderIds.EmbeddingsOpenRouterEmbeddings] =
                 [
-                    Field("ApiKey", "API Key", "secret", true, "OpenRouter API key.", operative: true),
-                    Field("BaseUrl", "Base URL", "url", false, "OpenRouter API base URL.", operative: true),
                     Field("ModelId", "Embedding Model ID", "text", true, "Model id routed through ServiceModes for OpenRouter embeddings.", operative: true),
+                    Field("AllowedModels", "Allowed Models", "text", false, "Comma-separated embedding model allowlist stored on the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Embedding request timeout in seconds.", operative: true),
                 ]
             },
             [RoutedServiceNames.ImageGeneration] = new Dictionary<string, IReadOnlyList<ProviderFieldMetadataDto>>(StringComparer.Ordinal)
             {
                 [ServiceProviderIds.ImageGenerationAzureOpenAiImages] =
                 [
-                    Field("Endpoint", "Endpoint", "url", true, "Azure OpenAI image endpoint.", operative: true),
-                    Field("ApiKey", "API Key", "secret", true, "Credential for image requests.", operative: true),
-                    Field("Deployment", "Deployment", "text", true, "Deployment for generation.", operative: true),
-                    Field("EditModelDeployment", "Edit Model Deployment", "text", true, "Deployment for edit requests.", operative: true),
-                    Field("ApiVersion", "API Version", "text", false, "Azure API version override.", operative: true),
+                    Field("Deployment", "Deployment", "text", true, "Deployment for generation stored on the service mode.", operative: true),
+                    Field("EditModelDeployment", "Edit Model Deployment", "text", true, "Deployment for edit requests stored on the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Image request timeout in seconds.", operative: true),
                 ],
                 [ServiceProviderIds.ImageGenerationLocalSdHttp] =
                 [
@@ -70,30 +68,29 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 ],
                 [ServiceProviderIds.ImageGenerationGoogleImagen] =
                 [
-                    Field("ApiKey", "API Key", "secret", true, "Google Gemini API key.", operative: true),
                     Field("ModelId", "Image Model ID", "text", true, "Gemini image-capable model id routed through ServiceModes.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Image request timeout in seconds.", operative: true),
                 ],
                 [ServiceProviderIds.ImageGenerationHuggingFaceInference] =
                 [
-                    Field("Token", "Token", "secret", true, "Hugging Face token for inference APIs.", operative: true),
                     Field("ModelId", "Image Model ID", "text", true, "Model id routed through ServiceModes for Hugging Face image generation.", operative: true),
+                    Field("AllowedModels", "Allowed Models", "text", false, "Comma-separated image model allowlist stored on the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Image request timeout in seconds.", operative: true),
                 ],
                 [ServiceProviderIds.ImageGenerationOpenRouterImage] =
                 [
-                    Field("ApiKey", "API Key", "secret", true, "OpenRouter API key.", operative: true),
-                    Field("BaseUrl", "Base URL", "url", false, "OpenRouter API base URL.", operative: true),
                     Field("ModelId", "Image Model ID", "text", true, "Model id routed through ServiceModes for OpenRouter image generation.", operative: true),
+                    Field("AllowedModels", "Allowed Models", "text", false, "Comma-separated image model allowlist stored on the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Image request timeout in seconds.", operative: true),
                 ]
             },
             [RoutedServiceNames.DocumentIntelligence] = new Dictionary<string, IReadOnlyList<ProviderFieldMetadataDto>>(StringComparer.Ordinal)
             {
                 [ServiceProviderIds.DocumentIntelligenceAzure] =
                 [
-                    Field("Endpoint", "Endpoint", "url", true, "Azure Document Intelligence endpoint.", operative: true),
-                    Field("ApiKey", "API Key", "secret", true, "Credential for Azure Document Intelligence.", operative: true),
-                    Field("ApiVersion", "API Version", "text", false, "Azure API version for extraction.", operative: true),
+                    Field("ApiVersion", "API Version", "text", false, "Azure API version for extraction stored on the service mode preset.", operative: true),
                     Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Timeout for extraction calls.", operative: true),
-                    Field("MaxRetries", "Max Retries", "int", true, "Retry attempts for transient failures.", operative: true),
+                    Field("MaxRetries", "Max Retries", "int", true, "Retry attempts for transient failures stored on the service mode preset.", operative: true),
                 ],
                 [ServiceProviderIds.DocumentIntelligenceLocalDoclingHttp] =
                 [
@@ -113,9 +110,8 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
             {
                 [ServiceProviderIds.SpeechTranscriptionAzureSpeechBatch] =
                 [
-                    Field("Endpoint", "Endpoint", "url", true, "Azure Speech endpoint.", operative: true),
-                    Field("ApiKey", "API Key", "secret", true, "Credential for Azure Speech Batch.", operative: true),
                     Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Cloud transcription timeout.", operative: true),
+                    Field("MaxRetries", "Max Retries", "int", false, "Azure Speech retry attempts owned by Speech Transcription.", operative: true),
                     Field("language", "Language", "text", false, "Legacy request preset language.", operative: false),
                     Field("modelHint", "Model Hint", "text", false, "Legacy request preset model hint.", operative: false),
                 ],
@@ -125,29 +121,29 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 ],
                 [ServiceProviderIds.SpeechTranscriptionGoogleSpeechToText] =
                 [
-                    Field("ApiKey", "API Key", "secret", true, "Google Gemini API key.", operative: true),
                     Field("ModelId", "Transcription Model ID", "text", true, "Gemini audio-capable model id routed through ServiceModes.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Cloud transcription timeout.", operative: true),
                 ],
                 [ServiceProviderIds.SpeechTranscriptionHuggingFaceInference] =
                 [
-                    Field("Token", "Token", "secret", true, "Hugging Face token for inference APIs.", operative: true),
                     Field("ModelId", "ASR Model ID", "text", true, "Model id routed through ServiceModes for Hugging Face ASR.", operative: true),
+                    Field("AllowedModels", "Allowed Models", "text", false, "Comma-separated ASR model allowlist stored on the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Cloud transcription timeout.", operative: true),
                 ],
                 [ServiceProviderIds.SpeechTranscriptionOpenRouterAudio] =
                 [
-                    Field("ApiKey", "API Key", "secret", true, "OpenRouter API key.", operative: true),
-                    Field("BaseUrl", "Base URL", "url", false, "OpenRouter API base URL.", operative: true),
                     Field("ModelId", "Transcription Model ID", "text", true, "Model id routed through ServiceModes for OpenRouter transcription.", operative: true),
+                    Field("AllowedModels", "Allowed Models", "text", false, "Comma-separated transcription model allowlist stored on the service mode preset.", operative: true),
+                    Field("MaxAudioBytes", "Max Audio Bytes", "int", false, "Maximum input audio bytes stored on the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Cloud transcription timeout.", operative: true),
                 ]
             },
             [RoutedServiceNames.SpeechSynthesis] = new Dictionary<string, IReadOnlyList<ProviderFieldMetadataDto>>(StringComparer.Ordinal)
             {
                 [ServiceProviderIds.SpeechSynthesisAzureSpeechSsml] =
                 [
-                    Field("ApiKey", "API Key", "secret", true, "Azure Speech credential.", operative: true),
-                    Field("Region", "Region", "text", true, "Azure Speech region.", operative: true),
-                    Field("Endpoint", "Endpoint", "url", false, "Optional endpoint override.", operative: true),
                     Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Azure synthesis timeout.", operative: true),
+                    Field("MaxRetries", "Max Retries", "int", false, "Azure Speech retry attempts owned by Speech Synthesis.", operative: true),
                     Field("voice", "Voice", "text", false, "Legacy request preset voice.", operative: false),
                     Field("language", "Language", "text", false, "Legacy request preset language.", operative: false),
                     Field("rate", "Rate", "text", false, "Legacy request preset rate.", operative: false),
@@ -159,20 +155,21 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 ],
                 [ServiceProviderIds.SpeechSynthesisGoogleTextToSpeech] =
                 [
-                    Field("ApiKey", "API Key", "secret", true, "Google Gemini API key.", operative: true),
                     Field("ModelId", "TTS Model ID", "text", true, "Gemini TTS model id routed through ServiceModes.", operative: true),
                     Field("VoiceName", "Voice Name", "text", true, "Required Gemini prebuilt voice name stored in the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Cloud synthesis timeout.", operative: true),
                 ],
                 [ServiceProviderIds.SpeechSynthesisHuggingFaceInference] =
                 [
-                    Field("Token", "Token", "secret", true, "Hugging Face token for inference APIs.", operative: true),
                     Field("ModelId", "TTS Model ID", "text", true, "Model id routed through ServiceModes for Hugging Face TTS.", operative: true),
+                    Field("AllowedModels", "Allowed Models", "text", false, "Comma-separated TTS model allowlist stored on the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Cloud synthesis timeout.", operative: true),
                 ],
                 [ServiceProviderIds.SpeechSynthesisOpenRouterTts] =
                 [
-                    Field("ApiKey", "API Key", "secret", true, "OpenRouter API key.", operative: true),
-                    Field("BaseUrl", "Base URL", "url", false, "OpenRouter API base URL.", operative: true),
                     Field("ModelId", "TTS Model ID", "text", true, "Model id routed through ServiceModes for OpenRouter TTS.", operative: true),
+                    Field("AllowedModels", "Allowed Models", "text", false, "Comma-separated TTS model allowlist stored on the service mode preset.", operative: true),
+                    Field("TimeoutSeconds", "Timeout Seconds", "int", true, "Cloud synthesis timeout.", operative: true),
                 ]
             },
         };

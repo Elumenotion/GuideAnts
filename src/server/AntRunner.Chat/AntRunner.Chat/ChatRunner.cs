@@ -7,9 +7,18 @@ namespace AntRunner.Chat
     {
         public ChatRunOutput? ChatRunOutput { get; private set; }
 
-        public ChatConversationException(Exception ex, ChatRunOutput? chatRunOutput) : base("An error occured during the run", ex)
+        public ChatConversationException(Exception ex, ChatRunOutput? chatRunOutput)
+            : base(BuildMessage(ex), ex)
         {
             ChatRunOutput = chatRunOutput;
+        }
+
+        private static string BuildMessage(Exception ex)
+        {
+            var message = ex.Message?.Trim();
+            return string.IsNullOrWhiteSpace(message)
+                ? "Chat run failed."
+                : message;
         }
     }
 

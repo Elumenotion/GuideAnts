@@ -147,9 +147,15 @@ export function ImageGenerationEditor() {
           <TextActionButton
             tone="primary"
             icon={saving ? <FaSpinner className="animate-spin" /> : <FaSave />}
-            disabled={saving}
+            disabled={saving || !selectedProvider.connectionConfigured}
             onClick={() => void save()}
-            title="Save and activate provider."
+            title={
+              !selectedProvider.connectionConfigured
+                  ? 'Configure the provider connection first.'
+                  : !selectedProvider.hasExplicitMode
+                    ? 'Save will create an explicit service mode and activate provider.'
+                    : 'Save and activate provider.'
+            }
           >
             Save
           </TextActionButton>

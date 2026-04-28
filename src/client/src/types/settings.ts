@@ -93,6 +93,14 @@ export interface ProviderEditorStateDto {
   providerId: string;
   providerKind: string;
   displayName: string;
+  providerSection: string;
+  modeId?: string | null;
+  hasExplicitMode: boolean;
+  isDefaultMode: boolean;
+  connectionConfigured: boolean;
+  connectionMissingFields: string[];
+  canActivate: boolean;
+  activationBlockers: string[];
   fields: Record<string, ProviderFieldValueDto>;
   runtimeDependencies: RuntimeKeyDto[];
   operativeFields: string[];

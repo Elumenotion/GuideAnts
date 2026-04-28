@@ -1,15 +1,18 @@
 using FluentAssertions;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Moq;
+using System.Text.Json.Nodes;
 
 namespace GuideAntsApi.Tests.Settings;
 
@@ -22,6 +25,10 @@ public sealed class ServiceEditorUpdateValidationTests
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
         var service = CreateService(db, configuration);
+        SeedServiceModes(db, "Embeddings",
+        [
+            new ServiceMode("local", "LocalServiceHosts:EmbeddingsBaseUrl", null, null, true, true)
+        ]);
 
         var act = async () => await service.UpdateServiceProviderFieldsAsync(
             "Embeddings",
@@ -29,7 +36,7 @@ public sealed class ServiceEditorUpdateValidationTests
             new ProviderFieldsUpdateRequest(
                 new Dictionary<string, string?>
                 {
-                    ["Endpoint"] = "https://embedding-api.example.com/",
+                    ["TimeoutSeconds"] = "30",
                     ["NotARealField"] = "x"
                 }),
             CancellationToken.None);
@@ -39,26 +46,28 @@ public sealed class ServiceEditorUpdateValidationTests
     }
 
     [TestMethod]
-    public async Task UpdateServiceProviderFieldsAsync_RejectsInvalidUrl()
+    public async Task UpdateServiceProviderFieldsAsync_RejectsInvalidServiceField()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
         var service = CreateService(db, configuration);
+        SeedServiceModes(db, "Embeddings",
+        [
+            new ServiceMode("local", "LocalServiceHosts:EmbeddingsBaseUrl", null, null, true, true)
+        ]);
 
         var act = async () => await service.UpdateServiceProviderFieldsAsync(
             "Embeddings",
-            ServiceProviderIds.EmbeddingsAzureOpenAiEmbedding,
+            ServiceProviderIds.EmbeddingsLocalEmbHttp,
             new ProviderFieldsUpdateRequest(
                 new Dictionary<string, string?>
                 {
-                    ["Endpoint"] = "not-a-url",
-                    ["ApiKey"] = "k",
-                    ["Deployment"] = "d"
+                    ["TimeoutSeconds"] = "not-a-number"
                 }),
             CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .Where(e => e.Message.Contains("URL", StringComparison.OrdinalIgnoreCase));
+            .Where(e => e.Message.Contains("whole number", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -67,6 +76,10 @@ public sealed class ServiceEditorUpdateValidationTests
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
         var service = CreateService(db, configuration);
+        SeedServiceModes(db, "Embeddings",
+        [
+            new ServiceMode("huggingface", "HuggingFace", null, null, true, true)
+        ]);
 
         await service.UpdateServiceProviderFieldsAsync(
             "Embeddings",
@@ -74,7 +87,6 @@ public sealed class ServiceEditorUpdateValidationTests
             new ProviderFieldsUpdateRequest(
                 new Dictionary<string, string?>
                 {
-                    ["Token"] = "hf_test_token",
                     ["ModelId"] = "sentence-transformers/all-MiniLM-L6-v2"
                 }),
             CancellationToken.None);
@@ -101,6 +113,11 @@ public sealed class ServiceEditorUpdateValidationTests
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
         var service = CreateService(db, configuration);
+        SeedServiceModes(db, "SpeechTranscription",
+        [
+            new ServiceMode("local", "LocalServiceHosts:SpeechTranscriptionBaseUrl", null, null, true, true),
+            new ServiceMode("google", "GoogleGeminiApi", null, null, true, false)
+        ]);
 
         await service.UpdateServiceProviderFieldsAsync(
             "SpeechTranscription",
@@ -108,7 +125,6 @@ public sealed class ServiceEditorUpdateValidationTests
             new ProviderFieldsUpdateRequest(
                 new Dictionary<string, string?>
                 {
-                    ["ApiKey"] = "gemini-key",
                     ["ModelId"] = "gemini-2.5-flash"
                 }),
             CancellationToken.None);
@@ -141,6 +157,50 @@ public sealed class ServiceEditorUpdateValidationTests
             && mode.IsDefault);
     }
 
+    [TestMethod]
+    public async Task UpdateServiceProviderFieldsAsync_RejectsConnectionFields()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+        SeedServiceModes(db, "Embeddings",
+        [
+            new ServiceMode("azure", "AzureOpenAiEmbedding", null, null, true, true)
+        ]);
+
+        var act = async () => await service.UpdateServiceProviderFieldsAsync(
+            "Embeddings",
+            ServiceProviderIds.EmbeddingsAzureOpenAiEmbedding,
+            new ProviderFieldsUpdateRequest(
+                new Dictionary<string, string?>
+                {
+                    ["Endpoint"] = "https://embedding-api.example.com/"
+                }),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .Where(e => e.Message.Contains("provider connection configuration", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public async Task SetServiceActiveProviderAsync_RejectsMissingExplicitMode()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+
+        var act = async () => await service.SetServiceActiveProviderAsync(
+            "Embeddings",
+            ServiceProviderIds.EmbeddingsHuggingFaceInference,
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .Where(e => e.Message.Contains("no explicit service mode", StringComparison.OrdinalIgnoreCase));
+
+        var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
+        modes.Should().NotContain(mode => string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal));
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -148,6 +208,21 @@ public sealed class ServiceEditorUpdateValidationTests
             .Options;
 
         return new ApplicationDbContext(options);
+    }
+
+    private static void SeedServiceModes(ApplicationDbContext db, string serviceName, IReadOnlyList<ServiceMode> modes)
+    {
+        var payload = new JsonObject();
+        ServiceModesPayload.WriteModesFor(payload, serviceName, modes, modes.FirstOrDefault(mode => mode.IsDefault)?.ModeId);
+        db.ApplicationSettings.Add(new ApplicationSetting
+        {
+            SectionName = ServiceModeResolver.SectionName,
+            SchemaVersion = 1,
+            JsonValue = payload.ToJsonString(),
+            CreatedUtc = DateTime.UtcNow,
+            UpdatedUtc = DateTime.UtcNow
+        });
+        db.SaveChanges();
     }
 
     private static IConfiguration BuildConfiguration()

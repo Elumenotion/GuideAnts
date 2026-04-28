@@ -2,11 +2,17 @@ using System.Net;
 using System.Text;
 using AntRunner.ToolCalling;
 using FluentAssertions;
+using GuideAnts.Usage;
+using GuideAntsApi.Options;
+using GuideAntsApi.DataModel;
 using GuideAntsApi.Services;
+using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.EntityFrameworkCore;
 using Moq;
 
 namespace GuideAntsApi.Tests.Services;
@@ -69,10 +75,9 @@ public sealed class NotebookImageServiceTests
             {
                 ["AzureOpenAiImages:Endpoint"] = "https://images.example.com/",
                 ["AzureOpenAiImages:ApiKey"] = "test-key",
-                ["AzureOpenAiImages:Deployment"] = "flux.1-kontext-pro",
-                ["AzureOpenAiImages:EditModelDeployment"] = "flux.1-kontext-pro",
                 ["AzureOpenAiImages:ApiVersion"] = "2025-04-01-preview"
-            });
+            },
+            modelId: "flux.1-kontext-pro");
 
         var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var result = await service.GenerateImageAsync("a test image", "cloud-provider.png", context: context);
@@ -136,6 +141,87 @@ public sealed class NotebookImageServiceTests
         handler.LastRequestUri.Should().NotBeNull();
         handler.LastRequestUri!.ToString().Should().Be("https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:generateContent");
         handler.LastRequestBody.Should().Contain("\"responseModalities\":[\"IMAGE\"]");
+    }
+
+    [TestMethod]
+    public async Task GenerateImageAsync_RecordsUsageWithSelectedProvider()
+    {
+        using var scope = CreateEnvironmentScope();
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"image/png\",\"data\":\"" + Convert.ToBase64String(Encoding.UTF8.GetBytes("fake-image")) + "\"}}]}}]}",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+
+        var usageRecorder = new Mock<IUsageRecorder>();
+        usageRecorder
+            .Setup(recorder => recorder.RecordAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<UsageCategory>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<UsageMetrics>(),
+                It.IsAny<decimal>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var syncService = new Mock<INotebookFileSyncService>();
+        syncService.Setup(service => service.SyncNotebookAsync(It.IsAny<Guid>())).Returns(Task.CompletedTask);
+        var fileService = new Mock<INotebookFileService>();
+
+        var services = new ServiceCollection()
+            .AddDbContext<ApplicationDbContext>(options =>
+                options.UseInMemoryDatabase($"image-usage-{Guid.NewGuid():N}"))
+            .AddSingleton(usageRecorder.Object)
+            .AddSingleton(syncService.Object)
+            .AddSingleton(fileService.Object)
+            .BuildServiceProvider();
+
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(
+            httpClient,
+            providerSection: GoogleProviderSection,
+            new Dictionary<string, string?>
+            {
+                ["GoogleGeminiApi:ApiKey"] = "key"
+            },
+            modelId: "imagen-3.0-generate-002",
+            serviceProvider: services);
+
+        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var result = await service.GenerateImageAsync("a test image", "google-usage-provider.png", context: context);
+
+        result.StandardError.Should().BeNullOrEmpty();
+        usageRecorder.Verify(recorder => recorder.RecordAsync(
+            context.ProjectId,
+            context.NotebookId,
+            UsageCategory.ImageGeneration,
+            ServiceProviderIds.ImageGenerationGoogleImagen,
+            "image-generation",
+            It.Is<UsageMetrics>(metrics => metrics.ValueOther > 0),
+            It.IsAny<decimal>(),
+            context.ConversationId,
+            null,
+            null,
+            null,
+            It.Is<string?>(metadata => metadata != null && metadata.Contains("google-usage-provider.png")),
+            context.AssistantId,
+            context.CurrentInvocationId,
+            null,
+            It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [TestMethod]
@@ -204,7 +290,8 @@ public sealed class NotebookImageServiceTests
         HttpClient httpClient,
         string providerSection,
         IDictionary<string, string?> values,
-        string? modelId = null)
+        string? modelId = null,
+        IServiceProvider? serviceProvider = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(values)
@@ -230,7 +317,7 @@ public sealed class NotebookImageServiceTests
             httpClientFactory.Object,
             configuration,
             NullLogger<NotebookImageService>.Instance,
-            serviceProvider: null!,
+            serviceProvider: serviceProvider!,
             serviceModeResolver: resolver);
     }
 

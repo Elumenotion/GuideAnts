@@ -25,6 +25,7 @@ internal sealed class HuggingFaceEmbeddingService(
     public async Task<float[][]> GetEmbeddingsAsync(
         IEnumerable<string> texts,
         string modelId,
+        string? requestPresetJson,
         CancellationToken cancellationToken = default)
     {
         var inputs = texts.ToArray();
@@ -37,7 +38,7 @@ internal sealed class HuggingFaceEmbeddingService(
         {
             throw new InvalidOperationException("Hugging Face embeddings model id is required.");
         }
-        ValidateEmbeddingModelCapability(modelId);
+        ValidateEmbeddingModelCapability(modelId, requestPresetJson);
 
         var token = _configuration["HuggingFace:Token"];
         if (string.IsNullOrWhiteSpace(token))
@@ -89,9 +90,9 @@ internal sealed class HuggingFaceEmbeddingService(
 
     private sealed record HuggingFaceEmbeddingRequest(object Inputs);
 
-    private void ValidateEmbeddingModelCapability(string modelId)
+    private void ValidateEmbeddingModelCapability(string modelId, string? requestPresetJson)
     {
-        var configured = _configuration["HuggingFace:EmbeddingAllowedModels"];
+        var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
         if (!string.IsNullOrWhiteSpace(configured))
         {
             if (IsModelAllowed(modelId, configured))
@@ -100,7 +101,7 @@ internal sealed class HuggingFaceEmbeddingService(
             }
 
             throw new InvalidOperationException(
-                $"Hugging Face model '{modelId}' is not in HuggingFace:EmbeddingAllowedModels.");
+                $"Hugging Face model '{modelId}' is not in the Embeddings service-mode AllowedModels preset.");
         }
 
         // Conservative default heuristic for embedding-capable public model namespaces.
@@ -114,7 +115,7 @@ internal sealed class HuggingFaceEmbeddingService(
 
         throw new InvalidOperationException(
             $"Hugging Face model '{modelId}' is not recognized as embedding-capable. " +
-            "Set HuggingFace:EmbeddingAllowedModels to explicitly allow it.");
+            "Set Embeddings service-mode AllowedModels to explicitly allow it.");
     }
 
     private static bool IsModelAllowed(string modelId, string allowlistCsv)
@@ -137,5 +138,31 @@ internal sealed class HuggingFaceEmbeddingService(
         }
 
         return false;
+    }
+
+    private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(requestPresetJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(requestPresetJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty(fieldName, out var node))
+            {
+                return null;
+            }
+
+            return node.ValueKind == JsonValueKind.String
+                ? node.GetString()?.Trim()
+                : node.ToString().Trim();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 }

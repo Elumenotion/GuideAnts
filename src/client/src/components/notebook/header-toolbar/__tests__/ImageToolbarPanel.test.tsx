@@ -42,6 +42,8 @@ describe('ImageToolbarPanel', () => {
               providerId: 'ImageGeneration.LocalSd.Http',
               displayName: 'Local',
               providerKind: 'local',
+              canActivate: true,
+              blockers: [],
             },
           ],
           selection: null,
@@ -69,5 +71,50 @@ describe('ImageToolbarPanel', () => {
       'ImageGeneration.LocalSd.Http'
     );
     expect(api.settings.localModels.selectActive).toHaveBeenCalledWith('ImageGeneration', 'bundle-a');
+  });
+
+  it('does not activate blocked providers', async () => {
+    vi.clearAllMocks();
+    const user = userEvent.setup();
+    render(
+      <ImageToolbarPanel
+        service={{
+          serviceId: 'ImageGeneration',
+          displayName: 'Image Generation',
+          kind: 'image',
+          status: 'blocked',
+          summary: 'blocked',
+          activeProviderId: 'ImageGeneration.LocalSd.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          providerOptions: [
+            {
+              providerId: 'ImageGeneration.Google.Imagen',
+              displayName: 'Google',
+              providerKind: 'Cloud',
+              canActivate: false,
+              blockers: ['Missing provider connection value: Google Gemini API Key.'],
+            },
+          ],
+          selection: null,
+          blockers: [],
+          localModelOptions: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('option', { name: /Google \(Cloud\)/i }));
+
+    expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });
 });

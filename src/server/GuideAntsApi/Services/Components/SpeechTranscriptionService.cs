@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -325,7 +326,7 @@ namespace GuideAntsApi.Services.Components
                     serviceId: RoutedServiceNames.SpeechTranscription,
                     modeId: mode.ModeId);
             }
-            ValidateHuggingFaceAsrModel(mode.ModelId!);
+            ValidateHuggingFaceAsrModel(mode.ModelId!, mode.RequestPresetJson);
 
             var token = _configurationForSection("HuggingFace", "Token");
             if (string.IsNullOrWhiteSpace(token))
@@ -397,12 +398,13 @@ namespace GuideAntsApi.Services.Components
             {
                 throw new InvalidOperationException("OpenRouter:ApiKey is required.");
             }
+            ValidateOpenRouterAsrModel(mode.ModelId!, mode.RequestPresetJson);
 
             audioContent.Position = 0;
             await using var memory = new MemoryStream();
             await audioContent.CopyToAsync(memory, cancellationToken);
             var audioBytes = memory.ToArray();
-            var maxBytes = ResolveOpenRouterAudioMaxBytes();
+            var maxBytes = ResolveOpenRouterAudioMaxBytes(mode.RequestPresetJson);
             if (audioBytes.LongLength > maxBytes)
             {
                 throw new InvalidOperationException(
@@ -491,9 +493,9 @@ namespace GuideAntsApi.Services.Components
         private static bool IsOpenRouterAudioFormatSupported(string format) =>
             format is "wav" or "mp3" or "ogg" or "webm" or "flac" or "m4a";
 
-        private long ResolveOpenRouterAudioMaxBytes()
+        private long ResolveOpenRouterAudioMaxBytes(string? requestPresetJson)
         {
-            var configured = _configuration["OpenRouter:TranscriptionMaxAudioBytes"];
+            var configured = ReadServiceModePresetField(requestPresetJson, "MaxAudioBytes");
             if (long.TryParse(configured, out var value) && value > 0)
             {
                 return value;
@@ -502,9 +504,9 @@ namespace GuideAntsApi.Services.Components
             return 25L * 1024 * 1024;
         }
 
-        private void ValidateHuggingFaceAsrModel(string modelId)
+        private void ValidateHuggingFaceAsrModel(string modelId, string? requestPresetJson)
         {
-            var configured = _configuration["HuggingFace:AsrAllowedModels"];
+            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
             if (!string.IsNullOrWhiteSpace(configured))
             {
                 if (IsModelAllowed(modelId, configured))
@@ -513,7 +515,7 @@ namespace GuideAntsApi.Services.Components
                 }
 
                 throw new InvalidOperationException(
-                    $"Hugging Face ASR model '{modelId}' is not in HuggingFace:AsrAllowedModels.");
+                    $"Hugging Face ASR model '{modelId}' is not in the SpeechTranscription service-mode AllowedModels preset.");
             }
 
             if (modelId.Contains("asr", StringComparison.OrdinalIgnoreCase)
@@ -525,7 +527,7 @@ namespace GuideAntsApi.Services.Components
 
             throw new InvalidOperationException(
                 $"Hugging Face model '{modelId}' is not recognized as ASR-capable. " +
-                "Set HuggingFace:AsrAllowedModels to explicitly allow it.");
+                "Set SpeechTranscription service-mode AllowedModels to explicitly allow it.");
         }
 
         private void ValidateGoogleGeminiTranscriptionModel(string modelId)
@@ -536,9 +538,9 @@ namespace GuideAntsApi.Services.Components
             }
         }
 
-        private void ValidateOpenRouterAsrModel(string modelId)
+        private void ValidateOpenRouterAsrModel(string modelId, string? requestPresetJson)
         {
-            var configured = _configuration["OpenRouter:TranscriptionAllowedModels"];
+            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
             if (!string.IsNullOrWhiteSpace(configured))
             {
                 if (IsModelAllowed(modelId, configured))
@@ -547,7 +549,7 @@ namespace GuideAntsApi.Services.Components
                 }
 
                 throw new InvalidOperationException(
-                    $"OpenRouter transcription model '{modelId}' is not in OpenRouter:TranscriptionAllowedModels.");
+                    $"OpenRouter transcription model '{modelId}' is not in the SpeechTranscription service-mode AllowedModels preset.");
             }
 
             if (modelId.Contains("transcribe", StringComparison.OrdinalIgnoreCase)
@@ -559,7 +561,7 @@ namespace GuideAntsApi.Services.Components
 
             throw new InvalidOperationException(
                 $"OpenRouter model '{modelId}' is not recognized as transcription-capable. " +
-                "Set OpenRouter:TranscriptionAllowedModels to explicitly allow it.");
+                "Set SpeechTranscription service-mode AllowedModels to explicitly allow it.");
         }
 
         private static bool IsModelAllowed(string modelId, string allowlistCsv)
@@ -582,6 +584,32 @@ namespace GuideAntsApi.Services.Components
             }
 
             return false;
+        }
+
+        private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(requestPresetJson))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(requestPresetJson);
+                if (document.RootElement.ValueKind != JsonValueKind.Object
+                    || !document.RootElement.TryGetProperty(fieldName, out var node))
+                {
+                    return null;
+                }
+
+                return node.ValueKind == JsonValueKind.String
+                    ? node.GetString()?.Trim()
+                    : node.ToString().Trim();
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
         }
 
         private static string NormalizeGoogleGeminiModelName(string modelId)
@@ -722,15 +750,13 @@ namespace GuideAntsApi.Services.Components
             CancellationToken cancellationToken)
         {
             audioContent.Position = 0;
+            await using var audioBuffer = new MemoryStream();
+            await audioContent.CopyToAsync(audioBuffer, cancellationToken);
+            var audioBytes = audioBuffer.ToArray();
 
             var speechOptions = _speechOptionsMonitor.CurrentValue;
             var endpoint = speechOptions.Endpoint.TrimEnd('/');
             var apiUrl = $"{endpoint}/speechtotext/transcriptions:transcribe?api-version=2024-11-15";
-
-            using var content = new MultipartFormDataContent();
-            var audioStreamContent = new StreamContent(audioContent);
-            audioStreamContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
-            content.Add(audioStreamContent, "audio", fileName);
 
             object definition = enableDiarization
                 ? new
@@ -750,22 +776,46 @@ namespace GuideAntsApi.Services.Components
                 };
 
             var definitionJson = JsonSerializer.Serialize(definition);
-            content.Add(new StringContent(definitionJson, Encoding.UTF8, "application/json"), "definition");
-
-            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, apiUrl)
-            {
-                Content = content
-            };
-            requestMessage.Headers.Add("Ocp-Apim-Subscription-Key", speechOptions.ApiKey);
-            requestMessage.Headers.Add("x-request-id", requestId);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, speechOptions.TimeoutSeconds)));
 
             var startedAt = DateTime.UtcNow;
-            var response = await _httpClient.SendAsync(requestMessage, timeoutCts.Token);
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            HttpResponseMessage? response = null;
+            var responseContent = string.Empty;
+            var maxRetries = Math.Max(0, _transcriptionOptionsMonitor.CurrentValue.MaxRetries);
+            for (var attempt = 0; attempt <= maxRetries; attempt++)
+            {
+                using var content = new MultipartFormDataContent();
+                var audioStreamContent = new ByteArrayContent(audioBytes);
+                audioStreamContent.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+                content.Add(audioStreamContent, "audio", fileName);
+                content.Add(new StringContent(definitionJson, Encoding.UTF8, "application/json"), "definition");
+
+                using var requestMessage = new HttpRequestMessage(HttpMethod.Post, apiUrl)
+                {
+                    Content = content
+                };
+                requestMessage.Headers.Add("Ocp-Apim-Subscription-Key", speechOptions.ApiKey);
+                requestMessage.Headers.Add("x-request-id", requestId);
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _transcriptionOptionsMonitor.CurrentValue.TimeoutSeconds)));
+
+                response?.Dispose();
+                response = await _httpClient.SendAsync(requestMessage, timeoutCts.Token);
+                responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.IsSuccessStatusCode || !IsTransientStatus(response.StatusCode) || attempt == maxRetries)
+                {
+                    break;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(200 * (attempt + 1)), cancellationToken);
+            }
+
             var latencyMs = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+
+            if (response == null)
+            {
+                throw new InvalidOperationException("Fast Transcription API did not return a response.");
+            }
 
             if (!response.IsSuccessStatusCode)
             {
@@ -891,7 +941,15 @@ namespace GuideAntsApi.Services.Components
                 return Math.Max(1, _transcriptionOptionsMonitor.CurrentValue.TimeoutSeconds);
             }
 
-            return Math.Max(1, _speechOptionsMonitor.CurrentValue.TimeoutSeconds);
+            return Math.Max(1, _transcriptionOptionsMonitor.CurrentValue.TimeoutSeconds);
+        }
+
+        private static bool IsTransientStatus(HttpStatusCode statusCode)
+        {
+            var code = (int)statusCode;
+            return statusCode == HttpStatusCode.RequestTimeout
+                || statusCode == (HttpStatusCode)429
+                || code >= 500;
         }
 
         private static long TryGetStreamLength(Stream stream)

@@ -116,7 +116,7 @@ function renderCloudEmbeddingsBehavior(provider: ProviderEditorStateDto) {
             <span className="font-mono">HuggingFace:Token</span>.
           </li>
           <li>
-            Use <span className="font-mono">HuggingFace:EmbeddingAllowedModels</span> when you want to pin the route to an
+            Use <span className="font-mono">Allowed Models</span> on this service mode when you want to pin the route to an
             approved model set.
           </li>
         </ul>
@@ -129,7 +129,7 @@ function renderCloudEmbeddingsBehavior(provider: ProviderEditorStateDto) {
             <span className="font-mono">Embedding Model ID</span>.
           </li>
           <li>
-            Use <span className="font-mono">OpenRouter:EmbeddingAllowedModels</span> to constrain which embedding models are
+            Use <span className="font-mono">Allowed Models</span> to constrain which embedding models are
             allowed for this route.
           </li>
         </ul>

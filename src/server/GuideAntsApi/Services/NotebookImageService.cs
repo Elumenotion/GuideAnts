@@ -10,6 +10,7 @@ using GuideAntsApi.Options;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Routing;
+using GuideAnts.Usage;
 using AntRunner.ToolCalling.Functions;
 using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.Attributes;
@@ -197,7 +198,8 @@ namespace GuideAntsApi.Services
                             n: n,
                             imageBytes: imageContent,
                             imageContentType: contentType,
-                            imageFileName: sourceFileName),
+                            imageFileName: sourceFileName,
+                            mode: mode),
                         ImageProviderGoogle => await GenerateImageEditViaGoogleGemini(
                             prompt: prompt,
                             size: size,
@@ -215,7 +217,8 @@ namespace GuideAntsApi.Services
                             imageBytes: imageContent,
                             imageContentType: contentType,
                             imageFileName: sourceFileName,
-                            modelId: mode.ModelId),
+                            modelId: mode.ModelId,
+                            requestPresetJson: mode.RequestPresetJson),
                         ImageProviderOpenRouter => await GenerateImageEditViaOpenRouter(
                             prompt: prompt,
                             size: size,
@@ -224,7 +227,8 @@ namespace GuideAntsApi.Services
                             imageBytes: imageContent,
                             imageContentType: contentType,
                             imageFileName: sourceFileName,
-                            modelId: mode.ModelId),
+                            modelId: mode.ModelId,
+                            requestPresetJson: mode.RequestPresetJson),
                         _ => throw new RoutingException(
                             RoutingErrorCodes.ProviderNotReady,
                             $"Image edit provider '{imageProvider}' is not recognized.",
@@ -239,10 +243,10 @@ namespace GuideAntsApi.Services
                     imageBytes = imageProvider switch
                     {
                         ImageProviderLocal => await GenerateImageViaLocalSd(prompt, size, n, outputFormat),
-                        ImageProviderCloud => await GenerateImageViaAzureOpenAI(prompt, size, n, outputFormat),
+                        ImageProviderCloud => await GenerateImageViaAzureOpenAI(prompt, size, n, outputFormat, mode),
                         ImageProviderGoogle => await GenerateImageViaGoogleGemini(prompt, size, n, outputFormat, mode.ModelId),
-                        ImageProviderHuggingFace => await GenerateImageViaHuggingFace(prompt, size, n, outputFormat, mode.ModelId),
-                        ImageProviderOpenRouter => await GenerateImageViaOpenRouter(prompt, size, n, outputFormat, mode.ModelId),
+                        ImageProviderHuggingFace => await GenerateImageViaHuggingFace(prompt, size, n, outputFormat, mode.ModelId, mode.RequestPresetJson),
+                        ImageProviderOpenRouter => await GenerateImageViaOpenRouter(prompt, size, n, outputFormat, mode.ModelId, mode.RequestPresetJson),
                         _ => throw new RoutingException(
                             RoutingErrorCodes.ProviderNotReady,
                             $"Image provider '{imageProvider}' is not recognized.",
@@ -287,6 +291,14 @@ namespace GuideAntsApi.Services
                             stdErrBuffer.AppendLine($"Warning: Image generated but failed to sync database: {syncEx.Message}");
                         }
                     }
+
+                    await RecordImageUsageAsync(
+                        context!,
+                        imageProvider,
+                        filename,
+                        imageBytes.Length,
+                        imageCount: Math.Max(1, n),
+                        operation: "image-generation");
                 }
                 else
                 {
@@ -554,7 +566,7 @@ namespace GuideAntsApi.Services
 
                 var mode = await ResolveImageGenerationModeAsync();
                 var imageProvider = ResolveImageProviderId(mode);
-                var imageSizeProfileName = ResolveImageSizeProfileName(imageProvider);
+                var imageSizeProfileName = ResolveImageSizeProfileName(imageProvider, mode);
 
                 // Determine the best size based on source image dimensions
                 string size = DetermineBestSizeForImage(sourceImageBytes, imageSizeProfileName);
@@ -577,7 +589,8 @@ namespace GuideAntsApi.Services
                         n: n,
                         imageBytes: sourceImageBytes,
                         imageContentType: sourceImageContentType,
-                        imageFileName: sourceImageFileName),
+                        imageFileName: sourceImageFileName,
+                        mode: mode),
                     ImageProviderGoogle => await GenerateImageEditViaGoogleGemini(
                         prompt: prompt,
                         size: size,
@@ -595,7 +608,8 @@ namespace GuideAntsApi.Services
                         imageBytes: sourceImageBytes,
                         imageContentType: sourceImageContentType,
                         imageFileName: sourceImageFileName,
-                        modelId: mode.ModelId),
+                        modelId: mode.ModelId,
+                        requestPresetJson: mode.RequestPresetJson),
                     ImageProviderOpenRouter => await GenerateImageEditViaOpenRouter(
                         prompt: prompt,
                         size: size,
@@ -604,7 +618,8 @@ namespace GuideAntsApi.Services
                         imageBytes: sourceImageBytes,
                         imageContentType: sourceImageContentType,
                         imageFileName: sourceImageFileName,
-                        modelId: mode.ModelId),
+                        modelId: mode.ModelId,
+                        requestPresetJson: mode.RequestPresetJson),
                     _ => throw new RoutingException(
                         RoutingErrorCodes.ProviderNotReady,
                         $"Image provider '{imageProvider}' is not recognized.",
@@ -648,6 +663,14 @@ namespace GuideAntsApi.Services
                             stdErrBuffer.AppendLine($"Warning: Image generated but failed to sync database: {syncEx.Message}");
                         }
                     }
+
+                    await RecordImageUsageAsync(
+                        context!,
+                        imageProvider,
+                        outputFilename,
+                        imageBytes.Length,
+                        imageCount: Math.Max(1, n),
+                        operation: "image-edit");
                 }
                 else
                 {
@@ -727,6 +750,52 @@ namespace GuideAntsApi.Services
             return imageEditResult;
         }
 
+        private async Task RecordImageUsageAsync(
+            InvocationContext context,
+            string providerId,
+            string filename,
+            long bytes,
+            int imageCount,
+            string operation)
+        {
+            if (_serviceProvider == null)
+            {
+                return;
+            }
+
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var recorder = scope.ServiceProvider.GetRequiredService<IUsageRecorder>();
+                await recorder.RecordImageAsync(
+                    projectId: context.ProjectId,
+                    notebookId: context.NotebookId,
+                    notebookFileId: null,
+                    imageCount: imageCount,
+                    bytes: bytes,
+                    service: providerId,
+                    operation: operation,
+                    conversationId: context.ConversationId,
+                    metadataJson: JsonSerializer.Serialize(new
+                    {
+                        providerId,
+                        filename,
+                        imageCount,
+                        bytes
+                    }),
+                    assistantId: context.AssistantId,
+                    agentInvocationId: context.CurrentInvocationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to record image usage. Provider={ProviderId}, Filename={Filename}",
+                    providerId,
+                    filename);
+            }
+        }
+
         private async Task<ServiceMode> ResolveImageGenerationModeAsync(CancellationToken cancellationToken = default)
         {
             return await _serviceModeResolver
@@ -755,7 +824,7 @@ namespace GuideAntsApi.Services
             };
         }
 
-        private string ResolveImageSizeProfileName(string imageProvider)
+        private string ResolveImageSizeProfileName(string imageProvider, ServiceMode mode)
         {
             if (imageProvider == ImageProviderLocal)
             {
@@ -777,8 +846,9 @@ namespace GuideAntsApi.Services
                 return "openrouter-image";
             }
 
-            var editDeployment = _configuration["AzureOpenAiImages:EditModelDeployment"]
-                ?? throw new InvalidOperationException("AzureOpenAiImages:EditModelDeployment is not configured");
+            var editDeployment = ReadServiceModePresetField(mode.RequestPresetJson, "EditModelDeployment")
+                ?? throw new InvalidOperationException(
+                    "ImageGeneration Azure service mode preset must include EditModelDeployment.");
             return editDeployment;
         }
 
@@ -1145,13 +1215,15 @@ namespace GuideAntsApi.Services
         /// <summary>
         /// Generates an image via Azure OpenAI DALL-E API using the provided implementation pattern
         /// </summary>
-        private async Task<byte[]?> GenerateImageViaAzureOpenAI(string prompt, string size, int n, string outputFormat)
+        private async Task<byte[]?> GenerateImageViaAzureOpenAI(string prompt, string size, int n, string outputFormat, ServiceMode mode)
         {
             try
             {
                 // You will need to set these environment variables or edit the following values.
                 var endpoint = _configuration["AzureOpenAiImages:Endpoint"] ?? throw new Exception("Bad config");
-                var deployment = _configuration["AzureOpenAiImages:Deployment"] ?? throw new Exception("Bad config: Deployment");
+                var deployment = !string.IsNullOrWhiteSpace(mode.ModelId)
+                    ? mode.ModelId.Trim()
+                    : throw new InvalidOperationException("ImageGeneration Azure service mode must include Deployment/ModelId.");
                 var apiVersion = _configuration["AzureOpenAiImages:ApiVersion"] ?? throw new Exception("Bad config:ApiVersion");
                 var apiKey = _configuration["AzureOpenAiImages:ApiKey"];
 
@@ -1210,7 +1282,7 @@ namespace GuideAntsApi.Services
 
         /// <summary>
         /// Generates an image edit via Azure OpenAI Images Edits endpoint using multipart/form-data.
-        /// Requires AzureOpenAiImages:EditModelDeployment.
+        /// Requires the Azure image service mode preset to include EditModelDeployment.
         /// </summary>
         private async Task<byte[]?> GenerateImageEditViaAzureOpenAI(
             string prompt,
@@ -1218,11 +1290,14 @@ namespace GuideAntsApi.Services
             int n,
             byte[] imageBytes,
             string imageContentType,
-            string imageFileName)
+            string imageFileName,
+            ServiceMode mode)
         {
             // Configuration: do not fallback silently if required settings are missing
             var endpoint = _configuration["AzureOpenAiImages:Endpoint"] ?? throw new InvalidOperationException("AzureOpenAiImages:Endpoint is not configured");
-            var editDeployment = _configuration["AzureOpenAiImages:EditModelDeployment"] ?? throw new InvalidOperationException("AzureOpenAiImages:EditModelDeployment is not configured");
+            var editDeployment = ReadServiceModePresetField(mode.RequestPresetJson, "EditModelDeployment")
+                ?? throw new InvalidOperationException(
+                    "ImageGeneration Azure service mode preset must include EditModelDeployment.");
             var apiVersion = _configuration["AzureOpenAiImages:ApiVersion"] ?? "2025-04-01-preview";
             var apiKey = _configuration["AzureOpenAiImages:ApiKey"] ?? throw new InvalidOperationException("AzureOpenAiImages:ApiKey is not configured");
 
@@ -1347,7 +1422,8 @@ namespace GuideAntsApi.Services
             byte[] imageBytes,
             string? imageContentType,
             string? imageFileName,
-            string? modelId)
+            string? modelId,
+            string? requestPresetJson)
         {
             _ = size;
             _ = n;
@@ -1356,7 +1432,7 @@ namespace GuideAntsApi.Services
                 HuggingFaceProviderSection,
                 modelId,
                 "Set ServiceModes.ImageGeneration model id for HuggingFace.");
-            ValidateHuggingFaceImageModel(model);
+            ValidateHuggingFaceImageModel(model, requestPresetJson);
             var token = _configuration["HuggingFace:Token"];
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -1403,14 +1479,15 @@ namespace GuideAntsApi.Services
             byte[] imageBytes,
             string? imageContentType,
             string? imageFileName,
-            string? modelId)
+            string? modelId,
+            string? requestPresetJson)
         {
             _ = outputFormat;
             var model = RequireImageModelId(
                 OpenRouterProviderSection,
                 modelId,
                 "Set ServiceModes.ImageGeneration model id for OpenRouter.");
-            ValidateOpenRouterImageModel(model);
+            ValidateOpenRouterImageModel(model, requestPresetJson);
             var apiKey = _configuration["OpenRouter:ApiKey"];
             var baseUrl = _configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
             if (string.IsNullOrWhiteSpace(apiKey))
@@ -1475,9 +1552,9 @@ namespace GuideAntsApi.Services
                 providerSection: providerSection);
         }
 
-        private void ValidateHuggingFaceImageModel(string modelId)
+        private void ValidateHuggingFaceImageModel(string modelId, string? requestPresetJson)
         {
-            var configured = _configuration["HuggingFace:ImageAllowedModels"];
+            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
             if (!string.IsNullOrWhiteSpace(configured))
             {
                 if (IsModelAllowed(modelId, configured))
@@ -1486,7 +1563,7 @@ namespace GuideAntsApi.Services
                 }
 
                 throw new InvalidOperationException(
-                    $"Hugging Face image model '{modelId}' is not in HuggingFace:ImageAllowedModels.");
+                    $"Hugging Face image model '{modelId}' is not in the ImageGeneration service-mode AllowedModels preset.");
             }
 
             if (modelId.Contains("image", StringComparison.OrdinalIgnoreCase)
@@ -1498,12 +1575,12 @@ namespace GuideAntsApi.Services
 
             throw new InvalidOperationException(
                 $"Hugging Face model '{modelId}' is not recognized as image-capable. " +
-                "Set HuggingFace:ImageAllowedModels to explicitly allow it.");
+                "Set ImageGeneration service-mode AllowedModels to explicitly allow it.");
         }
 
-        private void ValidateOpenRouterImageModel(string modelId)
+        private void ValidateOpenRouterImageModel(string modelId, string? requestPresetJson)
         {
-            var configured = _configuration["OpenRouter:ImageAllowedModels"];
+            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
             if (!string.IsNullOrWhiteSpace(configured))
             {
                 if (IsModelAllowed(modelId, configured))
@@ -1512,7 +1589,7 @@ namespace GuideAntsApi.Services
                 }
 
                 throw new InvalidOperationException(
-                    $"OpenRouter image model '{modelId}' is not in OpenRouter:ImageAllowedModels.");
+                    $"OpenRouter image model '{modelId}' is not in the ImageGeneration service-mode AllowedModels preset.");
             }
 
             if (modelId.Contains("image", StringComparison.OrdinalIgnoreCase)
@@ -1524,7 +1601,7 @@ namespace GuideAntsApi.Services
 
             throw new InvalidOperationException(
                 $"OpenRouter model '{modelId}' is not recognized as image-capable/output_modalities=image capable. " +
-                "Set OpenRouter:ImageAllowedModels to explicitly allow it.");
+                "Set ImageGeneration service-mode AllowedModels to explicitly allow it.");
         }
 
         private static bool IsModelAllowed(string modelId, string allowlistCsv)
@@ -1547,6 +1624,32 @@ namespace GuideAntsApi.Services
             }
 
             return false;
+        }
+
+        private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(requestPresetJson))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(requestPresetJson);
+                if (document.RootElement.ValueKind != JsonValueKind.Object
+                    || !document.RootElement.TryGetProperty(fieldName, out var node))
+                {
+                    return null;
+                }
+
+                return node.ValueKind == JsonValueKind.String
+                    ? node.GetString()?.Trim()
+                    : node.ToString().Trim();
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
         }
 
         private static string GetAspectRatioForImageSize(string size) => size switch
@@ -1662,7 +1765,13 @@ namespace GuideAntsApi.Services
             return await SaveResponseAndReturnBytes(responseBody);
         }
 
-        private async Task<byte[]?> GenerateImageViaHuggingFace(string prompt, string size, int n, string outputFormat, string? modelId)
+        private async Task<byte[]?> GenerateImageViaHuggingFace(
+            string prompt,
+            string size,
+            int n,
+            string outputFormat,
+            string? modelId,
+            string? requestPresetJson)
         {
             _ = size;
             _ = n;
@@ -1683,7 +1792,7 @@ namespace GuideAntsApi.Services
                     providerSection: HuggingFaceProviderSection);
             }
             var model = modelId;
-            ValidateHuggingFaceImageModel(model);
+            ValidateHuggingFaceImageModel(model, requestPresetJson);
             var endpoint = $"https://api-inference.huggingface.co/models/{model}";
             var requestBody = JsonSerializer.Serialize(new HuggingFaceImageGenerationRequest(prompt), ProviderPayloadJson);
 
@@ -1704,7 +1813,13 @@ namespace GuideAntsApi.Services
             return await response.Content.ReadAsByteArrayAsync();
         }
 
-        private async Task<byte[]?> GenerateImageViaOpenRouter(string prompt, string size, int n, string outputFormat, string? modelId)
+        private async Task<byte[]?> GenerateImageViaOpenRouter(
+            string prompt,
+            string size,
+            int n,
+            string outputFormat,
+            string? modelId,
+            string? requestPresetJson)
         {
             _ = outputFormat;
             var apiKey = _configuration["OpenRouter:ApiKey"];
@@ -1724,7 +1839,7 @@ namespace GuideAntsApi.Services
                     providerSection: OpenRouterProviderSection);
             }
             var model = modelId;
-            ValidateOpenRouterImageModel(model);
+            ValidateOpenRouterImageModel(model, requestPresetJson);
             var endpoint = $"{baseUrl.TrimEnd('/')}/chat/completions";
             var requestBody = new OpenRouterImageChatRequest(
                 Model: model,

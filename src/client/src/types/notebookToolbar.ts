@@ -11,6 +11,8 @@ export interface NotebookToolbarProviderOptionDto {
   providerId: string;
   displayName: string;
   providerKind: string;
+  canActivate: boolean;
+  blockers: string[];
 }
 
 export interface NotebookToolbarSelectionDto {

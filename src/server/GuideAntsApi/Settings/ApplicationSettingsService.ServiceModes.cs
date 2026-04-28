@@ -111,18 +111,10 @@ public sealed partial class ApplicationSettingsService
                 continue;
             }
 
-            var counterpartKind = string.Equals(existingKind, "local", StringComparison.OrdinalIgnoreCase)
-                ? "cloud"
-                : "local";
-            var counterpartSection = GetProviderSectionForKind(contract, counterpartKind);
-
-            var shouldAddCounterpart = !string.IsNullOrWhiteSpace(counterpartSection)
-                && !string.Equals(counterpartSection, existingProviderSection, StringComparison.OrdinalIgnoreCase);
             var shapeAlreadyCanonical =
                 string.Equals(existing.ModeId, existingModeId, StringComparison.Ordinal)
                 && string.Equals(existing.ProviderSection, existingProviderSection, StringComparison.Ordinal)
-                && existing.IsDefault
-                && !shouldAddCounterpart;
+                && existing.IsDefault;
             if (shapeAlreadyCanonical)
             {
                 continue;
@@ -137,17 +129,6 @@ public sealed partial class ApplicationSettingsService
                     IsDefault = true
                 }
             };
-
-            if (shouldAddCounterpart)
-            {
-                normalized.Add(new ServiceMode(
-                    ModeId: counterpartKind,
-                    ProviderSection: counterpartSection!,
-                    ModelId: null,
-                    RequestPresetJson: null,
-                    Enabled: true,
-                    IsDefault: false));
-            }
 
             ServiceModesPayload.WriteModesFor(payload, serviceName, normalized, defaultModeId: existingModeId);
             changed = true;

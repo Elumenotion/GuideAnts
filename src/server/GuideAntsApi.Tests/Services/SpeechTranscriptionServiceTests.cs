@@ -41,8 +41,7 @@ public sealed class SpeechTranscriptionServiceTests
             azureOptions: new AzureSpeechServiceOptions
             {
                 Endpoint = "https://azure-speech.example.com",
-                ApiKey = "test-key",
-                TimeoutSeconds = 90
+                ApiKey = "test-key"
             },
             transcriptionOptions: new SpeechTranscriptionOptions
             {
@@ -82,8 +81,7 @@ public sealed class SpeechTranscriptionServiceTests
             azureOptions: new AzureSpeechServiceOptions
             {
                 Endpoint = "https://azure-speech.example.com/",
-                ApiKey = "azure-key",
-                TimeoutSeconds = 90
+                ApiKey = "azure-key"
             },
             transcriptionOptions: new SpeechTranscriptionOptions
             {
@@ -123,8 +121,7 @@ public sealed class SpeechTranscriptionServiceTests
             azureOptions: new AzureSpeechServiceOptions
             {
                 Endpoint = "https://azure-speech.example.com/",
-                ApiKey = "azure-key",
-                TimeoutSeconds = 90
+                ApiKey = "azure-key"
             },
             transcriptionOptions: new SpeechTranscriptionOptions
             {
@@ -185,8 +182,7 @@ public sealed class SpeechTranscriptionServiceTests
             azureOptions: new AzureSpeechServiceOptions
             {
                 Endpoint = "https://azure-speech.example.com",
-                ApiKey = "test-key",
-                TimeoutSeconds = 90
+                ApiKey = "test-key"
             },
             transcriptionOptions: new SpeechTranscriptionOptions
             {
@@ -228,7 +224,7 @@ public sealed class SpeechTranscriptionServiceTests
         var service = CreateService(
             httpClient,
             providerSection: GoogleProviderSection,
-            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused", TimeoutSeconds = 90 },
+            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused" },
             transcriptionOptions: new SpeechTranscriptionOptions { TimeoutSeconds = 120 },
             localServiceHostsOptions: new LocalServiceHostsOptions(),
             configurationValues: new Dictionary<string, string?>
@@ -264,7 +260,7 @@ public sealed class SpeechTranscriptionServiceTests
         var service = CreateService(
             httpClient,
             providerSection: HuggingFaceProviderSection,
-            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused", TimeoutSeconds = 90 },
+            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused" },
             transcriptionOptions: new SpeechTranscriptionOptions { TimeoutSeconds = 120 },
             localServiceHostsOptions: new LocalServiceHostsOptions(),
             configurationValues: new Dictionary<string, string?>
@@ -300,7 +296,7 @@ public sealed class SpeechTranscriptionServiceTests
         var service = CreateService(
             httpClient,
             providerSection: OpenRouterProviderSection,
-            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused", TimeoutSeconds = 90 },
+            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused" },
             transcriptionOptions: new SpeechTranscriptionOptions { TimeoutSeconds = 120 },
             localServiceHostsOptions: new LocalServiceHostsOptions(),
             configurationValues: new Dictionary<string, string?>

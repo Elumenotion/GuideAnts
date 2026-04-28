@@ -168,6 +168,7 @@ public class NotebookPodcastService : INotebookPodcastService
                                 notebookId: context.NotebookId,
                                 notebookFileId: null,
                                 characterCount: script.Length,
+                                service: synthResult.ProviderId ?? "SpeechSynthesis.Unknown",
                                 conversationId: context.ConversationId,
                                 metadataJson: null,
                                 assistantId: context.AssistantId,

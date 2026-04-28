@@ -74,7 +74,8 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
             .ConfigureAwait(false);
         var requestId = Guid.NewGuid().ToString("N");
 
-        return mode.ProviderSection switch
+        var providerId = ResolveSpeechSynthesisProviderId(mode.ProviderSection);
+        var result = mode.ProviderSection switch
         {
             LocalProviderSection => await SynthesizeViaLocalTtsAsync(ssml, outputPath, requestId, cancellationToken),
             AzureProviderSection => await SynthesizeViaAzureAsync(ssml, outputPath, requestId, cancellationToken),
@@ -91,7 +92,19 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
                 serviceId: RoutedServiceNames.SpeechSynthesis,
                 modeId: mode.ModeId)
         };
+
+        return result with { ProviderId = providerId };
     }
+
+    private static string ResolveSpeechSynthesisProviderId(string providerSection) => providerSection switch
+    {
+        AzureProviderSection => ServiceProviderIds.SpeechSynthesisAzureSpeechSsml,
+        LocalProviderSection => ServiceProviderIds.SpeechSynthesisLocalTtsHttp,
+        GoogleGeminiProviderSection => ServiceProviderIds.SpeechSynthesisGoogleTextToSpeech,
+        HuggingFaceProviderSection => ServiceProviderIds.SpeechSynthesisHuggingFaceInference,
+        OpenRouterProviderSection => ServiceProviderIds.SpeechSynthesisOpenRouterTts,
+        _ => providerSection
+    };
 
     private async Task<ISpeechSynthesisService.SpeechSynthesisResult> SynthesizeViaGoogleAsync(
         string ssml,
@@ -174,7 +187,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         {
             return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "Hugging Face TTS requires mode.ModelId.");
         }
-        ValidateHuggingFaceTtsModel(mode.ModelId);
+        ValidateHuggingFaceTtsModel(mode.ModelId, mode.RequestPresetJson);
 
         var token = _configuration["HuggingFace:Token"];
         if (string.IsNullOrWhiteSpace(token))
@@ -214,7 +227,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         {
             return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "OpenRouter TTS requires mode.ModelId.");
         }
-        ValidateOpenRouterTtsModel(mode.ModelId);
+        ValidateOpenRouterTtsModel(mode.ModelId, mode.RequestPresetJson);
 
         var apiKey = _configuration["OpenRouter:ApiKey"];
         var baseUrl = _configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
@@ -257,68 +270,85 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
     {
         return await Task.Run(async () =>
         {
-            try
+            var maxRetries = Math.Max(0, _synthesisOptionsMonitor.CurrentValue.MaxRetries);
+            for (var attempt = 0; attempt <= maxRetries; attempt++)
             {
-                using var synthesizer = new SpeechSynthesizer(CreateSpeechConfig(), audioConfig: null);
-                var azureOptions = _azureOptionsMonitor.CurrentValue;
-                var timeout = TimeSpan.FromSeconds(Math.Max(1, azureOptions.TimeoutSeconds));
-                _logger.LogInformation(
-                    "tts_api_request_start provider={Provider} requestId={RequestId} outputPath={OutputPath}",
-                    AzureProviderSection,
-                    requestId,
-                    outputPath);
-
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeoutCts.CancelAfter(timeout);
-                var timeoutTask = Task.Delay(Timeout.InfiniteTimeSpan, timeoutCts.Token);
-                var speakTask = synthesizer.SpeakSsmlAsync(ssml);
-                var completed = await Task.WhenAny(speakTask, timeoutTask);
-                if (completed != speakTask)
+                try
                 {
-                    await synthesizer.StopSpeakingAsync();
-                    var timeoutMessage = $"Speech synthesis timed out after {timeout.TotalSeconds:F0}s.";
+                    using var synthesizer = new SpeechSynthesizer(CreateSpeechConfig(), audioConfig: null);
+                    var timeout = TimeSpan.FromSeconds(Math.Max(1, _synthesisOptionsMonitor.CurrentValue.TimeoutSeconds));
+                    _logger.LogInformation(
+                        "tts_api_request_start provider={Provider} requestId={RequestId} outputPath={OutputPath}",
+                        AzureProviderSection,
+                        requestId,
+                        outputPath);
+
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeoutCts.CancelAfter(timeout);
+                    var timeoutTask = Task.Delay(Timeout.InfiniteTimeSpan, timeoutCts.Token);
+                    var speakTask = synthesizer.SpeakSsmlAsync(ssml);
+                    var completed = await Task.WhenAny(speakTask, timeoutTask);
+                    if (completed != speakTask)
+                    {
+                        await synthesizer.StopSpeakingAsync();
+                        var timeoutMessage = $"Speech synthesis timed out after {timeout.TotalSeconds:F0}s.";
+                        _logger.LogError(
+                            "tts_api_request_failed provider={Provider} requestId={RequestId} reason={Reason}",
+                            AzureProviderSection,
+                            requestId,
+                            timeoutMessage);
+                        return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, timeoutMessage);
+                    }
+
+                    var result = await speakTask;
+                    if (result.Reason == ResultReason.SynthesizingAudioCompleted)
+                    {
+                        await File.WriteAllBytesAsync(outputPath, result.AudioData, cancellationToken);
+                        var durationSeconds = (long)Math.Round(result.AudioDuration.TotalSeconds);
+                        _logger.LogInformation(
+                            "tts_api_request_success provider={Provider} requestId={RequestId} durationSeconds={DurationSeconds} outputBytes={OutputBytes}",
+                            AzureProviderSection,
+                            requestId,
+                            durationSeconds,
+                            result.AudioData.Length);
+                        return new ISpeechSynthesisService.SpeechSynthesisResult(true, durationSeconds);
+                    }
+
+                    var details = SpeechSynthesisCancellationDetails.FromResult(result);
+                    var message = $"Speech synthesis failed: {details.Reason} | {details.ErrorDetails}";
                     _logger.LogError(
                         "tts_api_request_failed provider={Provider} requestId={RequestId} reason={Reason}",
                         AzureProviderSection,
                         requestId,
-                        timeoutMessage);
-                    return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, timeoutMessage);
-                }
+                        message);
+                    if (attempt < maxRetries && IsRetryableSynthesisFailure(details))
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(200 * (attempt + 1)), cancellationToken);
+                        continue;
+                    }
 
-                var result = await speakTask;
-                if (result.Reason == ResultReason.SynthesizingAudioCompleted)
+                    return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, message);
+                }
+                catch (Exception ex)
                 {
-                    await File.WriteAllBytesAsync(outputPath, result.AudioData, cancellationToken);
-                    var durationSeconds = (long)Math.Round(result.AudioDuration.TotalSeconds);
-                    _logger.LogInformation(
-                        "tts_api_request_success provider={Provider} requestId={RequestId} durationSeconds={DurationSeconds} outputBytes={OutputBytes}",
+                    var message = $"Speech synthesis exception for {outputPath}: {ex.Message}";
+                    _logger.LogError(
+                        ex,
+                        "tts_api_request_failed provider={Provider} requestId={RequestId} reason={Reason}",
                         AzureProviderSection,
                         requestId,
-                        durationSeconds,
-                        result.AudioData.Length);
-                    return new ISpeechSynthesisService.SpeechSynthesisResult(true, durationSeconds);
-                }
+                        message);
+                    if (attempt < maxRetries)
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(200 * (attempt + 1)), cancellationToken);
+                        continue;
+                    }
 
-                var details = SpeechSynthesisCancellationDetails.FromResult(result);
-                var message = $"Speech synthesis failed: {details.Reason} | {details.ErrorDetails}";
-                _logger.LogError(
-                    "tts_api_request_failed provider={Provider} requestId={RequestId} reason={Reason}",
-                    AzureProviderSection,
-                    requestId,
-                    message);
-                return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, message);
+                    return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, message);
+                }
             }
-            catch (Exception ex)
-            {
-                var message = $"Speech synthesis exception for {outputPath}: {ex.Message}";
-                _logger.LogError(
-                    ex,
-                    "tts_api_request_failed provider={Provider} requestId={RequestId} reason={Reason}",
-                    AzureProviderSection,
-                    requestId,
-                    message);
-                return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, message);
-            }
+
+            return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "Speech synthesis failed without returning a result.");
         }, cancellationToken);
     }
 
@@ -421,6 +451,14 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         }
 
         return speechConfig;
+    }
+
+    private static bool IsRetryableSynthesisFailure(SpeechSynthesisCancellationDetails details)
+    {
+        return details.Reason == CancellationReason.Error
+            && (details.ErrorCode == CancellationErrorCode.ServiceTimeout
+                || details.ErrorCode == CancellationErrorCode.ConnectionFailure
+                || details.ErrorCode == CancellationErrorCode.ServiceUnavailable);
     }
 
     private static long ParseDurationSeconds(HttpResponseMessage response)
@@ -533,9 +571,9 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         return stream.ToArray();
     }
 
-    private void ValidateHuggingFaceTtsModel(string modelId)
+    private void ValidateHuggingFaceTtsModel(string modelId, string? requestPresetJson)
     {
-        var configured = _configuration["HuggingFace:TtsAllowedModels"];
+        var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
         if (!string.IsNullOrWhiteSpace(configured))
         {
             if (IsModelAllowed(modelId, configured))
@@ -544,7 +582,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
             }
 
             throw new InvalidOperationException(
-                $"Hugging Face TTS model '{modelId}' is not in HuggingFace:TtsAllowedModels.");
+                $"Hugging Face TTS model '{modelId}' is not in the SpeechSynthesis service-mode AllowedModels preset.");
         }
 
         if (modelId.Contains("tts", StringComparison.OrdinalIgnoreCase)
@@ -556,12 +594,12 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
 
         throw new InvalidOperationException(
             $"Hugging Face model '{modelId}' is not recognized as TTS-capable. " +
-            "Set HuggingFace:TtsAllowedModels to explicitly allow it.");
+            "Set SpeechSynthesis service-mode AllowedModels to explicitly allow it.");
     }
 
-    private void ValidateOpenRouterTtsModel(string modelId)
+    private void ValidateOpenRouterTtsModel(string modelId, string? requestPresetJson)
     {
-        var configured = _configuration["OpenRouter:TtsAllowedModels"];
+        var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
         if (!string.IsNullOrWhiteSpace(configured))
         {
             if (IsModelAllowed(modelId, configured))
@@ -570,7 +608,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
             }
 
             throw new InvalidOperationException(
-                $"OpenRouter TTS model '{modelId}' is not in OpenRouter:TtsAllowedModels.");
+                $"OpenRouter TTS model '{modelId}' is not in the SpeechSynthesis service-mode AllowedModels preset.");
         }
 
         if (modelId.Contains("tts", StringComparison.OrdinalIgnoreCase)
@@ -582,7 +620,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
 
         throw new InvalidOperationException(
             $"OpenRouter model '{modelId}' is not recognized as TTS-capable. " +
-            "Set OpenRouter:TtsAllowedModels to explicitly allow it.");
+            "Set SpeechSynthesis service-mode AllowedModels to explicitly allow it.");
     }
 
     private static bool IsModelAllowed(string modelId, string allowlistCsv)
@@ -605,6 +643,32 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         }
 
         return false;
+    }
+
+    private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(requestPresetJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(requestPresetJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty(fieldName, out var node))
+            {
+                return null;
+            }
+
+            return node.ValueKind == JsonValueKind.String
+                ? node.GetString()?.Trim()
+                : node.ToString().Trim();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private sealed record GoogleGeminiGenerateContentRequest(

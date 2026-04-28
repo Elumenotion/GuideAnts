@@ -208,7 +208,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
     }
 
     [TestMethod]
-    public async Task BootstrapAsync_NormalizesSingleDefaultMode_AndAddsMissingCounterpartModes()
+    public async Task BootstrapAsync_NormalizesSingleDefaultMode_WithoutAddingCounterpartModes()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration(new Dictionary<string, string?>());
@@ -252,7 +252,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         var service = CreateService(db, configuration);
         await service.BootstrapAsync(configuration);
 
-        foreach (var (serviceName, expectedLocalProviderSection, expectedCloudProviderSection) in new[]
+        foreach (var (serviceName, expectedLocalProviderSection, _) in new[]
         {
             (RoutedServiceNames.Embeddings, "LocalServiceHosts:EmbeddingsBaseUrl", "AzureOpenAiEmbedding"),
             (RoutedServiceNames.ImageGeneration, "LocalServiceHosts:ImageGenerationBaseUrl", "AzureOpenAiImages"),
@@ -262,22 +262,17 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         })
         {
             var modes = await service.GetServiceModesAsync(serviceName);
-            modes.Should().HaveCount(2, "single legacy/default rows should normalize into explicit local+cloud modes");
+            modes.Should().HaveCount(1, "legacy/default rows should normalize only the persisted mode without synthesizing counterparts");
             modes.Should().Contain(m =>
                 m.ModeId == "local" &&
                 m.ProviderSection == expectedLocalProviderSection &&
                 m.Enabled &&
                 m.IsDefault);
-            modes.Should().Contain(m =>
-                m.ModeId == "cloud" &&
-                m.ProviderSection == expectedCloudProviderSection &&
-                m.Enabled &&
-                !m.IsDefault);
         }
     }
 
     [TestMethod]
-    public async Task BootstrapAsync_NormalizesSingleLocalMode_AddsCloudCounterpart()
+    public async Task BootstrapAsync_NormalizesSingleLocalMode_WithoutAddingCloudCounterpart()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration(new Dictionary<string, string?>());
@@ -312,15 +307,11 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         await service.BootstrapAsync(configuration);
 
         var modes = await service.GetServiceModesAsync(RoutedServiceNames.Embeddings);
-        modes.Should().HaveCount(2);
+        modes.Should().HaveCount(1);
         modes.Should().Contain(m =>
             m.ModeId == "local" &&
             m.ProviderSection == "LocalServiceHosts:EmbeddingsBaseUrl" &&
             m.IsDefault);
-        modes.Should().Contain(m =>
-            m.ModeId == "cloud" &&
-            m.ProviderSection == "AzureOpenAiEmbedding" &&
-            !m.IsDefault);
     }
 
     [TestMethod]

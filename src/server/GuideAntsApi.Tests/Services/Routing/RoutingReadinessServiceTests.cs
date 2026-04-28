@@ -807,9 +807,9 @@ public sealed class RoutingReadinessServiceTests
             LlamaRuntime: new LlamaRuntimeSnapshotDto(0, 0, Array.Empty<string>()));
 
         overview.ServiceModeReadiness.Should().HaveCount(RoutedServiceNames.All.Count);
-        // Legacy single "default" rows normalize to cloud + local modes per service.
-        overview.ServiceModeReadiness.Should().OnlyContain(r => r.Total == 2);
-        overview.ServiceModeReadiness.Should().OnlyContain(r => r.Ready == 2);
+        // Legacy single "default" rows normalize only the persisted mode; no counterpart modes are synthesized.
+        overview.ServiceModeReadiness.Should().OnlyContain(r => r.Total == 1);
+        overview.ServiceModeReadiness.Should().OnlyContain(r => r.Ready == 1);
         overview.ChatTargets.Total.Should().Be(1);
         overview.ChatTargets.Targets.Should().OnlyContain(t => t.ReferenceKind == "direct");
     }

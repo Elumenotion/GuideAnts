@@ -8,7 +8,11 @@ public interface ISpeechSynthesisService
     /// <summary>
     /// Result of a speech synthesis operation.
     /// </summary>
-    public record SpeechSynthesisResult(bool Success, long DurationSeconds, string? ErrorMessage = null);
+    public record SpeechSynthesisResult(
+        bool Success,
+        long DurationSeconds,
+        string? ErrorMessage = null,
+        string? ProviderId = null);
 
     /// <summary>
     /// Synthesize the provided SSML (or plain text) to a WAV file.

@@ -351,7 +351,7 @@ public sealed class ProviderNativeChatClientTests
 
         handler.LastRequestUri!.ToString().Should().Be("https://api.anthropic.com/v1/messages");
         using var requestJson = JsonDocument.Parse(handler.LastRequestBody);
-        requestJson.RootElement.GetProperty("temperature").GetDouble().Should().Be(1d);
+        requestJson.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
         requestJson.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
         requestJson.RootElement.GetProperty("thinking").GetProperty("type").GetString().Should().Be("enabled");
         requestJson.RootElement.GetProperty("thinking").GetProperty("budget_tokens").GetInt32().Should().Be(2048);

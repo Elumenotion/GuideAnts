@@ -23,6 +23,7 @@ export function ProviderFieldsSection({
   const operativeMetadata = provider.fieldMetadata.filter((field) =>
     provider.operativeFields.includes(field.name)
   );
+  const blocked = !provider.connectionConfigured;
 
   const renderField = (metadata: ProviderFieldMetadataDto) => {
     const fieldDto = provider.fields[metadata.name];
@@ -91,5 +92,22 @@ export function ProviderFieldsSection({
     );
   };
 
-  return <div className="space-y-4">{operativeMetadata.map((m) => renderField(m))}</div>;
+  return (
+    <div className="space-y-4">
+      {blocked ? (
+        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Configure this provider connection first: {provider.connectionMissingFields.join(', ')}.
+        </div>
+      ) : !provider.hasExplicitMode ? (
+        <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          Saving this provider will create an explicit service mode before activation.
+        </div>
+      ) : null}
+      {operativeMetadata.length > 0 ? (
+        operativeMetadata.map((m) => renderField(m))
+      ) : (
+        <p className="text-sm text-gray-600">No service-mode fields are editable for this provider.</p>
+      )}
+    </div>
+  );
 }

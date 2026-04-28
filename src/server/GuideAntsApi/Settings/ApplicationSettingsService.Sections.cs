@@ -106,6 +106,14 @@ public sealed partial class ApplicationSettingsService
             _settingsSecretsOptionsMonitor.CurrentValue,
             protector.Protect);
 
+        var unsupportedFields = GetUnsupportedSectionFields(definition, request.Payload ?? new JsonObject());
+        if (unsupportedFields.Count > 0)
+        {
+            return (null, unsupportedFields
+                .Select(field => $"Field '{field}' is not supported by section '{definition.SectionName}'.")
+                .ToList(), false);
+        }
+
         var merged = ApplicationSettingsJson.MergeForUpdate(definition, decryptedCurrent, request.Payload ?? new JsonObject());
         var validationErrors = definition.Validate(merged)
             .Concat(await ValidateSectionPayloadAsync(definition.SectionName, merged, cancellationToken).ConfigureAwait(false))
@@ -189,6 +197,25 @@ public sealed partial class ApplicationSettingsService
         }
 
         return [];
+    }
+
+    private static IReadOnlyList<string> GetUnsupportedSectionFields(
+        SettingsSectionDefinition definition,
+        JsonObject incomingPayload)
+    {
+        if (definition.Properties.Count == 0)
+        {
+            return [];
+        }
+
+        var supported = definition.Properties
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return incomingPayload
+            .Select(kvp => kvp.Key)
+            .Where(key => !supported.Contains(key))
+            .ToList();
     }
 
     public async Task<SettingsSchemaDto> GetSchemaAsync(CancellationToken cancellationToken = default)

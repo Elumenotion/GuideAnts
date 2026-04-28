@@ -44,10 +44,10 @@ internal sealed class ProviderRoutedEmbeddingService(
                 .GetEmbeddingsAsync(texts, purpose, RequireModelId(mode), cancellationToken)
                 .ConfigureAwait(false),
             HuggingFaceProviderSection => await _huggingFaceEmbeddingService
-                .GetEmbeddingsAsync(texts, RequireModelId(mode), cancellationToken)
+                .GetEmbeddingsAsync(texts, RequireModelId(mode), mode.RequestPresetJson, cancellationToken)
                 .ConfigureAwait(false),
             OpenRouterProviderSection => await _openRouterEmbeddingService
-                .GetEmbeddingsAsync(texts, RequireModelId(mode), cancellationToken)
+                .GetEmbeddingsAsync(texts, RequireModelId(mode), mode.RequestPresetJson, cancellationToken)
                 .ConfigureAwait(false),
             _ => throw RoutingException.ProviderNotReady(
                 mode.ProviderSection,

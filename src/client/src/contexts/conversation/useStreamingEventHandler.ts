@@ -214,6 +214,8 @@ export function useStreamingEventHandler(
           console.error('Streaming error received:', event.data);
 
           const errorMessage = event.data?.message || 'An error occurred during the conversation';
+          const errorAction = event.data?.action;
+          const displayMessage = errorAction ? `${errorMessage}\n\n${errorAction}` : errorMessage;
           const errorType = event.data?.type;
           // Server-populated `code` field. Currently one of:
           //   'local_llm_oom'       — classified CUDA/OOM response body from llama-server
@@ -222,7 +224,7 @@ export function useStreamingEventHandler(
           // See GuideAntsApi/Services/Conversations/StreamingErrorEnvelope.cs.
           const errorCode = event.data?.code;
 
-          dispatch({ type: 'SET_STREAMING_ERROR', payload: errorMessage });
+          dispatch({ type: 'SET_STREAMING_ERROR', payload: displayMessage });
           dispatch({ type: 'SET_STREAMING', payload: false });
           dispatch({ type: 'SET_CANCELLING', payload: false });
           dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
@@ -237,7 +239,7 @@ export function useStreamingEventHandler(
             window.dispatchEvent(new CustomEvent('llama-runtime-crashed', {
               detail: {
                 reason: event.data?.reason || (errorCode === 'local_llm_oom' ? 'OutOfMemory' : 'Crashed'),
-                message: errorMessage,
+                message: displayMessage,
                 upstreamDetail: event.data?.innerMessage || null,
                 code: errorCode
               }
@@ -268,7 +270,7 @@ export function useStreamingEventHandler(
             showToast({
               type: 'error',
               title: 'Conversation Error',
-              message: errorMessage,
+              message: displayMessage,
               duration: 8000
             });
           }

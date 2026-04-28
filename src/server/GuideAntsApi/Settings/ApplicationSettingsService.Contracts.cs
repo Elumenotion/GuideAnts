@@ -20,7 +20,7 @@ public sealed partial class ApplicationSettingsService
         new Dictionary<string, ProviderSectionRequirement>(StringComparer.OrdinalIgnoreCase)
         {
             ["AzureOpenAI"] = new(
-                RequiredFields: ["Resource", "ApiKey", "Deployment"],
+                RequiredFields: ["Resource", "ApiKey"],
                 AlternativeFieldGroups: []),
             ["OpenAI"] = new(
                 RequiredFields: ["ApiKey"],
@@ -35,10 +35,10 @@ public sealed partial class ApplicationSettingsService
                 RequiredFields: ["BaseUrl"],
                 AlternativeFieldGroups: []),
             ["AzureOpenAiEmbedding"] = new(
-                RequiredFields: ["Endpoint", "ApiKey", "Deployment"],
+                RequiredFields: ["Endpoint", "ApiKey"],
                 AlternativeFieldGroups: []),
             ["AzureOpenAiImages"] = new(
-                RequiredFields: ["Endpoint", "ApiKey", "Deployment", "EditModelDeployment"],
+                RequiredFields: ["Endpoint", "ApiKey"],
                 AlternativeFieldGroups: []),
             ["AzureSpeechService"] = new(
                 RequiredFields: ["ApiKey"],
@@ -106,7 +106,7 @@ public sealed partial class ApplicationSettingsService
             ServiceId: SpeechTranscriptionOptions.SectionName,
             DisplayName: "Speech Transcription",
             SectionName: SpeechTranscriptionOptions.SectionName,
-            ServiceFieldNames: ["TimeoutSeconds"],
+            ServiceFieldNames: ["TimeoutSeconds", "MaxRetries"],
             Providers:
             [
                 new ProviderContract(
@@ -192,7 +192,7 @@ public sealed partial class ApplicationSettingsService
             ServiceId: SpeechSynthesisOptions.SectionName,
             DisplayName: "Speech Synthesis",
             SectionName: SpeechSynthesisOptions.SectionName,
-            ServiceFieldNames: ["TimeoutSeconds"],
+            ServiceFieldNames: ["TimeoutSeconds", "MaxRetries"],
             Providers:
             [
                 new ProviderContract(
@@ -273,7 +273,7 @@ public sealed partial class ApplicationSettingsService
             ServiceId: ImageGenerationOptions.SectionName,
             DisplayName: "Image Generation",
             SectionName: ImageGenerationOptions.SectionName,
-            ServiceFieldNames: ["TimeoutSeconds"],
+            ServiceFieldNames: ["TimeoutSeconds", "LocalOutputFormat"],
             Providers:
             [
                 new ProviderContract(
@@ -286,9 +286,7 @@ public sealed partial class ApplicationSettingsService
                     RequiredSectionFields:
                     [
                         new SectionFieldRequirement("AzureOpenAiImages", "Endpoint", "Azure OpenAI Images Endpoint"),
-                        new SectionFieldRequirement("AzureOpenAiImages", "ApiKey", "Azure OpenAI Images API Key"),
-                        new SectionFieldRequirement("AzureOpenAiImages", "Deployment", "Image Deployment"),
-                        new SectionFieldRequirement("AzureOpenAiImages", "EditModelDeployment", "Image Edit Deployment")
+                        new SectionFieldRequirement("AzureOpenAiImages", "ApiKey", "Azure OpenAI Images API Key")
                     ],
                     RequiredRuntimeKeys: []),
                 new ProviderContract(
@@ -347,8 +345,6 @@ public sealed partial class ApplicationSettingsService
             [
                 "AzureOpenAiImages:Endpoint",
                 "AzureOpenAiImages:ApiKey",
-                "AzureOpenAiImages:Deployment",
-                "AzureOpenAiImages:EditModelDeployment",
                 "LocalServiceHosts:ImageGenerationBaseUrl",
                 "GoogleGeminiApi:ApiKey",
                 "HuggingFace:Token",
@@ -371,8 +367,7 @@ public sealed partial class ApplicationSettingsService
                     RequiredSectionFields:
                     [
                         new SectionFieldRequirement("AzureOpenAiEmbedding", "Endpoint", "Azure OpenAI Embedding Endpoint"),
-                        new SectionFieldRequirement("AzureOpenAiEmbedding", "ApiKey", "Azure OpenAI Embedding API Key"),
-                        new SectionFieldRequirement("AzureOpenAiEmbedding", "Deployment", "Embedding Deployment")
+                        new SectionFieldRequirement("AzureOpenAiEmbedding", "ApiKey", "Azure OpenAI Embedding API Key")
                     ],
                     RequiredRuntimeKeys: []),
                 new ProviderContract(
@@ -431,7 +426,6 @@ public sealed partial class ApplicationSettingsService
             [
                 "AzureOpenAiEmbedding:Endpoint",
                 "AzureOpenAiEmbedding:ApiKey",
-                "AzureOpenAiEmbedding:Deployment",
                 "LocalServiceHosts:EmbeddingsBaseUrl",
                 "GoogleGeminiApi:ApiKey",
                 "HuggingFace:Token",
@@ -441,7 +435,19 @@ public sealed partial class ApplicationSettingsService
             ServiceId: DocumentIntelligenceOptions.SectionName,
             DisplayName: "Markdown Extraction",
             SectionName: DocumentIntelligenceOptions.SectionName,
-            ServiceFieldNames: ["TimeoutSeconds", "MaxConcurrentConversions", "AsyncStatusPollIntervalMs"],
+            ServiceFieldNames:
+            [
+                "TimeoutSeconds",
+                "MaxConcurrentConversions",
+                "AsyncStatusPollIntervalMs",
+                "DoclingDoOcr",
+                "DoclingForceOcr",
+                "DoclingOcrPreset",
+                "DoclingPdfBackend",
+                "DoclingTableMode",
+                "DoclingTableCellMatching",
+                "DoclingImageExportMode"
+            ],
             Providers:
             [
                 new ProviderContract(

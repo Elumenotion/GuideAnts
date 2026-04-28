@@ -48,9 +48,6 @@ namespace GuideAntsApi.Options
 
         public string Endpoint { get; set; } = string.Empty;
         public string ApiKey { get; set; } = string.Empty;
-        public string ApiVersion { get; set; } = "2024-11-30";
-        public int TimeoutSeconds { get; set; } = 300;
-        public int MaxRetries { get; set; } = 3;
     }
 
     public class DocumentIntelligenceOptions
@@ -69,8 +66,6 @@ namespace GuideAntsApi.Options
         public string Endpoint { get; set; } = string.Empty;
         public string ApiKey { get; set; } = string.Empty;
         public string Region { get; set; } = "eastus";
-        public int TimeoutSeconds { get; set; } = 600;
-        public int MaxRetries { get; set; } = 3;
     }
 
     public class SpeechTranscriptionOptions
@@ -78,6 +73,7 @@ namespace GuideAntsApi.Options
         public const string SectionName = "SpeechTranscription";
 
         public int TimeoutSeconds { get; set; } = 300;
+        public int MaxRetries { get; set; } = 3;
     }
 
     public class SpeechSynthesisOptions
@@ -85,6 +81,7 @@ namespace GuideAntsApi.Options
         public const string SectionName = "SpeechSynthesis";
 
         public int TimeoutSeconds { get; set; } = 300;
+        public int MaxRetries { get; set; } = 3;
     }
 
     public class ImageGenerationOptions

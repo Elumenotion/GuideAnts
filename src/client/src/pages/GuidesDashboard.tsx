@@ -437,8 +437,14 @@ export default function GuidesDashboard() {
 
   const handleImportGuide = async (file: File) => {
     try {
-      await api.guides.guides.import(file);
-      showToast({ type: 'success', title: 'Guide imported successfully' });
+      const result = await api.guides.guides.import(file);
+      const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+      showToast({
+        type: warnings.length > 0 ? 'warning' : 'success',
+        title: warnings.length > 0 ? 'Guide imported with warnings' : 'Guide imported successfully',
+        message: warnings.length > 0 ? warnings.join('\n') : undefined,
+        duration: warnings.length > 0 ? 12000 : undefined
+      });
       const guidesData = await api.guides.guides.list();
       setGuides(guidesData);
     } catch (error: any) {
@@ -448,8 +454,14 @@ export default function GuidesDashboard() {
 
   const handleImportAssistant = async (file: File) => {
     try {
-      await api.guides.assistants.import(file);
-      showToast({ type: 'success', title: 'Assistant imported successfully' });
+      const result = await api.guides.assistants.import(file);
+      const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+      showToast({
+        type: warnings.length > 0 ? 'warning' : 'success',
+        title: warnings.length > 0 ? 'Assistant imported with warnings' : 'Assistant imported successfully',
+        message: warnings.length > 0 ? warnings.join('\n') : undefined,
+        duration: warnings.length > 0 ? 12000 : undefined
+      });
       const assistantsData = await api.guides.assistants.list();
       setAssistants(assistantsData);
     } catch (error: any) {

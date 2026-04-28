@@ -171,9 +171,11 @@ public static class UsageRecorderExtensions
         Guid? assistantId = null,
         Guid? agentInvocationId = null,
         Guid? notebookConversationMessageId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string service = "AzureOpenAI",
+        string operation = "image-generation")
         => recorder.RecordAsync(projectId, notebookId, UsageCategory.ImageGeneration,
-            "AzureOpenAI", "image-generation",
+            service, operation,
             new UsageMetrics(ValueOther: bytes), costUsd, conversationId, null, notebookFileId,
             null,
             metadataJson ?? (imageCount > 0 ? $"{{\"imageCount\":{imageCount}}}" : null),
@@ -213,9 +215,11 @@ public static class UsageRecorderExtensions
         string? metadataJson = null,
         Guid? assistantId = null,
         Guid? agentInvocationId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string service = "AzureSpeech",
+        string operation = "TTS")
         => recorder.RecordAsync(projectId, notebookId, UsageCategory.SpeechSynthesis,
-            "AzureSpeech", "TTS",
+            service, operation,
             new UsageMetrics(ValueOther: characterCount), costUsd, conversationId, null, notebookFileId,
             null, metadataJson, assistantId, agentInvocationId, null, ct);
 

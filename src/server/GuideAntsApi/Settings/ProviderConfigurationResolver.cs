@@ -44,7 +44,7 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
             ResourceName = GetValue("AzureOpenAI:Resource"),
             ApiKey = GetValue("AzureOpenAI:ApiKey"),
             ApiVersion = GetValue("AzureOpenAI:ApiVersion"),
-            DeploymentId = GetValue("AzureOpenAI:Deployment")
+            DeploymentId = null
         };
     }
 
@@ -59,7 +59,7 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
             ResourceName = null,
             ApiKey = GetValue("OpenAI:ApiKey"),
             ApiVersion = null,
-            DeploymentId = GetValue("OpenAI:Deployment")
+            DeploymentId = null
         };
     }
 
@@ -126,13 +126,9 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
             BaseUrl = GetValue("Anthropic:BaseUrl"),
             ApiKey = GetValue("Anthropic:ApiKey"),
             AuthToken = GetValue("Anthropic:AuthToken"),
-            DefaultModel = GetValue("Anthropic:DefaultModel"),
-            DefaultMaxTokens = GetIntValue(64000, "Anthropic:DefaultMaxTokens"),
-            ThinkingBudgets = new AnthropicThinkingBudgets(
-                Minimal: GetNullableIntValue("Anthropic:ThinkingBudgetMinimal"),
-                Low: GetNullableIntValue("Anthropic:ThinkingBudgetLow"),
-                Medium: GetNullableIntValue("Anthropic:ThinkingBudgetMedium"),
-                High: GetNullableIntValue("Anthropic:ThinkingBudgetHigh"))
+            DefaultModel = null,
+            DefaultMaxTokens = 64000,
+            ThinkingBudgets = new AnthropicThinkingBudgets()
         };
     }
 

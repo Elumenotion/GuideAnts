@@ -68,7 +68,7 @@ const OWNERSHIP_CATEGORIES: readonly OwnershipCategory[] = [
     key: 'chat',
     label: 'Chat / LLM Providers',
     description: 'Connections used when dispatching chat completions to a catalog model.',
-    sectionNames: ['AzureOpenAI', 'OpenAI', 'Anthropic', 'LlamaCpp', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace'],
+    sectionNames: ['AzureOpenAI', 'OpenAI', 'Anthropic', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace'],
   },
   {
     key: 'service',

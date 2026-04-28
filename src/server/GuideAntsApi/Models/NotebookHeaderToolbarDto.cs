@@ -14,7 +14,9 @@ public sealed record NotebookToolbarModelOptionDto(
 public sealed record NotebookToolbarProviderOptionDto(
     string ProviderId,
     string DisplayName,
-    string ProviderKind);
+    string ProviderKind,
+    bool CanActivate,
+    IReadOnlyList<string> Blockers);
 
 public sealed record NotebookToolbarSelectionDto(
     string? ResourceId,

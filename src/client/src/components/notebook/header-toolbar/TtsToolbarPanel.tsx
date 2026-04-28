@@ -73,13 +73,16 @@ export function TtsToolbarPanel({
           <button
             key={provider.providerId}
             type="button"
-            className={`${textButtonClassName('neutral')} w-full justify-start text-left`}
+            className={`${textButtonClassName('neutral')} w-full justify-start text-left ${provider.canActivate ? '' : 'opacity-60'}`}
+            disabled={!provider.canActivate}
             onClick={() => void setProvider(provider.providerId)}
+            title={provider.canActivate ? undefined : provider.blockers[0] ?? 'Provider is blocked.'}
             role="option"
             aria-selected={provider.providerId === service.activeProviderId}
           >
             {provider.displayName} ({provider.providerKind})
             {provider.providerId === service.activeProviderId ? ' (current)' : ''}
+            {!provider.canActivate ? ` — ${provider.blockers[0] ?? 'blocked'}` : ''}
           </button>
         ))}
       </div>

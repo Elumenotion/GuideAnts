@@ -14,7 +14,15 @@ export interface UseServiceEditorControllerResult {
   selectedProvider: ProviderEditorStateDto | undefined;
   persistedActiveLabel: string;
   editingProviderLabel: string | null;
-  providerOptions: Array<{ providerId: string; displayName: string; kind: string }>;
+  providerOptions: Array<{
+    providerId: string;
+    displayName: string;
+    kind: string;
+    hasExplicitMode: boolean;
+    connectionConfigured: boolean;
+    canActivate: boolean;
+    blocker: string | null;
+  }>;
   load: () => Promise<void>;
   save: () => Promise<boolean>;
   clearFieldError: (fieldName: string) => void;
@@ -41,7 +49,8 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
 
   const selectedProvider = providersById.get(draft.activeProviderId) ?? state?.providers[0];
   const persistedActiveProvider = state ? providersById.get(state.activeProviderId) : undefined;
-  const persistedActiveLabel = persistedActiveProvider?.displayName ?? state?.activeProviderId ?? '';
+  const persistedActiveLabel = persistedActiveProvider?.displayName
+    ?? (state?.activeProviderId ? state.activeProviderId : 'Not configured');
   const editingDifferentProvider = Boolean(state && draft.activeProviderId !== state.activeProviderId);
   const editingProviderLabel =
     editingDifferentProvider && selectedProvider ? selectedProvider.displayName : null;
@@ -54,13 +63,21 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
       providerId: p.providerId,
       displayName: p.displayName,
       kind: p.providerKind,
+      hasExplicitMode: p.hasExplicitMode,
+      connectionConfigured: p.connectionConfigured,
+      canActivate: p.canActivate,
+      blocker: !p.hasExplicitMode
+        ? 'No explicit service mode'
+        : !p.connectionConfigured
+          ? 'Connection not configured'
+          : p.activationBlockers[0] ?? null,
     }));
   }, [state]);
 
   const applyLoadedState = (next: ServiceEditorStateDto): void => {
     setState(next);
     const d = draftRef.current;
-    d.switchProvider(next.activeProviderId);
+    d.switchProvider(next.activeProviderId || next.providers[0]?.providerId || 'none');
     for (const provider of next.providers) {
       const seedDraft = Object.fromEntries(
         Object.entries(provider.fields)
@@ -125,6 +142,13 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
       return false;
     }
 
+    if (!selectedProvider.connectionConfigured) {
+      setError(
+        `Configure the provider connection before saving ${selectedProvider.displayName}: ${selectedProvider.connectionMissingFields.join(', ')}.`
+      );
+      return false;
+    }
+
     const validation = validateOperativeProviderFields(selectedProvider, draft.activeDraft);
     setFieldErrors(validation);
     if (hasValidationErrors(validation)) {
@@ -136,7 +160,9 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
     setError(null);
     try {
       const payload = buildSavePayload(selectedProvider, draft.activeDraft);
-      await api.settings.services.updateProviderFields(serviceId, selectedProvider.providerId, payload);
+      if (Object.keys(payload).length > 0 || !selectedProvider.hasExplicitMode) {
+        await api.settings.services.updateProviderFields(serviceId, selectedProvider.providerId, payload);
+      }
       await api.settings.services.updateActiveProvider(serviceId, selectedProvider.providerId);
       await load();
       return true;

@@ -441,12 +441,19 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         }
 
         var providerOptions = state.Providers
-            .Select(p => new NotebookToolbarProviderOptionDto(p.ProviderId, p.DisplayName, p.ProviderKind))
+            .Where(p => p.HasExplicitMode)
+            .Select(p => new NotebookToolbarProviderOptionDto(
+                p.ProviderId,
+                p.DisplayName,
+                p.ProviderKind,
+                p.CanActivate,
+                p.ActivationBlockers))
             .ToList();
 
         var active = state.Providers.FirstOrDefault(p =>
             string.Equals(p.ProviderId, state.ActiveProviderId, StringComparison.Ordinal));
-        var activeLabel = active?.DisplayName ?? state.ActiveProviderId;
+        var activeLabel = active?.DisplayName
+            ?? (string.IsNullOrWhiteSpace(state.ActiveProviderId) ? "Not configured" : state.ActiveProviderId);
 
         var supportsPower = string.Equals(state.ActiveProviderId, localProviderId, StringComparison.Ordinal);
         var readiness = state.Readiness;
@@ -478,7 +485,9 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             }
         }
 
-        var summary = $"{activeLabel} — {readiness.Status}";
+        var summary = string.IsNullOrWhiteSpace(state.ActiveProviderId)
+            ? "Not configured"
+            : $"{activeLabel} — {readiness.Status}";
         if (readiness.Warnings.Count > 0)
         {
             summary += $"; {readiness.Warnings[0]}";

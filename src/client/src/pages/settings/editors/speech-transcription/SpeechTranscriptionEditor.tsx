@@ -105,9 +105,15 @@ export function SpeechTranscriptionEditor() {
           <TextActionButton
             tone="primary"
             icon={saving ? <FaSpinner className="animate-spin" /> : <FaSave />}
-            disabled={saving}
+            disabled={saving || !selectedProvider.connectionConfigured}
             onClick={() => void save()}
-            title="Save and activate provider."
+            title={
+              !selectedProvider.connectionConfigured
+                  ? 'Configure the provider connection first.'
+                  : !selectedProvider.hasExplicitMode
+                    ? 'Save will create an explicit service mode and activate provider.'
+                    : 'Save and activate provider.'
+            }
           >
             Save
           </TextActionButton>
@@ -150,7 +156,7 @@ function renderCloudTranscriptionBehavior(providerId: string) {
             the shared <span className="font-mono">HuggingFace:Token</span>.
           </li>
           <li>
-            Use <span className="font-mono">HuggingFace:AsrAllowedModels</span> when you want to lock the route to an approved
+            Use <span className="font-mono">Allowed Models</span> when you want to lock the route to an approved
             model set.
           </li>
         </ul>
@@ -163,8 +169,8 @@ function renderCloudTranscriptionBehavior(providerId: string) {
             the selected <span className="font-mono">Transcription Model ID</span>.
           </li>
           <li>
-            Audio format support and request size are constrained by the upstream adapter; the size cap comes from{' '}
-            <span className="font-mono">OpenRouter:TranscriptionMaxAudioBytes</span>.
+            Audio format support and request size are constrained by the upstream adapter; the size cap comes from this
+            service mode's <span className="font-mono">Max Audio Bytes</span>.
           </li>
         </ul>
       );

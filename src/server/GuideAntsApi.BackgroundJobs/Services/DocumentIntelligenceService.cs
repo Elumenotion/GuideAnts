@@ -22,7 +22,7 @@ public interface IDocumentIntelligenceService
 public interface IDocumentIntelligenceExtractor
 {
     string Provider { get; }
-    Task<string> ExtractMarkdownAsync(Stream content, string fileName, CancellationToken cancellationToken = default);
+    Task<string> ExtractMarkdownAsync(Stream content, string fileName, ServiceMode mode, CancellationToken cancellationToken = default);
 }
 
 public sealed class ProviderRoutedDocumentIntelligenceService : IDocumentIntelligenceService
@@ -113,7 +113,7 @@ public sealed class ProviderRoutedDocumentIntelligenceService : IDocumentIntelli
                 modeId: mode.ModeId);
         }
 
-        return await extractor.ExtractMarkdownAsync(content, fileName, cancellationToken);
+        return await extractor.ExtractMarkdownAsync(content, fileName, mode, cancellationToken);
     }
 
     public bool IsFileTypeSupported(string fileName, string contentType)
@@ -186,9 +186,11 @@ public sealed class ProviderRoutedDocumentIntelligenceService : IDocumentIntelli
 
 internal sealed class AzureDocumentIntelligenceExtractor(
     IOptionsMonitor<AzureDocumentIntelligenceOptions> optionsMonitor,
+    IOptionsMonitor<DocumentIntelligenceOptions> serviceOptionsMonitor,
     ILogger<AzureDocumentIntelligenceExtractor> logger) : IDocumentIntelligenceExtractor
 {
     private readonly IOptionsMonitor<AzureDocumentIntelligenceOptions> _optionsMonitor = optionsMonitor;
+    private readonly IOptionsMonitor<DocumentIntelligenceOptions> _serviceOptionsMonitor = serviceOptionsMonitor;
     private readonly ILogger<AzureDocumentIntelligenceExtractor> _logger = logger;
 
     public string Provider => ServiceProviderIds.DocumentIntelligenceAzure;
@@ -196,6 +198,7 @@ internal sealed class AzureDocumentIntelligenceExtractor(
     public async Task<string> ExtractMarkdownAsync(
         Stream content,
         string fileName,
+        ServiceMode mode,
         CancellationToken cancellationToken = default)
     {
         var options = _optionsMonitor.CurrentValue;
@@ -218,12 +221,12 @@ internal sealed class AzureDocumentIntelligenceExtractor(
             }
 
             var credential = new AzureKeyCredential(options.ApiKey);
-            var clientOptions = new DocumentIntelligenceClientOptions
+            var clientOptions = new DocumentIntelligenceClientOptions(ResolveServiceVersion(mode.RequestPresetJson))
             {
                 Retry =
                 {
-                    MaxRetries = Math.Max(0, options.MaxRetries),
-                    NetworkTimeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds))
+                    MaxRetries = Math.Max(0, ReadIntPreset(mode.RequestPresetJson, "MaxRetries") ?? 3),
+                    NetworkTimeout = TimeSpan.FromSeconds(Math.Max(1, _serviceOptionsMonitor.CurrentValue.TimeoutSeconds))
                 }
             };
             var client = new DocumentIntelligenceClient(endpointUri, credential, clientOptions);
@@ -254,6 +257,74 @@ internal sealed class AzureDocumentIntelligenceExtractor(
             throw;
         }
     }
+
+    private static int? ReadIntPreset(string? requestPresetJson, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(requestPresetJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(requestPresetJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty(fieldName, out var node))
+            {
+                return null;
+            }
+
+            return node.ValueKind switch
+            {
+                JsonValueKind.Number when node.TryGetInt32(out var value) => value,
+                JsonValueKind.String when int.TryParse(node.GetString(), out var value) => value,
+                _ => null
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static DocumentIntelligenceClientOptions.ServiceVersion ResolveServiceVersion(string? requestPresetJson)
+    {
+        var configured = ReadStringPreset(requestPresetJson, "ApiVersion");
+        if (string.IsNullOrWhiteSpace(configured)
+            || string.Equals(configured, "2024-11-30", StringComparison.OrdinalIgnoreCase))
+        {
+            return DocumentIntelligenceClientOptions.ServiceVersion.V2024_11_30;
+        }
+
+        throw new InvalidOperationException(
+            $"DocumentIntelligence Azure service mode ApiVersion '{configured}' is not supported by the installed Azure.AI.DocumentIntelligence client.");
+    }
+
+    private static string? ReadStringPreset(string? requestPresetJson, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(requestPresetJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(requestPresetJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty(fieldName, out var node))
+            {
+                return null;
+            }
+
+            return node.ValueKind == JsonValueKind.String
+                ? node.GetString()?.Trim()
+                : node.ToString().Trim();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 }
 
 internal sealed class DoclingServeDocumentIntelligenceExtractor(
@@ -277,6 +348,7 @@ internal sealed class DoclingServeDocumentIntelligenceExtractor(
     public async Task<string> ExtractMarkdownAsync(
         Stream content,
         string fileName,
+        ServiceMode mode,
         CancellationToken cancellationToken = default)
     {
         var options = _optionsMonitor.CurrentValue;

@@ -107,7 +107,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
             var (catalogRow, catalogBlockers) = await LookupCatalogRowAsync(mode.ModelId!, cancellationToken)
                 .ConfigureAwait(false);
             blockers.AddRange(catalogBlockers);
-            blockers.AddRange(ModelCapabilityBlockers(service, mode.ProviderSection, mode.ModelId!));
+            blockers.AddRange(ModelCapabilityBlockers(service, mode, mode.ModelId!));
 
             if (catalogRow != null
                 && string.Equals(mode.ProviderSection, "LlamaCpp", StringComparison.OrdinalIgnoreCase))
@@ -325,8 +325,9 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         return false;
     }
 
-    private IReadOnlyList<string> ModelCapabilityBlockers(string service, string providerSection, string modelId)
+    private IReadOnlyList<string> ModelCapabilityBlockers(string service, ServiceModeDto mode, string modelId)
     {
+        var providerSection = mode.ProviderSection;
         if (string.IsNullOrWhiteSpace(providerSection) || string.IsNullOrWhiteSpace(modelId))
         {
             return Array.Empty<string>();
@@ -334,24 +335,24 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
 
         if (string.Equals(providerSection, "HuggingFace", StringComparison.OrdinalIgnoreCase))
         {
-            return HuggingFaceCapabilityBlockers(service, modelId);
+            return HuggingFaceCapabilityBlockers(service, modelId, mode.RequestPresetJson);
         }
 
         if (string.Equals(providerSection, "OpenRouter", StringComparison.OrdinalIgnoreCase))
         {
-            return OpenRouterCapabilityBlockers(service, modelId);
+            return OpenRouterCapabilityBlockers(service, modelId, mode.RequestPresetJson);
         }
 
         return Array.Empty<string>();
     }
 
-    private IReadOnlyList<string> HuggingFaceCapabilityBlockers(string service, string modelId)
+    private IReadOnlyList<string> HuggingFaceCapabilityBlockers(string service, string modelId, string? requestPresetJson)
     {
         if (string.Equals(service, RoutedServiceNames.Embeddings, StringComparison.OrdinalIgnoreCase))
         {
             return IsAllowedByConfigOrHeuristic(
                 modelId,
-                _configurationForSection("HuggingFace", "EmbeddingAllowedModels"),
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
                 m => m.Contains("embed", StringComparison.OrdinalIgnoreCase)
                     || m.StartsWith("sentence-transformers/", StringComparison.OrdinalIgnoreCase)
                     || m.StartsWith("intfloat/", StringComparison.OrdinalIgnoreCase)
@@ -367,7 +368,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         {
             return IsAllowedByConfigOrHeuristic(
                 modelId,
-                _configurationForSection("HuggingFace", "ImageAllowedModels"),
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
                 m => m.Contains("image", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("diffusion", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("flux", StringComparison.OrdinalIgnoreCase))
@@ -382,7 +383,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         {
             return IsAllowedByConfigOrHeuristic(
                 modelId,
-                _configurationForSection("HuggingFace", "AsrAllowedModels"),
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
                 m => m.Contains("asr", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("whisper", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("wav2vec", StringComparison.OrdinalIgnoreCase))
@@ -397,7 +398,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         {
             return IsAllowedByConfigOrHeuristic(
                 modelId,
-                _configurationForSection("HuggingFace", "TtsAllowedModels"),
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
                 m => m.Contains("tts", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("speech", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("kokoro", StringComparison.OrdinalIgnoreCase))
@@ -411,13 +412,13 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         return Array.Empty<string>();
     }
 
-    private IReadOnlyList<string> OpenRouterCapabilityBlockers(string service, string modelId)
+    private IReadOnlyList<string> OpenRouterCapabilityBlockers(string service, string modelId, string? requestPresetJson)
     {
         if (string.Equals(service, RoutedServiceNames.Embeddings, StringComparison.OrdinalIgnoreCase))
         {
             return IsAllowedByConfigOrHeuristic(
                 modelId,
-                _configurationForSection("OpenRouter", "EmbeddingAllowedModels"),
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
                 m => m.Contains("embed", StringComparison.OrdinalIgnoreCase))
                 ? Array.Empty<string>()
                 : new[]
@@ -430,7 +431,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         {
             return IsAllowedByConfigOrHeuristic(
                 modelId,
-                _configurationForSection("OpenRouter", "ImageAllowedModels"),
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
                 m => m.Contains("image", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("imagen", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("flux", StringComparison.OrdinalIgnoreCase))
@@ -445,7 +446,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         {
             return IsAllowedByConfigOrHeuristic(
                 modelId,
-                _configurationForSection("OpenRouter", "TranscriptionAllowedModels"),
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
                 m => m.Contains("transcribe", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("whisper", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("audio", StringComparison.OrdinalIgnoreCase))
@@ -460,7 +461,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         {
             return IsAllowedByConfigOrHeuristic(
                 modelId,
-                _configurationForSection("OpenRouter", "TtsAllowedModels"),
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
                 m => m.Contains("tts", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("audio", StringComparison.OrdinalIgnoreCase)
                     || m.Contains("speech", StringComparison.OrdinalIgnoreCase))
@@ -499,6 +500,32 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         }
 
         return heuristic(modelId);
+    }
+
+    private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(requestPresetJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(requestPresetJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty(fieldName, out var node))
+            {
+                return null;
+            }
+
+            return node.ValueKind == JsonValueKind.String
+                ? node.GetString()?.Trim()
+                : node.ToString().Trim();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private string? _configurationForSection(string section, string field)

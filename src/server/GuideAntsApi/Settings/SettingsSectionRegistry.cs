@@ -100,11 +100,8 @@ public sealed class SettingsSectionDefinition
         AddPositiveIntegerValidation(payload, errors, "AsyncStatusPollIntervalMs");
         AddPositiveIntegerValidation(payload, errors, "PollIntervalSeconds");
         AddPositiveIntegerValidation(payload, errors, "PollTimeoutSeconds");
-        AddPositiveIntegerValidation(payload, errors, "DefaultMaxTokens");
-        AddPositiveIntegerValidation(payload, errors, "ThinkingBudgetMinimal");
-        AddPositiveIntegerValidation(payload, errors, "ThinkingBudgetLow");
-        AddPositiveIntegerValidation(payload, errors, "ThinkingBudgetMedium");
-        AddPositiveIntegerValidation(payload, errors, "ThinkingBudgetHigh");
+        AddPositiveIntegerValidation(payload, errors, "MaxRetries");
+        AddPositiveIntegerValidation(payload, errors, "MaxAudioBytes");
 
         return errors;
     }
@@ -230,10 +227,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             Properties =
             [
                 new("Endpoint", "AzureDocumentIntelligence:Endpoint"),
-                new("ApiKey", "AzureDocumentIntelligence:ApiKey", IsSecret: true),
-                new("ApiVersion", "AzureDocumentIntelligence:ApiVersion", DefaultValue: "2024-11-30"),
-                new("TimeoutSeconds", "AzureDocumentIntelligence:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
-                new("MaxRetries", "AzureDocumentIntelligence:MaxRetries", SettingsValueType.Int, DefaultValue: 3)
+                new("ApiKey", "AzureDocumentIntelligence:ApiKey", IsSecret: true)
             ]
         },
         new()
@@ -245,7 +239,14 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             [
                 new("TimeoutSeconds", "DocumentIntelligence:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
                 new("MaxConcurrentConversions", "DocumentIntelligence:MaxConcurrentConversions", SettingsValueType.Int, DefaultValue: 1),
-                new("AsyncStatusPollIntervalMs", "DocumentIntelligence:AsyncStatusPollIntervalMs", SettingsValueType.Int, DefaultValue: 2000)
+                new("AsyncStatusPollIntervalMs", "DocumentIntelligence:AsyncStatusPollIntervalMs", SettingsValueType.Int, DefaultValue: 2000),
+                new("DoclingDoOcr", "DocumentIntelligence:DoclingDoOcr", SettingsValueType.Bool),
+                new("DoclingForceOcr", "DocumentIntelligence:DoclingForceOcr", SettingsValueType.Bool),
+                new("DoclingOcrPreset", "DocumentIntelligence:DoclingOcrPreset"),
+                new("DoclingPdfBackend", "DocumentIntelligence:DoclingPdfBackend"),
+                new("DoclingTableMode", "DocumentIntelligence:DoclingTableMode"),
+                new("DoclingTableCellMatching", "DocumentIntelligence:DoclingTableCellMatching"),
+                new("DoclingImageExportMode", "DocumentIntelligence:DoclingImageExportMode")
             ]
         },
         new()
@@ -257,9 +258,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             [
                 new("Endpoint", "AzureSpeechService:Endpoint"),
                 new("ApiKey", "AzureSpeechService:ApiKey", IsSecret: true),
-                new("Region", "AzureSpeechService:Region", DefaultValue: "eastus"),
-                new("TimeoutSeconds", "AzureSpeechService:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 600),
-                new("MaxRetries", "AzureSpeechService:MaxRetries", SettingsValueType.Int, DefaultValue: 3)
+                new("Region", "AzureSpeechService:Region", DefaultValue: "eastus")
             ]
         },
         new()
@@ -269,7 +268,8 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             DisplayOrder = 25,
             Properties =
             [
-                new("TimeoutSeconds", "SpeechTranscription:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300)
+                new("TimeoutSeconds", "SpeechTranscription:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
+                new("MaxRetries", "SpeechTranscription:MaxRetries", SettingsValueType.Int, DefaultValue: 3)
             ]
         },
         new()
@@ -279,7 +279,8 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             DisplayOrder = 27,
             Properties =
             [
-                new("TimeoutSeconds", "SpeechSynthesis:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300)
+                new("TimeoutSeconds", "SpeechSynthesis:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
+                new("MaxRetries", "SpeechSynthesis:MaxRetries", SettingsValueType.Int, DefaultValue: 3)
             ]
         },
         new()
@@ -291,7 +292,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             [
                 new("Resource", "AzureOpenAI:Resource"),
                 new("ApiKey", "AzureOpenAI:ApiKey", IsSecret: true),
-                new("Deployment", "AzureOpenAI:Deployment"),
                 new("ApiVersion", "AzureOpenAI:ApiVersion", DefaultValue: "2025-04-01-preview")
             ]
         },
@@ -304,8 +304,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             [
                 new("Endpoint", "AzureOpenAiImages:Endpoint"),
                 new("ApiKey", "AzureOpenAiImages:ApiKey", IsSecret: true),
-                new("Deployment", "AzureOpenAiImages:Deployment"),
-                new("EditModelDeployment", "AzureOpenAiImages:EditModelDeployment"),
                 new("ApiVersion", "AzureOpenAiImages:ApiVersion", DefaultValue: "2025-04-01-preview")
             ]
         },
@@ -339,8 +337,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             Properties =
             [
                 new("Endpoint", "AzureOpenAiEmbedding:Endpoint"),
-                new("ApiKey", "AzureOpenAiEmbedding:ApiKey", IsSecret: true),
-                new("Deployment", "AzureOpenAiEmbedding:Deployment")
+                new("ApiKey", "AzureOpenAiEmbedding:ApiKey", IsSecret: true)
             ]
         },
         new()
@@ -351,8 +348,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             Properties =
             [
                 new("ApiKey", "OpenAI:ApiKey", IsSecret: true),
-                new("Endpoint", "OpenAI:Endpoint"),
-                new("Deployment", "OpenAI:Deployment")
+                new("Endpoint", "OpenAI:Endpoint")
             ]
         },
         new()
@@ -374,13 +370,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             [
                 new("BaseUrl", "Anthropic:BaseUrl"),
                 new("ApiKey", "Anthropic:ApiKey", IsSecret: true),
-                new("AuthToken", "Anthropic:AuthToken", IsSecret: true),
-                new("DefaultModel", "Anthropic:DefaultModel"),
-                new("DefaultMaxTokens", "Anthropic:DefaultMaxTokens", SettingsValueType.Int, DefaultValue: 64000),
-                new("ThinkingBudgetMinimal", "Anthropic:ThinkingBudgetMinimal", SettingsValueType.Int),
-                new("ThinkingBudgetLow", "Anthropic:ThinkingBudgetLow", SettingsValueType.Int),
-                new("ThinkingBudgetMedium", "Anthropic:ThinkingBudgetMedium", SettingsValueType.Int),
-                new("ThinkingBudgetHigh", "Anthropic:ThinkingBudgetHigh", SettingsValueType.Int)
+                new("AuthToken", "Anthropic:AuthToken", IsSecret: true)
             ]
         },
         new()
@@ -393,12 +383,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
                 new("ApiKey", "OpenRouter:ApiKey", IsSecret: true),
                 new("BaseUrl", "OpenRouter:BaseUrl", DefaultValue: "https://openrouter.ai/api/v1"),
                 new("HttpReferer", "OpenRouter:HttpReferer"),
-                new("AppTitle", "OpenRouter:AppTitle"),
-                new("EmbeddingAllowedModels", "OpenRouter:EmbeddingAllowedModels"),
-                new("ImageAllowedModels", "OpenRouter:ImageAllowedModels"),
-                new("TranscriptionAllowedModels", "OpenRouter:TranscriptionAllowedModels"),
-                new("TtsAllowedModels", "OpenRouter:TtsAllowedModels"),
-                new("TranscriptionMaxAudioBytes", "OpenRouter:TranscriptionMaxAudioBytes", SettingsValueType.Int, DefaultValue: 26214400)
+                new("AppTitle", "OpenRouter:AppTitle")
             ]
         },
         // Single source of truth for the Hugging Face token used by every HF
@@ -419,11 +404,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
                 new(
                     "RouterBaseUrl",
                     "HuggingFace:RouterBaseUrl",
-                    DefaultValue: "https://router.huggingface.co/v1"),
-                new("EmbeddingAllowedModels", "HuggingFace:EmbeddingAllowedModels"),
-                new("ImageAllowedModels", "HuggingFace:ImageAllowedModels"),
-                new("AsrAllowedModels", "HuggingFace:AsrAllowedModels"),
-                new("TtsAllowedModels", "HuggingFace:TtsAllowedModels")
+                    DefaultValue: "https://router.huggingface.co/v1")
             ]
         },
         new()

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Models.Settings;
+using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
 
 namespace GuideAntsApi.Settings;
@@ -16,18 +17,20 @@ public sealed partial class ApplicationSettingsService
     {
         var contract = GetServiceContract(serviceId);
         var modes = await GetServiceModesAsync(contract.ServiceId, cancellationToken).ConfigureAwait(false);
-        var activeMode = modes.FirstOrDefault(mode => mode.IsDefault) ?? modes.FirstOrDefault();
-        var activeProvider = ResolveActiveProvider(contract, activeMode?.ProviderSection);
+        var activeMode = modes.FirstOrDefault(mode => mode.IsDefault && mode.Enabled)
+            ?? modes.FirstOrDefault(mode => mode.IsDefault)
+            ?? modes.FirstOrDefault(mode => mode.Enabled);
+        var activeProvider = TryResolveActiveProvider(contract, activeMode?.ProviderSection);
         var readiness = await GetServiceEditorReadinessAsync(contract.ServiceId, cancellationToken).ConfigureAwait(false);
 
         var providers = contract.Providers
-            .Select(provider => BuildProviderEditorState(contract.ServiceId, provider, modes))
+            .Select(provider => BuildProviderEditorState(contract, provider, modes))
             .ToList();
 
         return new ServiceEditorStateDto(
             ServiceId: contract.ServiceId,
             DisplayName: contract.DisplayName,
-            ActiveProviderId: activeProvider.ProviderId,
+            ActiveProviderId: activeProvider?.ProviderId ?? string.Empty,
             Providers: providers,
             Readiness: readiness);
     }
@@ -51,13 +54,15 @@ public sealed partial class ApplicationSettingsService
         var selectedMode = FindModeForProvider(modes, provider.ProviderSectionKey);
         if (selectedMode == null)
         {
-            selectedMode = new ServiceMode(
-                ModeId: BuildPreferredModeId(provider),
-                ProviderSection: provider.ProviderSectionKey,
-                ModelId: null,
-                RequestPresetJson: null,
-                Enabled: true,
-                IsDefault: true);
+            throw new InvalidOperationException(
+                $"Provider '{providerId}' cannot be activated because no explicit service mode exists for '{provider.ProviderSectionKey}'.");
+        }
+
+        var activationBlockers = BuildActivationBlockers(contract, provider, ToServiceModeDto(contract.ServiceId, selectedMode)).ToList();
+        if (activationBlockers.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Provider '{providerId}' cannot be activated: {string.Join("; ", activationBlockers)}");
         }
 
         var normalized = modes
@@ -69,15 +74,6 @@ public sealed partial class ApplicationSettingsService
                     : mode.Enabled
             })
             .ToList();
-
-        if (!normalized.Any(mode => string.Equals(mode.ModeId, selectedMode.ModeId, StringComparison.Ordinal)))
-        {
-            normalized.Add(selectedMode with
-            {
-                Enabled = true,
-                IsDefault = true
-            });
-        }
 
         ServiceModesPayload.WriteModesFor(payload, canonicalService, normalized, defaultModeId: selectedMode.ModeId);
         await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
@@ -104,11 +100,19 @@ public sealed partial class ApplicationSettingsService
         var metadataByName = metadataProvider
             .GetProviderFields(contract.ServiceId, provider.ProviderId)
             .ToDictionary(field => field.Name, field => field, StringComparer.Ordinal);
+        var hasExplicitMode = (await GetServiceModesAsync(contract.ServiceId, cancellationToken).ConfigureAwait(false))
+            .Any(mode => string.Equals(mode.ProviderSection, provider.ProviderSectionKey, StringComparison.OrdinalIgnoreCase));
 
         foreach (var (fieldName, _) in request.Fields)
         {
             if (!metadataByName.TryGetValue(fieldName, out var meta))
             {
+                if (IsConnectionOwnedFieldName(fieldName))
+                {
+                    throw new InvalidOperationException(
+                        $"Field '{fieldName}' belongs to provider connection configuration and cannot be updated through the service editor.");
+                }
+
                 throw new InvalidOperationException(
                     $"Unknown field '{fieldName}' for provider '{providerId}' on service '{serviceId}'.");
             }
@@ -118,6 +122,24 @@ public sealed partial class ApplicationSettingsService
                 throw new InvalidOperationException(
                     $"Field '{fieldName}' is diagnostic-only and cannot be updated through the service editor.");
             }
+
+            if (!IsServiceEditorEditableField(contract, meta))
+            {
+                throw new InvalidOperationException(
+                    $"Field '{fieldName}' belongs to provider connection configuration and cannot be updated through the service editor.");
+            }
+        }
+
+        if (!hasExplicitMode)
+        {
+            var missingConnectionFields = BuildProviderConnectionMissingFields(provider).ToList();
+            if (missingConnectionFields.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Provider '{providerId}' cannot be configured until its connection is ready: {string.Join(", ", missingConnectionFields)}.");
+            }
+
+            await CreateExplicitServiceModeAsync(contract, provider, cancellationToken).ConfigureAwait(false);
         }
 
         var updatesBySection = new Dictionary<string, JsonObject>(StringComparer.OrdinalIgnoreCase);
@@ -125,16 +147,15 @@ public sealed partial class ApplicationSettingsService
         foreach (var (fieldName, fieldValue) in request.Fields)
         {
             var metadata = metadataByName[fieldName];
-            ValidateProviderFieldUpdate(provider, metadata, fieldValue);
+            ValidateProviderFieldUpdate(contract, provider, metadata, fieldValue);
 
-            if (TryResolveServiceModeField(metadata.Name, out var modeField))
+            if (TryResolveServiceModeField(contract, metadata.Name, out var modeField))
             {
                 modeFieldUpdates[modeField] = fieldValue;
                 continue;
             }
 
-            var sectionName = ResolveFieldSection(provider, metadata.Name);
-            if (string.IsNullOrWhiteSpace(sectionName))
+            if (!TryResolveServiceFieldSection(contract, metadata.Name, out var sectionName))
             {
                 throw new InvalidOperationException(
                     $"Field '{fieldName}' does not resolve to a settings section for provider '{providerId}'.");
@@ -222,33 +243,32 @@ public sealed partial class ApplicationSettingsService
         return contract;
     }
 
-    private static ProviderContract ResolveActiveProvider(ServiceContract contract, string? providerSection)
+    private static ProviderContract? TryResolveActiveProvider(ServiceContract contract, string? providerSection)
     {
-        if (!string.IsNullOrWhiteSpace(providerSection))
+        if (string.IsNullOrWhiteSpace(providerSection))
         {
-            var match = contract.Providers.FirstOrDefault(provider =>
-                string.Equals(provider.ProviderSectionKey, providerSection, StringComparison.OrdinalIgnoreCase));
-            if (match != null)
-            {
-                return match;
-            }
+            return null;
         }
 
-        return contract.Providers.First();
+        return contract.Providers.FirstOrDefault(provider =>
+            string.Equals(provider.ProviderSectionKey, providerSection, StringComparison.OrdinalIgnoreCase));
     }
 
     private ProviderEditorStateDto BuildProviderEditorState(
-        string serviceId,
+        ServiceContract contract,
         ProviderContract provider,
         IReadOnlyList<ServiceModeDto> modes)
     {
         var metadataProvider = ResolveMetadataProvider();
-        var metadata = metadataProvider.GetProviderFields(serviceId, provider.ProviderId);
+        var metadata = metadataProvider
+            .GetProviderFields(contract.ServiceId, provider.ProviderId)
+            .Where(field => IsServiceEditorVisibleField(contract, field))
+            .ToList();
         var matchingMode = modes.FirstOrDefault(mode =>
             string.Equals(mode.ProviderSection, provider.ProviderSectionKey, StringComparison.OrdinalIgnoreCase));
         var fieldValues = metadata.ToDictionary(
             field => field.Name,
-            field => BuildProviderFieldValue(provider, field, matchingMode),
+            field => BuildProviderFieldValue(contract, provider, field, matchingMode),
             StringComparer.Ordinal);
 
         var runtimeDependencies = provider.RequiredRuntimeKeys
@@ -263,11 +283,21 @@ public sealed partial class ApplicationSettingsService
                     CurrentValue: value);
             })
             .ToList();
+        var connectionMissingFields = BuildProviderConnectionMissingFields(provider).ToList();
+        var activationBlockers = BuildActivationBlockers(contract, provider, matchingMode).ToList();
 
         return new ProviderEditorStateDto(
             ProviderId: provider.ProviderId,
             ProviderKind: provider.ProviderKind,
             DisplayName: provider.ProviderDisplayName,
+            ProviderSection: provider.ProviderSectionKey,
+            ModeId: matchingMode?.ModeId,
+            HasExplicitMode: matchingMode != null,
+            IsDefaultMode: matchingMode?.IsDefault == true,
+            ConnectionConfigured: connectionMissingFields.Count == 0,
+            ConnectionMissingFields: connectionMissingFields,
+            CanActivate: matchingMode != null && activationBlockers.Count == 0,
+            ActivationBlockers: activationBlockers,
             Fields: fieldValues,
             RuntimeDependencies: runtimeDependencies,
             OperativeFields: metadata.Where(field => field.Operative).Select(field => field.Name).ToList(),
@@ -276,11 +306,12 @@ public sealed partial class ApplicationSettingsService
     }
 
     private ProviderFieldValueDto BuildProviderFieldValue(
+        ServiceContract contract,
         ProviderContract provider,
         ProviderFieldMetadataDto field,
         ServiceModeDto? matchingMode)
     {
-        if (TryResolveServiceModeField(field.Name, out var modeField))
+        if (TryResolveServiceModeField(contract, field.Name, out var modeField))
         {
             var modeValue = ResolveServiceModeFieldValue(modeField, matchingMode);
 
@@ -291,7 +322,9 @@ public sealed partial class ApplicationSettingsService
                 HasValue: !string.IsNullOrWhiteSpace(modeValue));
         }
 
-        var sectionName = ResolveFieldSection(provider, field.Name);
+        var sectionName = TryResolveServiceFieldSection(contract, field.Name, out var serviceSectionName)
+            ? serviceSectionName
+            : ResolveFieldSection(provider, field.Name);
         var key = string.IsNullOrWhiteSpace(sectionName) ? null : $"{sectionName}:{field.Name}";
         var rawValue = key == null ? null : _configuration[key];
         var value = string.Equals(field.Kind, "url", StringComparison.OrdinalIgnoreCase)
@@ -317,17 +350,67 @@ public sealed partial class ApplicationSettingsService
         return provider.ProviderSettingsSection;
     }
 
-    private static bool TryResolveServiceModeField(string fieldName, out string modeFieldName)
+    private static bool IsServiceEditorVisibleField(ServiceContract contract, ProviderFieldMetadataDto field) =>
+        IsServiceEditorEditableField(contract, field);
+
+    private static bool IsServiceEditorEditableField(ServiceContract contract, ProviderFieldMetadataDto field) =>
+        field.Operative
+        && (TryResolveServiceModeField(contract, field.Name, out _)
+            || TryResolveServiceFieldSection(contract, field.Name, out _));
+
+    private static bool IsConnectionOwnedFieldName(string fieldName)
     {
-        if (string.Equals(fieldName, "ModelId", StringComparison.Ordinal))
+        string[] connectionFields =
+        [
+            "Endpoint",
+            "ApiKey",
+            "Token",
+            "BaseUrl",
+            "Region",
+            "Resource",
+            "AuthToken",
+            "HttpReferer",
+            "AppTitle",
+            "RouterBaseUrl"
+        ];
+
+        return connectionFields.Any(field =>
+            string.Equals(field, fieldName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryResolveServiceFieldSection(
+        ServiceContract contract,
+        string fieldName,
+        out string sectionName)
+    {
+        if (contract.ServiceFieldNames.Any(name => string.Equals(name, fieldName, StringComparison.Ordinal)))
+        {
+            sectionName = contract.SectionName;
+            return true;
+        }
+
+        sectionName = string.Empty;
+        return false;
+    }
+
+    private static bool TryResolveServiceModeField(ServiceContract contract, string fieldName, out string modeFieldName)
+    {
+        if (string.Equals(fieldName, "ModelId", StringComparison.Ordinal)
+            || string.Equals(fieldName, "Deployment", StringComparison.Ordinal))
         {
             modeFieldName = "ModelId";
             return true;
         }
 
-        if (string.Equals(fieldName, "VoiceName", StringComparison.Ordinal))
+        if (string.Equals(fieldName, "VoiceName", StringComparison.Ordinal)
+            || string.Equals(fieldName, "EditModelDeployment", StringComparison.Ordinal)
+            || string.Equals(fieldName, "AllowedModels", StringComparison.Ordinal)
+            || string.Equals(fieldName, "MaxAudioBytes", StringComparison.Ordinal)
+            || string.Equals(fieldName, "ApiVersion", StringComparison.Ordinal)
+            || (string.Equals(fieldName, "MaxRetries", StringComparison.Ordinal)
+                && string.Equals(contract.ServiceId, DocumentIntelligenceOptions.SectionName, StringComparison.Ordinal)))
         {
-            modeFieldName = "VoiceName";
+            modeFieldName = $"Preset:{fieldName}";
             return true;
         }
 
@@ -338,7 +421,8 @@ public sealed partial class ApplicationSettingsService
     private static string? ResolveServiceModeFieldValue(string modeField, ServiceModeDto? matchingMode) => modeField switch
     {
         "ModelId" => matchingMode?.ModelId,
-        "VoiceName" => ReadServiceModePresetField(matchingMode?.RequestPresetJson, "VoiceName"),
+        var preset when preset.StartsWith("Preset:", StringComparison.Ordinal) =>
+            ReadServiceModePresetField(matchingMode?.RequestPresetJson, preset["Preset:".Length..]),
         _ => null
     };
 
@@ -370,13 +454,13 @@ public sealed partial class ApplicationSettingsService
         var canonicalService = CanonicalizeServiceName(contract.ServiceId);
         var modes = ServiceModesPayload.ReadModesFor(payload, canonicalService).ToList();
         var existing = FindModeForProvider(modes, provider.ProviderSectionKey);
-        var updated = existing ?? new ServiceMode(
-            ModeId: BuildPreferredModeId(provider),
-            ProviderSection: provider.ProviderSectionKey,
-            ModelId: null,
-            RequestPresetJson: null,
-            Enabled: true,
-            IsDefault: modes.Count == 0);
+        if (existing == null)
+        {
+            throw new InvalidOperationException(
+                $"Provider '{provider.ProviderId}' cannot be configured because no explicit service mode exists for '{provider.ProviderSectionKey}'.");
+        }
+
+        var updated = existing;
 
         foreach (var (fieldName, value) in updates)
         {
@@ -385,27 +469,23 @@ public sealed partial class ApplicationSettingsService
                 case "ModelId":
                     updated = updated with { ModelId = string.IsNullOrWhiteSpace(value) ? null : value.Trim() };
                     break;
-                case "VoiceName":
+                case var preset when preset.StartsWith("Preset:", StringComparison.Ordinal):
                     updated = updated with
                     {
-                        RequestPresetJson = UpsertServiceModePresetField(updated.RequestPresetJson, "VoiceName", value)
+                        RequestPresetJson = UpsertServiceModePresetField(
+                            updated.RequestPresetJson,
+                            preset["Preset:".Length..],
+                            value)
                     };
                     break;
             }
         }
 
-        if (existing == null)
+        var index = modes.FindIndex(mode =>
+            string.Equals(mode.ModeId, existing.ModeId, StringComparison.Ordinal));
+        if (index >= 0)
         {
-            modes.Add(updated);
-        }
-        else
-        {
-            var index = modes.FindIndex(mode =>
-                string.Equals(mode.ModeId, existing.ModeId, StringComparison.Ordinal));
-            if (index >= 0)
-            {
-                modes[index] = updated;
-            }
+            modes[index] = updated;
         }
 
         var defaultModeId = modes.FirstOrDefault(mode => mode.IsDefault)?.ModeId
@@ -414,30 +494,124 @@ public sealed partial class ApplicationSettingsService
         await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task CreateExplicitServiceModeAsync(
+        ServiceContract contract,
+        ProviderContract provider,
+        CancellationToken cancellationToken)
+    {
+        var (row, payload) = await LoadOrCreateServiceModesRowAsync(cancellationToken).ConfigureAwait(false);
+        var canonicalService = CanonicalizeServiceName(contract.ServiceId);
+        var modes = ServiceModesPayload.ReadModesFor(payload, canonicalService).ToList();
+        if (FindModeForProvider(modes, provider.ProviderSectionKey) != null)
+        {
+            return;
+        }
+
+        var modeId = BuildExplicitServiceModeId(provider, modes);
+        modes.Add(new ServiceMode(
+            ModeId: modeId,
+            ProviderSection: provider.ProviderSectionKey,
+            ModelId: null,
+            RequestPresetJson: null,
+            Enabled: false,
+            IsDefault: false));
+
+        var defaultModeId = modes.FirstOrDefault(mode => mode.IsDefault)?.ModeId;
+        ServiceModesPayload.WriteModesFor(payload, canonicalService, modes, defaultModeId);
+        await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string BuildExplicitServiceModeId(
+        ProviderContract provider,
+        IReadOnlyList<ServiceMode> modes)
+    {
+        var candidate = provider.ProviderId;
+        if (!modes.Any(mode => string.Equals(mode.ModeId, candidate, StringComparison.Ordinal)))
+        {
+            return candidate;
+        }
+
+        for (var i = 2; ; i++)
+        {
+            var numbered = $"{candidate}-{i}";
+            if (!modes.Any(mode => string.Equals(mode.ModeId, numbered, StringComparison.Ordinal)))
+            {
+                return numbered;
+            }
+        }
+    }
+
     private static ServiceMode? FindModeForProvider(IReadOnlyList<ServiceMode> modes, string providerSectionKey)
     {
         return modes.FirstOrDefault(mode =>
             string.Equals(mode.ProviderSection, providerSectionKey, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string BuildPreferredModeId(ProviderContract provider)
+    private IEnumerable<string> BuildActivationBlockers(
+        ServiceContract contract,
+        ProviderContract provider,
+        ServiceModeDto? matchingMode)
     {
-        return provider.ProviderSectionKey switch
+        if (matchingMode == null)
         {
-            "LocalServiceHosts:EmbeddingsBaseUrl" => "local",
-            "LocalServiceHosts:ImageGenerationBaseUrl" => "local",
-            "LocalServiceHosts:SpeechTranscriptionBaseUrl" => "local",
-            "LocalServiceHosts:SpeechSynthesisBaseUrl" => "local",
-            "LocalServiceHosts:DocumentIntelligenceBaseUrl" => "local",
-            "AzureOpenAiEmbedding" => "azure",
-            "AzureOpenAiImages" => "azure",
-            "AzureSpeechService" => "azure",
-            "AzureDocumentIntelligence" => "azure",
-            "GoogleGeminiApi" => "google",
-            "HuggingFace" => "huggingface",
-            "OpenRouter" => "openrouter",
-            _ => provider.ProviderId
-        };
+            yield return $"No explicit service mode exists for '{provider.ProviderSectionKey}'.";
+        }
+
+        foreach (var missing in BuildProviderConnectionMissingFields(provider))
+        {
+            yield return $"Missing provider connection value: {missing}.";
+        }
+
+        foreach (var missing in BuildRequiredModeFieldBlockers(contract, provider, matchingMode))
+        {
+            yield return missing;
+        }
+
+    }
+
+    private IEnumerable<string> BuildProviderConnectionMissingFields(ProviderContract provider)
+    {
+        foreach (var field in provider.RequiredSectionFields)
+        {
+            var value = _configuration[$"{field.SectionName}:{field.FieldName}"];
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                yield return field.DisplayName;
+            }
+        }
+
+        foreach (var runtime in provider.RequiredRuntimeKeys)
+        {
+            var value = RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(_configuration[runtime.Key]);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                yield return runtime.DisplayName;
+            }
+        }
+    }
+
+    private IEnumerable<string> BuildRequiredModeFieldBlockers(
+        ServiceContract contract,
+        ProviderContract provider,
+        ServiceModeDto? matchingMode)
+    {
+        if (matchingMode == null)
+        {
+            yield break;
+        }
+
+        var metadata = ResolveMetadataProvider().GetProviderFields(contract.ServiceId, provider.ProviderId);
+        foreach (var field in metadata.Where(field =>
+            field.Required
+            && field.Operative
+            && TryResolveServiceModeField(contract, field.Name, out _)))
+        {
+            var value = BuildProviderFieldValue(contract, provider, field, matchingMode);
+            if (!value.HasValue)
+            {
+                yield return $"{field.Label} is required.";
+            }
+        }
     }
 
     private static string? UpsertServiceModePresetField(string? existingJson, string fieldName, string? value)
@@ -471,9 +645,15 @@ public sealed partial class ApplicationSettingsService
         return payload.Count == 0 ? null : ApplicationSettingsJson.Serialize(payload);
     }
 
-    private void ValidateProviderFieldUpdate(ProviderContract provider, ProviderFieldMetadataDto metadata, string? submittedValue)
+    private void ValidateProviderFieldUpdate(
+        ServiceContract contract,
+        ProviderContract provider,
+        ProviderFieldMetadataDto metadata,
+        string? submittedValue)
     {
-        var sectionName = ResolveFieldSection(provider, metadata.Name);
+        var sectionName = TryResolveServiceFieldSection(contract, metadata.Name, out var serviceSectionName)
+            ? serviceSectionName
+            : ResolveFieldSection(provider, metadata.Name);
         var configKey = string.IsNullOrWhiteSpace(sectionName) ? null : $"{sectionName}:{metadata.Name}";
         var existing = configKey == null ? null : _configuration[configKey];
         var hasExisting = !string.IsNullOrWhiteSpace(existing);
@@ -509,7 +689,10 @@ public sealed partial class ApplicationSettingsService
                     throw new InvalidOperationException($"{metadata.Label} must be a whole number.");
                 }
 
-                if (string.Equals(metadata.Name, "TimeoutSeconds", StringComparison.Ordinal) && n <= 0)
+                if ((string.Equals(metadata.Name, "TimeoutSeconds", StringComparison.Ordinal)
+                    || string.Equals(metadata.Name, "MaxRetries", StringComparison.Ordinal)
+                    || string.Equals(metadata.Name, "MaxAudioBytes", StringComparison.Ordinal))
+                    && n <= 0)
                 {
                     throw new InvalidOperationException($"{metadata.Label} must be greater than zero.");
                 }

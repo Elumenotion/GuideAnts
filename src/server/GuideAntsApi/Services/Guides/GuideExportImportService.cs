@@ -526,7 +526,7 @@ public class GuideExportImportService : IGuideExportImportService
                 }
 
                 // Import new assistant
-                var assistant = await ImportAssistantFromArchiveAsync(archive, assistantBasePath ?? "", assistantJson);
+                var assistant = await ImportAssistantFromArchiveAsync(archive, assistantBasePath ?? "", assistantJson, warnings);
                 _context.Assistants.Add(assistant);
                 await _context.SaveChangesAsync(); // Save to get ID
                 
@@ -539,22 +539,9 @@ public class GuideExportImportService : IGuideExportImportService
             var defaultAssistant = manifest.TryGetProperty("defaultAssistant", out var daProp) ? daProp.GetString() : null;
             var invocationEvaluator = manifest.TryGetProperty("invocationEvaluator", out var ieProp) ? ieProp.GetString() : null;
             
-            // Get model
-            string? modelId = null;
-            if (manifest.TryGetProperty("defaultModel", out var modelProp))
-            {
-                modelId = modelProp.GetString();
-                
-                // Validate model exists
-                if (!string.IsNullOrEmpty(modelId))
-                {
-                    var modelExists = await _context.Models.AnyAsync(m => m.ModelId == modelId);
-                    if (!modelExists)
-                    {
-                        modelId = null; // Fall back to default
-                    }
-                }
-            }
+            var modelId = manifest.TryGetProperty("defaultModel", out var modelProp)
+                ? await ResolveImportedModelIdOrWarnAsync(modelProp.GetString(), $"guide '{guideName}'", warnings)
+                : null;
 
             Assistant guide;
             if (isUpdate)
@@ -1132,6 +1119,7 @@ public class GuideExportImportService : IGuideExportImportService
         }
 
         Guid assistantId = Guid.Empty;
+        var warnings = new List<string>();
         
         // Use execution strategy to handle transactions with retry logic
         var strategy = _context.Database.CreateExecutionStrategy();
@@ -1139,7 +1127,7 @@ public class GuideExportImportService : IGuideExportImportService
         {
             using var transaction = await _context.Database.BeginTransactionAsync();
             
-            var assistant = await ImportAssistantFromArchiveAsync(archive, "", manifestJson);
+            var assistant = await ImportAssistantFromArchiveAsync(archive, "", manifestJson, warnings);
             
             _context.Assistants.Add(assistant);
             await _context.SaveChangesAsync();
@@ -1159,7 +1147,7 @@ public class GuideExportImportService : IGuideExportImportService
             0,  // CrewsCreated
             0,  // GlobalAssistantsLinked
             0,  // ItemsSkipped
-            new List<string>()  // Warnings
+            warnings
         );
     }
 
@@ -1220,13 +1208,37 @@ public class GuideExportImportService : IGuideExportImportService
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
+    private async Task<string?> ResolveImportedModelIdOrWarnAsync(
+        string? importedModelId,
+        string importedEntityLabel,
+        List<string>? warnings)
+    {
+        var modelId = importedModelId?.Trim();
+        if (string.IsNullOrWhiteSpace(modelId))
+        {
+            return null;
+        }
+
+        var modelExists = await _context.Models.AnyAsync(m => m.ModelId == modelId);
+        if (modelExists)
+        {
+            return modelId;
+        }
+
+        warnings?.Add(
+            $"Imported {importedEntityLabel} referenced catalog model '{modelId}', but that model is not in Settings → Models & Runtime. "
+            + "It will use the default chat model if one is configured; otherwise chat will fail until you set a model.");
+        return null;
+    }
+
     /// <summary>
     /// Imports an assistant from a ZIP archive at the specified base path
     /// </summary>
     private async Task<Assistant> ImportAssistantFromArchiveAsync(
         ZipArchive archive,
         string basePath,
-        string manifestJson)
+        string manifestJson,
+        List<string>? warnings = null)
     {
         // Normalize the JSON to convert numeric reasoning_effort to string format
         var normalizedJson = NormalizeManifestJson(manifestJson);
@@ -1244,18 +1256,10 @@ public class GuideExportImportService : IGuideExportImportService
             ? null
             : assistantDef.InvocationEvaluator;
         
-        // Get model
-        string? modelId = assistantDef.Model;
-        
-        // Validate model exists
-        if (!string.IsNullOrEmpty(modelId))
-        {
-            var modelExists = await _context.Models.AnyAsync(m => m.ModelId == modelId);
-            if (!modelExists)
-            {
-                modelId = null; // Fall back to default
-            }
-        }
+        var modelId = await ResolveImportedModelIdOrWarnAsync(
+            assistantDef.Model,
+            $"assistant '{name}'",
+            warnings);
 
         // Get temperature, top_p, reasoning_effort from properly deserialized object
         float? temperature = assistantDef.Temperature;

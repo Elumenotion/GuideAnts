@@ -91,6 +91,7 @@ public sealed class ProviderRoutedDocumentIntelligenceServiceTests
         public Task<string> ExtractMarkdownAsync(
             Stream content,
             string fileName,
+            ServiceMode mode,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(response);
     }

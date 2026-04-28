@@ -2349,29 +2349,6 @@ var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.co
                         .Select(m => new { m.Id, m.FunctionName, m.ToolCallId, ContentLength = m.Content.Length })
                         .ToListAsync(noneCt);
 
-                    // Image-generating tool names (conversation-level tools that ultimately invoke image generation)
-                    var imageTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase) 
-                    { 
-                        "Media_Creator", 
-                        "MakeImageFromImage" 
-                    };
-
-                    // For each tool call in this turn, determine whether it directly triggered an AgentInvocation.
-                    // When a tool call triggers an invocation, the inner agent pipeline is responsible for recording
-                    // its own usage (including image generation) using InvocationContext / AgentInvocationId.
-                    // In those cases we must NOT also record image usage here, or we double-count.
-                    var toolCallIds = toolMessages
-                        .Select(m => m.ToolCallId)
-                        .Where(id => id != null)
-                        .Distinct()
-                        .ToList();
-
-                    var invocationToolCallIds = new HashSet<string?>(
-                        await dbUsage.AgentInvocations
-                            .Where(ai => ai.TriggeringToolCallId != null && toolCallIds.Contains(ai.TriggeringToolCallId))
-                            .Select(ai => ai.TriggeringToolCallId)
-                            .ToListAsync(noneCt));
-                    
                     foreach (var toolMsg in toolMessages)
                     {
                         // Skip crew bridge invocations - they record their own usage
@@ -2390,30 +2367,6 @@ var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.co
                             }),
                             assistantId: ctx.AssistantId,
                             notebookConversationMessageId: toolMsg.Id);
-                        
-                        // Record image generation usage for image-generating tools (flat rate per image),
-                        // but ONLY when this tool call did NOT trigger an AgentInvocation. When there is
-                        // an AgentInvocation, the agent pipeline records image usage with AgentInvocationId
-                        // via ChatUsage/InvocationContext, and we must avoid double-counting here.
-                        var toolTriggeredInvocation = toolMsg.ToolCallId != null &&
-                                                      invocationToolCallIds.Contains(toolMsg.ToolCallId);
-
-                        if (imageTools.Contains(toolMsg.FunctionName!) && !toolTriggeredInvocation)
-                        {
-                            await _usageRecorder.RecordImageAsync(
-                                projectId: ctx.Conversation.Notebook.ProjectId,
-                                notebookId: ctx.Conversation.NotebookId,
-                                notebookFileId: null,
-                                imageCount: 1,
-                                bytes: 0, // Flat rate, size not needed
-                                conversationId: ctx.Conversation.Id,
-                                metadataJson: JsonSerializer.Serialize(new {
-                                    toolCallId = toolMsg.ToolCallId,
-                                    functionName = toolMsg.FunctionName
-                                }),
-                                assistantId: ctx.AssistantId,
-                                notebookConversationMessageId: toolMsg.Id);
-                        }
                     }
                 }
                 catch (Exception ex)

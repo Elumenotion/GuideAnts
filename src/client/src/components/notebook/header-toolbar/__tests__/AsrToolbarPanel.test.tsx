@@ -41,6 +41,8 @@ describe('AsrToolbarPanel', () => {
               providerId: 'SpeechTranscription.LocalAsr.Http',
               displayName: 'Local',
               providerKind: 'local',
+              canActivate: true,
+              blockers: [],
             },
           ],
           selection: null,
@@ -68,5 +70,50 @@ describe('AsrToolbarPanel', () => {
       'SpeechTranscription.LocalAsr.Http'
     );
     expect(api.settings.localModels.selectActive).toHaveBeenCalledWith('SpeechTranscription', 'asr-1');
+  });
+
+  it('does not activate blocked providers', async () => {
+    vi.clearAllMocks();
+    const user = userEvent.setup();
+    render(
+      <AsrToolbarPanel
+        service={{
+          serviceId: 'SpeechTranscription',
+          displayName: 'Speech Transcription',
+          kind: 'asr',
+          status: 'blocked',
+          summary: 'blocked',
+          activeProviderId: 'SpeechTranscription.LocalAsr.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          providerOptions: [
+            {
+              providerId: 'SpeechTranscription.GoogleSpeechToText',
+              displayName: 'Google',
+              providerKind: 'Cloud',
+              canActivate: false,
+              blockers: ['Transcription Model ID is required.'],
+            },
+          ],
+          selection: null,
+          blockers: [],
+          localModelOptions: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('option', { name: /Google \(Cloud\)/i }));
+
+    expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });
 });

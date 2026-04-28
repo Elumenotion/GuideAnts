@@ -16,67 +16,10 @@ namespace GuideAntsApi.Tests.Settings;
 public sealed class ApplicationSettingsServiceModelTests
 {
     [TestMethod]
-    public async Task CreateModelAsync_RejectsAnthropicThinkingChoices_WhenBudgetMissing()
+    public async Task CreateModelAsync_AllowsAnthropicThinkingChoices_WithoutConnectionOwnedBudgets()
     {
         await using var db = CreateDbContext();
-        var service = CreateService(db, BuildConfiguration(new Dictionary<string, string?>
-        {
-            ["Anthropic:ThinkingBudgetMinimal"] = "1024",
-            ["Anthropic:ThinkingBudgetMedium"] = "2048",
-            ["Anthropic:ThinkingBudgetHigh"] = "3072"
-        }));
-
-        Func<Task> act = () => service.CreateModelAsync(new CreateSettingsModelRequest(
-            ModelId: "claude-haiku-4-5-20251001",
-            DisplayName: "Claude Haiku 4.5",
-            Provider: "anthropic",
-            Description: null,
-            ReasoningChoicesJson: "[\"minimal\",\"low\",\"medium\",\"high\"]",
-            LocalRuntimeJson: null,
-            IsActive: true,
-            DisplayOrder: null));
-
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Anthropic:ThinkingBudgetLow*");
-    }
-
-    [TestMethod]
-    public async Task CreateModelAsync_RejectsAnthropicThinkingChoices_WhenOnlyLegacyBudgetAliasesConfigured()
-    {
-        await using var db = CreateDbContext();
-        var service = CreateService(db, BuildConfiguration(new Dictionary<string, string?>
-        {
-            ["ANTHROPIC_THINKING_BUDGET_MINIMAL"] = "1024",
-            ["ANTHROPIC_THINKING_BUDGET_LOW"] = "1536",
-            ["ANTHROPIC_THINKING_BUDGET_MEDIUM"] = "2048",
-            ["ANTHROPIC_THINKING_BUDGET_HIGH"] = "3072"
-        }));
-
-        Func<Task> act = () => service.CreateModelAsync(new CreateSettingsModelRequest(
-            ModelId: "claude-haiku-4-5-20251001",
-            DisplayName: "Claude Haiku 4.5",
-            Provider: "anthropic",
-            Description: null,
-            ReasoningChoicesJson: "[\"minimal\",\"low\",\"medium\",\"high\"]",
-            LocalRuntimeJson: null,
-            IsActive: true,
-            DisplayOrder: null));
-
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Anthropic:ThinkingBudgetMinimal*");
-    }
-
-    [TestMethod]
-    public async Task CreateModelAsync_AllowsAnthropicThinkingChoices_WhenBudgetsConfigured()
-    {
-        await using var db = CreateDbContext();
-        var service = CreateService(db, BuildConfiguration(new Dictionary<string, string?>
-        {
-            ["Anthropic:ThinkingBudgetMinimal"] = "1024",
-            ["Anthropic:ThinkingBudgetLow"] = "1536",
-            ["Anthropic:ThinkingBudgetMedium"] = "2048",
-            ["Anthropic:ThinkingBudgetHigh"] = "3072"
-        }));
+        var service = CreateService(db, BuildConfiguration());
 
         var created = await service.CreateModelAsync(new CreateSettingsModelRequest(
             ModelId: "claude-haiku-4-5-20251001",
@@ -92,7 +35,7 @@ public sealed class ApplicationSettingsServiceModelTests
     }
 
     [TestMethod]
-    public void SettingsSectionRegistry_Anthropic_DeclaresCanonicalBudgetKeys()
+    public void SettingsSectionRegistry_Anthropic_DoesNotDeclareModelParameterKeys()
     {
         var anthropic = new SettingsSectionRegistry().All
             .Single(section => section.SectionName == "Anthropic");
@@ -100,7 +43,9 @@ public sealed class ApplicationSettingsServiceModelTests
         anthropic.Properties
             .Select(property => property.CanonicalKey)
             .Should()
-            .Contain([
+            .NotContain([
+                "Anthropic:DefaultModel",
+                "Anthropic:DefaultMaxTokens",
                 "Anthropic:ThinkingBudgetMinimal",
                 "Anthropic:ThinkingBudgetLow",
                 "Anthropic:ThinkingBudgetMedium",
