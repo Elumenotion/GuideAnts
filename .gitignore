@@ -407,3 +407,4 @@ FodyWeavers.xsd
 /build_errors.txt
 /.claude
 /.cursor/rules
+/output/playwright
