@@ -1,29 +1,6 @@
 namespace AntRunner.Chat.OpenAI;
 
 /// <summary>
-/// Gets the configuration settings for connecting to the Azure OpenAI service.
-/// </summary>
-public static class AzureOpenAiConfigFactory
-{
-    private static readonly AzureOpenAiConfig? AzureOpenAiConfig;
-
-    static AzureOpenAiConfigFactory()
-    {
-        AzureOpenAiConfig = new AzureOpenAiConfig
-        {
-            ResourceName = Environment.GetEnvironmentVariable("AZURE_OPENAI_RESOURCE"),
-            ApiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY"),
-            ApiVersion = Environment.GetEnvironmentVariable("AZURE_OPENAI_API_VERSION"),
-            DeploymentId = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT"),
-        };
-    }
-
-#pragma warning disable CS8603 // Possible null reference return.
-    public static AzureOpenAiConfig Get() { return AzureOpenAiConfig; } // Set in constructor.
-#pragma warning restore CS8603 // Possible null reference return.
-}
-
-/// <summary>
 /// Represents the configuration settings for connecting to the Azure OpenAI service.
 /// </summary>
 public record AzureOpenAiConfig

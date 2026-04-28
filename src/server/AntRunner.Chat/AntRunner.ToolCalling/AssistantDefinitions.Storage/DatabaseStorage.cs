@@ -185,15 +185,26 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                     .FirstOrDefaultAsync(cancellationToken);
 
                 var requested = reasoningEffort.Trim();
-                var choices = ParseReasoningChoicesJson(reasoningChoicesJson);
+                if (IsNoReasoningChoice(requested))
+                {
+                    return null;
+                }
 
-                return choices.FirstOrDefault(choice =>
+                var choices = ParseReasoningChoicesJson(reasoningChoicesJson);
+                var matched = choices.FirstOrDefault(choice =>
                     string.Equals(choice, requested, StringComparison.OrdinalIgnoreCase));
+
+                return IsNoReasoningChoice(matched) ? null : matched;
             }
             catch
             {
                 return null;
             }
+        }
+
+        private static bool IsNoReasoningChoice(string? choice)
+        {
+            return string.Equals(choice?.Trim(), "none", StringComparison.OrdinalIgnoreCase);
         }
 
         private static List<string> ParseReasoningChoicesJson(string? reasoningChoicesJson)
@@ -223,15 +234,17 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
         /// </summary>
         private static AssistantStorageMetadata MaterializeAssistant(Assistant assistant)
         {
+            var modelParameters = NormalizeAssistantModelParameters(assistant);
+
             // Build the manifest JSON
             var manifest = new
             {
                 name = assistant.Name,
                 description = assistant.Description,
                 model = assistant.ModelId ?? assistant.Model?.ModelId,
-                temperature = assistant.Temperature,
-                top_p = assistant.TopP,
-                reasoning_effort = assistant.ReasoningEffort,
+                temperature = modelParameters.Temperature,
+                top_p = modelParameters.TopP,
+                reasoning_effort = modelParameters.ReasoningEffort,
                 invocation_evaluator = assistant.InvocationEvaluator,
                 tools = BuildToolsArray(assistant),
                 tool_resources = BuildToolResources(assistant),
@@ -286,8 +299,32 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                 VectorStoreFiles: BuildVectorStoreFiles(assistant),
                 Id: assistant.Id,
                 DomainAuth: BuildDomainAuth(assistant),
-                SamplingParametersJson: assistant.SamplingParametersJson
+                SamplingParametersJson: modelParameters.SamplingParametersJson
             );
+        }
+
+        private static AssistantModelParameters NormalizeAssistantModelParameters(Assistant assistant)
+        {
+            var reasoningEffort = IsNoReasoningChoice(assistant.ReasoningEffort)
+                ? null
+                : assistant.ReasoningEffort;
+
+            if (AssistantUsesLocalRuntime(assistant))
+            {
+                return new AssistantModelParameters(
+                    assistant.Temperature,
+                    assistant.TopP,
+                    reasoningEffort,
+                    assistant.SamplingParametersJson);
+            }
+
+            return new AssistantModelParameters(null, null, reasoningEffort, null);
+        }
+
+        private static bool AssistantUsesLocalRuntime(Assistant assistant)
+        {
+            return string.Equals(assistant.Model?.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
+                || !string.IsNullOrWhiteSpace(assistant.Model?.LocalRuntimeJson);
         }
 
         private static DomainAuth? BuildDomainAuth(Assistant assistant)
@@ -496,5 +533,11 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
         DomainAuth? DomainAuth = null,
         string? SamplingParametersJson = null
     );
+
+    internal sealed record AssistantModelParameters(
+        float? Temperature,
+        double? TopP,
+        string? ReasoningEffort,
+        string? SamplingParametersJson);
 }
 

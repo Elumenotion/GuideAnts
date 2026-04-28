@@ -4,8 +4,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AntRunner.Chat.Abstractions;
+using AntRunner.Chat.Anthropic;
 using AntRunner.Chat.GoogleGemini;
 using AntRunner.Chat.HuggingFace;
+using AntRunner.Chat.OpenAI;
 using AntRunner.Chat.OpenRouter;
 using FluentAssertions;
 
@@ -305,6 +307,139 @@ public sealed class ProviderNativeChatClientTests
         deltas.Should().Equal("Hi", " there");
     }
 
+    [TestMethod]
+    public async Task Anthropic_GetCompletionAsync_WithThinking_UsesConfiguredBudget()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(
+            """
+            {
+              "id": "msg_123",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-haiku-4-5-20251001",
+              "content": [
+                { "type": "text", "text": "hello from claude" }
+              ],
+              "stop_reason": "end_turn",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 5,
+                "output_tokens": 3
+              }
+            }
+            """));
+
+        using var httpClient = new HttpClient(handler);
+        var config = new AnthropicConfig
+        {
+            ApiKey = "ant-key",
+            BaseUrl = "https://api.anthropic.com",
+            DefaultModel = "claude-haiku-4-5-20251001",
+            DefaultMaxTokens = 4096,
+            ThinkingBudgets = new AnthropicThinkingBudgets(Medium: 2048)
+        };
+        var client = new AnthropicChatClientFactory(new StaticHttpClientFactory(httpClient), config)
+            .CreateClient(null, httpClient);
+
+        var response = await client.GetCompletionAsync(new ChatCompletionRequest(
+            messages:
+            [
+                new ChatMessage(ChatRole.User, "Hello")
+            ],
+            model: null,
+            reasoningEffort: "medium"));
+
+        handler.LastRequestUri!.ToString().Should().Be("https://api.anthropic.com/v1/messages");
+        using var requestJson = JsonDocument.Parse(handler.LastRequestBody);
+        requestJson.RootElement.GetProperty("temperature").GetDouble().Should().Be(1d);
+        requestJson.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+        requestJson.RootElement.GetProperty("thinking").GetProperty("type").GetString().Should().Be("enabled");
+        requestJson.RootElement.GetProperty("thinking").GetProperty("budget_tokens").GetInt32().Should().Be(2048);
+        response.FirstChoice!.Message.GetText().Should().Be("hello from claude");
+    }
+
+    [TestMethod]
+    public async Task Anthropic_GetCompletionAsync_WithThinking_RequiresConfiguredBudget()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(
+            """
+            {
+              "id": "msg_123",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-haiku-4-5-20251001",
+              "content": [
+                { "type": "text", "text": "hello from claude" }
+              ],
+              "stop_reason": "end_turn",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 5,
+                "output_tokens": 3
+              }
+            }
+            """));
+
+        using var httpClient = new HttpClient(handler);
+        var config = new AnthropicConfig
+        {
+            ApiKey = "ant-key",
+            BaseUrl = "https://api.anthropic.com",
+            DefaultModel = "claude-haiku-4-5-20251001",
+            DefaultMaxTokens = 4096,
+            ThinkingBudgets = new AnthropicThinkingBudgets()
+        };
+        var client = new AnthropicChatClientFactory(new StaticHttpClientFactory(httpClient), config)
+            .CreateClient(null, httpClient);
+
+        Func<Task> act = () => client.GetCompletionAsync(new ChatCompletionRequest(
+            messages:
+            [
+                new ChatMessage(ChatRole.User, "Hello")
+            ],
+            model: null,
+            reasoningEffort: "low"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Thinking budget not configured for low.");
+    }
+
+    [TestMethod]
+    public void Anthropic_CreateClient_RequiresExplicitConfiguration()
+    {
+        using var httpClient = new HttpClient(new CapturingHandler(_ => JsonResponse("{}")));
+        var factory = new AnthropicChatClientFactory(new StaticHttpClientFactory(httpClient));
+
+        Action act = () => factory.CreateClient(null, httpClient);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("Anthropic configuration is required.");
+    }
+
+    [TestMethod]
+    public void OpenAiChat_CreateClient_RequiresExplicitConfiguration()
+    {
+        using var httpClient = new HttpClient(new CapturingHandler(_ => JsonResponse("{}")));
+        var factory = new OpenAiChatClientFactory(new StaticHttpClientFactory(httpClient));
+
+        Action act = () => factory.CreateClient(null, httpClient);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("OpenAI configuration is required.");
+    }
+
+    [TestMethod]
+    public void OpenAiResponses_CreateClient_RequiresExplicitConfiguration()
+    {
+        using var httpClient = new HttpClient(new CapturingHandler(_ => JsonResponse("{}")));
+        var factory = new OpenAiResponsesClientFactory(new StaticHttpClientFactory(httpClient));
+
+        Action act = () => factory.CreateClient(null, httpClient);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("OpenAI configuration is required.");
+    }
+
     private static ChatCompletionRequest CreateTextRequest(string? reasoningEffort = "medium") =>
         new(
             messages:
@@ -364,6 +499,11 @@ public sealed class ProviderNativeChatClientTests
                 : await request.Content.ReadAsStringAsync(cancellationToken);
             return _responder(request);
         }
+    }
+
+    private sealed class StaticHttpClientFactory(HttpClient httpClient) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => httpClient;
     }
 
     private sealed class HttpRequestHeadersSnapshot

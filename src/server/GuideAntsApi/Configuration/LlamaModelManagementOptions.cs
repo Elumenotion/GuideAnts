@@ -11,8 +11,7 @@ namespace GuideAntsApi.Configuration;
 /// (property <c>Token</c>) and read through
 /// <see cref="Services.HuggingFace.IHuggingFaceTokenResolver"/>. See
 /// <see cref="Settings.SettingsSectionRegistry"/> for where the section is
-/// defined and bootstrapped from the <c>HF_TOKEN</c> environment variable on
-/// first install.
+/// defined.
 /// </para>
 /// </summary>
 public sealed class LlamaModelManagementOptions

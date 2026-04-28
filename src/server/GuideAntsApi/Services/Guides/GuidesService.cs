@@ -282,7 +282,12 @@ public class GuidesService(
 
     public async Task<GuideDto> CreateGuideAsync(CreateGuideDto dto)
     {
-        await ValidateModelParametersAsync(dto.ModelId, dto.Temperature, dto.TopP, dto.ReasoningEffort, dto.SamplingParametersJson);
+        var modelParameters = await NormalizeAndValidateModelParametersAsync(
+            dto.ModelId,
+            dto.Temperature,
+            dto.TopP,
+            dto.ReasoningEffort,
+            dto.SamplingParametersJson);
 
         // Validate runtime compatibility
         var members = new List<GuideRuntimeValidationMember>
@@ -312,10 +317,10 @@ public class GuidesService(
             dto.Instructions,
             dto.HomePageMarkdown, // guides have home pages
             dto.ModelId,
-            dto.Temperature,
-            dto.TopP,
-            dto.ReasoningEffort,
-            dto.SamplingParametersJson,
+            modelParameters.Temperature,
+            modelParameters.TopP,
+            modelParameters.ReasoningEffort,
+            modelParameters.SamplingParametersJson,
             dto.AvatarImageBytes,
             dto.AvatarContentType,
             dto.ToolIds,
@@ -369,7 +374,12 @@ public class GuidesService(
 
     public async Task<GuideDto> UpdateGuideAsync(Guid guideId, UpdateGuideDto dto)
     {
-        await ValidateModelParametersAsync(dto.ModelId, dto.Temperature, dto.TopP, dto.ReasoningEffort, dto.SamplingParametersJson);
+        var modelParameters = await NormalizeAndValidateModelParametersAsync(
+            dto.ModelId,
+            dto.Temperature,
+            dto.TopP,
+            dto.ReasoningEffort,
+            dto.SamplingParametersJson);
 
         // Validate runtime compatibility
         var members = new List<GuideRuntimeValidationMember>
@@ -400,10 +410,10 @@ public class GuidesService(
             dto.Instructions,
             dto.HomePageMarkdown, // guides have home pages
             dto.ModelId,
-            dto.Temperature,
-            dto.TopP,
-            dto.ReasoningEffort,
-            dto.SamplingParametersJson,
+            modelParameters.Temperature,
+            modelParameters.TopP,
+            modelParameters.ReasoningEffort,
+            modelParameters.SamplingParametersJson,
             dto.AvatarImageBytes,
             dto.AvatarContentType,
             dto.ToolIds,
@@ -637,7 +647,12 @@ public class GuidesService(
 
     public async Task<AssistantDto> CreateAssistantAsync(CreateAssistantDto dto)
     {
-        await ValidateModelParametersAsync(dto.ModelId, dto.Temperature, dto.TopP, dto.ReasoningEffort, dto.SamplingParametersJson);
+        var modelParameters = await NormalizeAndValidateModelParametersAsync(
+            dto.ModelId,
+            dto.Temperature,
+            dto.TopP,
+            dto.ReasoningEffort,
+            dto.SamplingParametersJson);
 
         var assistant = CreateAssistantEntity(
             AssistantKind.Assistant,
@@ -646,10 +661,10 @@ public class GuidesService(
             dto.Instructions,
             null, // homePageMarkdown - assistants don't have home pages
             dto.ModelId,
-            dto.Temperature,
-            dto.TopP,
-            dto.ReasoningEffort,
-            dto.SamplingParametersJson,
+            modelParameters.Temperature,
+            modelParameters.TopP,
+            modelParameters.ReasoningEffort,
+            modelParameters.SamplingParametersJson,
             dto.AvatarImageBytes,
             dto.AvatarContentType,
             dto.ToolIds,
@@ -697,7 +712,12 @@ public class GuidesService(
 
     public async Task<AssistantDto> UpdateAssistantAsync(Guid assistantId, UpdateAssistantDto dto)
     {
-        await ValidateModelParametersAsync(dto.ModelId, dto.Temperature, dto.TopP, dto.ReasoningEffort, dto.SamplingParametersJson);
+        var modelParameters = await NormalizeAndValidateModelParametersAsync(
+            dto.ModelId,
+            dto.Temperature,
+            dto.TopP,
+            dto.ReasoningEffort,
+            dto.SamplingParametersJson);
 
         // Validate runtime compatibility for all guides this assistant is part of
         var guideMemberships = await _context.GuideMembers
@@ -741,10 +761,10 @@ public class GuidesService(
             dto.Instructions,
             null, // homePageMarkdown - assistants don't have home pages
             dto.ModelId,
-            dto.Temperature,
-            dto.TopP,
-            dto.ReasoningEffort,
-            dto.SamplingParametersJson,
+            modelParameters.Temperature,
+            modelParameters.TopP,
+            modelParameters.ReasoningEffort,
+            modelParameters.SamplingParametersJson,
             dto.AvatarImageBytes,
             dto.AvatarContentType,
             dto.ToolIds,
@@ -1013,7 +1033,7 @@ public class GuidesService(
 
     #region Helper Methods
 
-    private async Task ValidateModelParametersAsync(
+    private async Task<NormalizedModelParameters> NormalizeAndValidateModelParametersAsync(
         string? modelId,
         float? temperature,
         double? topP,
@@ -1040,7 +1060,7 @@ public class GuidesService(
             || samplingOverrides is { Count: > 0 };
         if (!hasAnyParameter)
         {
-            return;
+            return NormalizedModelParameters.Empty;
         }
 
         if (string.IsNullOrWhiteSpace(modelId))
@@ -1050,7 +1070,7 @@ public class GuidesService(
                 throw new InvalidOperationException("ModelId is required when reasoningEffort is specified.");
             }
 
-            return;
+            return NormalizedModelParameters.Empty;
         }
 
         var model = await _context.Models
@@ -1082,13 +1102,45 @@ public class GuidesService(
                 ValidateReasoningEffortChoice(model.ModelId, model.ReasoningChoicesJson, profile, reasoningEffort);
             }
 
-            return;
+            return new NormalizedModelParameters(
+                temperature,
+                topP,
+                NormalizeReasoningEffort(reasoningEffort),
+                string.IsNullOrWhiteSpace(samplingParametersJson) ? null : samplingParametersJson);
         }
 
         if (!string.IsNullOrWhiteSpace(reasoningEffort))
         {
-            ValidateReasoningEffortChoicesLegacy(model.ModelId, model.ReasoningChoicesJson, reasoningEffort);
+            ValidateCatalogReasoningEffortChoice(model.ModelId, model.ReasoningChoicesJson, reasoningEffort);
         }
+
+        return new NormalizedModelParameters(
+            Temperature: null,
+            TopP: null,
+            ReasoningEffort: NormalizeReasoningEffort(reasoningEffort),
+            SamplingParametersJson: null);
+    }
+
+    private static string? NormalizeReasoningEffort(string? reasoningEffort)
+    {
+        if (string.IsNullOrWhiteSpace(reasoningEffort))
+        {
+            return null;
+        }
+
+        var trimmed = reasoningEffort.Trim();
+        return string.Equals(trimmed, "none", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : trimmed;
+    }
+
+    private sealed record NormalizedModelParameters(
+        float? Temperature,
+        double? TopP,
+        string? ReasoningEffort,
+        string? SamplingParametersJson)
+    {
+        public static NormalizedModelParameters Empty { get; } = new(null, null, null, null);
     }
 
     private static void ValidateSamplingParameters(
@@ -1171,7 +1223,7 @@ public class GuidesService(
         }
     }
 
-    private static void ValidateReasoningEffortChoicesLegacy(string modelId, string? reasoningChoicesJson, string reasoningEffort)
+    private static void ValidateCatalogReasoningEffortChoice(string modelId, string? reasoningChoicesJson, string reasoningEffort)
     {
         if (string.IsNullOrWhiteSpace(reasoningChoicesJson))
         {

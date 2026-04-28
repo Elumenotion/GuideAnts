@@ -180,8 +180,8 @@ export function OverviewTab({
   const [overrideAllChatModels, setOverrideAllChatModels] = useState(false);
   const [configValue, setConfigValue] = useState<ChatModelConfigValue>({
     modelId: '',
-    temperature: 1,
-    topP: 1,
+    temperature: null,
+    topP: null,
     reasoningEffort: undefined,
     samplingOverrides: {},
   });
@@ -210,8 +210,8 @@ export function OverviewTab({
       setOverrideAllChatModels(data.overrideAllChatModels);
       setConfigValue({
         modelId: data.defaultModelId ?? '',
-        temperature: data.temperature ?? 1,
-        topP: data.topP ?? 1,
+        temperature: data.temperature ?? null,
+        topP: data.topP ?? null,
         reasoningEffort: data.reasoningEffort ?? undefined,
         samplingOverrides: parseSamplingOverrides(data.samplingParametersJson),
       });

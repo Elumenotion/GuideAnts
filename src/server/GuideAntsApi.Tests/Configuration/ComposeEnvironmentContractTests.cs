@@ -178,11 +178,6 @@ public sealed class ComposeEnvironmentContractTests
             return true;
         }
 
-        // HF_TOKEN is the one-time bootstrap seed for the single top-level
-        // HuggingFace:Token application setting (see
-        // SettingsSectionRegistry.HuggingFace, LegacyAliasKeys). On first
-        // install the DB row is populated from this env value so existing
-        // compose / host setups keep working without manual re-entry.
         // Runtime code reads through IHuggingFaceTokenResolver, which
         // reads HuggingFace:Token from IConfiguration (DB-backed via
         // ApplicationSettingsConfigurationProvider). HF_TOKEN is also used

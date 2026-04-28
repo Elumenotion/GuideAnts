@@ -42,7 +42,13 @@ foreach (var kvp in envVariables)
     Environment.SetEnvironmentVariable(kvp.Key, kvp.Value);
 }
 
-var config = AzureOpenAiConfigFactory.Get();
+var config = new AzureOpenAiConfig
+{
+    ResourceName = "<azure-openai-resource>",
+    ApiKey = "<api-key>",
+    ApiVersion = "<api-version>",
+    DeploymentId = "<deployment-id>",
+};
 
 // Set up the chat options with assistant name and model deployment
 static ChatRunOptions chatConfiguration = new()
@@ -105,7 +111,7 @@ conversation.Save("./savedConversation.json");
 Load a conversation from a saved file:
 
 ```csharp
-var conversation2 = Conversation.Create(@"./savedConversation.json", AzureOpenAiConfigFactory.Get());
+var conversation2 = Conversation.Create(@"./savedConversation.json", config);
 ```
 
 ### View Conversation and Usage Stats

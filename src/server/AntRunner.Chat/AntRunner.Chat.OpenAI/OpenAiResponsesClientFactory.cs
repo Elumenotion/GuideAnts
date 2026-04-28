@@ -59,8 +59,7 @@ public sealed class OpenAiResponsesClientFactory : IChatCompletionClientFactory
     {
         return _configAccessor?.Invoke()
             ?? _config
-            ?? AzureOpenAiConfigFactory.Get()
-            ?? new AzureOpenAiConfig();
+            ?? throw new InvalidOperationException("OpenAI configuration is required.");
     }
 
     private void EnsureCacheSignature(AzureOpenAiConfig config)

@@ -1407,37 +1407,6 @@ public static class SettingsEndpoints
         // per-file or preview-only picker for other services) instead of
         // asking the operator to type filenames. Token injection is
         // server-side only; the browser never sees the HF token.
-        //
-        // The canonical path is `/api/settings/huggingface/...`; the
-        // `/api/settings/llama/huggingface/...` path below is kept as a
-        // legacy alias for one release so the llama-cpp wizard does not
-        // break mid-flight. Both paths share the same handler — there are
-        // no service-specific branches inside the proxy. Callers that want
-        // per-service telemetry can pass an optional `X-Service-Origin`
-        // header (e.g. `ImageGeneration`, `SpeechTranscription`); a missing
-        // header silently falls through.
-        llamaGroup.MapGet("/huggingface/repositories/{owner}/{repo}/files", (
-            string owner,
-            string repo,
-            HttpRequest request,
-            GuideAntsApi.Services.HuggingFace.IHuggingFaceRepositoryBrowser browser,
-            ILoggerFactory loggerFactory,
-            CancellationToken cancellationToken) =>
-            HuggingFaceBrowseHandler.ExecuteAsync(
-                owner,
-                repo,
-                request,
-                browser,
-                loggerFactory,
-                legacyLlamaPath: true,
-                cancellationToken))
-        .WithName("BrowseHuggingFaceRepositoryLegacy")
-        .Produces<GuideAntsApi.Services.HuggingFace.HuggingFaceRepositoryListing>(StatusCodes.Status200OK)
-        .Produces(StatusCodes.Status400BadRequest)
-        .Produces(StatusCodes.Status401Unauthorized)
-        .Produces(StatusCodes.Status403Forbidden)
-        .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status502BadGateway);
 
         var huggingFaceGroup = app.MapGroup("/api/settings/huggingface")
             .WithTags("SettingsHuggingFace")
@@ -1456,7 +1425,6 @@ public static class SettingsEndpoints
                 request,
                 browser,
                 loggerFactory,
-                legacyLlamaPath: false,
                 cancellationToken))
         .WithName("BrowseHuggingFaceRepository")
         .Produces<GuideAntsApi.Services.HuggingFace.HuggingFaceRepositoryListing>(StatusCodes.Status200OK)

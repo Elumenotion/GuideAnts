@@ -6,7 +6,10 @@ import type { ChatPanelProps } from './types';
 import { WORKSPACE_CONTROLS_COPY, statusToneClass } from './toolbarFormatters';
 import type { ChatDefaultsDto } from '../../../types/settings';
 import type { ModelDto } from '../../../types/guides';
-import { normalizeReasoningEffortForModel } from '../../chat-model/reasoning';
+import {
+  normalizeReasoningEffortForModel,
+  normalizeSamplingValueForModel,
+} from '../../chat-model/reasoning';
 
 const OP_POLL_MS = 2_000;
 
@@ -79,6 +82,16 @@ export function ChatToolbarPanel({
           : modelChanged
             ? null
             : (next.reasoningEffort ?? null),
+      temperature: selectedModel
+        ? normalizeSamplingValueForModel(selectedModel, 'temperature', next.temperature)
+        : modelChanged
+          ? null
+          : (next.temperature ?? null),
+      topP: selectedModel
+        ? normalizeSamplingValueForModel(selectedModel, 'top_p', next.topP)
+        : modelChanged
+          ? null
+          : (next.topP ?? null),
     };
   }, [catalogModelById, chatDefaults?.defaultModelId]);
 

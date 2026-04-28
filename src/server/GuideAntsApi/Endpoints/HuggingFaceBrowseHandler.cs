@@ -3,11 +3,7 @@ using GuideAntsApi.Services.HuggingFace;
 namespace GuideAntsApi.Endpoints;
 
 /// <summary>
-/// Shared handler for the Hugging Face repository browse endpoint. Both the
-/// canonical <c>/api/settings/huggingface/...</c> path and the legacy
-/// <c>/api/settings/llama/huggingface/...</c> alias route through this
-/// method so there is no service-specific branching inside the proxy. The
-/// server is service-agnostic; classification is done on the client.
+/// Shared handler for the Hugging Face repository browse endpoint.
 /// </summary>
 internal static class HuggingFaceBrowseHandler
 {
@@ -25,11 +21,10 @@ internal static class HuggingFaceBrowseHandler
         HttpRequest request,
         IHuggingFaceRepositoryBrowser browser,
         ILoggerFactory loggerFactory,
-        bool legacyLlamaPath,
         CancellationToken cancellationToken)
     {
         var logger = loggerFactory.CreateLogger("HuggingFaceBrowse");
-        var serviceOrigin = ResolveServiceOrigin(request, legacyLlamaPath);
+        var serviceOrigin = ResolveServiceOrigin(request);
 
         try
         {
@@ -38,26 +33,24 @@ internal static class HuggingFaceBrowseHandler
                 .ConfigureAwait(false);
 
             logger.LogInformation(
-                "HfBrowseByService: serviceId={ServiceId} repository={Repository} gated={Gated} tokenUsed={TokenUsed} fileCount={FileCount} legacyPath={LegacyPath}",
+                "HfBrowseByService: serviceId={ServiceId} repository={Repository} gated={Gated} tokenUsed={TokenUsed} fileCount={FileCount}",
                 serviceOrigin,
                 listing.Repository,
                 listing.Gated,
                 listing.TokenUsed,
-                listing.Files.Count,
-                legacyLlamaPath);
+                listing.Files.Count);
 
             return Results.Ok(listing);
         }
         catch (HuggingFaceBrowseException ex)
         {
             logger.LogInformation(
-                "HfBrowseByService: serviceId={ServiceId} repository={Owner}/{Repo} failed code={Code} status={Status} legacyPath={LegacyPath}",
+                "HfBrowseByService: serviceId={ServiceId} repository={Owner}/{Repo} failed code={Code} status={Status}",
                 serviceOrigin,
                 owner,
                 repo,
                 ex.Code,
-                (int)ex.StatusCode,
-                legacyLlamaPath);
+                (int)ex.StatusCode);
 
             return Results.Json(
                 new
@@ -70,12 +63,10 @@ internal static class HuggingFaceBrowseHandler
         }
     }
 
-    private static string ResolveServiceOrigin(HttpRequest request, bool legacyLlamaPath)
+    private static string ResolveServiceOrigin(HttpRequest request)
     {
         // Header is optional. A missing / whitespace-only value falls through
-        // as "unknown"; the legacy /llama/... path records a distinct tag so
-        // telemetry can tell clients on the old alias apart from clients that
-        // simply did not send the header on the neutral path.
+        // as "unknown".
         if (request.Headers.TryGetValue(ServiceOriginHeaderName, out var values))
         {
             var candidate = values.ToString()?.Trim();
@@ -85,6 +76,6 @@ internal static class HuggingFaceBrowseHandler
             }
         }
 
-        return legacyLlamaPath ? "LegacyLlamaAlias" : "unknown";
+        return "unknown";
     }
 }

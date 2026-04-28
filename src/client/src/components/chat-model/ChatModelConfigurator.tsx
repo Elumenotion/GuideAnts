@@ -3,12 +3,12 @@ import { api } from '../../services/api';
 import { ModelDto } from '../../types/guides';
 import { ModelSelector } from '../guides/editor/ModelSelector';
 import { ConfigParams } from '../guides/editor/ConfigParams';
-import { normalizeReasoningEffortForModel } from './reasoning';
+import { normalizeReasoningEffortForModel, normalizeSamplingValueForModel } from './reasoning';
 
 export interface ChatModelConfigValue {
   modelId: string;
-  temperature: number;
-  topP: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   samplingOverrides?: Record<string, number>;
 }
@@ -16,13 +16,11 @@ export interface ChatModelConfigValue {
 export interface ChatModelConfiguratorProps {
   mode: 'entity' | 'default';
   modelId?: string;
-  temperature?: number;
-  topP?: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   samplingOverrides?: Record<string, number>;
   onChange: (next: ChatModelConfigValue) => void;
-  /** When set, sampling controls are disabled and this hint is shown. */
-  disabledReason?: string;
   /**
    * Change this value to force a refetch of the catalog model list. Lets callers
    * invalidate the dropdown after an Add Model wizard install completes (so the
@@ -34,12 +32,11 @@ export interface ChatModelConfiguratorProps {
 export function ChatModelConfigurator({
   mode,
   modelId,
-  temperature = 1,
-  topP = 1,
+  temperature,
+  topP,
   reasoningEffort,
   samplingOverrides,
   onChange,
-  disabledReason,
   refreshKey,
 }: ChatModelConfiguratorProps) {
   const [models, setModels] = useState<ModelDto[]>([]);
@@ -77,17 +74,24 @@ export function ChatModelConfigurator({
     return models.find((m) => m.modelId === modelId);
   }, [models, modelId]);
 
-  const paramsDisabled = !!disabledReason;
-
-  const pushChange = (partial: Partial<ChatModelConfigValue>) => {
+  const pushChange = (
+    partial: Partial<ChatModelConfigValue>,
+    modelForNext: ModelDto | undefined = selectedModel
+  ) => {
     const nextReasoningEffort = Object.prototype.hasOwnProperty.call(partial, 'reasoningEffort')
       ? partial.reasoningEffort
       : reasoningEffort;
+    const nextTemperature = Object.prototype.hasOwnProperty.call(partial, 'temperature')
+      ? partial.temperature
+      : temperature;
+    const nextTopP = Object.prototype.hasOwnProperty.call(partial, 'topP')
+      ? partial.topP
+      : topP;
 
     onChange({
       modelId: partial.modelId ?? modelId ?? '',
-      temperature: partial.temperature ?? temperature,
-      topP: partial.topP ?? topP,
+      temperature: normalizeSamplingValueForModel(modelForNext, 'temperature', nextTemperature),
+      topP: normalizeSamplingValueForModel(modelForNext, 'top_p', nextTopP),
       reasoningEffort: nextReasoningEffort,
       samplingOverrides: partial.samplingOverrides ?? overrides,
     });
@@ -99,10 +103,20 @@ export function ChatModelConfigurator({
     }
 
     const normalizedReasoningEffort = normalizeReasoningEffortForModel(selectedModel, reasoningEffort);
-    if (normalizedReasoningEffort !== reasoningEffort) {
-      pushChange({ reasoningEffort: normalizedReasoningEffort });
+    const normalizedTemperature = normalizeSamplingValueForModel(selectedModel, 'temperature', temperature);
+    const normalizedTopP = normalizeSamplingValueForModel(selectedModel, 'top_p', topP);
+    if (
+      normalizedReasoningEffort !== reasoningEffort
+      || normalizedTemperature !== temperature
+      || normalizedTopP !== topP
+    ) {
+      pushChange({
+        temperature: normalizedTemperature,
+        topP: normalizedTopP,
+        reasoningEffort: normalizedReasoningEffort
+      });
     }
-  }, [loading, selectedModel, reasoningEffort]);
+  }, [loading, selectedModel, temperature, topP, reasoningEffort]);
 
   return (
     <div className="space-y-4">
@@ -117,15 +131,9 @@ export function ChatModelConfigurator({
           pushChange({
             modelId: nextModelId,
             reasoningEffort: normalizeReasoningEffortForModel(nextModel, reasoningEffort),
-          });
+          }, nextModel);
         }}
       />
-
-      {disabledReason && (
-        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2" role="status">
-          {disabledReason}
-        </p>
-      )}
 
       <ConfigParams
         model={selectedModel}
@@ -133,7 +141,6 @@ export function ChatModelConfigurator({
         topP={topP}
         reasoningEffort={reasoningEffort}
         samplingOverrides={overrides}
-        disabled={paramsDisabled}
         onTemperatureChange={(v) => pushChange({ temperature: v })}
         onTopPChange={(v) => pushChange({ topP: v })}
         onReasoningEffortChange={(v) => pushChange({ reasoningEffort: v })}

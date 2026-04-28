@@ -20,7 +20,7 @@ function parseReasoningChoices(json?: string): string[] {
   }
 }
 
-function getReasoningChoices(model?: ModelDto): string[] {
+export function getReasoningChoicesForModel(model?: ModelDto): string[] {
   if (model?.reasoningChoices && model.reasoningChoices.length > 0) {
     return model.reasoningChoices
       .map((choice) => choice.trim())
@@ -34,7 +34,7 @@ export function normalizeReasoningEffortForModel(
   model: ModelDto | undefined,
   current?: string | null
 ): string | undefined {
-  const choices = getReasoningChoices(model);
+  const choices = getReasoningChoicesForModel(model);
   if (choices.length === 0) {
     return undefined;
   }
@@ -59,4 +59,27 @@ export function normalizeReasoningEffortForModel(
   );
 
   return matchedChoice ?? choices[0];
+}
+
+export function modelDeclaresSamplingParameter(model: ModelDto | undefined, key: string): boolean {
+  return (model?.samplingParameterPolicy ?? []).some(
+    (param) => param.key.toLowerCase() === key.toLowerCase()
+  );
+}
+
+export function normalizeSamplingValueForModel(
+  model: ModelDto | undefined,
+  key: string,
+  current?: number | null
+): number | null {
+  const param = (model?.samplingParameterPolicy ?? []).find(
+    (candidate) => candidate.key.toLowerCase() === key.toLowerCase()
+  );
+  if (!param) {
+    return null;
+  }
+
+  return typeof current === 'number' && !Number.isNaN(current)
+    ? current
+    : param.recommendedDefault;
 }

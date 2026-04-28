@@ -7,6 +7,7 @@ using GuideAntsApi.DataModel.Models;
 using Microsoft.EntityFrameworkCore;
 using AntRunner.ToolCalling.AssistantDefinitions.Storage;
 using System.Reflection;
+using System.Text.Json;
 using FluentAssertions;
 
 namespace GuideAntsApi.Tests.Services;
@@ -125,5 +126,45 @@ public class AssistantDefinitionsTests
         storageMetadata!.AdditionalMetadata.Should().NotBeNull();
         storageMetadata.AdditionalMetadata.Should().ContainKey("__crew_names__");
         storageMetadata.AdditionalMetadata.Should().NotContainKey("__model_reasoning_choices__");
+    }
+
+    [TestMethod]
+    public void DatabaseMaterialization_CloudModelUsesCatalogParameterSurface()
+    {
+        var assistant = new Assistant
+        {
+            Name = "Claude Helper",
+            Kind = AssistantKind.Assistant,
+            IsActive = true,
+            ModelId = "claude-haiku-4-5-20251001",
+            Temperature = 1.0f,
+            TopP = 1.0,
+            ReasoningEffort = "medium",
+            Model = new Model
+            {
+                ModelId = "claude-haiku-4-5-20251001",
+                DisplayName = "Claude Haiku 4.5",
+                Provider = "anthropic",
+                ReasoningChoicesJson = "[\"minimal\",\"low\",\"medium\",\"high\"]",
+                IsActive = true
+            }
+        };
+
+        var storageMetadata = Materialize(assistant);
+
+        using var manifest = JsonDocument.Parse(storageMetadata.ManifestJson);
+        manifest.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
+        manifest.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+        manifest.RootElement.GetProperty("reasoning_effort").GetString().Should().Be("medium");
+    }
+
+    private static AssistantStorageMetadata Materialize(Assistant assistant)
+    {
+        var method = typeof(DatabaseStorage).GetMethod(
+            "MaterializeAssistant",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        method.Should().NotBeNull();
+        return (method!.Invoke(null, [assistant]) as AssistantStorageMetadata)!;
     }
 } 

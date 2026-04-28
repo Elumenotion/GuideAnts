@@ -143,15 +143,16 @@ export function importRuntimeProfile(json: string): ProfileFormState {
 }
 
 export function createEmptyAddModelWizardState(preselectedProvider?: string | null): AddModelWizardState {
+  const provider = (preselectedProvider?.trim() ?? '') as AddModelWizardState['provider'];
   return {
-    provider: (preselectedProvider?.trim() ?? '') as AddModelWizardState['provider'],
+    provider,
     catalogModelId: '',
     catalogDisplayName: '',
     catalogDescription: '',
     catalogDisplayOrder: '',
     catalogIsActive: true,
     openAiReasoningEffortEnabled: false,
-    anthropicThinkingEnabled: false,
+    anthropicThinkingEnabled: provider === 'anthropic',
     llamaInstallSource: 'huggingface',
     llamaRouterModelId: '',
     llamaRuntimeProfileId: '',

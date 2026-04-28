@@ -141,7 +141,8 @@ public sealed class ApplicationSettingsConfigurationProvider(
 
             if (definition != null)
             {
-                foreach (var key in definition.GetCanonicalAndAliasKeys(propertyName))
+                var key = definition.GetCanonicalKey(propertyName);
+                if (!string.IsNullOrWhiteSpace(key))
                 {
                     Data[key] = value;
                 }

@@ -437,7 +437,16 @@ export function AddModelWizard({
           <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Provider</label>
           <select
             value={value.provider}
-            onChange={(event) => setValue((previous) => ({ ...previous, provider: event.target.value as AddModelProvider }))}
+            onChange={(event) => {
+              const provider = event.target.value as AddModelProvider;
+              setValue((previous) => ({
+                ...previous,
+                provider,
+                anthropicThinkingEnabled: provider === 'anthropic'
+                  ? true
+                  : previous.anthropicThinkingEnabled,
+              }));
+            }}
             className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="">Select provider</option>

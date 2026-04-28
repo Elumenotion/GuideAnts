@@ -17,8 +17,8 @@ export interface GuideDetailsDto {
   guide: GuideDto;
   instructions?: string;
   homePageMarkdown?: string;
-  temperature?: number;
-  topP?: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   tools: ToolAssignmentDto[];
   contextOptions: ContextOptionDto[];
@@ -35,8 +35,8 @@ export interface CreateGuideDto {
   instructions?: string;
   homePageMarkdown?: string;
   modelId?: string;
-  temperature?: number;
-  topP?: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   samplingParametersJson?: string;
   avatarImageBytes?: string; // base64 encoded, empty string to clear, undefined to leave unchanged
@@ -56,8 +56,8 @@ export interface UpdateGuideDto {
   instructions?: string;
   homePageMarkdown?: string;
   modelId?: string;
-  temperature?: number;
-  topP?: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   samplingParametersJson?: string;
   avatarImageBytes?: string; // base64 encoded, empty string to clear, undefined to leave unchanged
@@ -88,8 +88,8 @@ export interface AssistantDto {
 export interface AssistantDetailsDto {
   assistant: AssistantDto;
   instructions?: string;
-  temperature?: number;
-  topP?: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   tools: ToolAssignmentDto[];
   contextOptions: ContextOptionDto[];
@@ -103,8 +103,8 @@ export interface CreateAssistantDto {
   description: string;
   instructions?: string;
   modelId?: string;
-  temperature?: number;
-  topP?: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   samplingParametersJson?: string;
   avatarImageBytes?: string; // base64 encoded, empty string to clear, undefined to leave unchanged
@@ -122,8 +122,8 @@ export interface UpdateAssistantDto {
   description: string;
   instructions?: string;
   modelId?: string;
-  temperature?: number;
-  topP?: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   samplingParametersJson?: string;
   avatarImageBytes?: string; // base64 encoded, empty string to clear, undefined to leave unchanged

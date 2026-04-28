@@ -78,7 +78,9 @@ public sealed class AnthropicChatClientFactory : IChatCompletionClientFactory
         return new AnthropicClient(options);
     }
 
-    private AnthropicConfig Config => _configAccessor?.Invoke() ?? _config ?? AnthropicConfigFactory.Get();
+    private AnthropicConfig Config => _configAccessor?.Invoke()
+        ?? _config
+        ?? throw new InvalidOperationException("Anthropic configuration is required.");
 
     private void EnsureCacheSignature(AnthropicConfig config)
     {

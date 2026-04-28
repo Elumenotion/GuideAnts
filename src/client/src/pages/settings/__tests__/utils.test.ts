@@ -21,6 +21,12 @@ describe('buildAddModelRequest', () => {
     expect(request.install).toBeUndefined();
   });
 
+  it('defaults anthropic add-model state to thinking choices enabled', () => {
+    const state = createEmptyAddModelWizardState('anthropic');
+
+    expect(state.anthropicThinkingEnabled).toBe(true);
+  });
+
   it('builds llama-cpp huggingface request', () => {
     const state = createEmptyAddModelWizardState('llama-cpp');
     state.catalogModelId = 'qwen3.5-local';

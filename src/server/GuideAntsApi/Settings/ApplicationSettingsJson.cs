@@ -322,38 +322,7 @@ public static class ApplicationSettingsJson
         SettingsPropertyDefinition property,
         out JsonNode? node)
     {
-        if (payload.TryGetPropertyValue(property.Name, out node))
-        {
-            return true;
-        }
-
-        foreach (var alias in property.LegacyAliasKeys)
-        {
-            var leafName = GetLeafName(alias);
-            if (string.IsNullOrWhiteSpace(leafName))
-            {
-                continue;
-            }
-
-            if (payload.TryGetPropertyValue(leafName, out node))
-            {
-                return true;
-            }
-        }
-
-        node = null;
-        return false;
-    }
-
-    private static string GetLeafName(string key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return string.Empty;
-        }
-
-        var lastSeparator = key.LastIndexOf(':');
-        return lastSeparator >= 0 ? key[(lastSeparator + 1)..] : key;
+        return payload.TryGetPropertyValue(property.Name, out node);
     }
 
     private static (string ActiveKeyId, byte[] ActiveKeyBytes) GetActiveEncryptionKeyOrThrow(SettingsSecretsOptions options)

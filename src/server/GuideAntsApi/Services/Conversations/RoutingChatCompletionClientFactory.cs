@@ -7,6 +7,8 @@ using AntRunner.Chat.OpenAI;
 using AntRunner.Chat.OpenRouter;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GuideAntsApi.Services.Conversations;
 
@@ -31,6 +33,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
     private readonly IChatTargetResolver _chatTargetResolver;
     private readonly IChatTargetValidator _chatTargetValidator;
     private readonly IRuntimeProfileResolver _runtimeProfileResolver;
+    private readonly ILogger<RoutingChatCompletionClientFactory> _logger;
 
     public RoutingChatCompletionClientFactory(
         [FromKeyedServices(OpenAiPlatformFactoryKey)] OpenAiChatClientFactory openAiPlatformChatFactory,
@@ -44,7 +47,8 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         LlamaCppChatClientFactory llamaCppFactory,
         IChatTargetResolver chatTargetResolver,
         IChatTargetValidator chatTargetValidator,
-        IRuntimeProfileResolver runtimeProfileResolver)
+        IRuntimeProfileResolver runtimeProfileResolver,
+        ILogger<RoutingChatCompletionClientFactory>? logger = null)
     {
         _openAiPlatformChatFactory = openAiPlatformChatFactory ?? throw new ArgumentNullException(nameof(openAiPlatformChatFactory));
         _azureOpenAiChatFactory = azureOpenAiChatFactory ?? throw new ArgumentNullException(nameof(azureOpenAiChatFactory));
@@ -58,6 +62,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         _chatTargetResolver = chatTargetResolver ?? throw new ArgumentNullException(nameof(chatTargetResolver));
         _chatTargetValidator = chatTargetValidator ?? throw new ArgumentNullException(nameof(chatTargetValidator));
         _runtimeProfileResolver = runtimeProfileResolver ?? throw new ArgumentNullException(nameof(runtimeProfileResolver));
+        _logger = logger ?? NullLogger<RoutingChatCompletionClientFactory>.Instance;
     }
 
     public string? DefaultDeploymentId => null;
@@ -70,6 +75,11 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         _chatTargetValidator.Validate(target);
 
         var provider = ParseProvider(target);
+        _logger.LogInformation(
+            "Chat provider route resolved. RequestedModelId={RequestedModelId}, CatalogModelId={CatalogModelId}, Provider={Provider}",
+            string.IsNullOrWhiteSpace(deploymentId) ? "(unset)" : deploymentId,
+            target.ModelId,
+            target.Provider);
 
         if (provider == Provider.LlamaCpp)
         {

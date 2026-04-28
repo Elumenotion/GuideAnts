@@ -11,12 +11,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace GuideAntsApi.Tests.Endpoints;
 
 /// <summary>
-/// Contract tests for the shared Hugging Face browse handler. Both the
-/// canonical <c>/api/settings/huggingface/...</c> route and the legacy
-/// <c>/api/settings/llama/huggingface/...</c> alias dispatch through the
-/// same <see cref="HuggingFaceBrowseHandler.ExecuteAsync"/> entry point,
-/// so a single handler-level test covers both endpoint shapes without
-/// needing a full WebApplicationFactory host.
+/// Contract tests for the shared Hugging Face browse handler without needing
+/// a full WebApplicationFactory host.
 /// </summary>
 [TestClass]
 public sealed class HuggingFaceBrowseHandlerTests
@@ -68,14 +64,13 @@ public sealed class HuggingFaceBrowseHandlerTests
             request: BuildRequest(serviceOrigin: "Embeddings"),
             browser: browser,
             loggerFactory: LoggerFactory(),
-            legacyLlamaPath: false,
             cancellationToken: CancellationToken.None);
 
         result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.Ok<HuggingFaceRepositoryListing>>();
     }
 
     [TestMethod]
-    public async Task LegacyLlamaPath_WithoutHeader_StillDispatchesToSameHandler()
+    public async Task CanonicalPath_WithoutHeader_ReturnsListing()
     {
         var listing = new HuggingFaceRepositoryListing(
             Repository: "acme/model",
@@ -91,7 +86,6 @@ public sealed class HuggingFaceBrowseHandlerTests
             request: BuildRequest(serviceOrigin: null),
             browser: browser,
             loggerFactory: LoggerFactory(),
-            legacyLlamaPath: true,
             cancellationToken: CancellationToken.None);
 
         result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.Ok<HuggingFaceRepositoryListing>>();
@@ -111,7 +105,6 @@ public sealed class HuggingFaceBrowseHandlerTests
             request: BuildRequest(serviceOrigin: "ImageGeneration"),
             browser: browser,
             loggerFactory: LoggerFactory(),
-            legacyLlamaPath: false,
             cancellationToken: CancellationToken.None);
 
         result.Should().NotBeNull();

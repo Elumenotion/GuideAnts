@@ -187,9 +187,6 @@ namespace AntRunner.Chat
                 resolvedModelId,
                 assistantDef.ReasoningEffort,
                 token);
-            var suppressSamplingForReasoning =
-                !string.IsNullOrWhiteSpace(reasoningEffortParam)
-                && SupportsOpenAiReasoningEffortByModelId(resolvedModelId);
 
             var api = clientFactory.CreateClient(options.DeploymentId, httpClient);
 
@@ -293,10 +290,7 @@ namespace AntRunner.Chat
                 while (continueChat)
                 {
                     token.ThrowIfCancellationRequested();
-                    var tempParam = suppressSamplingForReasoning ? null : assistantDef.Temperature;
-                    var topPParam = suppressSamplingForReasoning ? null : assistantDef.TopP;
-
-                    var chatRequest = new ChatCompletionRequest(messages, tools: tools, model: options.DeploymentId, temperature: tempParam, topP: topPParam, reasoningEffort: reasoningEffortParam, samplingParameters: assistantDef.SamplingParameters);
+                    var chatRequest = new ChatCompletionRequest(messages, tools: tools, model: options.DeploymentId, temperature: assistantDef.Temperature, topP: assistantDef.TopP, reasoningEffort: reasoningEffortParam, samplingParameters: assistantDef.SamplingParameters);
 
                     ChatCompletionResponse response;
                     if (onStream != null)
@@ -1226,17 +1220,6 @@ namespace AntRunner.Chat
             CancellationToken token)
         {
             return await DatabaseStorage.ResolveModelReasoningEffortAsync(modelId, reasoningEffort, token);
-        }
-
-        private static bool SupportsOpenAiReasoningEffortByModelId(string? modelId)
-        {
-            if (string.IsNullOrWhiteSpace(modelId))
-            {
-                return false;
-            }
-
-            return modelId.StartsWith("o", StringComparison.OrdinalIgnoreCase)
-                || modelId.StartsWith("gpt-5", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

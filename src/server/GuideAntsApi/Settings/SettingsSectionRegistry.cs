@@ -14,8 +14,7 @@ public sealed record SettingsPropertyDefinition(
     string CanonicalKey,
     SettingsValueType ValueType = SettingsValueType.String,
     bool IsSecret = false,
-    object? DefaultValue = null,
-    params string[] LegacyAliasKeys);
+    object? DefaultValue = null);
 
 public sealed class SettingsSectionDefinition
 {
@@ -110,29 +109,11 @@ public sealed class SettingsSectionDefinition
         return errors;
     }
 
-    public IEnumerable<string> GetCanonicalAndAliasKeys(string propertyName)
+    public string? GetCanonicalKey(string propertyName)
     {
         var property = Properties.FirstOrDefault(p =>
-            p.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase)
-            || p.LegacyAliasKeys.Any(alias =>
-                GetLeafName(alias).Equals(propertyName, StringComparison.OrdinalIgnoreCase)));
-        if (property == null)
-        {
-            return [];
-        }
-
-        return [property.CanonicalKey, .. property.LegacyAliasKeys];
-    }
-
-    private static string GetLeafName(string key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return string.Empty;
-        }
-
-        var lastSeparator = key.LastIndexOf(':');
-        return lastSeparator >= 0 ? key[(lastSeparator + 1)..] : key;
+            p.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase));
+        return property?.CanonicalKey;
     }
 
     private static string? ReadFromConfiguration(IConfiguration configuration, SettingsPropertyDefinition property)
@@ -141,15 +122,6 @@ public sealed class SettingsSectionDefinition
         if (!string.IsNullOrWhiteSpace(raw))
         {
             return raw;
-        }
-
-        foreach (var alias in property.LegacyAliasKeys)
-        {
-            var aliasRaw = configuration[alias];
-            if (!string.IsNullOrWhiteSpace(aliasRaw))
-            {
-                return aliasRaw;
-            }
         }
 
         return null;
@@ -317,10 +289,10 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             DisplayOrder = 30,
             Properties =
             [
-                new("Resource", "AzureOpenAI:Resource", LegacyAliasKeys: ["AZURE_OPENAI_RESOURCE"]),
-                new("ApiKey", "AzureOpenAI:ApiKey", IsSecret: true, LegacyAliasKeys: ["AZURE_OPENAI_API_KEY"]),
-                new("Deployment", "AzureOpenAI:Deployment", LegacyAliasKeys: ["AZURE_OPENAI_DEPLOYMENT"]),
-                new("ApiVersion", "AzureOpenAI:ApiVersion", DefaultValue: "2025-04-01-preview", LegacyAliasKeys: ["AZURE_OPENAI_API_VERSION"])
+                new("Resource", "AzureOpenAI:Resource"),
+                new("ApiKey", "AzureOpenAI:ApiKey", IsSecret: true),
+                new("Deployment", "AzureOpenAI:Deployment"),
+                new("ApiVersion", "AzureOpenAI:ApiVersion", DefaultValue: "2025-04-01-preview")
             ]
         },
         new()
@@ -400,15 +372,15 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             DisplayOrder = 80,
             Properties =
             [
-                new("BaseUrl", "Anthropic:BaseUrl", LegacyAliasKeys: ["ANTHROPIC_BASE_URL"]),
-                new("ApiKey", "Anthropic:ApiKey", IsSecret: true, LegacyAliasKeys: ["ANTHROPIC_API_KEY"]),
-                new("AuthToken", "Anthropic:AuthToken", IsSecret: true, LegacyAliasKeys: ["ANTHROPIC_AUTH_TOKEN"]),
-                new("DefaultModel", "Anthropic:DefaultModel", LegacyAliasKeys: ["ANTHROPIC_DEFAULT_MODEL"]),
-                new("DefaultMaxTokens", "Anthropic:DefaultMaxTokens", SettingsValueType.Int, DefaultValue: 64000, LegacyAliasKeys: ["ANTHROPIC_DEFAULT_MAX_TOKENS"]),
-                new("ThinkingBudgetMinimal", "Anthropic:ThinkingBudgetMinimal", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_MINIMAL"]),
-                new("ThinkingBudgetLow", "Anthropic:ThinkingBudgetLow", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_LOW"]),
-                new("ThinkingBudgetMedium", "Anthropic:ThinkingBudgetMedium", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_MEDIUM"]),
-                new("ThinkingBudgetHigh", "Anthropic:ThinkingBudgetHigh", SettingsValueType.Int, LegacyAliasKeys: ["ANTHROPIC_THINKING_BUDGET_HIGH"])
+                new("BaseUrl", "Anthropic:BaseUrl"),
+                new("ApiKey", "Anthropic:ApiKey", IsSecret: true),
+                new("AuthToken", "Anthropic:AuthToken", IsSecret: true),
+                new("DefaultModel", "Anthropic:DefaultModel"),
+                new("DefaultMaxTokens", "Anthropic:DefaultMaxTokens", SettingsValueType.Int, DefaultValue: 64000),
+                new("ThinkingBudgetMinimal", "Anthropic:ThinkingBudgetMinimal", SettingsValueType.Int),
+                new("ThinkingBudgetLow", "Anthropic:ThinkingBudgetLow", SettingsValueType.Int),
+                new("ThinkingBudgetMedium", "Anthropic:ThinkingBudgetMedium", SettingsValueType.Int),
+                new("ThinkingBudgetHigh", "Anthropic:ThinkingBudgetHigh", SettingsValueType.Int)
             ]
         },
         new()
@@ -432,11 +404,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         // Single source of truth for the Hugging Face token used by every HF
         // download path in the app (llama quants + mmproj, Stable Diffusion
         // bundles, Whisper ASR, Kokoro TTS). Stored encrypted in the DB and
-        // edited on Settings → Connections → Hugging Face. On first bootstrap
-        // the value is seeded from the HF_TOKEN environment variable (via the
-        // legacy alias) so existing compose / host env setups work without
-        // manual re-entry. After seeding the DB value wins unconditionally —
-        // there is no per-request override and no per-provider duplicate.
+        // edited on Settings → Connections → Hugging Face.
         new()
         {
             SectionName = "HuggingFace",
@@ -447,8 +415,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
                 new(
                     "Token",
                     "HuggingFace:Token",
-                    IsSecret: true,
-                    LegacyAliasKeys: ["HF_TOKEN", "LlamaCpp:HfToken", "LlamaModelManagement:HfToken"]),
+                    IsSecret: true),
                 new(
                     "RouterBaseUrl",
                     "HuggingFace:RouterBaseUrl",

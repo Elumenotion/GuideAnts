@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../common/Toast';
 import { api } from '../../../services/api';
 import { GuideDetailsDto, AssistantDetailsDto, CreateGuideDto, UpdateGuideDto, CreateAssistantDto, UpdateAssistantDto, ContextOptionDto, CustomToolDto, FileUploadDto, FileDto, AuthProviderDto, ModelDto } from '../../../types/guides';
-import type { ChatDefaultsDto } from '../../../types/settings';
 import LoadingSpinner from '../../LoadingSpinner';
 import { API_BASE_URL, getApiOrigin } from '../../../config/apiConfig';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
@@ -18,6 +17,10 @@ import { CrewTab } from './CrewTab';
 import { AuthConfig } from './AuthConfig';
 import { MarkdownPreviewModal } from './MarkdownPreviewModal';
 import { useRegisterTour } from '../../../tour/useRegisterTour';
+import {
+  normalizeReasoningEffortForModel,
+  normalizeSamplingValueForModel,
+} from '../../chat-model/reasoning';
 
 // Helper function to convert byte array to base64 without stack overflow
 // Using spread operator on large arrays causes "Maximum call stack size exceeded"
@@ -32,43 +35,14 @@ function bytesToBase64(bytes: number[]): string {
   return btoa(binary);
 }
 
-function parseReasoningChoices(json?: string): string[] {
-  if (!json) return [];
-
-  try {
-    const parsed = JSON.parse(json);
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed
-      .filter((value): value is string => typeof value === 'string')
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0);
-  } catch {
-    return [];
-  }
-}
-
-const LEGACY_MODEL_ID_ALIASES: Record<string, string> = {
-  'qwen3.5-27b-q6': 'qwen3.5-27b',
-  'qwen3.5-27b-q8': 'qwen3.5-27b',
-};
-
-function normalizeModelId(modelId?: string): string | undefined {
-  if (!modelId) {
-    return modelId;
-  }
-
-  return LEGACY_MODEL_ID_ALIASES[modelId] ?? modelId;
-}
-
 interface FormData {
   name: string;
   description: string;
   instructions: string;
   homePageMarkdown: string; // Only used for guides
   modelId?: string;
-  temperature: number;
-  topP: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   samplingOverrides: Record<string, number>;
   avatarData?: { bytes: number[]; contentType: string } | null;
@@ -88,8 +62,8 @@ const defaultFormData: FormData = {
   description: '',
   instructions: '',
   homePageMarkdown: '',
-  temperature: 1.0,
-  topP: 1.0,
+  temperature: null,
+  topP: null,
   reasoningEffort: undefined,
   samplingOverrides: {},
   selectedToolIds: [],
@@ -123,7 +97,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEditing);
   const [catalogModels, setCatalogModels] = useState<ModelDto[]>([]);
-  const [chatDefaults, setChatDefaults] = useState<ChatDefaultsDto | null>(null);
   const [avatarBlobUrl, setAvatarBlobUrl] = useState<string | null>(null);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [hasValidationErrors, setHasValidationErrors] = useState(false);
@@ -434,23 +407,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     loadModelCatalog();
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const d = await api.settings.chatDefaults.get();
-        if (!cancelled) {
-          setChatDefaults(d);
-        }
-      } catch {
-        // Guide Builder works without global default settings
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // Poll for file markdown extraction status updates
   // Only polls when on the Files tab - checks for processing files inside the interval
   useEffect(() => {
@@ -524,9 +480,9 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           description: data.guide.description,
           instructions: data.instructions || '',
           homePageMarkdown: data.homePageMarkdown || '',
-          modelId: normalizeModelId(data.guide.modelId),
-          temperature: data.temperature ?? 1.0,
-          topP: data.topP ?? 1.0,
+          modelId: data.guide.modelId,
+          temperature: data.temperature ?? null,
+          topP: data.topP ?? null,
           reasoningEffort: data.reasoningEffort,
           currentAvatarUrl: data.guide.avatarUrl,
           selectedToolIds: data.tools.filter((t) => !t.isCustom).map((t) => t.toolId),
@@ -551,9 +507,9 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           description: data.assistant.description,
           instructions: data.instructions || '',
           homePageMarkdown: '',
-          modelId: normalizeModelId(data.assistant.modelId),
-          temperature: data.temperature ?? 1.0,
-          topP: data.topP ?? 1.0,
+          modelId: data.assistant.modelId,
+          temperature: data.temperature ?? null,
+          topP: data.topP ?? null,
           reasoningEffort: data.reasoningEffort,
           samplingOverrides: {},
           currentAvatarUrl: data.assistant.avatarUrl,
@@ -636,7 +592,9 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     const instructions = instructionsEditorRef.current?.getValue() || formData.instructions;
     const homePageMarkdown = isGuide ? (homePageEditorRef.current?.getValue() || formData.homePageMarkdown) : undefined;
     const selectedModel = catalogModels.find((model) => model.modelId === formData.modelId);
-    const reasoningEffortToSave = normalizeReasoningForModel(selectedModel, formData.reasoningEffort);
+    const reasoningEffortToSave = normalizeReasoningEffortForModel(selectedModel, formData.reasoningEffort);
+    const temperatureToSave = normalizeSamplingValueForModel(selectedModel, 'temperature', formData.temperature);
+    const topPToSave = normalizeSamplingValueForModel(selectedModel, 'top_p', formData.topP);
 
     // Validate runtime compatibility before saving
     try {
@@ -697,8 +655,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             instructions,
             homePageMarkdown,
             modelId: formData.modelId || undefined,
-            temperature: formData.temperature,
-            topP: formData.topP,
+            temperature: temperatureToSave,
+            topP: topPToSave,
             reasoningEffort: reasoningEffortToSave,
             samplingParametersJson,
             avatarImageBytes:
@@ -726,8 +684,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             description: formData.description,
             instructions,
             modelId: formData.modelId || undefined,
-            temperature: formData.temperature,
-            topP: formData.topP,
+            temperature: temperatureToSave,
+            topP: topPToSave,
             reasoningEffort: reasoningEffortToSave,
             samplingParametersJson,
             avatarImageBytes:
@@ -760,8 +718,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             instructions,
             homePageMarkdown,
             modelId: formData.modelId || undefined,
-            temperature: formData.temperature,
-            topP: formData.topP,
+            temperature: temperatureToSave,
+            topP: topPToSave,
             reasoningEffort: reasoningEffortToSave,
             samplingParametersJson,
             avatarImageBytes:
@@ -790,8 +748,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             description: formData.description,
             instructions,
             modelId: formData.modelId || undefined,
-            temperature: formData.temperature,
-            topP: formData.topP,
+            temperature: temperatureToSave,
+            topP: topPToSave,
             reasoningEffort: reasoningEffortToSave,
             samplingParametersJson,
             avatarImageBytes:
@@ -896,40 +854,26 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     }
   }, [entityId, showToast]);
 
-  const normalizeReasoningForModel = useCallback((model: ModelDto | undefined, current?: string) => {
-    const choices = parseReasoningChoices(model?.reasoningChoicesJson);
-    if (choices.length === 0) {
-      return undefined;
-    }
-
-    if (!current) {
-      return choices[0];
-    }
-
-    const matchedChoice = choices.find((choice) => choice.toLowerCase() === current.toLowerCase());
-    return matchedChoice ?? choices[0];
-  }, []);
-
   useEffect(() => {
     if (!formData.modelId || catalogModels.length === 0) {
       return;
     }
 
     const model = catalogModels.find((catalogModel) => catalogModel.modelId === formData.modelId);
-    const normalizedReasoningEffort = normalizeReasoningForModel(model, formData.reasoningEffort);
+    const normalizedReasoningEffort = normalizeReasoningEffortForModel(model, formData.reasoningEffort);
 
     if (normalizedReasoningEffort !== formData.reasoningEffort) {
       setFormData((prev) => ({ ...prev, reasoningEffort: normalizedReasoningEffort }));
     }
-  }, [catalogModels, formData.modelId, formData.reasoningEffort, normalizeReasoningForModel]);
+  }, [catalogModels, formData.modelId, formData.reasoningEffort]);
 
   const handleModelChange = useCallback((newModelId?: string, selectedModel?: ModelDto) => {
-    const normalizedModelId = normalizeModelId(newModelId);
+    const normalizedModelId = newModelId;
 
     setFormData((prev) => {
       const model = selectedModel
         ?? catalogModels.find((catalogModel) => catalogModel.modelId === normalizedModelId);
-      const normalizedReasoningEffort = normalizeReasoningForModel(model, prev.reasoningEffort);
+      const normalizedReasoningEffort = normalizeReasoningEffortForModel(model, prev.reasoningEffort);
       return {
         ...prev,
         modelId: normalizedModelId,
@@ -937,17 +881,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
       };
     });
     setIsDirty(true);
-  }, [catalogModels, normalizeReasoningForModel]);
-
-  const configurationParamsDisabledReason = useMemo(() => {
-    if (chatDefaults?.overrideAllChatModels) {
-      return 'Override all chat models is enabled in Settings → Overview. Per-entity sampling is ignored until you turn it off.';
-    }
-    if (formData.modelId === '' || formData.modelId === undefined) {
-      return 'This entity uses the global default model. Configure default sampling under Settings → Overview → Default Chat Model.';
-    }
-    return undefined;
-  }, [chatDefaults?.overrideAllChatModels, formData.modelId]);
+  }, [catalogModels]);
 
   if (loading) {
     return (
@@ -1019,7 +953,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               onTopPChange={(topP) => updateForm({ topP })}
               onReasoningEffortChange={(reasoningEffort) => updateForm({ reasoningEffort })}
               onSamplingOverridesChange={(samplingOverrides) => updateForm({ samplingOverrides })}
-              paramsDisabledReason={configurationParamsDisabledReason}
             />
           )}
 

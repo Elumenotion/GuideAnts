@@ -51,7 +51,7 @@ namespace AntRunner.ToolCalling.Functions
         bool oAuth = false,
         bool authRequiredButMissing = false)
     {
-        public static Func<string, string?>? LegacyVariableResolver { get; set; }
+        public static Func<string, string?>? ConfigurationVariableResolver { get; set; }
 
         /// <summary>
         /// Generates request builders based on the OpenAPI specification.
@@ -98,7 +98,7 @@ namespace AntRunner.ToolCalling.Functions
                     }
                     else if (!string.IsNullOrWhiteSpace(actionAuthConfig.HeaderValueEnvironmentVariable))
                     {
-                        var envValue = LegacyVariableResolver?.Invoke(actionAuthConfig.HeaderValueEnvironmentVariable)
+                        var envValue = ConfigurationVariableResolver?.Invoke(actionAuthConfig.HeaderValueEnvironmentVariable)
                             ?? Environment.GetEnvironmentVariable(actionAuthConfig.HeaderValueEnvironmentVariable);
                         if (!string.IsNullOrEmpty(envValue))
                         {
@@ -124,7 +124,7 @@ namespace AntRunner.ToolCalling.Functions
                     }
                     else if (!string.IsNullOrWhiteSpace(actionAuthConfig.HeaderValueEnvironmentVariable))
                     {
-                        var envValue = LegacyVariableResolver?.Invoke(actionAuthConfig.HeaderValueEnvironmentVariable)
+                        var envValue = ConfigurationVariableResolver?.Invoke(actionAuthConfig.HeaderValueEnvironmentVariable)
                             ?? Environment.GetEnvironmentVariable(actionAuthConfig.HeaderValueEnvironmentVariable);
                         if (!string.IsNullOrEmpty(envValue))
                         {

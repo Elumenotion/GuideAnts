@@ -67,26 +67,22 @@ describe('ChatModelConfigurator', () => {
     expect(options[0]).toHaveTextContent(/select a catalog model/i);
   });
 
-  it('disables config params when disabledReason is set', async () => {
+  it('does not render undeclared sampling controls', async () => {
     const onChange = vi.fn();
     render(
       <ChatModelConfigurator
         mode="entity"
         modelId="m-active"
-        temperature={0.5}
-        topP={0.8}
+        temperature={1}
+        topP={1}
         onChange={onChange}
-        disabledReason="Sampling locked."
       />
     );
 
     await screen.findByRole('combobox', { name: /ai model/i });
-    expect(screen.getByText(/sampling locked/i)).toBeInTheDocument();
-
-    const sliders = screen.getAllByRole('slider');
-    for (const s of sliders) {
-      expect(s).toBeDisabled();
-    }
+    expect(screen.queryByRole('heading', { name: /configuration parameters/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: /temperature/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: /top p/i })).not.toBeInTheDocument();
   });
 
   it('preserves guide tour id on model select', async () => {
@@ -126,8 +122,8 @@ describe('ChatModelConfigurator', () => {
 
     expect(onChange).toHaveBeenCalledWith({
       modelId: 'gemini-2.5-flash',
-      temperature: 0.7,
-      topP: 0.9,
+      temperature: null,
+      topP: null,
       reasoningEffort: undefined,
       samplingOverrides: {},
     });
@@ -170,10 +166,95 @@ describe('ChatModelConfigurator', () => {
 
     expect(onChange).toHaveBeenCalledWith({
       modelId: 'gemini-2.5-flash',
-      temperature: 0.7,
-      topP: 0.9,
+      temperature: null,
+      topP: null,
       reasoningEffort: undefined,
       samplingOverrides: {},
     });
+  });
+
+  it('uses reasoningChoicesJson to show reasoning controls without undeclared sampling controls', async () => {
+    vi.mocked(api.guides.catalogs.models).mockResolvedValueOnce([
+      {
+        modelId: 'claude-haiku-4-5-20251001',
+        displayName: 'Claude Haiku 4.5',
+        provider: 'anthropic',
+        isActive: true,
+        reasoningChoicesJson: '["minimal","low","medium","high"]',
+      },
+    ]);
+
+    const onChange = vi.fn();
+    render(
+      <ChatModelConfigurator
+        mode="entity"
+        modelId="claude-haiku-4-5-20251001"
+        temperature={1}
+        topP={1}
+        reasoningEffort="medium"
+        onChange={onChange}
+      />
+    );
+
+    const reasoning = await screen.findByRole('combobox', { name: /reasoning effort/i });
+    expect(reasoning).toHaveValue('medium');
+    expect(within(reasoning).getByRole('option', { name: 'Medium' })).toHaveValue('medium');
+    expect(screen.queryByRole('slider', { name: /temperature/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: /top p/i })).not.toBeInTheDocument();
+    expect(onChange).toHaveBeenCalledWith({
+      modelId: 'claude-haiku-4-5-20251001',
+      temperature: null,
+      topP: null,
+      reasoningEffort: 'medium',
+      samplingOverrides: {},
+    });
+  });
+
+  it('locks reasoning controls when the catalog exposes only one reasoning choice', async () => {
+    vi.mocked(api.guides.catalogs.models).mockResolvedValueOnce([
+      {
+        modelId: 'single-choice-model',
+        displayName: 'Single Choice Model',
+        provider: 'openai-chat',
+        isActive: true,
+        reasoningChoices: ['high'],
+      },
+    ]);
+
+    render(
+      <ChatModelConfigurator
+        mode="entity"
+        modelId="single-choice-model"
+        reasoningEffort="high"
+        onChange={vi.fn()}
+      />
+    );
+
+    const reasoning = await screen.findByRole('combobox', { name: /reasoning effort/i });
+    expect(reasoning).toBeDisabled();
+  });
+
+  it('does not hard-lock gpt-5-pro when the catalog exposes multiple reasoning choices', async () => {
+    vi.mocked(api.guides.catalogs.models).mockResolvedValueOnce([
+      {
+        modelId: 'gpt-5-pro',
+        displayName: 'GPT-5 Pro',
+        provider: 'openai-responses',
+        isActive: true,
+        reasoningChoices: ['minimal', 'high'],
+      },
+    ]);
+
+    render(
+      <ChatModelConfigurator
+        mode="entity"
+        modelId="gpt-5-pro"
+        reasoningEffort="high"
+        onChange={vi.fn()}
+      />
+    );
+
+    const reasoning = await screen.findByRole('combobox', { name: /reasoning effort/i });
+    expect(reasoning).not.toBeDisabled();
   });
 });

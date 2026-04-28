@@ -8,6 +8,8 @@ namespace GuideAntsApi.Endpoints;
 
 public static class ChatEndpoints
 {
+    private sealed class LogCategory;
+
     public static void MapChatEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/chat")
@@ -19,6 +21,7 @@ public static class ChatEndpoints
             string assistantName,
             IChatCompletionClientFactory chatClientFactory,
             IChatModelResolver chatModelResolver,
+            ILogger<LogCategory> logger,
             [FromBody] ChatRunOptions chatRunOptions) =>
         {
             if (string.IsNullOrWhiteSpace(assistantName))
@@ -64,8 +67,11 @@ public static class ChatEndpoints
 
                 return Results.BadRequest("Unable to process request");
             }
-            catch 
+            catch (Exception ex)
             {
+                logger.LogError(ex, "Chat run failed for assistant {AssistantName} using deployment {DeploymentId}",
+                    assistantName,
+                    chatRunOptions.DeploymentId ?? "(unset)");
                 return Results.StatusCode(500);
             }
         })

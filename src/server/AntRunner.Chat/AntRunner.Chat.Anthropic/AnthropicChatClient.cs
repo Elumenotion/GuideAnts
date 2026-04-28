@@ -117,8 +117,8 @@ public sealed class AnthropicChatClient : IChatCompletionClient
                 Model = model,
                 MaxTokens = defaultMaxTokens,
                 Messages = messageParams,
-                Temperature = thinkingEnabled ? 1d : request.Temperature,
-                TopP = thinkingEnabled ? null : request.TopP,
+                Temperature = request.Temperature,
+                TopP = request.TopP,
                 System = systemMessages.Count > 0 ? new MessageCreateParamsSystem(systemMessages) : null,
                 Tools = toolDefinitions
             };

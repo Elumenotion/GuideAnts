@@ -1,13 +1,12 @@
 import { ModelDto } from '../../../types/guides';
+import { getReasoningChoicesForModel } from '../../chat-model/reasoning';
 
 interface ConfigParamsProps {
   model?: ModelDto;
-  temperature?: number;
-  topP?: number;
+  temperature?: number | null;
+  topP?: number | null;
   reasoningEffort?: string;
   samplingOverrides?: Record<string, number>;
-  /** When true, controls are non-interactive (e.g. entity uses global default or override-all is on). */
-  disabled?: boolean;
   onTemperatureChange: (value: number) => void;
   onTopPChange: (value: number) => void;
   onReasoningEffortChange: (value: string) => void;
@@ -20,27 +19,31 @@ export function ConfigParams({
   topP = 1.0,
   reasoningEffort,
   samplingOverrides,
-  disabled = false,
   onTemperatureChange,
   onTopPChange,
   onReasoningEffortChange,
   onSamplingParameterChange,
 }: ConfigParamsProps) {
   const samplingPolicy = model?.samplingParameterPolicy ?? [];
-  const reasoningChoices = model?.reasoningChoices ?? [];
+  const reasoningChoices = getReasoningChoicesForModel(model);
   const defaultReasoningChoice = model?.defaultReasoningChoice;
 
   const hasReasoningChoices = reasoningChoices.length > 0;
   const selectedReasoningEffort = reasoningEffort && reasoningChoices.includes(reasoningEffort)
     ? reasoningEffort
     : defaultReasoningChoice ?? reasoningChoices[0] ?? '';
-  const isGpt5Pro = model?.modelId?.toLowerCase() === 'gpt-5-pro';
+  const reasoningChoiceLocked = reasoningChoices.length <= 1;
+
+  if (samplingPolicy.length === 0 && !hasReasoningChoices) {
+    return null;
+  }
 
   const getParamValue = (key: string): number => {
-    if (key === 'temperature') return temperature;
-    if (key === 'top_p') return topP;
+    const policyDefault = samplingPolicy.find(p => p.key === key)?.recommendedDefault ?? 0;
+    if (key === 'temperature') return temperature ?? policyDefault;
+    if (key === 'top_p') return topP ?? policyDefault;
     if (samplingOverrides && key in samplingOverrides) return samplingOverrides[key];
-    return samplingPolicy.find(p => p.key === key)?.recommendedDefault ?? 0;
+    return policyDefault;
   };
 
   const handleParamChange = (key: string, value: number) => {
@@ -54,6 +57,9 @@ export function ConfigParams({
     if (step >= 0.1) return value.toFixed(1);
     return value.toFixed(2);
   };
+
+  const formatReasoningChoice = (choice: string): string =>
+    choice.length > 0 ? choice.charAt(0).toUpperCase() + choice.slice(1) : choice;
 
   return (
     <div className="space-y-4">
@@ -79,8 +85,7 @@ export function ConfigParams({
                 step={param.step}
                 value={getParamValue(param.key)}
                 onChange={(e) => handleParamChange(param.key, parseFloat(e.target.value))}
-                disabled={disabled}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
                 data-tour-id={`guide.config.${param.key}.input`}
               />
               <p className="mt-1 text-xs text-gray-500">
@@ -88,73 +93,24 @@ export function ConfigParams({
               </p>
             </div>
           ))
-        ) : (
-          <>
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <label htmlFor="temperature" className="text-sm font-medium text-gray-700">
-                  Temperature
-                </label>
-                <span className="text-sm text-gray-600">{temperature.toFixed(1)}</span>
-              </div>
-              <input
-                id="temperature"
-                type="range"
-                min="0"
-                max="2"
-                step="0.1"
-                value={temperature}
-                onChange={(e) => onTemperatureChange(parseFloat(e.target.value))}
-                disabled={disabled}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider disabled:opacity-50 disabled:cursor-not-allowed"
-                data-tour-id="guide.config.temperature.input"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Controls randomness: 0 is focused and deterministic, 2 is more creative
-              </p>
-            </div>
-            <div>
-              <div className="flex justify-between items-center mb-2">
-                <label htmlFor="topP" className="text-sm font-medium text-gray-700">
-                  Top P
-                </label>
-                <span className="text-sm text-gray-600">{topP.toFixed(2)}</span>
-              </div>
-              <input
-                id="topP"
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={topP}
-                onChange={(e) => onTopPChange(parseFloat(e.target.value))}
-                disabled={disabled}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider disabled:opacity-50 disabled:cursor-not-allowed"
-                data-tour-id="guide.config.topP.input"
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Controls diversity: lower values make responses more focused
-              </p>
-            </div>
-          </>
-        )}
+        ) : null}
 
         {hasReasoningChoices && (
           <div>
             <label htmlFor="reasoning-effort" className="block text-sm font-medium text-gray-700 mb-1">
-              Reasoning
+              Reasoning Effort
             </label>
             <select
               id="reasoning-effort"
               value={selectedReasoningEffort}
               onChange={(e) => onReasoningEffortChange(e.target.value)}
-              disabled={disabled || isGpt5Pro}
+              disabled={reasoningChoiceLocked}
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
               data-tour-id="guide.config.reasoningEffort.select"
             >
               {reasoningChoices.map((choice) => (
                 <option key={choice} value={choice}>
-                  {choice}
+                  {formatReasoningChoice(choice)}
                 </option>
               ))}
             </select>

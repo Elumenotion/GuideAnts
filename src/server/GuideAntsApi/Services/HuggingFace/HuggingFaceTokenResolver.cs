@@ -8,10 +8,8 @@ namespace GuideAntsApi.Services.HuggingFace;
 /// <para>
 /// The value lives in the <c>HuggingFace</c> application-settings section as
 /// the single secret property <c>Token</c> (see
-/// <see cref="Settings.SettingsSectionRegistry"/>). That section is bootstrapped
-/// from the <c>HF_TOKEN</c> environment variable on first install via a legacy
-/// alias, so existing compose / host env setups pick up automatically. After
-/// first bootstrap the DB value is authoritative.
+/// <see cref="Settings.SettingsSectionRegistry"/>). The DB-backed setting is
+/// authoritative.
 /// </para>
 ///
 /// <para>

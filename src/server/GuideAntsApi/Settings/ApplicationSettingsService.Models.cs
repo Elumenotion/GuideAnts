@@ -32,6 +32,7 @@ public sealed partial class ApplicationSettingsService
 
         var normalizedReasoningChoices = NormalizeReasoningChoicesJson(modelId, request.ReasoningChoicesJson);
         var normalizedLocalRuntimeJson = NormalizeLocalRuntimeJson(modelId, provider, request.LocalRuntimeJson);
+        ValidateProviderReasoningChoices(modelId, provider, normalizedReasoningChoices);
 
         var model = new Model
         {
@@ -70,6 +71,7 @@ public sealed partial class ApplicationSettingsService
         var provider = request.Provider.Trim();
         var normalizedReasoningChoices = NormalizeReasoningChoicesJson(request.ModelId.Trim(), request.ReasoningChoicesJson);
         var normalizedLocalRuntimeJson = NormalizeLocalRuntimeJson(request.ModelId.Trim(), provider, request.LocalRuntimeJson);
+        ValidateProviderReasoningChoices(request.ModelId.Trim(), provider, normalizedReasoningChoices);
 
         model.DisplayName = request.DisplayName.Trim();
         model.Provider = provider;
@@ -175,6 +177,64 @@ public sealed partial class ApplicationSettingsService
             .ToList();
 
         return JsonSerializer.Serialize(normalized);
+    }
+
+    private void ValidateProviderReasoningChoices(
+        string modelId,
+        string provider,
+        string? reasoningChoicesJson)
+    {
+        if (!string.Equals(provider, "anthropic", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(reasoningChoicesJson))
+        {
+            return;
+        }
+
+        var choices = JsonSerializer.Deserialize<List<string>>(reasoningChoicesJson) ?? [];
+        if (choices.Count == 0)
+        {
+            return;
+        }
+
+        var config = new ProviderConfigurationResolver(_configuration).GetAnthropicConfig();
+        foreach (var choice in choices)
+        {
+            if (string.Equals(choice, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var budget = config.ThinkingBudgets.ForEffort(choice);
+            if (!budget.HasValue)
+            {
+                throw new InvalidOperationException(
+                    $"Anthropic model '{modelId}' declares thinking choice '{choice}', but {GetAnthropicBudgetSettingName(choice)} is not configured.");
+            }
+
+            if (budget.Value < 1024)
+            {
+                throw new InvalidOperationException(
+                    $"Anthropic thinking budget for choice '{choice}' must be at least 1024 tokens.");
+            }
+
+            if (budget.Value >= config.DefaultMaxTokens)
+            {
+                throw new InvalidOperationException(
+                    $"Anthropic thinking budget for choice '{choice}' must be less than Anthropic:DefaultMaxTokens.");
+            }
+        }
+    }
+
+    private static string GetAnthropicBudgetSettingName(string choice)
+    {
+        return choice.Trim().ToLowerInvariant() switch
+        {
+            "minimal" => "Anthropic:ThinkingBudgetMinimal",
+            "low" => "Anthropic:ThinkingBudgetLow",
+            "medium" => "Anthropic:ThinkingBudgetMedium",
+            "high" => "Anthropic:ThinkingBudgetHigh",
+            _ => $"an Anthropic thinking budget setting for '{choice}'"
+        };
     }
 
     private static SettingsModelDto ToSettingsModelDto(Model model)

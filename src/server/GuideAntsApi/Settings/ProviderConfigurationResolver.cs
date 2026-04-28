@@ -30,7 +30,7 @@ public interface IProviderConfigurationResolver
     HuggingFaceRouterOptions GetHuggingFaceOptions();
 
     AnthropicConfig GetAnthropicConfig();
-    string? ResolveByLegacyVariableName(string variableName);
+    string? ResolveConfigurationVariableName(string variableName);
 }
 
 public sealed class ProviderConfigurationResolver(IConfiguration configuration) : IProviderConfigurationResolver
@@ -41,10 +41,10 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
     {
         return new AzureOpenAiConfig
         {
-            ResourceName = GetValue("AzureOpenAI:Resource", "AZURE_OPENAI_RESOURCE"),
-            ApiKey = GetValue("AzureOpenAI:ApiKey", "AZURE_OPENAI_API_KEY"),
-            ApiVersion = GetValue("AzureOpenAI:ApiVersion", "AZURE_OPENAI_API_VERSION"),
-            DeploymentId = GetValue("AzureOpenAI:Deployment", "AZURE_OPENAI_DEPLOYMENT")
+            ResourceName = GetValue("AzureOpenAI:Resource"),
+            ApiKey = GetValue("AzureOpenAI:ApiKey"),
+            ApiVersion = GetValue("AzureOpenAI:ApiVersion"),
+            DeploymentId = GetValue("AzureOpenAI:Deployment")
         };
     }
 
@@ -78,7 +78,7 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
     {
         return new HuggingFaceChatConfig
         {
-            Token = GetValue("HuggingFace:Token", "HF_TOKEN") ?? string.Empty,
+            Token = GetValue("HuggingFace:Token") ?? string.Empty,
             RouterBaseUrl = GetValue("HuggingFace:RouterBaseUrl") ?? "https://router.huggingface.co/v1"
         };
     }
@@ -114,7 +114,7 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
     {
         return new HuggingFaceRouterOptions
         {
-            Token = GetValue("HuggingFace:Token", "HF_TOKEN") ?? string.Empty,
+            Token = GetValue("HuggingFace:Token") ?? string.Empty,
             RouterBaseUrl = GetValue("HuggingFace:RouterBaseUrl") ?? "https://router.huggingface.co/v1"
         };
     }
@@ -123,43 +123,27 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
     {
         return new AnthropicConfig
         {
-            BaseUrl = GetValue("Anthropic:BaseUrl", "ANTHROPIC_BASE_URL"),
-            ApiKey = GetValue("Anthropic:ApiKey", "ANTHROPIC_API_KEY"),
-            AuthToken = GetValue("Anthropic:AuthToken", "ANTHROPIC_AUTH_TOKEN"),
-            DefaultModel = GetValue("Anthropic:DefaultModel", "ANTHROPIC_DEFAULT_MODEL"),
-            DefaultMaxTokens = GetIntValue(64000, "Anthropic:DefaultMaxTokens", "ANTHROPIC_DEFAULT_MAX_TOKENS"),
+            BaseUrl = GetValue("Anthropic:BaseUrl"),
+            ApiKey = GetValue("Anthropic:ApiKey"),
+            AuthToken = GetValue("Anthropic:AuthToken"),
+            DefaultModel = GetValue("Anthropic:DefaultModel"),
+            DefaultMaxTokens = GetIntValue(64000, "Anthropic:DefaultMaxTokens"),
             ThinkingBudgets = new AnthropicThinkingBudgets(
-                Minimal: GetNullableIntValue("Anthropic:ThinkingBudgetMinimal", "ANTHROPIC_THINKING_BUDGET_MINIMAL"),
-                Low: GetNullableIntValue("Anthropic:ThinkingBudgetLow", "ANTHROPIC_THINKING_BUDGET_LOW"),
-                Medium: GetNullableIntValue("Anthropic:ThinkingBudgetMedium", "ANTHROPIC_THINKING_BUDGET_MEDIUM"),
-                High: GetNullableIntValue("Anthropic:ThinkingBudgetHigh", "ANTHROPIC_THINKING_BUDGET_HIGH"))
+                Minimal: GetNullableIntValue("Anthropic:ThinkingBudgetMinimal"),
+                Low: GetNullableIntValue("Anthropic:ThinkingBudgetLow"),
+                Medium: GetNullableIntValue("Anthropic:ThinkingBudgetMedium"),
+                High: GetNullableIntValue("Anthropic:ThinkingBudgetHigh"))
         };
     }
 
-    public string? ResolveByLegacyVariableName(string variableName)
+    public string? ResolveConfigurationVariableName(string variableName)
     {
         if (string.IsNullOrWhiteSpace(variableName))
         {
             return null;
         }
 
-        return variableName.ToUpperInvariant() switch
-        {
-            "AZURE_OPENAI_RESOURCE" => GetValue("AzureOpenAI:Resource", "AZURE_OPENAI_RESOURCE"),
-            "AZURE_OPENAI_API_KEY" => GetValue("AzureOpenAI:ApiKey", "AZURE_OPENAI_API_KEY"),
-            "AZURE_OPENAI_API_VERSION" => GetValue("AzureOpenAI:ApiVersion", "AZURE_OPENAI_API_VERSION"),
-            "AZURE_OPENAI_DEPLOYMENT" => GetValue("AzureOpenAI:Deployment", "AZURE_OPENAI_DEPLOYMENT"),
-            "ANTHROPIC_BASE_URL" => GetValue("Anthropic:BaseUrl", "ANTHROPIC_BASE_URL"),
-            "ANTHROPIC_API_KEY" => GetValue("Anthropic:ApiKey", "ANTHROPIC_API_KEY"),
-            "ANTHROPIC_AUTH_TOKEN" => GetValue("Anthropic:AuthToken", "ANTHROPIC_AUTH_TOKEN"),
-            "ANTHROPIC_DEFAULT_MODEL" => GetValue("Anthropic:DefaultModel", "ANTHROPIC_DEFAULT_MODEL"),
-            "ANTHROPIC_DEFAULT_MAX_TOKENS" => GetValue("Anthropic:DefaultMaxTokens", "ANTHROPIC_DEFAULT_MAX_TOKENS"),
-            "ANTHROPIC_THINKING_BUDGET_MINIMAL" => GetValue("Anthropic:ThinkingBudgetMinimal", "ANTHROPIC_THINKING_BUDGET_MINIMAL"),
-            "ANTHROPIC_THINKING_BUDGET_LOW" => GetValue("Anthropic:ThinkingBudgetLow", "ANTHROPIC_THINKING_BUDGET_LOW"),
-            "ANTHROPIC_THINKING_BUDGET_MEDIUM" => GetValue("Anthropic:ThinkingBudgetMedium", "ANTHROPIC_THINKING_BUDGET_MEDIUM"),
-            "ANTHROPIC_THINKING_BUDGET_HIGH" => GetValue("Anthropic:ThinkingBudgetHigh", "ANTHROPIC_THINKING_BUDGET_HIGH"),
-            _ => _configuration[variableName]
-        };
+        return _configuration[variableName];
     }
 
     private string? GetValue(params string[] keys)

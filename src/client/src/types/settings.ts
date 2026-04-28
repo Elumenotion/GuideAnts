@@ -516,12 +516,6 @@ export interface HuggingFaceRepositoryFileDto {
 
 /**
  * Wire shape for <c>GET /api/settings/huggingface/repositories/{owner}/{repo}/files</c>.
- *
- * The legacy <c>/api/settings/llama/huggingface/...</c> alias still serves
- * the same payload for one release so the llama-cpp wizard does not break
- * mid-flight, but all new callers should target the neutral path and pass
- * an optional <c>X-Service-Origin</c> header via
- * <c>api.settings.browseHuggingFaceRepository(repo, {{ serviceOrigin }})</c>.
  */
 export interface HuggingFaceRepositoryListingDto {
   repository: string;

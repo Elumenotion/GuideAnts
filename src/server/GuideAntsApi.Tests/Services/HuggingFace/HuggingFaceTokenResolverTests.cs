@@ -51,9 +51,8 @@ public sealed class HuggingFaceTokenResolverTests
     public void Resolve_DoesNotReadFromLegacyLlamaCppHfToken()
     {
         // R-7.4 (rewritten): there is ONE token key, HuggingFace:Token. The
-        // legacy LlamaCpp:HfToken slot no longer exists as a source. Anyone
-        // with an old DB row picks up the new value via one-shot bootstrap
-        // seeding; the runtime resolver never falls through to the old key.
+        // LlamaCpp:HfToken slot no longer exists as a source; the runtime
+        // resolver never falls through to the old key.
         var configuration = BuildConfig(new Dictionary<string, string?>
         {
             ["LlamaCpp:HfToken"] = "stale_value",
@@ -66,11 +65,9 @@ public sealed class HuggingFaceTokenResolverTests
     [TestMethod]
     public void Resolve_DoesNotReadFromHfTokenEnvKey()
     {
-        // HF_TOKEN is ONLY consulted by the bootstrap alias chain in
-        // SettingsSectionRegistry when first populating the DB row. The
-        // runtime resolver never reads it directly — that would be a
-        // silent secondary source and is exactly the pattern the single-
-        // token contract forbids.
+        // HF_TOKEN is not a runtime source. Reading it directly would be a
+        // silent secondary source and is exactly the pattern the single-token
+        // contract forbids.
         var configuration = BuildConfig(new Dictionary<string, string?>
         {
             ["HF_TOKEN"] = "env_value",

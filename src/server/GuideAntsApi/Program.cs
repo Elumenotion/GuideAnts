@@ -184,7 +184,7 @@ public class Program
 
         // Resolve auth values from live configuration first, then env fallback.
         var providerConfigResolver = app.Services.GetRequiredService<IProviderConfigurationResolver>();
-        ToolCaller.LegacyVariableResolver = providerConfigResolver.ResolveByLegacyVariableName;
+        ToolCaller.ConfigurationVariableResolver = providerConfigResolver.ResolveConfigurationVariableName;
 
         // Set environment variables from configuration - CRITICAL for chat functionality
         // This ensures that Azure OpenAI and other API configurations are available as environment variables

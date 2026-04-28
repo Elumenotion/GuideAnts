@@ -1739,8 +1739,19 @@ var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.co
             }
         }
 
+        var requestedModelDeploymentId = modelDeploymentId;
         var resolvedModel = _chatModelResolver.Resolve(modelDeploymentId);
         modelDeploymentId = resolvedModel.ModelId;
+        _logger.LogInformation(
+            "Conversation chat model resolved. ConversationId={ConversationId}, AssistantName={AssistantName}, RequestedModelId={RequestedModelId}, ResolvedModelId={ResolvedModelId}, ReferenceKind={ReferenceKind}, OverrideTemperature={OverrideTemperature}, OverrideTopP={OverrideTopP}, OverrideReasoningEffort={OverrideReasoningEffort}",
+            conversationId,
+            assistantName,
+            string.IsNullOrWhiteSpace(requestedModelDeploymentId) ? "(unset)" : requestedModelDeploymentId,
+            resolvedModel.ModelId,
+            resolvedModel.ReferenceKind,
+            resolvedModel.OverrideTemperature,
+            resolvedModel.OverrideTopP,
+            resolvedModel.OverrideReasoningEffort ?? "(null)");
 
         var previousMessages = await PrepareMessagesForAssistantAsync(conv, assistantName, dbUser.Id, ct);
 
