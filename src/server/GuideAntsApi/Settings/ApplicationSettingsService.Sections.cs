@@ -157,6 +157,11 @@ public sealed partial class ApplicationSettingsService
         JsonObject payload,
         CancellationToken cancellationToken)
     {
+        if (string.Equals(sectionName, SettingsSectionRegistry.TelemetrySectionName, StringComparison.Ordinal))
+        {
+            return ValidateTelemetryPayload(payload);
+        }
+
         if (!string.Equals(sectionName, "ChatDefaults", StringComparison.Ordinal))
         {
             return [];
@@ -197,6 +202,35 @@ public sealed partial class ApplicationSettingsService
         }
 
         return [];
+    }
+
+    private static IReadOnlyList<string> ValidateTelemetryPayload(JsonObject payload)
+    {
+        string[] allowedLevels = ["Trace", "Debug", "Information", "Warning", "Error", "Critical", "None"];
+        var allowed = allowedLevels.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var errors = new List<string>();
+        foreach (var property in SettingsSectionRegistry.TelemetryProperties)
+        {
+            if (!payload.TryGetPropertyValue(property.Name, out var node) || node is null)
+            {
+                continue;
+            }
+
+            var value = ApplicationSettingsJson.NodeToString(node)?.Trim();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                errors.Add($"{property.Name} must be one of: {string.Join(", ", allowedLevels)}.");
+                continue;
+            }
+
+            if (!allowed.Contains(value))
+            {
+                errors.Add($"{property.Name} has invalid log level '{value}'. Allowed values: {string.Join(", ", allowedLevels)}.");
+            }
+        }
+
+        return errors;
     }
 
     private static IReadOnlyList<string> GetUnsupportedSectionFields(

@@ -1,4 +1,11 @@
-export type SettingsTab = 'overview' | 'services' | 'connections' | 'models-runtime' | 'infrastructure';
+export type SettingsTab =
+  | 'overview'
+  | 'personalization'
+  | 'telemetry'
+  | 'services'
+  | 'connections'
+  | 'models-runtime'
+  | 'infrastructure';
 
 /**
  * Sub-tabs rendered inside the Models & Runtime workspace. Accepted as a deep-link

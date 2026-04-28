@@ -5,10 +5,6 @@ using GuideAntsApi.Endpoints;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
-using OpenTelemetry.Metrics;
-using Azure.Monitor.OpenTelemetry.AspNetCore;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Settings;
 using Microsoft.Extensions.Logging;
@@ -63,7 +59,7 @@ public class Program
 
         // Connection string for catalog creation + migrations. DB-backed settings are registered only after
         // EnsureCatalogAndMigrate so no configuration access triggers ApplicationSettingsConfigurationProvider.Load
-        // before dbo.ApplicationSettings exists (see OpenTelemetry block below).
+        // before dbo.ApplicationSettings exists.
         var defaultConnectionString = bootstrapConfiguration.GetConnectionString("DefaultConnection");
 
         // Only enable console tracing in development to reduce log ingestion costs
@@ -116,51 +112,6 @@ public class Program
                 new SettingsSectionRegistry(),
                 builder.Environment.ContentRootPath,
                 settingsSecrets));
-        }
-
-        // Application Insights via Azure Monitor OpenTelemetry (optional in dev)
-        var aiConn = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]
-                    ?? builder.Configuration["ApplicationInsights:ConnectionString"];
-
-        var otelBuilder = builder.Services.AddOpenTelemetry()
-            .ConfigureResource(r => r.AddService(serviceName: "GuideAntsApi", serviceVersion: typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0"))
-            .WithTracing(tracing => tracing
-                .AddAspNetCoreInstrumentation(options =>
-                {
-                    // Filter out health check and static file requests to reduce noise
-                    options.Filter = (httpContext) =>
-                    {
-                        var path = httpContext.Request.Path.Value?.ToLowerInvariant();
-                        return !string.IsNullOrEmpty(path) && 
-                               !path.Contains("/health") && 
-                               !path.Contains("/favicon") &&
-                               !path.Contains(".css") &&
-                               !path.Contains(".js") &&
-                               !path.Contains(".png") &&
-                               !path.Contains(".jpg");
-                    };
-                })
-                .AddHttpClientInstrumentation(options =>
-                {
-                    // Filter out frequent internal HTTP calls
-                    options.FilterHttpRequestMessage = (httpRequestMessage) =>
-                    {
-                        var uri = httpRequestMessage.RequestUri?.ToString().ToLowerInvariant();
-                        return !string.IsNullOrEmpty(uri) && !uri.Contains("localhost");
-                    };
-                }))
-            .WithMetrics(metrics => metrics
-                .AddAspNetCoreInstrumentation()
-                .AddHttpClientInstrumentation());
-
-        if (!string.IsNullOrWhiteSpace(aiConn))
-        {
-            otelBuilder.UseAzureMonitor(o => 
-            { 
-                o.ConnectionString = aiConn;
-                // Ultra-aggressive sampling to reduce data ingestion by 99%
-                o.SamplingRatio = 0.01f;
-            });
         }
 
         // Increase max request body size to allow larger file uploads (e.g., audio/video)

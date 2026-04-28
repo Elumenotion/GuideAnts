@@ -183,6 +183,8 @@ public interface ISettingsSectionRegistry
 
 public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
 {
+    public const string TelemetrySectionName = "Telemetry";
+
     /// <summary>
     /// Builds <c>{"Containers":{ "containerId": {"BaseUrl":"..."} }}</c> for DB seeding.
     /// Starts from in-code defaults (local dev), then overlays <c>ServiceRouting:Containers:*:BaseUrl</c>
@@ -217,8 +219,63 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         ("plantuml", "http://localhost:8111"),
     ];
 
+    private static JsonObject BuildTelemetryBootstrapPayload(IConfiguration _)
+    {
+        var payload = new JsonObject();
+        foreach (var property in TelemetryProperties)
+        {
+            payload[property.Name] = JsonValue.Create(property.DefaultValue?.ToString());
+        }
+
+        return payload;
+    }
+
+    public static readonly IReadOnlyList<SettingsPropertyDefinition> TelemetryProperties =
+    [
+        new("Default", "Logging:LogLevel:Default", DefaultValue: "Warning"),
+        new("MicrosoftAspNetCore", "Logging:LogLevel:Microsoft.AspNetCore", DefaultValue: "Warning"),
+        new("MicrosoftEntityFrameworkCore", "Logging:LogLevel:Microsoft.EntityFrameworkCore", DefaultValue: "Warning"),
+        new("MicrosoftEntityFrameworkCoreDatabaseCommand", "Logging:LogLevel:Microsoft.EntityFrameworkCore.Database.Command", DefaultValue: "Warning"),
+        new("MicrosoftEntityFrameworkCoreQuery", "Logging:LogLevel:Microsoft.EntityFrameworkCore.Query", DefaultValue: "Warning"),
+        new("Program", "Logging:LogLevel:Program", DefaultValue: "Information"),
+        new("GuideAntsApi", "Logging:LogLevel:GuideAntsApi", DefaultValue: "Information"),
+        new("GuideAntsApiBackgroundJobs", "Logging:LogLevel:GuideAntsApi.BackgroundJobs", DefaultValue: "Information"),
+        new("GuideAntsApiBackgroundJobHandlers", "Logging:LogLevel:GuideAntsApi.BackgroundJobs.Jobs", DefaultValue: "Information"),
+        new("DocumentIntelligenceService", "Logging:LogLevel:GuideAntsApi.BackgroundJobs.Services.DocumentIntelligenceService", DefaultValue: "Information"),
+        new("EmbeddingServices", "Logging:LogLevel:GuideAntsApi.BackgroundJobs.Services.Embeddings", DefaultValue: "Information"),
+        new("IndexingServices", "Logging:LogLevel:GuideAntsApi.BackgroundJobs.Services.Indexing", DefaultValue: "Information"),
+        new("SearchServices", "Logging:LogLevel:GuideAntsApi.BackgroundJobs.Services.Search", DefaultValue: "Information"),
+        new("GuideAntsApiServicesRouting", "Logging:LogLevel:GuideAntsApi.Services.Routing", DefaultValue: "Information"),
+        new("RoutingChatCompletionClientFactory", "Logging:LogLevel:GuideAntsApi.Services.Conversations.RoutingChatCompletionClientFactory", DefaultValue: "Information"),
+        new("GuideAntsApiServicesLlamaCpp", "Logging:LogLevel:GuideAntsApi.Services.LlamaCpp", DefaultValue: "Information"),
+        new("InfrastructureProbeService", "Logging:LogLevel:GuideAntsApi.Services.Infrastructure.InfrastructureProbeService", DefaultValue: "Warning"),
+        new("SpeechTranscriptionService", "Logging:LogLevel:GuideAntsApi.Services.Components.SpeechTranscriptionService", DefaultValue: "Information"),
+        new("SpeechSynthesisService", "Logging:LogLevel:GuideAntsApi.Services.Components.SpeechSynthesisService", DefaultValue: "Information"),
+        new("VideoAudioExtractionService", "Logging:LogLevel:GuideAntsApi.Services.Components.VideoAudioExtractionService", DefaultValue: "Information"),
+        new("NotebookImageService", "Logging:LogLevel:GuideAntsApi.Services.NotebookImageService", DefaultValue: "Information"),
+        new("SearXngWebSearchService", "Logging:LogLevel:GuideAntsApi.Services.SearXngWebSearchService", DefaultValue: "Information"),
+        new("SearXngBrowserRenderingClient", "Logging:LogLevel:GuideAntsApi.Services.SearXngBrowserRenderingClient", DefaultValue: "Warning"),
+        new("WebScrapingService", "Logging:LogLevel:GuideAntsApi.Services.WebScrapingService", DefaultValue: "Information"),
+        new("StoragePathResolver", "Logging:LogLevel:GuideAntsApi.Services.StoragePathResolver", DefaultValue: "Warning"),
+        new("NotebookFileService", "Logging:LogLevel:GuideAntsApi.Services.Components.NotebookFileService", DefaultValue: "Warning"),
+        new("NotebookFileSyncService", "Logging:LogLevel:GuideAntsApi.Services.Components.NotebookFileSyncService", DefaultValue: "Warning"),
+        new("ContentFileService", "Logging:LogLevel:GuideAntsApi.Services.Components.ContentFileService", DefaultValue: "Warning"),
+        new("GuideAntsUsage", "Logging:LogLevel:GuideAnts.Usage", DefaultValue: "Warning"),
+        new("AntRunner", "Logging:LogLevel:AntRunner", DefaultValue: "Warning"),
+        new("AntRunnerChat", "Logging:LogLevel:AntRunner.Chat", DefaultValue: "Warning"),
+        new("AntRunnerChatLlamaCpp", "Logging:LogLevel:AntRunner.Chat.LlamaCpp", DefaultValue: "Warning")
+    ];
+
     public IReadOnlyList<SettingsSectionDefinition> All { get; } =
     [
+        new()
+        {
+            SectionName = TelemetrySectionName,
+            DisplayName = "Telemetry",
+            DisplayOrder = 5,
+            BootstrapPayloadFactory = BuildTelemetryBootstrapPayload,
+            Properties = TelemetryProperties
+        },
         new()
         {
             SectionName = "AzureDocumentIntelligence",

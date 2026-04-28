@@ -24,15 +24,8 @@ services:
 
   # GuideAnts AI: consolidated llama-server + ScriptExecutionAgent
   guideants-ai:
-    image: ${GA_AI_CUDA_IMAGE:-ghcr.io/elumenotion/guideants-ai-cuda13:latest}
+    image: ${GA_AI_CPU_IMAGE:-ghcr.io/elumenotion/guideants-ai-cpu:latest}
     container_name: guideants-ai
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     ports:
       - "8110:80"      # gateway (/sandbox, /llama-cpp, /asr, /sd, /tts, /emb)
     shm_size: "8gb"
@@ -62,7 +55,6 @@ services:
       - GA_LLAMA_THREADS=16
       - GA_LLAMA_PARALLEL=5
       - GA_LLAMA_CACHE_RAM=8192
-      - GA_LLAMA_GPU_LAYERS=999
       - GA_LLAMA_KV_UNIFIED=1
       - GA_LLAMA_JINJA=1
       - GA_LLAMA_CONT_BATCH=1
@@ -103,8 +95,7 @@ services:
       - GA_EMB_MODEL_DIR=/models-local/emb
       - GA_EMB_DEFAULT_MODEL_PATH=harrier-oss-v1-0.6b
       - GA_EMB_DEFAULT_MODEL_ID=microsoft/harrier-oss-v1-0.6b
-      - GA_EMB_DEVICE=${GA_EMB_DEVICE:-cuda}
-      - GA_EMB_TARGET_DEVICES=${GA_EMB_TARGET_DEVICES:-cuda:0,cuda:1}
+      - GA_EMB_DEVICE=${GA_EMB_DEVICE:-cpu}
       - GA_EMB_FIX_MISTRAL_REGEX=${GA_EMB_FIX_MISTRAL_REGEX:-1}
       - GA_EMB_AUTO_LOAD_ON_STARTUP=${GA_EMB_AUTO_LOAD_ON_STARTUP:-1}
       - GA_EMB_WARMUP_ON_LOAD=${GA_EMB_WARMUP_ON_LOAD:-1}
@@ -137,24 +128,15 @@ services:
       - GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP=${GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP:-1}
       - GA_SD_WAIT_FOR_READY_ON_STARTUP=${GA_SD_WAIT_FOR_READY_ON_STARTUP:-0}
       - GA_SD_READY_TIMEOUT_SECONDS=${GA_SD_READY_TIMEOUT_SECONDS:-1800}
-      - GA_SD_CUDA_VISIBLE_DEVICES=1
     networks:
       - guideants-network
     restart: unless-stopped
 
-
   docling-serve:
-    image: ${DOCLING_SERVE_CUDA_IMAGE:-quay.io/docling-project/docling-serve-cu130:v1.16.1}
+    image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.16.1}
     container_name: docling-serve
     environment:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     ports:
       - "5001:5001"
     networks:
@@ -162,6 +144,7 @@ services:
         aliases:
           - docling-serve
     restart: unless-stopped
+
 
   # Unified API + browser UI service (single image for web app entrypoint)
   guideants-webapi-ui:

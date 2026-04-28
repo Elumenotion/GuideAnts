@@ -1,5 +1,6 @@
 import { ProjectLink, ProjectDetailsDto, ContentFileDto, ProjectFolderDto, CreateFolderDto, UpdateFolderDto, FolderTreeDto, MoveFolderDto, MoveFileDto, ProjectNotebook, NotebookTemplateDto, NotebookTemplateSummaryDto, UpdateNotebookDto } from '../types/project';
 import { UsageSummaryDto, UsageDetailsQuery, PagedResultDto, UsageEventDto, UsageBucket, ProjectUsageSummaryDto, UsageBreakdownWithCategoriesDto } from '../types/usage';
+import type { UpdateCurrentUserRequest, UserDto } from '../types/user';
 import { getCachedFile, cacheFile } from '../utils/fileCache';
 import { FileLineageEvent } from '../types/fileLineage';
 import {
@@ -314,7 +315,13 @@ export const api = {
         }),
     },
     users: {
-        getUserById: (userId: string) => callApi<{ id: string; name: string; email: string }>(`/users/${userId}`),
+        getCurrent: () => callApi<UserDto>('/users/current'),
+        updatePersonalization: (request: UpdateCurrentUserRequest) =>
+            callApi<UserDto>('/users/current/personalization', {
+                method: 'PUT',
+                body: JSON.stringify(request),
+            }),
+        getUserById: (userId: string) => callApi<UserDto>(`/users/${userId}`),
     },
     utils: {
         getAuthenticatedUrl: async (url: string) => {

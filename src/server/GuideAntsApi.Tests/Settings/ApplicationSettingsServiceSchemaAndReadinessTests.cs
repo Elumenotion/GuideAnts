@@ -1,6 +1,7 @@
 using FluentAssertions;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using Moq;
+using System.Text.Json.Nodes;
 
 namespace GuideAntsApi.Tests.Settings;
 
@@ -33,6 +35,10 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         schema.Sections.Should().NotContain(section => string.Equals(section.SectionName, "Search", StringComparison.Ordinal));
         schema.Sections.Should().Contain(section =>
             string.Equals(section.SectionName, "ChatDefaults", StringComparison.Ordinal));
+        schema.Sections.Should().Contain(section =>
+            string.Equals(section.SectionName, SettingsSectionRegistry.TelemetrySectionName, StringComparison.Ordinal)
+            && section.Properties.Any(property => property.Name == "GuideAntsApiBackgroundJobs")
+            && section.Properties.All(property => property.ValueType == "string"));
 
         schema.Services.Should().OnlyContain(serviceDefinition =>
             serviceDefinition.ProviderIds.All(providerId =>
@@ -73,6 +79,78 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         schema.Sections.Should().Contain(section =>
             string.Equals(section.SectionName, "HuggingFace", StringComparison.Ordinal)
             && section.Properties.Any(property => property.Name == "Token" && property.IsRequired));
+    }
+
+    [TestMethod]
+    public async Task BootstrapAsync_CreatesTelemetrySection_WithConservativeDefaults()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Logging:LogLevel:Default"] = "Error",
+            ["Logging:LogLevel:GuideAntsApi.BackgroundJobs"] = "Error"
+        });
+        var service = CreateService(db, configuration);
+
+        await service.BootstrapAsync(configuration);
+
+        var row = await db.ApplicationSettings
+            .AsNoTracking()
+            .SingleAsync(x => x.SectionName == SettingsSectionRegistry.TelemetrySectionName);
+        var payload = ApplicationSettingsJson.DeserializeObject(row.JsonValue);
+
+        payload["Default"]!.GetValue<string>().Should().Be("Warning");
+        payload["GuideAntsApiBackgroundJobs"]!.GetValue<string>().Should().Be("Information");
+        payload["AntRunnerChat"]!.GetValue<string>().Should().Be("Warning");
+    }
+
+    [TestMethod]
+    public async Task UpdateSectionAsync_Telemetry_RejectsInvalidLogLevel()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration(new Dictionary<string, string?>());
+        var service = CreateService(db, configuration);
+
+        var section = await service.GetSectionAsync(SettingsSectionRegistry.TelemetrySectionName);
+        section.Should().NotBeNull();
+
+        var result = await service.UpdateSectionAsync(
+            SettingsSectionRegistry.TelemetrySectionName,
+            new UpdateSettingsSectionRequest(
+                section!.RowVersion,
+                new JsonObject
+                {
+                    ["GuideAntsApiBackgroundJobs"] = "Chatty"
+                }));
+
+        result.ValidationErrors.Should().Contain(error =>
+            error.Contains("GuideAntsApiBackgroundJobs", StringComparison.Ordinal)
+            && error.Contains("Chatty", StringComparison.Ordinal));
+        result.ConcurrencyConflict.Should().BeFalse();
+        result.Section.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task UpdateSectionAsync_Telemetry_ReturnsConcurrencyConflict_ForStaleRowVersion()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration(new Dictionary<string, string?>());
+        var service = CreateService(db, configuration);
+
+        await service.GetSectionAsync(SettingsSectionRegistry.TelemetrySectionName);
+
+        var result = await service.UpdateSectionAsync(
+            SettingsSectionRegistry.TelemetrySectionName,
+            new UpdateSettingsSectionRequest(
+                "stale-row-version",
+                new JsonObject
+                {
+                    ["GuideAntsApiBackgroundJobs"] = "Debug"
+                }));
+
+        result.ConcurrencyConflict.Should().BeTrue();
+        result.ValidationErrors.Should().BeEmpty();
+        result.Section.Should().BeNull();
     }
 
     [TestMethod]

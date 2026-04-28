@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { UserDto } from '../types/user';
 
 interface UserInfo {
   id?: string;
@@ -28,18 +29,18 @@ class UserService {
       return this.currentUser;
     }
 
-    this.currentUser = { name: 'OSS Lite User', email: 'oss-lite-user' };
+    const user = await api.users.getCurrent();
+    this.currentUser = this.toUserInfo(user);
+    this.userCache.set(user.id, this.currentUser);
     return this.currentUser;
   }
 
   /**
    * Check if a user ID belongs to the current user
    */
-  public async isCurrentUser(_userId: string): Promise<boolean> {
-    // For now, we can't easily determine if a database user ID belongs to current user
-    // without additional server endpoint. This will be false for most cases until 
-    // we implement proper current user ID lookup
-    return false;
+  public async isCurrentUser(userId: string): Promise<boolean> {
+    const current = await this.getCurrentUser();
+    return Boolean(current?.id && current.id === userId);
   }
 
   /**
@@ -100,6 +101,12 @@ class UserService {
     this.currentUser = null;
   }
 
+  public setCurrentUser(user: UserDto): void {
+    const userInfo = this.toUserInfo(user);
+    this.currentUser = userInfo;
+    this.userCache.set(user.id, userInfo);
+  }
+
   /**
    * Extract initials from user info
    */
@@ -124,6 +131,14 @@ class UserService {
     }
 
     return 'U';
+  }
+
+  private toUserInfo(user: UserDto): UserInfo {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+    };
   }
 }
 

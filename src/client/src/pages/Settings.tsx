@@ -19,8 +19,10 @@ import { ConnectionsTab } from './settings/components/ConnectionsTab';
 import { InfrastructureTab } from './settings/components/InfrastructureTab';
 import { ModelsRuntimeWorkspace } from './settings/components/ModelsRuntimeWorkspace';
 import { OverviewTab } from './settings/components/OverviewTab';
+import { PersonalizationTab } from './settings/components/PersonalizationTab';
 import { ServicesTab, type ServiceKey } from './settings/components/ServicesTab';
 import { SettingsTabNavigation } from './settings/components/SettingsTabNavigation';
+import { TelemetryTab } from './settings/components/TelemetryTab';
 import { AddModelWizard } from './settings/components/catalog/AddModelWizard';
 import {
   ActiveAddOperationState,
@@ -626,6 +628,14 @@ export default function Settings() {
       );
     }
 
+    if (activeTab === 'personalization') {
+      return <PersonalizationTab />;
+    }
+
+    if (activeTab === 'telemetry') {
+      return <TelemetryTab />;
+    }
+
     if (activeTab === 'connections') {
       return (
         <ConnectionsTab
@@ -751,7 +761,7 @@ export default function Settings() {
             <div className="min-w-0">
               <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
               <p className="text-sm text-gray-600">
-                Manage service-specific provider settings, provider connections, runtime infrastructure, and models &amp; runtime.
+                Manage service-specific provider settings, provider connections, telemetry, runtime infrastructure, and models &amp; runtime.
               </p>
             </div>
           </div>

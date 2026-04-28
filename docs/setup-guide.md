@@ -19,8 +19,8 @@ six services:
 | Service | Image / source | Role |
 |---------|----------------|------|
 | `mssql-express` | `${GA_MSSQL_IMAGE:-mssql2025-express-fts}` | SQL Server database. |
-| `guideants-ai` | `${GA_AI_IMAGE}` | Consolidated GPU service hosting llama.cpp + Script Execution Agent + local ASR / TTS / Stable Diffusion / embeddings behind a single gateway on port `8110`. |
-| `docling-serve-{cpu,cuda}` | `quay.io/docling-project/docling-serve*` | Local document intelligence (Markdown extraction). |
+| `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13}:latest` | Consolidated local AI service hosting llama.cpp + Script Execution Agent + local ASR / TTS / Stable Diffusion / embeddings behind a single gateway on port `8110`. |
+| `docling-serve` | CPU/CUDA compose file selects `quay.io/docling-project/docling-serve*` | Local document intelligence (Markdown extraction). |
 | `guideants-webapi-ui` | `${GA_WEBAPI_UI_IMAGE}` | Web API + bundled browser UI. Published on `http://localhost:5107`. |
 | `plantuml` | `plantuml-1.2025.2` | Diagram rendering. |
 | `searxng` | `docker.io/searxng/searxng:latest` | Meta-search backend used by agents. |
@@ -56,8 +56,7 @@ the full list of runtime-owned keys.
   `--gpus all` works. If you are onboarding cloud-only (no local AI), this
   requirement is optional until you enable local providers.
 - Docker Desktop (Windows) or Docker Engine 24+ with the Compose plugin.
-- PowerShell 7+ on Windows (the `docker/start-stack.ps1` helper and the
-  `docker/llama/run/*.ps1` scripts are PowerShell).
+- PowerShell 7+ on Windows for the `docker/llama/run/*.ps1` helper scripts.
 - ~60 GB of free disk for local model artifacts (Qwen3.5/3.6 quants,
   VibeVoice TTS, FLUX-2 image weights, Harrier embeddings, ASR model).
   Add headroom proportional to how many local llama models you plan to
@@ -68,7 +67,8 @@ the full list of runtime-owned keys.
 The compose file references two images you must build or pull ahead of
 time (they are not on a public registry):
 
-- `${GA_AI_IMAGE}` — set in `docker/.env`. Build instructions live in
+- `guideants-ai` — selected by `docker/docker-compose.yml` or
+  `docker/docker-compose.cpu.yml`. Build instructions live in
   [`docker/guideants-ai-build.md`](../docker/guideants-ai-build.md) and
   [`docker/build-processes.md`](../docker/build-processes.md).
 - `${GA_WEBAPI_UI_IMAGE}` — built from `docker/build/webapi-ui/Dockerfile`;
@@ -97,16 +97,19 @@ token override.
 Full precedence rules are in
 [`llama-model-download-and-runtime-management.md`](llama-model-download-and-runtime-management.md) §`HuggingFaceModelDownloadService`.
 
-## 3. Configure `docker/.env`
+## 3. Configure Compose
 
-`docker/.env` controls which images the compose stack runs and where on
-the host it mounts bind-mount volumes. Edit it before the first
-`start-stack.ps1`. Minimal example:
+Use one of the two explicit dev compose files:
+
+- `docker/docker-compose.yml` starts CUDA `guideants-ai` and CUDA Docling.
+- `docker/docker-compose.cpu.yml` starts CPU `guideants-ai` and CPU Docling.
+
+`docker/.env` is still used for shared bind-mount paths, database name,
+and the web API image tag. It no longer selects the Docling profile.
+Minimal example:
 
 ```dotenv
-GA_AI_IMAGE=guideants-ai:cuda13-26108.0925
 GA_WEBAPI_UI_IMAGE=guideants-webapi-ui:26108.1021
-DOCLING_PROFILE=docling-cuda
 DOCLING_SERVE_MAX_SYNC_WAIT=600
 
 # Host paths that really are bind mounts (content files + searxng
@@ -127,9 +130,7 @@ GA_DB_NAME=guideants-dev
 
 Notes:
 
-- `DOCLING_PROFILE` must be `docling-cpu` or `docling-cuda`. The
-  `start-stack.ps1` helper auto-picks CUDA when `GA_AI_IMAGE` includes
-  `:cuda`; set this explicitly if you want to pin the choice.
+- Choose CPU or CUDA with the compose file, not with a profile variable.
 - **Local AI model storage.** All local model artifacts (llama GGUFs,
   ASR, SD bundles, TTS weights, embeddings) live in a single
   Docker-managed named volume `ai_local_models` with per-service
@@ -162,25 +163,22 @@ Notes:
 From the repo root:
 
 ```powershell
-pwsh docker/start-stack.ps1
+docker compose -f docker/docker-compose.yml up -d
 ```
 
-The helper brings up `mssql-express`, `guideants-ai`,
-`docling-serve-{cpu|cuda}`, `guideants-webapi-ui`, `plantuml`, and
-`searxng`. It stops any previously-running docling profile before starting
-the selected one so you can flip CPU/CUDA without leftovers.
+This brings up `mssql-express`, `guideants-ai`, `docling-serve`,
+`guideants-webapi-ui`, `plantuml`, and `searxng`.
 
-Useful flags:
+For CPU-only local services, use:
 
-- `-DoclingProfile docling-cpu` / `-DoclingProfile docling-cuda` — pin the
-  docling variant instead of auto-detecting.
-- `-SkipWebApiUi`, `-SkipPlantUml`, `-SkipSearXng` — omit individual
-  services (for example when iterating on the web API from the IDE).
+```powershell
+docker compose -f docker/docker-compose.cpu.yml up -d
+```
 
 Verify everything came up:
 
 ```powershell
-docker compose --profile $env:DOCLING_PROFILE ps
+docker compose -f docker/docker-compose.yml ps
 ```
 
 All services should report `running` / `healthy`. The first boot takes a
@@ -465,7 +463,7 @@ To use local Docling for `DocumentIntelligence`, switch the service to the
 local provider and verify `LocalServiceHosts:DocumentIntelligenceBaseUrl`:
 
 1. **Connections** → confirm no cloud credentials are required (Docling
-   runs locally via the `docling-serve-{cpu|cuda}` container). No section
+   runs locally via the `docling-serve` container). No section
    needs editing.
 2. **Infrastructure** → verify
    `LocalServiceHosts:DocumentIntelligenceBaseUrl` resolves to
@@ -566,7 +564,7 @@ All four should return `200`.
 
 ```powershell
 Push-Location docker
-docker compose --profile docling-cuda down       # or docling-cpu
+docker compose -f docker-compose.yml down
 Pop-Location
 ```
 
@@ -577,8 +575,8 @@ untouched.
 
 ### Update images
 
-1. Edit `GA_AI_IMAGE` / `GA_WEBAPI_UI_IMAGE` in `docker/.env`.
-2. `pwsh docker/start-stack.ps1` — compose pulls the new tags and
+1. Edit `GA_WEBAPI_UI_IMAGE` in `docker/.env` if you need a different web API tag.
+2. `docker compose -f docker/docker-compose.yml up -d` — compose pulls the selected tags and
    recreates changed containers.
 3. On first boot of the updated web API, EF migrations run
    automatically. Existing DB state is preserved by migration idempotency
@@ -587,7 +585,9 @@ untouched.
 ### Reset local dev state
 
 ```powershell
-docker compose --profile docling-cuda down -v    # -v wipes named volumes
+Push-Location docker
+docker compose -f docker-compose.yml down -v
+Pop-Location
 ```
 
 This wipes SQL Server data and llama / ASR model volumes. Bind-mounted
@@ -689,10 +689,14 @@ retry.
 
 ### Docling probe fails / "connection refused" on port 5001
 
-The opposite docling profile (CPU vs CUDA) is running. `start-stack.ps1`
-normally stops the other profile before starting — run it again, or
-manually `docker compose --profile docling-cpu down` before launching
-`docling-cuda`.
+The wrong explicit stack is running, or an old profile-based Docling
+container is still present. Stop the old containers and start the matching
+compose file:
+
+```powershell
+docker rm -f docling-serve-cpu docling-serve-cuda
+docker compose -f docker/docker-compose.yml up -d
+```
 
 ## 12. Where to go next
 

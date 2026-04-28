@@ -156,7 +156,7 @@ public static class MemoryTools
         // Consolidate overlapping chunks from the same file
         var consolidatedResults = ConsolidateOverlappingChunks(results);
 
-        // Reduced logging to minimize Application Insights costs
+        // Keep no-result logging sparse; search tools can be high-volume.
         if (results.Count == 0)
         {
             _log?.LogWarning("Assistant files search returned no results for query: {Query}", query);
@@ -210,7 +210,7 @@ public static class MemoryTools
         // Consolidate overlapping chunks from the same file
         var consolidatedResults = ConsolidateOverlappingChunks(results);
 
-        // Reduced logging to minimize Application Insights costs
+        // Keep no-result logging sparse; search tools can be high-volume.
         if (results.Count == 0)
         {
             _log?.LogWarning("Hybrid search returned no results for query: {Query}", query);

@@ -20,10 +20,14 @@ public class ContextOptionsService : IContextOptionsService
     public async Task<Dictionary<string, string>> ResolveAsync(AssistantDefinition assistant, Guid projectId, Guid notebookId, Guid conversationId, CancellationToken ct = default)
     {
         var resolved = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var currentUser = await ResolveCurrentUserAsync(ct);
 
-        // Get user-provided values for this project
-        // var userValues = await _userProjectContextOptionsService.GetOptionsAsync(userId, projectId);
-        var userValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Get project-scoped user-provided values for the OSS-lite single user.
+        var userValues = currentUser == null || projectId == Guid.Empty
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(
+                await _userProjectContextOptionsService.GetOptionsAsync(currentUser.Id, projectId),
+                StringComparer.OrdinalIgnoreCase);
 
         // Process assistant-defined context options
         if (assistant?.ContextOptions != null)
@@ -48,9 +52,11 @@ public class ContextOptionsService : IContextOptionsService
                             value = DateTime.UtcNow.ToString("yyyy-MM-dd");
                             break;
                         case "userName":
-                            case "userEmail":
-                                // OMIT this key-value pair entirely
-                                continue;
+                            value = currentUser?.Name ?? string.Empty;
+                            break;
+                        case "userEmail":
+                            value = currentUser?.Email ?? string.Empty;
+                            break;
                         case "files":
                             value = await ResolveFilesAsync(projectId, notebookId, conversationId, ct);
                             break;
@@ -65,6 +71,19 @@ public class ContextOptionsService : IContextOptionsService
         }
 
         return resolved;
+    }
+
+    private async Task<CurrentUserContext?> ResolveCurrentUserAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        return await db.Users
+            .AsNoTracking()
+            .OrderBy(u => u.Created)
+            .ThenBy(u => u.Id)
+            .Select(u => new CurrentUserContext(u.Id, u.Name, u.Email))
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task<string?> BuildContextMessageAsync(AssistantDefinition assistant, Guid projectId, Guid notebookId, Guid conversationId, CancellationToken ct = default)
@@ -249,4 +268,5 @@ public class ContextOptionsService : IContextOptionsService
         return sb.ToString();
     }
 
+    private sealed record CurrentUserContext(Guid Id, string Name, string Email);
 }

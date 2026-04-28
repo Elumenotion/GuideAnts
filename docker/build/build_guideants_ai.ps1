@@ -220,15 +220,16 @@ finally {
     }
 }
 
-# --- Write GA_AI_IMAGE to docker/.env ---
+# --- Write backend-specific GuideAnts AI image tag to docker/.env ---
 $envFile = Join-Path $dockerRoot '.env'
-$envLine = "GA_AI_IMAGE=$imageTag"
+$imageEnvKey = if ($Backend -eq 'cuda13') { 'GA_AI_CUDA_IMAGE' } else { 'GA_AI_CPU_IMAGE' }
+$envLine = "$imageEnvKey=$imageTag"
 
 if (Test-Path $envFile) {
     $lines = Get-Content $envFile
     $replaced = $false
     $lines = $lines | ForEach-Object {
-        if ($_ -match '^GA_AI_IMAGE=') { $replaced = $true; $envLine } else { $_ }
+        if ($_ -match "^$([regex]::Escape($imageEnvKey))=") { $replaced = $true; $envLine } else { $_ }
     }
     if (-not $replaced) { $lines += $envLine }
     Set-Content -Path $envFile -Value $lines -Encoding UTF8

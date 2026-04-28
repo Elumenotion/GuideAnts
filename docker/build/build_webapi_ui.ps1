@@ -16,6 +16,68 @@ $clientRoot = Join-Path $repoRoot 'src\client'
 $clientNodeModules = Join-Path $clientRoot 'node_modules'
 $clientDistBrowser = Join-Path $clientRoot 'dist-browser'
 
+function Get-RunningComposeFileArgs {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DockerRoot,
+
+        [string]$ProjectName = 'guideants'
+    )
+
+    $composeJson = docker compose ls --format json
+    if ($LASTEXITCODE -ne 0) {
+        throw "docker compose ls failed with exit code $LASTEXITCODE"
+    }
+
+    $projects = @()
+    if (-not [string]::IsNullOrWhiteSpace($composeJson)) {
+        $parsed = $composeJson | ConvertFrom-Json
+        if ($parsed -is [System.Array]) {
+            $projects = @($parsed)
+        }
+        elseif ($null -ne $parsed) {
+            $projects = @($parsed)
+        }
+    }
+
+    $project = $projects | Where-Object { $_.Name -eq $ProjectName -and $_.Status -match '^running' } | Select-Object -First 1
+    if ($null -eq $project) {
+        throw "No running Docker Compose project named '$ProjectName' was found. Start the stack before rebuilding with recreate enabled, or pass -NoRecreate."
+    }
+
+    $configFiles = @()
+    if ($project.ConfigFiles) {
+        $configFiles = @($project.ConfigFiles -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+
+    if ($configFiles.Count -eq 0) {
+        throw "Running Docker Compose project '$ProjectName' did not report any config files."
+    }
+
+    $args = @()
+    foreach ($configFile in $configFiles) {
+        $resolved = if ([System.IO.Path]::IsPathRooted($configFile)) {
+            $configFile
+        }
+        else {
+            Join-Path $DockerRoot $configFile
+        }
+
+        if (-not (Test-Path $resolved)) {
+            Write-Warning "Running compose project references missing config file '$resolved'; skipping it."
+            continue
+        }
+
+        $args += @('-f', $resolved)
+    }
+
+    if ($args.Count -eq 0) {
+        throw "None of the config files for running Docker Compose project '$ProjectName' exist on disk."
+    }
+
+    return $args
+}
+
 switch ($Flavor) {
     'Slim' {
         $dockerTarget = 'runtime-slim'
@@ -37,9 +99,9 @@ switch ($Flavor) {
         $dockerTarget = 'runtime'
         $imageRepository = 'guideants-webapi-ui'
         $imageEnvKey = 'GA_WEBAPI_UI_IMAGE'
-        $composeFileName = 'docker-compose.yml'
         $serviceName = 'guideants-webapi-ui'
-        $useComposeFile = $false
+        $composeFileName = $null
+        $useRunningComposeStack = $true
     }
 }
 
@@ -174,28 +236,28 @@ Write-Host "Image built: $imageTag" -ForegroundColor Green
 Write-Host "Wrote $envLine to $envFile" -ForegroundColor Green
 Write-Host ""
 
-$composeFile = Join-Path $dockerRoot $composeFileName
+$composeFile = if ($composeFileName) { Join-Path $dockerRoot $composeFileName } else { $null }
 
-if (-not $NoRecreate -and (Test-Path $composeFile)) {
+if (-not $NoRecreate -and ($useRunningComposeStack -or (Test-Path $composeFile))) {
     Write-Host "Recreating $serviceName to apply the new image tag..." -ForegroundColor Cyan
     Push-Location $dockerRoot
     try {
         $composeArgs = @('compose')
-        if ($useComposeFile) {
-            $composeArgs += @('-f', $composeFileName)
+        if ($useRunningComposeStack) {
+            $composeArgs += Get-RunningComposeFileArgs -DockerRoot $dockerRoot
         }
-        else {
-            $composeArgs += @('--profile', 'webapi-ui')
+        elseif ($useComposeFile) {
+            $composeArgs += @('-f', $composeFileName)
         }
         $composeArgs += @('up', '-d', '--no-deps', '--force-recreate', $serviceName)
         docker @composeArgs
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Failed to recreate $serviceName (exit code $LASTEXITCODE)."
-            if ($useComposeFile) {
-                Write-Host "Use: docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+            if ($useRunningComposeStack) {
+                Write-Host "Use: rerun this script after confirming the 'guideants' compose stack is running and its config files exist." -ForegroundColor Yellow
             }
-            else {
-                Write-Host "Use: docker compose --profile webapi-ui up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+            elseif ($useComposeFile) {
+                Write-Host "Use: docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
             }
             exit 1
         }
@@ -209,11 +271,11 @@ if (-not $NoRecreate -and (Test-Path $composeFile)) {
 elseif ($NoRecreate) {
     Write-Host "Skipping compose service recreate (-NoRecreate)." -ForegroundColor Yellow
     Write-Host "To apply this image to an existing container, run:" -ForegroundColor Yellow
-    if ($useComposeFile) {
-        Write-Host "docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+    if ($useRunningComposeStack) {
+        Write-Host "docker compose <running stack config files> up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
     }
-    else {
-        Write-Host "docker compose --profile webapi-ui up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+    elseif ($useComposeFile) {
+        Write-Host "docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
     }
 }
 else {
