@@ -1,4 +1,5 @@
 import type { ProviderEditorStateDto } from '../../../types/settings';
+import { getProviderFieldLabel } from '../constants/displayLabels';
 
 function isProbablyUrl(value: string): boolean {
   try {
@@ -20,6 +21,7 @@ export function validateOperativeProviderFields(
   const operative = provider.fieldMetadata.filter((m) => provider.operativeFields.includes(m.name));
 
   for (const meta of operative) {
+    const label = getProviderFieldLabel(provider.providerId, meta.name);
     const fieldDto = provider.fields[meta.name];
     const raw =
       draft[meta.name] !== undefined && draft[meta.name] !== null
@@ -29,13 +31,13 @@ export function validateOperativeProviderFields(
     if (meta.kind === 'secret') {
       const hasStored = fieldDto?.hasValue === true && fieldDto?.isSecret === true;
       if (meta.required && !hasStored && raw.length === 0) {
-        errors[meta.name] = `${meta.label} is required.`;
+        errors[meta.name] = `${label} is required.`;
       }
       continue;
     }
 
     if (meta.required && raw.length === 0) {
-      errors[meta.name] = `${meta.label} is required.`;
+      errors[meta.name] = `${label} is required.`;
       continue;
     }
 
@@ -46,20 +48,20 @@ export function validateOperativeProviderFields(
     switch (meta.kind) {
       case 'url':
         if (!isProbablyUrl(raw)) {
-          errors[meta.name] = `${meta.label} must be a valid http(s) URL.`;
+          errors[meta.name] = `${label} must be a valid http(s) URL.`;
         }
         break;
       case 'int': {
         const n = Number.parseInt(raw, 10);
         if (!Number.isFinite(n)) {
-          errors[meta.name] = `${meta.label} must be a whole number.`;
+          errors[meta.name] = `${label} must be a whole number.`;
           break;
         }
         if (meta.name === 'TimeoutSeconds' && n <= 0) {
-          errors[meta.name] = `${meta.label} must be greater than zero.`;
+          errors[meta.name] = `${label} must be greater than zero.`;
         }
         if (meta.name === 'LocalMinIntervalMs' && n < 0) {
-          errors[meta.name] = `${meta.label} must be zero or greater.`;
+          errors[meta.name] = `${label} must be zero or greater.`;
         }
         if (
           (meta.name === 'MaxConcurrentConversions' ||
@@ -67,19 +69,19 @@ export function validateOperativeProviderFields(
             meta.name === 'AsyncStatusPollIntervalMs') &&
           n <= 0
         ) {
-          errors[meta.name] = `${meta.label} must be greater than zero.`;
+          errors[meta.name] = `${label} must be greater than zero.`;
         }
         break;
       }
       case 'enum':
         if (meta.enumOptions && meta.enumOptions.length > 0 && !meta.enumOptions.includes(raw)) {
-          errors[meta.name] = `${meta.label} must be one of: ${meta.enumOptions.join(', ')}.`;
+          errors[meta.name] = `${label} must be one of: ${meta.enumOptions.join(', ')}.`;
         }
         break;
       default:
         if (meta.name === 'ApiVersion' && raw.length > 0) {
           if (!/^\d{4}-\d{2}-\d{2}(-[a-zA-Z0-9.-]+)?$/.test(raw)) {
-            errors[meta.name] = `${meta.label} should look like a date-based API version (e.g. 2024-11-30 or 2025-04-01-preview).`;
+            errors[meta.name] = `${label} should look like a date-based API version (e.g. 2024-11-30 or 2025-04-01-preview).`;
           }
         }
         break;

@@ -12,6 +12,7 @@ import {
   UpdateSettingsModelRequest,
 } from '../../types/settings';
 import { AddModelWizardState, CanonicalLocalRuntimeConfig, CatalogEditState, ProfileFormState } from './types';
+import { getServiceProviderDisplayName } from './constants/displayLabels';
 
 export const SECRET_MASK = '********';
 
@@ -644,7 +645,7 @@ export function parseFieldValue(raw: string, property: SettingsSectionPropertyDe
 
 export function getProviderDisplayName(providers: SettingsProviderDefinitionDto[], providerId: string): string {
   const match = providers.find((provider) => provider.providerId === providerId);
-  return match?.displayName ?? providerId;
+  return getServiceProviderDisplayName(match?.providerId ?? providerId);
 }
 
 /**

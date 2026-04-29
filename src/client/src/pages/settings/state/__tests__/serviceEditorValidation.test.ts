@@ -8,9 +8,15 @@ function makeProvider(
   fields: ProviderEditorStateDto['fields']
 ): ProviderEditorStateDto {
   return {
-    providerId: 'test',
+    providerId: 'Embeddings.AzureOpenAI.Embedding',
     providerKind: 'Cloud',
-    displayName: 'Test',
+    providerSection: 'AzureOpenAiEmbedding',
+    hasExplicitMode: true,
+    isDefaultMode: true,
+    connectionConfigured: true,
+    connectionMissingFields: [],
+    canActivate: true,
+    activationBlockers: [],
     fields,
     runtimeDependencies: [],
     operativeFields: operativeNames,
@@ -26,10 +32,8 @@ describe('validateOperativeProviderFields', () => {
       [
         {
           name: 'ApiKey',
-          label: 'API Key',
           kind: 'secret',
           required: true,
-          helpText: '',
           enumOptions: null,
           operative: true,
         },
@@ -48,10 +52,8 @@ describe('validateOperativeProviderFields', () => {
       [
         {
           name: 'ApiKey',
-          label: 'API Key',
           kind: 'secret',
           required: true,
-          helpText: '',
           enumOptions: null,
           operative: true,
         },
@@ -70,10 +72,8 @@ describe('validateOperativeProviderFields', () => {
       [
         {
           name: 'ApiVersion',
-          label: 'API Version',
           kind: 'text',
           required: false,
-          helpText: '',
           enumOptions: null,
           operative: true,
         },
@@ -94,10 +94,8 @@ describe('buildSavePayload', () => {
       [
         {
           name: 'ApiKey',
-          label: 'API Key',
           kind: 'secret',
           required: true,
-          helpText: '',
           enumOptions: null,
           operative: true,
         },

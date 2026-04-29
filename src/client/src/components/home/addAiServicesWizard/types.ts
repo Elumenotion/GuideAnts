@@ -13,6 +13,7 @@ export interface FoundryModelDraft {
   localId: string;
   modelId: string;
   provider: FoundryModelProviderLabel;
+  setAsGlobalDefault: boolean;
   persisted: boolean;
 }
 
@@ -75,4 +76,3 @@ export type OptionalServiceKey =
   | 'SpeechTranscription'
   | 'SpeechSynthesis'
   | 'DocumentIntelligence';
-

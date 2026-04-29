@@ -5,10 +5,13 @@ interface ModelsStepProps {
   draftModels: FoundryModelDraft[];
   draftModelId: string;
   draftProvider: FoundryModelProviderLabel;
+  setDraftAsGlobalDefault: boolean;
+  lockDraftAsGlobalDefault: boolean;
   addError: string | null;
   validationError: string | null;
   onDraftModelIdChange: (next: string) => void;
   onDraftProviderChange: (next: FoundryModelProviderLabel) => void;
+  onSetDraftAsGlobalDefaultChange: (next: boolean) => void;
   onAddModel: () => void;
   onRemoveDraftModel: (localId: string) => void;
 }
@@ -26,10 +29,13 @@ export function ModelsStep({
   draftModels,
   draftModelId,
   draftProvider,
+  setDraftAsGlobalDefault,
+  lockDraftAsGlobalDefault,
   addError,
   validationError,
   onDraftModelIdChange,
   onDraftProviderChange,
+  onSetDraftAsGlobalDefaultChange,
   onAddModel,
   onRemoveDraftModel,
 }: ModelsStepProps) {
@@ -78,6 +84,23 @@ export function ModelsStep({
             Add model
           </button>
         </div>
+        <div className="md:col-span-3">
+          <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              checked={setDraftAsGlobalDefault}
+              disabled={lockDraftAsGlobalDefault}
+              onChange={(event) => onSetDraftAsGlobalDefaultChange(event.target.checked)}
+            />
+            Set this model as the global default chat model
+          </label>
+          {lockDraftAsGlobalDefault ? (
+            <p className="mt-1 text-xs text-gray-500">
+              The first configured model is always set as the global default.
+            </p>
+          ) : null}
+        </div>
       </div>
 
       {addError ? <p className="text-xs text-red-700">{addError}</p> : null}
@@ -104,6 +127,11 @@ export function ModelsStep({
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm text-gray-900">{model.modelId}</span>
                   <ProviderPill value={model.provider} />
+                  {model.setAsGlobalDefault ? (
+                    <span className="rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">
+                      Global default
+                    </span>
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -121,4 +149,3 @@ export function ModelsStep({
     </div>
   );
 }
-

@@ -377,14 +377,12 @@ public sealed class NotebookHeaderToolbarServiceTests
     {
         return new ServiceEditorStateDto(
             ServiceId: serviceId,
-            DisplayName: serviceId,
             ActiveProviderId: "google",
             Providers:
             [
                 new ProviderEditorStateDto(
                     ProviderId: "google",
                     ProviderKind: "Cloud",
-                    DisplayName: "Google",
                     ProviderSection: "GoogleGeminiApi",
                     ModeId: "google",
                     HasExplicitMode: true,

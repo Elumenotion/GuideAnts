@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { ProviderEditorStateDto, ProviderFieldMetadataDto } from '../../../../types/settings';
+import { getProviderFieldHelpText, getProviderFieldLabel } from '../../constants/displayLabels';
 import { EnumSelect } from '../inputs/EnumSelect';
 import { IntInput } from '../inputs/IntInput';
 import { SecretInput } from '../inputs/SecretInput';
@@ -30,6 +31,8 @@ export function ProviderFieldsSection({
     const rawValue =
       (draft[metadata.name] as string | undefined) ?? fieldDto?.value ?? '';
     const err = fieldErrors[metadata.name];
+    const label = getProviderFieldLabel(provider.providerId, metadata.name);
+    const helpText = getProviderFieldHelpText(provider.providerId, metadata.name);
 
     const onValueChange = (value: string | number | ''): void => {
       onClearFieldError?.(metadata.name);
@@ -80,14 +83,14 @@ export function ProviderFieldsSection({
 
     return (
       <div key={metadata.name} className="space-y-1">
-        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-600">{metadata.label}</label>
+        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-600">{label}</label>
         <div className={err ? 'rounded ring-1 ring-red-500 ring-offset-1' : undefined}>{control}</div>
         {err ? (
           <p className="text-xs text-red-600" role="alert">
             {err}
           </p>
         ) : null}
-        <p className="text-xs text-gray-500">{metadata.helpText}</p>
+        {helpText ? <p className="text-xs text-gray-500">{helpText}</p> : null}
       </div>
     );
   };

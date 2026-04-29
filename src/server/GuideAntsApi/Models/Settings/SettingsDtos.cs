@@ -4,15 +4,12 @@ namespace GuideAntsApi.Models.Settings;
 
 public sealed record SettingsSectionSummaryDto(
     string SectionName,
-    string DisplayName,
-    int DisplayOrder,
     bool HasSecrets,
     string ReadinessStatus,
     IReadOnlyList<string> MissingFields);
 
 public sealed record SettingsSectionDto(
     string SectionName,
-    string DisplayName,
     int SchemaVersion,
     string RowVersion,
     DateTime UpdatedUtc,
@@ -27,8 +24,6 @@ public sealed record SettingsSchemaDto(
 
 public sealed record SettingsSectionSchemaDto(
     string SectionName,
-    string DisplayName,
-    int DisplayOrder,
     int SchemaVersion,
     bool HasSecrets,
     IReadOnlyList<SettingsSectionPropertyDefinitionDto> Properties);
@@ -43,7 +38,6 @@ public sealed record SettingsSectionPropertyDefinitionDto(
 
 public sealed record SettingsServiceDefinitionDto(
     string ServiceId,
-    string DisplayName,
     string SectionName,
     IReadOnlyList<string> ProviderIds,
     IReadOnlyList<SettingsDependencyFieldDto> ServiceFields);
@@ -51,11 +45,9 @@ public sealed record SettingsServiceDefinitionDto(
 public sealed record SettingsProviderDefinitionDto(
     string ProviderId,
     string ServiceId,
-    string DisplayName,
     string Kind,
     string ProviderSectionKey,
     string? ProviderSettingsSection,
-    string? MarketingSummary,
     string? SectionName,
     string? RuntimeSectionName,
     IReadOnlyList<SettingsDependencyFieldDto> RequiredSectionFields,
@@ -63,20 +55,15 @@ public sealed record SettingsProviderDefinitionDto(
 
 public sealed record SettingsDependencyFieldDto(
     string SectionName,
-    string FieldName,
-    string DisplayName);
+    string FieldName);
 
 public sealed record SettingsRuntimeKeyRequirementDto(
-    string Key,
-    string DisplayName,
-    string ChangeHint);
+    string Key);
 
 public sealed record ProviderFieldMetadataDto(
     string Name,
-    string Label,
     string Kind,
     bool Required,
-    string HelpText,
     IReadOnlyList<string>? EnumOptions,
     bool Operative);
 
@@ -88,15 +75,12 @@ public sealed record ProviderFieldValueDto(
 
 public sealed record RuntimeKeyDto(
     string Key,
-    string DisplayName,
-    string ChangeHint,
     bool HasValue,
     string? CurrentValue);
 
 public sealed record ProviderEditorStateDto(
     string ProviderId,
     string ProviderKind,
-    string DisplayName,
     string ProviderSection,
     string? ModeId,
     bool HasExplicitMode,
@@ -118,7 +102,6 @@ public sealed record ServiceEditorReadinessDto(
 
 public sealed record ServiceEditorStateDto(
     string ServiceId,
-    string DisplayName,
     string ActiveProviderId,
     IReadOnlyList<ProviderEditorStateDto> Providers,
     ServiceEditorReadinessDto Readiness);
@@ -142,10 +125,8 @@ public sealed record ProviderFieldsUpdateRequest(IReadOnlyDictionary<string, str
 /// </summary>
 public sealed record SettingsRuntimeDependencyDto(
     string Key,
-    string DisplayName,
     string? CurrentValue,
     bool ReadOnly,
-    string ChangeHint,
     IReadOnlyList<string> UsedByProviderIds,
     string Source,
     bool HasValue,
@@ -159,7 +140,6 @@ public sealed record SettingsReadinessDto(
 
 public sealed record SettingsServiceReadinessDto(
     string ServiceId,
-    string DisplayName,
     string Status,
     IReadOnlyList<string> Blockers,
     IReadOnlyList<string> Warnings);

@@ -120,10 +120,8 @@ export function ImageGenerationEditor() {
                 <OperationalDependencyRow
                   key={dependency.key}
                   keyName={dependency.key}
-                  displayName={dependency.displayName}
                   hasValue={dependency.hasValue}
                   currentValue={dependency.currentValue}
-                  changeHint={dependency.changeHint}
                 />
               ))}
             </div>

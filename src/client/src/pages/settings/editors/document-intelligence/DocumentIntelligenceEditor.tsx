@@ -12,7 +12,7 @@ export function DocumentIntelligenceEditor() {
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">Conversion throughput</div>
             {provider.providerKind === 'Cloud' ? (
               <p className="text-sm text-gray-700">
-                Azure Document Intelligence uses the configured endpoint, API version, timeout, and retry policy for cloud extraction.
+                Microsoft Foundry Document Intelligence uses the configured endpoint, API version, timeout, and retry policy for cloud extraction.
               </p>
             ) : (
               <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700">

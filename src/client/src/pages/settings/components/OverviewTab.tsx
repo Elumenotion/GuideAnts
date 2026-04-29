@@ -11,6 +11,7 @@ import {
 import type { ModelsRuntimeSubTab } from '../types';
 import type { ServiceKey } from './ServicesTab';
 import { mapChatProviderToSection } from '../utils';
+import { getConnectionSectionDisplayName } from '../constants/displayLabels';
 import {
   ChatModelConfigurator,
   ChatModelConfigValue,
@@ -101,7 +102,7 @@ function buildChatProviderRows(overview: SettingsOverviewDto): ChatProviderRow[]
       continue;
     }
     if (!sectionToLabel.has(section)) {
-      sectionToLabel.set(section, section);
+      sectionToLabel.set(section, getConnectionSectionDisplayName(section));
     }
   }
 
@@ -109,7 +110,7 @@ function buildChatProviderRows(overview: SettingsOverviewDto): ChatProviderRow[]
   for (const section of sectionToLabel.keys()) {
     rows.push({
       section,
-      displayLabel: section,
+      displayLabel: getConnectionSectionDisplayName(section),
       ready: !issueSections.has(section),
     });
   }
@@ -455,7 +456,6 @@ export function OverviewTab({
               <li key={row.section} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
                 <div className="min-w-0">
                   <div className="font-medium text-gray-900">{row.displayLabel}</div>
-                  <div className="font-mono text-xs text-gray-500">{row.section}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <StatusPill status={row.ready ? 'ready' : 'not-ready'} />

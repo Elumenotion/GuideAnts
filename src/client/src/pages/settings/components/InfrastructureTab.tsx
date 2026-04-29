@@ -10,6 +10,7 @@ import {
   SettingsRuntimeDependencySource,
 } from '../../../types/settings';
 import { IconActionButton, TextActionButton } from './shared/ActionButtons';
+import { getRuntimeDependencyDisplayName } from '../constants/displayLabels';
 
 interface InfrastructureTabProps {
   /**
@@ -238,7 +239,10 @@ export function InfrastructureTab({ focusedRuntimeKey, onFocusedRuntimeKeyHandle
   }, [focusedRuntimeKey, dependencies, onFocusedRuntimeKeyHandled]);
 
   const sortedDependencies = useMemo(
-    () => [...dependencies].sort((left, right) => left.displayName.localeCompare(right.displayName)),
+    () =>
+      [...dependencies].sort((left, right) =>
+        getRuntimeDependencyDisplayName(left.key).localeCompare(getRuntimeDependencyDisplayName(right.key))
+      ),
     [dependencies]
   );
 
@@ -307,6 +311,7 @@ export function InfrastructureTab({ focusedRuntimeKey, onFocusedRuntimeKeyHandle
             )}
             {sortedDependencies.map((dep) => {
               const probeResult = probeResults[dep.key];
+              const displayName = getRuntimeDependencyDisplayName(dep.key);
               const showPrefixWarning = isLlamaCppPrefixIssue(dep);
               const canProbe = dep.hasValue && (dep.kind === 'url' || dep.kind === 'path');
               const isHighlighted = highlightKey === dep.key;
@@ -324,7 +329,7 @@ export function InfrastructureTab({ focusedRuntimeKey, onFocusedRuntimeKeyHandle
                 >
                   <td className="px-4 py-3 align-top text-sm">
                     <div className="font-mono text-gray-900">{dep.key}</div>
-                    <div className="mt-0.5 text-xs text-gray-500">{dep.displayName}</div>
+                    <div className="mt-0.5 text-xs text-gray-500">{displayName}</div>
                     {dep.usedByProviderIds.length > 0 && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {dep.usedByProviderIds.map((providerId) => (
@@ -366,7 +371,7 @@ export function InfrastructureTab({ focusedRuntimeKey, onFocusedRuntimeKeyHandle
                           icon={inFlightKey === dep.key ? <FaSpinner className="animate-spin" /> : <FaHeartbeat />}
                           disabled={inFlightKey === dep.key}
                           onClick={() => void handleProbeOne(dep)}
-                          title={`${dep.kind === 'path' ? 'Check path for' : 'Probe'} ${dep.displayName}`}
+                          title={`${dep.kind === 'path' ? 'Check path for' : 'Probe'} ${displayName}`}
                         />
                       )}
                     </div>

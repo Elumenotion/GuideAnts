@@ -88,10 +88,8 @@ export function SpeechSynthesisEditor() {
                 <OperationalDependencyRow
                   key={dependency.key}
                   keyName={dependency.key}
-                  displayName={dependency.displayName}
                   hasValue={dependency.hasValue}
                   currentValue={dependency.currentValue}
-                  changeHint={dependency.changeHint}
                 />
               ))}
             </div>
@@ -128,11 +126,11 @@ function renderCloudSynthesisBehavior(providerId: string) {
       return (
         <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
           <li>
-            Azure sends SSML directly to Speech (<span className="font-mono">SpeakSsmlAsync</span>). Region and API key are
+            Microsoft Foundry Speech Services sends SSML directly to Speech (<span className="font-mono">SpeakSsmlAsync</span>). Region and API key are
             required; optional endpoint override is supported.
           </li>
           <li>
-            The Azure Speech timeout field is stored for synthesis; verify runtime enforcement matches your deployment
+            The Microsoft Foundry Speech Services timeout field is stored for synthesis; verify runtime enforcement matches your deployment
             expectations.
           </li>
         </ul>

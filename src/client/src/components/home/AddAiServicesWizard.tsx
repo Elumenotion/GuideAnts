@@ -220,6 +220,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
 
   const [draftModelId, setDraftModelId] = useState('');
   const [draftModelProvider, setDraftModelProvider] = useState<FoundryModelProviderLabel>('Completions');
+  const [setDraftAsGlobalDefault, setSetDraftAsGlobalDefault] = useState(true);
   const [draftModels, setDraftModels] = useState<FoundryModelDraft[]>([]);
 
   const [coreErrors, setCoreErrors] = useState<Partial<Record<'resource' | 'apiKey' | 'apiVersion', string>>>({});
@@ -236,6 +237,9 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     () => (snapshot ? toExistingFoundryModels(snapshot.models) : []),
     [snapshot]
   );
+  const existingFoundryModelCount = existingFoundryModels.length;
+  const lockDraftAsGlobalDefault = existingFoundryModelCount === 0 && draftModels.length === 0;
+  const effectiveSetDraftAsGlobalDefault = lockDraftAsGlobalDefault ? true : setDraftAsGlobalDefault;
   const totalModelCount = existingFoundryModels.length + draftModels.length;
   const savedFoundryModelCount = useMemo(
     () => (snapshot ? toExistingFoundryModels(snapshot.models).length : 0),
@@ -305,12 +309,14 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
   }, [loadServiceState]);
 
   const resetWithSnapshot = useCallback((nextSnapshot: WizardLoadSnapshot) => {
+    const existingCount = toExistingFoundryModels(nextSnapshot.models).length;
     setSnapshot(nextSnapshot);
     setCoreForm(buildCoreForm(nextSnapshot));
     setOptionalForm(buildOptionalServicesForm(nextSnapshot));
     setDraftModels([]);
     setDraftModelId('');
     setDraftModelProvider('Completions');
+    setSetDraftAsGlobalDefault(existingCount === 0);
     setCoreErrors({});
     setOptionalErrors({});
     setModelAddError(null);
@@ -478,12 +484,35 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       setModelAddError('This model/provider combination is already queued.');
       return;
     }
+    const existingCount = snapshot ? toExistingFoundryModels(snapshot.models).length : 0;
+    const isFirstModelOverall = existingCount === 0 && draftModels.length === 0;
+    const shouldSetAsGlobalDefault = isFirstModelOverall || setDraftAsGlobalDefault;
+
     const localId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setDraftModels((previous) => [...previous, makeDraftModel(localId, normalizedId, draftModelProvider)]);
+    setDraftModels((previous) => {
+      const next = shouldSetAsGlobalDefault
+        ? previous.map((model) => ({ ...model, setAsGlobalDefault: false }))
+        : previous;
+      return [...next, makeDraftModel(localId, normalizedId, draftModelProvider, shouldSetAsGlobalDefault)];
+    });
     setDraftModelId('');
+    setSetDraftAsGlobalDefault(false);
     setModelAddError(null);
     setModelStepError(null);
-  }, [draftModelId, draftModelProvider, draftModels, snapshot]);
+  }, [draftModelId, draftModelProvider, draftModels, setDraftAsGlobalDefault, snapshot]);
+
+  const persistGlobalDefaultModel = useCallback(async (modelId: string) => {
+    const chatDefaults = await api.settings.chatDefaults.get();
+    await api.settings.chatDefaults.update({
+      rowVersion: chatDefaults.rowVersion,
+      defaultModelId: modelId,
+      overrideAllChatModels: chatDefaults.overrideAllChatModels,
+      temperature: chatDefaults.temperature ?? null,
+      topP: chatDefaults.topP ?? null,
+      reasoningEffort: chatDefaults.reasoningEffort ?? null,
+      samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
+    });
+  }, []);
 
   const persistModels = useCallback(async () => {
     if (!snapshot) {
@@ -523,12 +552,31 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       await api.settings.addModel(request);
     }
 
+    const forcedDefaultModelId = existingCount === 0 && pendingDrafts.length > 0
+      ? pendingDrafts[0].modelId
+      : null;
+    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
+    const targetDefaultModelId = forcedDefaultModelId ?? selectedDefaultModelId;
+    let defaultSaveWarning: string | null = null;
+    if (targetDefaultModelId) {
+      try {
+        await persistGlobalDefaultModel(targetDefaultModelId);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unknown error.';
+        defaultSaveWarning = `Model was added, but setting '${targetDefaultModelId}' as global default failed: ${detail}`;
+      }
+    }
+
     const refreshed = await loadSnapshot();
     setSnapshot(refreshed);
     setDraftModels([]);
+    setSetDraftAsGlobalDefault(toExistingFoundryModels(refreshed.models).length === 0);
     setFinishWarnings(summarizeOptionalServiceWarnings(refreshed));
     setModelStepError(null);
-  }, [draftModels, loadSnapshot, snapshot]);
+    if (defaultSaveWarning) {
+      setGlobalError(defaultSaveWarning);
+    }
+  }, [draftModels, loadSnapshot, persistGlobalDefaultModel, snapshot]);
 
   const validateOptionalServices = useCallback((): boolean => {
     const errors: Record<string, string> = {};
@@ -726,6 +774,26 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     setStep((previous) => previousStep(previous));
   }, [saving]);
 
+  const handleFinish = useCallback(async () => {
+    if (saving) {
+      return;
+    }
+    setGlobalError(null);
+    setSaving(true);
+    try {
+      const hasPendingDrafts = draftModels.some((model) => !model.persisted);
+      if (hasPendingDrafts) {
+        await persistModels();
+      }
+      closeWizard();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not finish setup.';
+      setGlobalError(message);
+    } finally {
+      setSaving(false);
+    }
+  }, [closeWizard, draftModels, persistModels, saving]);
+
   const isNextDisabled = useMemo(() => {
     if (loading || saving) {
       return true;
@@ -737,10 +805,15 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       return totalModelCount === 0;
     }
     if (step === 'finish') {
-      return !readyForBasicChat;
+      return true;
     }
     return false;
-  }, [loading, provider, readyForBasicChat, saving, step, totalModelCount]);
+  }, [loading, provider, saving, step, totalModelCount]);
+
+  const isFinishDisabled = useMemo(
+    () => loading || saving || totalModelCount === 0,
+    [loading, saving, totalModelCount]
+  );
 
   const currentStepLabel = useMemo(() => {
     const index = WIZARD_STEPS.findIndex((item) => item.id === step);
@@ -754,6 +827,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       onClose={closeWizard}
       maxWidthClass="max-w-4xl"
       disableDismiss={saving}
+      disableOverlayDismiss
       footer={(
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
           <label className="inline-flex items-center gap-2 text-xs text-gray-700">
@@ -780,35 +854,30 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
             >
               Configure manually
             </button>
-            {step !== 'provider' ? (
-              <button
-                type="button"
-                onClick={handleBack}
-                disabled={saving}
-                className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                Back
-              </button>
-            ) : null}
-            {step !== 'finish' ? (
-              <button
-                type="button"
-                onClick={() => void handleNext()}
-                disabled={isNextDisabled}
-                className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-blue-400"
-              >
-                {saving ? 'Saving...' : 'Next'}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={closeWizard}
-                disabled={isNextDisabled}
-                className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-blue-400"
-              >
-                Done
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleBack}
+              disabled={saving || step === 'provider'}
+              className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleNext()}
+              disabled={isNextDisabled}
+              className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-blue-400"
+            >
+              {saving ? 'Saving...' : 'Next'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleFinish()}
+              disabled={isFinishDisabled}
+              className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:bg-emerald-300"
+            >
+              {saving ? 'Saving...' : 'Finish'}
+            </button>
           </div>
         </div>
       )}
@@ -854,10 +923,13 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
             draftModels={draftModels}
             draftModelId={draftModelId}
             draftProvider={draftModelProvider}
+            setDraftAsGlobalDefault={effectiveSetDraftAsGlobalDefault}
+            lockDraftAsGlobalDefault={lockDraftAsGlobalDefault}
             addError={modelAddError}
             validationError={modelStepError}
             onDraftModelIdChange={setDraftModelId}
             onDraftProviderChange={setDraftModelProvider}
+            onSetDraftAsGlobalDefaultChange={setSetDraftAsGlobalDefault}
             onAddModel={addDraftModel}
             onRemoveDraftModel={(localId) => {
               setDraftModels((previous) => previous.filter((model) => model.localId !== localId));

@@ -16,6 +16,7 @@ import {
   CONNECTION_EXCLUDED_SECTION_NAMES,
   CONNECTION_OWNERSHIP_CATEGORIES,
 } from '../constants/connectionSections';
+import { getConnectionSectionDisplayName } from '../constants/displayLabels';
 import {
   SECRET_MASK,
   clonePayload,
@@ -294,7 +295,7 @@ export function ConnectionsTab({
       setSectionDraft(clonePayload(updated.payload));
       setSectionPreservedDraft(null);
       onRefreshSectionSummaries();
-      showToast({ type: 'success', title: `Saved ${updated.displayName}` });
+      showToast({ type: 'success', title: `Saved ${getConnectionSectionDisplayName(updated.sectionName)}` });
       void loadOverview();
       void loadUsage(selectedSection);
     } catch (error) {
@@ -428,6 +429,7 @@ export function ConnectionsTab({
                       const readiness = resolvedReadiness(summary.sectionName);
                       const usageCount = usageCountBySection.get(summary.sectionName) ?? 0;
                       const isSelected = summary.sectionName === selectedSection;
+                      const displayName = getConnectionSectionDisplayName(summary.sectionName);
                       return (
                         <li key={summary.sectionName}>
                           <button
@@ -440,8 +442,7 @@ export function ConnectionsTab({
                           >
                             <ReadinessDot status={readiness} />
                             <div className="min-w-0 flex-1">
-                              <div className="truncate font-medium text-gray-900">{summary.displayName}</div>
-                              <div className="truncate font-mono text-xs text-gray-500">{summary.sectionName}</div>
+                              <div className="truncate font-medium text-gray-900">{displayName}</div>
                             </div>
                             <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
                               Used by {usageCount}
@@ -550,15 +551,12 @@ function DetailsPanel({
   onOpenChatTarget,
   tabIndexFor,
 }: DetailsPanelProps) {
-  const displayName = summary?.displayName ?? sectionName;
+  const displayName = getConnectionSectionDisplayName(sectionName);
   return (
     <section className="overflow-hidden rounded-lg border border-gray-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-6 py-4">
         <div>
           <h2 className="text-base font-semibold text-gray-900">{displayName}</h2>
-          <p className="text-xs text-gray-600">
-            Section <span className="font-mono">{sectionName}</span>
-          </p>
         </div>
         <TextActionButton
           tone="neutral"
@@ -626,7 +624,7 @@ function DetailsPanel({
         />
 
         {loading && !section ? (
-          <LoadingSpinner message={`Loading ${sectionName}...`} />
+          <LoadingSpinner message={`Loading ${displayName}...`} />
         ) : section ? (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div>

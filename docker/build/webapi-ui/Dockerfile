@@ -7,6 +7,8 @@ RUN dotnet publish "GuideAntsApi/GuideAntsApi.csproj" -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime-base
 WORKDIR /app
 COPY --from=api-build /app/publish/ ./
+COPY src/server/GuideAntsApi/Resources/bootstrap/assistants/ ./Resources/bootstrap/assistants/
+COPY src/server/GuideAntsApi/Resources/bootstrap/guides/ ./Resources/bootstrap/guides/
 COPY src/client/dist-browser/ ./ui/
 
 ENV ASPNETCORE_URLS=http://127.0.0.1:8081 \

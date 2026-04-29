@@ -444,7 +444,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             .Where(p => p.HasExplicitMode)
             .Select(p => new NotebookToolbarProviderOptionDto(
                 p.ProviderId,
-                p.DisplayName,
+                p.ProviderId,
                 p.ProviderKind,
                 p.CanActivate,
                 p.ActivationBlockers))
@@ -452,7 +452,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
 
         var active = state.Providers.FirstOrDefault(p =>
             string.Equals(p.ProviderId, state.ActiveProviderId, StringComparison.Ordinal));
-        var activeLabel = active?.DisplayName
+        var activeLabel = active?.ProviderId
             ?? (string.IsNullOrWhiteSpace(state.ActiveProviderId) ? "Not configured" : state.ActiveProviderId);
 
         var supportsPower = string.Equals(state.ActiveProviderId, localProviderId, StringComparison.Ordinal);

@@ -375,10 +375,9 @@ public class GuideExportImportService : IGuideExportImportService
 
             // Note: Crew is included in the manifest.json above, no separate crews/ directory needed
 
-            // Export custom assistants (not global ones) - full export with OpenAPI and Files
             var customAssistants = guide.CrewMembers
                 .Select(ga => ga.Assistant)
-                .Where(a => a.Kind == AssistantKind.Assistant && !a.IsGlobal)
+                .Where(a => a.Kind == AssistantKind.Assistant)
                 .ToList();
 
             foreach (var assistant in customAssistants)
@@ -991,15 +990,13 @@ public class GuideExportImportService : IGuideExportImportService
                     }
                     else
                     {
-                        // Try to find global assistant
-                        var globalAssistant = await _context.Assistants
+                        var existingAssistant = await _context.Assistants
                             .FirstOrDefaultAsync(a => a.Name == crewName && 
-                                                     a.IsGlobal && 
                                                      a.Kind == AssistantKind.Assistant);
                         
-                        if (globalAssistant != null)
+                        if (existingAssistant != null)
                         {
-                            crewAssistantId = globalAssistant.Id;
+                            crewAssistantId = existingAssistant.Id;
                             globalLinked++;
                         }
                     }

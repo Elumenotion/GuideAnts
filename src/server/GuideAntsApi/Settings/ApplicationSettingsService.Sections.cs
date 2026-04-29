@@ -18,7 +18,7 @@ public sealed partial class ApplicationSettingsService
             .ToDictionaryAsync(x => x.SectionName, x => x, StringComparer.OrdinalIgnoreCase, cancellationToken);
 
         return _registry.All
-            .OrderBy(x => x.DisplayOrder)
+            .OrderBy(x => x.SectionName, StringComparer.OrdinalIgnoreCase)
             .Select(definition =>
             {
                 var readinessStatus = "not-applicable";
@@ -39,8 +39,6 @@ public sealed partial class ApplicationSettingsService
 
                 return new SettingsSectionSummaryDto(
                     definition.SectionName,
-                    definition.DisplayName,
-                    definition.DisplayOrder,
                     definition.HasSecrets,
                     readinessStatus,
                     missingFields);
@@ -261,7 +259,7 @@ public sealed partial class ApplicationSettingsService
             .ToDictionaryAsync(x => x.SectionName, x => x, StringComparer.OrdinalIgnoreCase, cancellationToken);
 
         var sectionSchemas = _registry.All
-            .OrderBy(x => x.DisplayOrder)
+            .OrderBy(x => x.SectionName, StringComparer.OrdinalIgnoreCase)
             .Select(definition =>
             {
                 var schemaVersion = rowsBySection.TryGetValue(definition.SectionName, out var row)
@@ -281,8 +279,6 @@ public sealed partial class ApplicationSettingsService
 
                 return new SettingsSectionSchemaDto(
                     SectionName: definition.SectionName,
-                    DisplayName: definition.DisplayName,
-                    DisplayOrder: definition.DisplayOrder,
                     SchemaVersion: schemaVersion,
                     HasSecrets: definition.HasSecrets,
                     Properties: properties);
@@ -292,14 +288,12 @@ public sealed partial class ApplicationSettingsService
         var services = ServiceContracts
             .Select(contract => new SettingsServiceDefinitionDto(
                 ServiceId: contract.ServiceId,
-                DisplayName: contract.DisplayName,
                 SectionName: contract.SectionName,
                 ProviderIds: contract.Providers.Select(p => p.ProviderId).ToList(),
                 ServiceFields: contract.ServiceFieldNames
                     .Select(fieldName => new SettingsDependencyFieldDto(
                         SectionName: contract.SectionName,
-                        FieldName: fieldName,
-                        DisplayName: HumanizeKey(fieldName)))
+                        FieldName: fieldName))
                     .ToList()))
             .ToList();
 
@@ -307,11 +301,9 @@ public sealed partial class ApplicationSettingsService
             .SelectMany(contract => contract.Providers.Select(provider => new SettingsProviderDefinitionDto(
                 ProviderId: provider.ProviderId,
                 ServiceId: contract.ServiceId,
-                DisplayName: provider.DisplayName,
                 Kind: provider.Kind,
                 ProviderSectionKey: provider.ProviderSectionKey,
                 ProviderSettingsSection: provider.ProviderSettingsSection,
-                MarketingSummary: provider.MarketingSummary,
                 SectionName: provider.SectionName,
                 RuntimeSectionName: provider.RequiredRuntimeKeys.Count > 0
                     ? LocalServiceHostsOptions.SectionName
@@ -319,14 +311,11 @@ public sealed partial class ApplicationSettingsService
                 RequiredSectionFields: provider.RequiredSectionFields
                     .Select(field => new SettingsDependencyFieldDto(
                         SectionName: field.SectionName,
-                        FieldName: field.FieldName,
-                        DisplayName: field.DisplayName))
+                        FieldName: field.FieldName))
                     .ToList(),
                 RequiredRuntimeKeys: provider.RequiredRuntimeKeys
                     .Select(key => new SettingsRuntimeKeyRequirementDto(
-                        Key: key.Key,
-                        DisplayName: key.DisplayName,
-                        ChangeHint: key.ChangeHint))
+                        Key: key.Key))
                     .ToList())))
             .ToList();
 
@@ -352,7 +341,6 @@ public sealed partial class ApplicationSettingsService
 
         return new SettingsSectionDto(
             SectionName: definition.SectionName,
-            DisplayName: definition.DisplayName,
             SchemaVersion: row.SchemaVersion,
             RowVersion: Convert.ToBase64String(row.RowVersion),
             UpdatedUtc: row.UpdatedUtc,
@@ -429,29 +417,4 @@ public sealed partial class ApplicationSettingsService
         }
     }
 
-    private static string HumanizeKey(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        var buffer = new List<char>(value.Length + 8);
-        for (var i = 0; i < value.Length; i++)
-        {
-            var current = value[i];
-            var previous = i > 0 ? value[i - 1] : '\0';
-            var shouldInsertSpace = i > 0
-                                    && char.IsUpper(current)
-                                    && (char.IsLower(previous) || char.IsDigit(previous));
-            if (shouldInsertSpace)
-            {
-                buffer.Add(' ');
-            }
-
-            buffer.Add(current is '_' or '-' ? ' ' : current);
-        }
-
-        return new string(buffer.ToArray());
-    }
 }

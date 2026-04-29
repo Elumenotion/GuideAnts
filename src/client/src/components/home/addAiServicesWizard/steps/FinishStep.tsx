@@ -10,7 +10,7 @@ export function FinishStep({ readyForBasicChat, totalModelCount, warningItems }:
       <div>
         <h3 className="text-sm font-semibold text-gray-900">Finish setup</h3>
         <p className="mt-1 text-sm text-gray-600">
-          Basic chat is ready when the core connection is configured and at least one model exists.
+          Steps are saved as you go. Finish is available once at least one model is configured, and you can come back later at any time.
         </p>
       </div>
 
@@ -37,4 +37,3 @@ export function FinishStep({ readyForBasicChat, totalModelCount, warningItems }:
     </div>
   );
 }
-

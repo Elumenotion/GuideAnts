@@ -19,8 +19,6 @@ public sealed record SettingsPropertyDefinition(
 public sealed class SettingsSectionDefinition
 {
     public required string SectionName { get; init; }
-    public required string DisplayName { get; init; }
-    public required int DisplayOrder { get; init; }
     public int SchemaVersion { get; init; } = 1;
     public required IReadOnlyList<SettingsPropertyDefinition> Properties { get; init; }
 
@@ -271,16 +269,12 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = TelemetrySectionName,
-            DisplayName = "Telemetry",
-            DisplayOrder = 5,
             BootstrapPayloadFactory = BuildTelemetryBootstrapPayload,
             Properties = TelemetryProperties
         },
         new()
         {
             SectionName = "AzureDocumentIntelligence",
-            DisplayName = "Azure Document Intelligence",
-            DisplayOrder = 10,
             Properties =
             [
                 new("Endpoint", "AzureDocumentIntelligence:Endpoint"),
@@ -290,8 +284,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "DocumentIntelligence",
-            DisplayName = "Markdown Extraction",
-            DisplayOrder = 11,
             Properties =
             [
                 new("TimeoutSeconds", "DocumentIntelligence:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
@@ -309,8 +301,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "AzureSpeechService",
-            DisplayName = "Azure Speech Service",
-            DisplayOrder = 20,
             Properties =
             [
                 new("Endpoint", "AzureSpeechService:Endpoint"),
@@ -321,8 +311,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "SpeechTranscription",
-            DisplayName = "Speech Transcription",
-            DisplayOrder = 25,
             Properties =
             [
                 new("TimeoutSeconds", "SpeechTranscription:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
@@ -332,8 +320,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "SpeechSynthesis",
-            DisplayName = "Speech Synthesis",
-            DisplayOrder = 27,
             Properties =
             [
                 new("TimeoutSeconds", "SpeechSynthesis:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
@@ -343,8 +329,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "AzureOpenAI",
-            DisplayName = "Azure OpenAI",
-            DisplayOrder = 30,
             Properties =
             [
                 new("Resource", "AzureOpenAI:Resource"),
@@ -355,8 +339,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "AzureOpenAiImages",
-            DisplayName = "Azure OpenAI Images",
-            DisplayOrder = 40,
             Properties =
             [
                 new("Endpoint", "AzureOpenAiImages:Endpoint"),
@@ -367,8 +349,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "ImageGeneration",
-            DisplayName = "Image Generation",
-            DisplayOrder = 45,
             Properties =
             [
                 new("TimeoutSeconds", "ImageGeneration:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 600),
@@ -378,8 +358,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "Embeddings",
-            DisplayName = "Embeddings",
-            DisplayOrder = 55,
             Properties =
             [
                 new("TimeoutSeconds", "Embeddings:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
@@ -389,8 +367,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "AzureOpenAiEmbedding",
-            DisplayName = "Azure OpenAI Embedding",
-            DisplayOrder = 60,
             Properties =
             [
                 new("Endpoint", "AzureOpenAiEmbedding:Endpoint"),
@@ -400,8 +376,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "OpenAI",
-            DisplayName = "OpenAI",
-            DisplayOrder = 70,
             Properties =
             [
                 new("ApiKey", "OpenAI:ApiKey", IsSecret: true),
@@ -411,8 +385,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "GoogleGeminiApi",
-            DisplayName = "Google Gemini API",
-            DisplayOrder = 75,
             Properties =
             [
                 new("ApiKey", "GoogleGeminiApi:ApiKey", IsSecret: true)
@@ -421,8 +393,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "Anthropic",
-            DisplayName = "Anthropic",
-            DisplayOrder = 80,
             Properties =
             [
                 new("BaseUrl", "Anthropic:BaseUrl"),
@@ -433,8 +403,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "OpenRouter",
-            DisplayName = "OpenRouter",
-            DisplayOrder = 85,
             Properties =
             [
                 new("ApiKey", "OpenRouter:ApiKey", IsSecret: true),
@@ -450,8 +418,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "HuggingFace",
-            DisplayName = "Hugging Face",
-            DisplayOrder = 87,
             Properties =
             [
                 new(
@@ -467,8 +433,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "ServiceRouting",
-            DisplayName = "Service routing",
-            DisplayOrder = 86,
             BootstrapPayloadFactory = BuildServiceRoutingBootstrapPayload,
             Properties = []
         },
@@ -481,8 +445,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "ServiceModes",
-            DisplayName = "Service Modes",
-            DisplayOrder = 90,
             Properties =
             [
                 new("Modes", "ServiceModes:Modes")
@@ -493,8 +455,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new()
         {
             SectionName = "ChatDefaults",
-            DisplayName = "Default Chat Model",
-            DisplayOrder = 89,
             Properties =
             [
                 new("DefaultModelId", "ChatDefaults:DefaultModelId"),

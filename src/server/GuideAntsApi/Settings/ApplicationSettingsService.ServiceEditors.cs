@@ -29,7 +29,6 @@ public sealed partial class ApplicationSettingsService
 
         return new ServiceEditorStateDto(
             ServiceId: contract.ServiceId,
-            DisplayName: contract.DisplayName,
             ActiveProviderId: activeProvider?.ProviderId ?? string.Empty,
             Providers: providers,
             Readiness: readiness);
@@ -277,8 +276,6 @@ public sealed partial class ApplicationSettingsService
                 var value = RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(_configuration[key.Key]);
                 return new RuntimeKeyDto(
                     Key: key.Key,
-                    DisplayName: key.DisplayName,
-                    ChangeHint: key.ChangeHint,
                     HasValue: !string.IsNullOrWhiteSpace(value),
                     CurrentValue: value);
             })
@@ -289,7 +286,6 @@ public sealed partial class ApplicationSettingsService
         return new ProviderEditorStateDto(
             ProviderId: provider.ProviderId,
             ProviderKind: provider.ProviderKind,
-            DisplayName: provider.ProviderDisplayName,
             ProviderSection: provider.ProviderSectionKey,
             ModeId: matchingMode?.ModeId,
             HasExplicitMode: matchingMode != null,
@@ -576,7 +572,7 @@ public sealed partial class ApplicationSettingsService
             var value = _configuration[$"{field.SectionName}:{field.FieldName}"];
             if (string.IsNullOrWhiteSpace(value))
             {
-                yield return field.DisplayName;
+                yield return field.FieldName;
             }
         }
 
@@ -585,7 +581,7 @@ public sealed partial class ApplicationSettingsService
             var value = RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(_configuration[runtime.Key]);
             if (string.IsNullOrWhiteSpace(value))
             {
-                yield return runtime.DisplayName;
+                yield return runtime.Key;
             }
         }
     }
@@ -609,7 +605,7 @@ public sealed partial class ApplicationSettingsService
             var value = BuildProviderFieldValue(contract, provider, field, matchingMode);
             if (!value.HasValue)
             {
-                yield return $"{field.Label} is required.";
+                yield return $"{field.Name} is required.";
             }
         }
     }
@@ -664,7 +660,7 @@ public sealed partial class ApplicationSettingsService
             {
                 if (metadata.Required && !hasExisting)
                 {
-                    throw new InvalidOperationException($"{metadata.Label} is required.");
+                    throw new InvalidOperationException($"{metadata.Name} is required.");
                 }
 
                 return;
@@ -674,7 +670,7 @@ public sealed partial class ApplicationSettingsService
         {
             if (metadata.Required)
             {
-                throw new InvalidOperationException($"{metadata.Label} is required.");
+                throw new InvalidOperationException($"{metadata.Name} is required.");
             }
 
             return;
@@ -686,7 +682,7 @@ public sealed partial class ApplicationSettingsService
             {
                 if (!int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
                 {
-                    throw new InvalidOperationException($"{metadata.Label} must be a whole number.");
+                    throw new InvalidOperationException($"{metadata.Name} must be a whole number.");
                 }
 
                 if ((string.Equals(metadata.Name, "TimeoutSeconds", StringComparison.Ordinal)
@@ -694,12 +690,12 @@ public sealed partial class ApplicationSettingsService
                     || string.Equals(metadata.Name, "MaxAudioBytes", StringComparison.Ordinal))
                     && n <= 0)
                 {
-                    throw new InvalidOperationException($"{metadata.Label} must be greater than zero.");
+                    throw new InvalidOperationException($"{metadata.Name} must be greater than zero.");
                 }
 
                 if (string.Equals(metadata.Name, "LocalMinIntervalMs", StringComparison.Ordinal) && n < 0)
                 {
-                    throw new InvalidOperationException($"{metadata.Label} must be zero or greater.");
+                    throw new InvalidOperationException($"{metadata.Name} must be zero or greater.");
                 }
             }
             else if (string.Equals(metadata.Kind, "url", StringComparison.OrdinalIgnoreCase))
@@ -707,7 +703,7 @@ public sealed partial class ApplicationSettingsService
                 if (!Uri.TryCreate(v, UriKind.Absolute, out var uri) ||
                     (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
                 {
-                    throw new InvalidOperationException($"{metadata.Label} must be a valid http(s) URL.");
+                    throw new InvalidOperationException($"{metadata.Name} must be a valid http(s) URL.");
                 }
             }
             else if (string.Equals(metadata.Kind, "enum", StringComparison.OrdinalIgnoreCase))
@@ -717,12 +713,12 @@ public sealed partial class ApplicationSettingsService
                     if (!opts.Any(o => string.Equals(o, v, StringComparison.Ordinal)))
                     {
                         throw new InvalidOperationException(
-                            $"{metadata.Label} must be one of: {string.Join(", ", opts)}.");
+                            $"{metadata.Name} must be one of: {string.Join(", ", opts)}.");
                     }
                 }
                 else if (!bool.TryParse(v, out _))
                 {
-                    throw new InvalidOperationException($"{metadata.Label} must be 'true' or 'false'.");
+                    throw new InvalidOperationException($"{metadata.Name} must be 'true' or 'false'.");
                 }
             }
             else if (string.Equals(metadata.Name, "ApiVersion", StringComparison.Ordinal) && v.Length > 0)
@@ -731,7 +727,7 @@ public sealed partial class ApplicationSettingsService
                 if (System.Text.RegularExpressions.Regex.IsMatch(v, @"^\d{4}-\d{2}-\d{2}(-[a-zA-Z0-9.-]+)?$") == false)
                 {
                     throw new InvalidOperationException(
-                        $"{metadata.Label} should look like a date-based API version (e.g. 2024-11-30).");
+                        $"{metadata.Name} should look like a date-based API version (e.g. 2024-11-30).");
                 }
             }
         }

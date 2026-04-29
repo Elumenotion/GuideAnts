@@ -30,7 +30,6 @@ public sealed partial class ApplicationSettingsService
 
             return new SettingsServiceReadinessDto(
                 ServiceId: contract.ServiceId,
-                DisplayName: contract.DisplayName,
                 Status: blockers.Count == 0 ? "ready" : "blocked",
                 Blockers: blockers,
                 Warnings: []);

@@ -22,10 +22,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Update="Resources\bootstrap\**\*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
+    <Content Remove="Resources\bootstrap\**\*" />
+    <None Include="Resources\bootstrap\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

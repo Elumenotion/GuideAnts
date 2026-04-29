@@ -10,6 +10,7 @@ import {
 } from '../../../../types/settings';
 import { ActiveAddOperationState, AddModelProvider, AddModelWizardState } from '../../types';
 import { buildAddModelRequest, createEmptyAddModelWizardState, getErrorMessage } from '../../utils';
+import { getCatalogProviderDisplayName } from '../../constants/displayLabels';
 import { TextActionButton } from '../shared/ActionButtons';
 import { SettingsModal } from '../shared/SettingsModal';
 import { AnthropicAddForm } from './providers/AnthropicForm';
@@ -452,8 +453,8 @@ export function AddModelWizard({
             <option value="">Select provider</option>
             <option value="openai-chat">openai-chat</option>
             <option value="openai-responses">openai-responses</option>
-            <option value="azure-openai-chat">azure-openai-chat</option>
-            <option value="azure-openai-responses">azure-openai-responses</option>
+            <option value="azure-openai-chat">Microsoft Foundry (Completions)</option>
+            <option value="azure-openai-responses">Microsoft Foundry (Responses)</option>
             <option value="anthropic">anthropic</option>
             <option value="llama-cpp">llama-cpp</option>
             <option value="google-gemini-chat">google-gemini-chat</option>
@@ -538,7 +539,7 @@ export function AddModelWizard({
         <div className="space-y-3 text-sm">
           <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
             <div>
-              <strong>Provider:</strong> {value.provider}
+              <strong>Provider:</strong> {getCatalogProviderDisplayName(value.provider)}
             </div>
             <div>
               <strong>Model ID:</strong> {value.catalogModelId}

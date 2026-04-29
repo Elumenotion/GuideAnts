@@ -12,6 +12,8 @@ interface SettingsModalProps {
   maxWidthClass?: string;
   /** If true, Esc and overlay click are disabled (for commit-in-progress forms). */
   disableDismiss?: boolean;
+  /** If true, clicking the overlay/backdrop will not close the modal. */
+  disableOverlayDismiss?: boolean;
 }
 
 /**
@@ -28,6 +30,7 @@ export function SettingsModal({
   footer,
   maxWidthClass = 'max-w-2xl',
   disableDismiss = false,
+  disableOverlayDismiss = false,
 }: SettingsModalProps) {
   useEffect(() => {
     if (!isOpen) {
@@ -57,7 +60,7 @@ export function SettingsModal({
       aria-modal="true"
       aria-label={title}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !disableDismiss) {
+        if (event.target === event.currentTarget && !disableDismiss && !disableOverlayDismiss) {
           onClose();
         }
       }}

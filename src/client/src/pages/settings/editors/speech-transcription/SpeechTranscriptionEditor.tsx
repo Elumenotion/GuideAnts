@@ -89,10 +89,8 @@ export function SpeechTranscriptionEditor() {
                 <OperationalDependencyRow
                   key={dependency.key}
                   keyName={dependency.key}
-                  displayName={dependency.displayName}
                   hasValue={dependency.hasValue}
                   currentValue={dependency.currentValue}
-                  changeHint={dependency.changeHint}
                 />
               ))}
             </div>
@@ -130,9 +128,9 @@ function renderCloudTranscriptionBehavior(providerId: string) {
         <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
           <li>
             Cloud batch transcription uses <span className="font-mono">AzureSpeechService:Endpoint</span>,{' '}
-            <span className="font-mono">ApiKey</span>, and the Azure Speech timeout stored for this path.
+            <span className="font-mono">ApiKey</span>, and the Microsoft Foundry Speech Services timeout stored for this path.
           </li>
-          <li>Diarization and structured output follow Azure Speech behavior when enabled in your workflows.</li>
+          <li>Diarization and structured output follow Microsoft Foundry Speech Services behavior when enabled in your workflows.</li>
         </ul>
       );
     case 'SpeechTranscription.Google.SpeechToText':

@@ -96,8 +96,6 @@ public sealed class ApplicationSettingsJsonTests
         var definition = new SettingsSectionDefinition
         {
             SectionName = "SpeechTranscription",
-            DisplayName = "Speech Transcription",
-            DisplayOrder = 1,
             Properties =
             [
                 new SettingsPropertyDefinition(
@@ -129,8 +127,6 @@ public sealed class ApplicationSettingsJsonTests
         return new SettingsSectionDefinition
         {
             SectionName = "UnitTest",
-            DisplayName = "Unit Test",
-            DisplayOrder = 1,
             Properties =
             [
                 new SettingsPropertyDefinition(

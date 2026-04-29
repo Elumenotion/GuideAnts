@@ -3,6 +3,7 @@ import { api } from '../../../../services/api';
 import { LlamaRuntimeInventoryItemDto, SettingsModelDto, SettingsRuntimeProfileDto } from '../../../../types/settings';
 import { CatalogEditState } from '../../types';
 import { buildCatalogEditRequest, createCatalogEditStateFromModel, getErrorMessage } from '../../utils';
+import { getCatalogProviderDisplayName } from '../../constants/displayLabels';
 import { TextActionButton } from '../shared/ActionButtons';
 import { SettingsModal } from '../shared/SettingsModal';
 import { AnthropicEditForm } from './providers/AnthropicForm';
@@ -140,7 +141,7 @@ export function CatalogRowEditModal({ model, profiles, profilesLoading, inventor
               <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Provider</label>
               <input
                 type="text"
-                value={value.provider}
+                value={getCatalogProviderDisplayName(value.provider)}
                 disabled
                 className="w-full rounded border border-gray-300 bg-gray-100 px-3 py-2 font-mono text-sm text-gray-600"
               />

@@ -1,7 +1,5 @@
 export interface SettingsSectionSummaryDto {
   sectionName: string;
-  displayName: string;
-  displayOrder: number;
   hasSecrets: boolean;
   readinessStatus: 'configured' | 'blocked' | 'unconfigured' | 'not-applicable' | string;
   missingFields: string[];
@@ -9,7 +7,6 @@ export interface SettingsSectionSummaryDto {
 
 export interface SettingsSectionDto {
   sectionName: string;
-  displayName: string;
   schemaVersion: number;
   rowVersion: string;
   updatedUtc: string;
@@ -26,8 +23,6 @@ export interface SettingsSchemaDto {
 
 export interface SettingsSectionSchemaDto {
   sectionName: string;
-  displayName: string;
-  displayOrder: number;
   schemaVersion: number;
   hasSecrets: boolean;
   properties: SettingsSectionPropertyDefinitionDto[];
@@ -44,7 +39,6 @@ export interface SettingsSectionPropertyDefinitionDto {
 
 export interface SettingsServiceDefinitionDto {
   serviceId: string;
-  displayName: string;
   sectionName: string;
   providerIds: string[];
   serviceFields: SettingsDependencyFieldDto[];
@@ -53,11 +47,9 @@ export interface SettingsServiceDefinitionDto {
 export interface SettingsProviderDefinitionDto {
   providerId: string;
   serviceId: string;
-  displayName: string;
   kind: 'cloud' | 'local' | string;
   providerSectionKey: string;
   providerSettingsSection?: string | null;
-  marketingSummary?: string | null;
   sectionName?: string | null;
   runtimeSectionName?: string | null;
   requiredSectionFields: SettingsDependencyFieldDto[];
@@ -66,10 +58,8 @@ export interface SettingsProviderDefinitionDto {
 
 export interface ProviderFieldMetadataDto {
   name: string;
-  label: string;
   kind: 'url' | 'secret' | 'int' | 'enum' | 'text' | 'path' | string;
   required: boolean;
-  helpText: string;
   enumOptions?: string[] | null;
   operative: boolean;
 }
@@ -83,8 +73,6 @@ export interface ProviderFieldValueDto {
 
 export interface RuntimeKeyDto {
   key: string;
-  displayName: string;
-  changeHint: string;
   hasValue: boolean;
   currentValue?: string | null;
 }
@@ -92,7 +80,6 @@ export interface RuntimeKeyDto {
 export interface ProviderEditorStateDto {
   providerId: string;
   providerKind: string;
-  displayName: string;
   providerSection: string;
   modeId?: string | null;
   hasExplicitMode: boolean;
@@ -116,7 +103,6 @@ export interface ServiceEditorReadinessDto {
 
 export interface ServiceEditorStateDto {
   serviceId: string;
-  displayName: string;
   activeProviderId: string;
   providers: ProviderEditorStateDto[];
   readiness: ServiceEditorReadinessDto;
@@ -174,13 +160,10 @@ export interface ProviderFieldsUpdateRequest {
 export interface SettingsDependencyFieldDto {
   sectionName: string;
   fieldName: string;
-  displayName: string;
 }
 
 export interface SettingsRuntimeKeyRequirementDto {
   key: string;
-  displayName: string;
-  changeHint: string;
 }
 
 /**
@@ -208,10 +191,8 @@ export type SettingsRuntimeDependencyKind = 'url' | 'path' | 'other';
 
 export interface SettingsRuntimeDependencyDto {
   key: string;
-  displayName: string;
   currentValue?: string | null;
   readOnly: boolean;
-  changeHint: string;
   usedByProviderIds: string[];
   source: SettingsRuntimeDependencySource | string;
   hasValue: boolean;
@@ -261,7 +242,6 @@ export interface SettingsReadinessDto {
 
 export interface SettingsServiceReadinessDto {
   serviceId: string;
-  displayName: string;
   status: 'ready' | 'blocked' | string;
   blockers: string[];
   warnings: string[];

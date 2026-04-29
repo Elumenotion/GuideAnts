@@ -49,11 +49,17 @@ export function toExistingFoundryModels(models: SettingsModelDto[]): ExistingFou
     .sort((left, right) => left.modelId.localeCompare(right.modelId));
 }
 
-export function makeDraftModel(localId: string, modelId: string, provider: FoundryModelProviderLabel): FoundryModelDraft {
+export function makeDraftModel(
+  localId: string,
+  modelId: string,
+  provider: FoundryModelProviderLabel,
+  setAsGlobalDefault: boolean
+): FoundryModelDraft {
   return {
     localId,
     modelId: modelId.trim(),
     provider,
+    setAsGlobalDefault,
     persisted: false,
   };
 }
@@ -210,4 +216,3 @@ export function summarizeOptionalServiceWarnings(snapshot: WizardLoadSnapshot): 
   }
   return warnings;
 }
-

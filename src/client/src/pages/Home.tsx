@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import StartCard from '../components/home/StartCard';
+import { Link, useNavigate } from 'react-router-dom';
+import { FiBarChart2, FiFolderPlus, FiSettings, FiTool } from 'react-icons/fi';
 import { api } from '../services/api';
 import { useToast } from '../components/common/Toast';
 import ErrorScreen from '../components/ErrorScreen';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { SettingsButton } from '../components/common/SettingsButton';
 import TabbedContentArea from '../components/home/TabbedContentArea';
 import EmptyStateVideo from '../components/home/EmptyStateVideo';
 import AddAiServicesWizard from '../components/home/AddAiServicesWizard';
@@ -22,6 +21,49 @@ interface ProjectSummary {
 }
 
 const ADD_AI_SERVICES_WIZARD_DISMISS_KEY = 'guideants.firstLaunch.addAiServicesWizard.dismissed.v1';
+
+interface HeaderIconLinkButtonProps {
+  to: string;
+  title: string;
+  icon: React.ReactNode;
+  tourId?: string;
+}
+
+function HeaderIconLinkButton({ to, title, icon, tourId }: HeaderIconLinkButtonProps) {
+  return (
+    <Link
+      to={to}
+      title={title}
+      aria-label={title}
+      className="h-10 w-10 border rounded-md transition-colors flex items-center justify-center hover:bg-gray-50 text-gray-700 border-gray-300 bg-white"
+      {...(tourId ? { ['data-tour-id']: tourId } : {})}
+    >
+      {icon}
+      <span className="sr-only">{title}</span>
+    </Link>
+  );
+}
+
+interface HeaderIconActionButtonProps {
+  title: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}
+
+function HeaderIconActionButton({ title, icon, onClick }: HeaderIconActionButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className="h-10 w-10 border rounded-md transition-colors flex items-center justify-center hover:bg-gray-50 text-gray-700 border-gray-300 bg-white"
+    >
+      {icon}
+      <span className="sr-only">{title}</span>
+    </button>
+  );
+}
 
 const Home = () => {
   const navigate = useNavigate();
@@ -329,7 +371,7 @@ const Home = () => {
         showToast({
           type: 'error',
           title: 'Could not start a chat in your latest notebook',
-          message: 'It may have been moved or deleted. Try again, or create a new project from Options.'
+          message: 'It may have been moved or deleted. Try again, or create a new project from the top toolbar.'
         });
       } else {
         showToast({ type: 'error', title: 'Quick Start failed', message: 'Please try again.' });
@@ -346,11 +388,11 @@ const Home = () => {
       content: 'Start a <strong>Quick Start</strong> project to jump straight into a new notebook and conversation.'
     },
     {
-      target: '[data-tour-id="home.options.new-project"]',
+      target: '[data-tour-id="home.actions.new-project"]',
       content: 'Create a <strong>new project</strong> to organize notebooks, files, and collaborators.'
     },
     {
-      target: '[data-tour-id="home.options.usage"]',
+      target: '[data-tour-id="home.actions.usage"]',
       content: 'Review <strong>Usage</strong> and costs for your owned projects.'
     },
     {
@@ -403,7 +445,28 @@ const Home = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <SettingsButton />
+            <HeaderIconLinkButton
+              to="/new-project"
+              title="New Project"
+              icon={<FiFolderPlus className="h-4 w-4" />}
+              tourId="home.actions.new-project"
+            />
+            <HeaderIconLinkButton
+              to="/usage"
+              title="Usage"
+              icon={<FiBarChart2 className="h-4 w-4" />}
+              tourId="home.actions.usage"
+            />
+            <HeaderIconActionButton
+              title="Setup Wizard"
+              icon={<FiTool className="h-4 w-4" />}
+              onClick={() => setShowAddAiServicesWizard(true)}
+            />
+            <HeaderIconLinkButton
+              to="/settings"
+              title="Settings"
+              icon={<FiSettings className="h-4 w-4" />}
+            />
             <TourStartButton
               screenId={SCREEN_ID}
               inline
@@ -413,36 +476,19 @@ const Home = () => {
         </div>
 
         <div className="mb-8">
-          <h2 className="text-sm font-medium text-gray-700 mb-3">Options</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <StartCard 
-              to="/new-project" 
-              title="New Project" 
-              description="Create a new project to organize notebooks."
-              tourId="home.options.new-project"
-            />
-            <StartCard
-              to="/settings"
-              title="Settings"
-              description="Manage services and model catalog."
-            />
-            <StartCard to="/usage" title="Usage" description="Review usage and costs." tourId="home.options.usage" />
-          </div>
-          <div className="mt-6 mb-4">
-            <button 
-              onClick={handleQuickStart}
-              disabled={quickStartLoading}
-              className={`w-full px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 ${shouldPulseAttention ? 'animate-gentle-pulse-5s' : ''}`}
-              data-tour-id="home.quick-start"
-            >
-              {quickStartLoading 
-                ? (quickStartTarget ? 'Starting chat in latest notebook...' : 'Creating Quick Start Project...')
-                : (quickStartTarget 
-                    ? 'Quick Start - Start a new chat in your latest notebook'
-                    : 'Quick Start - Start a new project with a notebook and chat')
-              }
-            </button>
-          </div>
+          <button
+            onClick={handleQuickStart}
+            disabled={quickStartLoading}
+            className={`w-full px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 ${shouldPulseAttention ? 'animate-gentle-pulse-5s' : ''}`}
+            data-tour-id="home.quick-start"
+          >
+            {quickStartLoading
+              ? (quickStartTarget ? 'Starting chat in latest notebook...' : 'Creating Quick Start Project...')
+              : (quickStartTarget
+                  ? 'Quick Start - Start a new chat in your latest notebook'
+                  : 'Quick Start - Start a new project with a notebook and chat')
+            }
+          </button>
         </div>
 
         {/* Recent Projects/Conversations Area */}

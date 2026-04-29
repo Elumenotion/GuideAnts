@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../../services/api';
 import type { ProviderEditorStateDto, ServiceEditorStateDto } from '../../../types/settings';
+import { getServiceProviderDisplayName } from '../constants/displayLabels';
 import { useServiceEditorDraft } from './useServiceEditorDraft';
 import { buildSavePayload, hasValidationErrors, validateOperativeProviderFields } from './serviceEditorValidation';
 
@@ -49,11 +50,14 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
 
   const selectedProvider = providersById.get(draft.activeProviderId) ?? state?.providers[0];
   const persistedActiveProvider = state ? providersById.get(state.activeProviderId) : undefined;
-  const persistedActiveLabel = persistedActiveProvider?.displayName
-    ?? (state?.activeProviderId ? state.activeProviderId : 'Not configured');
+  const persistedActiveLabel = persistedActiveProvider
+    ? getServiceProviderDisplayName(persistedActiveProvider.providerId)
+    : (state?.activeProviderId ? state.activeProviderId : 'Not configured');
   const editingDifferentProvider = Boolean(state && draft.activeProviderId !== state.activeProviderId);
   const editingProviderLabel =
-    editingDifferentProvider && selectedProvider ? selectedProvider.displayName : null;
+    editingDifferentProvider && selectedProvider
+      ? getServiceProviderDisplayName(selectedProvider.providerId)
+      : null;
 
   const providerOptions = useMemo(() => {
     if (!state) {
@@ -61,7 +65,7 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
     }
     return state.providers.map((p) => ({
       providerId: p.providerId,
-      displayName: p.displayName,
+      displayName: getServiceProviderDisplayName(p.providerId),
       kind: p.providerKind,
       hasExplicitMode: p.hasExplicitMode,
       connectionConfigured: p.connectionConfigured,
@@ -143,8 +147,9 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
     }
 
     if (!selectedProvider.connectionConfigured) {
+      const selectedProviderLabel = getServiceProviderDisplayName(selectedProvider.providerId);
       setError(
-        `Configure the provider connection before saving ${selectedProvider.displayName}: ${selectedProvider.connectionMissingFields.join(', ')}.`
+        `Configure the provider connection before saving ${selectedProviderLabel}: ${selectedProvider.connectionMissingFields.join(', ')}.`
       );
       return false;
     }

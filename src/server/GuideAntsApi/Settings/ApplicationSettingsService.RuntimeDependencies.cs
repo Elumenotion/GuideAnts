@@ -53,10 +53,8 @@ public sealed partial class ApplicationSettingsService
                 var serializedValue = isSecret ? null : value;
                 return new SettingsRuntimeDependencyDto(
                     Key: dependency.Key,
-                    DisplayName: dependency.DisplayName,
                     CurrentValue: serializedValue,
                     ReadOnly: true,
-                    ChangeHint: dependency.ChangeHint,
                     UsedByProviderIds: dependency.UsedByProviderIds,
                     Source: RuntimeDependencySourceResolver.Resolve(_configuration, dependency.Key),
                     HasValue: hasValue,
@@ -117,38 +115,24 @@ public sealed partial class ApplicationSettingsService
     [
         new(
             Key: "LlamaCpp:BaseUrl",
-            DisplayName: "Llama.cpp Server Base URL",
-            ChangeHint: RuntimeChangeHint,
             UsedByProviderIds: []),
         new(
             Key: "LocalServiceHosts:SpeechTranscriptionBaseUrl",
-            DisplayName: "Speech Transcription Base URL",
-            ChangeHint: RuntimeChangeHint,
             UsedByProviderIds: [ServiceProviderIds.SpeechTranscriptionLocalAsrHttp]),
         new(
             Key: "LocalServiceHosts:SpeechSynthesisBaseUrl",
-            DisplayName: "Speech Synthesis Base URL",
-            ChangeHint: RuntimeChangeHint,
             UsedByProviderIds: [ServiceProviderIds.SpeechSynthesisLocalTtsHttp]),
         new(
             Key: "LocalServiceHosts:ImageGenerationBaseUrl",
-            DisplayName: "Image Generation Base URL",
-            ChangeHint: RuntimeChangeHint,
             UsedByProviderIds: [ServiceProviderIds.ImageGenerationLocalSdHttp]),
         new(
             Key: "LocalServiceHosts:EmbeddingsBaseUrl",
-            DisplayName: "Embeddings Base URL",
-            ChangeHint: RuntimeChangeHint,
             UsedByProviderIds: [ServiceProviderIds.EmbeddingsLocalEmbHttp]),
         new(
             Key: "LocalServiceHosts:MediaBaseUrl",
-            DisplayName: "Media Extraction Base URL",
-            ChangeHint: RuntimeChangeHint,
             UsedByProviderIds: [ServiceProviderIds.SpeechTranscriptionLocalAsrHttp]),
         new(
             Key: "LocalServiceHosts:DocumentIntelligenceBaseUrl",
-            DisplayName: "Markdown Extraction Base URL",
-            ChangeHint: RuntimeChangeHint,
             UsedByProviderIds: [ServiceProviderIds.DocumentIntelligenceLocalDoclingHttp])
     ];
 }

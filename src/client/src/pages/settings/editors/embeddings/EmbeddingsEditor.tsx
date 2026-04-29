@@ -91,7 +91,7 @@ function renderCloudEmbeddingsBehavior(provider: ProviderEditorStateDto) {
     case 'Embeddings.AzureOpenAI.Embedding':
       return (
         <p className="text-sm text-gray-700">
-          Azure OpenAI embedding requests use the configured endpoint and deployment. Credentials are stored securely and are
+          Microsoft Foundry embedding requests use the configured endpoint and deployment. Credentials are stored securely and are
           not echoed back in API responses.
         </p>
       );

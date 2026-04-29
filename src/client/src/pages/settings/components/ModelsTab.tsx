@@ -9,6 +9,7 @@ import {
   SettingsRuntimeProfileDto,
 } from '../../../types/settings';
 import { ActiveAddOperationState } from '../types';
+import { getCatalogProviderDisplayName } from '../constants/displayLabels';
 import { formatDateTime, parseCanonicalLocalRuntimeJson } from '../utils';
 import { IconActionButton, TextActionButton } from './shared/ActionButtons';
 import { CatalogRowEditModal } from './catalog/CatalogRowEditModal';
@@ -339,7 +340,7 @@ export function ModelsTab({
                   >
                     <td className="whitespace-nowrap px-4 py-3 text-sm font-mono text-gray-900">{model.modelId}</td>
                     <td className="px-4 py-3 text-sm text-gray-900">{model.displayName}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">{model.provider}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{getCatalogProviderDisplayName(model.provider)}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{model.displayOrder ?? '-'}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{model.isActive ? 'Yes' : 'No'}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(model.updated ?? model.created)}</td>

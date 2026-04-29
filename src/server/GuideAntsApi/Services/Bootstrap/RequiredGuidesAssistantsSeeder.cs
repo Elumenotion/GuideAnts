@@ -41,8 +41,8 @@ public sealed class RequiredGuidesAssistantsSeeder : IRequiredGuidesAssistantsSe
             return;
         }
 
-        await SeedGuidesAsync(Path.Combine(bootstrapRoot, GuidesFolderName), cancellationToken);
         await SeedAssistantsAsync(Path.Combine(bootstrapRoot, AssistantsFolderName), cancellationToken);
+        await SeedGuidesAsync(Path.Combine(bootstrapRoot, GuidesFolderName), cancellationToken);
     }
 
     private async Task SeedGuidesAsync(string guidesFolder, CancellationToken cancellationToken)
