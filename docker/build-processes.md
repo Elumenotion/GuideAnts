@@ -7,14 +7,14 @@ This document covers the active Docker build paths under `docker/` and explains 
 | Image / Service | Build Source | Built By | Used By |
 |---|---|---|---|
 | `guideants-ai-deps:<backend>-<hash12>` | `docker/build/guideants-ai/Dockerfile` (`deps-cpu` / `deps-cuda13`) | `docker/build/build_guideants_ai.ps1` | cache/reuse layer for final GuideAnts AI image |
-| `guideants-ai:<backend>-<YYDDD>.<HHmm>` | `docker/build/guideants-ai/Dockerfile` | `docker/build/build_guideants_ai.ps1` | `guideants-ai` service (`GA_AI_IMAGE`) |
+| `guideants-ai:<backend>-<YYDDD>.<HHmm>` | `docker/build/guideants-ai/Dockerfile` | `docker/build/build_guideants_ai.ps1` | `guideants-ai` service (`GA_AI_CUDA_IMAGE` or `GA_AI_CPU_IMAGE`) |
 | `guideants-webapi-ui:<YYDDD>.<HHmm>` | `docker/build/webapi-ui/Dockerfile` | `docker/build/build_webapi_ui.ps1` | `guideants-webapi-ui` profile service (`GA_WEBAPI_UI_IMAGE`) |
 | `mssql2025-express-fts` | `docker/build/mssql-fts/Dockerfile` | `docker/build/build_guideants_ai.ps1 -All` | `mssql-express` service |
 | `plantuml-1.2025.2` | `docker/build/Sandboxes/PlantUml/dockerfile` | `docker/build/build_guideants_ai.ps1 -All` | `plantuml` service |
 | `guideants-searxng:latest` | `docker/build/searxng/Dockerfile` | `docker compose build searxng` | `searxng` service (`GA_SEARXNG_IMAGE`) |
 
 Notes:
-- `docker/docker-compose.yml` references image tags via `docker/.env` (`GA_AI_IMAGE`, `GA_WEBAPI_UI_IMAGE`).
+- `docker/docker-compose.cuda.yml` and `docker/docker-compose.cpu.yml` reference image tags via `docker/.env` (`GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, `GA_WEBAPI_UI_IMAGE`).
 - `guideants-webapi-ui` is optional and only starts when compose profile `webapi-ui` is enabled.
 - GitHub Actions now publish GHCR copies of the AI, PlantUML, SearXNG, webapi slim, and webapi mssql images without changing the local compose image-selection flow.
 
@@ -65,7 +65,7 @@ Script flow:
 6. Builds or reuses `guideants-ai-deps:<backend>-<hash12>` from `deps-cpu` / `deps-cuda13`.
 7. Runs final build with `--target <final-target>`, `--cache-from <deps-image>`, and backend-specific deps image build args.
 8. Cleans staged artifacts (`ScriptExecutionAgent`, staged `requirements.txt`).
-9. Writes `GA_AI_IMAGE=<new tag>` into `docker/.env`.
+9. Writes `GA_AI_CUDA_IMAGE=<new tag>` or `GA_AI_CPU_IMAGE=<new tag>` into `docker/.env`.
 10. If `-All` is set, also builds PlantUML and MSSQL FTS images, then invokes `build_webapi_ui.ps1` to build the compose-used WebAPI+UI image.
 
 ## 3) AI Multi-Stage Build (Why It Matters)
@@ -144,23 +144,23 @@ When `build_guideants_ai.ps1 -All` is used:
   - Built by invoking: `docker/build/build_webapi_ui.ps1 -NoRecreate` (or `-NoCache -NoRecreate` when `-RebuildBase` is used)
   - Dockerfile: `docker/build/webapi-ui/Dockerfile`
   - Tag: `guideants-webapi-ui:<YYDDD>.<HHmm>` (written to `GA_WEBAPI_UI_IMAGE`)
-  - This matches the image used by `docker-compose.yml` for the `guideants-webapi-ui` service
+  - This matches the image used by `docker-compose.cuda.yml` for the `guideants-webapi-ui` service
 
 ## 6) Compose Usage After Builds
 
 From `docker/`:
 
 ```powershell
-docker compose up -d guideants-ai mssql-express plantuml
+docker compose -f docker-compose.cuda.yml up -d guideants-ai mssql-express plantuml
 ```
 
-Optional UI profile:
+Recreate the WebAPI/UI service after a build:
 
 ```powershell
-docker compose --profile webapi-ui up -d guideants-webapi-ui
+docker compose -f docker-compose.cuda.yml up -d --no-deps --force-recreate guideants-webapi-ui
 ```
 
-Because the build scripts update `.env`, compose picks up the newest `GA_AI_IMAGE` and `GA_WEBAPI_UI_IMAGE` automatically.
+Because the build scripts update `.env`, compose picks up the newest `GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, and `GA_WEBAPI_UI_IMAGE` automatically.
 
 ## 7) Sandbox/Experimental Dockerfiles
 
@@ -173,3 +173,4 @@ The following folders contain sandbox/reference builds and are not first-class c
 - `docker/build/Sandboxes/Net9AndPython`
 
 These are useful for experimentation and dependency prototyping, while production/local-stack builds should follow Sections 2-6 above.
+

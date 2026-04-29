@@ -67,7 +67,7 @@ the full list of runtime-owned keys.
 The compose file references two images you must build or pull ahead of
 time (they are not on a public registry):
 
-- `guideants-ai` — selected by `docker/docker-compose.yml` or
+- `guideants-ai` — selected by `docker/docker-compose.cuda.yml` or
   `docker/docker-compose.cpu.yml`. Build instructions live in
   [`docker/guideants-ai-build.md`](../docker/guideants-ai-build.md) and
   [`docker/build-processes.md`](../docker/build-processes.md).
@@ -101,7 +101,7 @@ Full precedence rules are in
 
 Use one of the two explicit dev compose files:
 
-- `docker/docker-compose.yml` starts CUDA `guideants-ai` and CUDA Docling.
+- `docker/docker-compose.cuda.yml` starts CUDA `guideants-ai` and CUDA Docling.
 - `docker/docker-compose.cpu.yml` starts CPU `guideants-ai` and CPU Docling.
 
 `docker/.env` is still used for shared bind-mount paths, database name,
@@ -163,7 +163,7 @@ Notes:
 From the repo root:
 
 ```powershell
-docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.cuda.yml up -d
 ```
 
 This brings up `mssql-express`, `guideants-ai`, `docling-serve`,
@@ -178,7 +178,7 @@ docker compose -f docker/docker-compose.cpu.yml up -d
 Verify everything came up:
 
 ```powershell
-docker compose -f docker/docker-compose.yml ps
+docker compose -f docker/docker-compose.cuda.yml ps
 ```
 
 All services should report `running` / `healthy`. The first boot takes a
@@ -564,7 +564,7 @@ All four should return `200`.
 
 ```powershell
 Push-Location docker
-docker compose -f docker-compose.yml down
+docker compose -f docker-compose.cuda.yml down
 Pop-Location
 ```
 
@@ -576,7 +576,7 @@ untouched.
 ### Update images
 
 1. Edit `GA_WEBAPI_UI_IMAGE` in `docker/.env` if you need a different web API tag.
-2. `docker compose -f docker/docker-compose.yml up -d` — compose pulls the selected tags and
+2. `docker compose -f docker/docker-compose.cuda.yml up -d` — compose pulls the selected tags and
    recreates changed containers.
 3. On first boot of the updated web API, EF migrations run
    automatically. Existing DB state is preserved by migration idempotency
@@ -586,7 +586,7 @@ untouched.
 
 ```powershell
 Push-Location docker
-docker compose -f docker-compose.yml down -v
+docker compose -f docker-compose.cuda.yml down -v
 Pop-Location
 ```
 
@@ -695,7 +695,7 @@ compose file:
 
 ```powershell
 docker rm -f docling-serve-cpu docling-serve-cuda
-docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.cuda.yml up -d
 ```
 
 ## 12. Where to go next
@@ -718,3 +718,4 @@ Deeper docs, in reading order:
 - [`docker/guideants-ai-build.md`](../docker/guideants-ai-build.md) /
   [`docker/build-processes.md`](../docker/build-processes.md) — how to
   build the `guideants-ai` and `guideants-webapi-ui` images locally.
+

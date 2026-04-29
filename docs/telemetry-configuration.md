@@ -230,17 +230,16 @@ Column names may differ slightly by migration state; use the current EF model or
 For Compose-based runs, start with:
 
 ```powershell
-docker compose -f docker/docker-compose.yml logs --tail 200 guideants-webapi-ui
-docker compose -f docker/docker-compose.yml logs --tail 200 guideants-ai
-docker compose -f docker/docker-compose.yml logs --tail 200 searxng
-docker compose -f docker/docker-compose.yml logs --tail 200 docling-serve-cpu
-docker compose -f docker/docker-compose.yml logs --tail 200 docling-serve-cuda
+docker compose -f docker/docker-compose.cuda.yml logs --tail 200 guideants-webapi-ui
+docker compose -f docker/docker-compose.cuda.yml logs --tail 200 guideants-ai
+docker compose -f docker/docker-compose.cuda.yml logs --tail 200 searxng
+docker compose -f docker/docker-compose.cuda.yml logs --tail 200 docling-serve
 ```
 
 Use `-f` when reproducing a problem:
 
 ```powershell
-docker compose -f docker/docker-compose.yml logs -f guideants-webapi-ui guideants-ai
+docker compose -f docker/docker-compose.cuda.yml logs -f guideants-webapi-ui guideants-ai
 ```
 
 ## Settings Infrastructure Probes
@@ -264,3 +263,4 @@ The API does not currently provide custom spans or metrics for each domain opera
 - Provider-specific counters for success, retry, timeout, and model-not-ready outcomes.
 - Local runtime metrics for loaded models, GPU assignment, queue depth, and restart/load duration.
 - Extraction/transcription duration records by file type and provider.
+

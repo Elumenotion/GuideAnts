@@ -127,7 +127,7 @@ Supported switches:
 5. Build/reuse backend-specific dependency image (`deps-cpu` or `deps-cuda13`)
 6. Build final runtime target (`final-cpu` or `final-cuda13`) using the dependency image
 7. Clean staged artifacts
-8. Write `GA_AI_IMAGE=<final-tag>` to `docker/.env`
+8. Write `GA_AI_CUDA_IMAGE=<final-tag>` or `GA_AI_CPU_IMAGE=<final-tag>` to `docker/.env`
 9. Optionally build PlantUML/MSSQL and invoke `build_webapi_ui.ps1` if `-All` was passed
 
 ## File Layout
@@ -135,7 +135,7 @@ Supported switches:
 ```text
 docker/
   .env
-  docker-compose.yml
+  docker-compose.cuda.yml
   guideants-ai-build.md
   build/
     build_guideants_ai.ps1
@@ -173,7 +173,7 @@ Examples:
 - `guideants-ai-deps:cuda13-89ab1c2d3e4f`
 - `guideants-ai-deps:cpu-1a2b3c4d5e6f`
 
-`GA_AI_IMAGE` in `docker/.env` is always updated to the latest built final tag.
+`GA_AI_CUDA_IMAGE` or `GA_AI_CPU_IMAGE` in `docker/.env` is always updated to the latest built final tag.
 
 ## Running
 
@@ -275,7 +275,7 @@ Settings UI, which drives `huggingface_hub.snapshot_download` server-side.
 
 Legacy `GA_TTS_MODELS_HOST_PATH`, `GA_SD_MODELS_HOST_PATH`, and
 `GA_EMB_MODELS_HOST_PATH` overrides are no longer consulted by
-`docker-compose.yml` and have been removed from `docker/.env`.
+`docker-compose.cuda.yml` and have been removed from `docker/.env`.
 
 ## Local SD Model Bootstrap (Legacy Pre-refactor Path)
 
@@ -474,3 +474,4 @@ Update both final stages plus `entrypoint.sh`:
 - Keep stable-diffusion model weights external to image layers and load them through mounted volumes.
 - Keep shell scripts LF-only (`.gitattributes`) for Linux container compatibility.
 - Keep `docker/.env` as the single source for compose runtime image selection.
+
