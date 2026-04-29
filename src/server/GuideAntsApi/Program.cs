@@ -31,9 +31,6 @@ public class Program
 
         var builder = WebApplication.CreateBuilder(args);
 
-        // This API is DB-first for assistant definitions; do not fall back to file-based assistants.
-        Environment.SetEnvironmentVariable("ASSISTANTS_DISABLE_FILE_FALLBACK", "true");
-
         // Normalize file storage to an absolute path early so every service and options binding
         // resolves the same notebook root regardless of the current working directory.
         var configuredFileStoragePath = builder.Configuration["FileStorage:Path"];
@@ -129,6 +126,9 @@ public class Program
             var settingsService = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
             settingsService.BootstrapAsync(bootstrapConfiguration).GetAwaiter().GetResult();
             settingsService.ReloadConfiguration();
+
+            var requiredSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder>();
+            requiredSeeder.SeedAsync().GetAwaiter().GetResult();
         }
 
         ServiceRoutingStartupValidator.Validate(app.Services.GetRequiredService<IConfiguration>());

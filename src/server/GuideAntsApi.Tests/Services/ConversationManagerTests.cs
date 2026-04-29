@@ -19,7 +19,6 @@ public class ConversationManagerTests
     private IMemoryCache _cache = null!;
     private Mock<ILogger<ConversationManager>> _loggerMock = null!;
     private ConversationManager _manager = null!;
-    private readonly List<string> _createdAssistantDirs = [];
 
     private Guid _conversationId;
     private Guid _notebookId;
@@ -32,9 +31,6 @@ public class ConversationManagerTests
         _conversationId = Guid.NewGuid();
         _notebookId = Guid.NewGuid();
         _projectId = Guid.NewGuid();
-
-        // Set up assistant definitions for testing
-        SetupTestAssistantDefinitions();
 
         // In-memory EF Core database
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -70,9 +66,6 @@ public class ConversationManagerTests
         _context.Database.EnsureDeleted();
         _context.Dispose();
         _cache.Dispose();
-        
-        // Clean up assistant definitions
-        CleanupTestAssistantDefinitions();
     }
 
     private void SeedTestData()
@@ -100,74 +93,12 @@ public class ConversationManagerTests
         _context.SaveChanges();
     }
 
-    private void SetupTestAssistantDefinitions()
-    {
-        // Create test assistant definitions under test output so FileStorage default path can resolve them.
-        CreateTestAssistant("assistant", "You are a helpful assistant.", "gpt-4o-mini");
-        CreateTestAssistant("python-assistant", "You are a Python programming assistant.", "gpt-4o-mini");
-    }
-
-    private void CleanupTestAssistantDefinitions()
-    {
-        foreach (var dir in _createdAssistantDirs)
-        {
-            if (Directory.Exists(dir))
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-    }
-
-    private void CreateTestAssistant(string name, string instructions, string model)
-    {
-        var assemblyRoot = Path.GetDirectoryName(typeof(ConversationManagerTests).Assembly.Location)!;
-        var assistantDir = Path.Combine(assemblyRoot, "AssistantDefinitions", name);
-        Directory.CreateDirectory(assistantDir);
-        _createdAssistantDirs.Add(assistantDir);
-        
-        // Create manifest.json
-        var manifest = new
-        {
-            name = name,
-            description = $"Test assistant: {name}",
-            instructions = "",
-            tools = new List<object>(),
-            tool_resources = new { },
-            top_p = 0.7,
-            response_format = "auto",
-            metadata = new { },
-            model = model,
-            temperature = 0.5
-        };
-        
-        var manifestJson = System.Text.Json.JsonSerializer.Serialize(manifest, new System.Text.Json.JsonSerializerOptions 
-        { 
-            WriteIndented = true,
-            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
-        });
-        
-        File.WriteAllText(Path.Combine(assistantDir, "manifest.json"), manifestJson);
-        
-        // Create instructions.md
-        var instructionsContent = $"# {name} Instructions\n\n{instructions}";
-        File.WriteAllText(Path.Combine(assistantDir, "instructions.md"), instructionsContent);
-    }
-
     #region CreateConversationAsync Tests
     [TestMethod]
-    public async Task CreateConversationAsync_WithValidAssistant_ShouldCreateConversation()
+    public async Task CreateConversationAsync_WithoutDatabaseAssistantDefinition_ShouldThrowException()
     {
-        // Arrange
-        string assistantName = "assistant";
-
-        // Act
-        var result = await _manager.CreateConversationAsync(_conversationId, assistantName);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.AssistantDefinition.Should().NotBeNull();
-        result.AssistantDefinition!.Name.Should().Be(assistantName);
-        result.AssistantMessages.Should().ContainKey(assistantName);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(
+            () => _manager.CreateConversationAsync(_conversationId, "assistant"));
     }
 
     [TestMethod]

@@ -1,0 +1,14 @@
+[
+  {
+    "key": "system.currentDate",
+    "value": "[@currentDate]"
+  },
+  {
+    "key": "user.email",
+    "value": "[@userEmail]"
+  },
+  {
+    "key": "user.name",
+    "value": "[@userName]"
+  }
+]

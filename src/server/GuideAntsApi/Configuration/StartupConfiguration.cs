@@ -64,6 +64,7 @@ public static class StartupConfiguration
         services.AddSingleton<IServiceEditorMetadataProvider, ServiceEditorMetadataProvider>();
         services.AddScoped<IApplicationSettingsService, ApplicationSettingsService>();
         services.AddScoped<IEmbeddingsRebuildService, EmbeddingsRebuildService>();
+        services.AddScoped<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder, GuideAntsApi.Services.Bootstrap.RequiredGuidesAssistantsSeeder>();
 
         
         // Guides Services

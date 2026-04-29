@@ -1,0 +1,27 @@
+{
+  "name": "Creative Guide",
+  "description": "A comprehensive creative workspace with intelligent content discovery, code execution, media generation, and diagram creation capabilities",
+  "defaultAssistant": "Search",
+  "tools": [
+    {
+      "type": "search_notebook"
+    },
+    {
+      "type": "search_project"
+    }
+  ],
+  "crew": [
+    {
+      "name": "Search"
+    },
+    {
+      "name": "Media Creator"
+    },
+    {
+      "name": "Diagrams"
+    },
+    {
+      "name": "Code Executor"
+    }
+  ]
+}

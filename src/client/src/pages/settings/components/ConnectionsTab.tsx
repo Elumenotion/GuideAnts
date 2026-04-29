@@ -13,6 +13,10 @@ import {
 } from '../../../types/settings';
 import type { ServiceKey } from './ServicesTab';
 import {
+  CONNECTION_EXCLUDED_SECTION_NAMES,
+  CONNECTION_OWNERSHIP_CATEGORIES,
+} from '../constants/connectionSections';
+import {
   SECRET_MASK,
   clonePayload,
   getErrorMessage,
@@ -50,56 +54,6 @@ interface ConnectionsTabProps {
 }
 
 type SectionReadiness = 'configured' | 'blocked' | 'unconfigured' | 'loading';
-
-interface OwnershipCategory {
-  key: string;
-  label: string;
-  description: string;
-  sectionNames: string[];
-}
-
-/**
- * Client-only grouping for the Connections left pane (D.2). The backend
- * does not own this categorization so it lives next to the tab. These section
- * names must match those registered in SettingsSectionRegistry server-side.
- */
-const OWNERSHIP_CATEGORIES: readonly OwnershipCategory[] = [
-  {
-    key: 'chat',
-    label: 'Chat / LLM Providers',
-    description: 'Connections used when dispatching chat completions to a catalog model.',
-    sectionNames: ['AzureOpenAI', 'OpenAI', 'Anthropic', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace'],
-  },
-  {
-    key: 'service',
-    label: 'Service Providers',
-    description: 'Connections referenced by non-chat service routing modes (speech, images, embeddings, markdown extraction).',
-    sectionNames: ['AzureSpeechService', 'AzureOpenAiImages', 'AzureOpenAiEmbedding', 'AzureDocumentIntelligence', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace'],
-  },
-  // The Hugging Face token is the single source of truth for every Hugging
-  // Face download in the app (llama quants + mmproj, Stable Diffusion
-  // bundles, Whisper ASR, Kokoro TTS). Edited here once — there are no
-  // per-service or per-request duplicates.
-  {
-    key: 'huggingface',
-    label: 'Hugging Face',
-    description: 'Single token used for every Hugging Face download in the app (llama, Stable Diffusion bundles, Whisper ASR, Kokoro TTS).',
-    sectionNames: ['HuggingFace'],
-  },
-] as const;
-
-/**
- * Sections that are NEVER shown on Connections — they are routing/service
- * matrices, not provider credential stores. Hard-coded exclusion per D.2.
- */
-const EXCLUDED_SECTIONS = new Set<string>([
-  'ServiceModes',
-  'Embeddings',
-  'ImageGeneration',
-  'SpeechTranscription',
-  'SpeechSynthesis',
-  'DocumentIntelligence',
-]);
 
 const KNOWN_SERVICE_KEYS: readonly ServiceKey[] = [
   'Embeddings',
@@ -449,9 +403,9 @@ export function ConnectionsTab({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[18rem_1fr]">
         <aside className="space-y-4">
-          {OWNERSHIP_CATEGORIES.map((category) => {
+          {CONNECTION_OWNERSHIP_CATEGORIES.map((category) => {
             const entries = category.sectionNames
-              .filter((name) => !EXCLUDED_SECTIONS.has(name))
+              .filter((name) => !CONNECTION_EXCLUDED_SECTION_NAMES.has(name))
               .map((name) => sectionSummariesByName.get(name))
               .filter((summary): summary is SettingsSectionSummaryDto => Boolean(summary));
 

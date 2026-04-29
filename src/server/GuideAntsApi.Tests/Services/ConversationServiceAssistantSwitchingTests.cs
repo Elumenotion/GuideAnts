@@ -33,9 +33,6 @@ public class ConversationServiceAssistantSwitchingTests
     private Guid _notebookId;
     private Guid _conversationId;
     private Guid _templateId;
-    private string? _originalAssistantsBaseFolderPath;
-    private string? _originalAssistantsDisableFileFallback;
-    private string _testAssistantsRoot = string.Empty;
 
     [TestInitialize]
     public void TestInitialize()
@@ -59,9 +56,6 @@ public class ConversationServiceAssistantSwitchingTests
         _notebookId = Guid.NewGuid();
         _conversationId = Guid.NewGuid();
         _templateId = Guid.NewGuid();
-        _originalAssistantsBaseFolderPath = Environment.GetEnvironmentVariable("ASSISTANTS_BASE_FOLDER_PATH");
-        _originalAssistantsDisableFileFallback = Environment.GetEnvironmentVariable("ASSISTANTS_DISABLE_FILE_FALLBACK");
-        _testAssistantsRoot = Path.Combine(Path.GetTempPath(), "guideants-tests", Guid.NewGuid().ToString("N"));
 
         _testUser = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
@@ -114,7 +108,6 @@ public class ConversationServiceAssistantSwitchingTests
 
         // Seed test data
         SeedTestData();
-        SeedAssistantDefinitionFiles();
         AssistantUtility.ClearAllCache();
     }
 
@@ -151,14 +144,7 @@ public class ConversationServiceAssistantSwitchingTests
     [TestCleanup]
     public void TestCleanup()
     {
-        Environment.SetEnvironmentVariable("ASSISTANTS_BASE_FOLDER_PATH", _originalAssistantsBaseFolderPath);
-        Environment.SetEnvironmentVariable("ASSISTANTS_DISABLE_FILE_FALLBACK", _originalAssistantsDisableFileFallback);
         AssistantUtility.ClearAllCache();
-
-        if (!string.IsNullOrWhiteSpace(_testAssistantsRoot) && Directory.Exists(_testAssistantsRoot))
-        {
-            Directory.Delete(_testAssistantsRoot, recursive: true);
-        }
 
         _dbContext.Dispose();
     }
@@ -299,38 +285,6 @@ public class ConversationServiceAssistantSwitchingTests
     #endregion
 
     #region Helper Methods
-
-    private void SeedAssistantDefinitionFiles()
-    {
-        Environment.SetEnvironmentVariable("ASSISTANTS_DISABLE_FILE_FALLBACK", "false");
-
-        var assistantDir = Path.Combine(_testAssistantsRoot, "AssistantDefinitions", "Code and Data");
-        Directory.CreateDirectory(assistantDir);
-
-        var manifestPath = Path.Combine(assistantDir, "manifest.json");
-        var instructionsPath = Path.Combine(assistantDir, "instructions.md");
-
-        File.WriteAllText(
-            manifestPath,
-            """
-            {
-              "name": "Code and Data",
-              "description": "Assistant for code and data tasks",
-              "model": "gpt-4.1",
-              "tools": []
-            }
-            """);
-
-        File.WriteAllText(
-            instructionsPath,
-            """
-            You are a Python assistant focused on code and data analysis.
-            """);
-
-        var basePathSentinel = Path.Combine(_testAssistantsRoot, "base-path-sentinel.txt");
-        File.WriteAllText(basePathSentinel, "test");
-        Environment.SetEnvironmentVariable("ASSISTANTS_BASE_FOLDER_PATH", basePathSentinel);
-    }
 
     private async Task<NotebookConversation> SetupConversationWithMessages(string assistantName)
     {

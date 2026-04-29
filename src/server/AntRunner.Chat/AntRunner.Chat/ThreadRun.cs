@@ -1079,41 +1079,6 @@ namespace AntRunner.Chat
                     }
                 }
             }
-            else
-            {
-                // Fall back to static OpenAPI schema files from file system
-                var openApiSchemaFiles = await AssistantDefinitionFiles.GetFilesInOpenApiFolder(assistantName);
-                if (openApiSchemaFiles != null && openApiSchemaFiles.Count > 0)
-                {
-                    foreach (var openApiSchemaFile in openApiSchemaFiles)
-                    {
-                        var schema = await AssistantDefinitionFiles.GetFile(openApiSchemaFile);
-                        if (schema == null)
-                        {
-                            TraceWarning($"openApiSchemaFile {openApiSchemaFile} is null. Ignoring");
-                            continue;
-                        }
-
-                        var json = Encoding.Default.GetString(schema);
-
-                        var validationResult = OpenApiHelper.ValidateAndParseOpenApiSpec(json);
-                        var spec = validationResult.Spec;
-
-                        if (!validationResult.Status || spec == null)
-                        {
-                            TraceWarning($"Json is not a valid OpenAPI spec {json}. Ignoring");
-                            continue;
-                        }
-
-                        var requestBuilders = await ToolCaller.GetToolCallers(spec, assistantName);
-
-                        foreach (var tool in requestBuilders.Keys)
-                        {
-                            assistantRequestBuilders[tool] = requestBuilders[tool];
-                        }
-                    }
-                }
-            }
 
             // Inject annotated tool builders dynamically based on assistant's tool list
             // This replaces all the hardcoded if blocks with a unified annotation-driven approach

@@ -1,8 +1,6 @@
 using System.IO;
 using System.Linq;
-using System.Text;
 using YamlDotNet.Serialization;
-using static AntRunner.ToolCalling.AssistantDefinitions.Storage.AssistantDefinitionFiles;
 
 namespace AntRunner.ToolCalling.Functions
 {
@@ -446,33 +444,6 @@ namespace AntRunner.ToolCalling.Functions
                     });
                     toolDefinitions.Add(toolDefinition);
                 }
-            }
-
-            return toolDefinitions;
-        }
-
-        /// <summary>
-        /// Asynchronously retrieves tool definitions from a collection of OpenAPI schema files.
-        /// </summary>
-        /// <param name="openApiSchemaFiles">A collection of file paths to OpenAPI schema files.</param>
-        /// <returns>A task representing the asynchronous operation. The task result contains a list of <see cref="ToolDefinition"/> objects.</returns>
-        public static async Task<List<ToolDefinition>> GetToolDefinitionsFromOpenApiSchemaFiles(IEnumerable<string> openApiSchemaFiles)
-        {
-            var toolDefinitions = new List<ToolDefinition>();
-
-            foreach (var openApiSchemaFile in openApiSchemaFiles)
-            {
-                var schema = await GetFile(openApiSchemaFile);
-                if (schema == null)
-                {
-                    Trace.TraceWarning("openApiSchemaFile {0} is null. Ignoring", openApiSchemaFile);
-                    continue;
-                }
-
-                var json = Encoding.Default.GetString(schema);
-
-                var fileToolDefinitions = GetToolDefinitionsFromJson(json);
-                toolDefinitions.AddRange(fileToolDefinitions);
             }
 
             return toolDefinitions;

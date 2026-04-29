@@ -485,12 +485,10 @@ public class GuideExportImportService : IGuideExportImportService
         int crewsCreated = 0;
         int globalLinked = 0;
         
-        // Use execution strategy to handle transactions with retry logic
+        // Use execution strategy to handle retry logic
         var strategy = _context.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            
             // Step 1: Import custom assistants first
             var assistantEntries = archive.Entries
                 .Where(e => e.FullName.StartsWith("assistants/") && e.FullName.EndsWith("/manifest.json"))
@@ -1033,7 +1031,6 @@ public class GuideExportImportService : IGuideExportImportService
             }
 
             await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
             
             // Capture values to return
             guideId = guide.Id;
@@ -1121,17 +1118,14 @@ public class GuideExportImportService : IGuideExportImportService
         Guid assistantId = Guid.Empty;
         var warnings = new List<string>();
         
-        // Use execution strategy to handle transactions with retry logic
+        // Use execution strategy to handle retry logic
         var strategy = _context.Database.CreateExecutionStrategy();
         await strategy.ExecuteAsync(async () =>
         {
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            
             var assistant = await ImportAssistantFromArchiveAsync(archive, "", manifestJson, warnings);
             
             _context.Assistants.Add(assistant);
             await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
             
             // Capture ID to return
             assistantId = assistant.Id;

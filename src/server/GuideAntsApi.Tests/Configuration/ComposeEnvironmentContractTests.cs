@@ -6,37 +6,49 @@ namespace GuideAntsApi.Tests.Configuration;
 [TestClass]
 public sealed class ComposeEnvironmentContractTests
 {
+    private static readonly string[] ComposeStackFiles =
+    [
+        "docker-compose.cpu.yml",
+        "docker-compose.cuda.yml",
+        "docker-compose.ghcr-cpu.yml",
+        "docker-compose.ghcr-cuda13.yml"
+    ];
+
     [TestMethod]
-    public void GuideantsWebApiUi_EnvironmentKeys_MapToAppSettingsOrRuntime()
+    public void GuideantsWebApiUi_EnvironmentKeys_MapToAppSettingsOrRuntime_AcrossComposeStacks()
     {
         var repoRoot = FindRepositoryRoot();
-        var composePath = Path.Combine(repoRoot, "docker", "docker-compose.yml");
         var appsettingsPath = Path.Combine(repoRoot, "src", "server", "GuideAntsApi", "appsettings.json");
         var appsettingsDevelopmentPath = Path.Combine(repoRoot, "src", "server", "GuideAntsApi", "appsettings.Development.json");
 
-        File.Exists(composePath).Should().BeTrue($"compose file should exist at {composePath}");
         File.Exists(appsettingsPath).Should().BeTrue($"appsettings file should exist at {appsettingsPath}");
         File.Exists(appsettingsDevelopmentPath).Should().BeTrue($"appsettings development file should exist at {appsettingsDevelopmentPath}");
-
-        var composeEnvironmentKeys = ReadComposeEnvironmentKeys(composePath, "guideants-webapi-ui");
-        composeEnvironmentKeys.Should().NotBeEmpty();
 
         var appsettingsKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         CollectAppsettingsKeys(appsettingsPath, appsettingsKeys);
         CollectAppsettingsKeys(appsettingsDevelopmentPath, appsettingsKeys);
 
-        var unknownKeys = composeEnvironmentKeys
-            .Where(key => !IsAllowedRuntimeKey(key))
-            .Where(key =>
-            {
-                var mapped = key.Replace("__", ":");
-                return !appsettingsKeys.Contains(mapped);
-            })
-            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        foreach (var composeFile in ComposeStackFiles)
+        {
+            var composePath = Path.Combine(repoRoot, "docker", composeFile);
+            File.Exists(composePath).Should().BeTrue($"compose file should exist at {composePath}");
 
-        unknownKeys.Should().BeEmpty(
-            $"all compose keys for guideants-webapi-ui must map to appsettings-backed keys. Unknown keys: {string.Join(", ", unknownKeys)}");
+            var composeEnvironmentKeys = ReadComposeEnvironmentKeys(composePath, "guideants-webapi-ui");
+            composeEnvironmentKeys.Should().NotBeEmpty($"service guideants-webapi-ui should define environment keys in {composeFile}");
+
+            var unknownKeys = composeEnvironmentKeys
+                .Where(key => !IsAllowedRuntimeKey(key))
+                .Where(key =>
+                {
+                    var mapped = key.Replace("__", ":");
+                    return !appsettingsKeys.Contains(mapped);
+                })
+                .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            unknownKeys.Should().BeEmpty(
+                $"all compose keys for guideants-webapi-ui in {composeFile} must map to appsettings-backed keys. Unknown keys: {string.Join(", ", unknownKeys)}");
+        }
     }
 
     private static string FindRepositoryRoot()
@@ -44,8 +56,9 @@ public sealed class ComposeEnvironmentContractTests
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current != null)
         {
-            var composePath = Path.Combine(current.FullName, "docker", "docker-compose.yml");
-            if (File.Exists(composePath))
+            var dockerDirectory = Path.Combine(current.FullName, "docker");
+            var hasAnyKnownComposeFile = ComposeStackFiles.Any(name => File.Exists(Path.Combine(dockerDirectory, name)));
+            if (hasAnyKnownComposeFile)
             {
                 return current.FullName;
             }
@@ -53,7 +66,20 @@ public sealed class ComposeEnvironmentContractTests
             current = current.Parent;
         }
 
-        throw new InvalidOperationException("Unable to locate repository root from test execution directory.");
+        var processDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (processDirectory != null)
+        {
+            var dockerDirectory = Path.Combine(processDirectory.FullName, "docker");
+            var hasAnyKnownComposeFile = ComposeStackFiles.Any(name => File.Exists(Path.Combine(dockerDirectory, name)));
+            if (hasAnyKnownComposeFile)
+            {
+                return processDirectory.FullName;
+            }
+
+            processDirectory = processDirectory.Parent;
+        }
+
+        throw new InvalidOperationException("Unable to locate repository root from test execution directory or process working directory.");
     }
 
     private static HashSet<string> ReadComposeEnvironmentKeys(string composePath, string serviceName)
@@ -184,6 +210,12 @@ public sealed class ComposeEnvironmentContractTests
         // by the docker/llama/run/download-*.ps1 shell scripts that talk
         // directly to the HuggingFace CLI outside the app.
         if (key.Equals("HF_TOKEN", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (key.StartsWith("ServiceRouting__Containers__", StringComparison.OrdinalIgnoreCase)
+            && key.EndsWith("__BaseUrl", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

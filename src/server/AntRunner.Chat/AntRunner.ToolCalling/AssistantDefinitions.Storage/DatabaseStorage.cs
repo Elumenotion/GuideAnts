@@ -120,7 +120,6 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
             }
             catch
             {
-                // Database not available or error - return null to fall back to file storage
                 return null;
             }
         }
@@ -156,7 +155,6 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
             }
             catch
             {
-                // Database not available or error - return null to fall back to file storage
                 return null;
             }
         }

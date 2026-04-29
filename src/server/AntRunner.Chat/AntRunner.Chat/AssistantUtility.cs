@@ -3,29 +3,15 @@ using AntRunner.ToolCalling.Functions;
 using static AntRunner.ToolCalling.AssistantDefinitions.Storage.AssistantDefinitionFiles;
 using AntRunner.ToolCalling.AssistantDefinitions;
 using System.Text.Json.Serialization;
-using System.Text;
 using AntRunner.ToolCalling;
 
 namespace AntRunner.Chat
 {
     /// <summary>
-    /// Fetch and autoCreate assistants with caching and database support.
-    /// 
-    /// Loading Priority:
-    /// 1. Database assistants
-    /// 2. Template-based Guides (NotebookTemplates/)
-    /// 3. File-based assistants (AssistantDefinitions/)
+    /// Fetches and caches assistants resolved from database-backed definitions.
     /// </summary>
     public static class AssistantUtility
     {
-        private static bool IsFileFallbackDisabled()
-        {
-            var raw = Environment.GetEnvironmentVariable("ASSISTANTS_DISABLE_FILE_FALLBACK");
-            if (string.IsNullOrWhiteSpace(raw)) return false;
-            if (bool.TryParse(raw, out var parsed)) return parsed;
-            return raw.Equals("1", StringComparison.OrdinalIgnoreCase);
-        }
-
         /// <summary>
         /// Cache entry containing the definition and metadata for invalidation.
         /// </summary>
@@ -40,8 +26,7 @@ namespace AntRunner.Chat
         private static readonly TimeSpan CacheDuration = TimeSpan.FromSeconds(30);
 
         /// <summary>
-        /// Reads the assistant definition from database, templates, or file storage.
-        /// Supports database and file-based assistants.
+        /// Reads the assistant definition from database-backed storage.
         /// </summary>
         /// <param name="assistantName">The name of the assistant</param>
         /// <returns>AssistantDefinition if found, null otherwise</returns>
@@ -74,11 +59,10 @@ namespace AntRunner.Chat
                 if (guide != null)
                 {
                     definition = guide;
-                    // Guides may come from database (with updated timestamp) or file-based templates
                 }
             }
 
-            // If not a guide template, load from storage (database or file-based)
+            // If not a guide template, load from storage
             if (definition == null)
             {
                 var storageMetadata = await GetAssistantComplete(assistantName);
@@ -191,8 +175,7 @@ namespace AntRunner.Chat
                         }
                     }
                 }
-                // For time-based invalidation of database assistants with no updates, still consider valid
-                // For file-based assistants (no timestamp), accept cache staleness after duration
+                // For time-based invalidation of database assistants with no updates, still consider valid.
                 return cached.Updated.HasValue;
             }
 
@@ -348,44 +331,24 @@ namespace AntRunner.Chat
         // -----------------------------
         
         /// <summary>
-        /// Gets OpenAPI tool definitions for an assistant, checking database first then falling back to file system.
+        /// Gets OpenAPI tool definitions for an assistant from database-backed metadata.
         /// </summary>
         private static async Task<List<ToolDefinition>> GetOpenApiToolDefinitions(string assistantName)
         {
             var toolDefinitions = new List<ToolDefinition>();
-            
-            // Try database first
+
             var storageMetadata = await GetAssistantComplete(assistantName);
-            if (storageMetadata != null)
-            {
-                if (storageMetadata.OpenApiSchemas != null && storageMetadata.OpenApiSchemas.Any())
-                {
-                    // Database has the schemas as Dictionary<filename, content>
-                    foreach (var kvp in storageMetadata.OpenApiSchemas)
-                    {
-                        var defs = OpenApiHelper.GetToolDefinitionsFromJson(kvp.Value);
-                        toolDefinitions.AddRange(defs);
-                    }
-                }
-
-                if (IsFileFallbackDisabled())
-                {
-                    return toolDefinitions;
-                }
-            }
-
-            if (IsFileFallbackDisabled())
+            if (storageMetadata?.OpenApiSchemas == null || !storageMetadata.OpenApiSchemas.Any())
             {
                 return toolDefinitions;
             }
-            
-            // Fall back to file system (returns file paths)
-            var openApiSchemaFiles = await GetFilesInOpenApiFolder(assistantName);
-            if (openApiSchemaFiles != null && openApiSchemaFiles.Any())
+
+            foreach (var kvp in storageMetadata.OpenApiSchemas)
             {
-                toolDefinitions = await OpenApiHelper.GetToolDefinitionsFromOpenApiSchemaFiles(openApiSchemaFiles);
+                var defs = OpenApiHelper.GetToolDefinitionsFromJson(kvp.Value);
+                toolDefinitions.AddRange(defs);
             }
-            
+
             return toolDefinitions;
         }
         
@@ -467,173 +430,7 @@ namespace AntRunner.Chat
                 }
             }
 
-            // Not found in database, fall back to file-based template storage
-            if (IsFileFallbackDisabled())
-            {
-                return null;
-            }
-
-            var templatesRoot = ResolveTemplatesRoot();
-            if (templatesRoot == null || !Directory.Exists(templatesRoot))
-            {
-                // No file-based templates available, return null (not found)
-                return null;
-            }
-
-            // Consider both the full assistantName (may already end with Guide) and stripped name
-            static string StripGuide(string name) => name.EndsWith(" Guide", StringComparison.OrdinalIgnoreCase)
-                ? name[..^6] : name;
-
-            var candidates = new[] { assistantName, StripGuide(assistantName) };
-            foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                var dir = Path.Combine(templatesRoot, candidate);
-                if (!Directory.Exists(dir)) continue;
-
-                var manifestPath = Path.Combine(dir, "manifest.json");
-                if (!File.Exists(manifestPath))
-                {
-                    throw new FileNotFoundException("Template manifest.json not found for guide", manifestPath);
-                }
-
-                var json = File.ReadAllText(manifestPath, Encoding.UTF8);
-                var manifest = JsonSerializer.Deserialize<TemplateManifest>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-                if (manifest == null)
-                {
-                    throw new InvalidDataException($"Failed to parse template manifest: {manifestPath}");
-                }
-
-                // Determine instructions: manifest.Instructions > instructions.md; otherwise fail fast
-                string? instructions = manifest.Instructions;
-                if (string.IsNullOrWhiteSpace(instructions))
-                {
-                    var instructionsPath = Path.Combine(dir, "instructions.md");
-                    if (File.Exists(instructionsPath))
-                    {
-                        instructions = File.ReadAllText(instructionsPath, Encoding.UTF8);
-                    }
-                }
-                if (string.IsNullOrWhiteSpace(instructions))
-                {
-                    throw new InvalidOperationException($"Guide instructions not found. Provide 'instructions' in manifest or an instructions.md in: {dir}");
-                }
-
-                // Build assistant definition from template manifest properties
-                var def = new AssistantDefinition
-                {
-                    Name = assistantName,
-                    Description = manifest.Description ?? $"Your intelligent guide for {candidate} workflows",
-                    Instructions = instructions,
-                    InvocationEvaluator = manifest.InvocationEvaluator,
-                    Tools = manifest.Tools ?? new List<ToolDefinition>(),
-                    ToolResources = manifest.ToolResources,
-                    TopP = manifest.TopP,
-                    Metadata = manifest.Metadata,
-                    Model = manifest.Model ?? manifest.DefaultModel,
-                    Temperature = manifest.Temperature,
-                    ReasoningEffort = manifest.ReasoningEffort
-                };
-
-                // Load context options from template if they exist
-                var contextOptionsPath = Path.Combine(dir, "HostExtensions", "UI", "contextOptions.json");
-                if (File.Exists(contextOptionsPath))
-                {
-                    try
-                    {
-                        var contextJson = File.ReadAllText(contextOptionsPath, Encoding.UTF8);
-                        var contextList = JsonSerializer.Deserialize<List<ContextOptionItem>>(contextJson);
-                        if (contextList != null && contextList.Any())
-                        {
-                            def.ContextOptions = contextList.ToDictionary(i => i.key, i => i.value ?? string.Empty);
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        // Swallow context options parsing errors - guide can still work without them
-                    }
-                }
-
-                // Store crew names in metadata for processing in AddFunctionTools
-                if (manifest.Crew != null && manifest.Crew.Count > 0)
-                {
-                    var crewNames = manifest.Crew.Select(c => c.Name).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
-                    if (crewNames.Count == 0)
-                    {
-                        throw new InvalidOperationException($"Template '{candidate}' has an empty crew list.");
-                    }
-                    // Store crew names in metadata so AddFunctionTools can process them
-                    if (def.Metadata == null) def.Metadata = new Dictionary<string, string>();
-                    def.Metadata["__crew_names__"] = string.Join(",", crewNames);
-                }
-
-                return def;
-            }
-
-            // Guide not found in database or file-based templates
             return null;
-        }
-
-        private static string? ResolveTemplatesRoot()
-        {
-            // 1) Environment variable overrides
-            // Primary explicit var used across the server
-            var envVar = Environment.GetEnvironmentVariable("NOTEBOOK_TEMPLATES_BASE_FOLDER_PATH");
-            if (!string.IsNullOrWhiteSpace(envVar))
-            {
-                var full = Path.GetFullPath(envVar, AppContext.BaseDirectory);
-                if (Directory.Exists(full)) return full;
-                if (Directory.Exists(envVar)) return envVar; // already absolute
-            }
-
-            // Server publishes configuration keys into environment variables at startup
-            // so we can also read the config key directly
-            var configKeyVar = Environment.GetEnvironmentVariable("NotebookTemplates:BaseFolderPath");
-            if (!string.IsNullOrWhiteSpace(configKeyVar))
-            {
-                var full = Path.GetFullPath(configKeyVar, AppContext.BaseDirectory);
-                if (Directory.Exists(full)) return full;
-                if (Directory.Exists(configKeyVar)) return configKeyVar;
-            }
-
-            // 2) Common relative locations from current base directory
-            var baseDir = AppContext.BaseDirectory;
-            var candidates = new[]
-            {
-                Path.Combine(baseDir, "NotebookTemplates"),
-                Path.GetFullPath(Path.Combine(baseDir, "..", "NotebookTemplates")),
-                Path.GetFullPath(Path.Combine(baseDir, "..", "..", "NotebookTemplates")),
-                Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "NotebookTemplates"))
-            };
-            foreach (var c in candidates)
-            {
-                if (Directory.Exists(c)) return c;
-            }
-
-            return null;
-        }
-
-        // Minimal manifest backing type (subset plus assistant-like fields)
-        private class TemplateManifest
-        {
-            public string? Name { get; set; }
-            public string? Description { get; set; }
-            public string? DefaultAssistant { get; set; }
-            public string? Instructions { get; set; }
-            public string? InvocationEvaluator { get; set; }
-            public List<ToolDefinition>? Tools { get; set; }
-            public ToolResources? ToolResources { get; set; }
-            public double? TopP { get; set; }
-            public Dictionary<string, string>? Metadata { get; set; }
-            public string? Model { get; set; }
-            public string? DefaultModel { get; set; }
-            public float? Temperature { get; set; }
-            public string? ReasoningEffort { get; set; }
-            public List<TemplateCrewMember> Crew { get; set; } = new();
-        }
-
-        private class TemplateCrewMember
-        {
-            public string Name { get; set; } = string.Empty;
         }
 
         private record ContextOptionItem(string key, string? value);

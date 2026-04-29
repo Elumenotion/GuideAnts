@@ -8,9 +8,11 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { SettingsButton } from '../components/common/SettingsButton';
 import TabbedContentArea from '../components/home/TabbedContentArea';
 import EmptyStateVideo from '../components/home/EmptyStateVideo';
+import AddAiServicesWizardPlaceholder from '../components/home/AddAiServicesWizardPlaceholder';
 import { TourStartButton } from '../tour/TourStartButton';
 import { useRegisterTour } from '../tour/useRegisterTour';
 import { DEFAULT_CONVERSATION_TITLE } from '../constants/conversation';
+import { CONNECTION_SECTION_NAME_SET } from './settings/constants/connectionSections';
 
 interface ProjectSummary {
   id: string;
@@ -18,6 +20,8 @@ interface ProjectSummary {
   description: string;
   created: string;
 }
+
+const ADD_AI_SERVICES_WIZARD_DISMISS_KEY = 'guideants.firstLaunch.addAiServicesWizard.dismissed.v1';
 
 const Home = () => {
   const navigate = useNavigate();
@@ -33,6 +37,7 @@ const Home = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const [quickStartTarget, setQuickStartTarget] = useState<{ projectId: string; notebookId: string } | null>(null);
+  const [showAddAiServicesWizard, setShowAddAiServicesWizard] = useState(false);
 
   const SCREEN_ID = 'home';
 
@@ -55,6 +60,76 @@ const Home = () => {
   useEffect(() => {
     fetchProjects();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const probeFirstLaunchWizardState = async () => {
+      let dismissalEnabled = false;
+      try {
+        dismissalEnabled = typeof window !== 'undefined'
+          && window.localStorage.getItem(ADD_AI_SERVICES_WIZARD_DISMISS_KEY) === '1';
+      } catch {
+        dismissalEnabled = false;
+      }
+
+      if (dismissalEnabled) {
+        return;
+      }
+
+      try {
+        const [sectionSummaries, models] = await Promise.all([
+          api.settings.getSections(),
+          api.settings.getModels(),
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        const configuredConnections = sectionSummaries.filter(
+          (section) => CONNECTION_SECTION_NAME_SET.has(section.sectionName)
+            && section.readinessStatus === 'configured'
+        );
+        const needsWizard = configuredConnections.length === 0 || models.length === 0;
+        if (needsWizard) {
+          setShowAddAiServicesWizard(true);
+        }
+      } catch (probeError) {
+        console.warn('First-launch wizard probe skipped due to settings fetch error.', probeError);
+      }
+    };
+
+    void probeFirstLaunchWizardState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persistAddAiServicesWizardDismissal = useCallback(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(ADD_AI_SERVICES_WIZARD_DISMISS_KEY, '1');
+      }
+    } catch {
+      // best effort only
+    }
+  }, []);
+
+  const handleDismissAddAiServicesWizard = useCallback((persistDismissal: boolean) => {
+    if (persistDismissal) {
+      persistAddAiServicesWizardDismissal();
+    }
+    setShowAddAiServicesWizard(false);
+  }, [persistAddAiServicesWizardDismissal]);
+
+  const handleOpenSettingsFromAddAiServicesWizard = useCallback((persistDismissal: boolean) => {
+    if (persistDismissal) {
+      persistAddAiServicesWizardDismissal();
+    }
+    setShowAddAiServicesWizard(false);
+    navigate('/settings');
+  }, [navigate, persistAddAiServicesWizardDismissal]);
 
 
   // Close context menu when clicking outside
@@ -394,6 +469,11 @@ const Home = () => {
           />
         )}
       </div>
+      <AddAiServicesWizardPlaceholder
+        isOpen={showAddAiServicesWizard}
+        onDismiss={handleDismissAddAiServicesWizard}
+        onOpenSettings={handleOpenSettingsFromAddAiServicesWizard}
+      />
     </div>
   );
 };
