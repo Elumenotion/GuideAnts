@@ -32,6 +32,15 @@ This document describes the **global default chat model** feature: one instance-
 
 Choosing a `llama-cpp` catalog model as the global default does not change the admin protocol. **R-12** load orchestration in `NotebookModelRuntimeService` still applies when a chat turn resolves to that model.
 
+## Bootstrap seeds and defaults
+
+All required guide/assistant seeds in `Resources/bootstrap/` omit
+`model`, `defaultModel`, and sampling parameters (`temperature`, `top_p`,
+`reasoning_effort`). This means every seeded entity uses the operator's
+configured `ChatDefaults:DefaultModelId` and associated sampling
+overrides from the start. An operator only needs to set the global
+default once and all seeded guides/assistants pick it up automatically.
+
 ## Migration note
 
 Previous builds used a silent **`gpt-4.1`** string fallback in some assistant/template paths. That fallback is removed; unresolved model configuration surfaces as a **routing / readiness error** instead of a hidden default.

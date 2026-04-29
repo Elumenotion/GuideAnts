@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "profileId": "anthropic",
+  "displayName": "Anthropic",
+  "settingsValues": {
+    "Anthropic": {
+      "BaseUrl": "{{anthropic-base-url}}",
+      "ApiKey": "{{anthropic-api-key}}",
+      "AuthToken": "{{anthropic-auth-token}}"
+    }
+  },
+  "connectionDefinitions": {
+    "sectionName": "Anthropic",
+    "requiredFields": [
+      "ApiKey",
+      "AuthToken"
+    ]
+  },
+  "modelDefinitions": [
+    {
+      "modelId": "claude-opus-4-5",
+      "displayName": "claude-opus-4-5",
+      "provider": "anthropic",
+      "isActive": true
+    },
+    {
+      "modelId": "claude-sonnet-4-5",
+      "displayName": "claude-sonnet-4-5",
+      "provider": "anthropic",
+      "isActive": true
+    },
+    {
+      "modelId": "claude-haiku-4-5",
+      "displayName": "claude-haiku-4-5",
+      "provider": "anthropic",
+      "isActive": true
+    }
+  ],
+  "serviceDefaults": [],
+  "runtimeDependencies": []
+}

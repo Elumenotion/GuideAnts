@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 1,
+  "profileId": "azure-openai",
+  "displayName": "Azure OpenAI",
+  "settingsValues": {
+    "AzureOpenAI": {
+      "Resource": "{{azure-openai-resource}}",
+      "ApiKey": "{{azure-openai-api-key}}",
+      "ApiVersion": "{{azure-openai-api-version}}"
+    },
+    "AzureOpenAiEmbedding": {
+      "Endpoint": "{{azure-embedding-endpoint}}",
+      "ApiKey": "{{azure-embedding-api-key}}"
+    },
+    "AzureOpenAiImages": {
+      "Endpoint": "{{azure-images-endpoint}}",
+      "ApiKey": "{{azure-images-api-key}}",
+      "ApiVersion": "{{azure-images-api-version}}"
+    },
+    "AzureSpeechService": {
+      "Endpoint": "{{azure-speech-endpoint}}",
+      "ApiKey": "{{azure-speech-api-key}}",
+      "Region": "{{azure-speech-region}}"
+    },
+    "AzureDocumentIntelligence": {
+      "Endpoint": "{{azure-doc-int-endpoint}}",
+      "ApiKey": "{{azure-doc-int-api-key}}"
+    }
+  },
+  "connectionDefinitions": [
+    {
+      "sectionName": "AzureOpenAI",
+      "requiredFields": [
+        "Resource",
+        "ApiKey"
+      ]
+    },
+    {
+      "sectionName": "AzureOpenAiEmbedding",
+      "requiredFields": [
+        "Endpoint",
+        "ApiKey"
+      ]
+    },
+    {
+      "sectionName": "AzureOpenAiImages",
+      "requiredFields": [
+        "Endpoint",
+        "ApiKey"
+      ]
+    },
+    {
+      "sectionName": "AzureSpeechService",
+      "requiredFields": [
+        "Endpoint",
+        "ApiKey",
+        "Region"
+      ]
+    },
+    {
+      "sectionName": "AzureDocumentIntelligence",
+      "requiredFields": [
+        "Endpoint",
+        "ApiKey"
+      ]
+    }
+  ],
+  "modelDefinitions": [
+    {
+      "modelId": "gpt-4.1",
+      "displayName": "gpt-4.1",
+      "provider": "azure-openai-chat",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-4.1-mini",
+      "displayName": "gpt-4.1-mini",
+      "provider": "azure-openai-chat",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-4o",
+      "displayName": "gpt-4o",
+      "provider": "azure-openai-chat",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-4o-mini",
+      "displayName": "gpt-4o-mini",
+      "provider": "azure-openai-chat",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-5-chat",
+      "displayName": "gpt-5-chat",
+      "provider": "azure-openai-chat",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-5.1",
+      "displayName": "gpt-5.1",
+      "provider": "azure-openai-chat",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-5",
+      "displayName": "gpt-5",
+      "provider": "azure-openai-responses",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-5-mini",
+      "displayName": "gpt-5-mini",
+      "provider": "azure-openai-responses",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-5-nano",
+      "displayName": "gpt-5-nano",
+      "provider": "azure-openai-responses",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-5.2-codex",
+      "displayName": "gpt-5.2-codex",
+      "provider": "azure-openai-responses",
+      "isActive": true
+    },
+    {
+      "modelId": "o3",
+      "displayName": "o3",
+      "provider": "azure-openai-responses",
+      "isActive": true
+    },
+    {
+      "modelId": "o4-mini",
+      "displayName": "o4-mini",
+      "provider": "azure-openai-responses",
+      "isActive": true
+    }
+  ],
+  "serviceDefaults": [
+    {
+      "serviceId": "Embeddings",
+      "providerId": "Embeddings.AzureOpenAI.Embedding",
+      "setAsDefault": true,
+      "providerFields": {
+        "Deployment": "{{embeddings-deployment}}",
+        "TimeoutSeconds": 300
+      }
+    },
+    {
+      "serviceId": "ImageGeneration",
+      "providerId": "ImageGeneration.AzureOpenAI.Images",
+      "setAsDefault": true,
+      "providerFields": {
+        "Deployment": "{{image-generation-deployment}}",
+        "EditModelDeployment": "{{image-edit-deployment}}",
+        "TimeoutSeconds": 600
+      }
+    },
+    {
+      "serviceId": "SpeechTranscription",
+      "providerId": "SpeechTranscription.AzureSpeech.Batch",
+      "setAsDefault": true,
+      "providerFields": {
+        "TimeoutSeconds": 300,
+        "MaxRetries": 3
+      }
+    },
+    {
+      "serviceId": "SpeechSynthesis",
+      "providerId": "SpeechSynthesis.AzureSpeech.Ssml",
+      "setAsDefault": true,
+      "providerFields": {
+        "TimeoutSeconds": 300,
+        "MaxRetries": 3
+      }
+    },
+    {
+      "serviceId": "DocumentIntelligence",
+      "providerId": "DocumentIntelligence.Azure.DocumentIntelligence",
+      "setAsDefault": true,
+      "providerFields": {
+        "ApiVersion": "{{document-intelligence-api-version}}",
+        "TimeoutSeconds": 300,
+        "MaxRetries": 3
+      }
+    }
+  ],
+  "runtimeDependencies": []
+}

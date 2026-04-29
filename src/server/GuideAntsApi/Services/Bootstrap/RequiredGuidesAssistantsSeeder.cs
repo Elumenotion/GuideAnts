@@ -59,10 +59,27 @@ public sealed class RequiredGuidesAssistantsSeeder : IRequiredGuidesAssistantsSe
             var guideName = await TryReadManifestNameAsync(stream, cancellationToken);
             stream.Position = 0;
 
+            if (string.IsNullOrWhiteSpace(guideName))
+            {
+                throw new InvalidOperationException(
+                    $"Bootstrap guide seed '{seedSource.DisplayName}' is missing manifest name.");
+            }
+
+            var exists = await _dbContext.Assistants
+                .AnyAsync(a => a.Kind == AssistantKind.Guide && a.Name == guideName, cancellationToken);
+            if (exists)
+            {
+                _logger.LogInformation(
+                    "Required guide '{GuideName}' already exists. Skipping seed {SeedName}.",
+                    guideName,
+                    seedSource.DisplayName);
+                continue;
+            }
+
             _logger.LogInformation(
-                "Applying required bootstrap guide seed {SeedName}{GuideSuffix}.",
-                seedSource.DisplayName,
-                string.IsNullOrWhiteSpace(guideName) ? string.Empty : $" ({guideName})");
+                "Importing required bootstrap guide '{GuideName}' from seed {SeedName}.",
+                guideName,
+                seedSource.DisplayName);
 
             await _guideExportImportService.ImportGuideAsync(stream);
         }

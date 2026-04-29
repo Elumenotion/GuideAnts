@@ -182,14 +182,53 @@ docker compose -f docker/docker-compose.cuda.yml ps
 ```
 
 All services should report `running` / `healthy`. The first boot takes a
-few minutes because `mssql-express` applies EF migrations.
+few minutes because `mssql-express` applies EF migrations and the
+application seeds required guides and assistants (see below).
+
+### Required guides and assistants (bootstrap seeding)
+
+On first startup, after EF migrations and application settings bootstrap,
+the system imports a set of required guides and assistants from
+`Resources/bootstrap/` in the web API project. These definitions power
+core features such as the home page quick start button and conversation
+title generation.
+
+Seeded guides:
+
+- **Creative Guide** — general-purpose creative assistant with crew
+  members for search, media creation, diagrams, and code execution.
+- **The Guide Guide** — helps users create and refine their own guides.
+
+Seeded assistants (including crew members):
+
+- **Conversation Title Generator** — generates titles for chat threads.
+- **Read Web** — reads and summarises web content.
+- **Search** — meta-search crew member.
+- **Media Creator** — image generation crew member.
+- **Diagrams** — diagram rendering crew member.
+- **Code Executor** — code execution crew member.
+
+Seeding is idempotent: if a guide or assistant with the same name already
+exists in the database, the corresponding seed is skipped. User
+modifications are never overwritten. Seeds do not specify an explicit
+model; they inherit the operator's configured default chat model via
+`ChatDefaults` (see [default-chat-models.md](default-chat-models.md)).
+
+The seed definitions use the same folder-based export format as the
+guide/assistant import API. To add or update a seed, export the entity
+from a running system, extract it into a named subfolder under
+`Resources/bootstrap/guides/` or `Resources/bootstrap/assistants/`, and
+remove any model-specific fields from `manifest.json`. See
+[`Resources/bootstrap/README.md`](../src/server/GuideAntsApi/Resources/bootstrap/README.md)
+for details.
 
 ## 5. First load at `http://localhost:5107`
 
 Navigate to <http://localhost:5107>. You should land on the GuideAnts
-home page. Open **Settings** (gear icon or
-<http://localhost:5107/settings>). You will see five tabs in this fixed
-order (R-5.1):
+home page. The pre-seeded guides appear on the home page immediately;
+no manual configuration is needed for them. Open **Settings** (gear icon
+or <http://localhost:5107/settings>). You will see five tabs in this
+fixed order (R-5.1):
 
 1. **Overview** — **Default Chat Model** (global catalog default + optional
    “override all chat models”), chat providers in use (assistant-referenced),

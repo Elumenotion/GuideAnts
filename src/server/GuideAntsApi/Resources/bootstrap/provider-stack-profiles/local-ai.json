@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "profileId": "local-ai",
+  "displayName": "Local AI",
+  "settingsValues": {
+    "Embeddings": {
+      "TimeoutSeconds": "{{local-embeddings-timeout-seconds}}",
+      "LocalMinIntervalMs": "{{local-embeddings-interval-ms}}"
+    },
+    "ImageGeneration": {
+      "TimeoutSeconds": "{{local-image-timeout-seconds}}",
+      "LocalOutputFormat": "{{local-image-output-format}}"
+    },
+    "SpeechTranscription": {
+      "TimeoutSeconds": "{{local-transcription-timeout-seconds}}"
+    },
+    "SpeechSynthesis": {
+      "TimeoutSeconds": "{{local-synthesis-timeout-seconds}}"
+    },
+    "DocumentIntelligence": {
+      "TimeoutSeconds": "{{local-doc-int-timeout-seconds}}",
+      "MaxConcurrentConversions": "{{local-doc-int-max-concurrent}}",
+      "AsyncStatusPollIntervalMs": "{{local-doc-int-poll-interval-ms}}"
+    },
+    "HuggingFace": {
+      "Token": "{{huggingface-token}}"
+    }
+  },
+  "connectionDefinitions": [
+    {
+      "sectionName": "HuggingFace",
+      "requiredFields": [
+        "Token"
+      ]
+    },
+    {
+      "sectionName": "LlamaCpp",
+      "requiredFields": [
+        "BaseUrl"
+      ]
+    }
+  ],
+  "modelDefinitions": [
+    {
+      "modelId": "qwen3.5-27b",
+      "displayName": "qwen3.5-27b",
+      "provider": "llama-cpp",
+      "isActive": true
+    },
+    {
+      "modelId": "qwen3.5-35b-a3b",
+      "displayName": "qwen3.5-35b-a3b",
+      "provider": "llama-cpp",
+      "isActive": true
+    },
+    {
+      "modelId": "Qwen3.5-9B-Q5_K_M",
+      "displayName": "Qwen3.5-9B-Q5_K_M",
+      "provider": "llama-cpp",
+      "isActive": true
+    },
+    {
+      "modelId": "Qwen3.6-27B-UD-Q5_K_XL",
+      "displayName": "Qwen3.6-27B-UD-Q5_K_XL",
+      "provider": "llama-cpp",
+      "isActive": true
+    },
+    {
+      "modelId": "Qwen3.6-35B-A3B-UD-Q5_K_M",
+      "displayName": "Qwen3.6-35B-A3B-UD-Q5_K_M",
+      "provider": "llama-cpp",
+      "isActive": true
+    },
+    {
+      "modelId": "gemma-4-26B-A4B-it-UD-Q5_K_XL",
+      "displayName": "gemma-4-26B-A4B-it-UD-Q5_K_XL",
+      "provider": "llama-cpp",
+      "isActive": true
+    },
+    {
+      "modelId": "gemma-4-31B-it-Q5_K_M",
+      "displayName": "gemma-4-31B-it-Q5_K_M",
+      "provider": "llama-cpp",
+      "isActive": true
+    }
+  ],
+  "serviceDefaults": [
+    {
+      "serviceId": "Embeddings",
+      "providerId": "Embeddings.LocalEmb.Http",
+      "setAsDefault": true,
+      "providerFields": {
+        "TimeoutSeconds": "{{local-embeddings-timeout-seconds}}",
+        "LocalMinIntervalMs": "{{local-embeddings-interval-ms}}"
+      }
+    },
+    {
+      "serviceId": "ImageGeneration",
+      "providerId": "ImageGeneration.LocalSd.Http",
+      "setAsDefault": true,
+      "providerFields": {
+        "TimeoutSeconds": "{{local-image-timeout-seconds}}",
+        "LocalOutputFormat": "{{local-image-output-format}}"
+      }
+    },
+    {
+      "serviceId": "SpeechTranscription",
+      "providerId": "SpeechTranscription.LocalAsr.Http",
+      "setAsDefault": true,
+      "providerFields": {
+        "TimeoutSeconds": "{{local-transcription-timeout-seconds}}"
+      }
+    },
+    {
+      "serviceId": "SpeechSynthesis",
+      "providerId": "SpeechSynthesis.LocalTts.Http",
+      "setAsDefault": true,
+      "providerFields": {
+        "TimeoutSeconds": "{{local-synthesis-timeout-seconds}}"
+      }
+    },
+    {
+      "serviceId": "DocumentIntelligence",
+      "providerId": "DocumentIntelligence.LocalDocling.Http",
+      "setAsDefault": true,
+      "providerFields": {
+        "TimeoutSeconds": "{{local-doc-int-timeout-seconds}}",
+        "MaxConcurrentConversions": "{{local-doc-int-max-concurrent}}",
+        "AsyncStatusPollIntervalMs": "{{local-doc-int-poll-interval-ms}}"
+      }
+    }
+  ],
+  "runtimeDependencies": [
+    {
+      "key": "LlamaCpp:BaseUrl",
+      "required": true
+    },
+    {
+      "key": "LocalServiceHosts:EmbeddingsBaseUrl",
+      "required": true
+    },
+    {
+      "key": "LocalServiceHosts:ImageGenerationBaseUrl",
+      "required": true
+    },
+    {
+      "key": "LocalServiceHosts:SpeechTranscriptionBaseUrl",
+      "required": true
+    },
+    {
+      "key": "LocalServiceHosts:SpeechSynthesisBaseUrl",
+      "required": true
+    },
+    {
+      "key": "LocalServiceHosts:MediaBaseUrl",
+      "required": true
+    },
+    {
+      "key": "LocalServiceHosts:DocumentIntelligenceBaseUrl",
+      "required": true
+    }
+  ]
+}

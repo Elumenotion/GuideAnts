@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "profileId": "google-gemini",
+  "displayName": "Google Gemini",
+  "settingsValues": {
+    "GoogleGeminiApi": {
+      "ApiKey": "{{google-gemini-api-key}}"
+    }
+  },
+  "connectionDefinitions": {
+    "sectionName": "GoogleGeminiApi",
+    "requiredFields": [
+      "ApiKey"
+    ]
+  },
+  "modelDefinitions": [
+    {
+      "modelId": "gemini-2.5-flash",
+      "displayName": "gemini-2.5-flash",
+      "provider": "google-gemini-chat",
+      "isActive": true
+    },
+    {
+      "modelId": "gemini-2.5-pro",
+      "displayName": "gemini-2.5-pro",
+      "provider": "google-gemini-chat",
+      "isActive": true
+    }
+  ],
+  "serviceDefaults": [
+    {
+      "serviceId": "Embeddings",
+      "providerId": "Embeddings.Google.Embedding",
+      "setAsDefault": true,
+      "providerFields": {
+        "ModelId": "{{google-embeddings-model-id}}",
+        "TimeoutSeconds": 300
+      }
+    },
+    {
+      "serviceId": "ImageGeneration",
+      "providerId": "ImageGeneration.Google.Imagen",
+      "setAsDefault": true,
+      "providerFields": {
+        "ModelId": "{{google-image-model-id}}",
+        "TimeoutSeconds": 600
+      }
+    },
+    {
+      "serviceId": "SpeechTranscription",
+      "providerId": "SpeechTranscription.Google.SpeechToText",
+      "setAsDefault": true,
+      "providerFields": {
+        "ModelId": "{{google-transcription-model-id}}",
+        "TimeoutSeconds": 300
+      }
+    },
+    {
+      "serviceId": "SpeechSynthesis",
+      "providerId": "SpeechSynthesis.Google.TextToSpeech",
+      "setAsDefault": true,
+      "providerFields": {
+        "ModelId": "{{google-tts-model-id}}",
+        "VoiceName": "{{google-tts-voice-name}}",
+        "TimeoutSeconds": 300
+      }
+    }
+  ],
+  "runtimeDependencies": []
+}

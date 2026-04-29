@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "profileId": "openai",
+  "displayName": "OpenAI",
+  "settingsValues": {
+    "OpenAI": {
+      "ApiKey": "{{openai-api-key}}",
+      "Endpoint": "{{openai-endpoint}}"
+    }
+  },
+  "connectionDefinitions": {
+    "sectionName": "OpenAI",
+    "requiredFields": [
+      "ApiKey"
+    ]
+  },
+  "modelDefinitions": [
+    {
+      "modelId": "gpt-4.1-nano",
+      "displayName": "gpt-4.1-nano",
+      "provider": "openai-chat",
+      "isActive": true
+    },
+    {
+      "modelId": "gpt-5.1-2025-11-13",
+      "displayName": "gpt-5.1-2025-11-13",
+      "provider": "openai-chat",
+      "isActive": true
+    }
+  ],
+  "serviceDefaults": [],
+  "runtimeDependencies": []
+}

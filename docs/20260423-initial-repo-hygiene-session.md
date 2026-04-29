@@ -89,6 +89,15 @@ Deleted:
 
 Also removed the no-longer-needed `DatabaseSeeder` ignore entries from [`.gitignore`](D:/repos/GuideAnts/.gitignore).
 
+> **Note (2026-04-29):** A purpose-built replacement —
+> `RequiredGuidesAssistantsSeeder` — has since been added to the main API
+> startup path. It imports required guides and assistants from
+> folder-based seeds in `Resources/bootstrap/` using the existing
+> guide/assistant export/import format. Unlike the removed
+> `SampleDataSeeder`, it is idempotent (skips entities that already exist)
+> and does not contain sample user data. See
+> [setup-guide.md § Required guides and assistants](setup-guide.md#required-guides-and-assistants-bootstrap-seeding).
+
 ## Verification Performed
 
 Successful project builds:

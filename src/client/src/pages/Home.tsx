@@ -8,7 +8,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { SettingsButton } from '../components/common/SettingsButton';
 import TabbedContentArea from '../components/home/TabbedContentArea';
 import EmptyStateVideo from '../components/home/EmptyStateVideo';
-import AddAiServicesWizardPlaceholder from '../components/home/AddAiServicesWizardPlaceholder';
+import AddAiServicesWizard from '../components/home/AddAiServicesWizard';
 import { TourStartButton } from '../tour/TourStartButton';
 import { useRegisterTour } from '../tour/useRegisterTour';
 import { DEFAULT_CONVERSATION_TITLE } from '../constants/conversation';
@@ -469,7 +469,7 @@ const Home = () => {
           />
         )}
       </div>
-      <AddAiServicesWizardPlaceholder
+      <AddAiServicesWizard
         isOpen={showAddAiServicesWizard}
         onDismiss={handleDismissAddAiServicesWizard}
         onOpenSettings={handleOpenSettingsFromAddAiServicesWizard}
