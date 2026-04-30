@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfirmationDialog } from '../components/common/ConfirmationDialog';
 import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
+import { TourStartButton } from '../tour/TourStartButton';
 import { useToast } from '../components/common/Toast';
 import { api } from '../services/api';
 import {
@@ -768,6 +769,7 @@ export default function Settings() {
           <div className="flex items-center gap-2 self-end sm:self-auto">
             <HomeButton />
             <SettingsButton />
+            <TourStartButton screenId="settings" inline />
           </div>
         </div>
       </header>

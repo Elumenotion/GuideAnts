@@ -17,6 +17,18 @@ vi.mock('../TwoColumnLayout', () => ({
     ),
 }));
 
+vi.mock('../../common/HomeButton', () => ({
+    HomeButton: () => <button aria-label="Back to Home">Home</button>,
+}));
+
+vi.mock('../../common/SettingsButton', () => ({
+    SettingsButton: () => <button aria-label="Open Settings">Settings</button>,
+}));
+
+vi.mock('../../../tour/TourStartButton', () => ({
+    TourStartButton: ({ screenId }: { screenId: string }) => <button aria-label="Start tour" data-screen={screenId}>Tour</button>,
+}));
+
 describe('NotebookLayout', () => {
     const mockProject: ProjectDetailsDto = {
         id: 'project-1',
@@ -68,7 +80,7 @@ describe('NotebookLayout', () => {
         render(<NotebookLayout {...defaultProps} />);
 
         expect(screen.getByText('Test Notebook')).toBeInTheDocument();
-        expect(screen.getByText('Back to Project')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /back to project/i })).toBeInTheDocument();
         
         // Should not show created date or project reference in header
         expect(screen.queryByText(/Created on/)).not.toBeInTheDocument();
@@ -93,26 +105,26 @@ describe('NotebookLayout', () => {
     it('shows edit button when canEdit is true and onEdit is provided', () => {
         render(<NotebookLayout {...defaultProps} canEdit={true} onEdit={vi.fn()} />);
 
-        expect(screen.getByText('Edit Notebook')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /edit notebook/i })).toBeInTheDocument();
     });
 
     it('hides edit button when canEdit is false', () => {
         render(<NotebookLayout {...defaultProps} canEdit={false} onEdit={vi.fn()} />);
 
-        expect(screen.queryByText('Edit Notebook')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /edit notebook/i })).not.toBeInTheDocument();
     });
 
     it('hides edit button when onEdit is not provided', () => {
         render(<NotebookLayout {...defaultProps} canEdit={true} onEdit={undefined} />);
 
-        expect(screen.queryByText('Edit Notebook')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /edit notebook/i })).not.toBeInTheDocument();
     });
 
     it('calls onBack when back button is clicked', async () => {
         const onBack = vi.fn();
         render(<NotebookLayout {...defaultProps} onBack={onBack} />);
 
-        const backButton = screen.getByText('Back to Project');
+        const backButton = screen.getByRole('button', { name: /back to project/i });
         await userEvent.click(backButton);
 
         expect(onBack).toHaveBeenCalledTimes(1);
@@ -122,7 +134,7 @@ describe('NotebookLayout', () => {
         const onEdit = vi.fn();
         render(<NotebookLayout {...defaultProps} onEdit={onEdit} />);
 
-        const editButton = screen.getByText('Edit Notebook');
+        const editButton = screen.getByRole('button', { name: /edit notebook/i });
         await userEvent.click(editButton);
 
         expect(onEdit).toHaveBeenCalledTimes(1);

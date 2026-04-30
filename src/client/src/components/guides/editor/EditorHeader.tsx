@@ -12,6 +12,8 @@ interface EditorHeaderProps {
 }
 
 import { TourStartButton } from '../../../tour/TourStartButton';
+import { HomeButton } from '../../common/HomeButton';
+import { SettingsButton } from '../../common/SettingsButton';
 
 export function EditorHeader({ isEditing, saving, showExport, entityType, entityName, hasValidationErrors, onCancel, onSave, onExport, tourScreenId }: EditorHeaderProps) {
   const entityLabel = entityType.charAt(0).toUpperCase() + entityType.slice(1);
@@ -60,11 +62,11 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
             >
               {saving ? 'Saving...' : `Save ${entityLabel}`}
             </button>
-            {tourScreenId && (
-              <div data-tour-id="guide.header.help">
-                <TourStartButton screenId={tourScreenId} inline />
-              </div>
-            )}
+            <HomeButton />
+            <SettingsButton />
+            <div data-tour-id="guide.header.help">
+              <TourStartButton screenId={tourScreenId ?? 'guideBuilder'} inline />
+            </div>
           </div>
         </div>
       </div>

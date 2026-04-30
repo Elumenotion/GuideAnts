@@ -20,6 +20,7 @@ import { ConversationPanel } from '../components/notebook/conversations/Conversa
 import { ConversationProvider } from '../contexts/ConversationContext';
 import { LlamaRuntimeModal } from '../components/notebook/conversations/LlamaRuntimeModal';
 import { LlamaCrashedModal, LlamaCrashReason } from '../components/notebook/conversations/LlamaCrashedModal';
+import { NoChatModelDialog } from '../components/notebook/conversations/NoChatModelDialog';
 import MarkdownViewer from '../components/common/MarkdownViewer';
 import { NotebookAuthInterstitial } from '../components/notebook/auth/NotebookAuthInterstitial';
 import { checkNotebookAuthRequirements } from '../utils/notebookAuth';
@@ -151,6 +152,27 @@ function NotebookDetailsContent() {
         reason: LlamaCrashReason;
         upstreamDetail: string | null;
     } | null>(null);
+
+    // "No chat model configured" dialog — shown once per conversation entry when
+    // the toolbar reports no effective model. The user can dismiss it and still
+    // browse the conversation read-only; sending is independently blocked.
+    const [noChatModelDialogDismissed, setNoChatModelDialogDismissed] = useState(false);
+
+    // Reset dismissed state when switching conversations
+    useEffect(() => {
+        setNoChatModelDialogDismissed(false);
+    }, [activeConversationId]);
+
+    const chatModelMissing = Boolean(
+        headerToolbar.data &&
+        !headerToolbar.isLoading &&
+        !headerToolbar.data.chat.effectiveModelId
+    );
+
+    const showNoChatModelDialog =
+        chatModelMissing &&
+        !!activeConversationId &&
+        !noChatModelDialogDismissed;
 
     const applyRuntimeStatus = useCallback((status: any, assistantId?: string) => {
         if (!status?.state) return;
@@ -1193,6 +1215,7 @@ function NotebookDetailsContent() {
                             canEdit={canEdit()}
                             collaboratorCount={1}
                             isRuntimeLoading={isPolling}
+                            isChatModelMissing={chatModelMissing}
                             onNewConversation={(newConvoId) => handleItemSelect('conversations', newConvoId)}
                           />
                         </ConversationProvider>
@@ -1247,6 +1270,12 @@ function NotebookDetailsContent() {
             status={runtimeStatus}
             onStartLoad={handleStartLoad}
             isPolling={isPolling}
+        />
+        <NoChatModelDialog
+            isOpen={showNoChatModelDialog}
+            onClose={() => setNoChatModelDialogDismissed(true)}
+            onGoToSettings={() => navigate('/settings')}
+            blockers={headerToolbar.data?.chat?.blockers}
         />
         <LlamaCrashedModal
             isOpen={crashState !== null}

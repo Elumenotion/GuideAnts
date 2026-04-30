@@ -514,6 +514,22 @@ public sealed partial class ApplicationSettingsService
         await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task EnsureServiceModeExistsAsync(
+        string serviceId,
+        string providerId,
+        CancellationToken cancellationToken = default)
+    {
+        var contract = GetServiceContract(serviceId);
+        var provider = contract.Providers.FirstOrDefault(p =>
+            string.Equals(p.ProviderId, providerId, StringComparison.Ordinal));
+        if (provider == null)
+        {
+            throw new InvalidOperationException($"Provider '{providerId}' is not valid for service '{serviceId}'.");
+        }
+
+        await CreateExplicitServiceModeAsync(contract, provider, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task CreateExplicitServiceModeAsync(
         ServiceContract contract,
         ProviderContract provider,

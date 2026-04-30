@@ -5,7 +5,10 @@ import { NotebookDetailsDto } from '../../types/notebook';
 import { NotebookTemplateDto } from '../../types/project';
 import { TwoColumnLayout } from './TwoColumnLayout';
 import { TourStartButton } from '../../tour/TourStartButton';
+import { HomeButton } from '../common/HomeButton';
+import { SettingsButton } from '../common/SettingsButton';
 import { HiMenu } from 'react-icons/hi';
+import { FiEdit2 } from 'react-icons/fi';
 
 interface NotebookLayoutProps {
     project: ProjectDetailsDto;
@@ -96,29 +99,26 @@ function NotebookHeader({
                         {canEdit && onEdit && (
                             <button
                                 onClick={onEdit}
-                                className="hidden sm:block px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                                className="h-10 w-10 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center justify-center text-gray-700 bg-white"
+                                aria-label="Edit Notebook"
+                                title="Edit Notebook"
                             >
-                                Edit Notebook
+                                <FiEdit2 className="w-4 h-4" />
                             </button>
                         )}
                         <button
                             onClick={onBack}
-                            className="hidden sm:block px-3 py-1 text-sm border rounded hover:bg-gray-50 transition-colors"
-                        >
-                            Back to Project
-                        </button>
-                        {/* Mobile-only Back Icon */}
-                        <button
-                            onClick={onBack}
-                            className="sm:hidden p-1.5 text-gray-500 hover:bg-gray-100 rounded-md"
+                            className="h-10 w-10 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center justify-center text-gray-700 bg-white"
+                            aria-label="Back to Project"
                             title="Back to Project"
                         >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                             </svg>
                         </button>
-                        
-                        {tourScreenId && <TourStartButton screenId={tourScreenId} inline />}
+                        <HomeButton />
+                        <SettingsButton />
+                        <TourStartButton screenId={tourScreenId ?? 'notebook'} inline />
                     </div>
                 </div>
             </div>

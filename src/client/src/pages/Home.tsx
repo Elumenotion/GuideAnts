@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { FiBarChart2, FiFolderPlus, FiSettings, FiTool } from 'react-icons/fi';
+import { FiBarChart2, FiFolderPlus, FiTool } from 'react-icons/fi';
+import { HomeButton } from '../components/common/HomeButton';
+import { SettingsButton } from '../components/common/SettingsButton';
 import { api } from '../services/api';
 import { useToast } from '../components/common/Toast';
 import ErrorScreen from '../components/ErrorScreen';
@@ -462,11 +464,8 @@ const Home = () => {
               icon={<FiTool className="h-4 w-4" />}
               onClick={() => setShowAddAiServicesWizard(true)}
             />
-            <HeaderIconLinkButton
-              to="/settings"
-              title="Settings"
-              icon={<FiSettings className="h-4 w-4" />}
-            />
+            <HomeButton />
+            <SettingsButton />
             <TourStartButton
               screenId={SCREEN_ID}
               inline

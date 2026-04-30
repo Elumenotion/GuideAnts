@@ -6,6 +6,10 @@ import userEvent from '@testing-library/user-event';
 import { ProjectLayout } from '../ProjectLayout';
 import { ProjectDetailsDto } from '../../../types/project';
 
+vi.mock('../../../tour/TourStartButton', () => ({
+    TourStartButton: ({ screenId }: { screenId: string }) => <button aria-label="Start tour" data-screen={screenId}>Tour</button>,
+}));
+
 // Helper to build a minimal ProjectDetailsDto
 const buildProject = (): ProjectDetailsDto => ({
   id: 'project-1',
@@ -45,8 +49,8 @@ describe('ProjectLayout', () => {
     await userEvent.click(screen.getByRole('button', { name: /edit project/i }));
     expect(onEdit).toHaveBeenCalledTimes(1);
 
-    await userEvent.click(screen.getByRole('button', { name: /back to projects/i }));
-    expect(onBack).toHaveBeenCalledTimes(1);
+    // HomeButton navigates to '/' via useNavigate (no onBack callback)
+    expect(screen.getByRole('button', { name: /back to home/i })).toBeInTheDocument();
 
     // Sidebar and content rendered
     expect(screen.getByTestId('sidebar')).toBeInTheDocument();

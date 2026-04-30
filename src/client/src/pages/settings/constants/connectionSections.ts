@@ -9,18 +9,24 @@ export interface ConnectionOwnershipCategory {
  * Client-owned taxonomy for Settings -> Connections.
  * Keep first-launch auto-open detection aligned with this list.
  */
+/**
+ * Cloud provider sections hidden from the UI because their integrations are incomplete.
+ * Remove entries here to re-enable them once ready.
+ */
+export const HIDDEN_CLOUD_PROVIDER_SECTIONS = new Set<string>(['OpenRouter', 'HuggingFace']);
+
 export const CONNECTION_OWNERSHIP_CATEGORIES: readonly ConnectionOwnershipCategory[] = [
   {
     key: 'chat',
     label: 'Chat / LLM Providers',
     description: 'Connections used when dispatching chat completions to a catalog model.',
-    sectionNames: ['AzureOpenAI', 'OpenAI', 'Anthropic', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace'],
+    sectionNames: ['AzureOpenAI', 'OpenAI', 'Anthropic', 'GoogleGeminiApi'],
   },
   {
     key: 'service',
     label: 'Service Providers',
     description: 'Connections referenced by non-chat service routing modes (speech, images, embeddings, markdown extraction).',
-    sectionNames: ['AzureSpeechService', 'AzureOpenAiImages', 'AzureOpenAiEmbedding', 'AzureDocumentIntelligence', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace', 'OpenAI'],
+    sectionNames: ['AzureSpeechService', 'AzureOpenAiImages', 'AzureOpenAiEmbedding', 'AzureDocumentIntelligence', 'GoogleGeminiApi', 'OpenAI'],
   },
   {
     key: 'huggingface',

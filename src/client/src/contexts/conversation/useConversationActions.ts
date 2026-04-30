@@ -192,7 +192,22 @@ export function useConversationActions(
         setCurrentStreamController(null);
 
         if (error.status === 409) {
-          const runtimeStatus = error.body?.runtimeStatus;
+          const body = error.body;
+
+          if (body?.code === 'ROUTING_MODEL_NOT_READY') {
+            const action = body.action || 'Open Settings and configure a default chat model.';
+            dispatch({ type: 'SET_STREAMING_ERROR', payload: body.detail || 'No chat model is configured.' });
+            showToast({
+              type: 'error',
+              title: 'No Chat Model',
+              message: action,
+              duration: 8000
+            });
+            try { window.dispatchEvent(new Event('refresh-notebook-toolbar')); } catch {}
+            return;
+          }
+
+          const runtimeStatus = body?.runtimeStatus;
           if (runtimeStatus?.state && runtimeStatus.state !== 'ready') {
             dispatchRuntimeStatusWindowEvent(assistant?.id, runtimeStatus);
             if (runtimeStatus.state === 'failed' || runtimeStatus.state === 'invalid') {

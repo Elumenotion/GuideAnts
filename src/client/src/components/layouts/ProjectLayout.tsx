@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { ProjectDetailsDto } from '../../types/project';
 import { TwoColumnLayout } from './TwoColumnLayout';
 import { TourStartButton } from '../../tour/TourStartButton';
+import { HomeButton } from '../common/HomeButton';
 import { SettingsButton } from '../common/SettingsButton';
 import { HiMenu } from 'react-icons/hi';
+import { FiEdit2 } from 'react-icons/fi';
 
 interface ProjectLayoutProps {
     project: ProjectDetailsDto;
@@ -23,7 +25,6 @@ interface ProjectLayoutProps {
 function ProjectHeader({ 
     project, 
     onEdit, 
-    onBack, 
     canEdit,
     title, 
     subtitle,
@@ -33,11 +34,9 @@ function ProjectHeader({
 }: { 
     project: ProjectDetailsDto; 
     onEdit?: () => void; 
-    onBack: () => void;
     canEdit: boolean;
     title?: string;
     subtitle?: string;
-    backButtonLabel?: string;
     editButtonLabel?: string;
     tourScreenId?: string;
     onMobileSidebarToggle?: () => void;
@@ -71,24 +70,16 @@ function ProjectHeader({
                     {canEdit && onEdit && (
                         <button
                             onClick={onEdit}
-                            className="h-10 px-4 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center"
+                            className="h-10 w-10 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center justify-center text-gray-700 bg-white"
+                            aria-label={editButtonLabel}
+                            title={editButtonLabel}
                         >
-                            {editButtonLabel}
+                            <FiEdit2 className="w-4 h-4" />
                         </button>
                     )}
-                    <button
-                        onClick={onBack}
-                        aria-label="Back to Home"
-                        title="Home"
-                        className="h-10 w-10 border rounded-md hover:bg-gray-50 transition-colors flex items-center justify-center"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                            <path d="M11.47 3.84a.75.75 0 0 1 1.06 0l8 8a.75.75 0 1 1-1.06 1.06l-.72-.72V19.5A2.25 2.25 0 0 1 16.5 21.75h-2.25a.75.75 0 0 1-.75-.75v-3.75a1.5 1.5 0 0 0-1.5-1.5h-1.5a1.5 1.5 0 0 0-1.5 1.5V21a.75.75 0 0 1-.75.75H4.5A2.25 2.25 0 0 1 2.25 19.5v-7.32l-.72.72a.75.75 0 1 1-1.06-1.06l8-8Z" />
-                        </svg>
-                        <span className="sr-only">Home</span>
-                    </button>
+                    <HomeButton />
                     <SettingsButton />
-                    {tourScreenId && <TourStartButton screenId={tourScreenId} inline />}
+                    <TourStartButton screenId={tourScreenId ?? 'projectDetails'} inline />
                 </div>
             </div>
             <div className="text-sm text-gray-600 mt-0.5">
@@ -102,13 +93,13 @@ export function ProjectLayout({
     project,
     sidebar,
     content,
-    onBack,
+    onBack: _onBack,
     canEdit,
     onEdit,
     className = '',
     title,
     subtitle,
-    backButtonLabel,
+    backButtonLabel: _backButtonLabel,
     editButtonLabel,
     tourScreenId,
 }: ProjectLayoutProps) {
@@ -173,11 +164,9 @@ export function ProjectLayout({
             <ProjectHeader
                 project={project}
                 onEdit={onEdit}
-                onBack={onBack}
                 canEdit={canEdit}
                 title={title}
                 subtitle={subtitle}
-                backButtonLabel={backButtonLabel}
                 editButtonLabel={editButtonLabel}
                 tourScreenId={tourScreenId}
                 onMobileSidebarToggle={() => setIsMobileSidebarOpen(prev => !prev)}

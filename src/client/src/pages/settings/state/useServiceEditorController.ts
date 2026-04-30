@@ -2,8 +2,21 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../../services/api';
 import type { ProviderEditorStateDto, ServiceEditorStateDto } from '../../../types/settings';
 import { getServiceProviderDisplayName } from '../constants/displayLabels';
+import { HIDDEN_CLOUD_PROVIDER_SECTIONS } from '../constants/connectionSections';
 import { useServiceEditorDraft } from './useServiceEditorDraft';
 import { buildSavePayload, hasValidationErrors, validateOperativeProviderFields } from './serviceEditorValidation';
+
+function isHiddenCloudProvider(providerId: string): boolean {
+  return Array.from(HIDDEN_CLOUD_PROVIDER_SECTIONS).some(
+    (section) => providerId.includes(`.${section}.`)
+  );
+}
+
+function shouldHideProvider(p: ProviderEditorStateDto): boolean {
+  if (isHiddenCloudProvider(p.providerId)) return true;
+  if (!p.connectionConfigured && p.providerKind === 'Cloud') return true;
+  return false;
+}
 
 export interface UseServiceEditorControllerResult {
   state: ServiceEditorStateDto | null;
@@ -63,19 +76,21 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
     if (!state) {
       return [];
     }
-    return state.providers.map((p) => ({
-      providerId: p.providerId,
-      displayName: getServiceProviderDisplayName(p.providerId),
-      kind: p.providerKind,
-      hasExplicitMode: p.hasExplicitMode,
-      connectionConfigured: p.connectionConfigured,
-      canActivate: p.canActivate,
-      blocker: !p.hasExplicitMode
-        ? 'No explicit service mode'
-        : !p.connectionConfigured
-          ? 'Connection not configured'
-          : p.activationBlockers[0] ?? null,
-    }));
+    return state.providers
+      .filter((p) => !shouldHideProvider(p))
+      .map((p) => ({
+        providerId: p.providerId,
+        displayName: getServiceProviderDisplayName(p.providerId),
+        kind: p.providerKind,
+        hasExplicitMode: p.hasExplicitMode,
+        connectionConfigured: p.connectionConfigured,
+        canActivate: p.canActivate,
+        blocker: !p.hasExplicitMode
+          ? 'No explicit service mode'
+          : !p.connectionConfigured
+            ? 'Connection not configured'
+            : p.activationBlockers[0] ?? null,
+      }));
   }, [state]);
 
   const applyLoadedState = (next: ServiceEditorStateDto): void => {

@@ -11,6 +11,7 @@ interface ConversationPanelProps {
   collaboratorCount?: number;
   onNewConversation?: (conversationId: string) => void;
   isRuntimeLoading?: boolean;
+  isChatModelMissing?: boolean;
 }
 
 /**
@@ -21,16 +22,17 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
   conversationId: _conversationId,
   canEdit = false,
   onNewConversation,
-  isRuntimeLoading = false
+  isRuntimeLoading = false,
+  isChatModelMissing = false
 }) => {
   return (
     <div className="flex flex-col h-full min-h-0 w-full overflow-hidden relative">
-      <ConversationPanelContent canEdit={canEdit} onNewConversation={onNewConversation} isRuntimeLoading={isRuntimeLoading} />
+      <ConversationPanelContent canEdit={canEdit} onNewConversation={onNewConversation} isRuntimeLoading={isRuntimeLoading} isChatModelMissing={isChatModelMissing} />
     </div>
   );
 };
 
-const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?: (conversationId: string) => void; isRuntimeLoading?: boolean }> = ({ canEdit, onNewConversation, isRuntimeLoading }) => {
+const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?: (conversationId: string) => void; isRuntimeLoading?: boolean; isChatModelMissing?: boolean }> = ({ canEdit, onNewConversation, isRuntimeLoading, isChatModelMissing }) => {
   const { 
     messages, 
     isStreaming, 
@@ -53,10 +55,18 @@ const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?:
     onPreviewFileByPath
   } = useConversation();
 
+  const sendBlocked = !canEdit || !!isRuntimeLoading || !!isChatModelMissing;
+
   return (
     <div className="flex flex-col h-full min-h-0 w-full overflow-hidden">
       {/* Conversation header */}
       <ConversationHeader onUndo={undoLastTurn} canEdit={canEdit} onNewConversation={onNewConversation} data-tour-id="conversation.header" />
+
+      {isChatModelMissing && (
+        <div className="mx-4 mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800" data-tour-id="conversation.no-model-warning">
+          No chat model is configured. Open <strong>Settings</strong> and set a default chat model before sending messages.
+        </div>
+      )}
 
       {streamingError && (
         <div className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" data-tour-id="conversation.error">
@@ -75,16 +85,16 @@ const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?:
         selectedAssistant={selectedAssistant || undefined}
         assistants={assistants}
         conversationStarters={conversationStarters}
-        canEdit={canEdit && !isRuntimeLoading}
+        canEdit={!sendBlocked}
 
-        onDraftChange={canEdit && !isRuntimeLoading ? setDraftUserContent : () => {}}
-        onSendMessage={canEdit && !isRuntimeLoading ? sendMessage : () => {}}
-        onEditAssistant={canEdit && !isRuntimeLoading ? startEditingAssistant : () => {}}
-        onSaveAssistant={canEdit && !isRuntimeLoading ? editAssistantMessage : async () => {}}
-        onAssistantSelect={canEdit && !isRuntimeLoading ? setSelectedAssistant : () => {}}
-        onUndo={canEdit && !isRuntimeLoading ? undoLastTurn : () => {}}
+        onDraftChange={!sendBlocked ? setDraftUserContent : () => {}}
+        onSendMessage={!sendBlocked ? sendMessage : () => {}}
+        onEditAssistant={!sendBlocked ? startEditingAssistant : () => {}}
+        onSaveAssistant={!sendBlocked ? editAssistantMessage : async () => {}}
+        onAssistantSelect={!sendBlocked ? setSelectedAssistant : () => {}}
+        onUndo={!sendBlocked ? undoLastTurn : () => {}}
         onEditUserMessage={(messageId, content) => {
-          if (!canEdit || isRuntimeLoading) return;
+          if (sendBlocked) return;
           console.log('Edit user message:', messageId, content);
           sendMessage(content);
         }}
