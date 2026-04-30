@@ -93,7 +93,7 @@ export function OptionalServicesStep({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold text-gray-900">Optional Microsot Foundry services</h3>
+        <h3 className="text-sm font-semibold text-gray-900">Optional Microsoft Foundry services</h3>
         <p className="mt-1 text-sm text-gray-600">
           Basic chat works with the core connection and at least one model. These services are optional and can be added now or later.
         </p>
@@ -278,4 +278,3 @@ export function OptionalServicesStep({
     </div>
   );
 }
-

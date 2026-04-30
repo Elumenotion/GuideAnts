@@ -27,6 +27,11 @@ This document describes the **global default chat model** feature: one instance-
 - **`ChatModelConfigurator`** — Shared component for Guide Builder (`mode="entity"`) and Settings Overview default card (`mode="default"`).
 - **Guide Builder** — Model selector includes **Use Default Model (from Settings)** (`modelId` stored as empty / omitted). When the entity uses the default or when hard override is on, per-entity sampling controls are disabled with an explanatory hint.
 - **Settings → Overview** — **Default Chat Model** card: configurator + override toggle + Save (concurrency via `rowVersion`).
+- **Home → Add AI Services Wizard** — Model step can set the new model as
+  global default. When no catalog models exist yet, the first added model is
+  automatically set as `ChatDefaults:DefaultModelId`. This flow updates only
+  `defaultModelId` and preserves `overrideAllChatModels` and existing sampling
+  fields.
 
 ## Local Llama (`llama-cpp`)
 

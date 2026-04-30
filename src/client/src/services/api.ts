@@ -1290,7 +1290,11 @@ export const api = {
                     body: JSON.stringify({ providerId }),
                 }),
 
-            updateProviderFields: (serviceId: string, providerId: string, fields: Record<string, unknown>) =>
+            updateProviderFields: (
+                serviceId: string,
+                providerId: string,
+                fields: Record<string, string | null | undefined>
+            ) =>
                 callApi<ServiceEditorStateDto>(
                     `/settings/services/${encodeURIComponent(serviceId)}/providers/${encodeURIComponent(providerId)}`,
                     {

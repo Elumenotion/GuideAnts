@@ -7,6 +7,8 @@ export type AddAiServicesWizardStep =
   | 'optionalServices'
   | 'finish';
 
+export type AddAiServicesWizardProvider = 'foundry' | 'google-gemini';
+
 export type FoundryModelProviderLabel = 'Completions' | 'Responses';
 
 export interface FoundryModelDraft {
@@ -17,20 +19,39 @@ export interface FoundryModelDraft {
   persisted: boolean;
 }
 
+export interface GeminiModelDraft {
+  localId: string;
+  modelId: string;
+  setAsGlobalDefault: boolean;
+  persisted: boolean;
+}
+
 export interface ExistingFoundryModel {
   modelId: string;
   provider: FoundryModelProviderLabel;
   raw: SettingsModelDto;
 }
 
-export interface CoreConnectionFormState {
+export interface ExistingGeminiModel {
+  modelId: string;
+  raw: SettingsModelDto;
+}
+
+export interface FoundryCoreConnectionFormState {
   resource: string;
   apiKey: string;
   apiVersion: string;
   apiKeyHasStoredValue: boolean;
 }
 
-export interface OptionalServicesFormState {
+export type CoreConnectionFormState = FoundryCoreConnectionFormState;
+
+export interface GeminiCoreConnectionFormState {
+  apiKey: string;
+  apiKeyHasStoredValue: boolean;
+}
+
+export interface FoundryOptionalServicesFormState {
   enableEmbeddings: boolean;
   embeddingsEndpoint: string;
   embeddingsApiKey: string;
@@ -59,6 +80,27 @@ export interface OptionalServicesFormState {
   documentIntelligenceApiKeyHasStoredValue: boolean;
 }
 
+export type OptionalServicesFormState = FoundryOptionalServicesFormState;
+
+export interface GeminiOptionalServicesFormState {
+  enableEmbeddings: boolean;
+  embeddingsModelId: string;
+  embeddingsTimeoutSeconds: string;
+
+  enableImages: boolean;
+  imagesModelId: string;
+  imagesTimeoutSeconds: string;
+
+  enableSpeechTranscription: boolean;
+  speechTranscriptionModelId: string;
+  speechTranscriptionTimeoutSeconds: string;
+
+  enableSpeechSynthesis: boolean;
+  speechSynthesisModelId: string;
+  speechSynthesisVoiceName: string;
+  speechSynthesisTimeoutSeconds: string;
+}
+
 export interface WizardLoadSnapshot {
   sectionSummaries: SettingsSectionSummaryDto[];
   sectionsByName: Record<string, SettingsSectionDto>;
@@ -76,3 +118,9 @@ export type OptionalServiceKey =
   | 'SpeechTranscription'
   | 'SpeechSynthesis'
   | 'DocumentIntelligence';
+
+export type GeminiOptionalServiceKey =
+  | 'Embeddings'
+  | 'ImageGeneration'
+  | 'SpeechTranscription'
+  | 'SpeechSynthesis';

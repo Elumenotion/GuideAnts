@@ -3,6 +3,8 @@ import type { ProviderEditorStateDto, ServiceEditorStateDto } from '../../../../
 import {
   DOCUMENT_INTELLIGENCE_SECTION,
   EMBEDDINGS_SECTION,
+  GEMINI_CORE_SECTION,
+  GEMINI_SERVICE_PROVIDER_IDS,
   IMAGES_SECTION,
   SERVICE_PROVIDER_IDS,
   SPEECH_SECTION,
@@ -13,7 +15,9 @@ import {
   hasModelTuple,
   mapModelProviderIdToLabel,
   mapProviderLabelToModelProviderId,
+  summarizeGeminiOptionalServiceWarnings,
   summarizeOptionalServiceWarnings,
+  toExistingGeminiModels,
   toExistingFoundryModels,
 } from '../utils';
 import type { OptionalServiceKey, WizardLoadSnapshot } from '../types';
@@ -153,6 +157,28 @@ describe('addAiServicesWizard utils', () => {
     ]);
   });
 
+  it('filters to gemini chat models', () => {
+    const models = toExistingGeminiModels([
+      {
+        modelId: 'gemini-2.5-flash',
+        displayName: 'gemini-2.5-flash',
+        provider: 'google-gemini-chat',
+        isActive: true,
+        created: '2026-04-29T00:00:00Z',
+      },
+      {
+        modelId: 'gpt-4o',
+        displayName: 'gpt-4o',
+        provider: 'azure-openai-chat',
+        isActive: true,
+        created: '2026-04-29T00:00:00Z',
+      },
+    ]);
+
+    expect(models).toHaveLength(1);
+    expect(models[0]?.modelId).toBe('gemini-2.5-flash');
+  });
+
   it('checks model duplication helpers case-insensitively', () => {
     expect(
       hasModelTuple(
@@ -183,5 +209,30 @@ describe('addAiServicesWizard utils', () => {
         'Speech connection is not configured for synthesis.',
       ])
     );
+  });
+
+  it('returns no gemini optional warnings when gemini providers are active and configured', () => {
+    const snapshot = createSnapshot({
+      sectionSummaries: [
+        ...createSnapshot().sectionSummaries,
+        {
+          sectionName: GEMINI_CORE_SECTION,
+          displayName: 'Google Gemini API',
+          displayOrder: 9,
+          hasSecrets: true,
+          readinessStatus: 'configured',
+          missingFields: [],
+        },
+      ],
+      serviceStates: {
+        Embeddings: createServiceState('Embeddings', GEMINI_SERVICE_PROVIDER_IDS.Embeddings),
+        ImageGeneration: createServiceState('ImageGeneration', GEMINI_SERVICE_PROVIDER_IDS.ImageGeneration),
+        SpeechTranscription: createServiceState('SpeechTranscription', GEMINI_SERVICE_PROVIDER_IDS.SpeechTranscription),
+        SpeechSynthesis: createServiceState('SpeechSynthesis', GEMINI_SERVICE_PROVIDER_IDS.SpeechSynthesis),
+        DocumentIntelligence: createServiceState('DocumentIntelligence', SERVICE_PROVIDER_IDS.DocumentIntelligence),
+      },
+    });
+
+    expect(summarizeGeminiOptionalServiceWarnings(snapshot)).toEqual([]);
   });
 });

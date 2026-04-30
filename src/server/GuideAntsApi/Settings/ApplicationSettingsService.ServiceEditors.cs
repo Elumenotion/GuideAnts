@@ -102,7 +102,9 @@ public sealed partial class ApplicationSettingsService
         var hasExplicitMode = (await GetServiceModesAsync(contract.ServiceId, cancellationToken).ConfigureAwait(false))
             .Any(mode => string.Equals(mode.ProviderSection, provider.ProviderSectionKey, StringComparison.OrdinalIgnoreCase));
 
-        foreach (var (fieldName, _) in request.Fields)
+        var normalizedFields = NormalizeProviderFieldUpdates(request.Fields);
+
+        foreach (var (fieldName, _) in normalizedFields)
         {
             if (!metadataByName.TryGetValue(fieldName, out var meta))
             {
@@ -143,7 +145,7 @@ public sealed partial class ApplicationSettingsService
 
         var updatesBySection = new Dictionary<string, JsonObject>(StringComparer.OrdinalIgnoreCase);
         var modeFieldUpdates = new Dictionary<string, string?>(StringComparer.Ordinal);
-        foreach (var (fieldName, fieldValue) in request.Fields)
+        foreach (var (fieldName, fieldValue) in normalizedFields)
         {
             var metadata = metadataByName[fieldName];
             ValidateProviderFieldUpdate(contract, provider, metadata, fieldValue);
@@ -199,6 +201,28 @@ public sealed partial class ApplicationSettingsService
         }
 
         return await GetServiceEditorStateAsync(contract.ServiceId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static IReadOnlyDictionary<string, string?> NormalizeProviderFieldUpdates(
+        IReadOnlyDictionary<string, JsonElement> rawFields)
+    {
+        var normalized = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (fieldName, rawValue) in rawFields)
+        {
+            normalized[fieldName] = rawValue.ValueKind switch
+            {
+                JsonValueKind.Null => null,
+                JsonValueKind.Undefined => null,
+                JsonValueKind.String => rawValue.GetString(),
+                JsonValueKind.Number => rawValue.GetRawText(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                _ => throw new InvalidOperationException(
+                    $"Field '{fieldName}' must be a string, number, boolean, or null."),
+            };
+        }
+
+        return normalized;
     }
 
     public async Task<ServiceEditorReadinessDto> GetServiceEditorReadinessAsync(

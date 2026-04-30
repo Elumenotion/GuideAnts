@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import AddAiServicesWizard from '../AddAiServicesWizard';
 import { api } from '../../../services/api';
 
@@ -35,6 +35,7 @@ describe('AddAiServicesWizard', () => {
     let coreResource = '';
     let coreApiVersion = '2025-04-01-preview';
     let coreApiKeyStored = false;
+    let geminiApiKeyStored = false;
     let models: Array<{
       modelId: string;
       displayName: string;
@@ -83,6 +84,12 @@ describe('AddAiServicesWizard', () => {
         readinessStatus: 'unconfigured',
         missingFields: ['Endpoint', 'ApiKey'],
       },
+      {
+        sectionName: 'GoogleGeminiApi',
+        hasSecrets: true,
+        readinessStatus: geminiApiKeyStored ? 'configured' : 'unconfigured',
+        missingFields: geminiApiKeyStored ? [] : ['ApiKey'],
+      },
     ]);
 
     vi.mocked(api.settings.getSections).mockImplementation(async () => getSectionSummaries());
@@ -120,6 +127,20 @@ describe('AddAiServicesWizard', () => {
             },
           ],
         },
+        {
+          sectionName: 'GoogleGeminiApi',
+          schemaVersion: 1,
+          hasSecrets: true,
+          properties: [
+            {
+              name: 'ApiKey',
+              valueType: 'string',
+              isSecret: true,
+              isEditable: true,
+              isRequired: true,
+            },
+          ],
+        },
       ],
       services: [],
       providers: [],
@@ -148,6 +169,17 @@ describe('AddAiServicesWizard', () => {
           },
         };
       }
+      if (sectionName === 'GoogleGeminiApi') {
+        return {
+          ...base,
+          payload: {
+            ApiKey: '',
+          },
+          secretHasValue: {
+            ApiKey: geminiApiKeyStored,
+          },
+        };
+      }
       return base;
     });
     vi.mocked(api.settings.updateSection).mockImplementation(async (sectionName: string, request: any) => {
@@ -159,6 +191,12 @@ describe('AddAiServicesWizard', () => {
           coreApiKeyStored = true;
         }
       }
+      if (sectionName === 'GoogleGeminiApi') {
+        const payload = request?.payload ?? {};
+        if (typeof payload.ApiKey === 'string' && payload.ApiKey.trim().length > 0) {
+          geminiApiKeyStored = true;
+        }
+      }
       rowVersion += 1;
       return {
         sectionName,
@@ -166,7 +204,7 @@ describe('AddAiServicesWizard', () => {
         rowVersion: `${rowVersion}`,
         updatedUtc: NOW,
         payload: request?.payload ?? {},
-        secretHasValue: { ApiKey: coreApiKeyStored },
+        secretHasValue: { ApiKey: sectionName === 'GoogleGeminiApi' ? geminiApiKeyStored : coreApiKeyStored },
       };
     });
     vi.mocked(api.settings.addModel).mockImplementation(async (request: any) => {
@@ -204,7 +242,21 @@ describe('AddAiServicesWizard', () => {
     vi.mocked(api.settings.services.updateActiveProvider).mockResolvedValue(undefined as never);
   });
 
-  it('auto-sets the first model as global default and allows finishing after one saved model', async () => {
+  it('shows both provider paths in the first step', async () => {
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    expect(within(providerSelect).getByRole('option', { name: 'Microsoft Foundry' })).toBeInTheDocument();
+    expect(within(providerSelect).getByRole('option', { name: 'Google Gemini' })).toBeInTheDocument();
+  });
+
+  it('auto-sets the first model as global default and allows finishing after one saved Foundry model', async () => {
     const onDismiss = vi.fn();
 
     render(
@@ -220,7 +272,7 @@ describe('AddAiServicesWizard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
-    await screen.findByRole('heading', { name: /Microsot Foundry connection details/i });
+    await screen.findByRole('heading', { name: /Microsoft Foundry connection details/i });
     fireEvent.change(screen.getByLabelText(/resource/i), { target: { value: 'my-foundry-resource' } });
     fireEvent.change(screen.getByLabelText(/api key/i), { target: { value: 'super-secret-key-123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
@@ -231,6 +283,7 @@ describe('AddAiServicesWizard', () => {
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
     expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
     await waitFor(() =>
       expect(api.settings.chatDefaults.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -240,19 +293,15 @@ describe('AddAiServicesWizard', () => {
       )
     );
 
-    await screen.findByRole('heading', { name: /Optional Microsot Foundry services/i });
+    await screen.findByRole('heading', { name: /Optional Microsoft Foundry services/i });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
     await screen.findByRole('heading', { name: /Finish setup/i });
-    const finishButton = screen.getByRole('button', { name: 'Finish' });
-    expect(finishButton).toBeEnabled();
-    expect(screen.queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
-
-    fireEvent.click(finishButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
     await waitFor(() => expect(onDismiss).toHaveBeenCalledWith(false));
   });
 
-  it('lets users choose a newly-added model as global default when models already exist', async () => {
+  it('lets users choose a newly-added Foundry model as global default when Foundry models already exist', async () => {
     let models = [
       {
         modelId: 'existing-model',
@@ -291,7 +340,7 @@ describe('AddAiServicesWizard', () => {
 
     await screen.findByLabelText(/provider/i);
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    await screen.findByRole('heading', { name: /Microsot Foundry connection details/i });
+    await screen.findByRole('heading', { name: /Microsoft Foundry connection details/i });
     fireEvent.change(screen.getByLabelText(/resource/i), { target: { value: 'my-foundry-resource' } });
     fireEvent.change(screen.getByLabelText(/api key/i), { target: { value: 'super-secret-key-123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
@@ -315,5 +364,202 @@ describe('AddAiServicesWizard', () => {
         })
       )
     );
+  });
+
+  it('requires a Gemini model before enabling finish in Gemini flow', async () => {
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'google-gemini' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Google Gemini connection details/i });
+    fireEvent.change(screen.getByLabelText(/api key/i), { target: { value: 'gemini-secret-123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Gemini models \(required\)/i });
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
+    expect((screen.getByLabelText(/^Model$/i) as HTMLInputElement).value).toBe('gemini-2.5-flash');
+
+    fireEvent.change(screen.getByLabelText(/^Model$/i), { target: { value: 'gemini-2.5-flash' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() =>
+      expect(api.settings.addModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'google-gemini-chat',
+          catalog: expect.objectContaining({ modelId: 'gemini-2.5-flash' }),
+        })
+      )
+    );
+  });
+
+  it('validates Gemini speech synthesis fields before persisting optional services', async () => {
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'google-gemini' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Google Gemini connection details/i });
+    fireEvent.change(screen.getByLabelText(/api key/i), { target: { value: 'gemini-secret-123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Gemini models \(required\)/i });
+    fireEvent.change(screen.getByLabelText(/^Model$/i), { target: { value: 'gemini-2.5-pro' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Optional Google Gemini services/i });
+    const synthesisHeader = screen.getByRole('heading', { name: 'Speech Synthesis' });
+    const synthesisCard = synthesisHeader.closest('div')?.parentElement?.parentElement;
+    expect(synthesisCard).not.toBeNull();
+    if (!synthesisCard) {
+      return;
+    }
+
+    expect((within(synthesisCard).getByLabelText('Configure now') as HTMLInputElement).checked).toBe(true);
+    fireEvent.change(within(synthesisCard).getByLabelText(/TTS Model ID/i), { target: { value: 'gemini-3.1-flash-tts-preview' } });
+    fireEvent.change(within(synthesisCard).getByLabelText(/Voice Name/i), { target: { value: '' } });
+    fireEvent.change(within(synthesisCard).getByLabelText(/Timeout Seconds/i), { target: { value: '300' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText(/Voice name is required/i)).toBeInTheDocument();
+    expect(api.settings.services.updateProviderFields).not.toHaveBeenCalledWith(
+      'SpeechSynthesis',
+      'SpeechSynthesis.Google.TextToSpeech',
+      expect.anything()
+    );
+
+    fireEvent.change(within(synthesisCard).getByLabelText(/Voice Name/i), { target: { value: 'Kore' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() =>
+      expect(api.settings.services.updateProviderFields).toHaveBeenCalledWith(
+        'SpeechSynthesis',
+        'SpeechSynthesis.Google.TextToSpeech',
+        expect.objectContaining({
+          ModelId: 'gemini-3.1-flash-tts-preview',
+          VoiceName: 'Kore',
+          TimeoutSeconds: '300',
+        })
+      )
+    );
+    await waitFor(() =>
+      expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
+        'SpeechSynthesis',
+        'SpeechSynthesis.Google.TextToSpeech'
+      )
+    );
+  });
+
+  it('prefills Gemini optional service defaults as actual field values', async () => {
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'google-gemini' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Google Gemini connection details/i });
+    fireEvent.change(screen.getByLabelText(/api key/i), { target: { value: 'gemini-secret-123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Gemini models \(required\)/i });
+    fireEvent.change(screen.getByLabelText(/^Model$/i), { target: { value: 'gemini-2.5-pro' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Optional Google Gemini services/i });
+
+    const embeddingsCard = screen.getByRole('heading', { name: 'Embeddings' }).closest('div')?.parentElement?.parentElement;
+    expect(embeddingsCard).not.toBeNull();
+    if (!embeddingsCard) {
+      return;
+    }
+    expect((within(embeddingsCard).getByLabelText('Configure now') as HTMLInputElement).checked).toBe(true);
+    expect((within(embeddingsCard).getByLabelText(/Embedding Model ID/i) as HTMLInputElement).value).toBe('gemini-embedding-2');
+    expect((within(embeddingsCard).getByLabelText(/Timeout Seconds/i) as HTMLInputElement).value).toBe('300');
+
+    const imagesCard = screen.getByRole('heading', { name: 'Image Generation' }).closest('div')?.parentElement?.parentElement;
+    expect(imagesCard).not.toBeNull();
+    if (!imagesCard) {
+      return;
+    }
+    expect((within(imagesCard).getByLabelText('Configure now') as HTMLInputElement).checked).toBe(true);
+    expect((within(imagesCard).getByLabelText(/Image Model ID/i) as HTMLInputElement).value).toBe('gemini-2.5-flash-image');
+    expect((within(imagesCard).getByLabelText(/Timeout Seconds/i) as HTMLInputElement).value).toBe('900');
+
+    const transcriptionCard = screen.getByRole('heading', { name: 'Speech Transcription' }).closest('div')?.parentElement?.parentElement;
+    expect(transcriptionCard).not.toBeNull();
+    if (!transcriptionCard) {
+      return;
+    }
+    expect((within(transcriptionCard).getByLabelText('Configure now') as HTMLInputElement).checked).toBe(true);
+    expect((within(transcriptionCard).getByLabelText(/Transcription Model ID/i) as HTMLInputElement).value).toBe('gemini-2.5-flash');
+    expect((within(transcriptionCard).getByLabelText(/Timeout Seconds/i) as HTMLInputElement).value).toBe('300');
+
+    const synthesisCard = screen.getByRole('heading', { name: 'Speech Synthesis' }).closest('div')?.parentElement?.parentElement;
+    expect(synthesisCard).not.toBeNull();
+    if (!synthesisCard) {
+      return;
+    }
+    expect((within(synthesisCard).getByLabelText('Configure now') as HTMLInputElement).checked).toBe(true);
+    expect((within(synthesisCard).getByLabelText(/TTS Model ID/i) as HTMLInputElement).value).toBe('gemini-3.1-flash-tts-preview');
+    expect((within(synthesisCard).getByLabelText(/Voice Name/i) as HTMLInputElement).value).toBe('Kore');
+    expect((within(synthesisCard).getByLabelText(/Timeout Seconds/i) as HTMLInputElement).value).toBe('300');
+  });
+
+  it('routes Finish to the Finish step before closing from Gemini optional services', async () => {
+    const onDismiss = vi.fn();
+
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={onDismiss}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'google-gemini' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Google Gemini connection details/i });
+    fireEvent.change(screen.getByLabelText(/api key/i), { target: { value: 'gemini-secret-123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Gemini models \(required\)/i });
+    fireEvent.change(screen.getByLabelText(/^Model$/i), { target: { value: 'gemini-2.5-pro' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Optional Google Gemini services/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+
+    await screen.findByRole('heading', { name: /Finish setup/i });
+    expect(onDismiss).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(onDismiss).toHaveBeenCalledWith(false));
   });
 });

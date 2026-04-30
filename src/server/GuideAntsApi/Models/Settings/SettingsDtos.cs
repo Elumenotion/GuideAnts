@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace GuideAntsApi.Models.Settings;
@@ -108,7 +109,7 @@ public sealed record ServiceEditorStateDto(
 
 public sealed record SetActiveProviderRequest(string ProviderId);
 
-public sealed record ProviderFieldsUpdateRequest(IReadOnlyDictionary<string, string?> Fields);
+public sealed record ProviderFieldsUpdateRequest(IReadOnlyDictionary<string, JsonElement> Fields);
 
 /// <summary>
 /// Runtime-owned dependency surfaced on the Infrastructure tab (R-5.7).

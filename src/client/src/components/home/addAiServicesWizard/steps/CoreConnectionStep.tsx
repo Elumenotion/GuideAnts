@@ -20,7 +20,7 @@ export function CoreConnectionStep({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold text-gray-900">Microsot Foundry connection details</h3>
+        <h3 className="text-sm font-semibold text-gray-900">Microsoft Foundry connection details</h3>
         <p className="mt-1 text-sm text-gray-600">
           Enter the core resource details used for chat model routing.
         </p>
@@ -82,9 +82,8 @@ export function CoreConnectionStep({
       </div>
 
       <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-        Use deployment names exactly as configured in Microsot Foundry when you add models in the next step.
+        Use deployment names exactly as configured in Microsoft Foundry when you add models in the next step.
       </div>
     </div>
   );
 }
-

@@ -1,10 +1,11 @@
 interface FinishStepProps {
+  providerLabel: string;
   readyForBasicChat: boolean;
   totalModelCount: number;
   warningItems: string[];
 }
 
-export function FinishStep({ readyForBasicChat, totalModelCount, warningItems }: FinishStepProps) {
+export function FinishStep({ providerLabel, readyForBasicChat, totalModelCount, warningItems }: FinishStepProps) {
   return (
     <div className="space-y-4">
       <div>
@@ -16,7 +17,7 @@ export function FinishStep({ readyForBasicChat, totalModelCount, warningItems }:
 
       <div className={`rounded border px-3 py-2 text-sm ${readyForBasicChat ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
         {readyForBasicChat
-          ? `Ready for basic chat with ${totalModelCount} configured model${totalModelCount === 1 ? '' : 's'}.`
+          ? `Ready for basic chat with ${totalModelCount} configured ${providerLabel} model${totalModelCount === 1 ? '' : 's'}.`
           : 'Basic chat requirements are not met yet.'}
       </div>
 
@@ -31,7 +32,7 @@ export function FinishStep({ readyForBasicChat, totalModelCount, warningItems }:
         </div>
       ) : (
         <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-          Optional Microsot Foundry services are fully configured.
+          Optional {providerLabel} services are fully configured.
         </div>
       )}
     </div>

@@ -97,13 +97,20 @@ If section-summary or models load fails, do not auto-open (avoid blocking normal
 
 Wizard footer actions:
 
-- `Start setup` (primary)
-- `Configure manually` (secondary): closes wizard and opens Settings
-- `Not now` (tertiary): closes wizard, stays on current page
+- `Back` (always visible; disabled on first step)
+- `Next` (always visible; step-validated)
+- `Finish` (always visible; enabled once at least one model exists)
+- `Configure manually`: closes wizard and opens Settings
+- `Not now`: closes wizard, stays on current page
 
 Include checkbox:
 
 - `Don’t auto-open this again on this device`
+
+Dismiss behavior:
+
+- Clicking outside the wizard (backdrop/overlay) does **not** close it.
+- Close/X and explicit footer actions are the supported dismissal paths.
 
 This satisfies advanced-user cancel requirements without removing guided entry.
 
@@ -120,8 +127,10 @@ Suggested steps:
 2. **Connections**
    - Deep-link to `Settings -> Connections`, focused section(s) for chosen stack.
 3. **Models**
-   - Deep-link to `Settings -> Models & Runtime -> Catalog`, open existing
-     `AddModelWizard` with provider preselect when relevant.
+   - Add one or more chat models directly in wizard state.
+   - Model step includes `Set this model as the global default chat model`.
+   - If no models exist yet, the first added model is always forced as global
+     default.
 4. **Services**
    - Deep-link to `Settings -> Services` and service-specific editors.
 5. **Verify**
@@ -204,11 +213,18 @@ Important: wizard copy must honestly label partial/chat-only stacks.
 3. Wizard does not auto-open only when both are true:
    - at least one configured connection section
    - at least one model defined
-4. `Configure manually` closes wizard and lands user in Settings.
-5. `Not now` closes wizard without blocking usage.
-6. “Don’t auto-open again” prevents future automatic opens on that device.
-7. Manual launcher in Settings always opens wizard.
-8. Existing manual settings flows remain functional and unchanged.
+4. Footer actions `Back`, `Next`, and `Finish` are always visible; labels do
+   not change by step.
+5. `Finish` stays disabled until at least one model exists, then becomes active.
+6. Clicking the modal backdrop does not dismiss the wizard.
+7. `Configure manually` closes wizard and lands user in Settings.
+8. `Not now` closes wizard without blocking usage.
+9. “Don’t auto-open again” prevents future automatic opens on that device.
+10. Manual launcher in Settings always opens wizard.
+11. Existing manual settings flows remain functional and unchanged.
+12. If this is the first model, it is automatically written as
+    `ChatDefaults:DefaultModelId`; otherwise the operator can choose whether
+    the newly-added model becomes the global default.
 
 ## 10. Test Plan
 
@@ -225,6 +241,13 @@ Frontend (Vitest):
 - Dismissal preference persistence tests (localStorage).
 - Settings manual launcher + wizard open/close tests.
 - Deep-link action tests (Connections/Services/Models & Runtime navigation hooks).
+- Footer contract tests: `Back`/`Next`/`Finish` always rendered, `Finish`
+  activation only after model existence.
+- Model default tests:
+  - first added model auto-sets global default
+  - when models already exist, optional checkbox can set the new model as
+    global default
+- Backdrop click does not dismiss wizard.
 
 Integration / E2E:
 

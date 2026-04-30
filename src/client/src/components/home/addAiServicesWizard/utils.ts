@@ -1,17 +1,23 @@
 import type { AddModelRequest, ProviderEditorStateDto, ServiceEditorStateDto, SettingsModelDto, SettingsSectionSummaryDto } from '../../../types/settings';
 import {
-  DOCUMENT_INTELLIGENCE_SECTION,
-  EMBEDDINGS_SECTION,
-  IMAGES_SECTION,
+  FOUNDRY_DOCUMENT_INTELLIGENCE_SECTION,
+  FOUNDRY_EMBEDDINGS_SECTION,
+  FOUNDRY_IMAGES_SECTION,
+  FOUNDRY_SERVICE_PROVIDER_IDS,
+  FOUNDRY_SPEECH_SECTION,
+  GEMINI_CORE_SECTION,
+  GEMINI_MODEL_PROVIDER_ID,
+  GEMINI_SERVICE_PROVIDER_IDS,
   MODEL_PROVIDER_ID_TO_LABEL,
   MODEL_PROVIDER_LABEL_TO_ID,
-  SERVICE_PROVIDER_IDS,
-  SPEECH_SECTION,
 } from './constants';
 import type {
+  ExistingGeminiModel,
   ExistingFoundryModel,
   FoundryModelDraft,
   FoundryModelProviderLabel,
+  GeminiModelDraft,
+  GeminiOptionalServiceKey,
   OptionalServiceKey,
   WizardLoadSnapshot,
 } from './types';
@@ -49,6 +55,16 @@ export function toExistingFoundryModels(models: SettingsModelDto[]): ExistingFou
     .sort((left, right) => left.modelId.localeCompare(right.modelId));
 }
 
+export function toExistingGeminiModels(models: SettingsModelDto[]): ExistingGeminiModel[] {
+  return models
+    .filter((model) => model.provider === GEMINI_MODEL_PROVIDER_ID)
+    .map((model) => ({
+      modelId: model.modelId,
+      raw: model,
+    }))
+    .sort((left, right) => left.modelId.localeCompare(right.modelId));
+}
+
 export function makeDraftModel(
   localId: string,
   modelId: string,
@@ -59,6 +75,19 @@ export function makeDraftModel(
     localId,
     modelId: modelId.trim(),
     provider,
+    setAsGlobalDefault,
+    persisted: false,
+  };
+}
+
+export function makeGeminiDraftModel(
+  localId: string,
+  modelId: string,
+  setAsGlobalDefault: boolean
+): GeminiModelDraft {
+  return {
+    localId,
+    modelId: modelId.trim(),
     setAsGlobalDefault,
     persisted: false,
   };
@@ -92,6 +121,18 @@ export function buildAddModelRequest(modelId: string, provider: FoundryModelProv
   };
 }
 
+export function buildAddGeminiModelRequest(modelId: string): AddModelRequest {
+  const trimmed = modelId.trim();
+  return {
+    provider: GEMINI_MODEL_PROVIDER_ID,
+    catalog: {
+      modelId: trimmed,
+      displayName: trimmed,
+      isActive: true,
+    },
+  };
+}
+
 function findSectionSummary(
   sectionSummaries: readonly SettingsSectionSummaryDto[],
   sectionName: string
@@ -111,16 +152,16 @@ function optionalServiceStatus(
   snapshot: WizardLoadSnapshot
 ): { complete: boolean; message: string } {
   if (serviceKey === 'Embeddings') {
-    const section = findSectionSummary(snapshot.sectionSummaries, EMBEDDINGS_SECTION);
+    const section = findSectionSummary(snapshot.sectionSummaries, FOUNDRY_EMBEDDINGS_SECTION);
     if (!section || section.readinessStatus !== 'configured') {
       return { complete: false, message: 'Embeddings connection is not configured.' };
     }
 
     const state = snapshot.serviceStates.Embeddings;
-    const providerId = SERVICE_PROVIDER_IDS.Embeddings;
+    const providerId = FOUNDRY_SERVICE_PROVIDER_IDS.Embeddings;
     const provider = getProviderState(state, providerId);
     if (!state || !provider || state.activeProviderId !== providerId) {
-      return { complete: false, message: 'Embeddings service is not set to Microsot Foundry.' };
+      return { complete: false, message: 'Embeddings service is not set to Microsoft Foundry.' };
     }
     if (!provider.canActivate) {
       return { complete: false, message: 'Embeddings service has unresolved activation blockers.' };
@@ -129,16 +170,16 @@ function optionalServiceStatus(
   }
 
   if (serviceKey === 'ImageGeneration') {
-    const section = findSectionSummary(snapshot.sectionSummaries, IMAGES_SECTION);
+    const section = findSectionSummary(snapshot.sectionSummaries, FOUNDRY_IMAGES_SECTION);
     if (!section || section.readinessStatus !== 'configured') {
       return { complete: false, message: 'Image Generation connection is not configured.' };
     }
 
     const state = snapshot.serviceStates.ImageGeneration;
-    const providerId = SERVICE_PROVIDER_IDS.ImageGeneration;
+    const providerId = FOUNDRY_SERVICE_PROVIDER_IDS.ImageGeneration;
     const provider = getProviderState(state, providerId);
     if (!state || !provider || state.activeProviderId !== providerId) {
-      return { complete: false, message: 'Image Generation service is not set to Microsot Foundry.' };
+      return { complete: false, message: 'Image Generation service is not set to Microsoft Foundry.' };
     }
     if (!provider.canActivate) {
       return { complete: false, message: 'Image Generation service has unresolved activation blockers.' };
@@ -147,16 +188,16 @@ function optionalServiceStatus(
   }
 
   if (serviceKey === 'SpeechTranscription') {
-    const section = findSectionSummary(snapshot.sectionSummaries, SPEECH_SECTION);
+    const section = findSectionSummary(snapshot.sectionSummaries, FOUNDRY_SPEECH_SECTION);
     if (!section || section.readinessStatus !== 'configured') {
       return { complete: false, message: 'Speech connection is not configured for transcription.' };
     }
 
     const state = snapshot.serviceStates.SpeechTranscription;
-    const providerId = SERVICE_PROVIDER_IDS.SpeechTranscription;
+    const providerId = FOUNDRY_SERVICE_PROVIDER_IDS.SpeechTranscription;
     const provider = getProviderState(state, providerId);
     if (!state || !provider || state.activeProviderId !== providerId) {
-      return { complete: false, message: 'Speech Transcription service is not set to Microsot Foundry.' };
+      return { complete: false, message: 'Speech Transcription service is not set to Microsoft Foundry.' };
     }
     if (!provider.canActivate) {
       return { complete: false, message: 'Speech Transcription service has unresolved activation blockers.' };
@@ -165,16 +206,16 @@ function optionalServiceStatus(
   }
 
   if (serviceKey === 'SpeechSynthesis') {
-    const section = findSectionSummary(snapshot.sectionSummaries, SPEECH_SECTION);
+    const section = findSectionSummary(snapshot.sectionSummaries, FOUNDRY_SPEECH_SECTION);
     if (!section || section.readinessStatus !== 'configured') {
       return { complete: false, message: 'Speech connection is not configured for synthesis.' };
     }
 
     const state = snapshot.serviceStates.SpeechSynthesis;
-    const providerId = SERVICE_PROVIDER_IDS.SpeechSynthesis;
+    const providerId = FOUNDRY_SERVICE_PROVIDER_IDS.SpeechSynthesis;
     const provider = getProviderState(state, providerId);
     if (!state || !provider || state.activeProviderId !== providerId) {
-      return { complete: false, message: 'Speech Synthesis service is not set to Microsot Foundry.' };
+      return { complete: false, message: 'Speech Synthesis service is not set to Microsoft Foundry.' };
     }
     if (!provider.canActivate) {
       return { complete: false, message: 'Speech Synthesis service has unresolved activation blockers.' };
@@ -182,16 +223,16 @@ function optionalServiceStatus(
     return { complete: true, message: 'Speech Synthesis is ready.' };
   }
 
-  const section = findSectionSummary(snapshot.sectionSummaries, DOCUMENT_INTELLIGENCE_SECTION);
+  const section = findSectionSummary(snapshot.sectionSummaries, FOUNDRY_DOCUMENT_INTELLIGENCE_SECTION);
   if (!section || section.readinessStatus !== 'configured') {
     return { complete: false, message: 'Document Intelligence connection is not configured.' };
   }
 
   const state = snapshot.serviceStates.DocumentIntelligence;
-  const providerId = SERVICE_PROVIDER_IDS.DocumentIntelligence;
+  const providerId = FOUNDRY_SERVICE_PROVIDER_IDS.DocumentIntelligence;
   const provider = getProviderState(state, providerId);
   if (!state || !provider || state.activeProviderId !== providerId) {
-    return { complete: false, message: 'Document Intelligence service is not set to Microsot Foundry.' };
+    return { complete: false, message: 'Document Intelligence service is not set to Microsoft Foundry.' };
   }
   if (!provider.canActivate) {
     return { complete: false, message: 'Document Intelligence service has unresolved activation blockers.' };
@@ -199,7 +240,76 @@ function optionalServiceStatus(
   return { complete: true, message: 'Document Intelligence is ready.' };
 }
 
-export function summarizeOptionalServiceWarnings(snapshot: WizardLoadSnapshot): string[] {
+function geminiOptionalServiceStatus(
+  serviceKey: GeminiOptionalServiceKey,
+  snapshot: WizardLoadSnapshot
+): { complete: boolean; message: string } {
+  const geminiConnection = findSectionSummary(snapshot.sectionSummaries, GEMINI_CORE_SECTION);
+  if (!geminiConnection || geminiConnection.readinessStatus !== 'configured') {
+    if (serviceKey === 'Embeddings') {
+      return { complete: false, message: 'Google Gemini API connection is not configured for Embeddings.' };
+    }
+    if (serviceKey === 'ImageGeneration') {
+      return { complete: false, message: 'Google Gemini API connection is not configured for Image Generation.' };
+    }
+    if (serviceKey === 'SpeechTranscription') {
+      return { complete: false, message: 'Google Gemini API connection is not configured for Speech Transcription.' };
+    }
+    return { complete: false, message: 'Google Gemini API connection is not configured for Speech Synthesis.' };
+  }
+
+  if (serviceKey === 'Embeddings') {
+    const state = snapshot.serviceStates.Embeddings;
+    const providerId = GEMINI_SERVICE_PROVIDER_IDS.Embeddings;
+    const provider = getProviderState(state, providerId);
+    if (!state || !provider || state.activeProviderId !== providerId) {
+      return { complete: false, message: 'Embeddings service is not set to Google Gemini.' };
+    }
+    if (!provider.canActivate) {
+      return { complete: false, message: 'Embeddings service has unresolved activation blockers.' };
+    }
+    return { complete: true, message: 'Embeddings is ready.' };
+  }
+
+  if (serviceKey === 'ImageGeneration') {
+    const state = snapshot.serviceStates.ImageGeneration;
+    const providerId = GEMINI_SERVICE_PROVIDER_IDS.ImageGeneration;
+    const provider = getProviderState(state, providerId);
+    if (!state || !provider || state.activeProviderId !== providerId) {
+      return { complete: false, message: 'Image Generation service is not set to Google Gemini.' };
+    }
+    if (!provider.canActivate) {
+      return { complete: false, message: 'Image Generation service has unresolved activation blockers.' };
+    }
+    return { complete: true, message: 'Image Generation is ready.' };
+  }
+
+  if (serviceKey === 'SpeechTranscription') {
+    const state = snapshot.serviceStates.SpeechTranscription;
+    const providerId = GEMINI_SERVICE_PROVIDER_IDS.SpeechTranscription;
+    const provider = getProviderState(state, providerId);
+    if (!state || !provider || state.activeProviderId !== providerId) {
+      return { complete: false, message: 'Speech Transcription service is not set to Google Gemini.' };
+    }
+    if (!provider.canActivate) {
+      return { complete: false, message: 'Speech Transcription service has unresolved activation blockers.' };
+    }
+    return { complete: true, message: 'Speech Transcription is ready.' };
+  }
+
+  const state = snapshot.serviceStates.SpeechSynthesis;
+  const providerId = GEMINI_SERVICE_PROVIDER_IDS.SpeechSynthesis;
+  const provider = getProviderState(state, providerId);
+  if (!state || !provider || state.activeProviderId !== providerId) {
+    return { complete: false, message: 'Speech Synthesis service is not set to Google Gemini.' };
+  }
+  if (!provider.canActivate) {
+    return { complete: false, message: 'Speech Synthesis service has unresolved activation blockers.' };
+  }
+  return { complete: true, message: 'Speech Synthesis is ready.' };
+}
+
+export function summarizeFoundryOptionalServiceWarnings(snapshot: WizardLoadSnapshot): string[] {
   const keys: OptionalServiceKey[] = [
     'Embeddings',
     'ImageGeneration',
@@ -215,4 +325,25 @@ export function summarizeOptionalServiceWarnings(snapshot: WizardLoadSnapshot): 
     }
   }
   return warnings;
+}
+
+export function summarizeGeminiOptionalServiceWarnings(snapshot: WizardLoadSnapshot): string[] {
+  const keys: GeminiOptionalServiceKey[] = [
+    'Embeddings',
+    'ImageGeneration',
+    'SpeechTranscription',
+    'SpeechSynthesis',
+  ];
+  const warnings: string[] = [];
+  for (const key of keys) {
+    const result = geminiOptionalServiceStatus(key, snapshot);
+    if (!result.complete) {
+      warnings.push(result.message);
+    }
+  }
+  return warnings;
+}
+
+export function summarizeOptionalServiceWarnings(snapshot: WizardLoadSnapshot): string[] {
+  return summarizeFoundryOptionalServiceWarnings(snapshot);
 }
