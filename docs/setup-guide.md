@@ -39,11 +39,17 @@ Auto-open is skipped when:
 Wizard facts (as built):
 
 - Entry points: auto-open on Home and manual `Setup Wizard` button on Home.
-- Providers currently supported: `Microsoft Foundry` and `Google Gemini`.
-- Steps: `Provider`, `Connection details`, `Models`, `Optional services`, `Finish`.
+- Providers currently supported: `Microsoft Foundry`, `Google Gemini`, `OpenAI`, and `Local AI`.
+- Steps: `Provider`, `Connection details` (cloud) / `Prerequisites` (Local AI), `Models`, `Optional services`, `Finish`.
 - Footer actions are always visible: `Not now`, `Configure manually`, `Back`, `Next`, `Finish`.
 - `Finish` from a non-final step validates/saves current step and jumps to `Finish` step.
 - Wizard only closes when `Finish` is clicked on the final step.
+
+**Local AI path specifics**:
+
+- The `Prerequisites` step captures your HuggingFace token and shows the live readiness status of `LlamaCpp:BaseUrl` and all `LocalServiceHosts:*` keys. These keys are set in the container environment, not in the wizard.
+- The `Models` step provides a full HuggingFace repository browser and GGUF file picker to queue and install llama-cpp models asynchronously. Progress is shown per model and persists through to the `Finish` step.
+- The `Optional services` step provides toggle-based configuration for Embeddings, Image Generation, Speech Transcription, Speech Synthesis, and Document Intelligence via their local provider paths.
 
 Details: [add-ai-services-wizard.md](add-ai-services-wizard.md)
 

@@ -48,6 +48,14 @@ model onboarding, alias inventory, load/unload orchestration, and fail-fast beha
 `Settings -> Infrastructure` provides runtime dependency visibility/probes,
 including `LlamaCpp:BaseUrl` and local service host keys.
 
+**Add AI Services Wizard** (`Local AI` provider path) provides a guided first-launch onboarding path for llama-cpp models:
+
+- Prerequisites step: captures `HuggingFace:Token` and shows live readiness for `LlamaCpp:BaseUrl` and `LocalServiceHosts:*` keys.
+- Models step: reuses `RepositoryFilePicker` + `llamaCppClassifier` for HF repo browsing, GGUF selection, runtime profile assignment, and alias registration. Downloads are initiated via `POST /api/settings/models:add` and polled via `GET /api/settings/llama/downloads/{operationId}`.
+- Optional services step: toggle-based configuration for all five local non-chat services.
+
+The wizard path is complementary to full Settings ownership; operators can use either surface.
+
 ## 6. Runtime and error guarantees
 
 1. No silent fallback on unavailable aliases or provider/runtime mismatch.

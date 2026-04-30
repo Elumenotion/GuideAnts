@@ -162,7 +162,11 @@ export function ChatToolbarPanel({
   return (
     <div className="space-y-2">
       {showWorkspaceCopy ? <div className="text-xs text-slate-500">{WORKSPACE_CONTROLS_COPY}</div> : null}
-      <div className={`text-sm ${statusToneClass(chat.status)}`}>{chat.summary}</div>
+      <div className={`text-sm font-medium ${statusToneClass(chat.status)}`}>
+        {chat.effectiveModelDisplayName
+          ? `${chat.effectiveModelDisplayName} — ${chat.status}`
+          : chat.summary}
+      </div>
       {chatDefaultsError ? <div className="text-xs text-amber-700">{chatDefaultsError}</div> : null}
 
       <label className="flex cursor-pointer items-start gap-2">
@@ -187,22 +191,27 @@ export function ChatToolbarPanel({
       <div className="max-h-44 overflow-auto space-y-1">
         {chat.modelOptions
           .filter((option) => option.isActive)
-          .map((option) => (
-            <button
-              key={option.modelId}
-              type="button"
-              className={`${textButtonClassName('neutral')} w-full justify-start text-left ${overrideAllChatModels ? '' : 'cursor-default'}`}
-              role="option"
-              aria-selected={option.modelId === currentModelId}
-              disabled={!overrideAllChatModels}
-              onClick={() => {
-                void setGlobalModel(option.modelId);
-              }}
-            >
-              {option.displayName} <span className="text-slate-500">({option.provider})</span>
-              {option.modelId === currentModelId ? ' (current)' : ''}
-            </button>
-          ))}
+          .map((option) => {
+            const isCurrent = option.modelId === currentModelId;
+            return (
+              <button
+                key={option.modelId}
+                type="button"
+                className={`${textButtonClassName('neutral')} w-full justify-start text-left ${
+                  overrideAllChatModels ? '' : 'cursor-default'
+                } ${isCurrent ? 'ring-2 ring-emerald-400/60 bg-emerald-50 font-medium' : ''}`}
+                role="option"
+                aria-selected={isCurrent}
+                disabled={!overrideAllChatModels}
+                onClick={() => {
+                  void setGlobalModel(option.modelId);
+                }}
+              >
+                {option.displayName} <span className="text-slate-500">({option.provider})</span>
+                {isCurrent ? ' ✓' : ''}
+              </button>
+            );
+          })}
       </div>
 
       {chat.supportsLocalRuntimePower && (

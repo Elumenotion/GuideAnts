@@ -110,10 +110,29 @@ Primary Settings endpoints live in `SettingsEndpoints.cs`:
 
 ### Extend Add AI Services Wizard behavior
 
-1. Update wizard constants/types under `components/home/addAiServicesWizard`.
-2. Keep first-launch predicate aligned with `CONNECTION_SECTION_NAME_SET` and model count logic.
-3. Reuse existing Settings APIs; avoid parallel config systems.
-4. Add/refresh wizard tests for step persistence and first-launch behavior.
+The wizard currently supports four provider paths: `foundry`, `google-gemini`, `openai`, and `local-ai`.
+
+**Cloud provider path (foundry / google-gemini / openai pattern)**:
+
+1. Add types to `addAiServicesWizard/types.ts` and constants to `constants.ts`.
+2. Add a connection step, models step, and optional-services step component.
+3. Add provider-specific branches in `AddAiServicesWizard.tsx` for each wizard step.
+4. Keep first-launch predicate aligned with `CONNECTION_SECTION_NAME_SET` and model count logic.
+5. Reuse existing Settings APIs; avoid parallel config systems.
+
+**Local/async provider path (local-ai pattern)**:
+
+The local AI path uses a dedicated hook (`useLocalAiWizardState`) to isolate async state (download polling, inventory, runtime profiles) from the main wizard component. Follow this pattern for any provider that involves long-running async operations or multiple infrastructure dependencies.
+
+1. Extract provider state into a `use{Provider}WizardState` hook.
+2. Add a prerequisites step (instead of a generic connection step) to surface infrastructure readiness.
+3. Use polling to track async operations and surface progress within the wizard.
+4. Persist via existing Settings APIs only; never introduce parallel configuration systems.
+
+General rules:
+
+- Add/refresh wizard tests for step persistence and first-launch behavior.
+- Keep step/provider constants in `constants.ts` authoritative.
 
 Wizard deep dive: [add-ai-services-wizard.md](add-ai-services-wizard.md)
 

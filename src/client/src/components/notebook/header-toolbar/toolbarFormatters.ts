@@ -101,6 +101,10 @@ export function serviceSummaryLine(service: NotebookToolbarServiceDto): string {
   const active = service.providerOptions.find(p => p.providerId === service.activeProviderId);
   if (!active) return service.summary;
   const label = toolbarProviderOptionLabel(active);
+  if (label === 'Local' && service.localModelOptions.length > 0) {
+    const activeModel = service.localModelOptions.find(m => m.isActive);
+    if (activeModel) return `${activeModel.displayLabel} — ${service.status}`;
+  }
   return `${label} — ${service.status}`;
 }
 

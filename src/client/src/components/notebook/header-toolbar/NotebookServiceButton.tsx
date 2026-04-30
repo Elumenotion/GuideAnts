@@ -10,6 +10,7 @@ import {
 interface NotebookServiceButtonProps {
   serviceId: ToolbarServiceColorKey;
   label: string;
+  tooltip?: string;
   icon: ReactElement;
   status: string;
   expanded: boolean;
@@ -19,6 +20,7 @@ interface NotebookServiceButtonProps {
 export function NotebookServiceButton({
   serviceId,
   label,
+  tooltip,
   icon,
   status,
   expanded,
@@ -32,7 +34,7 @@ export function NotebookServiceButton({
       aria-haspopup="dialog"
       aria-label={label}
       onClick={onClick}
-      title={label}
+      title={tooltip ?? label}
     >
       <span
         className={`absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full border ${toolbarServiceStatusDotBorderClass(

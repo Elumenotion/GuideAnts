@@ -77,47 +77,55 @@ export function TtsToolbarPanel({
   return (
     <div className="space-y-2">
       {showWorkspaceCopy ? <div className="text-xs text-slate-500">{WORKSPACE_CONTROLS_COPY}</div> : null}
-      <div className={`text-sm ${statusToneClass(service.status)}`}>{serviceSummaryLine(service)}</div>
+      <div className={`text-sm font-medium ${statusToneClass(service.status)}`}>{serviceSummaryLine(service)}</div>
       {service.blockers.length > 0 && (
         <div className="text-xs text-red-700">{service.blockers[0]}</div>
       )}
 
       <div className="space-y-1">
-        {cloudModelOptions.map((provider) => (
-          <button
-            key={provider.providerId}
-            type="button"
-            className={`${textButtonClassName('neutral')} w-full justify-start text-left ${provider.canActivate ? '' : 'opacity-60'}`}
-            disabled={!provider.canActivate}
-            onClick={() => void setProvider(provider.providerId)}
-            title={provider.canActivate ? undefined : provider.blockers[0] ?? 'Provider is blocked.'}
-            role="option"
-            aria-selected={provider.providerId === service.activeProviderId}
-          >
-            {toolbarProviderOptionLabel(provider)}
-            {provider.providerId === service.activeProviderId ? ' (current)' : ''}
-            {!provider.canActivate ? ` — ${provider.blockers[0] ?? 'blocked'}` : ''}
-          </button>
-        ))}
+        {cloudModelOptions.map((provider) => {
+          const isCurrentProvider = provider.providerId === service.activeProviderId;
+          return (
+            <button
+              key={provider.providerId}
+              type="button"
+              className={`${textButtonClassName('neutral')} w-full justify-start text-left ${
+                provider.canActivate ? '' : 'opacity-60'
+              } ${isCurrentProvider ? 'ring-2 ring-emerald-400/60 bg-emerald-50 font-medium' : ''}`}
+              disabled={!provider.canActivate}
+              onClick={() => void setProvider(provider.providerId)}
+              title={provider.canActivate ? undefined : provider.blockers[0] ?? 'Provider is blocked.'}
+              role="option"
+              aria-selected={isCurrentProvider}
+            >
+              {toolbarProviderOptionLabel(provider)}
+              {isCurrentProvider ? ' ✓' : ''}
+              {!provider.canActivate ? ` — ${provider.blockers[0] ?? 'blocked'}` : ''}
+            </button>
+          );
+        })}
       </div>
 
       <div className="space-y-1 max-h-32 overflow-auto">
-        {service.localModelOptions.map((model) => (
-          <button
-            key={`${model.modelRef}:${model.displayLabel}`}
-            type="button"
-            className={`${textButtonClassName('neutral')} w-full justify-start text-left ${
-              model.isComplete ? '' : 'opacity-50'
-            }`}
-            disabled={!model.isComplete}
-            onClick={() => void setModel(model.modelRef)}
-            role="option"
-            aria-selected={activeProviderIsLocal && model.isActive}
-          >
-            {model.displayLabel}
-            {activeProviderIsLocal && model.isActive && !model.displayLabel.includes('(active)') ? ' (current)' : ''}
-          </button>
-        ))}
+        {service.localModelOptions.map((model) => {
+          const isCurrent = activeProviderIsLocal && model.isActive;
+          return (
+            <button
+              key={`${model.modelRef}:${model.displayLabel}`}
+              type="button"
+              className={`${textButtonClassName('neutral')} w-full justify-start text-left ${
+                model.isComplete ? '' : 'opacity-50'
+              } ${isCurrent ? 'ring-2 ring-emerald-400/60 bg-emerald-50 font-medium' : ''}`}
+              disabled={!model.isComplete}
+              onClick={() => void setModel(model.modelRef)}
+              role="option"
+              aria-selected={isCurrent}
+            >
+              {model.displayLabel}
+              {isCurrent && !model.displayLabel.includes('(active)') ? ' ✓' : ''}
+            </button>
+          );
+        })}
       </div>
 
       {service.supportsLocalRuntimePower && (

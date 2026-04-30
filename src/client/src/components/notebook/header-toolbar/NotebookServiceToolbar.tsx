@@ -13,6 +13,7 @@ import { AsrToolbarPanel } from './AsrToolbarPanel';
 import type { NotebookServiceToolbarProps, ToolbarPanelId } from './types';
 import { api } from '../../../services/api';
 import {
+  serviceSummaryLine,
   statusDotClass,
   toolbarRefreshButtonClass,
   toolbarServiceButtonClass,
@@ -152,26 +153,42 @@ export function NotebookServiceToolbar({
   }
   if (!data) return null;
 
+  const serviceForKind = (kind: string) => data.services.find((s) => s.kind === kind);
+  const serviceTooltip = (label: string, kind: string) => {
+    const svc = serviceForKind(kind);
+    if (!svc) return label;
+    const detail = serviceSummaryLine(svc);
+    return `${label}: ${detail}`;
+  };
+
+  const chatTooltip = data.chat.effectiveModelDisplayName
+    ? `Chat: ${data.chat.effectiveModelDisplayName} — ${data.chat.status}`
+    : `Chat — ${data.chat.status}`;
+
   const order: Array<{
     id: ToolbarServiceColorKey;
     label: string;
+    tooltip: string;
     status: string;
   }> = [
-    { id: 'chat', label: 'Chat', status: data.chat.status },
+    { id: 'chat', label: 'Chat', tooltip: chatTooltip, status: data.chat.status },
     {
       id: 'image',
       label: 'Image generation',
-      status: data.services.find((service) => service.kind === 'image')?.status ?? 'blocked',
+      tooltip: serviceTooltip('Image generation', 'image'),
+      status: serviceForKind('image')?.status ?? 'blocked',
     },
     {
       id: 'tts',
       label: 'Speech synthesis (TTS)',
-      status: data.services.find((service) => service.kind === 'tts')?.status ?? 'blocked',
+      tooltip: serviceTooltip('TTS', 'tts'),
+      status: serviceForKind('tts')?.status ?? 'blocked',
     },
     {
       id: 'asr',
       label: 'Speech transcription (ASR)',
-      status: data.services.find((service) => service.kind === 'asr')?.status ?? 'blocked',
+      tooltip: serviceTooltip('ASR', 'asr'),
+      status: serviceForKind('asr')?.status ?? 'blocked',
     },
   ];
 
@@ -194,7 +211,7 @@ export function NotebookServiceToolbar({
                 type="button"
                 className={toolbarServiceButtonClass(entry.id, { expanded: false, minSize: 'sm' })}
                 aria-label={entry.label}
-                title={entry.label}
+                title={entry.tooltip}
                 onClick={() => {
                   setOpenPanel(null);
                   openMobileSheet(entry.id);
@@ -275,6 +292,7 @@ export function NotebookServiceToolbar({
           <NotebookServiceButton
             serviceId={entry.id}
             label={entry.label}
+            tooltip={entry.tooltip}
             icon={toolbarServiceIcons[entry.id]}
             status={entry.status}
             expanded={openPanel === entry.id}
