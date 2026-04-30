@@ -8,6 +8,7 @@ import {
   GEMINI_CORE_SECTION,
   GEMINI_MODEL_PROVIDER_ID,
   GEMINI_SERVICE_PROVIDER_IDS,
+  LOCAL_AI_SERVICE_PROVIDER_IDS,
   MODEL_PROVIDER_ID_TO_LABEL,
   MODEL_PROVIDER_LABEL_TO_ID,
   OPENAI_CORE_SECTION,
@@ -23,6 +24,8 @@ import type {
   FoundryModelProviderLabel,
   GeminiModelDraft,
   GeminiOptionalServiceKey,
+  LocalAiModelDraft,
+  LocalAiOptionalServiceKey,
   OpenAiModelDraft,
   OpenAiModelProviderLabel,
   OpenAiOptionalServiceKey,
@@ -484,4 +487,150 @@ export function summarizeOpenAiOptionalServiceWarnings(snapshot: WizardLoadSnaps
 
 export function summarizeOptionalServiceWarnings(snapshot: WizardLoadSnapshot): string[] {
   return summarizeFoundryOptionalServiceWarnings(snapshot);
+}
+
+export function toExistingLocalModels(models: SettingsModelDto[]): SettingsModelDto[] {
+  return models
+    .filter((model) => model.provider === 'llama-cpp')
+    .sort((left, right) => left.modelId.localeCompare(right.modelId));
+}
+
+export function makeLocalAiModelDraft(localId: string, setAsGlobalDefault: boolean): LocalAiModelDraft {
+  return {
+    localId,
+    installSource: 'huggingface',
+    routerModelId: '',
+    runtimeProfileId: '',
+    huggingFaceRepository: '',
+    huggingFaceQuantIncludePattern: '',
+    huggingFaceMmprojIncludePattern: '',
+    huggingFaceTargetDirectory: '',
+    existingAliasRouterModelId: '',
+    routerContextSize: '',
+    routerCacheRamMib: '',
+    catalogModelId: '',
+    catalogDisplayName: '',
+    setAsGlobalDefault,
+    persisted: false,
+    asyncOperationId: null,
+    asyncStatus: 'pending',
+    asyncProgress: null,
+    asyncError: null,
+  };
+}
+
+export function buildLocalAiModelRequest(draft: LocalAiModelDraft): AddModelRequest {
+  const runtimeProfileId = draft.runtimeProfileId.trim();
+  if (!runtimeProfileId) {
+    throw new Error('Runtime profile is required for local AI model installation.');
+  }
+  const catalogModelId = draft.catalogModelId.trim();
+  if (!catalogModelId) {
+    throw new Error('Model ID is required.');
+  }
+  const routerKnobs: Record<string, number> = {};
+  const ctxSize = parseInt(draft.routerContextSize.trim(), 10);
+  if (!isNaN(ctxSize) && ctxSize > 0) {
+    routerKnobs.routerContextSize = ctxSize;
+  }
+  const cacheRam = parseInt(draft.routerCacheRamMib.trim(), 10);
+  if (!isNaN(cacheRam) && cacheRam > 0) {
+    routerKnobs.routerCacheRamMib = cacheRam;
+  }
+
+  if (draft.installSource === 'existingAlias') {
+    const alias = draft.existingAliasRouterModelId.trim();
+    if (!alias) {
+      throw new Error('Existing alias is required.');
+    }
+    return {
+      provider: 'llama-cpp',
+      catalog: {
+        modelId: catalogModelId,
+        displayName: (draft.catalogDisplayName.trim() || catalogModelId),
+        isActive: true,
+      },
+      install: {
+        source: 'existingAlias',
+        routerModelId: alias,
+        runtimeProfileId,
+        existingAlias: { routerModelId: alias },
+        ...routerKnobs,
+      },
+    };
+  }
+
+  const routerModelId = draft.routerModelId.trim();
+  if (!routerModelId) {
+    throw new Error('Router alias is required for Hugging Face install.');
+  }
+  const repository = draft.huggingFaceRepository.trim();
+  const quantPattern = draft.huggingFaceQuantIncludePattern.trim();
+  const mmprojPattern = draft.huggingFaceMmprojIncludePattern.trim();
+  const targetDirectory = draft.huggingFaceTargetDirectory.trim();
+  if (!repository || !quantPattern) {
+    throw new Error('Repository and model file selection are required.');
+  }
+  return {
+    provider: 'llama-cpp',
+    catalog: {
+      modelId: catalogModelId,
+      displayName: (draft.catalogDisplayName.trim() || catalogModelId),
+      isActive: true,
+    },
+    install: {
+      source: 'huggingface',
+      routerModelId,
+      runtimeProfileId,
+      huggingFace: {
+        repository,
+        quantIncludePattern: quantPattern,
+        mmprojIncludePattern: mmprojPattern || quantPattern,
+        targetDirectory: targetDirectory || routerModelId,
+      },
+      ...routerKnobs,
+    },
+  };
+}
+
+function localAiOptionalServiceStatus(
+  serviceKey: LocalAiOptionalServiceKey,
+  snapshot: WizardLoadSnapshot
+): { complete: boolean; message: string } {
+  const labels: Record<LocalAiOptionalServiceKey, string> = {
+    Embeddings: 'Embeddings',
+    ImageGeneration: 'Image Generation',
+    SpeechTranscription: 'Speech Transcription',
+    SpeechSynthesis: 'Speech Synthesis',
+    DocumentIntelligence: 'Document Intelligence',
+  };
+  const label = labels[serviceKey];
+  const providerId = LOCAL_AI_SERVICE_PROVIDER_IDS[serviceKey];
+  const state = snapshot.serviceStates[serviceKey];
+  const provider = getProviderState(state, providerId);
+  if (!state || !provider || state.activeProviderId !== providerId) {
+    return { complete: false, message: `${label} service is not set to Local AI.` };
+  }
+  if (!provider.canActivate) {
+    return { complete: false, message: `${label} service has unresolved activation blockers (check Infrastructure tab for required local service URLs).` };
+  }
+  return { complete: true, message: `${label} is ready.` };
+}
+
+export function summarizeLocalAiOptionalServiceWarnings(snapshot: WizardLoadSnapshot): string[] {
+  const keys: LocalAiOptionalServiceKey[] = [
+    'Embeddings',
+    'ImageGeneration',
+    'SpeechTranscription',
+    'SpeechSynthesis',
+    'DocumentIntelligence',
+  ];
+  const warnings: string[] = [];
+  for (const key of keys) {
+    const result = localAiOptionalServiceStatus(key, snapshot);
+    if (!result.complete) {
+      warnings.push(result.message);
+    }
+  }
+  return warnings;
 }

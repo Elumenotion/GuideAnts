@@ -1,4 +1,4 @@
-import type { AddAiServicesWizardProvider, FoundryModelProviderLabel, OpenAiModelProviderLabel, OptionalServiceKey } from './types';
+import type { AddAiServicesWizardProvider, FoundryModelProviderLabel, LocalAiOptionalServiceKey, OpenAiModelProviderLabel, OptionalServiceKey } from './types';
 
 export const WIZARD_STEPS: readonly { id: string; label: string }[] = [
   { id: 'provider', label: 'Provider' },
@@ -28,11 +28,18 @@ export const WIZARD_PROVIDER_OPTIONS: readonly {
     label: 'OpenAI',
     description: 'Configure OpenAI API key, chat models, and optional services (STT, TTS, images, embeddings).',
   },
+  {
+    id: 'local-ai',
+    label: 'Local AI',
+    description: 'Install local llama chat models and configure local non-chat services (embeddings, images, STT, TTS, document intelligence).',
+  },
 ] as const;
 
 export const FOUNDRY_CORE_SECTION = 'AzureOpenAI';
 export const GEMINI_CORE_SECTION = 'GoogleGeminiApi';
 export const OPENAI_CORE_SECTION = 'OpenAI';
+export const HUGGINGFACE_SECTION = 'HuggingFace';
+export const LLAMA_CPP_SECTION = 'LlamaCpp';
 
 export const FOUNDRY_EMBEDDINGS_SECTION = 'AzureOpenAiEmbedding';
 export const FOUNDRY_IMAGES_SECTION = 'AzureOpenAiImages';
@@ -105,6 +112,36 @@ export const GEMINI_OPTIONAL_SERVICE_DEFAULTS = {
   speechSynthesisVoiceName: 'Kore',
   speechSynthesisTimeoutSeconds: '300',
 } as const;
+
+export const LOCAL_AI_SERVICE_PROVIDER_IDS: Readonly<Record<LocalAiOptionalServiceKey, string>> = {
+  Embeddings: 'Embeddings.LocalEmb.Http',
+  ImageGeneration: 'ImageGeneration.LocalSd.Http',
+  SpeechTranscription: 'SpeechTranscription.LocalAsr.Http',
+  SpeechSynthesis: 'SpeechSynthesis.LocalTts.Http',
+  DocumentIntelligence: 'DocumentIntelligence.LocalDocling.Http',
+} as const;
+
+export const LOCAL_AI_OPTIONAL_SERVICE_DEFAULTS = {
+  embeddingsTimeoutSeconds: '300',
+  embeddingsLocalMinIntervalMs: '100',
+  imagesTimeoutSeconds: '600',
+  imagesLocalOutputFormat: '',
+  speechTranscriptionTimeoutSeconds: '300',
+  speechSynthesisTimeoutSeconds: '300',
+  documentIntelligenceTimeoutSeconds: '600',
+  documentIntelligenceMaxConcurrentConversions: '2',
+  documentIntelligenceAsyncStatusPollIntervalMs: '2000',
+} as const;
+
+export const LOCAL_AI_INFRASTRUCTURE_KEYS = [
+  'LlamaCpp:BaseUrl',
+  'LocalServiceHosts:EmbeddingsBaseUrl',
+  'LocalServiceHosts:ImageGenerationBaseUrl',
+  'LocalServiceHosts:SpeechTranscriptionBaseUrl',
+  'LocalServiceHosts:SpeechSynthesisBaseUrl',
+  'LocalServiceHosts:MediaBaseUrl',
+  'LocalServiceHosts:DocumentIntelligenceBaseUrl',
+] as const;
 
 export const OPENAI_OPTIONAL_SERVICE_DEFAULTS = {
   speechTranscriptionModelId: 'whisper-1',

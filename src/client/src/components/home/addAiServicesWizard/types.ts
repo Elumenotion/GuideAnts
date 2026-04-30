@@ -7,7 +7,7 @@ export type AddAiServicesWizardStep =
   | 'optionalServices'
   | 'finish';
 
-export type AddAiServicesWizardProvider = 'foundry' | 'google-gemini' | 'openai';
+export type AddAiServicesWizardProvider = 'foundry' | 'google-gemini' | 'openai' | 'local-ai';
 
 export type FoundryModelProviderLabel = 'Completions' | 'Responses';
 
@@ -168,3 +168,62 @@ export type GeminiOptionalServiceKey =
   | 'SpeechSynthesis';
 
 export type OpenAiOptionalServiceKey = 'Embeddings' | 'ImageGeneration' | 'SpeechTranscription' | 'SpeechSynthesis';
+
+export type LocalAiOptionalServiceKey =
+  | 'Embeddings'
+  | 'ImageGeneration'
+  | 'SpeechTranscription'
+  | 'SpeechSynthesis'
+  | 'DocumentIntelligence';
+
+export interface LocalAiPrerequisitesFormState {
+  huggingFaceToken: string;
+  huggingFaceTokenHasStoredValue: boolean;
+}
+
+export type LocalAiInstallSource = 'huggingface' | 'existingAlias';
+
+export type LocalAiDraftStatus = 'pending' | 'submitted' | 'downloading' | 'completed' | 'error';
+
+export interface LocalAiModelDraft {
+  localId: string;
+  installSource: LocalAiInstallSource;
+  routerModelId: string;
+  runtimeProfileId: string;
+  huggingFaceRepository: string;
+  huggingFaceQuantIncludePattern: string;
+  huggingFaceMmprojIncludePattern: string;
+  huggingFaceTargetDirectory: string;
+  existingAliasRouterModelId: string;
+  routerContextSize: string;
+  routerCacheRamMib: string;
+  catalogModelId: string;
+  catalogDisplayName: string;
+  setAsGlobalDefault: boolean;
+  persisted: boolean;
+  asyncOperationId: string | null;
+  asyncStatus: LocalAiDraftStatus;
+  asyncProgress: number | null;
+  asyncError: string | null;
+}
+
+export interface LocalAiOptionalServicesFormState {
+  enableEmbeddings: boolean;
+  embeddingsTimeoutSeconds: string;
+  embeddingsLocalMinIntervalMs: string;
+
+  enableImages: boolean;
+  imagesTimeoutSeconds: string;
+  imagesLocalOutputFormat: string;
+
+  enableSpeechTranscription: boolean;
+  speechTranscriptionTimeoutSeconds: string;
+
+  enableSpeechSynthesis: boolean;
+  speechSynthesisTimeoutSeconds: string;
+
+  enableDocumentIntelligence: boolean;
+  documentIntelligenceTimeoutSeconds: string;
+  documentIntelligenceMaxConcurrentConversions: string;
+  documentIntelligenceAsyncStatusPollIntervalMs: string;
+}

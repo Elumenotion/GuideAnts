@@ -13,6 +13,7 @@ import {
   GEMINI_DEFAULT_CHAT_MODEL_ID,
   GEMINI_OPTIONAL_SERVICE_DEFAULTS,
   GEMINI_SERVICE_PROVIDER_IDS,
+  HUGGINGFACE_SECTION,
   OPENAI_CORE_SECTION,
   OPENAI_DEFAULT_CHAT_MODEL_ID,
   OPENAI_OPTIONAL_SERVICE_DEFAULTS,
@@ -25,6 +26,9 @@ import { FinishStep } from './addAiServicesWizard/steps/FinishStep';
 import { GeminiConnectionStep } from './addAiServicesWizard/steps/GeminiConnectionStep';
 import { GeminiModelsStep } from './addAiServicesWizard/steps/GeminiModelsStep';
 import { GeminiOptionalServicesStep } from './addAiServicesWizard/steps/GeminiOptionalServicesStep';
+import { LocalAiModelsStep } from './addAiServicesWizard/steps/LocalAiModelsStep';
+import { LocalAiOptionalServicesStep } from './addAiServicesWizard/steps/LocalAiOptionalServicesStep';
+import { LocalAiPrerequisitesStep } from './addAiServicesWizard/steps/LocalAiPrerequisitesStep';
 import { ModelsStep } from './addAiServicesWizard/steps/ModelsStep';
 import { OpenAiConnectionStep } from './addAiServicesWizard/steps/OpenAiConnectionStep';
 import { OpenAiModelsStep } from './addAiServicesWizard/steps/OpenAiModelsStep';
@@ -60,11 +64,14 @@ import {
   makeOpenAiDraftModel,
   summarizeFoundryOptionalServiceWarnings,
   summarizeGeminiOptionalServiceWarnings,
+  summarizeLocalAiOptionalServiceWarnings,
   summarizeOpenAiOptionalServiceWarnings,
   toExistingFoundryModels,
   toExistingGeminiModels,
+  toExistingLocalModels,
   toExistingOpenAiModels,
 } from './addAiServicesWizard/utils';
+import { useLocalAiWizardState } from './addAiServicesWizard/useLocalAiWizardState';
 
 interface AddAiServicesWizardProps {
   isOpen: boolean;
@@ -412,6 +419,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     embeddingsTimeoutSeconds: OPENAI_OPTIONAL_SERVICE_DEFAULTS.embeddingsTimeoutSeconds,
   });
 
+  const localAi = useLocalAiWizardState();
+
   const [foundryDraftModelId, setFoundryDraftModelId] = useState('');
   const [foundryDraftModelProvider, setFoundryDraftModelProvider] = useState<FoundryModelProviderLabel>('Completions');
   const [setFoundryDraftAsGlobalDefault, setSetFoundryDraftAsGlobalDefault] = useState(true);
@@ -449,6 +458,10 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
   );
   const existingOpenAiModels = useMemo(
     () => (snapshot ? toExistingOpenAiModels(snapshot.models) : []),
+    [snapshot]
+  );
+  const existingLocalModels = useMemo(
+    () => (snapshot ? toExistingLocalModels(snapshot.models) : []),
     [snapshot]
   );
 
@@ -513,6 +526,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
 
   const derivedFoundryCoreEndpoint = useMemo(() => deriveEndpointFromResource(foundryCoreForm.resource), [foundryCoreForm.resource]);
 
+  const localAiTotalModelCount = existingLocalModels.length + localAi.draftModels.filter((d) => d.asyncStatus === 'completed').length;
+
   const readyForBasicChat = useMemo(() => {
     if (provider === 'foundry') {
       return foundryConnectionConfigured && savedFoundryModelCount > 0;
@@ -520,8 +535,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (provider === 'google-gemini') {
       return geminiConnectionConfigured && savedGeminiModelCount > 0;
     }
+    if (provider === 'local-ai') {
+      return localAiTotalModelCount > 0;
+    }
     return openAiConnectionConfigured && savedOpenAiModelCount > 0;
-  }, [provider, foundryConnectionConfigured, geminiConnectionConfigured, openAiConnectionConfigured, savedFoundryModelCount, savedGeminiModelCount, savedOpenAiModelCount]);
+  }, [provider, foundryConnectionConfigured, geminiConnectionConfigured, openAiConnectionConfigured, savedFoundryModelCount, savedGeminiModelCount, savedOpenAiModelCount, localAiTotalModelCount]);
 
   const finishWarnings = useMemo(() => {
     if (!snapshot) {
@@ -533,10 +551,17 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (provider === 'google-gemini') {
       return summarizeGeminiOptionalServiceWarnings(snapshot);
     }
+    if (provider === 'local-ai') {
+      return summarizeLocalAiOptionalServiceWarnings(snapshot);
+    }
     return summarizeOpenAiOptionalServiceWarnings(snapshot);
   }, [provider, snapshot]);
 
-  const providerLabel = provider === 'foundry' ? 'Microsoft Foundry' : provider === 'google-gemini' ? 'Google Gemini' : 'OpenAI';
+  const providerLabel =
+    provider === 'foundry' ? 'Microsoft Foundry'
+    : provider === 'google-gemini' ? 'Google Gemini'
+    : provider === 'local-ai' ? 'Local AI'
+    : 'OpenAI';
 
   const loadServiceState = useCallback(async (serviceId: OptionalServiceKey): Promise<ServiceEditorStateDto | undefined> => {
     try {
@@ -555,6 +580,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       FOUNDRY_DOCUMENT_INTELLIGENCE_SECTION,
       GEMINI_CORE_SECTION,
       OPENAI_CORE_SECTION,
+      HUGGINGFACE_SECTION,
     ];
 
     const [sectionSummaries, schema, models, ...sections] = await Promise.all([
@@ -601,6 +627,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     setFoundryOptionalForm(buildFoundryOptionalServicesForm(nextSnapshot));
     setGeminiOptionalForm(buildGeminiOptionalServicesForm(nextSnapshot));
     setOpenAiOptionalForm(buildOpenAiOptionalServicesForm(nextSnapshot));
+    localAi.resetWithSnapshot(nextSnapshot);
 
     setFoundryDraftModels([]);
     setFoundryDraftModelId('');
@@ -676,6 +703,12 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     setModelAddError(null);
     setModelStepError(null);
   }, [provider]);
+
+  useEffect(() => {
+    if (provider === 'local-ai' && step === 'models') {
+      localAi.loadRuntimeData();
+    }
+  }, [provider, step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const closeWizard = useCallback(() => {
     onDismiss(dontAutoOpenAgain);
@@ -1606,6 +1639,9 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         await persistFoundryCoreConnection();
       } else if (provider === 'google-gemini') {
         await persistGeminiCoreConnection();
+      } else if (provider === 'local-ai') {
+        if (!snapshot) throw new Error('Wizard state is not loaded.');
+        await localAi.persistLocalAiPrereqs(snapshot, loadSnapshot, setSnapshot);
       } else {
         await persistOpenAiCoreConnection();
       }
@@ -1617,6 +1653,9 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         await persistFoundryModels();
       } else if (provider === 'google-gemini') {
         await persistGeminiModels();
+      } else if (provider === 'local-ai') {
+        if (!snapshot) throw new Error('Wizard state is not loaded.');
+        await localAi.persistLocalAiModels(snapshot, loadSnapshot, setSnapshot);
       } else {
         await persistOpenAiModels();
       }
@@ -1628,6 +1667,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         await persistFoundryOptionalServices();
       } else if (provider === 'google-gemini') {
         await persistGeminiOptionalServices();
+      } else if (provider === 'local-ai') {
+        await localAi.persistLocalAiOptionalServices(loadSnapshot, setSnapshot);
       } else {
         await persistOpenAiOptionalServices();
       }
@@ -1642,6 +1683,9 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     persistFoundryOptionalServices,
     persistGeminiOptionalServices,
     persistOpenAiOptionalServices,
+    localAi,
+    loadSnapshot,
+    snapshot,
     provider,
     step,
   ]);
@@ -1709,6 +1753,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         if (hasPendingDrafts) {
           await persistGeminiModels();
         }
+      } else if (provider === 'local-ai') {
+        const hasPendingDrafts = localAi.draftModels.some((d) => d.asyncStatus === 'pending');
+        if (hasPendingDrafts && snapshot) {
+          await localAi.persistLocalAiModels(snapshot, loadSnapshot, setSnapshot);
+        }
       } else {
         const hasPendingDrafts = openAiDraftModels.some((model) => !model.persisted);
         if (hasPendingDrafts) {
@@ -1728,10 +1777,13 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     foundryDraftModels,
     geminiDraftModels,
     openAiDraftModels,
+    localAi,
     persistCurrentStep,
     persistFoundryModels,
     persistGeminiModels,
     persistOpenAiModels,
+    loadSnapshot,
+    snapshot,
     provider,
     saving,
     step,
@@ -1747,13 +1799,14 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (step === 'models') {
       if (provider === 'foundry') return foundryTotalModelCount === 0;
       if (provider === 'google-gemini') return geminiTotalModelCount === 0;
+      if (provider === 'local-ai') return localAi.draftModels.length === 0 && existingLocalModels.length === 0;
       return openAiTotalModelCount === 0;
     }
     if (step === 'finish') {
       return true;
     }
     return false;
-  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, loading, provider, saving, step]);
+  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, loading, provider, saving, step]);
 
   const isFinishDisabled = useMemo(() => {
     if (loading || saving) {
@@ -1761,8 +1814,9 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     }
     if (provider === 'foundry') return foundryTotalModelCount === 0;
     if (provider === 'google-gemini') return geminiTotalModelCount === 0;
+    if (provider === 'local-ai') return localAi.draftModels.length === 0 && existingLocalModels.length === 0;
     return openAiTotalModelCount === 0;
-  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, loading, provider, saving]);
+  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, loading, provider, saving]);
 
   const currentStepLabel = useMemo(() => {
     const index = WIZARD_STEPS.findIndex((item) => item.id === step);
@@ -1872,6 +1926,12 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               errors={geminiCoreErrors}
               onChange={(patch) => setGeminiCoreForm((previous) => ({ ...previous, ...patch }))}
             />
+          ) : provider === 'local-ai' ? (
+            <LocalAiPrerequisitesStep
+              value={localAi.prereqsForm}
+              errors={localAi.prereqsErrors}
+              onChange={localAi.setPrereqsForm}
+            />
           ) : (
             <OpenAiConnectionStep
               apiKey={openAiCoreForm.apiKey}
@@ -1918,6 +1978,21 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
                 setGeminiDraftModels((previous) => previous.filter((model) => model.localId !== localId));
               }}
             />
+          ) : provider === 'local-ai' ? (
+            <LocalAiModelsStep
+              draftModels={localAi.draftModels}
+              existingModels={existingLocalModels}
+              profiles={localAi.profiles}
+              profilesLoading={localAi.profilesLoading}
+              inventory={localAi.inventory}
+              inventoryLoading={localAi.inventoryLoading}
+              addError={localAi.addError}
+              addModelError={localAi.addModelError}
+              onAddDraft={localAi.addDraftModel}
+              onRemoveDraft={localAi.removeDraftModel}
+              onInstallDraft={localAi.installDraftModel}
+              onCreateRuntimeProfile={(_template) => Promise.resolve()}
+            />
           ) : (
             <OpenAiModelsStep
               existingModels={existingOpenAiModels}
@@ -1953,6 +2028,12 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               errors={geminiOptionalErrors}
               onChange={(patch) => setGeminiOptionalForm((previous) => ({ ...previous, ...patch }))}
             />
+          ) : provider === 'local-ai' ? (
+            <LocalAiOptionalServicesStep
+              value={localAi.optionalForm}
+              errors={localAi.optionalErrors}
+              onChange={localAi.setOptionalForm}
+            />
           ) : (
             <OpenAiOptionalServicesStep
               value={openAiOptionalForm}
@@ -1971,7 +2052,9 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
                 ? savedFoundryModelCount
                 : provider === 'google-gemini'
                   ? savedGeminiModelCount
-                  : savedOpenAiModelCount
+                  : provider === 'local-ai'
+                    ? localAiTotalModelCount
+                    : savedOpenAiModelCount
             }
             warningItems={finishWarnings}
           />
