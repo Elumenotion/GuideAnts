@@ -1,4 +1,4 @@
-import type { AddAiServicesWizardProvider, FoundryModelProviderLabel, OptionalServiceKey } from './types';
+import type { AddAiServicesWizardProvider, FoundryModelProviderLabel, OpenAiModelProviderLabel, OptionalServiceKey } from './types';
 
 export const WIZARD_STEPS: readonly { id: string; label: string }[] = [
   { id: 'provider', label: 'Provider' },
@@ -23,10 +23,16 @@ export const WIZARD_PROVIDER_OPTIONS: readonly {
     label: 'Google Gemini',
     description: 'Configure Gemini API key, Gemini chat models, and Gemini service modes.',
   },
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    description: 'Configure OpenAI API key, chat models, and optional services (STT, TTS, images, embeddings).',
+  },
 ] as const;
 
 export const FOUNDRY_CORE_SECTION = 'AzureOpenAI';
 export const GEMINI_CORE_SECTION = 'GoogleGeminiApi';
+export const OPENAI_CORE_SECTION = 'OpenAI';
 
 export const FOUNDRY_EMBEDDINGS_SECTION = 'AzureOpenAiEmbedding';
 export const FOUNDRY_IMAGES_SECTION = 'AzureOpenAiImages';
@@ -51,6 +57,16 @@ export const GEMINI_SERVICE_PROVIDER_IDS: Readonly<Record<
   SpeechSynthesis: 'SpeechSynthesis.Google.TextToSpeech',
 } as const;
 
+export const OPENAI_SERVICE_PROVIDER_IDS: Readonly<Record<
+  'Embeddings' | 'ImageGeneration' | 'SpeechTranscription' | 'SpeechSynthesis',
+  string
+>> = {
+  Embeddings: 'Embeddings.OpenAI.Embedding',
+  ImageGeneration: 'ImageGeneration.OpenAI.Images',
+  SpeechTranscription: 'SpeechTranscription.OpenAI.Audio',
+  SpeechSynthesis: 'SpeechSynthesis.OpenAI.Tts',
+} as const;
+
 export const MODEL_PROVIDER_LABEL_TO_ID: Readonly<Record<FoundryModelProviderLabel, string>> = {
   Completions: 'azure-openai-chat',
   Responses: 'azure-openai-responses',
@@ -64,6 +80,20 @@ export const MODEL_PROVIDER_ID_TO_LABEL: Readonly<Record<string, FoundryModelPro
 export const GEMINI_MODEL_PROVIDER_ID = 'google-gemini-chat';
 export const GEMINI_DEFAULT_CHAT_MODEL_ID = 'gemini-2.5-flash';
 
+export const OPENAI_CHAT_MODEL_PROVIDER_ID = 'openai-chat';
+export const OPENAI_RESPONSES_MODEL_PROVIDER_ID = 'openai-responses';
+export const OPENAI_DEFAULT_CHAT_MODEL_ID = 'gpt-4.1-nano';
+
+export const OPENAI_MODEL_PROVIDER_LABEL_TO_ID: Readonly<Record<OpenAiModelProviderLabel, string>> = {
+  Completions: 'openai-chat',
+  Responses: 'openai-responses',
+} as const;
+
+export const OPENAI_MODEL_PROVIDER_ID_TO_LABEL: Readonly<Record<string, OpenAiModelProviderLabel>> = {
+  'openai-chat': 'Completions',
+  'openai-responses': 'Responses',
+} as const;
+
 export const GEMINI_OPTIONAL_SERVICE_DEFAULTS = {
   embeddingsModelId: 'gemini-embedding-2',
   embeddingsTimeoutSeconds: '300',
@@ -74,6 +104,19 @@ export const GEMINI_OPTIONAL_SERVICE_DEFAULTS = {
   speechSynthesisModelId: 'gemini-3.1-flash-tts-preview',
   speechSynthesisVoiceName: 'Kore',
   speechSynthesisTimeoutSeconds: '300',
+} as const;
+
+export const OPENAI_OPTIONAL_SERVICE_DEFAULTS = {
+  speechTranscriptionModelId: 'whisper-1',
+  speechTranscriptionTimeoutSeconds: '300',
+  speechSynthesisModelId: 'tts-1',
+  speechSynthesisVoiceName: 'alloy',
+  speechSynthesisTimeoutSeconds: '300',
+  imagesModelId: 'gpt-image-1',
+  imagesTimeoutSeconds: '600',
+  embeddingsModelId: 'text-embedding-3-small',
+  embeddingsDimensions: '',
+  embeddingsTimeoutSeconds: '300',
 } as const;
 
 export const SECRET_MASK = '********';

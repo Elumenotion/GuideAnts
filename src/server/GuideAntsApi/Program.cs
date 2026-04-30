@@ -129,6 +129,9 @@ public class Program
 
             var requiredSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder>();
             requiredSeeder.SeedAsync().GetAwaiter().GetResult();
+
+            var runtimeProfileSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder>();
+            runtimeProfileSeeder.SeedAsync().GetAwaiter().GetResult();
         }
 
         ServiceRoutingStartupValidator.Validate(app.Services.GetRequiredService<IConfiguration>());

@@ -13,6 +13,10 @@ import {
   GEMINI_DEFAULT_CHAT_MODEL_ID,
   GEMINI_OPTIONAL_SERVICE_DEFAULTS,
   GEMINI_SERVICE_PROVIDER_IDS,
+  OPENAI_CORE_SECTION,
+  OPENAI_DEFAULT_CHAT_MODEL_ID,
+  OPENAI_OPTIONAL_SERVICE_DEFAULTS,
+  OPENAI_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
   WIZARD_STEPS,
 } from './addAiServicesWizard/constants';
@@ -22,6 +26,9 @@ import { GeminiConnectionStep } from './addAiServicesWizard/steps/GeminiConnecti
 import { GeminiModelsStep } from './addAiServicesWizard/steps/GeminiModelsStep';
 import { GeminiOptionalServicesStep } from './addAiServicesWizard/steps/GeminiOptionalServicesStep';
 import { ModelsStep } from './addAiServicesWizard/steps/ModelsStep';
+import { OpenAiConnectionStep } from './addAiServicesWizard/steps/OpenAiConnectionStep';
+import { OpenAiModelsStep } from './addAiServicesWizard/steps/OpenAiModelsStep';
+import { OpenAiOptionalServicesStep } from './addAiServicesWizard/steps/OpenAiOptionalServicesStep';
 import { OptionalServicesStep } from './addAiServicesWizard/steps/OptionalServicesStep';
 import { ProviderStep } from './addAiServicesWizard/steps/ProviderStep';
 import type {
@@ -34,21 +41,29 @@ import type {
   GeminiCoreConnectionFormState,
   GeminiModelDraft,
   GeminiOptionalServicesFormState,
+  OpenAiCoreConnectionFormState,
+  OpenAiModelDraft,
+  OpenAiModelProviderLabel,
+  OpenAiOptionalServicesFormState,
   OptionalServiceKey,
   WizardLoadSnapshot,
 } from './addAiServicesWizard/types';
 import {
   buildAddGeminiModelRequest,
   buildAddModelRequest,
+  buildAddOpenAiModelRequest,
   deriveEndpointFromResource,
   hasModelId,
   hasModelTuple,
   makeDraftModel,
   makeGeminiDraftModel,
+  makeOpenAiDraftModel,
   summarizeFoundryOptionalServiceWarnings,
   summarizeGeminiOptionalServiceWarnings,
+  summarizeOpenAiOptionalServiceWarnings,
   toExistingFoundryModels,
   toExistingGeminiModels,
+  toExistingOpenAiModels,
 } from './addAiServicesWizard/utils';
 
 interface AddAiServicesWizardProps {
@@ -81,6 +96,15 @@ function buildGeminiCoreForm(snapshot: WizardLoadSnapshot): GeminiCoreConnection
   const section = snapshot.sectionsByName[GEMINI_CORE_SECTION];
   return {
     apiKey: String(section?.payload.ApiKey ?? ''),
+    apiKeyHasStoredValue: Boolean(section?.secretHasValue?.ApiKey),
+  };
+}
+
+function buildOpenAiCoreForm(snapshot: WizardLoadSnapshot): OpenAiCoreConnectionFormState {
+  const section = snapshot.sectionsByName[OPENAI_CORE_SECTION];
+  return {
+    apiKey: String(section?.payload.ApiKey ?? ''),
+    endpoint: String(section?.payload.Endpoint ?? ''),
     apiKeyHasStoredValue: Boolean(section?.secretHasValue?.ApiKey),
   };
 }
@@ -211,6 +235,54 @@ function buildGeminiOptionalServicesForm(snapshot: WizardLoadSnapshot): GeminiOp
   };
 }
 
+function buildOpenAiOptionalServicesForm(snapshot: WizardLoadSnapshot): OpenAiOptionalServicesFormState {
+  return {
+    enableSpeechTranscription: true,
+    speechTranscriptionModelId:
+      getServiceProviderFieldValue(
+        snapshot.serviceStates.SpeechTranscription,
+        OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription,
+        'ModelId'
+      ) || OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechTranscriptionModelId,
+    speechTranscriptionTimeoutSeconds:
+      getServiceProviderFieldValue(
+        snapshot.serviceStates.SpeechTranscription,
+        OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription,
+        'TimeoutSeconds'
+      ) || OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechTranscriptionTimeoutSeconds,
+
+    enableSpeechSynthesis: true,
+    speechSynthesisModelId:
+      getServiceProviderFieldValue(snapshot.serviceStates.SpeechSynthesis, OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis, 'ModelId') ||
+      OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisModelId,
+    speechSynthesisVoiceName:
+      getServiceProviderFieldValue(snapshot.serviceStates.SpeechSynthesis, OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis, 'VoiceName') ||
+      OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisVoiceName,
+    speechSynthesisTimeoutSeconds:
+      getServiceProviderFieldValue(snapshot.serviceStates.SpeechSynthesis, OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis, 'TimeoutSeconds') ||
+      OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisTimeoutSeconds,
+
+    enableImages: true,
+    imagesModelId:
+      getServiceProviderFieldValue(snapshot.serviceStates.ImageGeneration, OPENAI_SERVICE_PROVIDER_IDS.ImageGeneration, 'ModelId') ||
+      OPENAI_OPTIONAL_SERVICE_DEFAULTS.imagesModelId,
+    imagesTimeoutSeconds:
+      getServiceProviderFieldValue(snapshot.serviceStates.ImageGeneration, OPENAI_SERVICE_PROVIDER_IDS.ImageGeneration, 'TimeoutSeconds') ||
+      OPENAI_OPTIONAL_SERVICE_DEFAULTS.imagesTimeoutSeconds,
+
+    enableEmbeddings: true,
+    embeddingsModelId:
+      getServiceProviderFieldValue(snapshot.serviceStates.Embeddings, OPENAI_SERVICE_PROVIDER_IDS.Embeddings, 'ModelId') ||
+      OPENAI_OPTIONAL_SERVICE_DEFAULTS.embeddingsModelId,
+    embeddingsDimensions:
+      getServiceProviderFieldValue(snapshot.serviceStates.Embeddings, OPENAI_SERVICE_PROVIDER_IDS.Embeddings, 'Dimensions') ||
+      OPENAI_OPTIONAL_SERVICE_DEFAULTS.embeddingsDimensions,
+    embeddingsTimeoutSeconds:
+      getServiceProviderFieldValue(snapshot.serviceStates.Embeddings, OPENAI_SERVICE_PROVIDER_IDS.Embeddings, 'TimeoutSeconds') ||
+      OPENAI_OPTIONAL_SERVICE_DEFAULTS.embeddingsTimeoutSeconds,
+  };
+}
+
 function nextStep(current: AddAiServicesWizardStep): AddAiServicesWizardStep {
   if (current === 'provider') {
     return 'connection';
@@ -267,6 +339,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     apiKey: '',
     apiKeyHasStoredValue: false,
   });
+  const [openAiCoreForm, setOpenAiCoreForm] = useState<OpenAiCoreConnectionFormState>({
+    apiKey: '',
+    endpoint: '',
+    apiKeyHasStoredValue: false,
+  });
 
   const [foundryOptionalForm, setFoundryOptionalForm] = useState<FoundryOptionalServicesFormState>({
     enableEmbeddings: false,
@@ -315,6 +392,25 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     speechSynthesisVoiceName: GEMINI_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisVoiceName,
     speechSynthesisTimeoutSeconds: GEMINI_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisTimeoutSeconds,
   });
+  const [openAiOptionalForm, setOpenAiOptionalForm] = useState<OpenAiOptionalServicesFormState>({
+    enableSpeechTranscription: true,
+    speechTranscriptionModelId: OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechTranscriptionModelId,
+    speechTranscriptionTimeoutSeconds: OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechTranscriptionTimeoutSeconds,
+
+    enableSpeechSynthesis: true,
+    speechSynthesisModelId: OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisModelId,
+    speechSynthesisVoiceName: OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisVoiceName,
+    speechSynthesisTimeoutSeconds: OPENAI_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisTimeoutSeconds,
+
+    enableImages: true,
+    imagesModelId: OPENAI_OPTIONAL_SERVICE_DEFAULTS.imagesModelId,
+    imagesTimeoutSeconds: OPENAI_OPTIONAL_SERVICE_DEFAULTS.imagesTimeoutSeconds,
+
+    enableEmbeddings: true,
+    embeddingsModelId: OPENAI_OPTIONAL_SERVICE_DEFAULTS.embeddingsModelId,
+    embeddingsDimensions: OPENAI_OPTIONAL_SERVICE_DEFAULTS.embeddingsDimensions,
+    embeddingsTimeoutSeconds: OPENAI_OPTIONAL_SERVICE_DEFAULTS.embeddingsTimeoutSeconds,
+  });
 
   const [foundryDraftModelId, setFoundryDraftModelId] = useState('');
   const [foundryDraftModelProvider, setFoundryDraftModelProvider] = useState<FoundryModelProviderLabel>('Completions');
@@ -325,10 +421,17 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
   const [setGeminiDraftAsGlobalDefault, setSetGeminiDraftAsGlobalDefault] = useState(true);
   const [geminiDraftModels, setGeminiDraftModels] = useState<GeminiModelDraft[]>([]);
 
+  const [openAiDraftModelId, setOpenAiDraftModelId] = useState(OPENAI_DEFAULT_CHAT_MODEL_ID);
+  const [openAiDraftModelProvider, setOpenAiDraftModelProvider] = useState<OpenAiModelProviderLabel>('Completions');
+  const [setOpenAiDraftAsGlobalDefault, setSetOpenAiDraftAsGlobalDefault] = useState(true);
+  const [openAiDraftModels, setOpenAiDraftModels] = useState<OpenAiModelDraft[]>([]);
+
   const [foundryCoreErrors, setFoundryCoreErrors] = useState<Partial<Record<'resource' | 'apiKey' | 'apiVersion', string>>>({});
   const [geminiCoreErrors, setGeminiCoreErrors] = useState<Partial<Record<'apiKey', string>>>({});
+  const [openAiCoreErrors, setOpenAiCoreErrors] = useState<Partial<Record<'apiKey' | 'endpoint', string>>>({});
   const [foundryOptionalErrors, setFoundryOptionalErrors] = useState<Record<string, string>>({});
   const [geminiOptionalErrors, setGeminiOptionalErrors] = useState<Record<string, string>>({});
+  const [openAiOptionalErrors, setOpenAiOptionalErrors] = useState<Record<string, string>>({});
   const [modelAddError, setModelAddError] = useState<string | null>(null);
   const [modelStepError, setModelStepError] = useState<string | null>(null);
 
@@ -344,19 +447,28 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     () => (snapshot ? toExistingGeminiModels(snapshot.models) : []),
     [snapshot]
   );
+  const existingOpenAiModels = useMemo(
+    () => (snapshot ? toExistingOpenAiModels(snapshot.models) : []),
+    [snapshot]
+  );
 
   const existingCatalogModelCount = snapshot?.models.length ?? 0;
 
   const lockFoundryDraftAsGlobalDefault =
-    existingCatalogModelCount === 0 && foundryDraftModels.length === 0 && geminiDraftModels.length === 0;
+    existingCatalogModelCount === 0 && foundryDraftModels.length === 0 && geminiDraftModels.length === 0 && openAiDraftModels.length === 0;
   const effectiveSetFoundryDraftAsGlobalDefault = lockFoundryDraftAsGlobalDefault ? true : setFoundryDraftAsGlobalDefault;
 
   const lockGeminiDraftAsGlobalDefault =
-    existingCatalogModelCount === 0 && geminiDraftModels.length === 0 && foundryDraftModels.length === 0;
+    existingCatalogModelCount === 0 && geminiDraftModels.length === 0 && foundryDraftModels.length === 0 && openAiDraftModels.length === 0;
   const effectiveSetGeminiDraftAsGlobalDefault = lockGeminiDraftAsGlobalDefault ? true : setGeminiDraftAsGlobalDefault;
+
+  const lockOpenAiDraftAsGlobalDefault =
+    existingCatalogModelCount === 0 && openAiDraftModels.length === 0 && foundryDraftModels.length === 0 && geminiDraftModels.length === 0;
+  const effectiveSetOpenAiDraftAsGlobalDefault = lockOpenAiDraftAsGlobalDefault ? true : setOpenAiDraftAsGlobalDefault;
 
   const foundryTotalModelCount = existingFoundryModels.length + foundryDraftModels.length;
   const geminiTotalModelCount = existingGeminiModels.length + geminiDraftModels.length;
+  const openAiTotalModelCount = existingOpenAiModels.length + openAiDraftModels.length;
 
   const savedFoundryModelCount = useMemo(
     () => (snapshot ? toExistingFoundryModels(snapshot.models).length : 0),
@@ -364,6 +476,10 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
   );
   const savedGeminiModelCount = useMemo(
     () => (snapshot ? toExistingGeminiModels(snapshot.models).length : 0),
+    [snapshot]
+  );
+  const savedOpenAiModelCount = useMemo(
+    () => (snapshot ? toExistingOpenAiModels(snapshot.models).length : 0),
     [snapshot]
   );
 
@@ -385,6 +501,15 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       ),
     [snapshot]
   );
+  const openAiConnectionConfigured = useMemo(
+    () =>
+      Boolean(
+        snapshot?.sectionSummaries.some(
+          (section) => section.sectionName === OPENAI_CORE_SECTION && section.readinessStatus === 'configured'
+        )
+      ),
+    [snapshot]
+  );
 
   const derivedFoundryCoreEndpoint = useMemo(() => deriveEndpointFromResource(foundryCoreForm.resource), [foundryCoreForm.resource]);
 
@@ -392,19 +517,26 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (provider === 'foundry') {
       return foundryConnectionConfigured && savedFoundryModelCount > 0;
     }
-    return geminiConnectionConfigured && savedGeminiModelCount > 0;
-  }, [provider, foundryConnectionConfigured, geminiConnectionConfigured, savedFoundryModelCount, savedGeminiModelCount]);
+    if (provider === 'google-gemini') {
+      return geminiConnectionConfigured && savedGeminiModelCount > 0;
+    }
+    return openAiConnectionConfigured && savedOpenAiModelCount > 0;
+  }, [provider, foundryConnectionConfigured, geminiConnectionConfigured, openAiConnectionConfigured, savedFoundryModelCount, savedGeminiModelCount, savedOpenAiModelCount]);
 
   const finishWarnings = useMemo(() => {
     if (!snapshot) {
       return [];
     }
-    return provider === 'foundry'
-      ? summarizeFoundryOptionalServiceWarnings(snapshot)
-      : summarizeGeminiOptionalServiceWarnings(snapshot);
+    if (provider === 'foundry') {
+      return summarizeFoundryOptionalServiceWarnings(snapshot);
+    }
+    if (provider === 'google-gemini') {
+      return summarizeGeminiOptionalServiceWarnings(snapshot);
+    }
+    return summarizeOpenAiOptionalServiceWarnings(snapshot);
   }, [provider, snapshot]);
 
-  const providerLabel = provider === 'foundry' ? 'Microsoft Foundry' : 'Google Gemini';
+  const providerLabel = provider === 'foundry' ? 'Microsoft Foundry' : provider === 'google-gemini' ? 'Google Gemini' : 'OpenAI';
 
   const loadServiceState = useCallback(async (serviceId: OptionalServiceKey): Promise<ServiceEditorStateDto | undefined> => {
     try {
@@ -422,6 +554,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       FOUNDRY_SPEECH_SECTION,
       FOUNDRY_DOCUMENT_INTELLIGENCE_SECTION,
       GEMINI_CORE_SECTION,
+      OPENAI_CORE_SECTION,
     ];
 
     const [sectionSummaries, schema, models, ...sections] = await Promise.all([
@@ -464,8 +597,10 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
 
     setFoundryCoreForm(buildFoundryCoreForm(nextSnapshot));
     setGeminiCoreForm(buildGeminiCoreForm(nextSnapshot));
+    setOpenAiCoreForm(buildOpenAiCoreForm(nextSnapshot));
     setFoundryOptionalForm(buildFoundryOptionalServicesForm(nextSnapshot));
     setGeminiOptionalForm(buildGeminiOptionalServicesForm(nextSnapshot));
+    setOpenAiOptionalForm(buildOpenAiOptionalServicesForm(nextSnapshot));
 
     setFoundryDraftModels([]);
     setFoundryDraftModelId('');
@@ -476,10 +611,17 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     setGeminiDraftModelId(GEMINI_DEFAULT_CHAT_MODEL_ID);
     setSetGeminiDraftAsGlobalDefault(existingCatalogCount === 0);
 
+    setOpenAiDraftModels([]);
+    setOpenAiDraftModelId(OPENAI_DEFAULT_CHAT_MODEL_ID);
+    setOpenAiDraftModelProvider('Completions');
+    setSetOpenAiDraftAsGlobalDefault(existingCatalogCount === 0);
+
     setFoundryCoreErrors({});
     setGeminiCoreErrors({});
+    setOpenAiCoreErrors({});
     setFoundryOptionalErrors({});
     setGeminiOptionalErrors({});
+    setOpenAiOptionalErrors({});
     setModelAddError(null);
     setModelStepError(null);
   }, []);
@@ -610,6 +752,21 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     return Object.keys(errors).length === 0;
   };
 
+  const validateOpenAiCoreConnection = (): boolean => {
+    const errors: Partial<Record<'apiKey' | 'endpoint', string>> = {};
+
+    const keyValue = openAiCoreForm.apiKey.trim();
+    if (!keyValue && !openAiCoreForm.apiKeyHasStoredValue) {
+      errors.apiKey = 'API key is required.';
+    }
+    if (keyValue && keyValue !== SECRET_MASK && keyValue.length < 8) {
+      errors.apiKey = 'API key looks too short.';
+    }
+
+    setOpenAiCoreErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const persistFoundryCoreConnection = useCallback(async () => {
     if (!snapshot) {
       throw new Error('Wizard state is not loaded.');
@@ -683,6 +840,45 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       apiKeyHasStoredValue: true,
     }));
   }, [geminiCoreForm.apiKey, geminiCoreForm.apiKeyHasStoredValue, snapshot]);
+
+  const persistOpenAiCoreConnection = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+    if (!validateOpenAiCoreConnection()) {
+      throw new Error('Connection details are incomplete.');
+    }
+
+    const payload: Record<string, unknown> = {
+      ApiKey: withSecretPreserved(openAiCoreForm.apiKey, openAiCoreForm.apiKeyHasStoredValue),
+    };
+    const endpointTrimmed = openAiCoreForm.endpoint.trim();
+    if (endpointTrimmed) {
+      payload.Endpoint = endpointTrimmed;
+    }
+
+    let nextSections = snapshot.sectionsByName;
+    nextSections = await updateSection(OPENAI_CORE_SECTION, payload, nextSections);
+
+    const [sectionSummaries, models] = await Promise.all([
+      api.settings.getSections(),
+      api.settings.getModels(),
+    ]);
+
+    const nextSnapshot: WizardLoadSnapshot = {
+      ...snapshot,
+      sectionsByName: nextSections,
+      sectionSummaries,
+      models,
+    };
+
+    setSnapshot(nextSnapshot);
+    setOpenAiCoreForm((previous) => ({
+      ...previous,
+      apiKey: payload.ApiKey as string,
+      apiKeyHasStoredValue: true,
+    }));
+  }, [openAiCoreForm.apiKey, openAiCoreForm.apiKeyHasStoredValue, openAiCoreForm.endpoint, snapshot]);
 
   const addFoundryDraftModel = useCallback(() => {
     const normalizedId = foundryDraftModelId.trim();
@@ -781,6 +977,61 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     geminiDraftModelId,
     geminiDraftModels,
     setGeminiDraftAsGlobalDefault,
+    snapshot,
+  ]);
+
+  const addOpenAiDraftModel = useCallback(() => {
+    const normalizedId = openAiDraftModelId.trim();
+    if (!normalizedId) {
+      setModelAddError('Model is required.');
+      return;
+    }
+
+    const existingModel = snapshot?.models.find(
+      (model) => model.modelId.trim().toLowerCase() === normalizedId.toLowerCase()
+    );
+    if (existingModel) {
+      setModelAddError(`Model '${normalizedId}' already exists with provider '${existingModel.provider}'.`);
+      return;
+    }
+
+    if (hasModelId(openAiDraftModels, normalizedId)) {
+      setModelAddError(`Model '${normalizedId}' is already queued.`);
+      return;
+    }
+
+    if (hasModelTuple(openAiDraftModels, { modelId: normalizedId, provider: openAiDraftModelProvider })) {
+      setModelAddError('This model/provider combination is already queued.');
+      return;
+    }
+
+    const isFirstModelOverall =
+      existingCatalogModelCount === 0
+      && openAiDraftModels.length === 0
+      && foundryDraftModels.length === 0
+      && geminiDraftModels.length === 0;
+    const shouldSetAsGlobalDefault = isFirstModelOverall || setOpenAiDraftAsGlobalDefault;
+
+    const localId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setOpenAiDraftModels((previous) => {
+      const next = shouldSetAsGlobalDefault
+        ? previous.map((model) => ({ ...model, setAsGlobalDefault: false }))
+        : previous;
+      return [...next, makeOpenAiDraftModel(localId, normalizedId, openAiDraftModelProvider, shouldSetAsGlobalDefault)];
+    });
+
+    setOpenAiDraftModelId('');
+    setSetOpenAiDraftAsGlobalDefault(false);
+    setModelAddError(null);
+    setModelStepError(null);
+  }, [
+    existingCatalogModelCount,
+    foundryDraftModels.length,
+    geminiDraftModels.length,
+    openAiDraftModelId,
+    openAiDraftModelProvider,
+    openAiDraftModels,
+    setOpenAiDraftAsGlobalDefault,
     snapshot,
   ]);
 
@@ -928,6 +1179,72 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       setGlobalError(defaultSaveWarning);
     }
   }, [geminiDraftModels, loadSnapshot, persistGlobalDefaultModel, snapshot]);
+
+  const persistOpenAiModels = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+
+    const existingCount = snapshot.models.length;
+    const pendingDrafts = openAiDraftModels.filter((model) => !model.persisted);
+
+    if (existingCount + pendingDrafts.length === 0) {
+      setModelStepError('At least one OpenAI model is required.');
+      throw new Error('Model requirement not met.');
+    }
+
+    const seenModelIds = new Set<string>();
+    for (const model of pendingDrafts) {
+      const normalized = model.modelId.trim().toLowerCase();
+      if (seenModelIds.has(normalized)) {
+        setModelStepError(`Model '${model.modelId}' is queued more than once. Use distinct model ids.`);
+        throw new Error('Duplicate model ids were queued.');
+      }
+      seenModelIds.add(normalized);
+    }
+
+    const latestModels = await api.settings.getModels();
+    const existingById = new Map(latestModels.map((model) => [model.modelId.trim().toLowerCase(), model]));
+    const existingConflict = pendingDrafts.find((model) => existingById.has(model.modelId.trim().toLowerCase()));
+    if (existingConflict) {
+      const conflict = existingById.get(existingConflict.modelId.trim().toLowerCase());
+      const providerName = conflict?.provider ?? 'unknown';
+      setModelStepError(
+        `Model '${existingConflict.modelId}' already exists with provider '${providerName}'. Choose a different model id.`
+      );
+      throw new Error('Model id conflict detected.');
+    }
+
+    for (const model of pendingDrafts) {
+      const request = buildAddOpenAiModelRequest(model.modelId, model.provider);
+      await api.settings.addModel(request);
+    }
+
+    const forcedDefaultModelId = existingCount === 0 && pendingDrafts.length > 0
+      ? pendingDrafts[0].modelId
+      : null;
+    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
+    const targetDefaultModelId = forcedDefaultModelId ?? selectedDefaultModelId;
+
+    let defaultSaveWarning: string | null = null;
+    if (targetDefaultModelId) {
+      try {
+        await persistGlobalDefaultModel(targetDefaultModelId);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unknown error.';
+        defaultSaveWarning = `Model was added, but setting '${targetDefaultModelId}' as global default failed: ${detail}`;
+      }
+    }
+
+    const refreshed = await loadSnapshot();
+    setSnapshot(refreshed);
+    setOpenAiDraftModels([]);
+    setSetOpenAiDraftAsGlobalDefault(refreshed.models.length === 0);
+    setModelStepError(null);
+    if (defaultSaveWarning) {
+      setGlobalError(defaultSaveWarning);
+    }
+  }, [openAiDraftModels, loadSnapshot, persistGlobalDefaultModel, snapshot]);
 
   const validateFoundryOptionalServices = useCallback((): boolean => {
     const errors: Record<string, string> = {};
@@ -1182,12 +1499,115 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     setGeminiOptionalErrors({});
   }, [geminiOptionalForm, loadSnapshot, snapshot, validateGeminiOptionalServices]);
 
+  const validateOpenAiOptionalServices = useCallback((): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (openAiOptionalForm.enableSpeechTranscription) {
+      if (!openAiOptionalForm.speechTranscriptionModelId.trim()) {
+        errors.speechTranscriptionModelId = 'Transcription model id is required.';
+      }
+      if (!isPositiveIntegerValue(openAiOptionalForm.speechTranscriptionTimeoutSeconds)) {
+        errors.speechTranscriptionTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    if (openAiOptionalForm.enableSpeechSynthesis) {
+      if (!openAiOptionalForm.speechSynthesisModelId.trim()) {
+        errors.speechSynthesisModelId = 'TTS model id is required.';
+      }
+      if (!openAiOptionalForm.speechSynthesisVoiceName.trim()) {
+        errors.speechSynthesisVoiceName = 'Voice name is required.';
+      }
+      if (!isPositiveIntegerValue(openAiOptionalForm.speechSynthesisTimeoutSeconds)) {
+        errors.speechSynthesisTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    if (openAiOptionalForm.enableImages) {
+      if (!openAiOptionalForm.imagesModelId.trim()) {
+        errors.imagesModelId = 'Image model id is required.';
+      }
+      if (!isPositiveIntegerValue(openAiOptionalForm.imagesTimeoutSeconds)) {
+        errors.imagesTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    if (openAiOptionalForm.enableEmbeddings) {
+      if (!openAiOptionalForm.embeddingsModelId.trim()) {
+        errors.embeddingsModelId = 'Embedding model id is required.';
+      }
+      if (!isPositiveIntegerValue(openAiOptionalForm.embeddingsTimeoutSeconds)) {
+        errors.embeddingsTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+      const dimensionsValue = openAiOptionalForm.embeddingsDimensions.trim();
+      if (dimensionsValue && !isPositiveIntegerValue(dimensionsValue)) {
+        errors.embeddingsDimensions = 'Dimensions must be a positive integer if provided.';
+      }
+    }
+
+    setOpenAiOptionalErrors(errors);
+    return Object.keys(errors).length === 0;
+  }, [openAiOptionalForm]);
+
+  const persistOpenAiOptionalServices = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+    if (!validateOpenAiOptionalServices()) {
+      throw new Error('Optional service inputs are incomplete.');
+    }
+
+    if (openAiOptionalForm.enableSpeechTranscription) {
+      await api.settings.services.updateProviderFields('SpeechTranscription', OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription, {
+        ModelId: openAiOptionalForm.speechTranscriptionModelId.trim(),
+        TimeoutSeconds: openAiOptionalForm.speechTranscriptionTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('SpeechTranscription', OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription);
+    }
+
+    if (openAiOptionalForm.enableSpeechSynthesis) {
+      await api.settings.services.updateProviderFields('SpeechSynthesis', OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis, {
+        ModelId: openAiOptionalForm.speechSynthesisModelId.trim(),
+        VoiceName: openAiOptionalForm.speechSynthesisVoiceName.trim(),
+        TimeoutSeconds: openAiOptionalForm.speechSynthesisTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('SpeechSynthesis', OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis);
+    }
+
+    if (openAiOptionalForm.enableImages) {
+      await api.settings.services.updateProviderFields('ImageGeneration', OPENAI_SERVICE_PROVIDER_IDS.ImageGeneration, {
+        ModelId: openAiOptionalForm.imagesModelId.trim(),
+        TimeoutSeconds: openAiOptionalForm.imagesTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('ImageGeneration', OPENAI_SERVICE_PROVIDER_IDS.ImageGeneration);
+    }
+
+    if (openAiOptionalForm.enableEmbeddings) {
+      const fields: Record<string, string> = {
+        ModelId: openAiOptionalForm.embeddingsModelId.trim(),
+        TimeoutSeconds: openAiOptionalForm.embeddingsTimeoutSeconds.trim(),
+      };
+      const dimensionsValue = openAiOptionalForm.embeddingsDimensions.trim();
+      if (dimensionsValue) {
+        fields.Dimensions = dimensionsValue;
+      }
+      await api.settings.services.updateProviderFields('Embeddings', OPENAI_SERVICE_PROVIDER_IDS.Embeddings, fields);
+      await api.settings.services.updateActiveProvider('Embeddings', OPENAI_SERVICE_PROVIDER_IDS.Embeddings);
+    }
+
+    const refreshed = await loadSnapshot();
+    setSnapshot(refreshed);
+    setOpenAiOptionalErrors({});
+  }, [openAiOptionalForm, loadSnapshot, snapshot, validateOpenAiOptionalServices]);
+
   const persistCurrentStep = useCallback(async () => {
     if (step === 'connection') {
       if (provider === 'foundry') {
         await persistFoundryCoreConnection();
-      } else {
+      } else if (provider === 'google-gemini') {
         await persistGeminiCoreConnection();
+      } else {
+        await persistOpenAiCoreConnection();
       }
       return;
     }
@@ -1195,8 +1615,10 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (step === 'models') {
       if (provider === 'foundry') {
         await persistFoundryModels();
-      } else {
+      } else if (provider === 'google-gemini') {
         await persistGeminiModels();
+      } else {
+        await persistOpenAiModels();
       }
       return;
     }
@@ -1204,17 +1626,22 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (step === 'optionalServices') {
       if (provider === 'foundry') {
         await persistFoundryOptionalServices();
-      } else {
+      } else if (provider === 'google-gemini') {
         await persistGeminiOptionalServices();
+      } else {
+        await persistOpenAiOptionalServices();
       }
     }
   }, [
     persistFoundryCoreConnection,
     persistGeminiCoreConnection,
+    persistOpenAiCoreConnection,
     persistFoundryModels,
     persistGeminiModels,
+    persistOpenAiModels,
     persistFoundryOptionalServices,
     persistGeminiOptionalServices,
+    persistOpenAiOptionalServices,
     provider,
     step,
   ]);
@@ -1277,10 +1704,15 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         if (hasPendingDrafts) {
           await persistFoundryModels();
         }
-      } else {
+      } else if (provider === 'google-gemini') {
         const hasPendingDrafts = geminiDraftModels.some((model) => !model.persisted);
         if (hasPendingDrafts) {
           await persistGeminiModels();
+        }
+      } else {
+        const hasPendingDrafts = openAiDraftModels.some((model) => !model.persisted);
+        if (hasPendingDrafts) {
+          await persistOpenAiModels();
         }
       }
 
@@ -1295,9 +1727,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     closeWizard,
     foundryDraftModels,
     geminiDraftModels,
+    openAiDraftModels,
     persistCurrentStep,
     persistFoundryModels,
     persistGeminiModels,
+    persistOpenAiModels,
     provider,
     saving,
     step,
@@ -1311,20 +1745,24 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       return false;
     }
     if (step === 'models') {
-      return provider === 'foundry' ? foundryTotalModelCount === 0 : geminiTotalModelCount === 0;
+      if (provider === 'foundry') return foundryTotalModelCount === 0;
+      if (provider === 'google-gemini') return geminiTotalModelCount === 0;
+      return openAiTotalModelCount === 0;
     }
     if (step === 'finish') {
       return true;
     }
     return false;
-  }, [foundryTotalModelCount, geminiTotalModelCount, loading, provider, saving, step]);
+  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, loading, provider, saving, step]);
 
   const isFinishDisabled = useMemo(() => {
     if (loading || saving) {
       return true;
     }
-    return provider === 'foundry' ? foundryTotalModelCount === 0 : geminiTotalModelCount === 0;
-  }, [foundryTotalModelCount, geminiTotalModelCount, loading, provider, saving]);
+    if (provider === 'foundry') return foundryTotalModelCount === 0;
+    if (provider === 'google-gemini') return geminiTotalModelCount === 0;
+    return openAiTotalModelCount === 0;
+  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, loading, provider, saving]);
 
   const currentStepLabel = useMemo(() => {
     const index = WIZARD_STEPS.findIndex((item) => item.id === step);
@@ -1427,12 +1865,20 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               errors={foundryCoreErrors}
               onChange={(patch) => setFoundryCoreForm((previous) => ({ ...previous, ...patch }))}
             />
-          ) : (
+          ) : provider === 'google-gemini' ? (
             <GeminiConnectionStep
               apiKey={geminiCoreForm.apiKey}
               apiKeyHasStoredValue={geminiCoreForm.apiKeyHasStoredValue}
               errors={geminiCoreErrors}
               onChange={(patch) => setGeminiCoreForm((previous) => ({ ...previous, ...patch }))}
+            />
+          ) : (
+            <OpenAiConnectionStep
+              apiKey={openAiCoreForm.apiKey}
+              endpoint={openAiCoreForm.endpoint}
+              apiKeyHasStoredValue={openAiCoreForm.apiKeyHasStoredValue}
+              errors={openAiCoreErrors}
+              onChange={(patch) => setOpenAiCoreForm((previous) => ({ ...previous, ...patch }))}
             />
           )
         ) : null}
@@ -1456,7 +1902,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
                 setFoundryDraftModels((previous) => previous.filter((model) => model.localId !== localId));
               }}
             />
-          ) : (
+          ) : provider === 'google-gemini' ? (
             <GeminiModelsStep
               existingModels={existingGeminiModels}
               draftModels={geminiDraftModels}
@@ -1472,6 +1918,24 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
                 setGeminiDraftModels((previous) => previous.filter((model) => model.localId !== localId));
               }}
             />
+          ) : (
+            <OpenAiModelsStep
+              existingModels={existingOpenAiModels}
+              draftModels={openAiDraftModels}
+              draftModelId={openAiDraftModelId}
+              draftProvider={openAiDraftModelProvider}
+              setDraftAsGlobalDefault={effectiveSetOpenAiDraftAsGlobalDefault}
+              lockDraftAsGlobalDefault={lockOpenAiDraftAsGlobalDefault}
+              addError={modelAddError}
+              validationError={modelStepError}
+              onDraftModelIdChange={setOpenAiDraftModelId}
+              onDraftProviderChange={setOpenAiDraftModelProvider}
+              onSetDraftAsGlobalDefaultChange={setSetOpenAiDraftAsGlobalDefault}
+              onAddModel={addOpenAiDraftModel}
+              onRemoveDraftModel={(localId) => {
+                setOpenAiDraftModels((previous) => previous.filter((model) => model.localId !== localId));
+              }}
+            />
           )
         ) : null}
 
@@ -1483,11 +1947,17 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               errors={foundryOptionalErrors}
               onChange={(patch) => setFoundryOptionalForm((previous) => ({ ...previous, ...patch }))}
             />
-          ) : (
+          ) : provider === 'google-gemini' ? (
             <GeminiOptionalServicesStep
               value={geminiOptionalForm}
               errors={geminiOptionalErrors}
               onChange={(patch) => setGeminiOptionalForm((previous) => ({ ...previous, ...patch }))}
+            />
+          ) : (
+            <OpenAiOptionalServicesStep
+              value={openAiOptionalForm}
+              errors={openAiOptionalErrors}
+              onChange={(patch) => setOpenAiOptionalForm((previous) => ({ ...previous, ...patch }))}
             />
           )
         ) : null}
@@ -1496,7 +1966,13 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
           <FinishStep
             providerLabel={providerLabel}
             readyForBasicChat={readyForBasicChat}
-            totalModelCount={provider === 'foundry' ? savedFoundryModelCount : savedGeminiModelCount}
+            totalModelCount={
+              provider === 'foundry'
+                ? savedFoundryModelCount
+                : provider === 'google-gemini'
+                  ? savedGeminiModelCount
+                  : savedOpenAiModelCount
+            }
             warningItems={finishWarnings}
           />
         ) : null}

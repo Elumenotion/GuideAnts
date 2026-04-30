@@ -444,15 +444,17 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             .Where(p => p.HasExplicitMode)
             .Select(p => new NotebookToolbarProviderOptionDto(
                 p.ProviderId,
-                p.ProviderId,
+                p.ProviderSection,
                 p.ProviderKind,
                 p.CanActivate,
-                p.ActivationBlockers))
+                p.ActivationBlockers,
+                p.ProviderSection,
+                ExtractModelId(p)))
             .ToList();
 
         var active = state.Providers.FirstOrDefault(p =>
             string.Equals(p.ProviderId, state.ActiveProviderId, StringComparison.Ordinal));
-        var activeLabel = active?.ProviderId
+        var activeLabel = active?.ProviderSection
             ?? (string.IsNullOrWhiteSpace(state.ActiveProviderId) ? "Not configured" : state.ActiveProviderId);
 
         var supportsPower = string.Equals(state.ActiveProviderId, localProviderId, StringComparison.Ordinal);
@@ -464,15 +466,11 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             status = "degraded";
         }
 
-        // Only probe local admin endpoints when the local provider is active.
-        // This prevents false "still talking to local" traffic when cloud is selected.
-        var localModels = supportsPower
-            ? await TryLoadLocalModelInventoryAsync(
-                serviceId,
-                localListPath,
-                isImage,
-                cancellationToken).ConfigureAwait(false)
-            : Array.Empty<NotebookToolbarLocalModelOptionDto>();
+        var localModels = await TryLoadLocalModelInventoryAsync(
+            serviceId,
+            localListPath,
+            isImage,
+            cancellationToken).ConfigureAwait(false);
 
         var selection = BuildSelectionForService(state, isImage, localModels);
         var localOn = supportsPower && await IsLocalEngineOnAsync(serviceId, isImage, selection, cancellationToken)
@@ -651,18 +649,48 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         {
             var id = it?["model_id"]?.GetValue<string>()
                 ?? it?["modelId"]?.GetValue<string>()
+                ?? it?["modelRef"]?.GetValue<string>()
                 ?? it?["id"]?.GetValue<string>();
             if (string.IsNullOrWhiteSpace(id))
             {
                 continue;
             }
+            if (id.StartsWith(".", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var activeTokenizer = it?["activeTokenizer"]?.GetValue<bool>() is true;
+            var activeModel = it?["activeModel"]?.GetValue<bool>() is true;
+            if (activeTokenizer && !activeModel)
+            {
+                // Tokenizer-only artifacts are runtime dependencies, not selectable service models.
+                continue;
+            }
             var path = it?["model_path"]?.GetValue<string>();
             var label = string.IsNullOrWhiteSpace(path) ? id : $"{id} ({path})";
             var active = it?["active"]?.GetValue<bool>() is true
+                || it?["activeModel"]?.GetValue<bool>() is true
                 || string.Equals(id, it?["active_model_id"]?.GetValue<string>(), StringComparison.Ordinal);
             list.Add(new NotebookToolbarLocalModelOptionDto(id, label, true, active));
         }
         return list;
+    }
+
+    private static string? ExtractModelId(ProviderEditorStateDto provider)
+    {
+        foreach (var entry in provider.Fields)
+        {
+            if ((string.Equals(entry.Key, "ModelId", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entry.Key, "Deployment", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entry.Key, "modelHint", StringComparison.OrdinalIgnoreCase))
+                && !string.IsNullOrWhiteSpace(entry.Value.Value))
+            {
+                return entry.Value.Value;
+            }
+        }
+
+        return null;
     }
 
     private async Task<string?> HttpGetLocalAdminJsonAsync(

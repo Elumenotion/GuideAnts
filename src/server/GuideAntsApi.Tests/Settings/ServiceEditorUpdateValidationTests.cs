@@ -108,6 +108,81 @@ public sealed class ServiceEditorUpdateValidationTests
     }
 
     [TestMethod]
+    public async Task UpdateServiceProviderFieldsAsync_PersistsModelIdIntoServiceModes_ForOpenAiEmbeddings()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+        SeedServiceModes(db, "Embeddings",
+        [
+            new ServiceMode("openai", "OpenAI", null, null, true, true)
+        ]);
+
+        await service.UpdateServiceProviderFieldsAsync(
+            "Embeddings",
+            ServiceProviderIds.EmbeddingsOpenAiEmbedding,
+            new ProviderFieldsUpdateRequest(
+                new Dictionary<string, string?>
+                {
+                    ["ModelId"] = "text-embedding-3-small"
+                }),
+            CancellationToken.None);
+
+        await service.SetServiceActiveProviderAsync(
+            "Embeddings",
+            ServiceProviderIds.EmbeddingsOpenAiEmbedding,
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "OpenAI", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "text-embedding-3-small", StringComparison.Ordinal));
+
+        var state = await service.GetServiceEditorStateAsync("Embeddings", CancellationToken.None);
+        var provider = state.Providers.Single(p => p.ProviderId == ServiceProviderIds.EmbeddingsOpenAiEmbedding);
+        provider.Fields["ModelId"].Value.Should().Be("text-embedding-3-small");
+        provider.Fields["ModelId"].HasValue.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task UpdateServiceProviderFieldsAsync_PersistsModelIdAndVoiceName_ForOpenAiSpeechSynthesis()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+        SeedServiceModes(db, "SpeechSynthesis",
+        [
+            new ServiceMode("openai", "OpenAI", null, null, true, true)
+        ]);
+
+        await service.UpdateServiceProviderFieldsAsync(
+            "SpeechSynthesis",
+            ServiceProviderIds.SpeechSynthesisOpenAiTts,
+            new ProviderFieldsUpdateRequest(
+                new Dictionary<string, string?>
+                {
+                    ["ModelId"] = "tts-1",
+                    ["VoiceName"] = "alloy"
+                }),
+            CancellationToken.None);
+
+        await service.SetServiceActiveProviderAsync(
+            "SpeechSynthesis",
+            ServiceProviderIds.SpeechSynthesisOpenAiTts,
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("SpeechSynthesis", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "OpenAI", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "tts-1", StringComparison.Ordinal));
+
+        var state = await service.GetServiceEditorStateAsync("SpeechSynthesis", CancellationToken.None);
+        var provider = state.Providers.Single(p => p.ProviderId == ServiceProviderIds.SpeechSynthesisOpenAiTts);
+        provider.Fields["ModelId"].Value.Should().Be("tts-1");
+        provider.Fields["VoiceName"].Value.Should().Be("alloy");
+    }
+
+    [TestMethod]
     public async Task SetServiceActiveProviderAsync_PreservesInactiveCloudModes_WhenSwitchingProviders()
     {
         await using var db = CreateDbContext();
@@ -254,7 +329,8 @@ public sealed class ServiceEditorUpdateValidationTests
             ["AzureDocumentIntelligence:ApiKey"] = "test-doc-intel-key",
             ["GoogleGeminiApi:ApiKey"] = "test-gemini-key",
             ["HuggingFace:Token"] = "hf_test_token",
-            ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1"
+            ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1",
+            ["OpenAI:ApiKey"] = "test-openai-key"
         };
 
         return new ConfigurationBuilder()

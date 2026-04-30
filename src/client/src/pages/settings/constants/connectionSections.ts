@@ -20,7 +20,7 @@ export const CONNECTION_OWNERSHIP_CATEGORIES: readonly ConnectionOwnershipCatego
     key: 'service',
     label: 'Service Providers',
     description: 'Connections referenced by non-chat service routing modes (speech, images, embeddings, markdown extraction).',
-    sectionNames: ['AzureSpeechService', 'AzureOpenAiImages', 'AzureOpenAiEmbedding', 'AzureDocumentIntelligence', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace'],
+    sectionNames: ['AzureSpeechService', 'AzureOpenAiImages', 'AzureOpenAiEmbedding', 'AzureDocumentIntelligence', 'GoogleGeminiApi', 'OpenRouter', 'HuggingFace', 'OpenAI'],
   },
   {
     key: 'huggingface',

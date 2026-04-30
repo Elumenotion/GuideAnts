@@ -78,7 +78,8 @@ public sealed class ServiceEditorMetadataProviderTests
             ["OpenRouter:ApiKey"] = "test-openrouter-key",
             ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1",
             ["HuggingFace:Token"] = "hf_test_token",
-            ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1"
+            ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1",
+            ["OpenAI:ApiKey"] = "test-openai-key"
         };
 
         return new ConfigurationBuilder()

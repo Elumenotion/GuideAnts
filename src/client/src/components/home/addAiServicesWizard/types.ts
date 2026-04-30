@@ -7,9 +7,11 @@ export type AddAiServicesWizardStep =
   | 'optionalServices'
   | 'finish';
 
-export type AddAiServicesWizardProvider = 'foundry' | 'google-gemini';
+export type AddAiServicesWizardProvider = 'foundry' | 'google-gemini' | 'openai';
 
 export type FoundryModelProviderLabel = 'Completions' | 'Responses';
+
+export type OpenAiModelProviderLabel = 'Completions' | 'Responses';
 
 export interface FoundryModelDraft {
   localId: string;
@@ -26,6 +28,14 @@ export interface GeminiModelDraft {
   persisted: boolean;
 }
 
+export interface OpenAiModelDraft {
+  localId: string;
+  modelId: string;
+  provider: OpenAiModelProviderLabel;
+  setAsGlobalDefault: boolean;
+  persisted: boolean;
+}
+
 export interface ExistingFoundryModel {
   modelId: string;
   provider: FoundryModelProviderLabel;
@@ -34,6 +44,12 @@ export interface ExistingFoundryModel {
 
 export interface ExistingGeminiModel {
   modelId: string;
+  raw: SettingsModelDto;
+}
+
+export interface ExistingOpenAiModel {
+  modelId: string;
+  provider: OpenAiModelProviderLabel;
   raw: SettingsModelDto;
 }
 
@@ -48,6 +64,12 @@ export type CoreConnectionFormState = FoundryCoreConnectionFormState;
 
 export interface GeminiCoreConnectionFormState {
   apiKey: string;
+  apiKeyHasStoredValue: boolean;
+}
+
+export interface OpenAiCoreConnectionFormState {
+  apiKey: string;
+  endpoint: string;
   apiKeyHasStoredValue: boolean;
 }
 
@@ -81,6 +103,26 @@ export interface FoundryOptionalServicesFormState {
 }
 
 export type OptionalServicesFormState = FoundryOptionalServicesFormState;
+
+export interface OpenAiOptionalServicesFormState {
+  enableSpeechTranscription: boolean;
+  speechTranscriptionModelId: string;
+  speechTranscriptionTimeoutSeconds: string;
+
+  enableSpeechSynthesis: boolean;
+  speechSynthesisModelId: string;
+  speechSynthesisVoiceName: string;
+  speechSynthesisTimeoutSeconds: string;
+
+  enableImages: boolean;
+  imagesModelId: string;
+  imagesTimeoutSeconds: string;
+
+  enableEmbeddings: boolean;
+  embeddingsModelId: string;
+  embeddingsDimensions: string;
+  embeddingsTimeoutSeconds: string;
+}
 
 export interface GeminiOptionalServicesFormState {
   enableEmbeddings: boolean;
@@ -124,3 +166,5 @@ export type GeminiOptionalServiceKey =
   | 'ImageGeneration'
   | 'SpeechTranscription'
   | 'SpeechSynthesis';
+
+export type OpenAiOptionalServiceKey = 'Embeddings' | 'ImageGeneration' | 'SpeechTranscription' | 'SpeechSynthesis';

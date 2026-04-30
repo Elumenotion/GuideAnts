@@ -1,0 +1,27 @@
+{
+  "profileId": "qwen3_6",
+  "displayName": "Qwen 3.6",
+  "description": "Profile for Qwen 3.6 model family. Thinking via chat_template_kwargs.enable_thinking.",
+  "combineSystemAndDeveloperMessages": true,
+  "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
+  "samplingParametersJson": {
+    "temperature": { "key": "temperature", "label": "Temperature", "description": "Controls randomness: lower is focused, higher is creative", "min": 0.0, "max": 2.0, "step": 0.1, "default": 0.7, "displayOrder": 0, "exposedInGuideBuilder": true },
+    "top_p": { "key": "top_p", "label": "Top P", "description": "Nucleus sampling: controls diversity of token selection", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.8, "displayOrder": 1, "exposedInGuideBuilder": true },
+    "top_k": { "key": "top_k", "label": "Top K", "description": "Limits number of token candidates considered", "min": 1, "max": 100, "step": 1, "default": 20, "displayOrder": 2, "exposedInGuideBuilder": true },
+    "min_p": { "key": "min_p", "label": "Min P", "description": "Minimum probability threshold for token selection", "min": 0.0, "max": 1.0, "step": 0.01, "default": 0.0, "displayOrder": 3, "exposedInGuideBuilder": false },
+    "presence_penalty": { "key": "presence_penalty", "label": "Presence Penalty", "description": "Reduces repetition (0=off, 1.5 recommended for general use, may reduce quality at higher values)", "min": 0.0, "max": 2.0, "step": 0.1, "default": 1.5, "displayOrder": 4, "exposedInGuideBuilder": true },
+    "repetition_penalty": { "key": "repetition_penalty", "label": "Repetition Penalty", "description": "Penalizes repeated tokens (1.0=disabled)", "min": 1.0, "max": 2.0, "step": 0.1, "default": 1.0, "displayOrder": 5, "exposedInGuideBuilder": false }
+  },
+  "thinkingControlJson": {
+    "defaultChoice": "enabled",
+    "choiceActions": {
+      "none": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": false },
+        { "target": "RequestField", "key": "reasoning_format", "value": "none" }
+      ],
+      "enabled": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true }
+      ]
+    }
+  }
+}

@@ -711,6 +711,222 @@ public sealed class RoutingReadinessServiceTests
     }
 
     [TestMethod]
+    [DataRow(RoutedServiceNames.Embeddings, "text-embedding-3-small")]
+    [DataRow(RoutedServiceNames.ImageGeneration, "dall-e-3")]
+    [DataRow(RoutedServiceNames.SpeechTranscription, "whisper-1")]
+    [DataRow(RoutedServiceNames.SpeechSynthesis, "tts-1")]
+    public async Task ProbeModeAsync_OpenAi_RequiresExplicitModelId(string serviceName, string validModelId)
+    {
+        using var db = CreateDb();
+        SeedMode(db, serviceName, new ServiceMode(
+            ModeId: "openai",
+            ProviderSection: "OpenAI",
+            ModelId: null,
+            RequestPresetJson: serviceName == RoutedServiceNames.SpeechSynthesis
+                ? "{\"VoiceName\":\"alloy\"}"
+                : null,
+            Enabled: true,
+            IsDefault: true));
+
+        var configuration = BuildConfigurationWithDefaults();
+        var appSettings = CreateAppSettings(db, configuration);
+        var inventory = new Mock<ILlamaRuntimeInventoryService>();
+        inventory.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+
+        var service = new RoutingReadinessService(
+            appSettings,
+            inventory.Object,
+            new TestServiceScopeFactory(db, configuration),
+            Mock.Of<ILogger<RoutingReadinessService>>());
+
+        var result = await service.ProbeModeAsync(serviceName, "openai");
+
+        result.Status.Should().Be("blocked");
+        result.Blockers.Should().Contain(b =>
+            b.StartsWith(RoutingReadinessService.BlockerKeys.ModelMissing, StringComparison.Ordinal)
+            && b.Contains("requires a model id", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    [DataRow(RoutedServiceNames.Embeddings, "text-embedding-3-small")]
+    [DataRow(RoutedServiceNames.ImageGeneration, "dall-e-3")]
+    [DataRow(RoutedServiceNames.ImageGeneration, "gpt-image-1")]
+    [DataRow(RoutedServiceNames.SpeechTranscription, "whisper-1")]
+    [DataRow(RoutedServiceNames.SpeechTranscription, "gpt-4o-transcribe")]
+    [DataRow(RoutedServiceNames.SpeechSynthesis, "tts-1")]
+    public async Task ProbeModeAsync_OpenAi_AcceptsValidModels(string serviceName, string modelId)
+    {
+        using var db = CreateDb();
+        SeedMode(db, serviceName, new ServiceMode(
+            ModeId: "openai",
+            ProviderSection: "OpenAI",
+            ModelId: modelId,
+            RequestPresetJson: serviceName == RoutedServiceNames.SpeechSynthesis
+                ? "{\"VoiceName\":\"alloy\"}"
+                : null,
+            Enabled: true,
+            IsDefault: true));
+
+        var configuration = BuildConfigurationWithDefaults();
+        var appSettings = CreateAppSettings(db, configuration);
+        var inventory = new Mock<ILlamaRuntimeInventoryService>();
+        inventory.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+
+        var service = new RoutingReadinessService(
+            appSettings,
+            inventory.Object,
+            new TestServiceScopeFactory(db, configuration),
+            Mock.Of<ILogger<RoutingReadinessService>>());
+
+        var result = await service.ProbeModeAsync(serviceName, "openai");
+
+        result.Status.Should().Be("ready",
+            $"model '{modelId}' should be recognized as capable for {serviceName} on OpenAI");
+        result.Blockers.Should().BeEmpty();
+        result.ProviderSection.Should().Be("OpenAI");
+        result.ModelId.Should().Be(modelId);
+    }
+
+    [TestMethod]
+    [DataRow(RoutedServiceNames.Embeddings, "gpt-4o")]
+    [DataRow(RoutedServiceNames.ImageGeneration, "gpt-4o")]
+    [DataRow(RoutedServiceNames.SpeechTranscription, "gpt-4o")]
+    [DataRow(RoutedServiceNames.SpeechSynthesis, "gpt-4o")]
+    public async Task ProbeModeAsync_OpenAi_RejectsInvalidModels(string serviceName, string modelId)
+    {
+        using var db = CreateDb();
+        SeedMode(db, serviceName, new ServiceMode(
+            ModeId: "openai",
+            ProviderSection: "OpenAI",
+            ModelId: modelId,
+            RequestPresetJson: serviceName == RoutedServiceNames.SpeechSynthesis
+                ? "{\"VoiceName\":\"alloy\"}"
+                : null,
+            Enabled: true,
+            IsDefault: true));
+
+        var configuration = BuildConfigurationWithDefaults();
+        var appSettings = CreateAppSettings(db, configuration);
+        var inventory = new Mock<ILlamaRuntimeInventoryService>();
+        inventory.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+
+        var service = new RoutingReadinessService(
+            appSettings,
+            inventory.Object,
+            new TestServiceScopeFactory(db, configuration),
+            Mock.Of<ILogger<RoutingReadinessService>>());
+
+        var result = await service.ProbeModeAsync(serviceName, "openai");
+
+        result.Status.Should().Be("blocked",
+            $"model '{modelId}' should not be recognized as capable for {serviceName} on OpenAI");
+        result.Blockers.Should().Contain(b =>
+            b.StartsWith(RoutingReadinessService.BlockerKeys.ModelMissing, StringComparison.Ordinal)
+            && b.Contains("not recognized", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ProbeModeAsync_OpenAiSpeechSynthesis_RequiresVoiceName()
+    {
+        using var db = CreateDb();
+        SeedMode(db, RoutedServiceNames.SpeechSynthesis, new ServiceMode(
+            ModeId: "openai",
+            ProviderSection: "OpenAI",
+            ModelId: "tts-1",
+            RequestPresetJson: null,
+            Enabled: true,
+            IsDefault: true));
+
+        var configuration = BuildConfigurationWithDefaults();
+        var appSettings = CreateAppSettings(db, configuration);
+        var inventory = new Mock<ILlamaRuntimeInventoryService>();
+        inventory.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+
+        var service = new RoutingReadinessService(
+            appSettings,
+            inventory.Object,
+            new TestServiceScopeFactory(db, configuration),
+            Mock.Of<ILogger<RoutingReadinessService>>());
+
+        var result = await service.ProbeModeAsync(RoutedServiceNames.SpeechSynthesis, "openai");
+
+        result.Status.Should().Be("blocked");
+        result.Blockers.Should().Contain(b =>
+            b.Contains("VoiceName", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ProbeModeAsync_OpenAiSpeechSynthesis_ReturnsReady_WhenVoiceNameProvided()
+    {
+        using var db = CreateDb();
+        SeedMode(db, RoutedServiceNames.SpeechSynthesis, new ServiceMode(
+            ModeId: "openai",
+            ProviderSection: "OpenAI",
+            ModelId: "tts-1",
+            RequestPresetJson: "{\"VoiceName\":\"alloy\"}",
+            Enabled: true,
+            IsDefault: true));
+
+        var configuration = BuildConfigurationWithDefaults();
+        var appSettings = CreateAppSettings(db, configuration);
+        var inventory = new Mock<ILlamaRuntimeInventoryService>();
+        inventory.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+
+        var service = new RoutingReadinessService(
+            appSettings,
+            inventory.Object,
+            new TestServiceScopeFactory(db, configuration),
+            Mock.Of<ILogger<RoutingReadinessService>>());
+
+        var result = await service.ProbeModeAsync(RoutedServiceNames.SpeechSynthesis, "openai");
+
+        result.Status.Should().Be("ready");
+        result.Blockers.Should().BeEmpty();
+        result.ProviderSection.Should().Be("OpenAI");
+        result.ModelId.Should().Be("tts-1");
+    }
+
+    [TestMethod]
+    public async Task ProbeModeAsync_OpenAi_ReturnsBlocked_WhenApiKeyMissing()
+    {
+        using var db = CreateDb();
+        SeedMode(db, RoutedServiceNames.Embeddings, new ServiceMode(
+            ModeId: "openai",
+            ProviderSection: "OpenAI",
+            ModelId: "text-embedding-3-small",
+            RequestPresetJson: null,
+            Enabled: true,
+            IsDefault: true));
+
+        var configuration = BuildConfigurationWithDefaults(overrides: new Dictionary<string, string?>
+        {
+            ["OpenAI:ApiKey"] = null
+        });
+        var appSettings = CreateAppSettings(db, configuration);
+        var inventory = new Mock<ILlamaRuntimeInventoryService>();
+        inventory.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+
+        var service = new RoutingReadinessService(
+            appSettings,
+            inventory.Object,
+            new TestServiceScopeFactory(db, configuration),
+            Mock.Of<ILogger<RoutingReadinessService>>());
+
+        var result = await service.ProbeModeAsync(RoutedServiceNames.Embeddings, "openai");
+
+        result.Status.Should().Be("blocked");
+        result.Blockers.Should().Contain(b =>
+            b.StartsWith(RoutingReadinessService.BlockerKeys.ProviderMissing, StringComparison.Ordinal)
+            && b.Contains("OpenAI:ApiKey", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task Overview_Shape_HasOneRollupPerRoutedService()
     {
         // Lightweight integration-ish assembly: exercise the same composition the

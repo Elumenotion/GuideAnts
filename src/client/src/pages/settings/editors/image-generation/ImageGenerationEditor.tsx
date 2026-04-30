@@ -202,6 +202,20 @@ function renderCloudImageBehavior(providerId: string) {
           </li>
         </ul>
       );
+    case 'ImageGeneration.OpenAI.Images':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            OpenAI image generation uses <span className="font-mono">/images/generations</span> with the selected{' '}
+            <span className="font-mono">Image Model ID</span> (e.g. <span className="font-mono">dall-e-3</span>,{' '}
+            <span className="font-mono">gpt-image-1</span>).
+          </li>
+          <li>
+            Image edits use <span className="font-mono">/images/edits</span> for models that support it.
+            Size options differ by model.
+          </li>
+        </ul>
+      );
     default:
       return (
         <p className="text-sm text-gray-700">

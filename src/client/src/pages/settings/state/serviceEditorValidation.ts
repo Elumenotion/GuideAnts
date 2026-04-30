@@ -66,7 +66,8 @@ export function validateOperativeProviderFields(
         if (
           (meta.name === 'MaxConcurrentConversions' ||
             meta.name === 'MaxRetries' ||
-            meta.name === 'AsyncStatusPollIntervalMs') &&
+            meta.name === 'AsyncStatusPollIntervalMs' ||
+            meta.name === 'Dimensions') &&
           n <= 0
         ) {
           errors[meta.name] = `${label} must be greater than zero.`;

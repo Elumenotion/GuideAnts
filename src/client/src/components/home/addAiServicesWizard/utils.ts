@@ -10,14 +10,22 @@ import {
   GEMINI_SERVICE_PROVIDER_IDS,
   MODEL_PROVIDER_ID_TO_LABEL,
   MODEL_PROVIDER_LABEL_TO_ID,
+  OPENAI_CORE_SECTION,
+  OPENAI_MODEL_PROVIDER_ID_TO_LABEL,
+  OPENAI_MODEL_PROVIDER_LABEL_TO_ID,
+  OPENAI_SERVICE_PROVIDER_IDS,
 } from './constants';
 import type {
   ExistingGeminiModel,
   ExistingFoundryModel,
+  ExistingOpenAiModel,
   FoundryModelDraft,
   FoundryModelProviderLabel,
   GeminiModelDraft,
   GeminiOptionalServiceKey,
+  OpenAiModelDraft,
+  OpenAiModelProviderLabel,
+  OpenAiOptionalServiceKey,
   OptionalServiceKey,
   WizardLoadSnapshot,
 } from './types';
@@ -65,6 +73,23 @@ export function toExistingGeminiModels(models: SettingsModelDto[]): ExistingGemi
     .sort((left, right) => left.modelId.localeCompare(right.modelId));
 }
 
+export function toExistingOpenAiModels(models: SettingsModelDto[]): ExistingOpenAiModel[] {
+  return models
+    .map((model) => {
+      const providerLabel = OPENAI_MODEL_PROVIDER_ID_TO_LABEL[model.provider];
+      if (!providerLabel) {
+        return null;
+      }
+      return {
+        modelId: model.modelId,
+        provider: providerLabel,
+        raw: model,
+      } satisfies ExistingOpenAiModel;
+    })
+    .filter((item): item is ExistingOpenAiModel => item !== null)
+    .sort((left, right) => left.modelId.localeCompare(right.modelId));
+}
+
 export function makeDraftModel(
   localId: string,
   modelId: string,
@@ -88,6 +113,21 @@ export function makeGeminiDraftModel(
   return {
     localId,
     modelId: modelId.trim(),
+    setAsGlobalDefault,
+    persisted: false,
+  };
+}
+
+export function makeOpenAiDraftModel(
+  localId: string,
+  modelId: string,
+  provider: OpenAiModelProviderLabel,
+  setAsGlobalDefault: boolean
+): OpenAiModelDraft {
+  return {
+    localId,
+    modelId: modelId.trim(),
+    provider,
     setAsGlobalDefault,
     persisted: false,
   };
@@ -125,6 +165,18 @@ export function buildAddGeminiModelRequest(modelId: string): AddModelRequest {
   const trimmed = modelId.trim();
   return {
     provider: GEMINI_MODEL_PROVIDER_ID,
+    catalog: {
+      modelId: trimmed,
+      displayName: trimmed,
+      isActive: true,
+    },
+  };
+}
+
+export function buildAddOpenAiModelRequest(modelId: string, provider: OpenAiModelProviderLabel): AddModelRequest {
+  const trimmed = modelId.trim();
+  return {
+    provider: OPENAI_MODEL_PROVIDER_LABEL_TO_ID[provider],
     catalog: {
       modelId: trimmed,
       displayName: trimmed,
@@ -337,6 +389,92 @@ export function summarizeGeminiOptionalServiceWarnings(snapshot: WizardLoadSnaps
   const warnings: string[] = [];
   for (const key of keys) {
     const result = geminiOptionalServiceStatus(key, snapshot);
+    if (!result.complete) {
+      warnings.push(result.message);
+    }
+  }
+  return warnings;
+}
+
+function openAiOptionalServiceStatus(
+  serviceKey: OpenAiOptionalServiceKey,
+  snapshot: WizardLoadSnapshot
+): { complete: boolean; message: string } {
+  const openAiConnection = findSectionSummary(snapshot.sectionSummaries, OPENAI_CORE_SECTION);
+  if (!openAiConnection || openAiConnection.readinessStatus !== 'configured') {
+    if (serviceKey === 'Embeddings') {
+      return { complete: false, message: 'OpenAI connection is not configured for Embeddings.' };
+    }
+    if (serviceKey === 'ImageGeneration') {
+      return { complete: false, message: 'OpenAI connection is not configured for Image Generation.' };
+    }
+    if (serviceKey === 'SpeechTranscription') {
+      return { complete: false, message: 'OpenAI connection is not configured for Speech Transcription.' };
+    }
+    return { complete: false, message: 'OpenAI connection is not configured for Speech Synthesis.' };
+  }
+
+  if (serviceKey === 'Embeddings') {
+    const state = snapshot.serviceStates.Embeddings;
+    const providerId = OPENAI_SERVICE_PROVIDER_IDS.Embeddings;
+    const provider = getProviderState(state, providerId);
+    if (!state || !provider || state.activeProviderId !== providerId) {
+      return { complete: false, message: 'Embeddings service is not set to OpenAI.' };
+    }
+    if (!provider.canActivate) {
+      return { complete: false, message: 'Embeddings service has unresolved activation blockers.' };
+    }
+    return { complete: true, message: 'Embeddings is ready.' };
+  }
+
+  if (serviceKey === 'ImageGeneration') {
+    const state = snapshot.serviceStates.ImageGeneration;
+    const providerId = OPENAI_SERVICE_PROVIDER_IDS.ImageGeneration;
+    const provider = getProviderState(state, providerId);
+    if (!state || !provider || state.activeProviderId !== providerId) {
+      return { complete: false, message: 'Image Generation service is not set to OpenAI.' };
+    }
+    if (!provider.canActivate) {
+      return { complete: false, message: 'Image Generation service has unresolved activation blockers.' };
+    }
+    return { complete: true, message: 'Image Generation is ready.' };
+  }
+
+  if (serviceKey === 'SpeechTranscription') {
+    const state = snapshot.serviceStates.SpeechTranscription;
+    const providerId = OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription;
+    const provider = getProviderState(state, providerId);
+    if (!state || !provider || state.activeProviderId !== providerId) {
+      return { complete: false, message: 'Speech Transcription service is not set to OpenAI.' };
+    }
+    if (!provider.canActivate) {
+      return { complete: false, message: 'Speech Transcription service has unresolved activation blockers.' };
+    }
+    return { complete: true, message: 'Speech Transcription is ready.' };
+  }
+
+  const state = snapshot.serviceStates.SpeechSynthesis;
+  const providerId = OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis;
+  const provider = getProviderState(state, providerId);
+  if (!state || !provider || state.activeProviderId !== providerId) {
+    return { complete: false, message: 'Speech Synthesis service is not set to OpenAI.' };
+  }
+  if (!provider.canActivate) {
+    return { complete: false, message: 'Speech Synthesis service has unresolved activation blockers.' };
+  }
+  return { complete: true, message: 'Speech Synthesis is ready.' };
+}
+
+export function summarizeOpenAiOptionalServiceWarnings(snapshot: WizardLoadSnapshot): string[] {
+  const keys: OpenAiOptionalServiceKey[] = [
+    'Embeddings',
+    'ImageGeneration',
+    'SpeechTranscription',
+    'SpeechSynthesis',
+  ];
+  const warnings: string[] = [];
+  for (const key of keys) {
+    const result = openAiOptionalServiceStatus(key, snapshot);
     if (!result.complete) {
       warnings.push(result.message);
     }

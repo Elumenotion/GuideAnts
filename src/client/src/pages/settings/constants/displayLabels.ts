@@ -4,6 +4,7 @@ const CONNECTION_SECTION_LABELS: Record<string, string> = {
   AzureOpenAiImages: 'Microsoft Foundry Images',
   AzureOpenAiEmbedding: 'Microsoft Foundry Embeddings',
   AzureDocumentIntelligence: 'Microsoft Foundry Document Intelligence',
+  OpenAI: 'OpenAI',
 };
 
 const SERVICE_LABELS: Record<string, string> = {
@@ -37,6 +38,10 @@ const SERVICE_PROVIDER_LABELS: Record<string, string> = {
   'SpeechSynthesis.OpenRouter.Tts': 'OpenRouter TTS',
   'ImageGeneration.OpenRouter.Image': 'OpenRouter Image',
   'Embeddings.OpenRouter.Embeddings': 'OpenRouter Embeddings',
+  'SpeechTranscription.OpenAI.Audio': 'OpenAI Whisper',
+  'SpeechSynthesis.OpenAI.Tts': 'OpenAI TTS',
+  'ImageGeneration.OpenAI.Images': 'OpenAI Images',
+  'Embeddings.OpenAI.Embedding': 'OpenAI Embeddings',
 };
 
 const CATALOG_PROVIDER_LABELS: Record<string, string> = {
@@ -56,6 +61,7 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   AllowedModels: 'Allowed Models',
   AsyncStatusPollIntervalMs: 'Poll Interval (ms)',
   Deployment: 'Deployment',
+  Dimensions: 'Dimensions',
   DoclingDoOcr: 'Do OCR',
   DoclingForceOcr: 'Force OCR',
   DoclingImageExportMode: 'Image Export Mode',
@@ -94,6 +100,10 @@ const PROVIDER_FIELD_LABEL_OVERRIDES: Record<string, Record<string, string>> = {
   'SpeechSynthesis.Google.TextToSpeech': { ModelId: 'TTS Model ID' },
   'SpeechSynthesis.HuggingFace.Inference': { ModelId: 'TTS Model ID' },
   'SpeechSynthesis.OpenRouter.Tts': { ModelId: 'TTS Model ID' },
+  'SpeechTranscription.OpenAI.Audio': { ModelId: 'Transcription Model ID' },
+  'SpeechSynthesis.OpenAI.Tts': { ModelId: 'TTS Model ID' },
+  'ImageGeneration.OpenAI.Images': { ModelId: 'Image Model ID' },
+  'Embeddings.OpenAI.Embedding': { ModelId: 'Embedding Model ID' },
 };
 
 const COMMON_FIELD_HELP_TEXT: Record<string, string> = {
@@ -101,6 +111,7 @@ const COMMON_FIELD_HELP_TEXT: Record<string, string> = {
   AllowedModels: 'Optional comma-separated allowlist.',
   AsyncStatusPollIntervalMs: 'Polling interval for async operations in milliseconds.',
   Deployment: 'Deployment name used by this route.',
+  Dimensions: 'Output embedding dimensions. Supported by text-embedding-3-* models only.',
   EditModelDeployment: 'Deployment name used for edit requests.',
   LocalMinIntervalMs: 'Minimum delay between local requests in milliseconds.',
   LocalOutputFormat: 'Output format for local image generation.',

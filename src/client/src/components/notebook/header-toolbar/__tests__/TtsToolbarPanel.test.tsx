@@ -22,7 +22,7 @@ vi.mock('../../../../services/api', () => ({
 }));
 
 describe('TtsToolbarPanel', () => {
-  it('switches provider and installed model', async () => {
+  it('switches to local provider when selecting an installed model', async () => {
     const user = userEvent.setup();
     render(
       <TtsToolbarPanel
@@ -32,17 +32,28 @@ describe('TtsToolbarPanel', () => {
           kind: 'tts',
           status: 'ready',
           summary: 'ready',
-          activeProviderId: 'SpeechSynthesis.LocalTts.Http',
-          activeProviderLabel: 'Local',
-          supportsLocalRuntimePower: true,
-          localRuntimeOn: true,
+          activeProviderId: 'SpeechSynthesis.Google.TextToSpeech',
+          activeProviderLabel: 'Google Gemini',
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
           providerOptions: [
             {
-              providerId: 'SpeechSynthesis.LocalTts.Http',
-              displayName: 'Local',
-              providerKind: 'local',
+              providerId: 'SpeechSynthesis.Google.TextToSpeech',
+              displayName: 'GoogleGeminiApi',
+              providerKind: 'Cloud',
               canActivate: true,
               blockers: [],
+              providerSection: 'GoogleGeminiApi',
+              modelId: 'tts-1',
+            },
+            {
+              providerId: 'SpeechSynthesis.LocalTts.Http',
+              displayName: 'LocalServiceHosts:SpeechSynthesisBaseUrl',
+              providerKind: 'LocalHttp',
+              canActivate: true,
+              blockers: [],
+              providerSection: 'LocalServiceHosts:SpeechSynthesisBaseUrl',
+              modelId: null,
             },
           ],
           selection: null,
@@ -63,7 +74,6 @@ describe('TtsToolbarPanel', () => {
       />
     );
 
-    await user.click(screen.getByRole('option', { name: /Local \(local\)/i }));
     await user.click(screen.getByRole('option', { name: /voice-1/i }));
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'SpeechSynthesis',
@@ -90,10 +100,12 @@ describe('TtsToolbarPanel', () => {
           providerOptions: [
             {
               providerId: 'SpeechSynthesis.Google.TextToSpeech',
-              displayName: 'Google',
+              displayName: 'GoogleGeminiApi',
               providerKind: 'Cloud',
               canActivate: false,
               blockers: ['Voice Name is required.'],
+              providerSection: 'GoogleGeminiApi',
+              modelId: null,
             },
           ],
           selection: null,
@@ -112,8 +124,9 @@ describe('TtsToolbarPanel', () => {
       />
     );
 
-    await user.click(screen.getByRole('option', { name: /Google \(Cloud\)/i }));
+    await user.click(screen.getByRole('option', { name: /google/i }));
 
     expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });
+
 });

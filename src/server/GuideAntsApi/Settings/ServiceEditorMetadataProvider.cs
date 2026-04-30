@@ -42,6 +42,12 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                     Field("ModelId", "text", true, operative: true),
                     Field("AllowedModels", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
+                ],
+                [ServiceProviderIds.EmbeddingsOpenAiEmbedding] =
+                [
+                    Field("ModelId", "text", true, operative: true),
+                    Field("Dimensions", "int", false, operative: true),
+                    Field("TimeoutSeconds", "int", true, operative: true),
                 ]
             },
             [RoutedServiceNames.ImageGeneration] = new Dictionary<string, IReadOnlyList<ProviderFieldMetadataDto>>(StringComparer.Ordinal)
@@ -76,6 +82,11 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [
                     Field("ModelId", "text", true, operative: true),
                     Field("AllowedModels", "text", false, operative: true),
+                    Field("TimeoutSeconds", "int", true, operative: true),
+                ],
+                [ServiceProviderIds.ImageGenerationOpenAiImages] =
+                [
+                    Field("ModelId", "text", true, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ]
             },
@@ -131,6 +142,11 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                     Field("AllowedModels", "text", false, operative: true),
                     Field("MaxAudioBytes", "int", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
+                ],
+                [ServiceProviderIds.SpeechTranscriptionOpenAiAudio] =
+                [
+                    Field("ModelId", "text", true, operative: true),
+                    Field("TimeoutSeconds", "int", true, operative: true),
                 ]
             },
             [RoutedServiceNames.SpeechSynthesis] = new Dictionary<string, IReadOnlyList<ProviderFieldMetadataDto>>(StringComparer.Ordinal)
@@ -164,6 +180,12 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [
                     Field("ModelId", "text", true, operative: true),
                     Field("AllowedModels", "text", false, operative: true),
+                    Field("TimeoutSeconds", "int", true, operative: true),
+                ],
+                [ServiceProviderIds.SpeechSynthesisOpenAiTts] =
+                [
+                    Field("ModelId", "text", true, operative: true),
+                    Field("VoiceName", "text", true, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ]
             },

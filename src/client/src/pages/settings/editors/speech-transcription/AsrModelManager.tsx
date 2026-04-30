@@ -10,6 +10,7 @@ import type {
   LocalModelsUpstreamFailure,
 } from '../../../../types/settings';
 import { RepositoryFilePicker, snapshotPreviewClassifier } from '../common';
+import { isSelectableLocalVoiceModelEntry } from '../common/localModelSelection';
 
 type AsrModelEntry = {
   modelRef: string;
@@ -45,7 +46,6 @@ type DownloadOp = {
 };
 
 const SERVICE_ID = 'SpeechTranscription';
-const isVisibleModelEntry = (modelRef: string): boolean => !modelRef.trim().startsWith('.');
 
 interface AsrModelManagerProps {
   enabled: boolean;
@@ -190,7 +190,7 @@ export function AsrModelManager({ enabled }: AsrModelManagerProps) {
     }
   };
 
-  const items = (list?.items ?? []).filter((m) => isVisibleModelEntry(m.modelRef));
+  const items = (list?.items ?? []).filter((m) => isSelectableLocalVoiceModelEntry(m));
 
   return (
     <>

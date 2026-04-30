@@ -257,8 +257,13 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
 
     private static IReadOnlyList<string> AdditionalModeFieldBlockers(string service, ServiceModeDto mode)
     {
-        if (!string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(mode.ProviderSection, "GoogleGeminiApi", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase))
+        {
+            return Array.Empty<string>();
+        }
+
+        if (!string.Equals(mode.ProviderSection, "GoogleGeminiApi", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mode.ProviderSection, "OpenAI", StringComparison.OrdinalIgnoreCase))
         {
             return Array.Empty<string>();
         }
@@ -322,6 +327,14 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
                 || string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase);
         }
 
+        if (string.Equals(providerSection, "OpenAI", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(service, RoutedServiceNames.Embeddings, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(service, RoutedServiceNames.ImageGeneration, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(service, RoutedServiceNames.SpeechTranscription, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase);
+        }
+
         return false;
     }
 
@@ -341,6 +354,11 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         if (string.Equals(providerSection, "OpenRouter", StringComparison.OrdinalIgnoreCase))
         {
             return OpenRouterCapabilityBlockers(service, modelId, mode.RequestPresetJson);
+        }
+
+        if (string.Equals(providerSection, "OpenAI", StringComparison.OrdinalIgnoreCase))
+        {
+            return OpenAiCapabilityBlockers(service, modelId, mode.RequestPresetJson);
         }
 
         return Array.Empty<string>();
@@ -469,6 +487,65 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
                 : new[]
                 {
                     $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as TTS-capable for OpenRouter."
+                };
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private IReadOnlyList<string> OpenAiCapabilityBlockers(string service, string modelId, string? requestPresetJson)
+    {
+        if (string.Equals(service, RoutedServiceNames.Embeddings, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
+                m => m.Contains("embed", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as embedding-capable for OpenAI."
+                };
+        }
+
+        if (string.Equals(service, RoutedServiceNames.ImageGeneration, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
+                m => m.Contains("dall-e", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("gpt-image", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as image-capable for OpenAI."
+                };
+        }
+
+        if (string.Equals(service, RoutedServiceNames.SpeechTranscription, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
+                m => m.Contains("whisper", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("transcribe", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as transcription-capable for OpenAI."
+                };
+        }
+
+        if (string.Equals(service, RoutedServiceNames.SpeechSynthesis, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAllowedByConfigOrHeuristic(
+                modelId,
+                ReadServiceModePresetField(requestPresetJson, "AllowedModels"),
+                m => m.Contains("tts", StringComparison.OrdinalIgnoreCase))
+                ? Array.Empty<string>()
+                : new[]
+                {
+                    $"{BlockerKeys.ModelMissing}: model '{modelId}' is not recognized as TTS-capable for OpenAI."
                 };
         }
 

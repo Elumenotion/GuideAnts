@@ -134,6 +134,20 @@ function renderCloudEmbeddingsBehavior(provider: ProviderEditorStateDto) {
           </li>
         </ul>
       );
+    case 'Embeddings.OpenAI.Embedding':
+      return (
+        <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700">
+          <li>
+            OpenAI embeddings use the shared <span className="font-mono">OpenAI:ApiKey</span> plus the selected{' '}
+            <span className="font-mono">Embedding Model ID</span> (e.g.{' '}
+            <span className="font-mono">text-embedding-3-small</span>).
+          </li>
+          <li>
+            The optional <span className="font-mono">Dimensions</span> parameter is supported by{' '}
+            <span className="font-mono">text-embedding-3-*</span> models only.
+          </li>
+        </ul>
+      );
     default:
       return (
         <p className="text-sm text-gray-700">

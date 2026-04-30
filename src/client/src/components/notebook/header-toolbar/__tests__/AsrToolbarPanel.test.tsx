@@ -22,7 +22,7 @@ vi.mock('../../../../services/api', () => ({
 }));
 
 describe('AsrToolbarPanel', () => {
-  it('switches provider and installed model', async () => {
+  it('switches to local provider when selecting an installed model', async () => {
     const user = userEvent.setup();
     render(
       <AsrToolbarPanel
@@ -32,17 +32,28 @@ describe('AsrToolbarPanel', () => {
           kind: 'asr',
           status: 'ready',
           summary: 'ready',
-          activeProviderId: 'SpeechTranscription.LocalAsr.Http',
-          activeProviderLabel: 'Local',
-          supportsLocalRuntimePower: true,
-          localRuntimeOn: true,
+          activeProviderId: 'SpeechTranscription.Google.SpeechToText',
+          activeProviderLabel: 'Google Gemini',
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
           providerOptions: [
             {
-              providerId: 'SpeechTranscription.LocalAsr.Http',
-              displayName: 'Local',
-              providerKind: 'local',
+              providerId: 'SpeechTranscription.Google.SpeechToText',
+              displayName: 'GoogleGeminiApi',
+              providerKind: 'Cloud',
               canActivate: true,
               blockers: [],
+              providerSection: 'GoogleGeminiApi',
+              modelId: 'gemini-2.5-flash',
+            },
+            {
+              providerId: 'SpeechTranscription.LocalAsr.Http',
+              displayName: 'LocalServiceHosts:SpeechTranscriptionBaseUrl',
+              providerKind: 'LocalHttp',
+              canActivate: true,
+              blockers: [],
+              providerSection: 'LocalServiceHosts:SpeechTranscriptionBaseUrl',
+              modelId: null,
             },
           ],
           selection: null,
@@ -63,7 +74,6 @@ describe('AsrToolbarPanel', () => {
       />
     );
 
-    await user.click(screen.getByRole('option', { name: /Local \(local\)/i }));
     await user.click(screen.getByRole('option', { name: /asr-1/i }));
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'SpeechTranscription',
@@ -89,11 +99,13 @@ describe('AsrToolbarPanel', () => {
           localRuntimeOn: false,
           providerOptions: [
             {
-              providerId: 'SpeechTranscription.GoogleSpeechToText',
-              displayName: 'Google',
+              providerId: 'SpeechTranscription.Google.SpeechToText',
+              displayName: 'GoogleGeminiApi',
               providerKind: 'Cloud',
               canActivate: false,
               blockers: ['Transcription Model ID is required.'],
+              providerSection: 'GoogleGeminiApi',
+              modelId: null,
             },
           ],
           selection: null,
@@ -112,7 +124,7 @@ describe('AsrToolbarPanel', () => {
       />
     );
 
-    await user.click(screen.getByRole('option', { name: /Google \(Cloud\)/i }));
+    await user.click(screen.getByRole('option', { name: /google/i }));
 
     expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });

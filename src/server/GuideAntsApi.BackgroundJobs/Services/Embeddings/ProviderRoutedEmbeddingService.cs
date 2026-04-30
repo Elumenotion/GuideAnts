@@ -8,6 +8,7 @@ internal sealed class ProviderRoutedEmbeddingService(
     GoogleGeminiEmbeddingService googleGeminiEmbeddingService,
     HuggingFaceEmbeddingService huggingFaceEmbeddingService,
     OpenRouterEmbeddingService openRouterEmbeddingService,
+    OpenAiEmbeddingService openAiEmbeddingService,
     IServiceModeResolver serviceModeResolver) : IEmbeddingService
 {
     private const string AzureProviderSection = "AzureOpenAiEmbedding";
@@ -15,12 +16,14 @@ internal sealed class ProviderRoutedEmbeddingService(
     private const string GoogleGeminiProviderSection = "GoogleGeminiApi";
     private const string HuggingFaceProviderSection = "HuggingFace";
     private const string OpenRouterProviderSection = "OpenRouter";
+    private const string OpenAiProviderSection = "OpenAI";
 
     private readonly AzureOpenAiEmbeddingService _azureEmbeddingService = azureEmbeddingService;
     private readonly LocalEmbeddingService _localEmbeddingService = localEmbeddingService;
     private readonly GoogleGeminiEmbeddingService _googleGeminiEmbeddingService = googleGeminiEmbeddingService;
     private readonly HuggingFaceEmbeddingService _huggingFaceEmbeddingService = huggingFaceEmbeddingService;
     private readonly OpenRouterEmbeddingService _openRouterEmbeddingService = openRouterEmbeddingService;
+    private readonly OpenAiEmbeddingService _openAiEmbeddingService = openAiEmbeddingService;
     private readonly IServiceModeResolver _serviceModeResolver = serviceModeResolver;
 
     public async Task<float[][]> GetEmbeddingsAsync(
@@ -49,12 +52,15 @@ internal sealed class ProviderRoutedEmbeddingService(
             OpenRouterProviderSection => await _openRouterEmbeddingService
                 .GetEmbeddingsAsync(texts, RequireModelId(mode), mode.RequestPresetJson, cancellationToken)
                 .ConfigureAwait(false),
+            OpenAiProviderSection => await _openAiEmbeddingService
+                .GetEmbeddingsAsync(texts, RequireModelId(mode), mode.RequestPresetJson, cancellationToken)
+                .ConfigureAwait(false),
             _ => throw RoutingException.ProviderNotReady(
                 mode.ProviderSection,
                 new[]
                 {
                     $"Embeddings mode '{mode.ModeId}' references unsupported provider section '{mode.ProviderSection}'. " +
-                    $"Expected '{AzureProviderSection}', '{LocalProviderSection}', '{GoogleGeminiProviderSection}', '{HuggingFaceProviderSection}', or '{OpenRouterProviderSection}'."
+                    $"Expected '{AzureProviderSection}', '{LocalProviderSection}', '{GoogleGeminiProviderSection}', '{HuggingFaceProviderSection}', '{OpenRouterProviderSection}', or '{OpenAiProviderSection}'."
                 },
                 serviceId: RoutedServiceNames.Embeddings,
                 modeId: mode.ModeId)

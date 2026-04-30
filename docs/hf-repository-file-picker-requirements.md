@@ -2,11 +2,11 @@
 
 Status: Draft / design doc
 Owner: Settings / local-model admin
-Related: `docs/add-model-wizard-and-catalog-redesign.md`, `docs/llama-model-download-and-runtime-management.md`, `docs/settings-service-provider-model-requirements.md`
+Related: `docs/settings-page-provider-model-llama-redesign.md`, `docs/llama-model-download-and-runtime-management.md`, `docs/settings-service-provider-model-requirements.md`
 
 ## 1. Motivation
 
-The Add-Model wizard for **llama-cpp** was redesigned (see the "Naming note" in `docs/add-model-wizard-and-catalog-redesign.md`) so an operator can paste a Hugging Face `owner/repo` and pick the model GGUF and optional mmproj file from dropdowns, instead of authoring glob patterns. That UX change removed a whole class of user-visible bugs (silent multi-file quant downloads, mmproj mismatches, typoed patterns).
+The Add-Model wizard for **llama-cpp** was redesigned (see the current Settings architecture doc `docs/settings-page-provider-model-llama-redesign.md`) so an operator can paste a Hugging Face `owner/repo` and pick the model GGUF and optional mmproj file from dropdowns, instead of authoring glob patterns. That UX change removed a whole class of user-visible bugs (silent multi-file quant downloads, mmproj mismatches, typoed patterns).
 
 The same bad UX still exists for every other Hugging-Face-backed service in the app:
 

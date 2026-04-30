@@ -26,6 +26,11 @@ namespace GuideAntsApi.Options
         public const string EmbeddingsHuggingFaceInference = "Embeddings.HuggingFace.Inference";
         public const string EmbeddingsOpenRouterEmbeddings = "Embeddings.OpenRouter.Embeddings";
 
+        public const string SpeechTranscriptionOpenAiAudio = "SpeechTranscription.OpenAI.Audio";
+        public const string SpeechSynthesisOpenAiTts = "SpeechSynthesis.OpenAI.Tts";
+        public const string ImageGenerationOpenAiImages = "ImageGeneration.OpenAI.Images";
+        public const string EmbeddingsOpenAiEmbedding = "Embeddings.OpenAI.Embedding";
+
         public const string DocumentIntelligenceAzure = "DocumentIntelligence.Azure.DocumentIntelligence";
         public const string DocumentIntelligenceLocalDoclingHttp = "DocumentIntelligence.LocalDocling.Http";
     }

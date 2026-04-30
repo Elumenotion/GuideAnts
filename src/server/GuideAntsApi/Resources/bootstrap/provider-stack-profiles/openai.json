@@ -28,6 +28,32 @@
       "isActive": true
     }
   ],
-  "serviceDefaults": [],
+  "serviceDefaults": [
+    {
+      "serviceId": "SpeechTranscription",
+      "providerId": "SpeechTranscription.OpenAI.Audio",
+      "modelId": "whisper-1",
+      "timeoutSeconds": 300
+    },
+    {
+      "serviceId": "SpeechSynthesis",
+      "providerId": "SpeechSynthesis.OpenAI.Tts",
+      "modelId": "tts-1",
+      "voiceName": "alloy",
+      "timeoutSeconds": 300
+    },
+    {
+      "serviceId": "ImageGeneration",
+      "providerId": "ImageGeneration.OpenAI.Images",
+      "modelId": "gpt-image-1",
+      "timeoutSeconds": 600
+    },
+    {
+      "serviceId": "Embeddings",
+      "providerId": "Embeddings.OpenAI.Embedding",
+      "modelId": "text-embedding-3-small",
+      "timeoutSeconds": 300
+    }
+  ],
   "runtimeDependencies": []
 }

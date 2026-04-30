@@ -15,6 +15,7 @@ import {
   snapshotPreviewClassifier,
   withSnapshotExtraBadges,
 } from '../common';
+import { isSelectableLocalVoiceModelEntry } from '../common/localModelSelection';
 
 type TtsModelEntry = {
   modelRef: string;
@@ -46,7 +47,6 @@ type DownloadOp = {
 };
 
 const SERVICE_ID = 'SpeechSynthesis';
-const isVisibleModelEntry = (modelRef: string): boolean => !modelRef.trim().startsWith('.');
 
 interface TtsModelManagerProps {
   enabled: boolean;
@@ -194,7 +194,7 @@ export function TtsModelManager({ enabled }: TtsModelManagerProps) {
     }
   };
 
-  const items = (list?.items ?? []).filter((m) => isVisibleModelEntry(m.modelRef));
+  const items = (list?.items ?? []).filter((m) => isSelectableLocalVoiceModelEntry(m));
 
   return (
     <>

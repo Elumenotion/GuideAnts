@@ -20,6 +20,21 @@ describe('displayLabels', () => {
     expect(getRuntimeDependencyDisplayName('LocalServiceHosts:EmbeddingsBaseUrl')).toBe('Embeddings Base URL');
   });
 
+  it('returns mapped labels for OpenAI service provider ids', () => {
+    expect(getServiceProviderDisplayName('SpeechTranscription.OpenAI.Audio')).toBe('OpenAI Whisper');
+    expect(getServiceProviderDisplayName('SpeechSynthesis.OpenAI.Tts')).toBe('OpenAI TTS');
+    expect(getServiceProviderDisplayName('ImageGeneration.OpenAI.Images')).toBe('OpenAI Images');
+    expect(getServiceProviderDisplayName('Embeddings.OpenAI.Embedding')).toBe('OpenAI Embeddings');
+    expect(getConnectionSectionDisplayName('OpenAI')).toBe('OpenAI');
+  });
+
+  it('returns OpenAI-specific provider field labels', () => {
+    expect(getProviderFieldLabel('SpeechTranscription.OpenAI.Audio', 'ModelId')).toBe('Transcription Model ID');
+    expect(getProviderFieldLabel('SpeechSynthesis.OpenAI.Tts', 'ModelId')).toBe('TTS Model ID');
+    expect(getProviderFieldLabel('ImageGeneration.OpenAI.Images', 'ModelId')).toBe('Image Model ID');
+    expect(getProviderFieldLabel('Embeddings.OpenAI.Embedding', 'ModelId')).toBe('Embedding Model ID');
+  });
+
   it('returns deterministic humanized labels for unknown ids', () => {
     expect(humanizePresentationKey('UnknownServiceProviderId')).toBe('Unknown Service Provider Id');
     expect(getConnectionSectionDisplayName('NewProviderSection')).toBe('New Provider Section');

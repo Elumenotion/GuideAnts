@@ -1,51 +1,53 @@
-# Default Chat Models (R-9)
+# Default Chat Models
 
-This document describes the **global default chat model** feature: one instance-wide default catalog model (cloud or `llama-cpp`), an optional **hard override** that forces every chat turn to use that default, and the shared UI plus server resolver seam.
+Last updated: 2026-04-30
 
-## Semantics
+This document describes the shipped default-chat behavior:
+instance-wide default model, optional override-all behavior, and resolver integration.
 
-- **Hard override (`OverrideAllChatModels`)** — When **on**, every chat path uses the configured default **catalog model id** and the **sampling fields stored in `ChatDefaults`**. Per-entity `modelId` on guides/assistants is ignored for routing.
-- **Override off** — Per-entity `modelId` is respected when set. If the entity uses **Use Default Model** (stored as omitted / empty `modelId`), the effective model is **`ChatDefaults:DefaultModelId`** and sampling overrides from `ChatDefaults` apply for that resolution.
+## 1. Behavior
 
-## Server seam
+- `defaultModelId`: instance default chat catalog model.
+- `overrideAllChatModels`:
+  - `true`: all chat turns route to default model.
+  - `false`: entity `modelId` is used when set; empty/omitted model uses default.
 
-- **`IChatModelResolver`** (`GuideAntsApi.Services.Routing`) — Single seam (R-1.6) used from conversation streaming, published conversations, `Agent.Invoke`, and conversation creation. Returns `ResolvedChatModel` with:
-  - **`ModelId`** — Catalog model id string for routing.
-  - **`ReferenceKind`** — `Direct` | `DefaultedTo` | `OverriddenToDefault` (R-9.2).
-  - **`OverrideTemperature` / `OverrideTopP` / `OverrideReasoningEffort`** — Applied in `ThreadRun` when resolution is not `Direct` (from `ChatDefaults` configuration).
-- **`POST /api/chat/run-thread/{assistantName}`** now resolves the effective deployment through `IChatModelResolver` before invoking `ChatRunner`, and fills missing sampling overrides from the resolved default model settings.
-- **Evaluator continuity.** When `ThreadRun` performs evaluator invocations, it now forwards the resolved deployment id and override knobs so evaluator calls follow the same default/override semantics as the primary run.
+Sampling overrides from chat defaults apply for default/override paths.
 
-- **Readiness** — `GET` chat-target readiness populates `referenceKind` on `ChatTargetReadinessDto` (`direct` | `defaultedTo` | `overriddenToDefault`).
+## 2. Resolver seam
 
-## Persistence
+- `IChatModelResolver` is the canonical seam for effective chat model resolution.
+- `IChatTargetResolver` and `IChatTargetValidator` handle target resolution and execution validation.
 
-- Application settings section **`ChatDefaults`** (JSON blob, row-versioned). Exposed to the client as **`GET/PUT /api/settings/chat-defaults`** (typed DTOs) in addition to the generic section APIs.
+This separation is required to keep default behavior explicit and testable.
 
-## UI
+## 3. Supported chat provider ids
 
-- **`ChatModelConfigurator`** — Shared component for Guide Builder (`mode="entity"`) and Settings Overview default card (`mode="default"`).
-- **Guide Builder** — Model selector includes **Use Default Model (from Settings)** (`modelId` stored as empty / omitted). When the entity uses the default or when hard override is on, per-entity sampling controls are disabled with an explanatory hint.
-- **Settings → Overview** — **Default Chat Model** card: configurator + override toggle + Save (concurrency via `rowVersion`).
-- **Home → Add AI Services Wizard** — Model step can set the new model as
-  global default. When no catalog models exist yet, the first added model is
-  automatically set as `ChatDefaults:DefaultModelId`. This flow updates only
-  `defaultModelId` and preserves `overrideAllChatModels` and existing sampling
-  fields.
+The current validated chat provider set is:
 
-## Local Llama (`llama-cpp`)
+- `openai-chat`
+- `openai-responses`
+- `azure-openai-chat`
+- `azure-openai-responses`
+- `anthropic`
+- `llama-cpp`
+- `google-gemini-chat`
+- `hf-inference-chat`
+- `openrouter-chat`
 
-Choosing a `llama-cpp` catalog model as the global default does not change the admin protocol. **R-12** load orchestration in `NotebookModelRuntimeService` still applies when a chat turn resolves to that model.
+## 4. Settings and UI surfaces
 
-## Bootstrap seeds and defaults
+- `GET/PUT /api/settings/chat-defaults`
+- `Settings -> Overview` default chat model controls
+- Guide/assistant editor support for "Use Default Model"
 
-All required guide/assistant seeds in `Resources/bootstrap/` omit
-`model`, `defaultModel`, and sampling parameters (`temperature`, `top_p`,
-`reasoning_effort`). This means every seeded entity uses the operator's
-configured `ChatDefaults:DefaultModelId` and associated sampling
-overrides from the start. An operator only needs to set the global
-default once and all seeded guides/assistants pick it up automatically.
+## 5. Wizard integration
 
-## Migration note
+`Home -> Add AI Services Wizard` can set the first/added model as default chat model.
+Wizard behavior details: [add-ai-services-wizard.md](add-ai-services-wizard.md)
 
-Previous builds used a silent **`gpt-4.1`** string fallback in some assistant/template paths. That fallback is removed; unresolved model configuration surfaces as a **routing / readiness error** instead of a hidden default.
+## 6. Related docs
+
+- Setup: [setup-guide.md](setup-guide.md)
+- Settings architecture: [settings-page-provider-model-llama-redesign.md](settings-page-provider-model-llama-redesign.md)
+- Requirements: [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)

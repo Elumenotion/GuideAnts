@@ -22,6 +22,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
     private const string GoogleGeminiProviderSection = "GoogleGeminiApi";
     private const string HuggingFaceProviderSection = "HuggingFace";
     private const string OpenRouterProviderSection = "OpenRouter";
+    private const string OpenAiProviderSection = "OpenAI";
     private static readonly JsonSerializerOptions ProviderPayloadJson = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -82,12 +83,13 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
             GoogleGeminiProviderSection => await SynthesizeViaGoogleAsync(ssml, outputPath, requestId, mode, cancellationToken),
             HuggingFaceProviderSection => await SynthesizeViaHuggingFaceAsync(ssml, outputPath, requestId, mode, cancellationToken),
             OpenRouterProviderSection => await SynthesizeViaOpenRouterAsync(ssml, outputPath, requestId, mode, cancellationToken),
+            OpenAiProviderSection => await SynthesizeViaOpenAiAsync(ssml, outputPath, requestId, mode, cancellationToken),
             _ => throw RoutingException.ProviderNotReady(
                 mode.ProviderSection,
                 new[]
                 {
                     $"SpeechSynthesis mode '{mode.ModeId}' references unsupported provider section '{mode.ProviderSection}'. " +
-                    $"Expected '{AzureProviderSection}', '{LocalProviderSection}', '{GoogleGeminiProviderSection}', '{HuggingFaceProviderSection}', or '{OpenRouterProviderSection}'."
+                    $"Expected '{AzureProviderSection}', '{LocalProviderSection}', '{GoogleGeminiProviderSection}', '{HuggingFaceProviderSection}', '{OpenRouterProviderSection}', or '{OpenAiProviderSection}'."
                 },
                 serviceId: RoutedServiceNames.SpeechSynthesis,
                 modeId: mode.ModeId)
@@ -103,6 +105,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         GoogleGeminiProviderSection => ServiceProviderIds.SpeechSynthesisGoogleTextToSpeech,
         HuggingFaceProviderSection => ServiceProviderIds.SpeechSynthesisHuggingFaceInference,
         OpenRouterProviderSection => ServiceProviderIds.SpeechSynthesisOpenRouterTts,
+        OpenAiProviderSection => ServiceProviderIds.SpeechSynthesisOpenAiTts,
         _ => providerSection
     };
 
@@ -259,6 +262,66 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
 
         var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
         await File.WriteAllBytesAsync(outputPath, bytes, cancellationToken);
+        return new ISpeechSynthesisService.SpeechSynthesisResult(true, 0);
+    }
+
+    private async Task<ISpeechSynthesisService.SpeechSynthesisResult> SynthesizeViaOpenAiAsync(
+        string ssml,
+        string outputPath,
+        string requestId,
+        ServiceMode mode,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(mode.ModelId))
+        {
+            return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "OpenAI TTS requires mode.ModelId.");
+        }
+
+        var voiceName = ResolveGoogleGeminiVoiceName(mode);
+        if (string.IsNullOrWhiteSpace(voiceName))
+        {
+            return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "OpenAI TTS requires VoiceName in the service mode preset.");
+        }
+
+        var apiKey = _configuration["OpenAI:ApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "OpenAI:ApiKey is required.");
+        }
+
+        var baseUrl = (_configuration["OpenAI:Endpoint"] ?? "https://api.openai.com/v1").TrimEnd('/');
+        var endpoint = $"{baseUrl}/audio/speech";
+        var text = StripSsmlMarkup(ssml);
+        var payload = JsonSerializer.Serialize(new OpenAiTtsRequest(mode.ModelId!, text, voiceName, "wav"), ProviderPayloadJson);
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        request.Headers.Add("x-request-id", requestId);
+
+        _logger.LogInformation(
+            "tts_api_request_start provider={Provider} requestId={RequestId} textLength={TextLength}",
+            OpenAiProviderSection,
+            requestId,
+            text.Length);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, $"OpenAI TTS failed: {(int)response.StatusCode} {errorBody}");
+        }
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        await File.WriteAllBytesAsync(outputPath, bytes, cancellationToken);
+
+        _logger.LogInformation(
+            "tts_api_request_success provider={Provider} requestId={RequestId} outputBytes={OutputBytes}",
+            OpenAiProviderSection,
+            requestId,
+            bytes.Length);
+
         return new ISpeechSynthesisService.SpeechSynthesisResult(true, 0);
     }
 
@@ -705,4 +768,10 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         string Input,
         string Model,
         string Voice);
+
+    private sealed record OpenAiTtsRequest(
+        string Model,
+        string Input,
+        string Voice,
+        [property: JsonPropertyName("response_format")] string ResponseFormat);
 }

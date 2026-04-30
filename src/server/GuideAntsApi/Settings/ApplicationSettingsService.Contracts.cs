@@ -146,6 +146,16 @@ public sealed partial class ApplicationSettingsService
                     [
                         new SectionFieldRequirement(OpenRouterOptions.SectionName, "ApiKey")
                     ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.SpeechTranscriptionOpenAiAudio,
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: "OpenAI",
+                    ProviderSettingsSection: "OpenAI",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement("OpenAI", "ApiKey")
+                    ],
                     RequiredRuntimeKeys: [])
             ],
             ErrorKeys:
@@ -156,7 +166,8 @@ public sealed partial class ApplicationSettingsService
                 "LocalServiceHosts:MediaBaseUrl",
                 "GoogleGeminiApi:ApiKey",
                 "HuggingFace:Token",
-                "OpenRouter:ApiKey"
+                "OpenRouter:ApiKey",
+                "OpenAI:ApiKey"
             ]),
         new(
             ServiceId: SpeechSynthesisOptions.SectionName,
@@ -214,6 +225,16 @@ public sealed partial class ApplicationSettingsService
                     [
                         new SectionFieldRequirement(OpenRouterOptions.SectionName, "ApiKey")
                     ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.SpeechSynthesisOpenAiTts,
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: "OpenAI",
+                    ProviderSettingsSection: "OpenAI",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement("OpenAI", "ApiKey")
+                    ],
                     RequiredRuntimeKeys: [])
             ],
             ErrorKeys:
@@ -223,7 +244,8 @@ public sealed partial class ApplicationSettingsService
                 "LocalServiceHosts:SpeechSynthesisBaseUrl",
                 "GoogleGeminiApi:ApiKey",
                 "HuggingFace:Token",
-                "OpenRouter:ApiKey"
+                "OpenRouter:ApiKey",
+                "OpenAI:ApiKey"
             ]),
         new(
             ServiceId: ImageGenerationOptions.SectionName,
@@ -281,6 +303,16 @@ public sealed partial class ApplicationSettingsService
                     [
                         new SectionFieldRequirement(OpenRouterOptions.SectionName, "ApiKey")
                     ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.ImageGenerationOpenAiImages,
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: "OpenAI",
+                    ProviderSettingsSection: "OpenAI",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement("OpenAI", "ApiKey")
+                    ],
                     RequiredRuntimeKeys: [])
             ],
             ErrorKeys:
@@ -290,7 +322,8 @@ public sealed partial class ApplicationSettingsService
                 "LocalServiceHosts:ImageGenerationBaseUrl",
                 "GoogleGeminiApi:ApiKey",
                 "HuggingFace:Token",
-                "OpenRouter:ApiKey"
+                "OpenRouter:ApiKey",
+                "OpenAI:ApiKey"
             ]),
         new(
             ServiceId: "Embeddings",
@@ -348,6 +381,16 @@ public sealed partial class ApplicationSettingsService
                     [
                         new SectionFieldRequirement(OpenRouterOptions.SectionName, "ApiKey")
                     ],
+                    RequiredRuntimeKeys: []),
+                new ProviderContract(
+                    ProviderId: ServiceProviderIds.EmbeddingsOpenAiEmbedding,
+                    ProviderKind: "Cloud",
+                    ProviderSectionKey: "OpenAI",
+                    ProviderSettingsSection: "OpenAI",
+                    RequiredSectionFields:
+                    [
+                        new SectionFieldRequirement("OpenAI", "ApiKey")
+                    ],
                     RequiredRuntimeKeys: [])
             ],
             ErrorKeys:
@@ -357,7 +400,8 @@ public sealed partial class ApplicationSettingsService
                 "LocalServiceHosts:EmbeddingsBaseUrl",
                 "GoogleGeminiApi:ApiKey",
                 "HuggingFace:Token",
-                "OpenRouter:ApiKey"
+                "OpenRouter:ApiKey",
+                "OpenAI:ApiKey"
             ]),
         new(
             ServiceId: DocumentIntelligenceOptions.SectionName,

@@ -17,6 +17,7 @@ namespace GuideAntsApi.Services.Components
         private const string GoogleGeminiProviderSection = "GoogleGeminiApi";
         private const string HuggingFaceProviderSection = "HuggingFace";
         private const string OpenRouterProviderSection = "OpenRouter";
+        private const string OpenAiProviderSection = "OpenAI";
         private static readonly JsonSerializerOptions ProviderPayloadJson = new()
         {
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -215,12 +216,14 @@ namespace GuideAntsApi.Services.Components
                     audioContent, fileName, normalizedContentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
                 OpenRouterProviderSection => await TranscribeViaOpenRouterWithDurationAsync(
                     audioContent, fileName, normalizedContentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
+                OpenAiProviderSection => await TranscribeViaOpenAiWithDurationAsync(
+                    audioContent, fileName, normalizedContentType, requestId, payloadSizeBytes, payloadSizeBucket, mode, cancellationToken),
                 _ => throw RoutingException.ProviderNotReady(
                     mode.ProviderSection,
                     new[]
                     {
                         $"SpeechTranscription mode '{mode.ModeId}' references unsupported provider section '{mode.ProviderSection}'. " +
-                        $"Expected '{AzureProviderSection}', '{LocalProviderSection}', '{GoogleGeminiProviderSection}', '{HuggingFaceProviderSection}', or '{OpenRouterProviderSection}'."
+                        $"Expected '{AzureProviderSection}', '{LocalProviderSection}', '{GoogleGeminiProviderSection}', '{HuggingFaceProviderSection}', '{OpenRouterProviderSection}', or '{OpenAiProviderSection}'."
                     },
                     serviceId: RoutedServiceNames.SpeechTranscription,
                     modeId: mode.ModeId)
@@ -451,6 +454,80 @@ namespace GuideAntsApi.Services.Components
             _logger.LogWarning(
                 "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
                 OpenRouterProviderSection,
+                requestId,
+                latencyMs,
+                payloadSizeBytes,
+                payloadSizeBucket,
+                0,
+                text.Length);
+
+            return new TranscriptionResult(text, 0);
+        }
+
+        private async Task<TranscriptionResult> TranscribeViaOpenAiWithDurationAsync(
+            Stream audioContent,
+            string fileName,
+            string contentType,
+            string requestId,
+            long payloadSizeBytes,
+            string payloadSizeBucket,
+            ServiceMode mode,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(mode.ModelId))
+            {
+                throw RoutingException.ProviderNotReady(
+                    OpenAiProviderSection,
+                    new[] { $"SpeechTranscription mode '{mode.ModeId}' requires an OpenAI transcription model id." },
+                    serviceId: RoutedServiceNames.SpeechTranscription,
+                    modeId: mode.ModeId);
+            }
+
+            var apiKey = _configurationForSection("OpenAI", "ApiKey");
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("OpenAI:ApiKey is required.");
+            }
+
+            var baseUrl = (_configurationForSection("OpenAI", "Endpoint") ?? "https://api.openai.com/v1").TrimEnd('/');
+            var endpoint = $"{baseUrl}/audio/transcriptions";
+
+            audioContent.Position = 0;
+            using var content = new MultipartFormDataContent();
+            var audioStreamContent = new StreamContent(audioContent);
+            audioStreamContent.Headers.ContentType = new MediaTypeHeaderValue(
+                string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
+            content.Add(audioStreamContent, "file", fileName);
+            content.Add(new StringContent(mode.ModelId!), "model");
+            content.Add(new StringContent("json"), "response_format");
+
+            var language = ReadServiceModePresetField(mode.RequestPresetJson, "language");
+            if (!string.IsNullOrWhiteSpace(language))
+            {
+                content.Add(new StringContent(language), "language");
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            request.Headers.Add("x-request-id", requestId);
+
+            var startedAt = DateTime.UtcNow;
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var latencyMs = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"OpenAI transcription failed ({(int)response.StatusCode}): {body}");
+            }
+
+            var parsed = JsonSerializer.Deserialize<OpenAiTranscriptionResponse>(body, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            var text = parsed?.Text ?? string.Empty;
+            _logger.LogWarning(
+                "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
+                OpenAiProviderSection,
                 requestId,
                 latencyMs,
                 payloadSizeBytes,
@@ -1064,4 +1141,6 @@ namespace GuideAntsApi.Services.Components
     public sealed record OpenRouterTranscriptionChoice(OpenRouterTranscriptionMessageOut? Message);
 
     public sealed record OpenRouterTranscriptionMessageOut(string? Content);
+
+    public sealed record OpenAiTranscriptionResponse(string? Text);
 }

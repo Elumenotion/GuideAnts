@@ -172,6 +172,19 @@ function renderCloudTranscriptionBehavior(providerId: string) {
           </li>
         </ul>
       );
+    case 'SpeechTranscription.OpenAI.Audio':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            OpenAI transcription posts audio to <span className="font-mono">/audio/transcriptions</span> using the selected{' '}
+            <span className="font-mono">Transcription Model ID</span> (e.g. <span className="font-mono">whisper-1</span>).
+          </li>
+          <li>
+            The shared <span className="font-mono">OpenAI:ApiKey</span> and optional{' '}
+            <span className="font-mono">OpenAI:Endpoint</span> are used for authentication and routing.
+          </li>
+        </ul>
+      );
     default:
       return (
         <p className="text-sm text-gray-700">

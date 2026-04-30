@@ -173,6 +173,21 @@ function renderCloudSynthesisBehavior(providerId: string) {
           </li>
         </ul>
       );
+    case 'SpeechSynthesis.OpenAI.Tts':
+      return (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>
+            OpenAI TTS strips SSML to plain text and posts it to <span className="font-mono">/audio/speech</span> using the
+            selected <span className="font-mono">TTS Model ID</span> and <span className="font-mono">Voice Name</span>.
+          </li>
+          <li>
+            Both model and voice are required. Available voices include{' '}
+            <span className="font-mono">alloy</span>, <span className="font-mono">echo</span>,{' '}
+            <span className="font-mono">fable</span>, <span className="font-mono">nova</span>,{' '}
+            <span className="font-mono">onyx</span>, <span className="font-mono">shimmer</span>, and others.
+          </li>
+        </ul>
+      );
     default:
       return (
         <p className="text-sm text-gray-700">

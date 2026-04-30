@@ -65,6 +65,7 @@ public static class StartupConfiguration
         services.AddScoped<IApplicationSettingsService, ApplicationSettingsService>();
         services.AddScoped<IEmbeddingsRebuildService, EmbeddingsRebuildService>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder, GuideAntsApi.Services.Bootstrap.RequiredGuidesAssistantsSeeder>();
+        services.AddScoped<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder, GuideAntsApi.Services.Bootstrap.RuntimeProfileSeeder>();
 
         
         // Guides Services

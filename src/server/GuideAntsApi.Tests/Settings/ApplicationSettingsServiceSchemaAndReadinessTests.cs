@@ -69,6 +69,19 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
                 "LocalServiceHosts:MediaBaseUrl",
                 StringComparison.Ordinal)));
 
+        schema.Providers.Should().Contain(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.SpeechTranscriptionOpenAiAudio, StringComparison.Ordinal)
+            && string.Equals(provider.ProviderSettingsSection, "OpenAI", StringComparison.Ordinal));
+        schema.Providers.Should().Contain(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.SpeechSynthesisOpenAiTts, StringComparison.Ordinal)
+            && string.Equals(provider.ProviderSettingsSection, "OpenAI", StringComparison.Ordinal));
+        schema.Providers.Should().Contain(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.ImageGenerationOpenAiImages, StringComparison.Ordinal)
+            && string.Equals(provider.ProviderSettingsSection, "OpenAI", StringComparison.Ordinal));
+        schema.Providers.Should().Contain(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.EmbeddingsOpenAiEmbedding, StringComparison.Ordinal)
+            && string.Equals(provider.ProviderSettingsSection, "OpenAI", StringComparison.Ordinal));
+
         schema.Sections.Should().Contain(section =>
             string.Equals(section.SectionName, GoogleGeminiApiOptions.SectionName, StringComparison.Ordinal)
             && section.Properties.Any(property => property.Name == "ApiKey" && property.IsRequired)
@@ -79,6 +92,10 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         schema.Sections.Should().Contain(section =>
             string.Equals(section.SectionName, "HuggingFace", StringComparison.Ordinal)
             && section.Properties.Any(property => property.Name == "Token" && property.IsRequired));
+        schema.Sections.Should().Contain(section =>
+            string.Equals(section.SectionName, "OpenAI", StringComparison.Ordinal)
+            && section.Properties.Any(property => property.Name == "ApiKey" && property.IsRequired)
+            && section.Properties.Count == 1);
     }
 
     [TestMethod]
@@ -168,6 +185,23 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
 
         google.ReadinessStatus.Should().Be("unconfigured");
         google.MissingFields.Should().ContainSingle().Which.Should().Be("ApiKey");
+    }
+
+    [TestMethod]
+    public async Task GetSectionSummariesAsync_ReportsUnconfiguredOpenAiProviderSection()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["OpenAI:ApiKey"] = null,
+        });
+        var service = CreateService(db, configuration);
+
+        var summaries = await service.GetSectionSummariesAsync();
+        var openai = summaries.Single(section => string.Equals(section.SectionName, "OpenAI", StringComparison.Ordinal));
+
+        openai.ReadinessStatus.Should().Be("unconfigured");
+        openai.MissingFields.Should().ContainSingle().Which.Should().Be("ApiKey");
     }
 
     [TestMethod]
@@ -665,7 +699,8 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
             ["OpenRouter:ApiKey"] = "test-openrouter-key",
             ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1",
             ["HuggingFace:Token"] = "hf_test_token",
-            ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1"
+            ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1",
+            ["OpenAI:ApiKey"] = "test-openai-key"
         };
 
         foreach (var pair in values)

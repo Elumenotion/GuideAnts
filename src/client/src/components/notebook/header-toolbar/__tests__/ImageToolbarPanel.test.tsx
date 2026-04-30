@@ -22,7 +22,7 @@ vi.mock('../../../../services/api', () => ({
 }));
 
 describe('ImageToolbarPanel', () => {
-  it('switches provider and model through settings APIs', async () => {
+  it('switches to local provider when selecting a local model', async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn(async () => {});
     render(
@@ -33,17 +33,28 @@ describe('ImageToolbarPanel', () => {
           kind: 'image',
           status: 'ready',
           summary: 'ready',
-          activeProviderId: 'ImageGeneration.LocalSd.Http',
-          activeProviderLabel: 'Local',
-          supportsLocalRuntimePower: true,
-          localRuntimeOn: true,
+          activeProviderId: 'ImageGeneration.Google.Imagen',
+          activeProviderLabel: 'Google Gemini',
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
           providerOptions: [
             {
-              providerId: 'ImageGeneration.LocalSd.Http',
-              displayName: 'Local',
-              providerKind: 'local',
+              providerId: 'ImageGeneration.Google.Imagen',
+              displayName: 'GoogleGeminiApi',
+              providerKind: 'Cloud',
               canActivate: true,
               blockers: [],
+              providerSection: 'GoogleGeminiApi',
+              modelId: 'imagen-3',
+            },
+            {
+              providerId: 'ImageGeneration.LocalSd.Http',
+              displayName: 'LocalServiceHosts:ImageGenerationBaseUrl',
+              providerKind: 'LocalHttp',
+              canActivate: true,
+              blockers: [],
+              providerSection: 'LocalServiceHosts:ImageGenerationBaseUrl',
+              modelId: null,
             },
           ],
           selection: null,
@@ -64,7 +75,6 @@ describe('ImageToolbarPanel', () => {
       />
     );
 
-    await user.click(screen.getByRole('option', { name: /Local \(local\)/i }));
     await user.click(screen.getByRole('option', { name: /bundle-a/i }));
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'ImageGeneration',
@@ -91,10 +101,12 @@ describe('ImageToolbarPanel', () => {
           providerOptions: [
             {
               providerId: 'ImageGeneration.Google.Imagen',
-              displayName: 'Google',
+              displayName: 'GoogleGeminiApi',
               providerKind: 'Cloud',
               canActivate: false,
               blockers: ['Missing provider connection value: Google Gemini API Key.'],
+              providerSection: 'GoogleGeminiApi',
+              modelId: null,
             },
           ],
           selection: null,
@@ -113,7 +125,7 @@ describe('ImageToolbarPanel', () => {
       />
     );
 
-    await user.click(screen.getByRole('option', { name: /Google \(Cloud\)/i }));
+    await user.click(screen.getByRole('option', { name: /google/i }));
 
     expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });

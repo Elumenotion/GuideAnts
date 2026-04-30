@@ -2,7 +2,7 @@ import { FaCog, FaPlay, FaStop } from 'react-icons/fa';
 import { api } from '../../../services/api';
 import { textButtonClassName } from '../../../pages/settings/components/shared/ActionButtons';
 import type { ServicePanelCommonProps } from './types';
-import { WORKSPACE_CONTROLS_COPY, serviceSummaryLine, statusToneClass } from './toolbarFormatters';
+import { WORKSPACE_CONTROLS_COPY, serviceSummaryLine, statusToneClass, toolbarProviderOptionLabel } from './toolbarFormatters';
 
 export function ImageToolbarPanel({
   service,
@@ -12,6 +12,12 @@ export function ImageToolbarPanel({
   showWorkspaceCopy = true,
 }: ServicePanelCommonProps) {
   const activeProviderIsLocal = service.supportsLocalRuntimePower;
+  const localProvider = service.providerOptions.find((provider) =>
+    provider.providerKind.toLowerCase().includes('local')
+  );
+  const cloudModelOptions = service.providerOptions.filter(
+    (provider) => provider.providerId !== localProvider?.providerId
+  );
 
   const setProvider = async (providerId: string) => {
     setInFlight(true);
@@ -31,6 +37,14 @@ export function ImageToolbarPanel({
   const setModel = async (modelRef: string) => {
     setInFlight(true);
     try {
+      if (localProvider && service.activeProviderId !== localProvider.providerId) {
+        const updated = await api.settings.services.updateActiveProvider(service.serviceId, localProvider.providerId);
+        if (updated.activeProviderId !== localProvider.providerId) {
+          console.error(
+            `[toolbar][image] provider switch mismatch: requested='${localProvider.providerId}' actual='${updated.activeProviderId}'`
+          );
+        }
+      }
       await api.settings.localModels.selectActive(service.serviceId, modelRef);
       await onRefresh();
     } finally {
@@ -67,7 +81,7 @@ export function ImageToolbarPanel({
       )}
 
       <div className="space-y-1">
-        {service.providerOptions.map((provider) => (
+        {cloudModelOptions.map((provider) => (
           <button
             key={provider.providerId}
             type="button"
@@ -78,7 +92,7 @@ export function ImageToolbarPanel({
             role="option"
             aria-selected={provider.providerId === service.activeProviderId}
           >
-            {provider.displayName} ({provider.providerKind})
+            {toolbarProviderOptionLabel(provider)}
             {provider.providerId === service.activeProviderId ? ' (current)' : ''}
             {!provider.canActivate ? ` — ${provider.blockers[0] ?? 'blocked'}` : ''}
           </button>
@@ -93,13 +107,13 @@ export function ImageToolbarPanel({
             className={`${textButtonClassName('neutral')} w-full justify-start text-left ${
               model.isComplete ? '' : 'opacity-50'
             }`}
-            disabled={!model.isComplete || !activeProviderIsLocal}
+            disabled={!model.isComplete}
             onClick={() => void setModel(model.modelRef)}
             role="option"
-            aria-selected={model.isActive}
+            aria-selected={activeProviderIsLocal && model.isActive}
           >
             {model.displayLabel}
-            {model.isActive && !model.displayLabel.includes('(active)') ? ' (active)' : ''}
+            {activeProviderIsLocal && model.isActive && !model.displayLabel.includes('(active)') ? ' (current)' : ''}
           </button>
         ))}
       </div>

@@ -66,6 +66,47 @@ describe('validateOperativeProviderFields', () => {
     expect(errors.ApiKey).toBeUndefined();
   });
 
+  it('accepts empty optional Dimensions', () => {
+    const provider = makeProvider(
+      ['Dimensions'],
+      [
+        {
+          name: 'Dimensions',
+          kind: 'int',
+          required: false,
+          enumOptions: null,
+          operative: true,
+        },
+      ],
+      {
+        Dimensions: { name: 'Dimensions', value: null, isSecret: false, hasValue: false },
+      }
+    );
+    expect(validateOperativeProviderFields(provider, {}).Dimensions).toBeUndefined();
+    expect(validateOperativeProviderFields(provider, { Dimensions: '' }).Dimensions).toBeUndefined();
+  });
+
+  it('rejects non-positive Dimensions', () => {
+    const provider = makeProvider(
+      ['Dimensions'],
+      [
+        {
+          name: 'Dimensions',
+          kind: 'int',
+          required: false,
+          enumOptions: null,
+          operative: true,
+        },
+      ],
+      {
+        Dimensions: { name: 'Dimensions', value: null, isSecret: false, hasValue: false },
+      }
+    );
+    expect(validateOperativeProviderFields(provider, { Dimensions: '0' }).Dimensions).toBeDefined();
+    expect(validateOperativeProviderFields(provider, { Dimensions: '-5' }).Dimensions).toBeDefined();
+    expect(validateOperativeProviderFields(provider, { Dimensions: '1536' }).Dimensions).toBeUndefined();
+  });
+
   it('validates ApiVersion pattern when non-empty', () => {
     const provider = makeProvider(
       ['ApiVersion'],

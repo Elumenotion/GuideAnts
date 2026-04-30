@@ -70,9 +70,11 @@ The `guideants-ai` container is especially important: it is the local runtime su
 If you are new to the repo, these are the best first reads:
 
 1. [`docs/setup-guide.md`](docs/setup-guide.md) for the end-to-end local stack and Settings workflow.
-2. [`docs/project-and-notebook-files-system.md`](docs/project-and-notebook-files-system.md) for the core project/notebook/file model.
-3. [`docs/settings-page-provider-model-llama-redesign.md`](docs/settings-page-provider-model-llama-redesign.md) for how routing, providers, models, and runtime management fit together.
-4. [`docker/guideants-ai-build.md`](docker/guideants-ai-build.md) and [`docker/build-processes.md`](docker/build-processes.md) for building the local images this repo expects.
+2. [`docs/settings-page-provider-model-llama-redesign.md`](docs/settings-page-provider-model-llama-redesign.md) for current Settings architecture and extension seams.
+3. [`docs/settings-and-llama-completion-requirements.md`](docs/settings-and-llama-completion-requirements.md) and [`docs/settings-service-provider-model-requirements.md`](docs/settings-service-provider-model-requirements.md) for normative requirements.
+4. [`docs/default-chat-models.md`](docs/default-chat-models.md), [`docs/llama-model-download-and-runtime-management.md`](docs/llama-model-download-and-runtime-management.md), and [`docs/add-ai-services-wizard.md`](docs/add-ai-services-wizard.md) for focused deep dives.
+5. [`docs/project-and-notebook-files-system.md`](docs/project-and-notebook-files-system.md) for the core project/notebook/file model.
+6. [`docker/guideants-ai-build.md`](docker/guideants-ai-build.md) and [`docker/build-processes.md`](docker/build-processes.md) for building the local images this repo expects.
 
 ## Development Entry Points
 

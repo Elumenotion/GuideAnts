@@ -48,11 +48,13 @@ namespace GuideAntsApi.Services
         private const string ImageProviderGoogle = ServiceProviderIds.ImageGenerationGoogleImagen;
         private const string ImageProviderHuggingFace = ServiceProviderIds.ImageGenerationHuggingFaceInference;
         private const string ImageProviderOpenRouter = ServiceProviderIds.ImageGenerationOpenRouterImage;
+        private const string ImageProviderOpenAi = ServiceProviderIds.ImageGenerationOpenAiImages;
         private const string AzureProviderSection = "AzureOpenAiImages";
         private const string LocalProviderSection = "LocalServiceHosts:ImageGenerationBaseUrl";
         private const string GoogleGeminiProviderSection = "GoogleGeminiApi";
         private const string HuggingFaceProviderSection = "HuggingFace";
         private const string OpenRouterProviderSection = "OpenRouter";
+        private const string OpenAiProviderSection = "OpenAI";
         private static readonly string[] CurrentImageSizes = { "1024x1024", "1024x1792", "1792x1024" };
         private static readonly string[] GptImage15Sizes = { "1024x1024", "1024x1536", "1536x1024", "auto" };
         private static readonly JsonSerializerOptions ProviderPayloadJson = new()
@@ -229,6 +231,14 @@ namespace GuideAntsApi.Services
                             imageFileName: sourceFileName,
                             modelId: mode.ModelId,
                             requestPresetJson: mode.RequestPresetJson),
+                        ImageProviderOpenAi => await GenerateImageEditViaOpenAi(
+                            prompt: prompt,
+                            size: size,
+                            n: n,
+                            imageBytes: imageContent,
+                            imageContentType: contentType,
+                            imageFileName: sourceFileName,
+                            modelId: mode.ModelId),
                         _ => throw new RoutingException(
                             RoutingErrorCodes.ProviderNotReady,
                             $"Image edit provider '{imageProvider}' is not recognized.",
@@ -247,6 +257,7 @@ namespace GuideAntsApi.Services
                         ImageProviderGoogle => await GenerateImageViaGoogleGemini(prompt, size, n, outputFormat, mode.ModelId),
                         ImageProviderHuggingFace => await GenerateImageViaHuggingFace(prompt, size, n, outputFormat, mode.ModelId, mode.RequestPresetJson),
                         ImageProviderOpenRouter => await GenerateImageViaOpenRouter(prompt, size, n, outputFormat, mode.ModelId, mode.RequestPresetJson),
+                        ImageProviderOpenAi => await GenerateImageViaOpenAi(prompt, size, n, mode.ModelId),
                         _ => throw new RoutingException(
                             RoutingErrorCodes.ProviderNotReady,
                             $"Image provider '{imageProvider}' is not recognized.",
@@ -620,6 +631,14 @@ namespace GuideAntsApi.Services
                         imageFileName: sourceImageFileName,
                         modelId: mode.ModelId,
                         requestPresetJson: mode.RequestPresetJson),
+                    ImageProviderOpenAi => await GenerateImageEditViaOpenAi(
+                        prompt: prompt,
+                        size: size,
+                        n: n,
+                        imageBytes: sourceImageBytes,
+                        imageContentType: sourceImageContentType,
+                        imageFileName: sourceImageFileName,
+                        modelId: mode.ModelId),
                     _ => throw new RoutingException(
                         RoutingErrorCodes.ProviderNotReady,
                         $"Image provider '{imageProvider}' is not recognized.",
@@ -812,12 +831,13 @@ namespace GuideAntsApi.Services
                 GoogleGeminiProviderSection => ImageProviderGoogle,
                 HuggingFaceProviderSection => ImageProviderHuggingFace,
                 OpenRouterProviderSection => ImageProviderOpenRouter,
+                OpenAiProviderSection => ImageProviderOpenAi,
                 _ => throw RoutingException.ProviderNotReady(
                     mode.ProviderSection,
                     new[]
                     {
                         $"ImageGeneration mode '{mode.ModeId}' references unsupported provider section '{mode.ProviderSection}'. " +
-                        $"Expected '{AzureProviderSection}', '{LocalProviderSection}', '{GoogleGeminiProviderSection}', '{HuggingFaceProviderSection}', or '{OpenRouterProviderSection}'."
+                        $"Expected '{AzureProviderSection}', '{LocalProviderSection}', '{GoogleGeminiProviderSection}', '{HuggingFaceProviderSection}', '{OpenRouterProviderSection}', or '{OpenAiProviderSection}'."
                     },
                     serviceId: RoutedServiceNames.ImageGeneration,
                     modeId: mode.ModeId)
@@ -844,6 +864,11 @@ namespace GuideAntsApi.Services
             if (imageProvider == ImageProviderOpenRouter)
             {
                 return "openrouter-image";
+            }
+
+            if (imageProvider == ImageProviderOpenAi)
+            {
+                return "openai-image";
             }
 
             var editDeployment = ReadServiceModePresetField(mode.RequestPresetJson, "EditModelDeployment")
@@ -1532,6 +1557,99 @@ namespace GuideAntsApi.Services
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException($"OpenRouter image edit failed: {(int)response.StatusCode} {result}");
+            }
+
+            return await SaveResponseAndReturnBytes(result);
+        }
+
+        private async Task<byte[]?> GenerateImageViaOpenAi(
+            string prompt,
+            string size,
+            int n,
+            string? modelId)
+        {
+            var apiKey = _configuration["OpenAI:ApiKey"];
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("OpenAI:ApiKey is required.");
+            }
+
+            var model = RequireImageModelId(
+                OpenAiProviderSection,
+                modelId,
+                "Set ServiceModes.ImageGeneration model id for OpenAI.");
+
+            var baseUrl = (_configuration["OpenAI:Endpoint"] ?? "https://api.openai.com/v1").TrimEnd('/');
+            var endpoint = $"{baseUrl}/images/generations";
+            var requestBody = new Dictionary<string, object>
+            {
+                ["model"] = model,
+                ["prompt"] = prompt,
+                ["n"] = Math.Max(1, n),
+                ["size"] = size,
+                ["response_format"] = "b64_json"
+            };
+
+            using var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using var response = await client.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"OpenAI image generation failed: {(int)response.StatusCode} {responseBody}");
+            }
+
+            return await SaveResponseAndReturnBytes(responseBody);
+        }
+
+        private async Task<byte[]?> GenerateImageEditViaOpenAi(
+            string prompt,
+            string size,
+            int n,
+            byte[] imageBytes,
+            string? imageContentType,
+            string? imageFileName,
+            string? modelId)
+        {
+            var apiKey = _configuration["OpenAI:ApiKey"];
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("OpenAI:ApiKey is required.");
+            }
+
+            var model = RequireImageModelId(
+                OpenAiProviderSection,
+                modelId,
+                "Set ServiceModes.ImageGeneration model id for OpenAI.");
+
+            var baseUrl = (_configuration["OpenAI:Endpoint"] ?? "https://api.openai.com/v1").TrimEnd('/');
+            var endpoint = $"{baseUrl}/images/edits";
+
+            using var content = new MultipartFormDataContent();
+            var imageContent = new ByteArrayContent(imageBytes);
+            imageContent.Headers.ContentType = new MediaTypeHeaderValue(
+                string.IsNullOrWhiteSpace(imageContentType) ? "application/octet-stream" : imageContentType);
+            content.Add(imageContent, "image", imageFileName ?? "image.png");
+            content.Add(new StringContent(prompt), "prompt");
+            content.Add(new StringContent(model), "model");
+            content.Add(new StringContent(size), "size");
+            content.Add(new StringContent(Math.Max(1, n).ToString()), "n");
+            content.Add(new StringContent("b64_json"), "response_format");
+
+            using var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using var response = await client.SendAsync(request);
+            var result = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"OpenAI image edit failed: {(int)response.StatusCode} {result}");
             }
 
             return await SaveResponseAndReturnBytes(result);

@@ -42,11 +42,13 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient<GoogleGeminiEmbeddingService>();
         services.AddHttpClient<HuggingFaceEmbeddingService>();
         services.AddHttpClient<OpenRouterEmbeddingService>();
+        services.AddHttpClient<OpenAiEmbeddingService>();
         services.AddSingleton<AzureOpenAiEmbeddingService>();
         services.AddSingleton<LocalEmbeddingService>();
         services.AddSingleton<GoogleGeminiEmbeddingService>();
         services.AddSingleton<HuggingFaceEmbeddingService>();
         services.AddSingleton<OpenRouterEmbeddingService>();
+        services.AddSingleton<OpenAiEmbeddingService>();
         services.AddSingleton<IEmbeddingService, ProviderRoutedEmbeddingService>();
         services.AddScoped<IHybridIndexer, HybridIndexer>();
         services.AddScoped<IHybridSearcher, HybridSearcher>();

@@ -1,5 +1,5 @@
 import { cloneElement, isValidElement, type ReactElement } from 'react';
-import type { NotebookToolbarServiceDto } from '../../../types/notebookToolbar';
+import type { NotebookToolbarProviderOptionDto, NotebookToolbarServiceDto } from '../../../types/notebookToolbar';
 
 export const WORKSPACE_CONTROLS_COPY =
   'Workspace controls apply to this entire workspace, not one notebook.';
@@ -98,5 +98,32 @@ export function statusDotClass(status: string): string {
 }
 
 export function serviceSummaryLine(service: NotebookToolbarServiceDto): string {
-  return service.summary;
+  const active = service.providerOptions.find(p => p.providerId === service.activeProviderId);
+  if (!active) return service.summary;
+  const label = toolbarProviderOptionLabel(active);
+  return `${label} — ${service.status}`;
+}
+
+const TOOLBAR_PROVIDER_NAMES: Record<string, string> = {
+  AzureOpenAI: 'Microsoft Foundry',
+  AzureSpeechService: 'Microsoft Foundry',
+  AzureOpenAiImages: 'Microsoft Foundry',
+  AzureOpenAiEmbedding: 'Microsoft Foundry',
+  AzureDocumentIntelligence: 'Microsoft Foundry',
+  GoogleGeminiApi: 'Google Gemini',
+  OpenAI: 'OpenAI',
+  OpenRouter: 'OpenRouter',
+  HuggingFace: 'Hugging Face',
+};
+
+export function toolbarProviderLabel(section: string | null | undefined): string {
+  if (!section) return 'Unknown';
+  if (section.startsWith('LocalServiceHosts:')) return 'Local';
+  return TOOLBAR_PROVIDER_NAMES[section] ?? section;
+}
+
+export function toolbarProviderOptionLabel(option: NotebookToolbarProviderOptionDto): string {
+  const name = toolbarProviderLabel(option.providerSection);
+  if (option.modelId) return `${name} ${option.modelId}`;
+  return name;
 }
