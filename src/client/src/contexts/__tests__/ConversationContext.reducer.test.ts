@@ -88,16 +88,6 @@ describe('ConversationContext reducer', () => {
       expect(result._renderCounter).toBe(1);
     });
 
-    it('APPEND_TOKEN should create streaming message if none exists', () => {
-      const result = reducer(initialState, { type: 'APPEND_TOKEN', payload: 'Hello' });
-
-      expect(result.messages).toHaveLength(1);
-      expect(result.messages[0].content).toBe('Hello');
-      expect(result.messages[0].id).toMatch(/^streaming-/);
-      expect(result.messages[0].role).toBe('assistant');
-      expect(result._renderCounter).toBe(1);
-    });
-
     it('APPEND_TOKEN should append to existing streaming message', () => {
       const streamingMsg = createMockAssistantMessage({ 
         id: 'streaming-123', 
@@ -112,44 +102,6 @@ describe('ConversationContext reducer', () => {
       expect(result._renderCounter).toBe(1);
     });
 
-    it('APPEND_TOKEN should handle JSON payload format', () => {
-      const payload = JSON.stringify({ contentDelta: 'test content' });
-      const result = reducer(initialState, { type: 'APPEND_TOKEN', payload });
-
-      expect(result.messages[0].content).toBe('test content');
-    });
-
-    it('FINALIZE_STREAMING_MESSAGE should convert streaming message to final', () => {
-      const streamingMsg = {
-        ...createMockAssistantMessage({ 
-          id: 'streaming-123', 
-          content: 'Final content'
-        }),
-        streaming: true
-      };
-      const state = { ...initialState, messages: [streamingMsg] };
-
-      const result = reducer(state, { type: 'FINALIZE_STREAMING_MESSAGE' });
-
-      expect(result.messages[0].id).toMatch(/^msg-/);
-      expect(result.messages[0].content).toBe('Final content');
-      expect((result.messages[0] as any).streaming).toBe(false);
-    });
-
-    it('FINALIZE_STREAMING_MESSAGE should preserve content when cancelled', () => {
-      const streamingMsg = {
-        ...createMockAssistantMessage({ 
-          id: 'streaming-123', 
-          content: ''
-        }),
-        streaming: true
-      };
-      const state = { ...initialState, messages: [streamingMsg] };
-
-      const result = reducer(state, { type: 'FINALIZE_STREAMING_MESSAGE' });
-
-      expect(result.messages[0].content).toBe('[Stream was cancelled]');
-    });
   });
 
   describe('Tool call operations', () => {

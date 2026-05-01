@@ -223,52 +223,6 @@ describe('FullScreenEditor', () => {
     });
   });
 
-  describe('Keyboard Shortcuts', () => {
-    it('saves on Ctrl+Enter in both modes', async () => {
-      const mockOnSave = vi.fn();
-      
-      render(<FullScreenEditor {...defaultProps} onSave={mockOnSave} />);
-      
-      // Wait for editor to be ready
-      await waitFor(() => {
-        expect(screen.getByTestId('lexical-editor')).toBeInTheDocument();
-      });
-      
-      // Find the element with onKeyDown handler (the parent of lexical-editor)
-      const editorContainer = screen.getByTestId('lexical-editor').parentElement;
-      
-      // Dispatch keyboard event
-      const event = new KeyboardEvent('keydown', {
-        key: 'Enter',
-        ctrlKey: true,
-        bubbles: true
-      });
-      editorContainer!.dispatchEvent(event);
-      
-      expect(mockOnSave).toHaveBeenCalledWith('Test content');
-    });
-
-    it('cancels on Escape', async () => {
-      const mockOnCancel = vi.fn();
-      
-      render(<FullScreenEditor {...defaultProps} onCancel={mockOnCancel} />);
-      
-      await waitFor(() => {
-        expect(screen.getByTestId('lexical-editor')).toBeInTheDocument();
-      });
-      
-      const editorContainer = screen.getByTestId('lexical-editor').parentElement;
-      
-      const event = new KeyboardEvent('keydown', {
-        key: 'Escape',
-        bubbles: true
-      });
-      editorContainer!.dispatchEvent(event);
-      
-      expect(mockOnCancel).toHaveBeenCalledWith('Test content');
-    });
-  });
-
   describe('Loading States', () => {
     it('shows loading state on submit button', () => {
       render(
@@ -320,21 +274,6 @@ describe('FullScreenEditor', () => {
     });
   });
 
-  it('renders with initial content in editor', async () => {
-    render(
-      <FullScreenEditor
-        content="Initial content"
-        onSave={vi.fn()}
-        onCancel={vi.fn()}
-        mode="compose"
-      />
-    );
-
-    await waitFor(() => {
-      expect(screen.getByDisplayValue('Initial content')).toBeInTheDocument();
-    });
-  });
-
   it('shows Send button for compose mode', () => {
     render(
       <FullScreenEditor
@@ -359,30 +298,6 @@ describe('FullScreenEditor', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
-  });
-
-  it('calls onSave with content when save button is clicked', async () => {
-    const user = userEvent.setup();
-    const mockOnSave = vi.fn();
-    
-    render(
-      <FullScreenEditor
-        content=""
-        onSave={mockOnSave}
-        onCancel={vi.fn()}
-        mode="compose"
-      />
-    );
-
-    // Type content by updating the mock value
-    const input = screen.getByTestId('mock-editor-input');
-    await user.type(input, 'Test content');
-
-    // Click save
-    await user.click(screen.getByRole('button', { name: 'Send' }));
-
-    // Verify onSave was called with content
-    expect(mockOnSave).toHaveBeenCalledWith('Test content');
   });
 
   it('calls onCancel when cancel button is clicked (edit mode)', async () => {

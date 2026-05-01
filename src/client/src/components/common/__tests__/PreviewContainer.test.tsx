@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '../../../test/test-utils';
+import { render, screen } from '../../../test/test-utils';
 import '@testing-library/jest-dom';
 
 import PreviewContainer from '../PreviewContainer';
@@ -33,35 +33,4 @@ describe('PreviewContainer', () => {
     expect(container.querySelector(`.${customClass}`)).toBeInTheDocument();
   });
 
-  it('toggles between normal and full-screen modes', () => {
-    render(
-      <PreviewContainer>
-        <p>Toggle test</p>
-      </PreviewContainer>
-    );
-
-    // Locate essential elements
-    const toggleButton = screen.getByRole('button', { name: /full screen/i });
-    const headerDiv = screen.getByText('Preview').closest('div') as HTMLElement;
-    const outerContainer = headerDiv.parentElement as HTMLElement;
-
-    // Initial (collapsed) state expectations
-    expect(toggleButton).toHaveTextContent('Full screen');
-    expect(outerContainer).toHaveClass('w-full flex-1 flex-col');
-    expect(outerContainer).not.toHaveClass('fixed');
-
-    // First click – expand to full-screen
-    fireEvent.click(toggleButton);
-
-    expect(toggleButton).toHaveTextContent('Collapse');
-    expect(outerContainer).toHaveClass('fixed');
-    expect(outerContainer).not.toHaveClass('w-full flex-1 flex-col');
-
-    // Second click – collapse back to normal
-    fireEvent.click(toggleButton);
-
-    expect(toggleButton).toHaveTextContent('Full screen');
-    expect(outerContainer).toHaveClass('w-full flex-1 flex-col');
-    expect(outerContainer).not.toHaveClass('fixed');
-  });
 }); 

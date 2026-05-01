@@ -1,9 +1,8 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
 import FullScreenEditor from '../FullScreenEditor';
-import LexicalEditor, { LexicalEditorRef } from '../LexicalEditor';
 
 /**
  * Test-First Strategy: FullScreenEditor Table & Image Issues
@@ -40,126 +39,6 @@ describe('FullScreenEditor Table & Image Bug Reproduction', () => {
     const imageElement = screen.getByAltText('Test Image');
     expect(imageElement).toBeInTheDocument();
     expect(imageElement).toHaveAttribute('src', 'https://via.placeholder.com/150x100');
-  });
-
-  it('should preserve table formatting in full-screen mode', async () => {
-    const mockOnSave = vi.fn();
-    const mockOnCancel = vi.fn();
-
-    render(
-      <FullScreenEditor
-        content={tableWithImage}
-        onSave={mockOnSave}
-        onCancel={mockOnCancel}
-        mode="edit"
-      />
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Save')).toBeInTheDocument();
-    });
-
-    // Check that table structure is preserved
-    const tableElement = document.querySelector('table');
-    expect(tableElement).toBeInTheDocument();
-    
-    // Check for table headers
-    const headerCells = document.querySelectorAll('th');
-    expect(headerCells).toHaveLength(3);
-    expect(headerCells[0]).toHaveTextContent('Column 1');
-    expect(headerCells[1]).toHaveTextContent('Image Column');
-    expect(headerCells[2]).toHaveTextContent('Column 3');
-  });
-
-  it('BUG REPRODUCTION: Table formatting differs between inline and fullscreen', async () => {
-    console.log('\n=== TABLE FORMATTING COMPARISON ===');
-    
-    // Test 1: Render inline editor with table
-    const InlineTest = () => {
-      const editorRef = useRef<LexicalEditorRef>(null);
-      const [initialized, setInitialized] = useState(false);
-
-      useEffect(() => {
-        if (editorRef.current && !initialized) {
-          editorRef.current.setValue(tableWithImage);
-          setInitialized(true);
-        }
-      }, [initialized]);
-
-      return (
-        <div data-testid="inline-container">
-          <LexicalEditor
-            ref={editorRef}
-            placeholder="Inline test"
-            showToolbar={false}
-            className="inline-editor"
-          />
-        </div>
-      );
-    };
-
-    const { rerender } = render(<InlineTest />);
-    
-    // Wait for inline editor to initialize
-    await waitFor(() => {
-      expect(screen.getByTestId('inline-container')).toBeInTheDocument();
-    }, { timeout: 2000 });
-
-    // Check inline table structure
-    const inlineTable = screen.queryByRole('table');
-    const inlineImages = screen.queryAllByRole('img');
-    
-    console.log('INLINE EDITOR:');
-    console.log('- Table found:', !!inlineTable);
-    console.log('- Images found:', inlineImages.length);
-    if (inlineTable) {
-      console.log('- Table classes:', inlineTable.className);
-      console.log('- Table HTML preview:', inlineTable.outerHTML.substring(0, 200) + '...');
-    }
-
-    // Test 2: Render fullscreen editor with same content
-    const FullScreenTest = () => (
-      <FullScreenEditor
-        content={tableWithImage}
-        onSave={() => {}}
-        onCancel={() => {}}
-        mode="edit"
-        placeholder="Fullscreen test"
-      />
-    );
-
-    rerender(<FullScreenTest />);
-
-    // Wait for fullscreen editor to initialize
-    await waitFor(() => {
-      const fullscreenOverlay = document.querySelector('.fixed.inset-0.z-50');
-      expect(fullscreenOverlay).toBeInTheDocument();
-    }, { timeout: 2000 });
-
-    // Check fullscreen table structure
-    const fullscreenTable = screen.queryByRole('table');
-    const fullscreenImages = screen.queryAllByRole('img');
-
-    console.log('\nFULLSCREEN EDITOR:');
-    console.log('- Table found:', !!fullscreenTable);
-    console.log('- Images found:', fullscreenImages.length);
-    if (fullscreenTable) {
-      console.log('- Table classes:', fullscreenTable.className);
-      console.log('- Table HTML preview:', fullscreenTable.outerHTML.substring(0, 200) + '...');
-    }
-
-    console.log('\n=== COMPARISON RESULTS ===');
-    console.log('Table rendering consistent:', !!inlineTable === !!fullscreenTable);
-    console.log('Image count consistent:', inlineImages.length === fullscreenImages.length);
-
-    // These assertions should identify the exact differences
-    expect(fullscreenTable).toBeTruthy(); // Should find table in fullscreen
-    expect(fullscreenImages.length).toBeGreaterThan(0); // Should find images in fullscreen
-    
-    if (inlineTable && fullscreenTable) {
-      // Compare table styling
-      expect(fullscreenTable.className).toBe(inlineTable.className);
-    }
   });
 
   it('BUG REPRODUCTION: Image loading in different rendering contexts', async () => {

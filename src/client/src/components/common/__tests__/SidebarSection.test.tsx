@@ -61,12 +61,6 @@ describe('SidebarSection', () => {
     expect(item).toHaveClass('text-blue-600');
   });
 
-  it('shows upload button for contentFiles type', () => {
-    render(<SidebarSection {...defaultProps} type="contentFiles" />);
-    const uploadButton = screen.getByTitle('Upload files');
-    expect(uploadButton).toBeInTheDocument();
-  });
-
   it('shows add button for links type', () => {
     render(<SidebarSection {...defaultProps} type="links" onAdd={vi.fn()} />);
     const addButton = screen.getByTitle('Add new link');

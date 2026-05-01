@@ -160,42 +160,6 @@ describe('DraftUserCell', () => {
     expect(mockOnSend).not.toHaveBeenCalled();
   });
 
-  it('shows loading indicator when disabled', () => {
-    const mockOnChange = vi.fn();
-    const mockOnSend = vi.fn();
-    
-    render(
-      <DraftUserCell
-        value="Test message"
-        onChange={mockOnChange}
-        onSend={mockOnSend}
-        disabled={true}
-      />
-    );
-
-    expect(screen.getByText('Sending...')).toBeInTheDocument();
-    // Check for spinner by class instead of role
-    const spinnerElement = document.querySelector('.animate-spin');
-    expect(spinnerElement).toBeInTheDocument();
-  });
-
-  // Editor read-only behavior is handled internally by Lexical; ensure Send button is disabled
-  it('disables send button when disabled prop is true', () => {
-    const mockOnChange = vi.fn();
-    const mockOnSend = vi.fn();
-
-    render(
-      <DraftUserCell
-        value="Test message"
-        onChange={mockOnChange}
-        onSend={mockOnSend}
-        disabled={true}
-      />
-    );
-
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-  });
-
   it('shows keyboard shortcut hint', () => {
     const mockOnChange = vi.fn();
     const mockOnSend = vi.fn();

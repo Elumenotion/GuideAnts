@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema-jsonc.json",
+  "entry": [
+    "src/main.tsx",
+    "electron/preload.mjs",
+    "vite.config.browser.ts",
+    "vite.config.electron.ts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "electron/**/*.{js,mjs,ts}",
+    "*.config.{js,cjs,mjs,ts}"
+  ],
+  "ignoreBinaries": [
+    "pwsh"
+  ]
+}

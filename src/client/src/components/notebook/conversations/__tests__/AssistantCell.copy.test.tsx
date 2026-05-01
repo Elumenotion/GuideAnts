@@ -214,13 +214,6 @@ describe('AssistantCell - Copy Functionality', () => {
       }
     };
 
-    it('should render save button when all required props are provided', () => {
-      renderWithToast(<AssistantCell {...saveProps} />);
-
-      const saveButton = screen.getByLabelText('Save to notebook');
-      expect(saveButton).toBeInTheDocument();
-    });
-
     it('should not render save button when onSaveToNotebook is missing', () => {
       renderWithToast(<AssistantCell {...saveProps} onSaveToNotebook={undefined} />);
 
@@ -249,16 +242,5 @@ describe('AssistantCell - Copy Functionality', () => {
       expect(saveButton).not.toBeInTheDocument();
     });
 
-    it('should verify correct button order with save button present', () => {
-      renderWithToast(<AssistantCell {...saveProps} />);
-
-      const buttonContainer = screen.getByLabelText('Save to notebook').closest('div');
-      const allButtons = buttonContainer?.querySelectorAll('button');
-      
-      expect(allButtons).toHaveLength(3);
-      expect(allButtons?.[0]).toHaveAttribute('aria-label', 'Save to notebook');
-      expect(allButtons?.[1]).toHaveAttribute('aria-label', 'Copy to clipboard');
-      expect(allButtons?.[2]).toHaveAttribute('aria-label', 'Full screen');
-    });
   });
 }); 

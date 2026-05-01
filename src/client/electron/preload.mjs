@@ -1,4 +1,6 @@
-import { contextBridge, ipcRenderer, webFrame } from 'electron';
+import electron from 'electron';
+
+const { contextBridge, ipcRenderer, webFrame } = electron;
 
 console.log('Preload script starting...');
 

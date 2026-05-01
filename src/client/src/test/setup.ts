@@ -188,8 +188,9 @@ beforeAll(() => {
     [Symbol.iterator]: vi.fn()
   }));
 
-  // Mock scrollIntoView
+  // Mock scroll methods not provided by jsdom
   Element.prototype.scrollIntoView = vi.fn();
+  Element.prototype.scrollTo = vi.fn();
 
   // Mock Intersection Observer
   global.IntersectionObserver = vi.fn().mockImplementation(() => ({

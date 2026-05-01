@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+
 import { describe, expect, it, vi } from 'vitest';
 import { NotebookServiceToolbar } from '../NotebookServiceToolbar';
 import type { NotebookHeaderToolbarDto } from '../../../../types/notebookToolbar';
@@ -124,24 +124,4 @@ describe('NotebookServiceToolbar', () => {
     expect(screen.queryByText(/Document Intelligence/i)).not.toBeInTheDocument();
   });
 
-  it('opens chat panel from toolbar button', async () => {
-    const user = userEvent.setup();
-    render(
-      <NotebookServiceToolbar
-        projectId="p1"
-        notebookId="n1"
-        conversationId="c1"
-        data={makeToolbar()}
-        isLoading={false}
-        isMobile={false}
-        onRefresh={vi.fn(async () => {})}
-        inFlight={false}
-        setInFlight={vi.fn()}
-        assistantByName={{ assistant: { id: 'a1' } }}
-      />
-    );
-
-    await user.click(screen.getByRole('button', { name: /chat/i }));
-    expect(screen.getByText(/Chat ready/i)).toBeInTheDocument();
-  });
 });

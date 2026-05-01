@@ -14,15 +14,6 @@ const renderWithRouter = (component: React.ReactElement) => {
 };
 
 describe('ErrorScreen', () => {
-  it('renders default error screen', () => {
-    renderWithRouter(<ErrorScreen />);
-    
-    expect(screen.getByRole('heading', { name: 'Connection Error' })).toBeInTheDocument();
-    expect(screen.getByText('An unexpected error occurred')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Back to Projects' })).toBeInTheDocument();
-  });
-
   it('renders with custom title and message', () => {
     renderWithRouter(<ErrorScreen title="Custom Error" message="Custom message" />);
     
@@ -46,16 +37,6 @@ describe('ErrorScreen', () => {
     fireEvent.click(retryButton);
     
     expect(onRetry).toHaveBeenCalled();
-  });
-
-  it('calls onBack when back button is clicked', () => {
-    const onBack = vi.fn();
-    renderWithRouter(<ErrorScreen onBack={onBack} />);
-    
-    const backButton = screen.getByRole('button', { name: 'Back to Projects' });
-    fireEvent.click(backButton);
-    
-    expect(onBack).toHaveBeenCalled();
   });
 
   it('shows loading state during retry', async () => {

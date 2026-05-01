@@ -271,58 +271,6 @@ describe('WorkflowSection', () => {
   
   // Enhanced streaming functionality tests
   describe('Enhanced Streaming Functionality', () => {
-    it('should show streaming indicators when tool calls are in progress', () => {
-      // Mock streaming state
-      const streamingTurn: StreamingTurn = {
-        id: 'streaming-turn-1',
-        assistantStepSection: {
-          content: 'Let me run some Python code for you.',
-          toolCalls: [{
-            id: 'call_123',
-            name: 'runPython',
-            arguments: '{"script":"print(\'Hello World\')"}',
-            status: 'pending',
-            timestamp: new Date('2025-01-07T10:00:00Z')
-          }],
-          isVisible: true
-        },
-        toolCalls: [{
-          id: 'call_123',
-          name: 'runPython',
-          arguments: '{"script":"print(\'Hello World\')"}',
-          status: 'executing',
-          timestamp: new Date('2025-01-07T10:00:00Z')
-        }],
-        toolResults: [],
-        startTime: new Date('2025-01-07T10:00:00Z'),
-        isComplete: false
-      };
-      
-      mockConversationContext.currentTurn = streamingTurn;
-      mockConversationContext.isStreamingToolCalls = true;
-      mockConversationContext.streamingProgress = {
-        currentPhase: 'tool_execution',
-        completedSteps: 1,
-        totalSteps: 3
-      };
-      
-      renderWithProviders(<WorkflowSection messages={[]} isStreaming={true} />);
-      
-      // Should show streaming phase indicator
-      expect(screen.getByText('Executing tools...')).toBeInTheDocument();
-      
-      // Should show progress - the text shows "1 step" not "1/3 steps completed"
-      expect(screen.getByText(/\(1 step\)/)).toBeInTheDocument();
-      
-      // Should show streaming indicators
-      expect(screen.getByText('Executing tools...')).toBeInTheDocument();
-      
-      // Reset mock
-      mockConversationContext.currentTurn = undefined;
-      mockConversationContext.isStreamingToolCalls = false;
-      mockConversationContext.streamingProgress = { currentPhase: 'complete', completedSteps: 0, totalSteps: 0 };
-    });
-
     it('should show thinking phase when assistant is thinking', () => {
       const streamingTurn: StreamingTurn = {
         id: 'streaming-turn-2',

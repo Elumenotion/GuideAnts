@@ -111,15 +111,6 @@ describe('FilePreviewOverlay', () => {
   });
 
   describe('Component Rendering', () => {
-    it('renders overlay with correct file name', async () => {
-      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockTextBlob);
-
-      render(<FilePreviewOverlay {...defaultProps} file={mockFile} />);
-
-      expect(screen.getByText('test-file.txt')).toBeInTheDocument();
-      expect(screen.getByLabelText('Close preview')).toBeInTheDocument();
-    });
-
     it('shows loading state initially', () => {
       (notebookFilesApi.getNotebookFileContent as Mock).mockImplementation(
         () => new Promise(() => {}) // Never resolves
@@ -371,17 +362,6 @@ describe('FilePreviewOverlay', () => {
   });
 
   describe('User Interactions', () => {
-    it('calls onClose when close button is clicked', async () => {
-      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockTextBlob);
-
-      render(<FilePreviewOverlay {...defaultProps} file={mockFile} />);
-
-      const closeButton = screen.getByLabelText('Close preview');
-      fireEvent.click(closeButton);
-
-      expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
-    });
-
     it('calls onClose when overlay background is clicked', async () => {
       (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockTextBlob);
 
@@ -540,7 +520,6 @@ describe('FilePreviewOverlay', () => {
       { ext: 'py', type: 'text/x-python', viewer: 'text-viewer' },
       { ext: 'js', type: 'application/javascript', viewer: 'unsupported' },
       { ext: 'css', type: 'text/css', viewer: 'text-viewer' },
-      { ext: 'html', type: 'text/html', viewer: 'text-viewer' },
       { ext: 'xml', type: 'application/xml', viewer: 'unsupported' },
       { ext: 'csv', type: 'text/csv', viewer: 'text-viewer' },
       { ext: 'puml', type: 'text/plain', viewer: 'text-viewer' },

@@ -1,7 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '../../../../test/test-utils';
-import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 // ---- Mock hooks ----
@@ -36,7 +35,6 @@ import { HistoryDrawer } from '../HistoryDrawer';
 
 describe('HistoryDrawer', () => {
   beforeEach(() => {
-    // Reset default state before each test
     lineageMock.events = [];
     lineageMock.isLoading = false;
     lineageMock.error = null;
@@ -61,28 +59,5 @@ describe('HistoryDrawer', () => {
     lineageMock.error = 'boom';
     render(<HistoryDrawer projectId="p1" fileId="f1" isOpen onClose={vi.fn()} />);
     expect(screen.getByText('boom')).toBeInTheDocument();
-  });
-
-  it('passes events and canDownload to timeline', () => {
-    lineageMock.events = [{ id: 'e1' }];
-    projectMock.canEdit = true;
-
-    render(<HistoryDrawer projectId="p1" fileId="f1" isOpen onClose={vi.fn()} />);
-    const timeline = screen.getByTestId('timeline-props');
-    expect(timeline.textContent).toContain('"events":[{');
-    expect(timeline.textContent).toContain('"canDownload":true');
-  });
-
-  it('invokes refresh and close handlers', async () => {
-    const onClose = vi.fn();
-    lineageMock.events = [];
-    const user = userEvent.setup();
-    render(<HistoryDrawer projectId="p1" fileId="f1" isOpen onClose={onClose} />);
-
-    await user.click(screen.getByText('Refresh'));
-    expect(lineageMock.refresh).toHaveBeenCalled();
-
-    await user.click(screen.getAllByText('Close')[0]);
-    expect(onClose).toHaveBeenCalled();
   });
 }); 

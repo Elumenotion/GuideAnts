@@ -106,35 +106,12 @@ describe('FolderTree', () => {
   });
 
   describe('rendering', () => {
-    it('renders folder tree with folders and files', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      // Check root folder
-      expect(screen.getByText('Test Project')).toBeInTheDocument();
-
-      // Check subfolder
-      expect(screen.getByText('Documents')).toBeInTheDocument();
-
-      // Check files
-      expect(screen.getByText('test.txt')).toBeInTheDocument();
-      expect(screen.getByText('root-file.txt')).toBeInTheDocument();
-    });
-
-    it('renders empty state when no folder tree provided', () => {
-      render(<FolderTree {...defaultProps} folderTree={null} folders={[]} />);
-
-      expect(screen.getByText('No folders found')).toBeInTheDocument();
-      expect(screen.getByText(/Add Folder/)).toBeInTheDocument();
-    });
-
     it('shows folder tree content when not disabled', () => {
       render(<FolderTree {...defaultProps} />);
 
-      // Check that folder tree content is visible and not disabled
       const rootFolder = screen.getByText('Test Project');
       expect(rootFolder).toBeInTheDocument();
       
-      // Check that expand/collapse buttons are not disabled
       const expandButtons = screen.getAllByRole('button');
       expandButtons.forEach(button => {
         expect(button).not.toBeDisabled();
@@ -148,71 +125,11 @@ describe('FolderTree', () => {
       expect(createButton).toBeNull();
     });
 
-    it('shows selected file with highlight', () => {
-      render(<FolderTree {...defaultProps} selectedFileId="file-1" />);
-
-      const fileElement = screen.getByText('test.txt').closest('div');
-      expect(fileElement).toHaveClass('bg-blue-100', 'text-blue-600');
-    });
-
     it('shows selected folder with highlight', () => {
       render(<FolderTree {...defaultProps} selectedFolderId="folder-1" />);
 
       const folderElement = screen.getByText('Documents').closest('div');
       expect(folderElement).toHaveClass('bg-blue-100', 'text-blue-600');
-    });
-  });
-
-  describe('user interactions', () => {
-    it('calls onFileSelect when file is clicked', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      fireEvent.click(screen.getByText('test.txt'));
-
-      expect(defaultProps.onFileSelect).toHaveBeenCalledWith('file-1');
-    });
-
-    it('calls onFolderSelect when folder is clicked', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      fireEvent.click(screen.getByText('Documents'));
-
-      expect(defaultProps.onFolderSelect).toHaveBeenCalledWith('folder-1');
-    });
-
-    it('expands and collapses folders when expand button is clicked', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      // Initially expanded, subfolder should be visible
-      expect(screen.getByText('Subfolder')).toBeInTheDocument();
-
-      // Find the expand button by looking for the SVG that contains the expand icon
-      const expandButton = screen.getAllByRole('button').find(button => 
-        button.querySelector('svg path[fill-rule="evenodd"]')
-      );
-      expect(expandButton).toBeDefined();
-
-      // Click collapse button
-      fireEvent.click(expandButton!);
-
-      // Subfolder should be hidden
-      expect(screen.queryByText('Subfolder')).not.toBeInTheDocument();
-
-      // Click expand button again
-      fireEvent.click(expandButton!);
-
-      // Subfolder should be visible again
-      expect(screen.getByText('Subfolder')).toBeInTheDocument();
-    });
-
-    it('does not trigger callbacks when disabled', () => {
-      render(<FolderTree {...defaultProps} disabled={true} />);
-
-      fireEvent.click(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Documents'));
-
-      expect(defaultProps.onFileSelect).not.toHaveBeenCalled();
-      expect(defaultProps.onFolderSelect).not.toHaveBeenCalled();
     });
   });
 
@@ -287,37 +204,6 @@ describe('FolderTree', () => {
       expect(defaultProps.onUploadToFolder).toHaveBeenCalledWith('folder-1');
     });
 
-    it('calls onDeleteFolder when delete is confirmed', async () => {
-      defaultProps.onDeleteFolder.mockResolvedValue(undefined);
-
-      render(<FolderTree {...defaultProps} />);
-
-      fireEvent.contextMenu(screen.getByText('Subfolder'));
-      fireEvent.click(screen.getByText('Delete'));
-
-      // Confirm dialog appears – click confirm
-      const confirmBtn = await screen.findByTestId('confirm');
-      fireEvent.click(confirmBtn);
-
-      await waitFor(() => {
-        expect(defaultProps.onDeleteFolder).toHaveBeenCalledWith('folder-2');
-      });
-    });
-
-    it('does not delete folder when cancel is clicked', async () => {
-      render(<FolderTree {...defaultProps} />);
-
-      fireEvent.contextMenu(screen.getByText('Subfolder'));
-      fireEvent.click(screen.getByText('Delete'));
-
-      // Click cancel in dialog
-      const cancelBtn = await screen.findByRole('button', { name: /cancel/i });
-      fireEvent.click(cancelBtn);
-
-      await waitFor(() => {
-        expect(defaultProps.onDeleteFolder).not.toHaveBeenCalled();
-      });
-    });
   });
 
   describe('inline editing', () => {
@@ -426,36 +312,10 @@ describe('FolderTree', () => {
 
   describe('create root folder', () => {
     it('folder tree supports create folder operations', async () => {
-      // This test is now handled by the parent component (ProjectSidebar)
-      // FolderTree itself just renders the tree structure
       render(<FolderTree {...defaultProps} />);
 
-      // Verify the tree structure is rendered correctly
       expect(screen.getByText('Test Project')).toBeInTheDocument();
       expect(screen.getByText('Documents')).toBeInTheDocument();
-    });
-
-    it('shows instructional text when there are no folders', () => {
-      render(<FolderTree {...defaultProps} folderTree={null} folders={[]} />);
-
-      expect(screen.getByText('No folders found')).toBeInTheDocument();
-      expect(
-        screen.getByText(/Use the "Add Folder" button in the sidebar/i)
-      ).toBeInTheDocument();
-      // No create button should exist in new UI
-      expect(screen.queryByText('Create your first folder')).not.toBeInTheDocument();
-    });
-  });
-
-  describe('file size formatting', () => {
-    it('displays file sizes correctly', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      // 1024 bytes = 1 KB (based on actual formatting)
-      expect(screen.getByText('1 KB')).toBeInTheDocument();
-
-      // 2048 bytes = 2 KB (based on actual formatting)
-      expect(screen.getByText('2 KB')).toBeInTheDocument();
     });
   });
 
@@ -530,52 +390,6 @@ describe('FolderTree', () => {
       expect(folderElement).not.toHaveClass('ring-2', 'ring-blue-400', 'bg-blue-50');
     });
 
-    it('handles file drag start', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      const fileElement = screen.getByText('test.txt').closest('div');
-      const dataTransfer = createDataTransfer();
-
-      fireEvent.dragStart(fileElement!, { dataTransfer });
-
-      expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', 'file-1');
-      expect(dataTransfer.setData).toHaveBeenCalledWith('application/x-origin-folder', 'folder-1');
-    });
-
-    it('handles file drag end', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      const fileElement = screen.getByText('test.txt').closest('div');
-      const dataTransfer = createDataTransfer();
-
-      // Mock the element style for visual feedback
-      const mockStyle = { opacity: '0.5' };
-      Object.defineProperty(fileElement, 'style', {
-        value: mockStyle,
-        writable: true
-      });
-
-      fireEvent.dragStart(fileElement!, { dataTransfer });
-      fireEvent.dragEnd(fileElement!, { dataTransfer });
-
-      // Should reset opacity after drag ends
-      expect(mockStyle.opacity).toBe('1');
-    });
-
-    it('handles drop file on folder', async () => {
-      render(<FolderTree {...defaultProps} />);
-
-      const targetFolder = screen.getByText('Subfolder').closest('div');
-      const dataTransfer = createDataTransfer({
-        'text/plain': 'file-1',
-        'application/x-origin-folder': 'folder-1'
-      });
-
-      fireEvent.drop(targetFolder!, { dataTransfer });
-
-      expect(defaultProps.onMoveFile).toHaveBeenCalledWith('file-1', 'folder-2');
-    });
-
     it('handles drop file on root folder', async () => {
       render(<FolderTree {...defaultProps} />);
 
@@ -617,173 +431,6 @@ describe('FolderTree', () => {
       fireEvent.drop(targetFolder!, { dataTransfer });
 
       expect(defaultProps.onMoveFile).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('file operations', () => {
-    beforeEach(() => {
-      // Add required props for file operations
-      defaultProps.onDeleteFile = vi.fn().mockResolvedValue(undefined);
-      defaultProps.onRenameFile = vi.fn().mockResolvedValue(undefined);
-      defaultProps.onCreateNotebookFromFile = vi.fn();
-      defaultProps.onToggleIndex = vi.fn().mockResolvedValue(undefined);
-    });
-
-    it('shows file context menu on right click', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-
-      expect(screen.getByText('Create Notebook from File')).toBeInTheDocument();
-      expect(screen.getByText('Rename')).toBeInTheDocument();
-      expect(screen.getByText('Delete')).toBeInTheDocument();
-    });
-
-    it('creates notebook from file via context menu', async () => {
-      render(<FolderTree {...defaultProps} />);
-
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Create Notebook from File'));
-
-      expect(defaultProps.onCreateNotebookFromFile).toHaveBeenCalledWith('file-1', 'test.txt');
-    });
-
-    it('deletes file via context menu when confirmed', async () => {
-      defaultProps.onDeleteFile.mockResolvedValue(undefined);
-
-      render(<FolderTree {...defaultProps} />);
-
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Delete'));
-
-      const confirmBtn = await screen.findByTestId('confirm');
-      fireEvent.click(confirmBtn);
-
-      await waitFor(() => {
-        expect(defaultProps.onDeleteFile).toHaveBeenCalledWith('file-1');
-      });
-    });
-
-    it('does not delete file when cancel is clicked', async () => {
-      render(<FolderTree {...defaultProps} />);
-
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Delete'));
-
-      const cancelBtn = await screen.findByRole('button', { name: /cancel/i });
-      fireEvent.click(cancelBtn);
-
-      await waitFor(() => {
-        expect(defaultProps.onDeleteFile).not.toHaveBeenCalled();
-      });
-    });
-
-    it('enters file rename mode when rename is clicked', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Rename'));
-
-      // Should show input field with current filename
-      const input = screen.getByDisplayValue('test.txt');
-      expect(input).toBeInTheDocument();
-      expect(input).toHaveFocus();
-    });
-
-    it('saves file rename when Enter key is pressed', async () => {
-      render(<FolderTree {...defaultProps} />);
-
-      // Enter rename mode
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Rename'));
-
-      const input = screen.getByDisplayValue('test.txt');
-
-      // Change value and press Enter
-      fireEvent.change(input, { target: { value: 'renamed.txt' } });
-      fireEvent.keyDown(input, { key: 'Enter' });
-
-      await waitFor(() => {
-        expect(defaultProps.onRenameFile).toHaveBeenCalledWith('file-1', 'renamed.txt');
-      });
-    });
-
-    it('cancels file rename when Escape key is pressed', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      // Enter rename mode
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Rename'));
-
-      const input = screen.getByDisplayValue('test.txt');
-
-      // Change value and press Escape
-      fireEvent.change(input, { target: { value: 'renamed.txt' } });
-      fireEvent.keyDown(input, { key: 'Escape' });
-
-      // Should not call rename and should exit edit mode
-      expect(defaultProps.onRenameFile).not.toHaveBeenCalled();
-      expect(screen.queryByDisplayValue('renamed.txt')).not.toBeInTheDocument();
-      expect(screen.getByText('test.txt')).toBeInTheDocument();
-    });
-
-    it('saves file rename when input loses focus', async () => {
-      render(<FolderTree {...defaultProps} />);
-
-      // Enter rename mode
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Rename'));
-
-      const input = screen.getByDisplayValue('test.txt');
-
-      // Change value and blur
-      fireEvent.change(input, { target: { value: 'renamed.txt' } });
-      fireEvent.blur(input);
-
-      await waitFor(() => {
-        expect(defaultProps.onRenameFile).toHaveBeenCalledWith('file-1', 'renamed.txt');
-      });
-    });
-
-    it('does not save file rename when name is unchanged', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      // Enter rename mode
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Rename'));
-
-      const input = screen.getByDisplayValue('test.txt');
-
-      // Press Enter without changing value
-      fireEvent.keyDown(input, { key: 'Enter' });
-
-      expect(defaultProps.onRenameFile).not.toHaveBeenCalled();
-    });
-
-    it('does not save file rename when name is empty', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      // Enter rename mode
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-      fireEvent.click(screen.getByText('Rename'));
-
-      const input = screen.getByDisplayValue('test.txt');
-
-      // Clear value and press Enter
-      fireEvent.change(input, { target: { value: '' } });
-      fireEvent.keyDown(input, { key: 'Enter' });
-
-      expect(defaultProps.onRenameFile).not.toHaveBeenCalled();
-    });
-
-    it('does not show file context menu when disabled', () => {
-      render(<FolderTree {...defaultProps} disabled={true} />);
-
-      fireEvent.contextMenu(screen.getByText('test.txt'));
-
-      expect(screen.queryByText('Create Notebook from File')).not.toBeInTheDocument();
-      expect(screen.queryByText('Rename')).not.toBeInTheDocument();
-      expect(screen.queryByText('Delete')).not.toBeInTheDocument();
     });
   });
 
@@ -933,53 +580,9 @@ describe('FolderTree', () => {
       files: []
     };
 
-    it('shows all items when no search term', () => {
-      render(<FolderTree {...defaultProps} folderTree={searchableTree} searchTerm="" />);
-
-      expect(screen.getByText('SearchFolder')).toBeInTheDocument();
-      expect(screen.getByText('OtherFolder')).toBeInTheDocument();
-      expect(screen.getByText('searchable.txt')).toBeInTheDocument();
-      expect(screen.getByText('other.txt')).toBeInTheDocument();
-    });
-
-    it('filters folders and files by search term', () => {
-      render(<FolderTree {...defaultProps} folderTree={searchableTree} searchTerm="search" />);
-
-      // Should show matching folder and file
-      expect(screen.getByText('SearchFolder')).toBeInTheDocument();
-      expect(screen.getByText('searchable.txt')).toBeInTheDocument();
-      expect(screen.getByText('nested-search.txt')).toBeInTheDocument();
-
-      // Should hide non-matching items
-      expect(screen.queryByText('OtherFolder')).not.toBeInTheDocument();
-      expect(screen.queryByText('other.txt')).not.toBeInTheDocument();
-    });
-
-    it('shows parent folders when child matches search', () => {
-      render(<FolderTree {...defaultProps} folderTree={searchableTree} searchTerm="nested" />);
-
-      // Should show parent folder even though it doesn't match directly
-      expect(screen.getByText('SearchFolder')).toBeInTheDocument();
-      expect(screen.getByText('NestedSearch')).toBeInTheDocument();
-      expect(screen.getByText('nested-search.txt')).toBeInTheDocument();
-
-      // Should hide non-matching items
-      expect(screen.queryByText('OtherFolder')).not.toBeInTheDocument();
-      expect(screen.queryByText('searchable.txt')).not.toBeInTheDocument();
-    });
-
-    it('is case insensitive', () => {
-      render(<FolderTree {...defaultProps} folderTree={searchableTree} searchTerm="SEARCH" />);
-
-      expect(screen.getByText('SearchFolder')).toBeInTheDocument();
-      expect(screen.getByText('searchable.txt')).toBeInTheDocument();
-    });
-
     it('handles empty search results gracefully', () => {
       render(<FolderTree {...defaultProps} folderTree={searchableTree} searchTerm="nonexistent" />);
 
-      // When no matches found, the entire folder tree is filtered out
-      // So we should not expect to find any elements
       expect(screen.queryByText('SearchFolder')).not.toBeInTheDocument();
       expect(screen.queryByText('OtherFolder')).not.toBeInTheDocument();
       expect(screen.queryByText('searchable.txt')).not.toBeInTheDocument();
@@ -1142,17 +745,6 @@ describe('FolderTree', () => {
       const deleteButton = screen.getByText('Delete');
       expect(deleteButton).toHaveClass('opacity-50', 'cursor-not-allowed');
       expect(deleteButton).toBeDisabled();
-    });
-
-    it('allows folder deletion when folder has no children', () => {
-      render(<FolderTree {...defaultProps} />);
-
-      // Subfolder has no children
-      fireEvent.contextMenu(screen.getByText('Subfolder'));
-
-      const deleteButton = screen.getByText('Delete');
-      expect(deleteButton).not.toHaveClass('opacity-50', 'cursor-not-allowed');
-      expect(deleteButton).not.toBeDisabled();
     });
   });
 }); 

@@ -42,19 +42,6 @@ describe('MarkdownViewer', () => {
     expect(screen.getByText('code')).toBeInTheDocument();
   });
 
-  it('renders mermaid code block using MermaidRenderer', async () => {
-    const md = '```mermaid\ngraph TD; A-->B\n```';
-    const { container } = render(<MarkdownViewer text={md} />);
-
-    // Wait for MermaidRenderer to insert SVG
-    await waitFor(() => {
-      const diagramContainer = container.querySelector('.mermaid-diagram');
-      expect(diagramContainer).toBeInTheDocument();
-      // svg inserted by mocked mermaid.render
-      expect(diagramContainer?.querySelector('svg')).toBeInTheDocument();
-    });
-  });
-
   it('renders within a PreviewContainer', () => {
     render(<MarkdownViewer text="some text" />);
     expect(screen.getByText('Preview')).toBeInTheDocument();

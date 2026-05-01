@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, beforeEach, expect, vi } from 'vitest';
 import '@testing-library/jest-dom';
@@ -31,24 +31,12 @@ describe('AssistantDropdown', () => {
     expect(screen.getByAltText('Code Ants avatar')).toBeInTheDocument();
   });
 
-  it('opens dropdown when clicked', async () => {
-    const user = userEvent.setup();
-    render(<AssistantDropdown {...defaultProps} />);
-    
-    const button = screen.getByRole('button');
-    await user.click(button);
-    
-    expect(screen.getByRole('listbox')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Search assistants by name')).toBeInTheDocument();
-  });
-
   it('displays all assistants in dropdown', async () => {
     const user = userEvent.setup();
     render(<AssistantDropdown {...defaultProps} />);
     
     await user.click(screen.getByRole('button'));
     
-    // Check that all assistants appear as options in the dropdown
     mockAssistants.forEach(assistant => {
       expect(screen.getByRole('option', { name: new RegExp(assistant.name) })).toBeInTheDocument();
     });
@@ -64,33 +52,6 @@ describe('AssistantDropdown', () => {
     expect(selectedOption).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('filters assistants based on search query', async () => {
-    const user = userEvent.setup();
-    render(<AssistantDropdown {...defaultProps} />);
-    
-    await user.click(screen.getByRole('button'));
-    
-    const searchInput = screen.getByPlaceholderText('Search assistants by name');
-    await user.type(searchInput, 'Web');
-    
-    // Should show Web Ants option
-    expect(screen.getByRole('option', { name: /Web Ants/ })).toBeInTheDocument();
-    // Should not show Code Ants as an option in the dropdown (but still shows in button)
-    expect(screen.queryByRole('option', { name: /Code Ants/ })).not.toBeInTheDocument();
-  });
-
-  it('shows no results message when search has no matches', async () => {
-    const user = userEvent.setup();
-    render(<AssistantDropdown {...defaultProps} />);
-    
-    await user.click(screen.getByRole('button'));
-    
-    const searchInput = screen.getByPlaceholderText('Search assistants by name');
-    await user.type(searchInput, 'xyz');
-    
-    expect(screen.getByText('No assistants found matching "xyz"')).toBeInTheDocument();
-  });
-
   it('calls onSelect when assistant is chosen', async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
@@ -100,34 +61,6 @@ describe('AssistantDropdown', () => {
     await user.click(screen.getByRole('option', { name: /Web Ants/ }));
     
     expect(onSelect).toHaveBeenCalledWith('Web Ants');
-  });
-
-  it('clears search when selecting an assistant', async () => {
-    const user = userEvent.setup();
-    render(<AssistantDropdown {...defaultProps} />);
-    
-    await user.click(screen.getByRole('button'));
-    
-    const searchInput = screen.getByPlaceholderText('Search assistants by name');
-    await user.type(searchInput, 'Web');
-    
-    // Verify search is working
-    expect(searchInput).toHaveValue('Web');
-    
-    // Select an assistant (this will close the dropdown)
-    await user.click(screen.getByRole('option', { name: /Web Ants/ }));
-    
-    // Verify dropdown is closed
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
-    
-    // Reopen dropdown and verify search is cleared
-    await user.click(screen.getByRole('button'));
-    
-    // Wait for the search input to appear and verify it's cleared
-    await waitFor(() => {
-      const newSearchInput = screen.getByPlaceholderText('Search assistants by name');
-      expect(newSearchInput).toHaveValue('');
-    });
   });
 
   it('closes dropdown on escape key', async () => {

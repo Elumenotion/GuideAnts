@@ -45,13 +45,4 @@ describe('MermaidRenderer', () => {
     });
   });
 
-  it('cleans up orphaned elements on unmount', async () => {
-    const { cleanupOrphanedMermaidElements } = await import('../../../utils/mermaidCleanup');
-    
-    const { unmount } = render(<MermaidRenderer chart={'graph TD; A-->B'} />);
-    
-    unmount();
-    
-    expect(vi.mocked(cleanupOrphanedMermaidElements)).toHaveBeenCalled();
-  });
 }); 

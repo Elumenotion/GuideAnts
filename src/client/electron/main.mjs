@@ -1,14 +1,14 @@
-import { app, BrowserWindow, Menu, ipcMain, shell, dialog } from 'electron'
+import electron from 'electron'
 import express from 'express'
 import http from 'http'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import contextMenu from 'electron-context-menu'
 import { createServer } from 'net'
 import updaterPkg from 'electron-updater'
 import { readFileSync } from 'fs'
 
 const { autoUpdater } = updaterPkg
+const { app, BrowserWindow, Menu, ipcMain, shell, dialog } = electron
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -440,11 +440,20 @@ async function startStaticServer() {
 // Handle app ready
 app.whenReady()
   .then(async () => {
-    // Enable native-like context menu with copy/paste for all BrowserWindows
-    contextMenu({
-      showSearchWithGoogle: false,
-      showInspectElement: isDev,
-    });
+    // Enable native-like context menu when available.
+    // Some Electron/runtime combinations can fail to load this optional dependency.
+    try {
+      const mod = await import('electron-context-menu')
+      const contextMenu = mod?.default || mod
+      if (typeof contextMenu === 'function') {
+        contextMenu({
+          showSearchWithGoogle: false,
+          showInspectElement: isDev,
+        })
+      }
+    } catch (error) {
+      console.warn('electron-context-menu unavailable, continuing without it')
+    }
     console.log('App is ready')
 
     // In production, optionally initialize electron-log for updater logs

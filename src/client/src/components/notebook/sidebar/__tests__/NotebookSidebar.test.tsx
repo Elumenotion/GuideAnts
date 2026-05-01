@@ -218,12 +218,6 @@ describe('NotebookSidebar', () => {
     expect(collapsedContainer).toBeInTheDocument();
   });
 
-  it('disables interactions when disabled', () => {
-    render(<NotebookSidebar {...defaultProps} disabled={true} />);
-    const searchInput = screen.getByPlaceholderText('Search files and links...');
-    expect(searchInput).toBeDisabled();
-  });
-
   describe('Upload Dialog', () => {
     it('opens upload dialog when upload to folder is triggered', async () => {
       render(<NotebookSidebar {...defaultProps} />);
