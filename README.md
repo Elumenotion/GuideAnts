@@ -1,5 +1,33 @@
 # GuideAnts
 
+## Quickstart
+
+Use the root one-step launcher for your OS:
+
+- Windows:
+  - `start_windows.cmd`
+- Linux:
+  - `bash ./start_linux.sh`
+- macOS:
+  - `bash ./start_macos.sh`
+
+What these scripts do:
+
+- Validate Docker and Docker Compose availability.
+- Detect backend (`cuda13` when NVIDIA is available, otherwise `cpu`).
+- Choose the matching compose stack (GHCR by default).
+- Start GuideAnts with Docker Compose.
+- Wait for `http://localhost:5107/` and open it in your browser.
+
+Useful options:
+
+- `--doctor` checks only (no changes).
+- `--fix` attempts limited remediation where possible.
+- `--backend cpu|cuda13` forces backend choice.
+- `--compose ghcr|local` chooses prebuilt GHCR stack or local-image stack.
+
+After startup, follow the [Local AI Setup Guide](docs/local-ai-setup-guide.md) to configure Hugging Face access, download models, and enable local AI services in the Settings wizard.
+
 GuideAnts is an AI notebook and workflow platform built around projects, notebooks, reusable guides, and provider-routed AI services. It is designed to give people a place to collect source material, work with assistants in context, run multimodal AI tasks, and turn rough working sessions into reusable or publishable outputs.
 
 At a high level, a GuideAnts project is the durable home for files, folders, links, guides, assistants, usage data, and published experiences. Notebooks sit inside projects as working spaces where users chat with models, upload or copy files, generate artifacts, run speech and image workflows, and publish results back into the project when they are ready.

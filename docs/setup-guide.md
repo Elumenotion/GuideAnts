@@ -1,18 +1,60 @@
 # GuideAnts Setup Guide
 
-Last updated: 2026-04-30
+Last updated: 2026-05-01
 
-This is the operator-facing setup source of truth for Settings and AI onboarding.
-Use this guide for first install, first-launch configuration, and troubleshooting.
+This is the setup-first operator guide for GuideAnts.
+Use it to get a working environment from zero to usable chat/services, then use linked docs for deeper architecture details.
 
-## 1. What is current
+## 1. Fast path (recommended)
 
-GuideAnts runs as a Docker-based stack with configuration split between:
+Use the root launcher script for your OS:
 
-- Runtime/environment config (compose/appsettings/env), and
-- DB-backed application settings edited in the Settings UI.
+- Windows: `start_windows.cmd`
+- Linux: `bash ./start_linux.sh`
+- macOS: `bash ./start_macos.sh`
 
-The Settings UI now has **seven** top-level tabs, in this order:
+What these scripts do:
+
+- Validate Docker + Docker Compose.
+- Auto-detect backend (`cuda13` when NVIDIA is available, otherwise `cpu`).
+- Choose compose stack (`ghcr` by default, `local` optional).
+- Start the stack and wait for `http://localhost:5107/`.
+
+Useful options:
+
+- `--doctor` (checks only, no startup)
+- `--fix` (limited auto-remediation)
+- `--backend cpu|cuda13` (force backend)
+- `--compose ghcr|local` (prebuilt GHCR vs local images)
+
+If the launcher gets you to `http://localhost:5107/`, skip to section 5.
+
+## 2. What you are setting up
+
+GuideAnts runs as a Docker Compose stack on a single host. The runtime stack includes six services:
+
+| Service | Image/source | Role |
+|---------|---------------|------|
+| `mssql-express` | `mssql2025-express-fts` | SQL Server database. |
+| `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13}:latest` (or local tag) | Consolidated local AI gateway: llama.cpp, ASR, TTS, image generation, embeddings, media, script execution. |
+| `docling-serve` | `quay.io/docling-project/docling-serve-{cpu,cu130}` | Local document intelligence / markdown extraction. |
+| `guideants-webapi-ui` | `${GA_WEBAPI_UI_IMAGE}` | Main API plus bundled browser UI at `http://localhost:5107`. |
+| `plantuml` | `plantuml-1.2025.2` | Diagram rendering. |
+| `searxng` | `${GA_SEARXNG_IMAGE:-guideants-searxng:latest}` | Search backend used by agent/web features. |
+
+Llama runtime ownership split:
+
+- `guideants-ai` owns local model artifacts under `/models-local/llama`.
+- Router preset lives at `/models-local/router-models.ini` on Docker volume `ai_local_models`.
+- API delegates runtime/download/register/load/unload to `guideants-ai` (`/llama-admin/*`).
+- Web API does not directly own host llama model folders.
+
+Settings ownership split:
+
+- Runtime/environment config comes from compose/appsettings/env.
+- Credentials and routing choices are DB-backed settings edited in UI.
+
+Settings top-level tab order (current):
 
 1. Overview
 2. Personalization
@@ -22,100 +64,199 @@ The Settings UI now has **seven** top-level tabs, in this order:
 6. Infrastructure
 7. Telemetry
 
-This order comes from `SettingsTabNavigation.tsx` and is the canonical UI IA.
+## 3. Prerequisites
 
-## 2. First launch and Add AI Services Wizard
+### Host
 
-On Home (`/`), the Add AI Services Wizard opens automatically when either condition is true:
+- Docker Desktop (Windows/macOS) or Docker Engine 24+ with Compose plugin.
+- Windows PowerShell 7+ for `docker/llama/run/*.ps1` helper scripts.
+- For CUDA local AI: NVIDIA drivers + container runtime support.
+- Disk budget: ~60 GB minimum for common local model sets.
 
-- No configured connection sections (`readinessStatus === configured` for connection sections), or
-- No catalog models exist.
+### Images and compose mode
 
-Auto-open is skipped when:
+You can run in either mode:
 
-- The user has set `Don't auto-open this again on this device`, or
-- Startup probe calls fail.
+- `ghcr` mode (default in launcher): pulls prebuilt images via `docker/docker-compose.ghcr-*.yml`.
+- `local` mode: uses `docker/docker-compose.{cpu,cuda}.yml`; build local images first when needed.
 
-Wizard facts (as built):
+Build references:
 
-- Entry points: auto-open on Home and manual `Setup Wizard` button on Home.
-- Providers currently supported: `Microsoft Foundry`, `Google Gemini`, `OpenAI`, and `Local AI`.
-- Steps: `Provider`, `Connection details` (cloud) / `Prerequisites` (Local AI), `Models`, `Optional services`, `Finish`.
-- Footer actions are always visible: `Not now`, `Configure manually`, `Back`, `Next`, `Finish`.
-- `Finish` from a non-final step validates/saves current step and jumps to `Finish` step.
-- Wizard only closes when `Finish` is clicked on the final step.
+- [`docker/guideants-ai-build.md`](../docker/guideants-ai-build.md)
+- [`docker/build-processes.md`](../docker/build-processes.md)
 
-**Local AI path specifics**:
+### Optional: Hugging Face token
 
-- The `Prerequisites` step captures your HuggingFace token and shows the live readiness status of `LlamaCpp:BaseUrl` and all `LocalServiceHosts:*` keys. These keys are set in the container environment, not in the wizard.
-- The `Models` step provides a full HuggingFace repository browser and GGUF file picker to queue and install llama-cpp models asynchronously. Progress is shown per model and persists through to the `Finish` step.
-- The `Optional services` step provides toggle-based configuration for Embeddings, Image Generation, Speech Transcription, Speech Synthesis, and Document Intelligence via their local provider paths.
+You need an HF token for wizard/download flows that pull models from Hugging Face.
+Create one at <https://huggingface.co/settings/tokens> (read scope is enough for public models).
 
-Details: [add-ai-services-wizard.md](add-ai-services-wizard.md)
+UI token path is intentionally single-source:
 
-## 2a. Bootstrap seeding (first startup)
+1. `Settings -> Connections -> HuggingFace -> Token`
 
-On first startup, after EF migrations and application settings bootstrap,
-the system seeds required data from `Resources/bootstrap/`:
+`POST /api/settings/models:add` does not support per-request token overrides.
 
-**Required guides and assistants** — imported via the existing
-guide/assistant export/import service. Seeds include Creative Guide,
-The Guide Guide, and their crew member assistants (Conversation Title
-Generator, Read Web, Search, Media Creator, Diagrams, Code Executor,
-Conversation User Proxy). All seeds omit explicit model fields so they
-inherit the operator's configured default chat model.
+Details: [`llama-model-download-and-runtime-management.md`](llama-model-download-and-runtime-management.md)
 
-**Runtime profiles** — the three template profiles required by R-6.7 and
-R-8.1 are seeded directly into the `RuntimeProfiles` table:
+## 4. Start the stack manually (compose)
 
-- `qwen3_5` — Qwen 3.5 family (non-thinking general defaults)
-- `qwen3_6` — Qwen 3.6 family (current default recommendation)
-- `gemma4` — Gemma 4 family
+If you do not use the launcher scripts, start compose directly from repo root.
 
-All seeding is idempotent: if an entity with the same name (guides/assistants)
-or profile ID (runtime profiles) already exists, the seed is skipped.
-User modifications are never overwritten.
+### Choose compose file
 
-## 3. Recommended setup flow
+Local images:
 
-1. Open **Connections** and save required credentials.
-2. Open **Models & Runtime** and add at least one chat model.
-3. Open **Services** and select/activate provider per non-chat service.
-4. Check **Overview** status pills for chat + non-chat readiness.
-5. Use **Infrastructure** probes if runtime endpoints are unreachable.
-6. Use **Telemetry** to raise log levels for investigations.
+- CUDA: `docker/docker-compose.cuda.yml`
+- CPU: `docker/docker-compose.cpu.yml`
 
-Use **Personalization** for user profile details only.
+GHCR images:
 
-## 4. Connections and token ownership
+- CUDA: `docker/docker-compose.ghcr-cuda13.yml`
+- CPU: `docker/docker-compose.ghcr-cpu.yml`
 
-Hugging Face token ownership is single-path:
+### Example startup commands
 
-- `Settings -> Connections -> HuggingFace -> Token`
+```powershell
+# local CUDA
+ docker compose -f docker/docker-compose.cuda.yml up -d
 
-The token is resolved server-side from `HuggingFace:Token` via `IHuggingFaceTokenResolver`.
-There are no per-request token overrides in the Settings model-download flow.
+# local CPU
+ docker compose -f docker/docker-compose.cpu.yml up -d
 
-## 5. Models & Runtime and llama specifics
+# GHCR CUDA
+ docker compose -f docker/docker-compose.ghcr-cuda13.yml up -d
 
-`Models & Runtime` is the operator home for:
+# GHCR CPU
+ docker compose -f docker/docker-compose.ghcr-cpu.yml up -d
+```
 
-- Catalog models
-- Runtime profiles (three templates seeded at first boot — see §2a)
-- Local llama runtime inventory/actions
+### Minimal `docker/.env`
 
-Llama download behavior:
+```dotenv
+GA_WEBAPI_UI_IMAGE=guideants-webapi-ui:latest
+DOCLING_SERVE_MAX_SYNC_WAIT=600
+GA_CONTENT_FILES_HOST_PATH=./volumes/content-files
+GA_SEARXNG_CONFIG_HOST_PATH=./volumes/searxng/config
+GA_SEARXNG_DATA_HOST_PATH=./volumes/searxng/data
+GA_DB_NAME=guideants-dev
+# HF_TOKEN=hf_xxxxx
+```
 
-- API delegates download and alias registration to `guideants-ai` admin endpoints.
-- `LlamaModelManagementOptions` currently includes `AllowOverwrite` only.
-- Runtime alias/files are runtime-owned; the API does not directly manage host model directories.
+### Verify startup
 
-Details: [llama-model-download-and-runtime-management.md](llama-model-download-and-runtime-management.md)
+```powershell
+# choose the same compose file you used for up
+ docker compose -f docker/docker-compose.cuda.yml ps
+```
 
-## 6. Infrastructure runtime dependencies
+All services should report running/healthy.
 
-Infrastructure tab exposes runtime-owned dependency keys with source and probe support.
-Current keys are:
+### Bootstrap seeding on first startup
+
+After migrations and settings bootstrap, required data is seeded from `Resources/bootstrap/`:
+
+- Required guides: Creative Guide, The Guide Guide.
+- Required assistants/crew: Conversation Title Generator, Read Web, Search, Media Creator, Diagrams, Code Executor, Conversation User Proxy.
+- Runtime profiles: `qwen3_5`, `qwen3_6`, `gemma4`.
+
+Seeding is idempotent and does not overwrite user edits.
+
+Reference: [`../src/server/GuideAntsApi/Resources/bootstrap/README.md`](../src/server/GuideAntsApi/Resources/bootstrap/README.md)
+
+## 5. First load and first-launch wizard
+
+Open `http://localhost:5107`.
+
+On first-load conditions, Home auto-opens Add AI Services Wizard when either is true:
+
+- No configured connection sections, or
+- No catalog models.
+
+Auto-open is skipped if local dismissal key is set:
+
+- `guideants.firstLaunch.addAiServicesWizard.dismissed.v1`
+
+Wizard paths currently supported:
+
+- Microsoft Foundry
+- Google Gemini
+- OpenAI
+- Local AI
+
+Wizard step flow:
+
+1. Provider
+2. Connection details (cloud) or Prerequisites (Local AI)
+3. Models
+4. Optional services
+5. Finish
+
+Local AI path specifics:
+
+- Prerequisites step captures HF token and shows live readiness for `LlamaCpp:BaseUrl` and `LocalServiceHosts:*` keys.
+- Models step supports Hugging Face browse + GGUF selection + async install progress.
+- Optional services step configures local providers for embeddings, images, STT, TTS, and document intelligence.
+
+Detailed walkthroughs:
+
+- [`add-ai-services-wizard.md`](add-ai-services-wizard.md)
+- [`local-ai-setup-guide.md`](local-ai-setup-guide.md)
+
+## 6. Configure AI services (manual Settings path)
+
+Use this if you skip wizard or need fine-grained changes.
+
+### Step 1: Connections
+
+Open **Connections** and save credentials you plan to use.
+
+Typical sections include:
+
+- Chat providers: `AzureOpenAI`, `OpenAI`, `Anthropic`, `GoogleGeminiApi`
+- Service providers: `AzureSpeechService`, `AzureOpenAiImages`, `AzureOpenAiEmbedding`, `AzureDocumentIntelligence`
+- Hugging Face token section for model downloads
+
+Secrets are masked on read and encrypted at rest.
+
+### Step 2: Models & Runtime
+
+Open **Models & Runtime**:
+
+- **Catalog**: add chat models (`llama-cpp`, OpenAI/Azure/Gemini/etc.).
+- **Runtime Profiles**: manage `qwen3_5`, `qwen3_6`, `gemma4` templates or custom profiles.
+- **Local Llama Runtime**: view inventory and run load/unload/delete alias actions.
+
+For local llama onboarding, use `Add Model` with source `Install from Hugging Face` or `Attach existing alias`.
+
+### Step 3: Services
+
+Open **Services** and configure each non-chat capability:
+
+- Embeddings
+- Image Generation
+- Speech Transcription
+- Speech Synthesis
+- Document Intelligence
+
+For each service:
+
+1. Choose provider.
+2. Fill required provider fields.
+3. Save and activate provider.
+
+### Step 4: Overview
+
+Use **Overview** to verify:
+
+- Default chat model state.
+- Chat + non-chat readiness chips.
+- Direct links back to failing sections.
+
+### Step 5: Infrastructure
+
+Use **Infrastructure** to verify runtime-owned dependencies and probe reachability.
+
+Current dependency keys surfaced in UI:
 
 - `LlamaCpp:BaseUrl`
 - `LocalServiceHosts:SpeechTranscriptionBaseUrl`
@@ -125,41 +266,172 @@ Current keys are:
 - `LocalServiceHosts:MediaBaseUrl`
 - `LocalServiceHosts:DocumentIntelligenceBaseUrl`
 
-If local runtime calls fail, validate these keys first, then run probes.
+Probe notes:
 
-## 7. Common troubleshooting
+- URL probes use GET with a short timeout (3s).
+- `LlamaCpp:BaseUrl` is probed via `/health` path mapping.
+- Probe failures are usually runtime/network issues, not DB config corruption.
 
-### Wizard did not auto-open on a fresh environment
+### Step 6: Telemetry and Personalization
 
-- Confirm browser local storage does not contain dismissal key:
-  `guideants.firstLaunch.addAiServicesWizard.dismissed.v1`
-- Confirm `GET /api/settings/sections` and `GET /api/settings/models` both succeed.
+- **Telemetry**: raise API logging levels during troubleshooting.
+- **Personalization**: user profile fields only; does not affect routing readiness.
 
-### Cloud setup works, local runtime actions fail
+## 7. Worked examples for Add Model
 
-- Verify `LlamaCpp:BaseUrl` and `LocalServiceHosts:*` values.
+### 7a) Local llama model via Hugging Face
+
+Example flow (`Qwen3.5-9B-Q5_K_M-local`):
+
+1. Settings -> Models & Runtime -> Catalog -> Add Model.
+2. Provider: `llama-cpp`.
+3. Catalog fields:
+   - `modelId`: `Qwen3.5-9B-Q5_K_M-local`
+   - `displayName`: `Qwen3.5 9B Q5_K_M (Local)`
+4. Provider/runtime fields:
+   - Runtime profile: `qwen3_5`
+   - Router alias: `Qwen3.5-9B-Q5_K_M`
+   - Source: `Install from Hugging Face`
+   - Repository: `unsloth/Qwen3.5-9B-GGUF`
+   - GGUF: `Qwen3.5-9B-Q5_K_M.gguf`
+   - Optional mmproj: `mmproj-F16.gguf`
+5. Create model and monitor progress (`queued -> resolvingFiles -> downloading -> registeringAlias -> completed`).
+6. In Local Llama Runtime, load the alias and verify test chat.
+
+### 7b) Cloud model add
+
+1. Settings -> Models & Runtime -> Catalog -> Add Model.
+2. Pick provider (`openai-chat`, `openai-responses`, `azure-openai-*`, `google-gemini-chat`, etc.).
+3. Fill model/provider config.
+4. Save.
+5. Verify row is available for chat routing.
+
+### 7c) Attach existing alias (no re-download)
+
+Use when runtime files exist but catalog row is missing:
+
+1. Confirm alias exists in Local Llama Runtime inventory.
+2. Add Model -> `llama-cpp` -> source `Attach existing alias`.
+3. Select orphaned alias and save.
+4. Verify model is usable immediately.
+
+## 8. Worked example: switch markdown extraction to local Docling
+
+1. Infrastructure: verify `LocalServiceHosts:DocumentIntelligenceBaseUrl` resolves and probes healthy.
+2. Services -> Document Intelligence:
+   - Select `Local Docling HTTP`.
+   - Save and activate provider.
+3. Validate by extracting a PDF and checking logs for Docling execution path.
+
+## 9. Smoke tests
+
+Run these after setup changes.
+
+### Chat
+
+Open any assistant/notebook and send a simple prompt.
+
+### Embeddings
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:5107/api/settings/embeddings/rebuild" -Method Post
+```
+
+Track returned job id until completed.
+
+### Speech transcription / synthesis
+
+- ASR: test microphone upload/voice flow and verify transcription path.
+- TTS: request speech output and verify audio response.
+
+### Image generation
+
+Trigger image generation in notebook. First call may be slower due to model warmup.
+
+### Runtime health endpoints
+
+```powershell
+curl.exe -s -o NUL -w "HTTP=%{http_code}" http://localhost:8110/llama-cpp/health
+curl.exe -s -o NUL -w "HTTP=%{http_code}" http://localhost:8110/llama-admin/health
+curl.exe -s -o NUL -w "HTTP=%{http_code}" http://localhost:8110/emb/health
+curl.exe -s -o NUL -w "HTTP=%{http_code}" http://localhost:5001/health
+```
+
+Expected: HTTP 200 for each reachable local runtime.
+
+## 10. Stop, update, reset
+
+### Stop
+
+```powershell
+# choose the same compose file used for startup
+ docker compose -f docker/docker-compose.cuda.yml down
+```
+
+This preserves named volumes by default (including SQL data and `ai_local_models`).
+
+### Update
+
+1. Update image tags/env where needed.
+2. Re-run `docker compose -f <file> up -d`.
+3. Allow migrations to run on first boot of updated API image.
+
+### Reset local dev state
+
+```powershell
+docker compose -f docker/docker-compose.cuda.yml down -v
+```
+
+This removes compose-managed volumes for that stack.
+
+## 11. Troubleshooting
+
+### Wizard did not auto-open
+
+- Check local storage key `guideants.firstLaunch.addAiServicesWizard.dismissed.v1`.
+- Verify `GET /api/settings/sections` and `GET /api/settings/models` both succeed.
+
+### Local runtime calls fail but cloud setup works
+
+- Validate `LlamaCpp:BaseUrl` and `LocalServiceHosts:*` values.
 - Run Infrastructure probes.
-- Check `guideants-ai` health and logs.
+- Check `guideants-ai` and `docling-serve` logs.
 
-### Model creation/download fails due to Hugging Face auth
+### Model download fails with Hugging Face auth error
 
-- Save `HuggingFace.Token` in Connections.
-- Retry model add/download.
+- Save token in `Settings -> Connections -> HuggingFace`.
+- Retry add/download.
 
 ### Service shows Not ready
 
-- Open Services editor for that capability.
-- Validate active provider fields and save provider activation.
-- Re-check Overview.
+- Open that service editor.
+- Confirm required provider fields and active provider.
+- Re-check Overview readiness.
 
-## 8. Developer and deep-dive docs
+### Add Model structured error codes
+
+- `HUGGINGFACE_TOKEN_MISSING`: missing/invalid HF token.
+- `PROVIDER_CREDENTIALS_MISSING`: required connection section is not configured.
+- `RUNTIME_PROFILE_NOT_FOUND`: selected runtime profile is missing.
+- `ROUTER_ALIAS_TAKEN`: alias already exists in runtime.
+- `MODEL_ID_TAKEN`: duplicate catalog model id.
+
+### `ROUTING_RUNTIME_NOT_READY` on local llama actions
+
+A load/unload op is already in flight for that alias.
+Wait for current operation to finish, then retry.
+
+## 12. Where to go next
 
 Read in this order:
 
-1. [settings-page-provider-model-llama-redesign.md](settings-page-provider-model-llama-redesign.md)
-2. [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)
-3. [settings-service-provider-model-requirements.md](settings-service-provider-model-requirements.md)
-4. [default-chat-models.md](default-chat-models.md)
-5. [llama-model-download-and-runtime-management.md](llama-model-download-and-runtime-management.md)
-6. [add-ai-services-wizard.md](add-ai-services-wizard.md)
-7. [telemetry-configuration.md](telemetry-configuration.md)
+1. [`add-ai-services-wizard.md`](add-ai-services-wizard.md)
+2. [`local-ai-setup-guide.md`](local-ai-setup-guide.md)
+3. [`settings-page-provider-model-llama-redesign.md`](settings-page-provider-model-llama-redesign.md)
+4. [`settings-and-llama-completion-requirements.md`](settings-and-llama-completion-requirements.md)
+5. [`settings-service-provider-model-requirements.md`](settings-service-provider-model-requirements.md)
+6. [`default-chat-models.md`](default-chat-models.md)
+7. [`llama-model-download-and-runtime-management.md`](llama-model-download-and-runtime-management.md)
+8. [`telemetry-configuration.md`](telemetry-configuration.md)
+9. [`../docker/guideants-ai-build.md`](../docker/guideants-ai-build.md)
+10. [`../docker/build-processes.md`](../docker/build-processes.md)
