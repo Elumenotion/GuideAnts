@@ -408,3 +408,4 @@ FodyWeavers.xsd
 /.claude
 /.cursor/rules
 /output/playwright
+.installer_state.env
