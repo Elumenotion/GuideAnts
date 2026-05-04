@@ -8,9 +8,24 @@ ARG SD_CUDA_ARCHITECTURES="75;80;86;89;90"
 ARG BUILDKIT_INLINE_CACHE=1
 ARG GA_DEPS_CPU_IMAGE=deps-cpu
 ARG GA_DEPS_CUDA13_IMAGE=deps-cuda13
+ARG GA_UBUNTU_MIRROR_URL=http://mirrors.kernel.org/ubuntu
+ARG PYTHON311_VERSION=3.11.11
 
 FROM ubuntu:24.04 AS sd-cli-cpu-builder
 ARG SDCPP_REF
+ARG GA_UBUNTU_MIRROR_URL
+RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi \
+    && if [ -f /etc/apt/sources.list ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list; \
+    fi
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
@@ -35,6 +50,19 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} h
 FROM nvidia/cuda:13.0.0-devel-ubuntu24.04 AS sd-cli-cuda-builder
 ARG SDCPP_REF
 ARG SD_CUDA_ARCHITECTURES
+ARG GA_UBUNTU_MIRROR_URL
+RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi \
+    && if [ -f /etc/apt/sources.list ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list; \
+    fi
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
@@ -59,22 +87,46 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} h
        else echo "sd-server binary was not produced by stable-diffusion.cpp CUDA build" && exit 1; fi \
     && strip /out/sd-cli /out/sd-server || true
 
+FROM python:${PYTHON311_VERSION}-slim-bookworm AS python311-runtime
+ARG PYTHON311_VERSION
+
 # =============================================================================
 # CPU backend (runtime base + python deps builder + dependency image)
 # =============================================================================
 FROM ghcr.io/ggml-org/llama.cpp:server AS runtime-cpu-base
 ARG BUILDKIT_INLINE_CACHE
+ARG GA_UBUNTU_MIRROR_URL
 ENV DEBIAN_FRONTEND=noninteractive
+RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi \
+    && if [ -f /etc/apt/sources.list ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list; \
+    fi
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
-    && apt-get install -y --no-install-recommends software-properties-common ca-certificates curl \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
     && apt-get install -y --no-install-recommends \
-        python3.11 python3.11-venv python3.11-distutils \
+        ca-certificates curl \
+        libbz2-1.0 libffi8 libgdbm6 liblzma5 libncursesw6 \
+        libreadline8 libsqlite3-0 libssl3 zlib1g libuuid1 tk \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=python311-runtime /usr/local/bin/python3.11 /usr/local/bin/python3.11
+COPY --from=python311-runtime /usr/local/bin/pip3.11 /usr/local/bin/pip3.11
+COPY --from=python311-runtime /usr/local/lib/python3.11 /usr/local/lib/python3.11
+COPY --from=python311-runtime /usr/local/lib/libpython3.11.so.1.0 /usr/local/lib/libpython3.11.so.1.0
+COPY --from=python311-runtime /usr/local/include/python3.11 /usr/local/include/python3.11
+RUN ln -sf /usr/local/bin/python3.11 /usr/local/bin/python3 \
+    && ln -sf /usr/local/bin/pip3.11 /usr/local/bin/pip3 \
+    && echo "/usr/local/lib" > /etc/ld.so.conf.d/python311.conf \
+    && ldconfig
 
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
@@ -106,7 +158,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         build-essential cmake git \
         graphviz graphviz-dev \
         libopenblas-dev liblapack-dev libboost-python-dev \
-        python3.11-dev ffmpeg \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3.11 -m venv $VIRTUAL_ENV
@@ -181,17 +233,38 @@ ENTRYPOINT ["/entrypoint.sh"]
 # =============================================================================
 FROM ghcr.io/ggml-org/llama.cpp:server-cuda13 AS runtime-cuda13-base
 ARG BUILDKIT_INLINE_CACHE
+ARG GA_UBUNTU_MIRROR_URL
 ENV DEBIAN_FRONTEND=noninteractive
+RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi \
+    && if [ -f /etc/apt/sources.list ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list; \
+    fi
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
-    && apt-get install -y --no-install-recommends software-properties-common ca-certificates curl \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
     && apt-get install -y --no-install-recommends \
-        python3.11 python3.11-venv python3.11-distutils \
+        ca-certificates curl \
+        libbz2-1.0 libffi8 libgdbm6 liblzma5 libncursesw6 \
+        libreadline8 libsqlite3-0 libssl3 zlib1g libuuid1 tk \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=python311-runtime /usr/local/bin/python3.11 /usr/local/bin/python3.11
+COPY --from=python311-runtime /usr/local/bin/pip3.11 /usr/local/bin/pip3.11
+COPY --from=python311-runtime /usr/local/lib/python3.11 /usr/local/lib/python3.11
+COPY --from=python311-runtime /usr/local/lib/libpython3.11.so.1.0 /usr/local/lib/libpython3.11.so.1.0
+COPY --from=python311-runtime /usr/local/include/python3.11 /usr/local/include/python3.11
+RUN ln -sf /usr/local/bin/python3.11 /usr/local/bin/python3 \
+    && ln -sf /usr/local/bin/pip3.11 /usr/local/bin/pip3 \
+    && echo "/usr/local/lib" > /etc/ld.so.conf.d/python311.conf \
+    && ldconfig
 
 RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
@@ -223,7 +296,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         build-essential cmake git \
         graphviz graphviz-dev \
         libopenblas-dev liblapack-dev libboost-python-dev \
-        python3.11-dev ffmpeg \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3.11 -m venv $VIRTUAL_ENV

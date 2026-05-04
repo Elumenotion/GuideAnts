@@ -10,6 +10,138 @@ if [ -n "$ROUTER_PRESET" ] && [ ! -f "$ROUTER_PRESET" ] && [ -f /opt/seed/router
     cp -f /opt/seed/router-models.ini "$ROUTER_PRESET"
 fi
 
+sanitize_router_preset() {
+    local preset_path="$1"
+    if [ -z "$preset_path" ] || [ ! -f "$preset_path" ]; then
+        return
+    fi
+
+    local tmp_path="${preset_path}.sanitized.$$"
+    if ! python3 - "$preset_path" "$tmp_path" <<'PY'
+import os
+import sys
+
+source_path = sys.argv[1]
+output_path = sys.argv[2]
+
+with open(source_path, "r", encoding="utf-8") as src:
+    lines = src.read().splitlines(keepends=True)
+
+header_lines = []
+sections = []
+current = None
+
+for raw_line in lines:
+    stripped = raw_line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        if current is not None:
+            sections.append(current)
+        current = {
+            "alias": stripped[1:-1].strip(),
+            "raw": [raw_line],
+            "model": "",
+            "mmproj": "",
+        }
+        continue
+
+    if current is None:
+        header_lines.append(raw_line)
+        continue
+
+    current["raw"].append(raw_line)
+    if "=" not in raw_line:
+        continue
+
+    key, value = raw_line.split("=", 1)
+    key = key.strip().lower()
+    value = value.strip()
+    if key == "model":
+        current["model"] = value
+    elif key == "mmproj":
+        current["mmproj"] = value
+
+if current is not None:
+    sections.append(current)
+
+version_value = "1"
+for raw_line in header_lines:
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#") or stripped.startswith(";"):
+        continue
+    if "=" not in stripped:
+        continue
+    key, value = stripped.split("=", 1)
+    if key.strip().lower() == "version":
+        candidate = value.strip()
+        if candidate:
+            version_value = candidate
+        break
+
+valid_sections = []
+removed_sections = []
+
+for section in sections:
+    alias = section["alias"]
+    model_path = section["model"].strip()
+    mmproj_path = section["mmproj"].strip()
+    reasons = []
+
+    if not model_path:
+        reasons.append("model path is missing")
+    elif not os.path.isfile(model_path):
+        reasons.append(f"model file not found: {model_path}")
+
+    if mmproj_path and not os.path.isfile(mmproj_path):
+        reasons.append(f"mmproj file not found: {mmproj_path}")
+
+    if reasons:
+        removed_sections.append((alias, reasons))
+    else:
+        valid_sections.append(section)
+
+with open(output_path, "w", encoding="utf-8", newline="\n") as dst:
+    dst.write(f"version = {version_value}\n")
+    if valid_sections:
+        dst.write("\n")
+        for index, section in enumerate(valid_sections):
+            for raw_line in section["raw"]:
+                if raw_line.endswith("\n"):
+                    dst.write(raw_line)
+                else:
+                    dst.write(raw_line + "\n")
+            if index != len(valid_sections) - 1:
+                last_line = section["raw"][-1] if section["raw"] else ""
+                if last_line.strip():
+                    dst.write("\n")
+
+if removed_sections:
+    print(
+        f"WARNING: router preset '{source_path}' had {len(removed_sections)} invalid alias entries at startup; removing them before llama-server boot.",
+        file=sys.stderr,
+    )
+    for alias, reasons in removed_sections:
+        reason_text = "; ".join(reasons)
+        print(
+            f"WARNING: removing router alias '{alias}' from startup preset because {reason_text}.",
+            file=sys.stderr,
+        )
+PY
+    then
+        echo "WARNING: router preset startup validation failed for '${preset_path}'; continuing with existing file unchanged." >&2
+        rm -f "$tmp_path" 2>/dev/null || true
+        return
+    fi
+
+    if cmp -s "$preset_path" "$tmp_path"; then
+        rm -f "$tmp_path" 2>/dev/null || true
+        return
+    fi
+
+    mv -f "$tmp_path" "$preset_path"
+}
+
+sanitize_router_preset "$ROUTER_PRESET"
+
 # llama-server stdout/stderr is tee'd here so the admin service can classify crash reasons
 # (CUDA OOM vs. generic SIGABRT vs. reload SIGTERM). Capped at ~128KB via the tail-truncate
 # below before each respawn so the volume never fills with driver stack traces.

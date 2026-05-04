@@ -39,7 +39,7 @@ pwsh .\run\test-openai-chat.ps1
   - The `llama-admin` service in `guideants-ai` performs non-destructive file writes in `/models-local/llama`, serializes same-alias downloads, and atomically upserts the live router preset at **`/models-local/router-models.ini`** on the **`ai_local_models`** volume (same filesystem as GGUF trees — not a host bind). On first boot of an empty volume, `entrypoint.sh` seeds that file from `/opt/seed/router-models.ini` in the image.
   - The **GuideAnts API** delegates downloads and router changes to llama-admin over HTTP; the web API does not read a repo-side `router-models.ini` at runtime.
   - Both paths are visible in the Local Llama Runtime tab header and in **Settings → Infrastructure → Runtime Dependencies** with a source indicator (`appsettings` / `env` / `compose`) and an existence probe.
-  - The `router-models.ini` file in this folder documents the default alias layout (kept in sync with `docker/build/guideants-ai/router-models.seed.ini`); operational truth is the file on the volume, maintained via **Settings → Models & Runtime** (UI).
+  - The `router-models.ini` file in this folder documents the default seed format (kept in sync with `docker/build/guideants-ai/router-models.seed.ini`); operational truth is the file on the volume, maintained via **Settings → Models & Runtime** (UI).
 - Runtime uses the upstream `ghcr.io/ggml-org/llama.cpp:server-cuda13` image directly.
 - Container uses `--restart unless-stopped` so it survives host restarts.
 - In the full compose stack, every local model (llama GGUFs, ASR, SD
