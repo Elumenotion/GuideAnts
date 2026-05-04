@@ -186,6 +186,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
   const [snapshot, setLocalSnapshot] = useState<WizardLoadSnapshot | null>(null);
 
   const pollingRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const pollFailureCounts = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     draftModelsRef.current = draftModels;
@@ -240,14 +241,21 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     setOptionalFormState((previous) => ({ ...previous, ...patch }));
   }, []);
 
-  const removeDraftModel = useCallback((localId: string) => {
+  const stopPolling = useCallback((localId: string) => {
     const existing = pollingRefs.current.get(localId);
     if (existing) {
       clearInterval(existing);
       pollingRefs.current.delete(localId);
     }
-    setDraftModels((prev) => prev.filter((d) => d.localId !== localId));
+    pollFailureCounts.current.delete(localId);
   }, []);
+
+  const POLL_FAILURE_THRESHOLD = 5;
+
+  const removeDraftModel = useCallback((localId: string) => {
+    stopPolling(localId);
+    setDraftModels((prev) => prev.filter((d) => d.localId !== localId));
+  }, [stopPolling]);
 
   const pollDownload = useCallback((
     localId: string,
@@ -255,17 +263,17 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     catalogModelId: string,
     shouldSetDefault: boolean
   ) => {
+    pollFailureCounts.current.set(localId, 0);
+
     const interval = setInterval(() => {
       void (async () => {
         try {
           const op = await api.settings.getDownloadStatus(operationId);
+          pollFailureCounts.current.set(localId, 0);
+
           const done = op.status === 'completed' || op.status === 'failed' || op.status === 'error';
           if (done) {
-            const existing = pollingRefs.current.get(localId);
-            if (existing) {
-              clearInterval(existing);
-              pollingRefs.current.delete(localId);
-            }
+            stopPolling(localId);
             if (op.status === 'completed' && shouldSetDefault) {
               try {
                 await persistGlobalDefault(catalogModelId);
@@ -286,12 +294,26 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
             })
           );
         } catch {
-          // silently ignore poll errors
+          const count = (pollFailureCounts.current.get(localId) ?? 0) + 1;
+          pollFailureCounts.current.set(localId, count);
+          if (count >= POLL_FAILURE_THRESHOLD) {
+            stopPolling(localId);
+            setDraftModels((prev) =>
+              prev.map((d) => {
+                if (d.localId !== localId) return d;
+                return {
+                  ...d,
+                  asyncStatus: 'error' as const,
+                  asyncError: 'Download status is no longer reachable. The runtime container may have restarted.',
+                };
+              })
+            );
+          }
         }
       })();
     }, 2000);
     pollingRefs.current.set(localId, interval);
-  }, []);
+  }, [stopPolling]);
 
   const startInstall = useCallback(async (formData: LocalAiInstallFormData) => {
     setInstallError(null);

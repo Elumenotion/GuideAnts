@@ -200,7 +200,11 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
         string operationId,
         CancellationToken cancellationToken = default)
     {
-        using var response = await _httpClient.GetAsync($"downloads/{Uri.EscapeDataString(operationId)}", cancellationToken)
+        using var pollTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        pollTimeout.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var response = await _httpClient.GetAsync(
+                $"downloads/{Uri.EscapeDataString(operationId)}", pollTimeout.Token)
             .ConfigureAwait(false);
 
         if (response.StatusCode == HttpStatusCode.NotFound)

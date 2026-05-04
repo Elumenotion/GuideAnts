@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { FaCheck, FaSpinner, FaTimes } from 'react-icons/fa';
+import { useEffect, useRef, useState } from 'react';
+import { FaCheck, FaRedo, FaSpinner, FaTimes } from 'react-icons/fa';
 import type { AddModelErrorDto, LlamaRuntimeInventoryItemDto, SettingsModelDto, SettingsRuntimeProfileDto } from '../../../../types/settings';
 import {
   LLAMA_MMPROJ_ROLE_ID,
@@ -68,28 +68,42 @@ export function DraftProgress({ draft }: { draft: LocalAiModelDraft }) {
 
   const currentStep = operationStep(draft.asyncStatus);
   const currentIndex = ADD_STEPS.findIndex((s) => s.id === currentStep);
+  const pct = draft.asyncProgress != null
+    ? Math.round(Math.min(1, Math.max(0, draft.asyncProgress)) * 100)
+    : null;
 
   return (
-    <div className="mt-1 space-y-1">
-      <div className="flex flex-wrap gap-2">
-        {ADD_STEPS.map((s, i) => (
-          <span
-            key={s.id}
-            className={`text-xs ${i <= currentIndex ? 'text-gray-900 font-medium' : 'text-gray-400'} ${s.id === currentStep ? 'text-blue-700' : ''}`}
-          >
-            {i === currentIndex ? (
-              <FaSpinner className="mr-1 inline animate-spin text-blue-600" />
-            ) : null}
-            {s.label}
-          </span>
-        ))}
+    <div className="mt-2 space-y-2.5">
+      <div className="flex items-center gap-1 text-sm">
+        {ADD_STEPS.map((s, i) => {
+          const done = i < currentIndex;
+          const active = i === currentIndex;
+          const future = i > currentIndex;
+          return (
+            <span key={s.id} className="flex items-center gap-1">
+              {i > 0 ? <span className={`mx-0.5 text-xs ${future ? 'text-gray-300' : 'text-gray-400'}`}>&rsaquo;</span> : null}
+              {active ? <FaSpinner className="inline animate-spin text-blue-600" /> : null}
+              {done ? <FaCheck className="inline text-emerald-500" /> : null}
+              <span className={
+                active ? 'font-medium text-blue-700'
+                : done ? 'text-gray-700'
+                : 'text-gray-400'
+              }>
+                {s.label}
+              </span>
+            </span>
+          );
+        })}
       </div>
-      {draft.asyncProgress != null && draft.asyncStatus === 'downloading' ? (
-        <div className="h-1.5 w-full overflow-hidden rounded bg-gray-200">
-          <div
-            className="h-full bg-blue-500 transition-all"
-            style={{ width: `${Math.round(Math.min(1, Math.max(0, draft.asyncProgress)) * 100)}%` }}
-          />
+      {pct != null && draft.asyncStatus === 'downloading' ? (
+        <div>
+          <div className="mb-1 text-xs text-gray-500">{pct}%</div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+            <div
+              className="h-full rounded-full bg-blue-500 transition-all"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
         </div>
       ) : null}
     </div>
@@ -144,6 +158,54 @@ export function LocalAiModelsStep({
 
   const [submitting, setSubmitting] = useState(false);
 
+  const prevCompletedIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const currentCompleted = new Set(
+      draftModels.filter((d) => d.asyncStatus === 'completed').map((d) => d.localId)
+    );
+    const hasNew = [...currentCompleted].some((id) => !prevCompletedIds.current.has(id));
+    prevCompletedIds.current = currentCompleted;
+    if (hasNew) {
+      resetForm();
+    }
+  }, [draftModels]);
+
+  const resetForm = () => {
+    setRouterModelId('');
+    setRepository('');
+    setQuantPattern('');
+    setMmprojPattern('');
+    setTargetDirectory('');
+    setExistingAlias('');
+    setCatalogModelId('');
+    setCatalogDisplayName('');
+    setContextSize('');
+    setCacheRam('');
+    setSetAsGlobalDefault(false);
+  };
+
+  const populateFormFromDraft = (draft: LocalAiModelDraft) => {
+    setInstallSource(draft.installSource);
+    setRuntimeProfileId(draft.runtimeProfileId);
+    setRouterModelId(draft.routerModelId);
+    setRepository(draft.huggingFaceRepository);
+    setQuantPattern(draft.huggingFaceQuantIncludePattern);
+    setMmprojPattern(draft.huggingFaceMmprojIncludePattern);
+    setTargetDirectory(draft.huggingFaceTargetDirectory);
+    setExistingAlias(draft.existingAliasRouterModelId);
+    setContextSize(draft.routerContextSize);
+    setCacheRam(draft.routerCacheRamMib);
+    setCatalogModelId(draft.catalogModelId);
+    setCatalogDisplayName(draft.catalogDisplayName);
+    setSetAsGlobalDefault(draft.setAsGlobalDefault);
+  };
+
+  const handleRetry = (draft: LocalAiModelDraft) => {
+    populateFormFromDraft(draft);
+    onRemoveDraft(draft.localId);
+  };
+
   const handleInstall = async () => {
     const effectiveCatalogModelId = catalogModelId.trim() || (installSource === 'existingAlias' ? existingAlias : routerModelId);
     const formData: LocalAiInstallFormData = {
@@ -165,16 +227,6 @@ export function LocalAiModelsStep({
     setSubmitting(true);
     try {
       await onInstall(formData);
-      // Reset form on success (no install error means the API call was accepted)
-      setRouterModelId('');
-      setRepository('');
-      setQuantPattern('');
-      setMmprojPattern('');
-      setTargetDirectory('');
-      setExistingAlias('');
-      setCatalogModelId('');
-      setCatalogDisplayName('');
-      setSetAsGlobalDefault(false);
     } finally {
       setSubmitting(false);
     }
@@ -205,30 +257,40 @@ export function LocalAiModelsStep({
       ) : null}
 
       {draftModels.length > 0 ? (
-        <div className="space-y-1">
+        <div className="space-y-2">
           <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Installing</div>
-          <div className="divide-y divide-gray-100 rounded border border-gray-200">
+          <div className="space-y-3">
             {draftModels.map((draft) => (
-              <div key={draft.localId} className="px-3 py-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-mono text-sm text-gray-900">{draft.catalogModelId || draft.routerModelId}</div>
-                    <div className="text-xs text-gray-500">
+              <div key={draft.localId} className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-sm font-medium text-gray-900">{draft.catalogModelId || draft.routerModelId}</div>
+                    <div className="mt-0.5 text-xs text-gray-500">
                       {draft.installSource === 'existingAlias'
                         ? `Alias: ${draft.existingAliasRouterModelId}`
-                        : `HF: ${draft.huggingFaceRepository}`}
+                        : draft.huggingFaceRepository}
                     </div>
                     <DraftProgress draft={draft} />
                   </div>
                   {draft.asyncStatus === 'error' ? (
-                    <button
-                      type="button"
-                      onClick={() => onRemoveDraft(draft.localId)}
-                      className="shrink-0 text-gray-400 hover:text-red-600"
-                      title="Dismiss"
-                    >
-                      <FaTimes />
-                    </button>
+                    <div className="mt-0.5 flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleRetry(draft)}
+                        className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
+                        title="Retry"
+                      >
+                        <FaRedo />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveDraft(draft.localId)}
+                        className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                        title="Dismiss"
+                      >
+                        <FaTimes />
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               </div>
