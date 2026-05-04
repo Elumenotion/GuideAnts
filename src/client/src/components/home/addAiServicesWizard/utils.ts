@@ -495,30 +495,6 @@ export function toExistingLocalModels(models: SettingsModelDto[]): SettingsModel
     .sort((left, right) => left.modelId.localeCompare(right.modelId));
 }
 
-export function makeLocalAiModelDraft(localId: string, setAsGlobalDefault: boolean): LocalAiModelDraft {
-  return {
-    localId,
-    installSource: 'huggingface',
-    routerModelId: '',
-    runtimeProfileId: '',
-    huggingFaceRepository: '',
-    huggingFaceQuantIncludePattern: '',
-    huggingFaceMmprojIncludePattern: '',
-    huggingFaceTargetDirectory: '',
-    existingAliasRouterModelId: '',
-    routerContextSize: '',
-    routerCacheRamMib: '',
-    catalogModelId: '',
-    catalogDisplayName: '',
-    setAsGlobalDefault,
-    persisted: false,
-    asyncOperationId: null,
-    asyncStatus: 'pending',
-    asyncProgress: null,
-    asyncError: null,
-  };
-}
-
 export function buildLocalAiModelRequest(draft: LocalAiModelDraft): AddModelRequest {
   const runtimeProfileId = draft.runtimeProfileId.trim();
   if (!runtimeProfileId) {

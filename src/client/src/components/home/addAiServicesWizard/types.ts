@@ -183,7 +183,7 @@ export interface LocalAiPrerequisitesFormState {
 
 export type LocalAiInstallSource = 'huggingface' | 'existingAlias';
 
-export type LocalAiDraftStatus = 'pending' | 'submitted' | 'downloading' | 'completed' | 'error';
+export type LocalAiDraftStatus = 'submitted' | 'downloading' | 'completed' | 'error';
 
 export interface LocalAiModelDraft {
   localId: string;

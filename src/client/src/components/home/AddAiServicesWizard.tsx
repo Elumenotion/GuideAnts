@@ -26,7 +26,7 @@ import { FinishStep } from './addAiServicesWizard/steps/FinishStep';
 import { GeminiConnectionStep } from './addAiServicesWizard/steps/GeminiConnectionStep';
 import { GeminiModelsStep } from './addAiServicesWizard/steps/GeminiModelsStep';
 import { GeminiOptionalServicesStep } from './addAiServicesWizard/steps/GeminiOptionalServicesStep';
-import { LocalAiModelsStep } from './addAiServicesWizard/steps/LocalAiModelsStep';
+import { DraftProgress, LocalAiModelsStep } from './addAiServicesWizard/steps/LocalAiModelsStep';
 import { LocalAiOptionalServicesStep } from './addAiServicesWizard/steps/LocalAiOptionalServicesStep';
 import { LocalAiPrerequisitesStep } from './addAiServicesWizard/steps/LocalAiPrerequisitesStep';
 import { ModelsStep } from './addAiServicesWizard/steps/ModelsStep';
@@ -1754,8 +1754,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
           await persistGeminiModels();
         }
       } else if (provider === 'local-ai') {
-        const hasPendingDrafts = localAi.draftModels.some((d) => d.asyncStatus === 'pending');
-        if (hasPendingDrafts && snapshot) {
+        if (snapshot) {
           await localAi.persistLocalAiModels(snapshot, loadSnapshot, setSnapshot);
         }
       } else {
@@ -1789,6 +1788,10 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     step,
   ]);
 
+  const localAiHasActiveDownloads = localAi.draftModels.some(
+    (d) => d.asyncStatus === 'submitted' || d.asyncStatus === 'downloading'
+  );
+
   const isNextDisabled = useMemo(() => {
     if (loading || saving) {
       return true;
@@ -1799,14 +1802,17 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (step === 'models') {
       if (provider === 'foundry') return foundryTotalModelCount === 0;
       if (provider === 'google-gemini') return geminiTotalModelCount === 0;
-      if (provider === 'local-ai') return localAi.draftModels.length === 0 && existingLocalModels.length === 0;
+      if (provider === 'local-ai') {
+        const hasNoModels = localAi.draftModels.length === 0 && existingLocalModels.length === 0;
+        return hasNoModels || localAiHasActiveDownloads;
+      }
       return openAiTotalModelCount === 0;
     }
     if (step === 'finish') {
       return true;
     }
     return false;
-  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, loading, provider, saving, step]);
+  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, localAiHasActiveDownloads, loading, provider, saving, step]);
 
   const isFinishDisabled = useMemo(() => {
     if (loading || saving) {
@@ -1814,9 +1820,12 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     }
     if (provider === 'foundry') return foundryTotalModelCount === 0;
     if (provider === 'google-gemini') return geminiTotalModelCount === 0;
-    if (provider === 'local-ai') return localAi.draftModels.length === 0 && existingLocalModels.length === 0;
+    if (provider === 'local-ai') {
+      const hasNoModels = localAi.draftModels.length === 0 && existingLocalModels.length === 0;
+      return hasNoModels || localAiHasActiveDownloads;
+    }
     return openAiTotalModelCount === 0;
-  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, loading, provider, saving]);
+  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, localAiHasActiveDownloads, loading, provider, saving]);
 
   const currentStepLabel = useMemo(() => {
     const index = WIZARD_STEPS.findIndex((item) => item.id === step);
@@ -1986,12 +1995,10 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               profilesLoading={localAi.profilesLoading}
               inventory={localAi.inventory}
               inventoryLoading={localAi.inventoryLoading}
-              addError={localAi.addError}
-              addModelError={localAi.addModelError}
-              onAddDraft={localAi.addDraftModel}
+              installError={localAi.installError}
+              installModelError={localAi.installModelError}
+              onInstall={localAi.startInstall}
               onRemoveDraft={localAi.removeDraftModel}
-              onInstallDraft={localAi.installDraftModel}
-              onCreateRuntimeProfile={(_template) => Promise.resolve()}
             />
           ) : (
             <OpenAiModelsStep
@@ -2012,6 +2019,20 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               }}
             />
           )
+        ) : null}
+
+        {!loading && step === 'optionalServices' && provider === 'local-ai' && localAi.draftModels.length > 0 ? (
+          <div className="rounded border border-gray-200 bg-gray-50 p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">Model installation status</div>
+            <div className="space-y-2">
+              {localAi.draftModels.map((draft) => (
+                <div key={draft.localId}>
+                  <div className="font-mono text-xs text-gray-800">{draft.catalogModelId || draft.routerModelId}</div>
+                  <DraftProgress draft={draft} />
+                </div>
+              ))}
+            </div>
+          </div>
         ) : null}
 
         {!loading && step === 'optionalServices' ? (
@@ -2041,6 +2062,20 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               onChange={(patch) => setOpenAiOptionalForm((previous) => ({ ...previous, ...patch }))}
             />
           )
+        ) : null}
+
+        {!loading && step === 'finish' && provider === 'local-ai' && localAi.draftModels.length > 0 ? (
+          <div className="rounded border border-gray-200 bg-gray-50 p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">Model installation status</div>
+            <div className="divide-y divide-gray-100">
+              {localAi.draftModels.map((draft) => (
+                <div key={draft.localId} className="py-1.5">
+                  <div className="font-mono text-xs text-gray-800">{draft.catalogModelId || draft.routerModelId}</div>
+                  <DraftProgress draft={draft} />
+                </div>
+              ))}
+            </div>
+          </div>
         ) : null}
 
         {!loading && step === 'finish' ? (

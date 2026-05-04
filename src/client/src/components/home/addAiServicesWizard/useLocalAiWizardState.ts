@@ -19,9 +19,21 @@ import type {
 } from './types';
 import {
   buildLocalAiModelRequest,
-  makeLocalAiModelDraft,
   toExistingLocalModels,
 } from './utils';
+
+async function persistGlobalDefault(catalogModelId: string): Promise<void> {
+  const chatDefaults = await api.settings.chatDefaults.get();
+  await api.settings.chatDefaults.update({
+    rowVersion: chatDefaults.rowVersion,
+    defaultModelId: catalogModelId,
+    overrideAllChatModels: chatDefaults.overrideAllChatModels,
+    temperature: chatDefaults.temperature ?? null,
+    topP: chatDefaults.topP ?? null,
+    reasoningEffort: chatDefaults.reasoningEffort ?? null,
+    samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
+  });
+}
 
 function getServiceProviderFieldValue(
   snapshot: WizardLoadSnapshot,
@@ -104,6 +116,8 @@ function buildLocalAiOptionalServicesForm(snapshot: WizardLoadSnapshot): LocalAi
   };
 }
 
+export type LocalAiInstallFormData = Omit<LocalAiModelDraft, 'localId' | 'persisted' | 'asyncOperationId' | 'asyncStatus' | 'asyncProgress' | 'asyncError'>;
+
 export interface UseLocalAiWizardStateResult {
   prereqsForm: LocalAiPrerequisitesFormState;
   prereqsErrors: Partial<Record<'huggingFaceToken', string>>;
@@ -115,16 +129,15 @@ export interface UseLocalAiWizardStateResult {
   profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
   inventoryLoading: boolean;
-  addError: string | null;
-  addModelError: AddModelErrorDto | null;
+  installError: string | null;
+  installModelError: AddModelErrorDto | null;
   modelStepError: string | null;
   readyForBasicChat: boolean;
 
   setPrereqsForm: (patch: Partial<LocalAiPrerequisitesFormState>) => void;
   setOptionalForm: (patch: Partial<LocalAiOptionalServicesFormState>) => void;
-  addDraftModel: (draftData: Omit<LocalAiModelDraft, 'localId' | 'persisted' | 'asyncOperationId' | 'asyncStatus' | 'asyncProgress' | 'asyncError'>) => void;
+  startInstall: (formData: LocalAiInstallFormData) => Promise<void>;
   removeDraftModel: (localId: string) => void;
-  installDraftModel: (localId: string) => Promise<void>;
   persistLocalAiPrereqs: (snapshot: WizardLoadSnapshot, loadSnapshot: () => Promise<WizardLoadSnapshot>, setSnapshot: (s: WizardLoadSnapshot) => void) => Promise<void>;
   persistLocalAiModels: (snapshot: WizardLoadSnapshot, loadSnapshot: () => Promise<WizardLoadSnapshot>, setSnapshot: (s: WizardLoadSnapshot) => void) => Promise<void>;
   validateLocalAiOptionalServices: () => boolean;
@@ -141,8 +154,10 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
   const [prereqsErrors, setPrereqsErrors] = useState<Partial<Record<'huggingFaceToken', string>>>({});
 
   const [draftModels, setDraftModels] = useState<LocalAiModelDraft[]>([]);
-  const [addError, setAddError] = useState<string | null>(null);
-  const [addModelError, setAddModelError] = useState<AddModelErrorDto | null>(null);
+  const draftModelsRef = useRef<LocalAiModelDraft[]>([]);
+
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [installModelError, setInstallModelError] = useState<AddModelErrorDto | null>(null);
   const [modelStepError, setModelStepError] = useState<string | null>(null);
 
   const [optionalForm, setOptionalFormState] = useState<LocalAiOptionalServicesFormState>({
@@ -171,6 +186,10 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
   const [snapshot, setLocalSnapshot] = useState<WizardLoadSnapshot | null>(null);
 
   const pollingRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+
+  useEffect(() => {
+    draftModelsRef.current = draftModels;
+  }, [draftModels]);
 
   useEffect(() => {
     return () => {
@@ -208,8 +227,8 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     setDraftModels([]);
     setPrereqsErrors({});
     setOptionalErrors({});
-    setAddError(null);
-    setAddModelError(null);
+    setInstallError(null);
+    setInstallModelError(null);
     setModelStepError(null);
   }, []);
 
@@ -221,17 +240,6 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     setOptionalFormState((previous) => ({ ...previous, ...patch }));
   }, []);
 
-  const addDraftModel = useCallback((
-    draftData: Omit<LocalAiModelDraft, 'localId' | 'persisted' | 'asyncOperationId' | 'asyncStatus' | 'asyncProgress' | 'asyncError'>
-  ) => {
-    const localId = `draft-local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const draft = makeLocalAiModelDraft(localId, draftData.setAsGlobalDefault);
-    const filled: LocalAiModelDraft = { ...draft, ...draftData, localId };
-    setDraftModels((prev) => [...prev, filled]);
-    setAddError(null);
-    setAddModelError(null);
-  }, []);
-
   const removeDraftModel = useCallback((localId: string) => {
     const existing = pollingRefs.current.get(localId);
     if (existing) {
@@ -241,22 +249,34 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     setDraftModels((prev) => prev.filter((d) => d.localId !== localId));
   }, []);
 
-  const pollDownload = useCallback((localId: string, operationId: string) => {
+  const pollDownload = useCallback((
+    localId: string,
+    operationId: string,
+    catalogModelId: string,
+    shouldSetDefault: boolean
+  ) => {
     const interval = setInterval(() => {
       void (async () => {
         try {
           const op = await api.settings.getDownloadStatus(operationId);
+          const done = op.status === 'completed' || op.status === 'failed' || op.status === 'error';
+          if (done) {
+            const existing = pollingRefs.current.get(localId);
+            if (existing) {
+              clearInterval(existing);
+              pollingRefs.current.delete(localId);
+            }
+            if (op.status === 'completed' && shouldSetDefault) {
+              try {
+                await persistGlobalDefault(catalogModelId);
+              } catch {
+                // non-fatal — model is installed even if default can't be set
+              }
+            }
+          }
           setDraftModels((prev) =>
             prev.map((d) => {
               if (d.localId !== localId) return d;
-              const done = op.status === 'completed' || op.status === 'failed' || op.status === 'error';
-              if (done) {
-                const existing = pollingRefs.current.get(localId);
-                if (existing) {
-                  clearInterval(existing);
-                  pollingRefs.current.delete(localId);
-                }
-              }
               return {
                 ...d,
                 asyncStatus: op.status === 'completed' ? 'completed' : op.status === 'failed' || op.status === 'error' ? 'error' : 'downloading',
@@ -273,30 +293,52 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     pollingRefs.current.set(localId, interval);
   }, []);
 
-  const installDraftModel = useCallback(async (localId: string) => {
-    const draft = draftModels.find((d) => d.localId === localId);
-    if (!draft || draft.asyncStatus !== 'pending') return;
+  const startInstall = useCallback(async (formData: LocalAiInstallFormData) => {
+    setInstallError(null);
+    setInstallModelError(null);
 
-    setDraftModels((prev) =>
-      prev.map((d) => d.localId === localId ? { ...d, asyncStatus: 'submitted' as const } : d)
-    );
-    setAddModelError(null);
+    const localId = `draft-local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const draft: LocalAiModelDraft = {
+      ...formData,
+      localId,
+      persisted: false,
+      asyncOperationId: null,
+      asyncStatus: 'submitted',
+      asyncProgress: null,
+      asyncError: null,
+    };
+
+    // Validate before touching state.
+    let request;
+    try {
+      request = buildLocalAiModelRequest(draft);
+    } catch (error) {
+      setInstallError(error instanceof Error ? error.message : 'Invalid model configuration.');
+      return;
+    }
+
+    setDraftModels((prev) => [...prev, draft]);
 
     try {
-      const request = buildLocalAiModelRequest(draft);
       const response = await api.settings.addModel(request);
-
       const operationId = response.operationId ?? null;
 
       if (operationId) {
         setDraftModels((prev) =>
           prev.map((d) => d.localId === localId ? { ...d, asyncOperationId: operationId, asyncStatus: 'downloading' as const } : d)
         );
-        pollDownload(localId, operationId);
+        pollDownload(localId, operationId, draft.catalogModelId, formData.setAsGlobalDefault);
       } else {
         setDraftModels((prev) =>
           prev.map((d) => d.localId === localId ? { ...d, persisted: true, asyncStatus: 'completed' as const } : d)
         );
+        if (formData.setAsGlobalDefault) {
+          try {
+            await persistGlobalDefault(draft.catalogModelId);
+          } catch {
+            // non-fatal
+          }
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to install model.';
@@ -316,15 +358,15 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
       }
 
       if (parsedError) {
-        setAddModelError(parsedError);
+        setInstallModelError(parsedError);
       } else {
-        setAddError(message);
+        setInstallError(message);
       }
       setDraftModels((prev) =>
         prev.map((d) => d.localId === localId ? { ...d, asyncStatus: 'error' as const, asyncError: message } : d)
       );
     }
-  }, [draftModels, pollDownload]);
+  }, [pollDownload]);
 
   const persistLocalAiPrereqs = useCallback(async (
     snap: WizardLoadSnapshot,
@@ -366,18 +408,29 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     _setSnapshot: (s: WizardLoadSnapshot) => void
   ) => {
     const existingCount = toExistingLocalModels(snap.models).length;
-    const pendingDrafts = draftModels.filter((d) => d.asyncStatus === 'pending');
+    const current = draftModelsRef.current;
 
-    if (existingCount + draftModels.length === 0 && pendingDrafts.length === 0) {
-      setModelStepError('At least one local AI model must be queued for installation.');
-      throw new Error('Model requirement not met.');
+    if (existingCount + current.length === 0) {
+      setModelStepError('Install at least one local AI model to continue.');
+      throw new Error('No models.');
     }
 
-    for (const draft of pendingDrafts) {
-      await installDraftModel(draft.localId);
+    const hasActiveDownloads = current.some(
+      (d) => d.asyncStatus === 'submitted' || d.asyncStatus === 'downloading'
+    );
+    if (hasActiveDownloads) {
+      setModelStepError('Model downloads are in progress — please wait for them to complete before continuing.');
+      throw new Error('Downloads in progress.');
     }
+
+    const hasUsableModel = existingCount > 0 || current.some((d) => d.asyncStatus === 'completed');
+    if (!hasUsableModel) {
+      setModelStepError('No models were installed successfully. Fix any errors and install a model to continue.');
+      throw new Error('No usable models.');
+    }
+
     setModelStepError(null);
-  }, [draftModels, installDraftModel]);
+  }, [draftModels]);
 
   const validateLocalAiOptionalServices = useCallback((): boolean => {
     const errors: Record<string, string> = {};
@@ -494,15 +547,14 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     profilesLoading,
     inventory,
     inventoryLoading,
-    addError,
-    addModelError,
+    installError,
+    installModelError,
     modelStepError,
     readyForBasicChat,
     setPrereqsForm,
     setOptionalForm,
-    addDraftModel,
+    startInstall,
     removeDraftModel,
-    installDraftModel,
     persistLocalAiPrereqs,
     persistLocalAiModels,
     validateLocalAiOptionalServices,

@@ -8,6 +8,7 @@ import {
   llamaCppClassifier,
 } from '../../../../pages/settings/editors/common';
 import type { RolePickerSpec } from '../../../../pages/settings/editors/common';
+import type { LocalAiInstallFormData } from '../useLocalAiWizardState';
 import type { LocalAiModelDraft } from '../types';
 
 const LLAMA_ROLES: RolePickerSpec[] = [
@@ -37,27 +38,35 @@ const ADD_STEPS = [
 ] as const;
 
 function operationStep(status: string): (typeof ADD_STEPS)[number]['id'] {
-  const s = status.trim();
-  if (s === 'queued') return 'queued';
-  if (s === 'resolving' || s === 'resolvingFiles') return 'resolvingFiles';
-  if (s === 'downloading') return 'downloading';
-  if (s === 'registering' || s === 'registeringAlias') return 'registeringAlias';
-  if (s === 'completed') return 'completed';
+  if (status === 'queued') return 'queued';
+  if (status === 'resolving' || status === 'resolvingFiles') return 'resolvingFiles';
+  if (status === 'downloading') return 'downloading';
+  if (status === 'registering' || status === 'registeringAlias') return 'registeringAlias';
+  if (status === 'completed') return 'completed';
   return 'downloading';
 }
 
-function DraftProgress({ draft }: { draft: LocalAiModelDraft }) {
-  if (draft.asyncStatus === 'pending') {
-    return <span className="text-xs text-amber-700">Queued for installation</span>;
+export function DraftProgress({ draft }: { draft: LocalAiModelDraft }) {
+  if (draft.asyncStatus === 'submitted') {
+    return (
+      <span className="flex items-center gap-1 text-xs text-blue-700">
+        <FaSpinner className="animate-spin" /> Submitting to server…
+      </span>
+    );
   }
   if (draft.asyncStatus === 'error') {
     return <span className="text-xs text-red-700">{draft.asyncError ?? 'Installation failed'}</span>;
   }
   if (draft.asyncStatus === 'completed') {
-    return <span className="flex items-center gap-1 text-xs text-emerald-700"><FaCheck className="text-emerald-600" /> Installed</span>;
+    return (
+      <span className="flex items-center gap-1 text-xs text-emerald-700">
+        <FaCheck className="text-emerald-600" /> Installed
+        {draft.setAsGlobalDefault ? <span className="ml-1 text-gray-500">(set as default)</span> : null}
+      </span>
+    );
   }
 
-  const currentStep = operationStep(draft.asyncStatus === 'downloading' ? 'downloading' : draft.asyncStatus);
+  const currentStep = operationStep(draft.asyncStatus);
   const currentIndex = ADD_STEPS.findIndex((s) => s.id === currentStep);
 
   return (
@@ -66,9 +75,9 @@ function DraftProgress({ draft }: { draft: LocalAiModelDraft }) {
         {ADD_STEPS.map((s, i) => (
           <span
             key={s.id}
-            className={`text-xs ${i <= currentIndex ? 'text-gray-900 font-medium' : 'text-gray-400'} ${s.id === currentStep && draft.asyncStatus !== 'completed' ? 'text-blue-700' : ''}`}
+            className={`text-xs ${i <= currentIndex ? 'text-gray-900 font-medium' : 'text-gray-400'} ${s.id === currentStep ? 'text-blue-700' : ''}`}
           >
-            {i === currentIndex && draft.asyncStatus !== 'completed' ? (
+            {i === currentIndex ? (
               <FaSpinner className="mr-1 inline animate-spin text-blue-600" />
             ) : null}
             {s.label}
@@ -94,12 +103,10 @@ interface LocalAiModelsStepProps {
   profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
   inventoryLoading: boolean;
-  addError: string | null;
-  addModelError: AddModelErrorDto | null;
-  onAddDraft: (draft: Omit<LocalAiModelDraft, 'localId' | 'persisted' | 'asyncOperationId' | 'asyncStatus' | 'asyncProgress' | 'asyncError'>) => void;
+  installError: string | null;
+  installModelError: AddModelErrorDto | null;
+  onInstall: (formData: LocalAiInstallFormData) => Promise<void>;
   onRemoveDraft: (localId: string) => void;
-  onInstallDraft: (localId: string) => Promise<void>;
-  onCreateRuntimeProfile: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => Promise<void>;
 }
 
 export function LocalAiModelsStep({
@@ -109,11 +116,10 @@ export function LocalAiModelsStep({
   profilesLoading,
   inventory,
   inventoryLoading,
-  addError,
-  addModelError,
-  onAddDraft,
+  installError,
+  installModelError,
+  onInstall,
   onRemoveDraft,
-  onInstallDraft,
 }: LocalAiModelsStepProps) {
   const [installSource, setInstallSource] = useState<'huggingface' | 'existingAlias'>('huggingface');
   const [runtimeProfileId, setRuntimeProfileId] = useState('');
@@ -127,13 +133,20 @@ export function LocalAiModelsStep({
   const [cacheRam, setCacheRam] = useState('');
   const [catalogModelId, setCatalogModelId] = useState('');
   const [catalogDisplayName, setCatalogDisplayName] = useState('');
-  const [setAsGlobalDefault, setSetAsGlobalDefault] = useState(existingModels.length === 0 && draftModels.length === 0);
+
+  const totalInstalled = existingModels.length + draftModels.filter((d) => d.asyncStatus === 'completed').length;
+  const hasInflightInstall = draftModels.some((d) => d.asyncStatus === 'submitted' || d.asyncStatus === 'downloading');
+  const isFirstModel = totalInstalled === 0 && !hasInflightInstall;
+  const [setAsGlobalDefault, setSetAsGlobalDefault] = useState(false);
 
   const unattachedAliases = inventory.filter((row) => row.catalogModelIds.length === 0 && row.hasModelFile);
   const llamaUnavailable = !inventoryLoading && inventory.length === 0;
 
-  const handleAdd = () => {
-    onAddDraft({
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleInstall = async () => {
+    const effectiveCatalogModelId = catalogModelId.trim() || (installSource === 'existingAlias' ? existingAlias : routerModelId);
+    const formData: LocalAiInstallFormData = {
       installSource,
       routerModelId: installSource === 'existingAlias' ? existingAlias : routerModelId,
       runtimeProfileId,
@@ -144,24 +157,28 @@ export function LocalAiModelsStep({
       existingAliasRouterModelId: existingAlias,
       routerContextSize: contextSize,
       routerCacheRamMib: cacheRam,
-      catalogModelId: catalogModelId || (installSource === 'existingAlias' ? existingAlias : routerModelId),
-      catalogDisplayName: catalogDisplayName || catalogModelId || (installSource === 'existingAlias' ? existingAlias : routerModelId),
-      setAsGlobalDefault,
-    });
-    setRouterModelId('');
-    setRepository('');
-    setQuantPattern('');
-    setMmprojPattern('');
-    setTargetDirectory('');
-    setExistingAlias('');
-    setCatalogModelId('');
-    setCatalogDisplayName('');
-    setSetAsGlobalDefault(false);
-  };
+      catalogModelId: effectiveCatalogModelId,
+      catalogDisplayName: catalogDisplayName.trim() || effectiveCatalogModelId,
+      setAsGlobalDefault: isFirstModel || setAsGlobalDefault,
+    };
 
-  const totalModels = existingModels.length + draftModels.length;
-  const lockDefault = totalModels === 0;
-  const effectiveSetAsDefault = lockDefault ? true : setAsGlobalDefault;
+    setSubmitting(true);
+    try {
+      await onInstall(formData);
+      // Reset form on success (no install error means the API call was accepted)
+      setRouterModelId('');
+      setRepository('');
+      setQuantPattern('');
+      setMmprojPattern('');
+      setTargetDirectory('');
+      setExistingAlias('');
+      setCatalogModelId('');
+      setCatalogDisplayName('');
+      setSetAsGlobalDefault(false);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -189,7 +206,7 @@ export function LocalAiModelsStep({
 
       {draftModels.length > 0 ? (
         <div className="space-y-1">
-          <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Queued installs</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Installing</div>
           <div className="divide-y divide-gray-100 rounded border border-gray-200">
             {draftModels.map((draft) => (
               <div key={draft.localId} className="px-3 py-2">
@@ -198,32 +215,21 @@ export function LocalAiModelsStep({
                     <div className="font-mono text-sm text-gray-900">{draft.catalogModelId || draft.routerModelId}</div>
                     <div className="text-xs text-gray-500">
                       {draft.installSource === 'existingAlias'
-                        ? `Attach alias: ${draft.existingAliasRouterModelId}`
+                        ? `Alias: ${draft.existingAliasRouterModelId}`
                         : `HF: ${draft.huggingFaceRepository}`}
                     </div>
                     <DraftProgress draft={draft} />
                   </div>
-                  <div className="flex shrink-0 gap-2">
-                    {draft.asyncStatus === 'pending' ? (
-                      <button
-                        type="button"
-                        onClick={() => void onInstallDraft(draft.localId)}
-                        className="rounded border border-blue-300 px-2 py-1 text-xs text-blue-700 hover:bg-blue-50"
-                      >
-                        Install
-                      </button>
-                    ) : null}
-                    {draft.asyncStatus === 'pending' || draft.asyncStatus === 'error' ? (
-                      <button
-                        type="button"
-                        onClick={() => onRemoveDraft(draft.localId)}
-                        className="text-gray-400 hover:text-red-600"
-                        title="Remove"
-                      >
-                        <FaTimes />
-                      </button>
-                    ) : null}
-                  </div>
+                  {draft.asyncStatus === 'error' ? (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveDraft(draft.localId)}
+                      className="shrink-0 text-gray-400 hover:text-red-600"
+                      title="Dismiss"
+                    >
+                      <FaTimes />
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -232,7 +238,7 @@ export function LocalAiModelsStep({
       ) : null}
 
       <div className="space-y-4 rounded border border-gray-200 bg-gray-50 p-4">
-        <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Add a model</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Install a model</div>
 
         <div className="space-y-1">
           <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Install Source</label>
@@ -278,7 +284,7 @@ export function LocalAiModelsStep({
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 <option value="">
-                  {inventoryLoading ? 'Loading inventory…' : unattachedAliases.length === 0 ? 'No orphaned aliases available' : 'Select alias'}
+                  {inventoryLoading ? 'Loading inventory…' : unattachedAliases.length === 0 ? 'No unregistered aliases available' : 'Select alias'}
                 </option>
                 {unattachedAliases.map((row) => (
                   <option key={row.routerModelId} value={row.routerModelId}>
@@ -310,10 +316,8 @@ export function LocalAiModelsStep({
               roles={LLAMA_ROLES}
               classify={llamaCppClassifier}
               onChange={(values) => {
-                const nextQuant = values[LLAMA_MODEL_ROLE_ID] ?? '';
-                const nextMmproj = values[LLAMA_MMPROJ_ROLE_ID] ?? '';
-                setQuantPattern(nextQuant);
-                setMmprojPattern(nextMmproj);
+                setQuantPattern(values[LLAMA_MODEL_ROLE_ID] ?? '');
+                setMmprojPattern(values[LLAMA_MMPROJ_ROLE_ID] ?? '');
               }}
               serviceOrigin="llamaCpp"
               repoInputHint="Paste the owner/repo shown at the top of the Hugging Face model page."
@@ -331,7 +335,7 @@ export function LocalAiModelsStep({
                 spellCheck={false}
               />
               <p className="text-[11px] text-gray-500">
-                Folder under <span className="font-mono">/models-local/llama</span> where the files will be written. Defaults to the router alias.
+                Folder under <span className="font-mono">/models-local/llama</span> where files will be written. Defaults to the router alias.
               </p>
             </div>
           </>
@@ -391,42 +395,48 @@ export function LocalAiModelsStep({
           </div>
         </div>
 
-        {totalModels > 0 ? (
+        {isFirstModel ? (
+          <p className="text-xs text-gray-500">This model will be set as the global default chat model.</p>
+        ) : (
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input
               type="checkbox"
-              checked={effectiveSetAsDefault}
-              disabled={lockDefault}
+              checked={setAsGlobalDefault}
               onChange={(e) => setSetAsGlobalDefault(e.target.checked)}
               className="h-4 w-4 rounded border-gray-300 text-blue-600"
             />
             Set as global default chat model
           </label>
+        )}
+
+        {installError ? (
+          <p className="text-xs text-red-600">{installError}</p>
         ) : null}
 
-        {addError ? (
-          <p className="text-xs text-red-600">{addError}</p>
-        ) : null}
-
-        {addModelError ? (
+        {installModelError ? (
           <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-            <div className="font-medium">{addModelError.code}</div>
-            <div>{addModelError.message}</div>
-            {addModelError.remediation ? <div className="mt-1">{addModelError.remediation}</div> : null}
+            <div className="font-medium">{installModelError.code}</div>
+            <div>{installModelError.message}</div>
+            {installModelError.remediation ? <div className="mt-1">{installModelError.remediation}</div> : null}
           </div>
         ) : null}
 
         <button
           type="button"
-          onClick={handleAdd}
-          className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+          onClick={() => void handleInstall()}
+          disabled={submitting}
+          className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
         >
-          Add to queue
+          {submitting ? (
+            <span className="flex items-center gap-1.5">
+              <FaSpinner className="animate-spin" /> Installing…
+            </span>
+          ) : 'Install model'}
         </button>
       </div>
 
-      {totalModels === 0 ? (
-        <p className="text-xs text-amber-700">At least one model must be added to continue.</p>
+      {existingModels.length === 0 && draftModels.length === 0 ? (
+        <p className="text-xs text-amber-700">At least one model must be installed to continue.</p>
       ) : null}
     </div>
   );
