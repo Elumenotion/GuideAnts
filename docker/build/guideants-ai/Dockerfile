@@ -5,7 +5,6 @@
 # =============================================================================
 ARG SDCPP_REF=master
 ARG SD_CUDA_ARCHITECTURES="75;80;86;89;90"
-ARG BUILDKIT_INLINE_CACHE=1
 ARG GA_DEPS_CPU_IMAGE=deps-cpu
 ARG GA_DEPS_CUDA13_IMAGE=deps-cuda13
 ARG GA_UBUNTU_MIRROR_URL=http://mirrors.kernel.org/ubuntu
@@ -94,7 +93,6 @@ ARG PYTHON311_VERSION
 # CPU backend (runtime base + python deps builder + dependency image)
 # =============================================================================
 FROM ghcr.io/ggml-org/llama.cpp:server AS runtime-cpu-base
-ARG BUILDKIT_INLINE_CACHE
 ARG GA_UBUNTU_MIRROR_URL
 ENV DEBIAN_FRONTEND=noninteractive
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
@@ -232,7 +230,6 @@ ENTRYPOINT ["/entrypoint.sh"]
 # CUDA 13 backend (runtime base + python deps builder + dependency image)
 # =============================================================================
 FROM ghcr.io/ggml-org/llama.cpp:server-cuda13 AS runtime-cuda13-base
-ARG BUILDKIT_INLINE_CACHE
 ARG GA_UBUNTU_MIRROR_URL
 ENV DEBIAN_FRONTEND=noninteractive
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \

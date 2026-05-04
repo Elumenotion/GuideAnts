@@ -48,6 +48,7 @@ $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $dockerRoot = Split-Path $PSScriptRoot -Parent
 $serverPath = Join-Path $repoRoot 'src\server'
 $buildContext = Join-Path $PSScriptRoot 'guideants-ai'
+$buildxCachePath = Join-Path $dockerRoot '.buildx-cache'
 
 # --- Select backend ---
 
@@ -166,13 +167,16 @@ try {
             Write-Host "Dependency image not found. Building $depsTag..." -ForegroundColor Cyan
         }
 
-        $depsBuildArgs = @('build')
+        $depsBuildArgs = @('buildx', 'build', '--load')
         if ($RebuildBase) {
             $depsBuildArgs += '--no-cache'
         }
+        else {
+            $depsBuildArgs += @('--cache-from', "type=local,src=$buildxCachePath")
+        }
         $depsBuildArgs += @(
+            '--cache-to', "type=local,dest=$buildxCachePath,mode=max",
             '--target', $depsTarget,
-            '--build-arg', 'BUILDKIT_INLINE_CACHE=1',
             '-t', $depsTag,
             '-f', (Join-Path $buildContext 'Dockerfile'),
             $buildContext
@@ -189,13 +193,12 @@ try {
     }
 
     # --- Build final image (one Dockerfile, backend selected by target) ---
-    $dockerArgs = @('build')
+    $dockerArgs = @('buildx', 'build', '--load')
     if ($RebuildBase) {
         $dockerArgs += '--no-cache'
     }
     $dockerArgs += @(
-        '--cache-from', $depsTag,
-        '--build-arg', 'BUILDKIT_INLINE_CACHE=1',
+        '--cache-from', "type=local,src=$buildxCachePath",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,

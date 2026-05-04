@@ -690,6 +690,36 @@ def download_hf_file(
     encoded_path = "/".join(encoded_segments)
     url = f"https://huggingface.co/{repo_path}/resolve/main/{encoded_path}"
 
+    temp_path = destination_path + ".tmp"
+
+    existing_bytes = 0
+    if os.path.exists(temp_path):
+        existing_bytes = os.path.getsize(temp_path)
+
+    if existing_bytes > 0:
+        try:
+            _download_hf_range(url, token, temp_path, existing_bytes, progress_callback)
+        except _RangeNotSatisfiable:
+            os.remove(temp_path)
+            _download_hf_full(url, token, temp_path, progress_callback)
+    else:
+        _download_hf_full(url, token, temp_path, progress_callback)
+
+    if os.path.exists(destination_path):
+        os.remove(destination_path)
+    os.replace(temp_path, destination_path)
+
+
+class _RangeNotSatisfiable(Exception):
+    pass
+
+
+def _download_hf_full(
+    url: str,
+    token: str | None,
+    temp_path: str,
+    progress_callback: Callable[[int], None] | None,
+) -> None:
     request = urllib.request.Request(
         url,
         method="GET",
@@ -698,8 +728,6 @@ def download_hf_file(
             **({"Authorization": f"Bearer {token}"} if token else {}),
         },
     )
-
-    temp_path = destination_path + ".tmp"
     try:
         with urllib.request.urlopen(request, timeout=HF_TIMEOUT_SECONDS) as response:
             with open(temp_path, "wb") as target:
@@ -719,14 +747,53 @@ def download_hf_file(
         if os.path.exists(temp_path):
             os.remove(temp_path)
         raise RuntimeError(f"Download failed ({exc.code}): {detail}") from exc
-    except Exception:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        raise
 
-    if os.path.exists(destination_path):
-        os.remove(destination_path)
-    os.replace(temp_path, destination_path)
+
+def _download_hf_range(
+    url: str,
+    token: str | None,
+    temp_path: str,
+    existing_bytes: int,
+    progress_callback: Callable[[int], None] | None,
+) -> None:
+    headers: dict[str, str] = {
+        "User-Agent": HTTP_USER_AGENT,
+        "Range": f"bytes={existing_bytes}-",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    request = urllib.request.Request(url, method="GET", headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=HF_TIMEOUT_SECONDS) as response:
+            if response.status == 200:
+                # Server ignored the Range header and sent the full file.
+                mode = "wb"
+                offset = 0
+            elif response.status == 206:
+                mode = "ab"
+                offset = existing_bytes
+            else:
+                mode = "wb"
+                offset = 0
+
+            with open(temp_path, mode) as target:
+                total = offset
+                while True:
+                    chunk = response.read(81920)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+                    total += len(chunk)
+                    if progress_callback:
+                        progress_callback(total)
+                target.flush()
+                os.fsync(target.fileno())
+    except urllib.error.HTTPError as exc:
+        if exc.code == 416:
+            raise _RangeNotSatisfiable() from exc
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Download failed ({exc.code}): {detail}") from exc
 
 
 class RouterEntryUpsertRequest(BaseModel):
@@ -895,10 +962,18 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
             fail_operation(operation_id, "Target file(s) already exist. Enable AllowOverwrite or remove existing files.")
             return
 
-        update_operation(operation_id, status="downloading", progress=0.05, log_line=f"Downloading {quant_path}")
-
         quant_size = quant_file.get("size")
         mmproj_size = mmproj_file.get("size")
+
+        quant_tmp = quant_dest + ".tmp"
+        quant_existing = os.path.getsize(quant_tmp) if os.path.exists(quant_tmp) else 0
+        if quant_existing > 0 and isinstance(quant_size, int) and quant_size > 0:
+            resume_pct = round(100 * quant_existing / quant_size)
+            initial_progress = 0.05 + 0.45 * (quant_existing / float(quant_size))
+            update_operation(operation_id, status="downloading", progress=min(initial_progress, 0.5),
+                             log_line=f"Resuming {quant_path} ({resume_pct}% already downloaded)")
+        else:
+            update_operation(operation_id, status="downloading", progress=0.05, log_line=f"Downloading {quant_path}")
 
         def report_quant(bytes_read: int) -> None:
             if isinstance(quant_size, int) and quant_size > 0:
@@ -921,7 +996,15 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
             token,
             progress_callback=report_quant,
         )
-        update_operation(operation_id, log_line=f"Downloading {mmproj_path}")
+        mmproj_tmp = mmproj_dest + ".tmp"
+        mmproj_existing = os.path.getsize(mmproj_tmp) if os.path.exists(mmproj_tmp) else 0
+        if mmproj_existing > 0 and isinstance(mmproj_size, int) and mmproj_size > 0:
+            resume_pct = round(100 * mmproj_existing / mmproj_size)
+            initial_progress = 0.50 + 0.45 * (mmproj_existing / float(mmproj_size))
+            update_operation(operation_id, progress=min(initial_progress, 0.95),
+                             log_line=f"Resuming {mmproj_path} ({resume_pct}% already downloaded)")
+        else:
+            update_operation(operation_id, log_line=f"Downloading {mmproj_path}")
         download_hf_file(
             request.repository.strip(),
             mmproj_path,
