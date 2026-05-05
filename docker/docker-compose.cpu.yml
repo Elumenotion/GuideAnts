@@ -210,9 +210,6 @@ services:
   searxng:
     container_name: readweb-searxng
     image: ${GA_SEARXNG_IMAGE:-guideants-searxng:latest}
-    build:
-      context: ..
-      dockerfile: docker/build/searxng/Dockerfile
     restart: unless-stopped
     ports:
       - "127.0.0.1:8091:8080"

@@ -312,6 +312,18 @@ if ($All) {
         exit 1
     }
 
+    $searxngDockerfilePath = Join-Path $PSScriptRoot "searxng\Dockerfile"
+    if (-not (Test-Path $searxngDockerfilePath)) {
+        Write-Error "SearXNG Dockerfile not found at $searxngDockerfilePath"
+        exit 1
+    }
+    Write-Host "Building searxng image: guideants-searxng:latest"
+    docker build -t guideants-searxng:latest -f $searxngDockerfilePath $repoRoot
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "SearXNG image build failed with exit code $LASTEXITCODE"
+        exit 1
+    }
+
     $webApiUiBuildScript = Join-Path $PSScriptRoot "build_webapi_ui.ps1"
     if (-not (Test-Path $webApiUiBuildScript)) {
         Write-Error "WebAPI+UI build script not found at $webApiUiBuildScript"

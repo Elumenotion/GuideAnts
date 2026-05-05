@@ -86,6 +86,37 @@ function Get-LatestVariantImage {
     return $candidates | Sort-Object -Property SortKey -Descending | Select-Object -First 1
 }
 
+function Get-LocalImageRef {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Repository,
+        [string]$Tag = 'latest',
+        [Parameter(Mandatory = $true)]
+        [string]$MissingMessage
+    )
+
+    $rows = docker image ls $Repository --format "{{.Repository}}|{{.Tag}}"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to enumerate local image '$Repository'."
+    }
+
+    foreach ($row in $rows) {
+        if ([string]::IsNullOrWhiteSpace($row)) { continue }
+        $parts = $row -split '\|', 2
+        if ($parts.Count -ne 2) { continue }
+
+        $repo = $parts[0].Trim()
+        $rowTag = $parts[1].Trim()
+        if ([string]::IsNullOrWhiteSpace($repo) -or [string]::IsNullOrWhiteSpace($rowTag)) { continue }
+
+        if ($repo -ieq $Repository -and $rowTag -ieq $Tag) {
+            return "${repo}:$rowTag"
+        }
+    }
+
+    throw $MissingMessage
+}
+
 if ([string]::IsNullOrWhiteSpace($Owner)) {
     $Owner = Get-OwnerFromGitRemote
 }
@@ -168,10 +199,59 @@ foreach ($target in $targets) {
     Invoke-DockerCommand -Arguments @('push', $latestRef)
 }
 
+$plantUmlSourceRef = Get-LocalImageRef `
+    -Repository 'plantuml-1.2025.2' `
+    -MissingMessage "No local plantuml-1.2025.2:latest image found. Build it first with docker/build/build_guideants_ai.ps1 -All."
+
+$mssqlSourceRef = Get-LocalImageRef `
+    -Repository 'mssql2025-express-fts' `
+    -MissingMessage "No local mssql2025-express-fts:latest image found. Build it first with docker/build/build_guideants_ai.ps1 -All."
+
+$searxngSourceRef = Get-LocalImageRef `
+    -Repository 'guideants-searxng' `
+    -MissingMessage "No local guideants-searxng:latest image found. Build it first with docker/build/build_guideants_ai.ps1 -All."
+
+$extraTargets = @(
+    [pscustomobject]@{
+        Name        = 'plantuml'
+        SourceRef   = $plantUmlSourceRef
+        PackageName = 'guideants-plantuml'
+        Tags        = @($cpuImage.BuildTag, '1.2025.2', 'latest')
+    },
+    [pscustomobject]@{
+        Name        = 'mssql'
+        SourceRef   = $mssqlSourceRef
+        PackageName = 'mssql2025-express-fts'
+        Tags        = @($cpuImage.BuildTag, 'latest')
+    },
+    [pscustomobject]@{
+        Name        = 'searxng'
+        SourceRef   = $searxngSourceRef
+        PackageName = 'guideants-searxng'
+        Tags        = @($cpuImage.BuildTag, 'latest')
+    }
+)
+
+foreach ($target in $extraTargets) {
+    $targetRefs = @()
+    foreach ($tag in $target.Tags) {
+        $targetRefs += "$Registry/$Owner/$($target.PackageName):$tag"
+    }
+
+    Write-Host ""
+    Write-Host "Pushing $($target.Name) image" -ForegroundColor Cyan
+    Write-Host "  Source:      $($target.SourceRef)"
+    foreach ($targetRef in $targetRefs) {
+        Write-Host "  Target tag:  $targetRef"
+        Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $targetRef)
+        Invoke-DockerCommand -Arguments @('push', $targetRef)
+    }
+}
+
 Write-Host ""
 if ($null -ne $rocmImage) {
-    Write-Host "Done. Pushed latest local CPU, CUDA13, and ROCm GuideAnts AI images to GHCR owner '$Owner'." -ForegroundColor Green
+    Write-Host "Done. Pushed latest local CPU, CUDA13, and ROCm GuideAnts AI images plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$Owner'." -ForegroundColor Green
 }
 else {
-    Write-Host "Done. Pushed latest local CPU and CUDA13 GuideAnts AI images to GHCR owner '$Owner'." -ForegroundColor Green
+    Write-Host "Done. Pushed latest local CPU and CUDA13 GuideAnts AI images plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$Owner'." -ForegroundColor Green
 }
