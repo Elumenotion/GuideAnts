@@ -1,6 +1,6 @@
 # GuideAnts Notebooks
 
-Guides + Assistants = GuideAnts (pronounced "guideance")
+Guides + Assistants = GuideAnts (pronounced "guidance")
 
 ## Quickstart
 
