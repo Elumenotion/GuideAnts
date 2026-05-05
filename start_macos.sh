@@ -7,7 +7,7 @@ DOCKER_DIR="$ROOT_DIR/docker"
 
 MODE="install"          # install | doctor
 FIX_MODE="0"            # 0 | 1
-BACKEND_OVERRIDE=""     # cpu | cuda13
+BACKEND_OVERRIDE=""     # cpu | cuda13 | rocm
 COMPOSE_MODE="ghcr"     # ghcr | local
 HEALTH_URL="http://localhost:5107/"
 
@@ -18,7 +18,7 @@ Usage: ./start_macos.sh [options]
 Options:
   --doctor               Run checks only, do not change anything.
   --fix                  Attempt limited auto-remediation where possible.
-  --backend cpu|cuda13   Force backend selection.
+  --backend cpu|cuda13|rocm   Force backend selection.
   --compose ghcr|local   Use GHCR compose files (default) or local build files.
   --help                 Show this help.
 EOF
@@ -42,7 +42,13 @@ detect_backend() {
     return
   fi
 
-  # Most macOS setups are CPU path for this stack unless explicit CUDA remote setup is desired.
+  if command -v system_profiler >/dev/null 2>&1; then
+    if system_profiler SPDisplaysDataType 2>/dev/null | grep -Eiq 'AMD|Radeon'; then
+      SELECTED_BACKEND="rocm"
+      return
+    fi
+  fi
+
   SELECTED_BACKEND="cpu"
 }
 
@@ -74,17 +80,17 @@ check_prereqs() {
 
 select_compose_file() {
   if [[ "$COMPOSE_MODE" == "local" ]]; then
-    if [[ "$SELECTED_BACKEND" == "cuda13" ]]; then
-      COMPOSE_FILE="docker-compose.cuda.yml"
-    else
-      COMPOSE_FILE="docker-compose.cpu.yml"
-    fi
+    case "$SELECTED_BACKEND" in
+      cuda13) COMPOSE_FILE="docker-compose.cuda.yml" ;;
+      rocm) COMPOSE_FILE="docker-compose.rocm.yml" ;;
+      *) COMPOSE_FILE="docker-compose.cpu.yml" ;;
+    esac
   else
-    if [[ "$SELECTED_BACKEND" == "cuda13" ]]; then
-      COMPOSE_FILE="docker-compose.ghcr-cuda13.yml"
-    else
-      COMPOSE_FILE="docker-compose.ghcr-cpu.yml"
-    fi
+    case "$SELECTED_BACKEND" in
+      cuda13) COMPOSE_FILE="docker-compose.ghcr-cuda13.yml" ;;
+      rocm) COMPOSE_FILE="docker-compose.ghcr-rocm.yml" ;;
+      *) COMPOSE_FILE="docker-compose.ghcr-cpu.yml" ;;
+    esac
   fi
 }
 
@@ -124,7 +130,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$COMPOSE_MODE" == "ghcr" || "$COMPOSE_MODE" == "local" ]] || fail "--compose must be ghcr or local"
-[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" == "cpu" || "$BACKEND_OVERRIDE" == "cuda13" ]] || fail "--backend must be cpu or cuda13"
+[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" == "cpu" || "$BACKEND_OVERRIDE" == "cuda13" || "$BACKEND_OVERRIDE" == "rocm" ]] || fail "--backend must be cpu, cuda13, or rocm"
 
 check_prereqs
 detect_backend

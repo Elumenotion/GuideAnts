@@ -324,6 +324,16 @@ def resolve_device() -> str:
     requested = (os.getenv("GA_EMB_DEVICE", "cpu") or "cpu").strip().lower().replace("_", "-")
     if requested in {"multi-gpu", "multigpu"}:
         requested = "cuda-multi"
+    if requested in {"hip", "rocm", "amd"}:
+        requested = "cuda"
+    if requested in {"hip-multi", "rocm-multi", "amd-multi"}:
+        requested = "cuda-multi"
+    if requested in {"cuda", "cuda-multi"}:
+        try:
+            if torch is None or not torch.cuda.is_available():
+                return "cpu"
+        except Exception:
+            return "cpu"
     if requested in {"cpu", "cuda", "mps", "cuda-multi"}:
         return requested
     return "cpu"

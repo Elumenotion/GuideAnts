@@ -1,4 +1,6 @@
-# GuideAnts
+# GuideAnts Notebooks
+
+Guides + Assistants = GuideAnts (pronounced "guideance")
 
 ## Quickstart
 
@@ -10,6 +12,10 @@ Use the root one-step launcher for your OS:
   - `bash ./start_linux.sh`
 - macOS:
   - `bash ./start_macos.sh`
+
+If your `.sh` launchers are not executable, run:
+
+- `chmod +x ./start_linux.sh ./start_macos.sh`
 
 What these scripts do:
 
@@ -23,8 +29,12 @@ Useful options:
 
 - `--doctor` checks only (no changes).
 - `--fix` attempts limited remediation where possible.
-- `--backend cpu|cuda13` forces backend choice.
+- `--backend cpu|cuda13|rocm` forces backend choice.
 - `--compose ghcr|local` chooses prebuilt GHCR stack or local-image stack.
+
+Experimental support note:
+
+- GuideAnts now includes experimental ROCm support for AMD GPUs (`rocm` backend). Behavior, compatibility, and image size/performance are still being validated.
 
 After startup, follow the [Local AI Setup Guide](docs/local-ai-setup-guide.md) to configure Hugging Face access, download models, and enable local AI services in the Settings wizard.
 

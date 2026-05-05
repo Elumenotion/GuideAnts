@@ -24,8 +24,8 @@ Gateway route prefixes:
 The build system is optimized for local iterative development:
 
 - one build script
-- one Dockerfile
-- backend selected interactively (CPU or CUDA 13)
+- backend-specific Dockerfiles (`Dockerfile.cpu`, `Dockerfile.cuda`, `Dockerfile.rocm`)
+- backend selected interactively (CPU, CUDA 13, or ROCm)
 - deterministic dependency-image tags derived from dependency file hashes
 
 ## GHCR Publishing
@@ -34,6 +34,7 @@ GitHub Actions publish the runtime images to GHCR as separate packages:
 
 - `ghcr.io/<owner>/guideants-ai-cpu`
 - `ghcr.io/<owner>/guideants-ai-cuda13`
+- `ghcr.io/<owner>/guideants-ai-rocm`
 
 Workflow:
 
@@ -44,6 +45,7 @@ Manual dispatch options:
 - `all` publishes both variants
 - `cpu` publishes only the CPU image
 - `cuda13` publishes only the CUDA 13 image
+- `rocm` publishes only the ROCm image
 
 Workflow implementation details:
 
@@ -51,15 +53,15 @@ Workflow implementation details:
 - stages that output into `docker/build/guideants-ai/ScriptExecutionAgent`
 - copies backend-specific sandbox requirements into `docker/build/guideants-ai/requirements.txt`
 - strips `torch`, `torchaudio`, `torchvision`, and `torchtext` so the Dockerfile remains the single owner of backend torch installation
-- builds `final-cpu` or `final-cuda13`
+- builds `final-cpu`, `final-cuda13`, or `final-rocm`
 - runs by manual GitHub Actions dispatch and pushes branch, `sha-*`, and `latest` tags to GHCR
 - uses GitHub Actions cache scopes per backend instead of publishing `guideants-ai-deps:*` cache images
 
 ## Current Design
 
-### One Dockerfile, backend-specific dependency stages
+### Backend-Specific Dockerfiles
 
-`docker/build/guideants-ai/Dockerfile` contains backend-specific builder, dependency, and runtime stages:
+`docker/build/guideants-ai/Dockerfile.cpu`, `Dockerfile.cuda`, and `Dockerfile.rocm` contain backend-specific builder, dependency, and runtime stages:
 
 - `sd-cli-cpu-builder` -> builds CPU `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
 - `sd-cli-cuda-builder` -> builds CUDA `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
@@ -74,15 +76,22 @@ Workflow implementation details:
 - `deps-cuda13` -> runtime dependency image (no compiler toolchain)
 - `final-cuda13` -> runtime image on top of `deps-cuda13` (or an externally tagged deps image)
 
+- `runtime-rocm-base` -> OS/runtime base on `ghcr.io/ggml-org/llama.cpp:server-rocm`
+- `pydeps-rocm-builder` -> Python dependency build stage (includes build toolchain)
+- `deps-rocm` -> runtime dependency image (no compiler toolchain)
+- `final-rocm` -> runtime image on top of `deps-rocm` (or an externally tagged deps image)
+
 The script builds one target with `--target` based on prompt choice:
 
 - CPU choice -> `--target final-cpu`
 - CUDA choice -> `--target final-cuda13`
+- ROCm choice -> `--target final-rocm`
 
 The backend choice is baked into the image:
 
 - `final-cpu` gets `sd-cli` + `sd-server` from `sd-cli-cpu-builder`
 - `final-cuda13` gets CUDA-enabled `sd-cli` + `sd-server` from `sd-cli-cuda-builder`
+- `final-rocm` gets HIP-enabled `sd-cli` + `sd-server` from `sd-cli-rocm-builder`
 
 No startup toggle is used to switch stable-diffusion backend capability.
 
@@ -120,14 +129,14 @@ Supported switches:
 
 ### Build flow
 
-1. Prompt backend (`CPU` or `CUDA 13`)
+1. Prompt backend (`CPU`, `CUDA 13`, or `ROCm`)
 2. Build/publish `src/server/ScriptExecutionAgent`
 3. Stage `ScriptExecutionAgent` and filtered `requirements.txt` into Docker build context
-4. Compute dependency hash from Dockerfile + requirement inputs
-5. Build/reuse backend-specific dependency image (`deps-cpu` or `deps-cuda13`)
-6. Build final runtime target (`final-cpu` or `final-cuda13`) using the dependency image
+4. Compute dependency hash from backend Dockerfile + requirement inputs
+5. Build/reuse backend-specific dependency image (`deps-cpu`, `deps-cuda13`, or `deps-rocm`)
+6. Build final runtime target (`final-cpu`, `final-cuda13`, or `final-rocm`) using the dependency image
 7. Clean staged artifacts
-8. Write `GA_AI_CUDA_IMAGE=<final-tag>` or `GA_AI_CPU_IMAGE=<final-tag>` to `docker/.env`
+8. Write `GA_AI_CUDA_IMAGE=<final-tag>`, `GA_AI_CPU_IMAGE=<final-tag>`, or `GA_AI_ROCM_IMAGE=<final-tag>` to `docker/.env`
 9. Optionally build PlantUML/MSSQL and invoke `build_webapi_ui.ps1` if `-All` was passed
 
 ## File Layout
@@ -140,7 +149,9 @@ docker/
   build/
     build_guideants_ai.ps1
     guideants-ai/
-      Dockerfile
+      Dockerfile.cpu
+      Dockerfile.cuda
+      Dockerfile.rocm
       entrypoint.sh
       start-llama.sh
       start-asr.sh
@@ -155,6 +166,7 @@ docker/
     Sandboxes/
       python311TorchCPU/requirements.txt
       python311TorchCUDA/requirements.txt
+      python311TorchROCM/requirements.txt
 ```
 
 ## Image Tagging

@@ -16,7 +16,7 @@ Use the root launcher script for your OS:
 What these scripts do:
 
 - Validate Docker + Docker Compose.
-- Auto-detect backend (`cuda13` when NVIDIA is available, otherwise `cpu`).
+- Auto-detect backend (`cuda13` when NVIDIA is available, `rocm` when AMD/ROCm is available, otherwise `cpu`).
 - Choose compose stack (`ghcr` by default, `local` optional).
 - Start the stack and wait for `http://localhost:5107/`.
 
@@ -24,7 +24,7 @@ Useful options:
 
 - `--doctor` (checks only, no startup)
 - `--fix` (limited auto-remediation)
-- `--backend cpu|cuda13` (force backend)
+- `--backend cpu|cuda13|rocm` (force backend)
 - `--compose ghcr|local` (prebuilt GHCR vs local images)
 
 If the launcher gets you to `http://localhost:5107/`, skip to section 5.
@@ -36,7 +36,7 @@ GuideAnts runs as a Docker Compose stack on a single host. The runtime stack inc
 | Service | Image/source | Role |
 |---------|---------------|------|
 | `mssql-express` | `mssql2025-express-fts` | SQL Server database. |
-| `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13}:latest` (or local tag) | Consolidated local AI gateway: llama.cpp, ASR, TTS, image generation, embeddings, media, script execution. |
+| `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13,rocm}:latest` (or local tag) | Consolidated local AI gateway: llama.cpp, ASR, TTS, image generation, embeddings, media, script execution. |
 | `docling-serve` | `quay.io/docling-project/docling-serve-{cpu,cu130}` | Local document intelligence / markdown extraction. |
 | `guideants-webapi-ui` | `${GA_WEBAPI_UI_IMAGE}` | Main API plus bundled browser UI at `http://localhost:5107`. |
 | `plantuml` | `plantuml-1.2025.2` | Diagram rendering. |
@@ -78,7 +78,7 @@ Settings top-level tab order (current):
 You can run in either mode:
 
 - `ghcr` mode (default in launcher): pulls prebuilt images via `docker/docker-compose.ghcr-*.yml`.
-- `local` mode: uses `docker/docker-compose.{cpu,cuda}.yml`; build local images first when needed.
+- `local` mode: uses `docker/docker-compose.{cpu,cuda,rocm}.yml`; build local images first when needed.
 
 Build references:
 
@@ -108,11 +108,13 @@ Local images:
 
 - CUDA: `docker/docker-compose.cuda.yml`
 - CPU: `docker/docker-compose.cpu.yml`
+- ROCm: `docker/docker-compose.rocm.yml`
 
 GHCR images:
 
 - CUDA: `docker/docker-compose.ghcr-cuda13.yml`
 - CPU: `docker/docker-compose.ghcr-cpu.yml`
+- ROCm: `docker/docker-compose.ghcr-rocm.yml`
 
 ### Example startup commands
 
@@ -128,6 +130,12 @@ GHCR images:
 
 # GHCR CPU
  docker compose -f docker/docker-compose.ghcr-cpu.yml up -d
+
+# local ROCm
+ docker compose -f docker/docker-compose.rocm.yml up -d
+
+# GHCR ROCm
+ docker compose -f docker/docker-compose.ghcr-rocm.yml up -d
 ```
 
 ### Minimal `docker/.env`

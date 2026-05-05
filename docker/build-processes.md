@@ -6,8 +6,8 @@ This document covers the active Docker build paths under `docker/` and explains 
 
 | Image / Service | Build Source | Built By | Used By |
 |---|---|---|---|
-| `guideants-ai-deps:<backend>-<hash12>` | `docker/build/guideants-ai/Dockerfile` (`deps-cpu` / `deps-cuda13`) | `docker/build/build_guideants_ai.ps1` | cache/reuse layer for final GuideAnts AI image |
-| `guideants-ai:<backend>-<YYDDD>.<HHmm>` | `docker/build/guideants-ai/Dockerfile` | `docker/build/build_guideants_ai.ps1` | `guideants-ai` service (`GA_AI_CUDA_IMAGE` or `GA_AI_CPU_IMAGE`) |
+| `guideants-ai-deps:<backend>-<hash12>` | `docker/build/guideants-ai/Dockerfile.<backend>` | `docker/build/build_guideants_ai.ps1` | cache/reuse layer for final GuideAnts AI image |
+| `guideants-ai:<backend>-<YYDDD>.<HHmm>` | `docker/build/guideants-ai/Dockerfile.<backend>` | `docker/build/build_guideants_ai.ps1` | `guideants-ai` service (`GA_AI_CUDA_IMAGE` / `GA_AI_CPU_IMAGE` / `GA_AI_ROCM_IMAGE`) |
 | `guideants-webapi-ui:<YYDDD>.<HHmm>` | `docker/build/webapi-ui/Dockerfile` | `docker/build/build_webapi_ui.ps1` | `guideants-webapi-ui` profile service (`GA_WEBAPI_UI_IMAGE`) |
 | `mssql2025-express-fts` | `docker/build/mssql-fts/Dockerfile` | `docker/build/build_guideants_ai.ps1 -All` | `mssql-express` service |
 | `plantuml-1.2025.2` | `docker/build/Sandboxes/PlantUml/dockerfile` | `docker/build/build_guideants_ai.ps1 -All` | `plantuml` service |
@@ -57,23 +57,24 @@ pwsh .\docker\build\build_guideants_ai.ps1 -RebuildBase -All
 ```
 
 Script flow:
-1. Prompts for backend (`CPU` or `CUDA 13`) and maps to Docker target (`final-cpu` or `final-cuda13`).
+1. Prompts for backend (`CPU`, `CUDA 13`, or `ROCm`) and maps to Docker target (`final-cpu`, `final-cuda13`, or `final-rocm`).
 2. Builds `src/server/ScriptExecutionAgent` with `dotnet publish`.
 3. Stages publish output into `docker/build/guideants-ai/ScriptExecutionAgent`.
 4. Copies backend-specific `requirements.txt` from sandbox folder, then strips `torch*` entries so torch stays backend-controlled in Dockerfile.
 5. Computes a deterministic dependency hash from Dockerfile + dependency input files.
-6. Builds or reuses `guideants-ai-deps:<backend>-<hash12>` from `deps-cpu` / `deps-cuda13`.
+6. Builds or reuses `guideants-ai-deps:<backend>-<hash12>` from `deps-cpu` / `deps-cuda13` / `deps-rocm`.
 7. Runs final build with `--target <final-target>`, `--cache-from <deps-image>`, and backend-specific deps image build args.
 8. Cleans staged artifacts (`ScriptExecutionAgent`, staged `requirements.txt`).
-9. Writes `GA_AI_CUDA_IMAGE=<new tag>` or `GA_AI_CPU_IMAGE=<new tag>` into `docker/.env`.
+9. Writes `GA_AI_CUDA_IMAGE=<new tag>`, `GA_AI_CPU_IMAGE=<new tag>`, or `GA_AI_ROCM_IMAGE=<new tag>` into `docker/.env`.
 10. If `-All` is set, also builds PlantUML and MSSQL FTS images, then invokes `build_webapi_ui.ps1` to build the compose-used WebAPI+UI image.
 
 ## 3) AI Multi-Stage Build (Why It Matters)
 
-The AI Dockerfile has two backend lanes, each split into runtime base, Python dependency build, dependency runtime image, and final app layer:
+The AI build uses backend-specific Dockerfiles, each split into runtime base, Python dependency build, dependency runtime image, and final app layer:
 
 - CPU lane: `runtime-cpu-base` -> `pydeps-cpu-builder` -> `deps-cpu` -> `final-cpu`
 - CUDA lane: `runtime-cuda13-base` -> `pydeps-cuda13-builder` -> `deps-cuda13` -> `final-cuda13`
+- ROCm lane: `runtime-rocm-base` -> `pydeps-rocm-builder` -> `deps-rocm` -> `final-rocm`
 
 What is in `pydeps-*` (heavy Python build stage):
 - Python 3.11 + a single shared venv (`/opt/venv`)

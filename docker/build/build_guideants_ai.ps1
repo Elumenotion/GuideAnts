@@ -1,6 +1,8 @@
 param(
     [switch]$RebuildBase,
-    [switch]$All
+    [switch]$All,
+    [ValidateSet('cpu', 'cuda13', 'rocm')]
+    [string]$Backend
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,10 +55,20 @@ $finalCachePath = Join-Path $dockerRoot '.buildx-cache-final'
 
 # --- Select backend ---
 
-Write-Host "Select backend:"
-Write-Host "  1) CPU-only"
-Write-Host "  2) CUDA 13"
-$choice = Read-Host "Enter choice [1 or 2]"
+if ([string]::IsNullOrWhiteSpace($Backend)) {
+    Write-Host "Select backend:"
+    Write-Host "  1) CPU-only"
+    Write-Host "  2) CUDA 13"
+    Write-Host "  3) ROCm"
+    $choice = Read-Host "Enter choice [1, 2, or 3]"
+}
+else {
+    $choice = switch ($Backend) {
+        'cpu' { '1' }
+        'cuda13' { '2' }
+        'rocm' { '3' }
+    }
+}
 
 switch ($choice) {
     '1' {
@@ -65,6 +77,7 @@ switch ($choice) {
         $depsTarget = 'deps-cpu'
         $depsImageArg = 'GA_DEPS_CPU_IMAGE'
         $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchCPU\requirements.txt'
+        $dockerfilePath = Join-Path $buildContext 'Dockerfile.cpu'
     }
     '2' {
         $Backend = 'cuda13'
@@ -72,6 +85,15 @@ switch ($choice) {
         $depsTarget = 'deps-cuda13'
         $depsImageArg = 'GA_DEPS_CUDA13_IMAGE'
         $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchCUDA\requirements.txt'
+        $dockerfilePath = Join-Path $buildContext 'Dockerfile.cuda'
+    }
+    '3' {
+        $Backend = 'rocm'
+        $fullTarget = 'final-rocm'
+        $depsTarget = 'deps-rocm'
+        $depsImageArg = 'GA_DEPS_ROCM_IMAGE'
+        $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchROCM\requirements.txt'
+        $dockerfilePath = Join-Path $buildContext 'Dockerfile.rocm'
     }
     default {
         Write-Error "Invalid choice."
@@ -97,6 +119,10 @@ Write-Host ""
 
 if (-not (Test-Path $requirementsSrc)) {
     Write-Error "Requirements file not found at $requirementsSrc"
+    exit 1
+}
+if (-not (Test-Path $dockerfilePath)) {
+    Write-Error "Dockerfile not found at $dockerfilePath"
     exit 1
 }
 
@@ -148,7 +174,7 @@ Get-Content $requirementsSrc |
 Write-Host "Build context staged." -ForegroundColor Green
 
 $depsHashInputs = @(
-    (Join-Path $buildContext 'Dockerfile'),
+    $dockerfilePath,
     (Join-Path $buildContext 'asr-requirements.txt'),
     (Join-Path $buildContext 'tts-requirements.txt'),
     (Join-Path $buildContext 'emb-requirements.txt'),
@@ -179,10 +205,10 @@ try {
             )
         }
         $depsBuildArgs += @(
-            '--cache-to', "type=local,dest=$depsCachePath,mode=max",
+            '--cache-to', "type=local,dest=$depsCachePath,mode=min",
             '--target', $depsTarget,
             '-t', $depsTag,
-            '-f', (Join-Path $buildContext 'Dockerfile'),
+            '-f', $dockerfilePath,
             $buildContext
         )
 
@@ -204,11 +230,11 @@ try {
     $dockerArgs += @(
         '--cache-from', "type=local,src=$depsCachePath",
         '--cache-from', "type=local,src=$finalCachePath",
-        '--cache-to', "type=local,dest=$finalCachePath,mode=max",
+        '--cache-to', "type=local,dest=$finalCachePath,mode=min",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,
-        '-f', (Join-Path $buildContext 'Dockerfile'),
+        '-f', $dockerfilePath,
         $buildContext
     )
 
@@ -231,7 +257,11 @@ finally {
 
 # --- Write backend-specific GuideAnts AI image tag to docker/.env ---
 $envFile = Join-Path $dockerRoot '.env'
-$imageEnvKey = if ($Backend -eq 'cuda13') { 'GA_AI_CUDA_IMAGE' } else { 'GA_AI_CPU_IMAGE' }
+$imageEnvKey = switch ($Backend) {
+    'cuda13' { 'GA_AI_CUDA_IMAGE' }
+    'rocm' { 'GA_AI_ROCM_IMAGE' }
+    default { 'GA_AI_CPU_IMAGE' }
+}
 $envLine = "$imageEnvKey=$imageTag"
 
 if (Test-Path $envFile) {

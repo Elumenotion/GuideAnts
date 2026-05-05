@@ -1,0 +1,230 @@
+﻿name: guideants
+
+services:
+  mssql-express:
+    image: ${GA_MSSQL_IMAGE:-ghcr.io/elumenotion/mssql2025-express-fts:main}
+    pull_policy: always
+    container_name: mssql-express
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}' -Q 'SELECT 1' -C -No | grep -q 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    ports:
+      - "1434:1433"
+    cpus: "4.0"
+    volumes:
+      - mssql_runtime_state:/var/opt/mssql
+      - mssql_data:/var/opt/mssql/data
+      - mssql_ftdata:/var/opt/mssql/FTData
+      - mssql_log:/var/opt/mssql/log
+    restart: unless-stopped
+
+  guideants-ai:
+    image: ${GA_AI_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-rocm:main}
+    pull_policy: always
+    container_name: guideants-ai
+    group_add:
+      - video
+      - render
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    ports:
+      - "8110:80"
+    shm_size: "8gb"
+    volumes:
+      - ai_local_models-new:/models-local
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
+        target: /app/ContentFiles
+    environment:
+      - FILE_STORAGE_ROOT=/app/ContentFiles
+      - HF_TOKEN=${HF_TOKEN:-}
+      - GA_LLAMA_MODELS_PRESET=/models-local/router-models.ini
+      - GA_LLAMA_MODEL_DIR=/models-local/llama
+      - GA_LLAMA_ADMIN_PORT=8086
+      - GA_LLAMA_MODELS_MAX=1
+      - GA_LLAMA_NO_AUTOLOAD=1
+      - GA_LLAMA_CTX_SIZE=262144
+      - GA_LLAMA_THREADS=16
+      - GA_LLAMA_PARALLEL=5
+      - GA_LLAMA_CACHE_RAM=8192
+      - GA_LLAMA_KV_UNIFIED=1
+      - GA_LLAMA_JINJA=1
+      - GA_LLAMA_CONT_BATCH=1
+      - GA_LLAMA_NO_MMAP=0
+      - GA_ASR_HOST=127.0.0.1
+      - GA_ASR_PORT=8082
+      - GA_ASR_MODEL_DIR=/models-local/asr
+      - GA_ASR_DEFAULT_MODEL_PATH=Qwen3-ASR-0.6B
+      - GA_ASR_DEFAULT_MODEL_ID=Qwen/Qwen3-ASR-0.6B
+      - GA_ASR_AUTO_LOAD_ON_STARTUP=${GA_ASR_AUTO_LOAD_ON_STARTUP:-1}
+      - GA_ASR_WAIT_FOR_READY_ON_STARTUP=${GA_ASR_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_ASR_READY_TIMEOUT_SECONDS=${GA_ASR_READY_TIMEOUT_SECONDS:-1800}
+      - GA_ASR_DEVICE_MAP=auto
+      - GA_ASR_DTYPE=bfloat16
+      - GA_ASR_MAX_INFERENCE_BATCH_SIZE=8
+      - GA_ASR_MAX_NEW_TOKENS=512
+      - GA_ASR_WARMUP_ON_LOAD=${GA_ASR_WARMUP_ON_LOAD:-1}
+      - GA_ASR_WARMUP_AUDIO_PATH=${GA_ASR_WARMUP_AUDIO_PATH:-/app/asr-service/warmup.webm}
+      - GA_ASR_WARMUP_LANGUAGE=${GA_ASR_WARMUP_LANGUAGE:-}
+      - GA_TTS_HOST=127.0.0.1
+      - GA_TTS_PORT=8084
+      - GA_TTS_MODEL_DIR=/models-local/tts
+      - GA_TTS_DEFAULT_MODEL_PATH=VibeVoice-1.5B
+      - GA_TTS_DEFAULT_MODEL_ID=microsoft/VibeVoice-1.5B
+      - GA_TTS_TOKENIZER_PATH=Qwen2.5-1.5B-tokenizer
+      - GA_TTS_TOKENIZER_ID=Qwen/Qwen2.5-1.5B
+      - GA_TTS_AUTO_LOAD_ON_STARTUP=${GA_TTS_AUTO_LOAD_ON_STARTUP:-1}
+      - GA_TTS_WAIT_FOR_READY_ON_STARTUP=${GA_TTS_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_TTS_READY_TIMEOUT_SECONDS=${GA_TTS_READY_TIMEOUT_SECONDS:-1800}
+      - GA_TTS_DEVICE_MAP=auto
+      - GA_TTS_DTYPE=bfloat16
+      - GA_TTS_TIMEOUT_SECONDS=300
+      - GA_TTS_MAX_NEW_TOKENS=512
+      - GA_TTS_SAMPLE_RATE=24000
+      - GA_TTS_DEFAULT_VOICE_SECONDS=1.0
+      - GA_EMB_HOST=127.0.0.1
+      - GA_EMB_PORT=8085
+      - GA_EMB_MODEL_DIR=/models-local/emb
+      - GA_EMB_DEFAULT_MODEL_PATH=${GA_EMB_DEFAULT_MODEL_PATH:-}
+      - GA_EMB_DEVICE=${GA_EMB_DEVICE:-rocm}
+      - GA_EMB_FIX_MISTRAL_REGEX=${GA_EMB_FIX_MISTRAL_REGEX:-1}
+      - GA_EMB_AUTO_LOAD_ON_STARTUP=${GA_EMB_AUTO_LOAD_ON_STARTUP:-0}
+      - GA_EMB_WARMUP_ON_LOAD=${GA_EMB_WARMUP_ON_LOAD:-1}
+      - GA_EMB_WAIT_FOR_READY_ON_STARTUP=${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_EMB_READY_TIMEOUT_SECONDS=${GA_EMB_READY_TIMEOUT_SECONDS:-1800}
+      - GA_MEDIA_HOST=127.0.0.1
+      - GA_MEDIA_PORT=8087
+      - GA_SD_HOST=127.0.0.1
+      - GA_SD_PORT=8083
+      - GA_SD_MODEL_DIR=/models-local/sd
+      - GA_SD_TIMEOUT_SECONDS=900
+      - GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=${GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS:-120}
+      - GA_SD_STEPS=4
+      - GA_SD_CFG_SCALE=1.0
+      - GA_SD_STRENGTH=0.75
+      - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
+      - GA_SD_DIFFUSION_FA=1
+      - GA_SD_AUTO_LOAD_ON_STARTUP=${GA_SD_AUTO_LOAD_ON_STARTUP:-1}
+      - GA_SD_WARMUP_PROMPT=${GA_SD_WARMUP_PROMPT:-startup-warmup}
+      - GA_SD_WARMUP_SIZE=${GA_SD_WARMUP_SIZE:-512x512}
+      - GA_SD_WARMUP_STEPS=${GA_SD_WARMUP_STEPS:-1}
+      - GA_SD_WARMUP_OUTPUT_FORMAT=${GA_SD_WARMUP_OUTPUT_FORMAT:-png}
+      - GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS=${GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS:-180}
+      - GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP=${GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP:-1}
+      - GA_SD_WAIT_FOR_READY_ON_STARTUP=${GA_SD_WAIT_FOR_READY_ON_STARTUP:-0}
+      - GA_SD_READY_TIMEOUT_SECONDS=${GA_SD_READY_TIMEOUT_SECONDS:-1800}
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  docling-serve:
+    image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.16.1}
+    pull_policy: always
+    container_name: docling-serve
+    environment:
+      - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
+    ports:
+      - "5001:5001"
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  guideants-webapi-ui:
+    image: ${GA_WEBAPI_UI_SLIM_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-webapi-ui-slim:main}
+    pull_policy: always
+    container_name: guideants-webapi-ui
+    depends_on:
+      mssql-express:
+        condition: service_healthy
+      guideants-ai:
+        condition: service_started
+    ports:
+      - "5107:8080"
+    volumes:
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
+        target: /app/ContentFiles
+    environment:
+      - ASPNETCORE_URLS=http://127.0.0.1:8081
+      - ASPNETCORE_ENVIRONMENT=Development
+      - API_RUNTIME_CONTEXT=compose-ghcr-rocm
+      - ConnectionStrings__DefaultConnection=Server=mssql-express,1433;Initial Catalog=${GA_DB_NAME:-guideants-dev};Persist Security Info=False;User ID=sa;Password=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd};MultipleActiveResultSets=True;Encrypt=False;TrustServerCertificate=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;
+      - FileStorage__Path=/app/ContentFiles
+      - Ui__RootPath=/app/ui
+      - Ui__DevServerUrl=
+      - ALLOWED_ORIGINS=*
+      - ANTRUNNER_SERVICES_HOST_URL=http://guideants-webapi-ui:8080/
+      - SearXngSearch__BaseUrl=http://searxng:8080
+      - BrowserRendering__BaseUrl=http://searxng:8080
+      - LocalServiceHosts__SpeechTranscriptionBaseUrl=http://guideants-ai:80
+      - LocalServiceHosts__SpeechSynthesisBaseUrl=http://guideants-ai:80
+      - LocalServiceHosts__ImageGenerationBaseUrl=http://guideants-ai:80
+      - LocalServiceHosts__EmbeddingsBaseUrl=http://guideants-ai:80
+      - LocalServiceHosts__MediaBaseUrl=http://guideants-ai:80
+      - LocalServiceHosts__DocumentIntelligenceBaseUrl=http://docling-serve:5001
+      - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
+      - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox
+      - HF_TOKEN=${HF_TOKEN:-}
+      - SettingsSecrets__ActiveKeyId=local-dev
+      - SettingsSecrets__Keys__local-dev=MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
+      - Logging__LogLevel__GuideAntsApi.Services.Components.SpeechTranscriptionService=Information
+      - Logging__LogLevel__GuideAntsApi.Services.Components.SpeechSynthesisService=Information
+    networks:
+      - guideants-network
+      - default
+    restart: unless-stopped
+
+  plantuml:
+    image: ${GA_PLANTUML_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}
+    pull_policy: always
+    container_name: plantuml
+    environment:
+      - FILE_STORAGE_ROOT=/app/ContentFiles
+    ports:
+      - "8111:80"
+    volumes:
+      - type: bind
+        source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
+        target: /app/ContentFiles
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
+  searxng:
+    image: ${GA_SEARXNG_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}
+    pull_policy: always
+    container_name: readweb-searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8091:8080"
+    volumes:
+      - type: bind
+        source: ${GA_SEARXNG_CONFIG_HOST_PATH:-./volumes/searxng/config}
+        target: /etc/searxng
+      - type: bind
+        source: ${GA_SEARXNG_DATA_HOST_PATH:-./volumes/searxng/data}
+        target: /var/cache/searxng
+    environment:
+      - FORCE_OWNERSHIP=true
+      - BROWSER_RENDER_PORT=3001
+    networks:
+      - guideants-network
+
+volumes:
+  mssql_runtime_state:
+  mssql_data:
+  mssql_ftdata:
+  mssql_log:
+  ai_local_models-new:
+
+networks:
+  guideants-network:
+    driver: bridge
+

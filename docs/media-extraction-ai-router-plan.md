@@ -63,7 +63,7 @@ Start it from:
 
 Copy it from:
 
-- `docker/build/guideants-ai/Dockerfile`
+- `docker/build/guideants-ai/Dockerfile.<backend>`
 
 ## Core Design Principle
 
@@ -295,7 +295,7 @@ Suggested port:
 
 ## Dockerfile Changes
 
-Update `docker/build/guideants-ai/Dockerfile`:
+Update backend Dockerfiles (`docker/build/guideants-ai/Dockerfile.cpu`, `Dockerfile.cuda`, `Dockerfile.rocm`):
 
 1. copy `media-service/` into `/app/media-service/`
 2. copy `start-media.sh` into `/app/start-media.sh`

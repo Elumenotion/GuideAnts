@@ -44,15 +44,14 @@ function Get-OwnerFromGitRemote {
 function Get-LatestVariantImage {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('cpu', 'cuda13')]
+        [ValidateSet('cpu', 'cuda13', 'rocm')]
         [string]$Variant
     )
 
-    $variantPattern = if ($Variant -eq 'cpu') {
-        '^cpu-(?<build>\d{5}\.\d{4})$'
-    }
-    else {
-        '^cuda13-(?<build>\d{5}\.\d{4})$'
+    $variantPattern = switch ($Variant) {
+        'cpu' { '^cpu-(?<build>\d{5}\.\d{4})$' }
+        'cuda13' { '^cuda13-(?<build>\d{5}\.\d{4})$' }
+        'rocm' { '^rocm-(?<build>\d{5}\.\d{4})$' }
     }
 
     $rows = docker image ls guideants-ai --format "{{.Repository}}|{{.Tag}}"
@@ -120,6 +119,14 @@ if (-not $SkipLogin) {
 $cpuImage = Get-LatestVariantImage -Variant 'cpu'
 $cudaImage = Get-LatestVariantImage -Variant 'cuda13'
 
+$rocmImage = $null
+try {
+    $rocmImage = Get-LatestVariantImage -Variant 'rocm'
+}
+catch {
+    Write-Warning "No local ROCm image found; skipping ROCm push. Build it first with docker/build/build_guideants_ai.ps1 (backend rocm)."
+}
+
 $targets = @(
     [pscustomobject]@{
         Variant     = 'cpu'
@@ -134,6 +141,15 @@ $targets = @(
         BuildTag    = $cudaImage.BuildTag
     }
 )
+
+if ($null -ne $rocmImage) {
+    $targets += [pscustomobject]@{
+        Variant     = 'rocm'
+        PackageName = 'guideants-ai-rocm'
+        SourceRef   = $rocmImage.SourceRef
+        BuildTag    = $rocmImage.BuildTag
+    }
+}
 
 foreach ($target in $targets) {
     $buildRef = "$Registry/$Owner/$($target.PackageName):$($target.BuildTag)"
@@ -153,4 +169,9 @@ foreach ($target in $targets) {
 }
 
 Write-Host ""
-Write-Host "Done. Pushed latest local CPU and CUDA13 GuideAnts AI images to GHCR owner '$Owner'." -ForegroundColor Green
+if ($null -ne $rocmImage) {
+    Write-Host "Done. Pushed latest local CPU, CUDA13, and ROCm GuideAnts AI images to GHCR owner '$Owner'." -ForegroundColor Green
+}
+else {
+    Write-Host "Done. Pushed latest local CPU and CUDA13 GuideAnts AI images to GHCR owner '$Owner'." -ForegroundColor Green
+}

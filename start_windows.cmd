@@ -45,7 +45,7 @@ call :fail Unknown option: %~1
 :args_done
 if /I not "%COMPOSE_MODE%"=="ghcr" if /I not "%COMPOSE_MODE%"=="local" call :fail --compose must be ghcr or local
 if not "%BACKEND_OVERRIDE%"=="" (
-  if /I not "%BACKEND_OVERRIDE%"=="cpu" if /I not "%BACKEND_OVERRIDE%"=="cuda13" call :fail --backend must be cpu or cuda13
+  if /I not "%BACKEND_OVERRIDE%"=="cpu" if /I not "%BACKEND_OVERRIDE%"=="cuda13" if /I not "%BACKEND_OVERRIDE%"=="rocm" call :fail --backend must be cpu, cuda13, or rocm
 )
 
 call :log Running preflight checks...
@@ -118,28 +118,35 @@ if not "%BACKEND_OVERRIDE%"=="" (
 )
 
 where nvidia-smi >nul 2>nul || (
-  set "SELECTED_BACKEND=cpu"
-  exit /b 0
+  goto detect_amd
 )
 
 nvidia-smi >nul 2>nul || (
-  set "SELECTED_BACKEND=cpu"
-  exit /b 0
+  goto detect_amd
 )
 
 set "SELECTED_BACKEND=cuda13"
+exit /b 0
+
+:detect_amd
+for /f "delims=" %%a in ('powershell -NoProfile -Command "$g=(Get-CimInstance Win32_VideoController 2>$null | Select-Object -ExpandProperty Name) -join ''`n''; if($g -match ''AMD|Radeon''){''rocm''} else {''cpu''}"') do set "SELECTED_BACKEND=%%a"
+if not defined SELECTED_BACKEND set "SELECTED_BACKEND=cpu"
 exit /b 0
 
 :select_compose_file
 if /I "%COMPOSE_MODE%"=="local" (
   if /I "%SELECTED_BACKEND%"=="cuda13" (
     set "COMPOSE_FILE=docker-compose.cuda.yml"
+  ) else if /I "%SELECTED_BACKEND%"=="rocm" (
+    set "COMPOSE_FILE=docker-compose.rocm.yml"
   ) else (
     set "COMPOSE_FILE=docker-compose.cpu.yml"
   )
 ) else (
   if /I "%SELECTED_BACKEND%"=="cuda13" (
     set "COMPOSE_FILE=docker-compose.ghcr-cuda13.yml"
+  ) else if /I "%SELECTED_BACKEND%"=="rocm" (
+    set "COMPOSE_FILE=docker-compose.ghcr-rocm.yml"
   ) else (
     set "COMPOSE_FILE=docker-compose.ghcr-cpu.yml"
   )
@@ -182,7 +189,7 @@ echo.
 echo Options:
 echo   --doctor               Run checks only, do not change anything.
 echo   --fix                  Attempt limited auto-remediation where possible.
-echo   --backend cpu^|cuda13   Force backend selection.
+echo   --backend cpu^|cuda13^|rocm   Force backend selection.
 echo   --compose ghcr^|local   Use GHCR compose files ^(default^) or local build files.
 echo   --help                 Show this help.
 exit /b 0
