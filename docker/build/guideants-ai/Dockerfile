@@ -211,13 +211,14 @@ COPY start-tts.sh /app/start-tts.sh
 COPY start-emb.sh /app/start-emb.sh
 COPY start-media.sh /app/start-media.sh
 COPY router-models.seed.ini /opt/seed/router-models.ini
+RUN chmod +x /entrypoint.sh /app/start-llama.sh /app/start-llama-admin.sh /app/start-asr.sh /app/start-sd.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
+
 COPY llama-admin-service/ /app/llama-admin-service/
 COPY asr-service/ /app/asr-service/
 COPY sd-service/ /app/sd-service/
 COPY tts-service/ /app/tts-service/
 COPY emb-service/ /app/emb-service/
 COPY media-service/ /app/media-service/
-RUN chmod +x /entrypoint.sh /app/start-llama.sh /app/start-llama-admin.sh /app/start-asr.sh /app/start-sd.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
 
 EXPOSE 80
 
@@ -348,13 +349,14 @@ COPY start-tts.sh /app/start-tts.sh
 COPY start-emb.sh /app/start-emb.sh
 COPY start-media.sh /app/start-media.sh
 COPY router-models.seed.ini /opt/seed/router-models.ini
+RUN chmod +x /entrypoint.sh /app/start-llama.sh /app/start-llama-admin.sh /app/start-asr.sh /app/start-sd.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
+
 COPY llama-admin-service/ /app/llama-admin-service/
 COPY asr-service/ /app/asr-service/
 COPY sd-service/ /app/sd-service/
 COPY tts-service/ /app/tts-service/
 COPY emb-service/ /app/emb-service/
 COPY media-service/ /app/media-service/
-RUN chmod +x /entrypoint.sh /app/start-llama.sh /app/start-llama-admin.sh /app/start-asr.sh /app/start-sd.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
 
 EXPOSE 80
 

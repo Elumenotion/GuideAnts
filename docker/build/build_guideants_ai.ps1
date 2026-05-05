@@ -48,7 +48,8 @@ $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $dockerRoot = Split-Path $PSScriptRoot -Parent
 $serverPath = Join-Path $repoRoot 'src\server'
 $buildContext = Join-Path $PSScriptRoot 'guideants-ai'
-$buildxCachePath = Join-Path $dockerRoot '.buildx-cache'
+$depsCachePath = Join-Path $dockerRoot '.buildx-cache-deps'
+$finalCachePath = Join-Path $dockerRoot '.buildx-cache-final'
 
 # --- Select backend ---
 
@@ -172,10 +173,13 @@ try {
             $depsBuildArgs += '--no-cache'
         }
         else {
-            $depsBuildArgs += @('--cache-from', "type=local,src=$buildxCachePath")
+            $depsBuildArgs += @(
+                '--cache-from', "type=local,src=$depsCachePath",
+                '--cache-from', "type=local,src=$finalCachePath"
+            )
         }
         $depsBuildArgs += @(
-            '--cache-to', "type=local,dest=$buildxCachePath,mode=max",
+            '--cache-to', "type=local,dest=$depsCachePath,mode=max",
             '--target', $depsTarget,
             '-t', $depsTag,
             '-f', (Join-Path $buildContext 'Dockerfile'),
@@ -198,7 +202,9 @@ try {
         $dockerArgs += '--no-cache'
     }
     $dockerArgs += @(
-        '--cache-from', "type=local,src=$buildxCachePath",
+        '--cache-from', "type=local,src=$depsCachePath",
+        '--cache-from', "type=local,src=$finalCachePath",
+        '--cache-to', "type=local,dest=$finalCachePath,mode=max",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,

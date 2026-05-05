@@ -2,6 +2,7 @@ import gc
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -9,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
@@ -73,6 +74,20 @@ class LoadModelRequest(BaseModel):
     hf_token: str | None = None
 
 
+class DownloadModelRequest(BaseModel):
+    """
+    Request body for an explicit admin model download.
+
+    ``hf_token`` is the single server-resolved token from the top-level
+    ``HuggingFace:Token`` application setting, stamped in by the .NET web
+    layer. This service does not consult ``HF_TOKEN`` env directly; whatever
+    the web API passes is the one token used for every HF call.
+    """
+    model_id: str
+    revision: str | None = None
+    hf_token: str | None = None
+
+
 class EmbedRequest(BaseModel):
     inputs: list[str] = Field(default_factory=list)
     purpose: str = "document"
@@ -122,6 +137,113 @@ class EmbRuntimeState:
 STATE = EmbRuntimeState()
 APP = FastAPI(title="GuideAnts Embeddings Service", version="1.0.0")
 MODEL_LOAD_LOCK = threading.Lock()
+MODEL_OPS_LOCK = threading.Lock()
+MODEL_DOWNLOAD_OPERATIONS: dict[str, dict[str, Any]] = {}
+
+
+def get_model_dir() -> str:
+    return os.getenv("GA_EMB_MODEL_DIR", "/models-local/emb")
+
+
+def list_model_entries() -> list[dict[str, Any]]:
+    model_dir = get_model_dir()
+    os.makedirs(model_dir, exist_ok=True)
+    active_ref = STATE.snapshot().get("modelRef")
+    items: list[dict[str, Any]] = []
+    for name in sorted(os.listdir(model_dir)):
+        full_path = os.path.join(model_dir, name)
+        try:
+            size_bytes = os.path.getsize(full_path) if os.path.isfile(full_path) else 0
+        except OSError:
+            size_bytes = 0
+        items.append(
+            {
+                "modelRef": name,
+                "path": full_path,
+                "isDirectory": os.path.isdir(full_path),
+                "sizeBytes": size_bytes,
+                "active": bool(active_ref and (active_ref == name or active_ref == full_path)),
+            }
+        )
+    return items
+
+
+def _status_is_terminal(status: str | None) -> bool:
+    normalized = (status or "").strip().lower()
+    return normalized in {"completed", "failed", "error", "cancelled", "canceled"}
+
+
+def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
+    operation_id = uuid.uuid4().hex
+    operation = {
+        "operationId": operation_id,
+        "status": "queued",
+        "modelId": request.model_id,
+        "error": None,
+        "modelRef": None,
+        "cancelRequested": False,
+        "startedAtUtc": utc_now_iso(),
+        "completedAtUtc": None,
+    }
+    with MODEL_OPS_LOCK:
+        MODEL_DOWNLOAD_OPERATIONS[operation_id] = operation
+
+    def _run() -> None:
+        model_dir = get_model_dir()
+        os.makedirs(model_dir, exist_ok=True)
+        target_name = request.model_id.replace("/", "--")
+        target_path = os.path.join(model_dir, target_name)
+        with MODEL_OPS_LOCK:
+            current = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)
+            if current is None:
+                return
+            if current.get("cancelRequested"):
+                current["status"] = "cancelled"
+                current["error"] = "Cancelled by operator."
+                current["completedAtUtc"] = utc_now_iso()
+                return
+            current["status"] = "running"
+        try:
+            from huggingface_hub import snapshot_download
+
+            hf_token = (request.hf_token or "").strip() or None
+            snapshot_download(
+                repo_id=request.model_id,
+                revision=request.revision,
+                local_dir=target_path,
+                local_dir_use_symlinks=False,
+                resume_download=True,
+                token=hf_token,
+            )
+            with MODEL_OPS_LOCK:
+                current = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)
+                if current is None:
+                    return
+                if current.get("cancelRequested"):
+                    if os.path.exists(target_path):
+                        shutil.rmtree(target_path, ignore_errors=True)
+                    current["status"] = "cancelled"
+                    current["error"] = "Cancelled by operator."
+                    current["completedAtUtc"] = utc_now_iso()
+                    return
+                current["status"] = "completed"
+                current["modelRef"] = target_name
+                current["completedAtUtc"] = utc_now_iso()
+        except Exception as exc:
+            with MODEL_OPS_LOCK:
+                current = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)
+                if current is None:
+                    return
+                if current.get("cancelRequested"):
+                    current["status"] = "cancelled"
+                    current["error"] = "Cancelled by operator."
+                else:
+                    current["status"] = "failed"
+                    current["error"] = str(exc)
+                current["completedAtUtc"] = utc_now_iso()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return operation
 
 
 def unload_model() -> dict[str, Any]:
@@ -166,8 +288,7 @@ def unload_model() -> dict[str, Any]:
 
 def resolve_model_target(request: LoadModelRequest) -> str:
     model_dir = os.getenv("GA_EMB_MODEL_DIR", "/models-local/emb")
-    default_model_path = (os.getenv("GA_EMB_DEFAULT_MODEL_PATH") or "harrier-oss-v1-0.6b").strip()
-    default_model_id = (os.getenv("GA_EMB_DEFAULT_MODEL_ID") or "microsoft/harrier-oss-v1-0.6b").strip()
+    default_model_path = (os.getenv("GA_EMB_DEFAULT_MODEL_PATH") or "").strip()
 
     if request.model_path:
         candidate = request.model_path.strip()
@@ -175,7 +296,10 @@ def resolve_model_target(request: LoadModelRequest) -> str:
             candidate = os.path.join(model_dir, candidate)
         if os.path.exists(candidate):
             return candidate
-        return request.model_path.strip()
+        raise FileNotFoundError(
+            f"Configured model_path '{request.model_path.strip()}' does not exist on disk. "
+            "Download the model into the embeddings model directory first."
+        )
 
     if request.model_id:
         return request.model_id.strip()
@@ -186,8 +310,14 @@ def resolve_model_target(request: LoadModelRequest) -> str:
             candidate = os.path.join(model_dir, candidate)
         if os.path.exists(candidate):
             return candidate
+        raise FileNotFoundError(
+            f"GA_EMB_DEFAULT_MODEL_PATH points to '{default_model_path}', but that file/directory is not present."
+        )
 
-    return default_model_id
+    raise ValueError(
+        "No default local embeddings model is configured. Set GA_EMB_DEFAULT_MODEL_PATH to an existing local model "
+        "or load explicitly via model_path / model_id."
+    )
 
 
 def resolve_device() -> str:
@@ -440,7 +570,16 @@ async def on_startup() -> None:
 
     if env_flag("GA_EMB_AUTO_LOAD_ON_STARTUP", default=False):
         startup_request = LoadModelRequest()
-        startup_target = resolve_model_target(startup_request)
+        try:
+            startup_target = resolve_model_target(startup_request)
+        except Exception as exc:
+            log_event(
+                "emb_model_autoload_failed",
+                modelTarget=None,
+                errorType=type(exc).__name__,
+                error=str(exc),
+            )
+            return
         log_event("emb_model_autoload_start", modelTarget=startup_target, **startup_details)
 
         def _autoload_worker() -> None:
@@ -507,6 +646,17 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
             force_warmup=env_flag("GA_EMB_WARMUP_ON_LOAD", default=True))
         log_event("emb_model_load_success", requestId=request_id, **details)
         return JSONResponse(status_code=200, content={"requestId": request_id, "status": "loaded", **details})
+    except (ValueError, FileNotFoundError) as exc:
+        log_event("emb_model_load_failed", requestId=request_id, errorType=type(exc).__name__, error=str(exc))
+        return JSONResponse(
+            status_code=400,
+            content={
+                "requestId": request_id,
+                "status": "failed",
+                "errorType": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
     except Exception as exc:
         log_event("emb_model_load_failed", requestId=request_id, errorType=type(exc).__name__, error=str(exc))
         return JSONResponse(
@@ -571,6 +721,75 @@ async def admin_unload(request: Request) -> JSONResponse:
         )
     finally:
         MODEL_LOAD_LOCK.release()
+
+
+@APP.get("/admin/models")
+async def admin_list_models() -> JSONResponse:
+    return JSONResponse(
+        status_code=200,
+        content={
+            "modelDir": get_model_dir(),
+            "items": list_model_entries(),
+        },
+    )
+
+
+@APP.post("/admin/models/download")
+async def admin_download_model(payload: DownloadModelRequest) -> JSONResponse:
+    if not payload.model_id.strip():
+        raise HTTPException(status_code=400, detail="model_id is required")
+    operation = start_download_operation(payload)
+    return JSONResponse(status_code=202, content=operation)
+
+
+@APP.get("/admin/models/{operation_id}")
+async def admin_download_status(operation_id: str) -> JSONResponse:
+    with MODEL_OPS_LOCK:
+        operation = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)
+        if operation is None:
+            raise HTTPException(status_code=404, detail="operation not found")
+        return JSONResponse(status_code=200, content=dict(operation))
+
+
+@APP.post("/admin/models/{operation_id}/cancel")
+async def admin_cancel_download(operation_id: str) -> JSONResponse:
+    with MODEL_OPS_LOCK:
+        operation = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)
+        if operation is None:
+            raise HTTPException(status_code=404, detail="operation not found")
+        if _status_is_terminal(operation.get("status")):
+            return JSONResponse(status_code=200, content=dict(operation))
+        operation["cancelRequested"] = True
+        if operation.get("status") == "queued":
+            operation["status"] = "cancelled"
+            operation["error"] = "Cancelled by operator."
+            operation["completedAtUtc"] = utc_now_iso()
+        elif operation.get("status") == "running":
+            operation["status"] = "cancelling"
+        return JSONResponse(status_code=200, content=dict(operation))
+
+
+@APP.delete("/admin/models/{model_ref}")
+async def admin_delete_model(model_ref: str) -> JSONResponse:
+    if not model_ref:
+        raise HTTPException(status_code=400, detail="model_ref is required")
+
+    active_ref = STATE.snapshot().get("modelRef")
+    if active_ref and (active_ref == model_ref or str(active_ref).endswith(model_ref)):
+        raise HTTPException(status_code=409, detail="cannot delete active model")
+
+    model_dir = os.path.abspath(get_model_dir())
+    target = os.path.abspath(os.path.join(model_dir, model_ref))
+    if not target.startswith(model_dir):
+        raise HTTPException(status_code=400, detail="invalid model_ref")
+    if not os.path.exists(target):
+        raise HTTPException(status_code=404, detail="model not found")
+
+    if os.path.isdir(target):
+        shutil.rmtree(target, ignore_errors=False)
+    else:
+        os.remove(target)
+    return JSONResponse(status_code=200, content={"deleted": True, "modelRef": model_ref})
 
 
 @APP.post("/embed")
