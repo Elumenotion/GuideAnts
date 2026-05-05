@@ -1,14 +1,42 @@
 import { useState } from 'react';
-import { FaRedo, FaSpinner } from 'react-icons/fa';
+import { FaRedo, FaSave, FaSpinner } from 'react-icons/fa';
 import { api } from '../../../../services/api';
 import type { ProviderEditorStateDto } from '../../../../types/settings';
 import { TextActionButton } from '../../components/shared/ActionButtons';
-import { ServiceEditorBase } from '../common/ServiceEditorBase';
+import { OperationalDependencyRow } from '../../components/shared/OperationalDependencyRow';
+import { ProviderFieldsSection } from '../../components/shared/ProviderFieldsSection';
+import { ProviderSelector } from '../../components/shared/ProviderSelector';
+import { ServiceEditorShell } from '../../components/shared/ServiceEditorShell';
+import { useServiceEditorController } from '../../state/useServiceEditorController';
 import { EmbRuntimeManager } from './EmbRuntimeManager';
 
 export function EmbeddingsEditor() {
+  const {
+    state,
+    loading,
+    error,
+    saving,
+    fieldErrors,
+    draft,
+    selectedProvider,
+    persistedActiveLabel,
+    editingProviderLabel,
+    providerOptions,
+    save,
+    clearFieldError,
+  } = useServiceEditorController('Embeddings');
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildMessage, setRebuildMessage] = useState<string | null>(null);
+
+  if (loading) {
+    return <div className="text-sm text-gray-600">Loading Embeddings settings…</div>;
+  }
+
+  if (!state || !selectedProvider) {
+    return <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error ?? 'Not found.'}</div>;
+  }
+
+  const isLocal = selectedProvider.providerKind !== 'Cloud';
 
   const triggerRebuild = async (): Promise<void> => {
     const confirmed = window.confirm(
@@ -39,18 +67,55 @@ export function EmbeddingsEditor() {
   };
 
   return (
-    <ServiceEditorBase
-      serviceId="Embeddings"
-      title="Embeddings"
-      providerExtraTop={(provider: ProviderEditorStateDto) =>
-        provider.providerKind !== 'Cloud' ? <EmbRuntimeManager enabled /> : null
+    <ServiceEditorShell
+      serviceName="Embeddings"
+      activeProviderLabel={persistedActiveLabel}
+      editingProviderLabel={editingProviderLabel}
+      readinessStatus={state.readiness.status}
+      readinessSummary={state.readiness.blockers.length > 0 ? state.readiness.blockers.join(' | ') : 'Ready'}
+      providerSelector={
+        <div className="space-y-2">
+          <ProviderSelector
+            value={draft.activeProviderId}
+            options={providerOptions}
+            onChange={(id) => draft.switchProvider(id)}
+          />
+          <p className="text-xs text-gray-500">
+            Select a provider, adjust settings, then click <span className="font-medium">Save and activate provider</span>.
+          </p>
+        </div>
       }
-      providerExtra={(provider: ProviderEditorStateDto) => (
-        <div className="space-y-4 border-t border-gray-100 pt-4">
+      providerSettings={(
+        <div className="space-y-6">
+          {isLocal ? <EmbRuntimeManager enabled={isLocal} /> : null}
+
+          <ProviderFieldsSection
+            provider={selectedProvider}
+            draft={draft.activeDraft}
+            fieldErrors={fieldErrors}
+            onPatch={(patch) => draft.patchActiveDraft(patch)}
+            onClearFieldError={clearFieldError}
+          />
+
+          {selectedProvider.runtimeDependencies.length > 0 ? (
+            <div className="space-y-2 border-t border-gray-100 pt-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-600">Operational Dependencies</div>
+              {selectedProvider.runtimeDependencies.map((dependency) => (
+                <OperationalDependencyRow
+                  key={dependency.key}
+                  keyName={dependency.key}
+                  hasValue={dependency.hasValue}
+                  currentValue={dependency.currentValue}
+                />
+              ))}
+            </div>
+          ) : null}
+
+          <div className="space-y-4 border-t border-gray-100 pt-4">
           <div>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">Runtime behavior</div>
-            {provider.providerKind === 'Cloud' ? (
-              renderCloudEmbeddingsBehavior(provider)
+            {!isLocal ? (
+              renderCloudEmbeddingsBehavior(selectedProvider)
             ) : (
               <ul className="list-disc space-y-2 pl-5 text-sm text-gray-700">
                 <li>
@@ -67,9 +132,11 @@ export function EmbeddingsEditor() {
             )}
           </div>
         </div>
+        </div>
       )}
-      extraActions={
+      actions={(
         <div className="flex items-center gap-2">
+          {error ? <span className="mr-3 text-xs text-red-700">{error}</span> : null}
           {rebuildMessage ? <span className="text-xs text-gray-700">{rebuildMessage}</span> : null}
           <TextActionButton
             tone="danger"
@@ -80,8 +147,24 @@ export function EmbeddingsEditor() {
           >
             Rebuild vectors
           </TextActionButton>
+
+          <TextActionButton
+            tone="primary"
+            icon={saving ? <FaSpinner className="animate-spin" /> : <FaSave />}
+            disabled={saving || !selectedProvider.connectionConfigured}
+            onClick={() => void save()}
+            title={
+              !selectedProvider.connectionConfigured
+                  ? 'Configure the provider connection first.'
+                  : !selectedProvider.hasExplicitMode
+                    ? 'Save will create an explicit service mode and activate provider.'
+                    : 'Save and activate provider.'
+            }
+          >
+            Save
+          </TextActionButton>
         </div>
-      }
+      )}
     />
   );
 }

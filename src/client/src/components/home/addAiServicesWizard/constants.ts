@@ -8,6 +8,18 @@ export const WIZARD_STEPS: readonly { id: string; label: string }[] = [
   { id: 'finish', label: 'Finish' },
 ] as const;
 
+export const LOCAL_AI_WIZARD_STEPS: readonly { id: string; label: string }[] = [
+  { id: 'provider', label: 'Provider' },
+  { id: 'connection', label: 'Connection details' },
+  { id: 'models', label: 'Models' },
+  { id: 'localAiSpeechTranscription', label: 'Speech Transcription' },
+  { id: 'localAiImageGeneration', label: 'Image Generation' },
+  { id: 'localAiSpeechSynthesis', label: 'Speech Synthesis' },
+  { id: 'localAiDocumentIntelligence', label: 'Document Intelligence' },
+  { id: 'localAiEmbeddings', label: 'Embeddings' },
+  { id: 'finish', label: 'Finish' },
+] as const;
+
 export const WIZARD_PROVIDER_OPTIONS: readonly {
   id: AddAiServicesWizardProvider;
   label: string;

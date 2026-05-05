@@ -703,6 +703,29 @@ public static class SettingsEndpoints
         })
         .WithName("GetServiceLocalModelOperation");
 
+        serviceEditorsGroup.MapPost("/{serviceId}/local-models/operations/{operationId}/cancel", async (
+            string serviceId,
+            string operationId,
+            IHttpClientFactory httpClientFactory,
+            IConfiguration configuration,
+            CancellationToken cancellationToken) =>
+        {
+            var adminBase = ResolveLocalServiceAdminBase(serviceId, configuration);
+            if (string.IsNullOrWhiteSpace(adminBase))
+            {
+                return LocalServiceUnavailable(serviceId);
+            }
+
+            var path = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
+                ? $"/admin/bundles/operations/{Uri.EscapeDataString(operationId)}/cancel"
+                : $"/admin/models/{Uri.EscapeDataString(operationId)}/cancel";
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{adminBase}{path}");
+            return await LocalServiceAdminRouting.ProxyAsync(
+                httpClientFactory.CreateClient(), request, cancellationToken);
+        })
+        .WithName("CancelServiceLocalModelOperation");
+
         // Load / activate a model for ASR, TTS, or Image Generation.
         //
         // ASR / TTS: the request body must carry model_id or model_path plus
@@ -756,10 +779,19 @@ public static class SettingsEndpoints
             }
             else if (isEmbeddings)
             {
-                // Embeddings accepts an optional { model_id | model_path }; if
-                // the client passed neither, the sub-service falls back to its
-                // configured default. The HF token is still stamped in because
-                // a model_id can trigger an implicit snapshot download.
+                // Embeddings follows the same explicit contract as ASR/TTS:
+                // callers must provide model_id or model_path. No silent
+                // default-target load is allowed at this proxy layer.
+                var hasModelId = TryGetNonEmptyString(payload, "model_id", out _);
+                var hasModelPath = TryGetNonEmptyString(payload, "model_path", out _);
+                if (!hasModelId && !hasModelPath)
+                {
+                    return Results.BadRequest(new { error = "Either model_id or model_path is required." });
+                }
+
+                // The load path can still trigger an implicit Hugging Face
+                // snapshot download when model_id is used, so stamp the single
+                // resolved token into the forwarded body.
                 var resolvedHfToken = hfTokenResolver.Resolve();
                 content = LocalServiceAdminRouting.BuildForwardedBodyWithHfToken(payload, resolvedHfToken);
             }

@@ -256,6 +256,26 @@ describe('AddAiServicesWizard', () => {
     expect(within(providerSelect).getByRole('option', { name: 'Google Gemini' })).toBeInTheDocument();
   });
 
+  it('switches the wizard progress to service-specific Local AI steps when Local AI is selected', async () => {
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'local-ai' } });
+
+    expect(screen.getByText('Speech Transcription')).toBeInTheDocument();
+    expect(screen.getByText('Image Generation')).toBeInTheDocument();
+    expect(screen.getByText('Speech Synthesis')).toBeInTheDocument();
+    expect(screen.getByText('Document Intelligence')).toBeInTheDocument();
+    expect(screen.getByText('Embeddings')).toBeInTheDocument();
+    expect(screen.queryByText('Optional services')).not.toBeInTheDocument();
+  });
+
   it('auto-sets the first model as global default and allows finishing after one saved Foundry model', async () => {
     const onDismiss = vi.fn();
 

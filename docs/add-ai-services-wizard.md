@@ -1,6 +1,6 @@
 # Add AI Services Wizard
 
-Last updated: 2026-04-30
+Last updated: 2026-05-05
 
 This document describes the **as-built** Home onboarding wizard behavior.
 
@@ -53,13 +53,27 @@ Provider options (current):
 - `openai` (`OpenAI`)
 - `local-ai` (`Local AI`)
 
-Step sequence (current):
+Step sequence is provider-specific:
+
+`foundry`, `google-gemini`, and `openai` currently use:
 
 1. `Provider`
-2. `Connection details` (cloud providers) / `Prerequisites` (Local AI)
+2. `Connection details`
 3. `Models`
 4. `Optional services`
 5. `Finish`
+
+Local AI (`local-ai`):
+
+1. `Provider`
+2. `Connection details` (rendered as `Prerequisites`)
+3. `Models`
+4. `Speech Transcription`
+5. `Image Generation`
+6. `Speech Synthesis`
+7. `Document Intelligence`
+8. `Embeddings`
+9. `Finish`
 
 ## 5. Footer and dismissal behavior
 
@@ -121,20 +135,52 @@ The local AI path differs structurally from the cloud provider paths. It uses a 
 - Runtime profiles are loaded lazily from `GET /api/settings/runtime-profiles` when the step becomes active.
 - Llama inventory is loaded lazily from `GET /api/settings/llama/runtime/inventory` when the step becomes active.
 
-**Optional services step:**
+**Service-specific steps** (replaces Local AI use of `Optional services`):
 
-- Toggle-based form for five local services:
+- One step per local service, in this fixed order:
+  - Speech Transcription
+  - Image Generation
+  - Speech Synthesis
+  - Document Intelligence
+  - Embeddings
+- Each step reuses the Settings service editor primitives for that service:
+  - provider fields (`ProviderFieldsSection`/service editor controller behavior),
+  - local runtime manager UI (`AsrModelManager`, `ImageBundleManager`, `TtsModelManager`, `EmbRuntimeManager`),
+  - dependency/readiness surfaces.
+- Provider is fixed to the Local provider ID for that service inside the step.
+- `Next` validates/persists provider fields and activates the local provider.
+- `Skip this service` advances without mutating that service.
 
-| Service | Provider ID | Infrastructure key |
+Current Local AI service/provider mapping:
+
+| Service | Provider ID | Runtime dependency key |
 |---|---|---|
-| Embeddings | `Embeddings.LocalEmb.Http` | `LocalServiceHosts:EmbeddingsBaseUrl` |
-| Image Generation | `ImageGeneration.LocalSd.Http` | `LocalServiceHosts:ImageGenerationBaseUrl` |
 | Speech Transcription | `SpeechTranscription.LocalAsr.Http` | `LocalServiceHosts:SpeechTranscriptionBaseUrl` |
+| Image Generation | `ImageGeneration.LocalSd.Http` | `LocalServiceHosts:ImageGenerationBaseUrl` |
 | Speech Synthesis | `SpeechSynthesis.LocalTts.Http` | `LocalServiceHosts:SpeechSynthesisBaseUrl` |
 | Document Intelligence | `DocumentIntelligence.LocalDocling.Http` | `LocalServiceHosts:DocumentIntelligenceBaseUrl` |
+| Embeddings | `Embeddings.LocalEmb.Http` | `LocalServiceHosts:EmbeddingsBaseUrl` |
 
-- Each service card shows the required infrastructure key so operators know which container environment variable must be set.
-- Persists via `PUT /api/settings/services/{serviceId}/providers/{providerId}/fields` and `PUT /api/settings/services/{serviceId}/active-provider`.
+**Navigation blocking and cancel behavior (local service steps):**
+
+- If a local download operation is in-flight on the current step, `Back`/`Next`/`Skip`/`Finish` are blocked.
+- Footer shows blocking state and a `Cancel operation` action.
+- Cancel calls `POST /api/settings/services/{serviceId}/local-models/operations/{operationId}/cancel`.
+
+**Operation polling robustness standard:**
+
+- Poll interval: 2 seconds.
+- Transient poll failures are tolerated up to 5 consecutive failures.
+- On threshold breach, UI marks the operation failed with an explicit runtime-unreachable message.
+- Terminal statuses include `completed`, `failed`, `error`, and `cancelled`.
+
+**Embeddings-specific behavior (current):**
+
+- Embeddings now follows the same explicit lifecycle pattern as ASR/TTS:
+  - `Add model` -> `POST /api/settings/services/Embeddings/local-models/downloads`
+  - poll operation status
+  - `Load` selected installed model (`model_path`)
+- No silent default model fallback in wizard step persistence/load path.
 
 **readyForBasicChat** condition for Local AI: at least one llama-cpp model has been installed (completed draft or pre-existing catalog row).
 
@@ -158,6 +204,8 @@ When extending wizard behavior:
 6. Add tests for:
    - predicate matrix,
    - provider/step persistence,
+   - local service step blocking/cancel behavior,
+   - runtime-readiness gating on persist,
    - finish/dismiss behavior,
    - dismissal key persistence.
 

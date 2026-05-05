@@ -4,6 +4,11 @@ export type AddAiServicesWizardStep =
   | 'provider'
   | 'connection'
   | 'models'
+  | 'localAiSpeechTranscription'
+  | 'localAiImageGeneration'
+  | 'localAiSpeechSynthesis'
+  | 'localAiDocumentIntelligence'
+  | 'localAiEmbeddings'
   | 'optionalServices'
   | 'finish';
 

@@ -6,14 +6,39 @@ vi.mock('../../../../../services/api', () => ({
   api: {
     settings: {
       localModels: {
+        listOutcome: vi.fn(),
         runtimeReadinessOutcome: vi.fn(),
         load: vi.fn(),
         unload: vi.fn(),
+        startDownload: vi.fn(),
+        getOperation: vi.fn(),
+        cancelOperation: vi.fn(),
+        remove: vi.fn(),
       },
       browseHuggingFaceRepository: vi.fn(),
     },
   },
 }));
+
+vi.mock('../../common/localOperationPolling', async () => {
+  const actual = await vi.importActual<typeof import('../../common/localOperationPolling')>(
+    '../../common/localOperationPolling'
+  );
+  return {
+    ...actual,
+    startLocalOperationPoll: vi.fn(({ onUpdate, onTerminal }) => {
+      const terminal = {
+        operationId: 'op-1',
+        modelId: 'acme/emb',
+        status: 'completed',
+        error: null,
+      };
+      onUpdate(terminal);
+      onTerminal?.(terminal);
+      return 1;
+    }),
+  };
+});
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import { api } from '../../../../../services/api';
@@ -30,157 +55,115 @@ describe('EmbRuntimeManager', () => {
   it('renders nothing when disabled', () => {
     const { container } = render(<EmbRuntimeManager enabled={false} />);
     expect(container).toBeEmptyDOMElement();
+    expect(api.settings.localModels.listOutcome).not.toHaveBeenCalled();
     expect(api.settings.localModels.runtimeReadinessOutcome).not.toHaveBeenCalled();
   });
 
-  it('shows the engine state, enables Unload only when loaded, and forwards Unload to the API', async () => {
-    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: {
-        ready: true,
-        loaded: true,
-        modelRef: '/models-local/emb/harrier-oss-v1-0.6b',
-        device: 'cuda',
-        dimensions: 1024,
-        warmupEnabled: true,
-        warmupSucceeded: true,
-      },
-    });
-    (api.settings.localModels.unload as any).mockResolvedValueOnce({ ok: true });
-    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: { ready: false, loaded: false, modelRef: null },
-    });
-
-    render(<EmbRuntimeManager enabled />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Ready')).toBeInTheDocument();
-    });
-    expect(screen.getByText(/harrier-oss-v1-0\.6b/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Load default model/i })).toBeDisabled();
-    const unloadBtn = screen.getByRole('button', { name: 'Unload model' });
-    expect(unloadBtn).not.toBeDisabled();
-
-    fireEvent.click(unloadBtn);
-
-    await waitFor(() => {
-      expect(api.settings.localModels.unload).toHaveBeenCalledWith('Embeddings');
-    });
-    await waitFor(() => {
-      expect(screen.getByText('Not loaded')).toBeInTheDocument();
-    });
-  });
-
-  it('enables Load when no model is loaded and forwards Load to the API', async () => {
-    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: { ready: false, loaded: false, modelRef: null },
-    });
+  it('loads a selected installed model by model_path', async () => {
+    (api.settings.localModels.listOutcome as any)
+      .mockResolvedValueOnce({
+        kind: 'available',
+        payload: {
+          modelDir: '/models-local/emb',
+          items: [{ modelRef: 'acme--emb', isDirectory: true, sizeBytes: 0, active: false }],
+        },
+      })
+      .mockResolvedValueOnce({
+        kind: 'available',
+        payload: {
+          modelDir: '/models-local/emb',
+          items: [{ modelRef: 'acme--emb', isDirectory: true, sizeBytes: 0, active: true }],
+        },
+      });
+    (api.settings.localModels.runtimeReadinessOutcome as any)
+      .mockResolvedValueOnce({
+        kind: 'available',
+        payload: { ready: false, loaded: false, modelRef: null },
+      })
+      .mockResolvedValueOnce({
+        kind: 'available',
+        payload: { ready: true, loaded: true, modelRef: '/models-local/emb/acme--emb' },
+      });
     (api.settings.localModels.load as any).mockResolvedValueOnce({ status: 'loaded' });
-    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: {
-        ready: true,
-        loaded: true,
-        modelRef: '/models-local/emb/default',
-      },
-    });
 
     render(<EmbRuntimeManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText('Not loaded')).toBeInTheDocument();
+      expect(screen.getByText(/No model loaded/i)).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: 'Unload model' })).toBeDisabled();
-    const loadBtn = screen.getByRole('button', { name: /Load default model/i });
-    expect(loadBtn).not.toBeDisabled();
 
-    fireEvent.click(loadBtn);
+    fireEvent.click(screen.getByRole('button', { name: /^Load$/i }));
 
     await waitFor(() => {
-      expect(api.settings.localModels.load).toHaveBeenCalledWith('Embeddings', {});
+      expect(api.settings.localModels.load).toHaveBeenCalledWith('Embeddings', { model_path: 'acme--emb' });
     });
     await waitFor(() => {
       expect(screen.getByText('Ready')).toBeInTheDocument();
     });
   });
 
-  it('blocks Load in HF mode until a successful browse has returned', async () => {
-    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: { ready: false, loaded: false, modelRef: null },
-    });
+  it('opens add-model dialog and starts HF download only after browse resolves', async () => {
+    (api.settings.localModels.listOutcome as any)
+      .mockResolvedValueOnce({
+        kind: 'available',
+        payload: { modelDir: '/models-local/emb', items: [] },
+      })
+      .mockResolvedValueOnce({
+        kind: 'available',
+        payload: { modelDir: '/models-local/emb', items: [] },
+      });
+    (api.settings.localModels.runtimeReadinessOutcome as any)
+      .mockResolvedValueOnce({
+        kind: 'available',
+        payload: { ready: false, loaded: false, modelRef: null },
+      })
+      .mockResolvedValueOnce({
+        kind: 'available',
+        payload: { ready: false, loaded: false, modelRef: null },
+      });
     (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
       repository: 'acme/emb',
       gated: false,
       tokenUsed: false,
       modelCardUrl: null,
-      files: [
-        { path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false },
-      ],
+      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
     });
-    (api.settings.localModels.load as any).mockResolvedValueOnce({ status: 'loaded' });
-    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: { ready: true, loaded: true, modelRef: 'acme/emb' },
+    (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
+      operationId: 'op-1',
+      modelId: 'acme/emb',
+      status: 'queued',
+      error: null,
     });
 
     render(<EmbRuntimeManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText('Not loaded')).toBeInTheDocument();
+      expect(screen.getByText(/No embedding models installed/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByLabelText(/From Hugging Face/i));
-    const loadBtn = screen.getByRole('button', { name: /Load from Hugging Face/i });
-    expect(loadBtn).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
 
-    const repoInput = screen.getByPlaceholderText(/owner\/repo/i) as HTMLInputElement;
-    fireEvent.change(repoInput, { target: { value: 'acme/emb' } });
+    const downloadButton = screen.getByRole('button', { name: /Download snapshot/i });
+    expect(downloadButton).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText(/microsoft\/harrier/i), { target: { value: 'acme/emb' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
 
     await waitFor(() => {
-      expect(loadBtn).not.toBeDisabled();
+      expect(downloadButton).not.toBeDisabled();
     });
 
-    fireEvent.click(loadBtn);
+    fireEvent.click(downloadButton);
 
     await waitFor(() => {
-      expect(api.settings.localModels.load).toHaveBeenCalledWith('Embeddings', { model_id: 'acme/emb' });
+      expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('Embeddings', { model_id: 'acme/emb' });
     });
   });
 
-  it('sends {model_path} when Local path mode is chosen', async () => {
-    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: { ready: false, loaded: false, modelRef: null },
+  it('surfaces model-list probe failure', async () => {
+    (api.settings.localModels.listOutcome as any).mockResolvedValueOnce({
+      kind: 'error',
+      message: 'probe blew up',
     });
-    (api.settings.localModels.load as any).mockResolvedValueOnce({ status: 'loaded' });
-    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: { ready: true, loaded: true, modelRef: '/models/local/emb' },
-    });
-
-    render(<EmbRuntimeManager enabled />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Not loaded')).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByLabelText(/From local path/i));
-    const pathInput = screen.getByLabelText(/Local model path/i) as HTMLInputElement;
-    fireEvent.change(pathInput, { target: { value: '/models/local/emb' } });
-    const loadBtn = screen.getByRole('button', { name: /Load from local path/i });
-    expect(loadBtn).not.toBeDisabled();
-    fireEvent.click(loadBtn);
-
-    await waitFor(() => {
-      expect(api.settings.localModels.load).toHaveBeenCalledWith('Embeddings', {
-        model_path: '/models/local/emb',
-      });
-    });
-  });
-
-  it('surfaces a probe failure when runtime readiness is unavailable', async () => {
     (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValueOnce({
       kind: 'error',
       message: 'probe blew up',
@@ -189,8 +172,7 @@ describe('EmbRuntimeManager', () => {
     render(<EmbRuntimeManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Runtime readiness probe not available/i)).toBeInTheDocument();
+      expect(screen.getByText(/probe blew up/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/probe blew up/i)).toBeInTheDocument();
   });
 });

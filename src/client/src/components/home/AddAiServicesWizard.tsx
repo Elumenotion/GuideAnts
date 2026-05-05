@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
 import type { ServiceEditorStateDto, SettingsSchemaDto, SettingsSectionDto } from '../../types/settings';
 import { SettingsModal } from '../../pages/settings/components/shared/SettingsModal';
@@ -19,6 +19,7 @@ import {
   OPENAI_OPTIONAL_SERVICE_DEFAULTS,
   OPENAI_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
+  LOCAL_AI_WIZARD_STEPS,
   WIZARD_STEPS,
 } from './addAiServicesWizard/constants';
 import { CoreConnectionStep } from './addAiServicesWizard/steps/CoreConnectionStep';
@@ -27,14 +28,20 @@ import { GeminiConnectionStep } from './addAiServicesWizard/steps/GeminiConnecti
 import { GeminiModelsStep } from './addAiServicesWizard/steps/GeminiModelsStep';
 import { GeminiOptionalServicesStep } from './addAiServicesWizard/steps/GeminiOptionalServicesStep';
 import { DraftProgress, LocalAiModelsStep } from './addAiServicesWizard/steps/LocalAiModelsStep';
-import { LocalAiOptionalServicesStep } from './addAiServicesWizard/steps/LocalAiOptionalServicesStep';
 import { LocalAiPrerequisitesStep } from './addAiServicesWizard/steps/LocalAiPrerequisitesStep';
+import { LocalAiSpeechTranscriptionStep } from './addAiServicesWizard/steps/LocalAiSpeechTranscriptionStep';
+import { LocalAiImageGenerationStep } from './addAiServicesWizard/steps/LocalAiImageGenerationStep';
+import { LocalAiSpeechSynthesisStep } from './addAiServicesWizard/steps/LocalAiSpeechSynthesisStep';
+import { LocalAiDocumentIntelligenceStep } from './addAiServicesWizard/steps/LocalAiDocumentIntelligenceStep';
+import { LocalAiEmbeddingsStep } from './addAiServicesWizard/steps/LocalAiEmbeddingsStep';
+import type { LocalAiServiceStepHandle } from './addAiServicesWizard/steps/LocalAiServiceStepBase';
 import { ModelsStep } from './addAiServicesWizard/steps/ModelsStep';
 import { OpenAiConnectionStep } from './addAiServicesWizard/steps/OpenAiConnectionStep';
 import { OpenAiModelsStep } from './addAiServicesWizard/steps/OpenAiModelsStep';
 import { OpenAiOptionalServicesStep } from './addAiServicesWizard/steps/OpenAiOptionalServicesStep';
 import { OptionalServicesStep } from './addAiServicesWizard/steps/OptionalServicesStep';
 import { ProviderStep } from './addAiServicesWizard/steps/ProviderStep';
+import type { LocalDownloadOperationState } from '../../pages/settings/editors/common/localOperationPolling';
 import type {
   AddAiServicesWizardProvider,
   AddAiServicesWizardStep,
@@ -290,36 +297,63 @@ function buildOpenAiOptionalServicesForm(snapshot: WizardLoadSnapshot): OpenAiOp
   };
 }
 
-function nextStep(current: AddAiServicesWizardStep): AddAiServicesWizardStep {
-  if (current === 'provider') {
-    return 'connection';
-  }
-  if (current === 'connection') {
-    return 'models';
-  }
-  if (current === 'models') {
-    return 'optionalServices';
-  }
-  if (current === 'optionalServices') {
-    return 'finish';
-  }
-  return 'finish';
+const STEP_SEQUENCE_BY_PROVIDER: Readonly<Record<AddAiServicesWizardProvider, readonly AddAiServicesWizardStep[]>> = {
+  foundry: ['provider', 'connection', 'models', 'optionalServices', 'finish'],
+  'google-gemini': ['provider', 'connection', 'models', 'optionalServices', 'finish'],
+  openai: ['provider', 'connection', 'models', 'optionalServices', 'finish'],
+  'local-ai': [
+    'provider',
+    'connection',
+    'models',
+    'localAiSpeechTranscription',
+    'localAiImageGeneration',
+    'localAiSpeechSynthesis',
+    'localAiDocumentIntelligence',
+    'localAiEmbeddings',
+    'finish',
+  ],
+} as const;
+
+const STEP_TABS_BY_PROVIDER: Readonly<Record<AddAiServicesWizardProvider, readonly { id: string; label: string }[]>> = {
+  foundry: WIZARD_STEPS,
+  'google-gemini': WIZARD_STEPS,
+  openai: WIZARD_STEPS,
+  'local-ai': LOCAL_AI_WIZARD_STEPS,
+} as const;
+
+function getStepSequence(provider: AddAiServicesWizardProvider): AddAiServicesWizardStep[] {
+  return [...STEP_SEQUENCE_BY_PROVIDER[provider]];
 }
 
-function previousStep(current: AddAiServicesWizardStep): AddAiServicesWizardStep {
-  if (current === 'finish') {
-    return 'optionalServices';
+function nextStep(provider: AddAiServicesWizardProvider, current: AddAiServicesWizardStep): AddAiServicesWizardStep {
+  const sequence = getStepSequence(provider);
+  const currentIndex = sequence.indexOf(current);
+  if (currentIndex === -1) {
+    return sequence[0] ?? 'provider';
   }
-  if (current === 'optionalServices') {
-    return 'models';
+  return sequence[Math.min(currentIndex + 1, sequence.length - 1)] ?? 'finish';
+}
+
+function previousStep(provider: AddAiServicesWizardProvider, current: AddAiServicesWizardStep): AddAiServicesWizardStep {
+  const sequence = getStepSequence(provider);
+  const currentIndex = sequence.indexOf(current);
+  if (currentIndex === -1) {
+    return sequence[0] ?? 'provider';
   }
-  if (current === 'models') {
-    return 'connection';
-  }
-  if (current === 'connection') {
-    return 'provider';
-  }
-  return 'provider';
+  return sequence[Math.max(currentIndex - 1, 0)] ?? 'provider';
+}
+
+function isLocalAiServiceStep(step: AddAiServicesWizardStep): step is
+  | 'localAiSpeechTranscription'
+  | 'localAiImageGeneration'
+  | 'localAiSpeechSynthesis'
+  | 'localAiDocumentIntelligence'
+  | 'localAiEmbeddings' {
+  return step === 'localAiSpeechTranscription'
+    || step === 'localAiImageGeneration'
+    || step === 'localAiSpeechSynthesis'
+    || step === 'localAiDocumentIntelligence'
+    || step === 'localAiEmbeddings';
 }
 
 const OPTIONAL_SERVICE_KEYS: OptionalServiceKey[] = [
@@ -447,6 +481,9 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [localAiStepOperation, setLocalAiStepOperation] = useState<LocalDownloadOperationState | null>(null);
+  const [cancellingLocalAiOperation, setCancellingLocalAiOperation] = useState(false);
+  const localAiServiceStepRef = useRef<LocalAiServiceStepHandle | null>(null);
 
   const existingFoundryModels = useMemo(
     () => (snapshot ? toExistingFoundryModels(snapshot.models) : []),
@@ -709,6 +746,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       localAi.loadRuntimeData();
     }
   }, [provider, step]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setLocalAiStepOperation(null);
+    setCancellingLocalAiOperation(false);
+  }, [provider, step]);
 
   const closeWizard = useCallback(() => {
     onDismiss(dontAutoOpenAgain);
@@ -1662,6 +1704,16 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       return;
     }
 
+    if (provider === 'local-ai' && isLocalAiServiceStep(step)) {
+      if (!localAiServiceStepRef.current) {
+        throw new Error('Local service step is not ready.');
+      }
+      await localAiServiceStepRef.current.persist();
+      const refreshed = await loadSnapshot();
+      setSnapshot(refreshed);
+      return;
+    }
+
     if (step === 'optionalServices') {
       if (provider === 'foundry') {
         await persistFoundryOptionalServices();
@@ -1694,13 +1746,16 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (saving) {
       return;
     }
+    if (provider === 'local-ai' && isLocalAiServiceStep(step) && localAiStepOperation?.inFlight) {
+      return;
+    }
 
     setGlobalError(null);
     setSaving(true);
     try {
       await persistCurrentStep();
 
-      setStep((previous) => nextStep(previous));
+      setStep((previous) => nextStep(provider, previous));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not continue to the next step.';
       setGlobalError(message);
@@ -1708,20 +1763,29 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       setSaving(false);
     }
   }, [
-    persistCurrentStep,
     saving,
+    provider,
+    step,
+    localAiStepOperation?.inFlight,
+    persistCurrentStep,
   ]);
 
   const handleBack = useCallback(() => {
     if (saving) {
       return;
     }
+    if (provider === 'local-ai' && isLocalAiServiceStep(step) && localAiStepOperation?.inFlight) {
+      return;
+    }
     setGlobalError(null);
-    setStep((previous) => previousStep(previous));
-  }, [saving]);
+    setStep((previous) => previousStep(provider, previous));
+  }, [localAiStepOperation?.inFlight, provider, saving, step]);
 
   const handleFinish = useCallback(async () => {
     if (saving) {
+      return;
+    }
+    if (provider === 'local-ai' && isLocalAiServiceStep(step) && localAiStepOperation?.inFlight) {
       return;
     }
 
@@ -1786,14 +1850,44 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     provider,
     saving,
     step,
+    localAiStepOperation?.inFlight,
   ]);
 
   const localAiHasActiveDownloads = localAi.draftModels.some(
     (d) => d.asyncStatus === 'submitted' || d.asyncStatus === 'downloading'
   );
+  const isCurrentLocalAiServiceStep = provider === 'local-ai' && isLocalAiServiceStep(step);
+  const localAiNavigationBlockedByOperation = isCurrentLocalAiServiceStep && Boolean(localAiStepOperation?.inFlight);
+
+  const handleSkipLocalAiService = useCallback(() => {
+    if (saving || loading || !isCurrentLocalAiServiceStep || localAiNavigationBlockedByOperation) {
+      return;
+    }
+    setGlobalError(null);
+    setStep((previous) => nextStep(provider, previous));
+  }, [isCurrentLocalAiServiceStep, loading, localAiNavigationBlockedByOperation, provider, saving]);
+
+  const handleCancelLocalAiServiceOperation = useCallback(async () => {
+    if (!localAiStepOperation || !localAiStepOperation.inFlight || cancellingLocalAiOperation) {
+      return;
+    }
+    setGlobalError(null);
+    setCancellingLocalAiOperation(true);
+    try {
+      await api.settings.localModels.cancelOperation(localAiStepOperation.serviceId, localAiStepOperation.operationId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not cancel the active download operation.';
+      setGlobalError(message);
+    } finally {
+      setCancellingLocalAiOperation(false);
+    }
+  }, [cancellingLocalAiOperation, localAiStepOperation]);
 
   const isNextDisabled = useMemo(() => {
     if (loading || saving) {
+      return true;
+    }
+    if (localAiNavigationBlockedByOperation) {
       return true;
     }
     if (step === 'provider') {
@@ -1812,10 +1906,13 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       return true;
     }
     return false;
-  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, localAiHasActiveDownloads, loading, provider, saving, step]);
+  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, localAiHasActiveDownloads, localAiNavigationBlockedByOperation, loading, provider, saving, step]);
 
   const isFinishDisabled = useMemo(() => {
     if (loading || saving) {
+      return true;
+    }
+    if (localAiNavigationBlockedByOperation) {
       return true;
     }
     if (provider === 'foundry') return foundryTotalModelCount === 0;
@@ -1825,12 +1922,14 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       return hasNoModels || localAiHasActiveDownloads;
     }
     return openAiTotalModelCount === 0;
-  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, localAiHasActiveDownloads, loading, provider, saving]);
+  }, [foundryTotalModelCount, geminiTotalModelCount, openAiTotalModelCount, localAi.draftModels.length, existingLocalModels.length, localAiHasActiveDownloads, localAiNavigationBlockedByOperation, loading, provider, saving]);
 
+  const activeWizardSteps = STEP_TABS_BY_PROVIDER[provider];
   const currentStepLabel = useMemo(() => {
-    const index = WIZARD_STEPS.findIndex((item) => item.id === step);
-    return `${index + 1} of ${WIZARD_STEPS.length}`;
-  }, [step]);
+    const index = activeWizardSteps.findIndex((item) => item.id === step);
+    const position = index >= 0 ? index + 1 : 1;
+    return `${position} of ${activeWizardSteps.length}`;
+  }, [activeWizardSteps, step]);
 
   return (
     <SettingsModal
@@ -1842,15 +1941,32 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       disableOverlayDismiss
       footer={(
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
-          <label className="inline-flex items-center gap-2 text-xs text-gray-700">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              checked={dontAutoOpenAgain}
-              onChange={(event) => setDontAutoOpenAgain(event.target.checked)}
-            />
-            Don&apos;t auto-open this again on this device
-          </label>
+          <div className="space-y-1">
+            <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                checked={dontAutoOpenAgain}
+                onChange={(event) => setDontAutoOpenAgain(event.target.checked)}
+              />
+              Don&apos;t auto-open this again on this device
+            </label>
+            {localAiNavigationBlockedByOperation ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-amber-800">
+                <span>
+                  Download in progress ({localAiStepOperation?.status ?? 'running'}). Navigation is blocked until it completes or is cancelled.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleCancelLocalAiServiceOperation()}
+                  disabled={cancellingLocalAiOperation}
+                  className="rounded border border-amber-300 bg-amber-100 px-2 py-1 font-medium text-amber-900 hover:bg-amber-200 disabled:opacity-50"
+                >
+                  {cancellingLocalAiOperation ? 'Cancelling…' : 'Cancel operation'}
+                </button>
+              </div>
+            ) : null}
+          </div>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -1869,11 +1985,21 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
             <button
               type="button"
               onClick={handleBack}
-              disabled={saving || step === 'provider'}
+              disabled={saving || step === 'provider' || localAiNavigationBlockedByOperation}
               className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               Back
             </button>
+            {isCurrentLocalAiServiceStep ? (
+              <button
+                type="button"
+                onClick={handleSkipLocalAiService}
+                disabled={saving || loading || localAiNavigationBlockedByOperation}
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Skip this service
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void handleNext()}
@@ -1898,7 +2024,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs text-gray-500">Step {currentStepLabel}</div>
           <div className="flex flex-wrap gap-2 text-xs">
-            {WIZARD_STEPS.map((item) => (
+            {activeWizardSteps.map((item) => (
               <span
                 key={item.id}
                 className={`rounded-full px-2 py-0.5 ${
@@ -2021,18 +2147,36 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
           )
         ) : null}
 
-        {!loading && step === 'optionalServices' && provider === 'local-ai' && localAi.draftModels.length > 0 ? (
-          <div className="rounded border border-gray-200 bg-gray-50 p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600">Model installation status</div>
-            <div className="space-y-2">
-              {localAi.draftModels.map((draft) => (
-                <div key={draft.localId}>
-                  <div className="font-mono text-xs text-gray-800">{draft.catalogModelId || draft.routerModelId}</div>
-                  <DraftProgress draft={draft} />
-                </div>
-              ))}
-            </div>
-          </div>
+        {!loading && step === 'localAiSpeechTranscription' ? (
+          <LocalAiSpeechTranscriptionStep
+            ref={localAiServiceStepRef}
+            onDownloadOperationChange={setLocalAiStepOperation}
+          />
+        ) : null}
+
+        {!loading && step === 'localAiImageGeneration' ? (
+          <LocalAiImageGenerationStep
+            ref={localAiServiceStepRef}
+            onDownloadOperationChange={setLocalAiStepOperation}
+          />
+        ) : null}
+
+        {!loading && step === 'localAiSpeechSynthesis' ? (
+          <LocalAiSpeechSynthesisStep
+            ref={localAiServiceStepRef}
+            onDownloadOperationChange={setLocalAiStepOperation}
+          />
+        ) : null}
+
+        {!loading && step === 'localAiDocumentIntelligence' ? (
+          <LocalAiDocumentIntelligenceStep ref={localAiServiceStepRef} />
+        ) : null}
+
+        {!loading && step === 'localAiEmbeddings' ? (
+          <LocalAiEmbeddingsStep
+            ref={localAiServiceStepRef}
+            onDownloadOperationChange={setLocalAiStepOperation}
+          />
         ) : null}
 
         {!loading && step === 'optionalServices' ? (
@@ -2048,12 +2192,6 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               value={geminiOptionalForm}
               errors={geminiOptionalErrors}
               onChange={(patch) => setGeminiOptionalForm((previous) => ({ ...previous, ...patch }))}
-            />
-          ) : provider === 'local-ai' ? (
-            <LocalAiOptionalServicesStep
-              value={localAi.optionalForm}
-              errors={localAi.optionalErrors}
-              onChange={localAi.setOptionalForm}
             />
           ) : (
             <OpenAiOptionalServicesStep

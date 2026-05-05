@@ -8,6 +8,15 @@ import { SettingsModal } from '../../components/shared/SettingsModal';
 import type { LocalModelsUpstreamFailure } from '../../../../types/settings';
 import { RepositoryFilePicker, type RolePickerSpec } from '../common';
 import {
+  isOperationFailedStatus,
+  isOperationInFlight,
+  isOperationTerminalStatus,
+  LOCAL_OPERATION_UNREACHABLE_MESSAGE,
+  type LocalDownloadOperationState,
+  type LocalRuntimeReadinessState,
+  startLocalOperationPoll,
+} from '../common/localOperationPolling';
+import {
   sdDiffusionClassifier,
   sdTextEncoderClassifier,
   sdVaeClassifier,
@@ -102,14 +111,6 @@ const EMPTY_DOWNLOAD_FORM: DownloadFormValues = {
   textEncoderFile: '',
   revision: '',
 };
-
-function operationInFlight(operation: OperationState | null | undefined): boolean {
-  if (!operation) {
-    return false;
-  }
-  const status = (operation.status || '').toLowerCase();
-  return status !== 'completed' && status !== 'failed';
-}
 
 const ROLES: Array<{
   key: 'diffusion' | 'vae' | 'textEncoder';
@@ -239,11 +240,13 @@ function triggerJsonDownload(fileName: string, text: string): void {
 
 interface ImageBundleManagerProps {
   enabled: boolean;
+  onDownloadOperationChange?: (state: LocalDownloadOperationState | null) => void;
+  onRuntimeReadinessChange?: (state: LocalRuntimeReadinessState | null) => void;
 }
 
 type BundleDialogMode = 'create' | 'view' | 'edit';
 
-export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
+export function ImageBundleManager({ enabled, onDownloadOperationChange, onRuntimeReadinessChange }: ImageBundleManagerProps) {
   const [phase, setPhase] = useState<LocalCapabilityPhase>('loading');
   const [payload, setPayload] = useState<BundleListPayload | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
@@ -265,6 +268,14 @@ export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
 
   const pollRef = useRef<number | null>(null);
   const definitionUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const hasInFlightOperation = activeOperation !== null && isOperationInFlight(activeOperation.status);
+
+  const stopPolling = () => {
+    if (pollRef.current != null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
 
   const refresh = async (): Promise<void> => {
     setActionError(null);
@@ -293,46 +304,155 @@ export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
 
   useEffect(() => {
     return () => {
-      if (pollRef.current != null) {
-        window.clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
+      stopPolling();
+      onDownloadOperationChange?.(null);
+      onRuntimeReadinessChange?.(null);
     };
-  }, []);
+  }, [onDownloadOperationChange, onRuntimeReadinessChange]);
+
+  useEffect(() => {
+    if (!onDownloadOperationChange) {
+      return;
+    }
+    if (!activeOperation) {
+      onDownloadOperationChange(null);
+      return;
+    }
+    onDownloadOperationChange({
+      serviceId: SERVICE_ID,
+      operationId: activeOperation.operationId,
+      status: activeOperation.status,
+      inFlight: isOperationInFlight(activeOperation.status),
+      error: activeOperation.error ?? null,
+    });
+  }, [activeOperation, onDownloadOperationChange]);
 
   const bundles = useMemo(() => payload?.items ?? [], [payload]);
   const engine = payload?.engine;
   const engineAlive = Boolean(engine?.processAlive);
   const loadedBundleId = payload?.loadedBundleId ?? engine?.loadedBundleId ?? null;
 
+  useEffect(() => {
+    if (!onRuntimeReadinessChange) {
+      return;
+    }
+    if (!enabled || phase === 'hidden') {
+      onRuntimeReadinessChange(null);
+      return;
+    }
+    if (phase === 'loading') {
+      onRuntimeReadinessChange(null);
+      return;
+    }
+    if (phase === 'error') {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: false,
+        status: 'Local SD service unavailable',
+        detail: errorMessage ?? null,
+      });
+      return;
+    }
+    const lastError = engine?.lastError?.trim() || null;
+    if (hasInFlightOperation && activeOperation) {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: false,
+        status: `Bundle operation ${activeOperation.status}`,
+        detail: activeOperation.error ?? null,
+      });
+      return;
+    }
+    if (engineBusy !== null) {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: false,
+        status: engineBusy === 'load' ? 'Loading engine' : 'Unloading engine',
+      });
+      return;
+    }
+    if (engineAlive && loadedBundleId) {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: true,
+        status: 'Ready',
+      });
+      return;
+    }
+    if (bundles.length === 0) {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: false,
+        status: 'No bundles installed',
+        detail: lastError,
+      });
+      return;
+    }
+    if (!payload?.activeBundleId) {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: false,
+        status: 'No active bundle selected',
+        detail: lastError,
+      });
+      return;
+    }
+    if (!engineAlive) {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: false,
+        status: 'Engine is not loaded',
+        detail: lastError,
+      });
+      return;
+    }
+    onRuntimeReadinessChange({
+      serviceId: SERVICE_ID,
+      ready: false,
+      status: 'Engine running without loaded bundle',
+      detail: lastError,
+    });
+  }, [
+    activeOperation,
+    bundles.length,
+    enabled,
+    engine?.lastError,
+    engineAlive,
+    engineBusy,
+    errorMessage,
+    hasInFlightOperation,
+    loadedBundleId,
+    onRuntimeReadinessChange,
+    payload?.activeBundleId,
+    phase,
+  ]);
+
   const startOperationPoll = (operationId: string, initial: OperationState) => {
     setActiveOperation(initial);
-    if (pollRef.current != null) {
-      window.clearInterval(pollRef.current);
-    }
-    pollRef.current = window.setInterval(async () => {
-      try {
-        const op = (await api.settings.localModels.getOperation(SERVICE_ID, operationId)) as OperationState;
+    stopPolling();
+    pollRef.current = startLocalOperationPoll<OperationState>({
+      poll: () => api.settings.localModels.getOperation(SERVICE_ID, operationId) as Promise<OperationState>,
+      onUpdate: (op) => {
         setActiveOperation(op);
-        if (operationInFlight(op)) {
-          // Keep the table's role readiness fresh while a download/edit is
-          // still mutating files on disk so stale "Ready" badges don't linger.
-          void refresh();
-        } else {
-          if (pollRef.current != null) {
-            window.clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
+        if (isOperationInFlight(op.status)) {
+          // Keep role readiness fresh while files are mutating on disk.
           void refresh();
         }
-      } catch (e) {
-        setActionError(e instanceof Error ? e.message : 'Failed to poll download operation.');
-        if (pollRef.current != null) {
-          window.clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-      }
-    }, 2000);
+      },
+      onTerminal: () => {
+        stopPolling();
+        void refresh();
+      },
+      onPollFailureThreshold: () => {
+        stopPolling();
+        setActionError(LOCAL_OPERATION_UNREACHABLE_MESSAGE);
+        setActiveOperation((previous) =>
+          previous
+            ? { ...previous, status: 'error', error: LOCAL_OPERATION_UNREACHABLE_MESSAGE }
+            : previous
+        );
+      },
+    });
   };
 
   const openBundleDialog = async (
@@ -403,7 +523,7 @@ export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
   };
 
   const handleUploadDefinitionClick = () => {
-    if (operationInFlight(activeOperation)) {
+    if (hasInFlightOperation) {
       return;
     }
     setActionError(null);
@@ -468,6 +588,9 @@ export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
   };
 
   const handleLoadEngine = async () => {
+    if (hasInFlightOperation) {
+      return;
+    }
     setActionError(null);
     setEngineBusy('load');
     try {
@@ -481,6 +604,9 @@ export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
   };
 
   const handleUnloadEngine = async () => {
+    if (hasInFlightOperation) {
+      return;
+    }
     setActionError(null);
     setEngineBusy('unload');
     try {
@@ -510,6 +636,23 @@ export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
     }
   };
 
+  const handleCancelOperation = async () => {
+    if (!activeOperation || !isOperationInFlight(activeOperation.status)) {
+      return;
+    }
+    setActionError(null);
+    try {
+      const latest = (await api.settings.localModels.cancelOperation(SERVICE_ID, activeOperation.operationId)) as OperationState;
+      setActiveOperation(latest);
+      if (isOperationTerminalStatus(latest.status)) {
+        stopPolling();
+        await refresh();
+      }
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Cancel failed.');
+    }
+  };
+
   return (
     <>
       <LocalCapabilityFrame
@@ -529,11 +672,17 @@ export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
           engine={engine}
           loadedBundleId={loadedBundleId}
           engineBusy={engineBusy}
+          blockedByDownload={hasInFlightOperation}
           onLoad={() => void handleLoadEngine()}
           onUnload={() => void handleUnloadEngine()}
         />
 
-        {activeOperation ? <DownloadOperationStatus operation={activeOperation} /> : null}
+        {activeOperation ? (
+          <DownloadOperationStatus
+            operation={activeOperation}
+            onCancel={isOperationInFlight(activeOperation.status) ? () => void handleCancelOperation() : undefined}
+          />
+        ) : null}
 
         <div className="overflow-hidden rounded border border-gray-200">
           <table className="w-full table-fixed text-sm">
@@ -565,7 +714,7 @@ export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
               ) : null}
               {bundles.map((b) => {
                 const bundleOperation = activeOperation?.bundleId === b.bundleId ? activeOperation : null;
-                const bundleOperationBusy = operationInFlight(bundleOperation);
+                const bundleOperationBusy = bundleOperation !== null && isOperationInFlight(bundleOperation.status);
                 const bundleExportBusy = exportingBundleId === b.bundleId;
                 const operationRoles = bundleOperation?.roles;
                 return (
@@ -722,18 +871,18 @@ export function ImageBundleManager({ enabled }: ImageBundleManagerProps) {
           <TextActionButton
             tone="neutral"
             icon={<FaUpload />}
-            disabled={operationInFlight(activeOperation)}
+            disabled={hasInFlightOperation}
             onClick={handleUploadDefinitionClick}
-            title={operationInFlight(activeOperation) ? 'Wait for the current bundle download/update to finish.' : 'Upload a bundle definition JSON and prefill the download form.'}
+            title={hasInFlightOperation ? 'Wait for the current bundle download/update to finish.' : 'Upload a bundle definition JSON and prefill the download form.'}
           >
             Upload definition
           </TextActionButton>
           <TextActionButton
             tone="primary"
             icon={<FaDownload />}
-            disabled={operationInFlight(activeOperation)}
+            disabled={hasInFlightOperation}
             onClick={() => void openBundleDialog('create')}
-            title={operationInFlight(activeOperation) ? 'Wait for the current bundle download/update to finish.' : 'Add a new SD bundle by downloading from Hugging Face.'}
+            title={hasInFlightOperation ? 'Wait for the current bundle download/update to finish.' : 'Add a new SD bundle by downloading from Hugging Face.'}
           >
             Add bundle
           </TextActionButton>
@@ -781,12 +930,14 @@ function EngineStatusPanel({
   engine,
   loadedBundleId,
   engineBusy,
+  blockedByDownload,
   onLoad,
   onUnload,
 }: {
   engine: EngineState | undefined;
   loadedBundleId: string | null | undefined;
   engineBusy: null | 'load' | 'unload';
+  blockedByDownload: boolean;
   onLoad: () => void;
   onUnload: () => void;
 }) {
@@ -831,18 +982,26 @@ function EngineStatusPanel({
           <TextActionButton
             tone="primary"
             icon={engineBusy === 'load' ? <FaSpinner className="animate-spin" /> : <FaPlay />}
-            disabled={alive || engineBusy !== null}
+            disabled={alive || engineBusy !== null || blockedByDownload}
             onClick={onLoad}
-            title="Start the sd-server subprocess and load the active bundle into memory."
+            title={
+              blockedByDownload
+                ? 'Wait for the current bundle operation to finish or cancel it first.'
+                : 'Start the sd-server subprocess and load the active bundle into memory.'
+            }
           >
             {engineBusy === 'load' ? 'Loading…' : 'Load engine'}
           </TextActionButton>
           <TextActionButton
             tone="neutral"
             icon={engineBusy === 'unload' ? <FaSpinner className="animate-spin" /> : <FaStop />}
-            disabled={!alive || engineBusy !== null}
+            disabled={!alive || engineBusy !== null || blockedByDownload}
             onClick={onUnload}
-            title="Stop the sd-server subprocess and release its GPU / RAM."
+            title={
+              blockedByDownload
+                ? 'Wait for the current bundle operation to finish or cancel it first.'
+                : 'Stop the sd-server subprocess and release its GPU / RAM.'
+            }
           >
             {engineBusy === 'unload' ? 'Unloading…' : 'Unload engine'}
           </TextActionButton>
@@ -919,21 +1078,29 @@ function RoleCell({
   );
 }
 
-function DownloadOperationStatus({ operation }: { operation: OperationState }) {
-  const terminal = operation.status === 'completed' || operation.status === 'failed';
+function DownloadOperationStatus({ operation, onCancel }: { operation: OperationState; onCancel?: () => void }) {
+  const failed = isOperationFailedStatus(operation.status);
+  const terminal = isOperationTerminalStatus(operation.status);
   return (
     <div
       className={`rounded border p-3 text-xs ${
-        operation.status === 'failed'
+        failed
           ? 'border-red-300 bg-red-50 text-red-800'
-          : operation.status === 'completed'
+          : terminal
           ? 'border-green-300 bg-green-50 text-green-800'
           : 'border-blue-300 bg-blue-50 text-blue-800'
       }`}
     >
-      <div className="font-semibold">
-        Download {operation.bundleId ? `"${operation.bundleId}"` : ''}: {operation.status}
-        {!terminal ? '…' : ''}
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-semibold">
+          Download {operation.bundleId ? `"${operation.bundleId}"` : ''}: {operation.status}
+          {!terminal ? '…' : ''}
+        </div>
+        {onCancel ? (
+          <TextActionButton tone="danger" icon={<FaTimes />} onClick={onCancel} title="Cancel this bundle operation.">
+            Cancel
+          </TextActionButton>
+        ) : null}
       </div>
       {operation.roles ? (
         <ul className="mt-1 list-inside list-disc">

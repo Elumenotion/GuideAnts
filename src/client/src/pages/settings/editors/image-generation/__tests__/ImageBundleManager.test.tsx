@@ -732,8 +732,9 @@ describe('ImageBundleManager', () => {
       },
     });
 
-    const bundleIdInput = await screen.findByLabelText(/Bundle id/i);
-    expect((bundleIdInput as HTMLInputElement).value).toBe('bundle-from-file');
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Bundle id/i) as HTMLInputElement).value).toBe('bundle-from-file');
+    });
     expect((screen.getByLabelText(/Diffusion repo/i) as HTMLInputElement).value).toBe('org/diffusion');
     expect((screen.getByLabelText(/Diffusion file/i) as HTMLInputElement).value).toBe('diff.gguf');
     expect((screen.getByLabelText(/VAE repo/i) as HTMLInputElement).value).toBe('org/vae');

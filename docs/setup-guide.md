@@ -1,6 +1,6 @@
 # GuideAnts Setup Guide
 
-Last updated: 2026-05-01
+Last updated: 2026-05-05
 
 This is the setup-first operator guide for GuideAnts.
 Use it to get a working environment from zero to usable chat/services, then use linked docs for deeper architecture details.
@@ -183,19 +183,36 @@ Wizard paths currently supported:
 - OpenAI
 - Local AI
 
-Wizard step flow:
+Wizard step flow is provider-specific:
+
+`foundry`, `google-gemini`, and `openai` currently use:
 
 1. Provider
-2. Connection details (cloud) or Prerequisites (Local AI)
+2. Connection details
 3. Models
 4. Optional services
 5. Finish
 
+Local AI:
+
+1. Provider
+2. Connection details (Prerequisites)
+3. Models
+4. Speech Transcription
+5. Image Generation
+6. Speech Synthesis
+7. Document Intelligence
+8. Embeddings
+9. Finish
+
 Local AI path specifics:
 
 - Prerequisites step captures HF token and shows live readiness for `LlamaCpp:BaseUrl` and `LocalServiceHosts:*` keys.
-- Models step supports Hugging Face browse + GGUF selection + async install progress.
-- Optional services step configures local providers for embeddings, images, STT, TTS, and document intelligence.
+- Models step supports Hugging Face browse + GGUF selection + async install progress for local chat models.
+- After chat models, each non-chat local service has its own step with Settings-parity controls.
+- Each local service step is skippable; `Next` persists provider fields + activates local provider for that service, while `Skip this service` leaves service config unchanged.
+- If a local model/bundle download is in flight on the active step, navigation is blocked until completion or explicit cancel.
+- Embeddings now requires explicit model download + load (same lifecycle pattern as ASR/TTS); no silent default-model activation in wizard flow.
 
 Detailed walkthroughs:
 
@@ -407,6 +424,13 @@ This removes compose-managed volumes for that stack.
 - Open that service editor.
 - Confirm required provider fields and active provider.
 - Re-check Overview readiness.
+
+### Local embeddings says Not ready / No model loaded
+
+- Install an embeddings model from the Embeddings service manager (`Add model`).
+- Wait for download operation completion (or cancel and retry).
+- Load an installed model from the row action (`Load`), then re-check readiness.
+- Verify `LocalServiceHosts:EmbeddingsBaseUrl` probe in Infrastructure.
 
 ### Add Model structured error codes
 

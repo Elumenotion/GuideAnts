@@ -162,7 +162,21 @@ docker compose -f docker-compose.cuda.yml up -d --no-deps --force-recreate guide
 
 Because the build scripts update `.env`, compose picks up the newest `GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, and `GA_WEBAPI_UI_IMAGE` automatically.
 
-## 7) Sandbox/Experimental Dockerfiles
+## 7) SQL Recovery Model On New Installs
+
+- On first app startup, `GuideAntsApi` creates the configured SQL catalog when missing (`SqlServerDatabaseInitializer`).
+- New catalogs are immediately set to `RECOVERY SIMPLE` so transaction logs auto-truncate and local installs do not require log-backup maintenance.
+- Existing catalogs are not modified automatically.
+
+Verify after first boot:
+
+```powershell
+docker exec guideants-mssql-express-1 /opt/mssql-tools18/bin/sqlcmd `
+  -S localhost -U sa -P "YourStrong!Passw0rd" -C `
+  -Q "SELECT name, recovery_model_desc FROM sys.databases WHERE name = 'guideants-dev';"
+```
+
+## 8) Sandbox/Experimental Dockerfiles
 
 The following folders contain sandbox/reference builds and are not first-class compose entrypoints by default:
 

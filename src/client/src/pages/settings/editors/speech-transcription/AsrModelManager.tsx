@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FaDownload, FaPlay, FaSpinner, FaStop, FaTrash } from 'react-icons/fa';
+import { FaDownload, FaPlay, FaSpinner, FaStop, FaTimes, FaTrash } from 'react-icons/fa';
 import { ConfirmationDialog } from '../../../../components/common/ConfirmationDialog';
 import { api } from '../../../../services/api';
 import { IconActionButton, TextActionButton } from '../../components/shared/ActionButtons';
@@ -11,6 +11,15 @@ import type {
 } from '../../../../types/settings';
 import { RepositoryFilePicker, snapshotPreviewClassifier } from '../common';
 import { isSelectableLocalVoiceModelEntry } from '../common/localModelSelection';
+import {
+  isOperationFailedStatus,
+  isOperationInFlight,
+  isOperationTerminalStatus,
+  LOCAL_OPERATION_UNREACHABLE_MESSAGE,
+  type LocalDownloadOperationState,
+  type LocalRuntimeReadinessState,
+  startLocalOperationPoll,
+} from '../common/localOperationPolling';
 
 type AsrModelEntry = {
   modelRef: string;
@@ -49,9 +58,11 @@ const SERVICE_ID = 'SpeechTranscription';
 
 interface AsrModelManagerProps {
   enabled: boolean;
+  onDownloadOperationChange?: (state: LocalDownloadOperationState | null) => void;
+  onRuntimeReadinessChange?: (state: LocalRuntimeReadinessState | null) => void;
 }
 
-export function AsrModelManager({ enabled }: AsrModelManagerProps) {
+export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeReadinessChange }: AsrModelManagerProps) {
   const [phase, setPhase] = useState<LocalCapabilityPhase>('loading');
   const [list, setList] = useState<AsrListPayload | undefined>(undefined);
   const [readiness, setReadiness] = useState<AsrReadiness | undefined>(undefined);
@@ -65,6 +76,14 @@ export function AsrModelManager({ enabled }: AsrModelManagerProps) {
   const [engineBusy, setEngineBusy] = useState<null | { op: 'load' | 'unload'; modelRef?: string }>(null);
 
   const pollRef = useRef<number | null>(null);
+  const hasInFlightDownload = activeDownload !== null && isOperationInFlight(activeDownload.status);
+
+  const stopPolling = () => {
+    if (pollRef.current != null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
 
   const refresh = async (): Promise<void> => {
     setActionError(null);
@@ -102,12 +121,79 @@ export function AsrModelManager({ enabled }: AsrModelManagerProps) {
 
   useEffect(() => {
     return () => {
-      if (pollRef.current != null) {
-        window.clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
+      stopPolling();
+      onDownloadOperationChange?.(null);
+      onRuntimeReadinessChange?.(null);
     };
-  }, []);
+  }, [onDownloadOperationChange, onRuntimeReadinessChange]);
+
+  useEffect(() => {
+    if (!onDownloadOperationChange) {
+      return;
+    }
+    if (!activeDownload) {
+      onDownloadOperationChange(null);
+      return;
+    }
+    onDownloadOperationChange({
+      serviceId: SERVICE_ID,
+      operationId: activeDownload.operationId,
+      status: activeDownload.status,
+      inFlight: isOperationInFlight(activeDownload.status),
+      error: activeDownload.error ?? null,
+    });
+  }, [activeDownload, onDownloadOperationChange]);
+
+  useEffect(() => {
+    if (!onRuntimeReadinessChange) {
+      return;
+    }
+    if (!enabled || phase === 'hidden') {
+      onRuntimeReadinessChange(null);
+      return;
+    }
+    if (phase === 'loading') {
+      onRuntimeReadinessChange(null);
+      return;
+    }
+    if (phase === 'error') {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: false,
+        status: 'Local ASR service unavailable',
+        detail: errorMessage ?? null,
+      });
+      return;
+    }
+    if (!readiness) {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: false,
+        status: 'Runtime readiness probe unavailable',
+      });
+      return;
+    }
+    if (readiness.ready) {
+      onRuntimeReadinessChange({
+        serviceId: SERVICE_ID,
+        ready: true,
+        status: 'Ready',
+      });
+      return;
+    }
+    const status = readiness.loading
+      ? 'Loading model'
+      : readiness.loaded
+      ? 'Loaded, warmup pending'
+      : 'No model loaded';
+    const detail = readiness.loadError ?? readiness.warmupError ?? null;
+    onRuntimeReadinessChange({
+      serviceId: SERVICE_ID,
+      ready: false,
+      status,
+      detail,
+    });
+  }, [enabled, errorMessage, onRuntimeReadinessChange, phase, readiness]);
 
   const startDownload = async (values: { modelId: string; revision: string }) => {
     setActionError(null);
@@ -115,35 +201,52 @@ export function AsrModelManager({ enabled }: AsrModelManagerProps) {
     if (values.revision.trim()) {
       body.revision = values.revision.trim();
     }
-    const op = (await api.settings.localModels.startDownload(SERVICE_ID, body)) as DownloadOp;
-    setDownloadOpen(false);
-    setActiveDownload(op);
-    if (pollRef.current != null) {
-      window.clearInterval(pollRef.current);
-    }
-    pollRef.current = window.setInterval(async () => {
-      try {
-        const latest = (await api.settings.localModels.getOperation(SERVICE_ID, op.operationId)) as DownloadOp;
-        setActiveDownload(latest);
-        if (latest.status === 'completed' || latest.status === 'failed') {
-          if (pollRef.current != null) {
-            window.clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
+    try {
+      const op = (await api.settings.localModels.startDownload(SERVICE_ID, body)) as DownloadOp;
+      setDownloadOpen(false);
+      setActiveDownload(op);
+      stopPolling();
+      pollRef.current = startLocalOperationPoll<DownloadOp>({
+        poll: () => api.settings.localModels.getOperation(SERVICE_ID, op.operationId) as Promise<DownloadOp>,
+        onUpdate: (latest) => setActiveDownload(latest),
+        onTerminal: () => {
+          stopPolling();
           void refresh();
-        }
-      } catch (e) {
-        setActionError(e instanceof Error ? e.message : 'Poll failed.');
-        if (pollRef.current != null) {
-          window.clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
+        },
+        onPollFailureThreshold: () => {
+          stopPolling();
+          setActionError(LOCAL_OPERATION_UNREACHABLE_MESSAGE);
+          setActiveDownload((previous) =>
+            previous
+              ? { ...previous, status: 'error', error: LOCAL_OPERATION_UNREACHABLE_MESSAGE }
+              : previous
+          );
+        },
+      });
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Download failed to start.');
+    }
+  };
+
+  const handleCancelDownload = async () => {
+    if (!activeDownload || !isOperationInFlight(activeDownload.status)) {
+      return;
+    }
+    setActionError(null);
+    try {
+      const latest = (await api.settings.localModels.cancelOperation(SERVICE_ID, activeDownload.operationId)) as DownloadOp;
+      setActiveDownload(latest);
+      if (isOperationTerminalStatus(latest.status)) {
+        stopPolling();
+        void refresh();
       }
-    }, 2000);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Cancel failed.');
+    }
   };
 
   const handleLoadRow = async (modelRef: string) => {
-    if (engineBusy !== null) return;
+    if (engineBusy !== null || hasInFlightDownload) return;
     setActionError(null);
     setEngineBusy({ op: 'load', modelRef });
     try {
@@ -157,7 +260,7 @@ export function AsrModelManager({ enabled }: AsrModelManagerProps) {
   };
 
   const handleUnload = async () => {
-    if (engineBusy !== null) return;
+    if (engineBusy !== null || hasInFlightDownload) return;
     setActionError(null);
     setEngineBusy({ op: 'unload' });
     try {
@@ -207,7 +310,12 @@ export function AsrModelManager({ enabled }: AsrModelManagerProps) {
           onUnload={() => void handleUnload()}
         />
 
-        {activeDownload ? <DownloadOperationStatus operation={activeDownload} /> : null}
+        {activeDownload ? (
+          <DownloadOperationStatus
+            operation={activeDownload}
+            onCancel={isOperationInFlight(activeDownload.status) ? () => void handleCancelDownload() : undefined}
+          />
+        ) : null}
 
         {list?.modelDir ? (
           <p className="text-xs text-gray-500">
@@ -242,8 +350,8 @@ export function AsrModelManager({ enabled }: AsrModelManagerProps) {
               {items.map((m) => {
                 const isBusyRow =
                   engineBusy !== null && engineBusy.op === 'load' && engineBusy.modelRef === m.modelRef;
-                const disableLoad = engineBusy !== null || !!m.active;
-                const disableRemove = engineBusy !== null || !!m.active;
+                const disableLoad = engineBusy !== null || hasInFlightDownload || !!m.active;
+                const disableRemove = engineBusy !== null || hasInFlightDownload || !!m.active;
                 return (
                   <tr key={m.modelRef} className="border-t border-gray-100">
                     <td className="px-3 py-2 font-mono text-xs text-gray-900">{m.modelRef}</td>
@@ -302,9 +410,13 @@ export function AsrModelManager({ enabled }: AsrModelManagerProps) {
           <TextActionButton
             tone="primary"
             icon={<FaDownload />}
-            disabled={engineBusy !== null}
+            disabled={engineBusy !== null || hasInFlightDownload}
             onClick={() => setDownloadOpen(true)}
-            title={engineBusy !== null ? 'Wait for the current engine operation to finish.' : 'Add a new ASR model from Hugging Face.'}
+            title={
+              engineBusy !== null || hasInFlightDownload
+                ? 'Wait for the current operation to finish or cancel it first.'
+                : 'Add a new ASR model from Hugging Face.'
+            }
           >
             Add model
           </TextActionButton>
@@ -407,19 +519,28 @@ function EngineStatusPanel({
   );
 }
 
-function DownloadOperationStatus({ operation }: { operation: DownloadOp }) {
+function DownloadOperationStatus({ operation, onCancel }: { operation: DownloadOp; onCancel?: () => void }) {
+  const failed = isOperationFailedStatus(operation.status);
+  const completed = !failed && !isOperationInFlight(operation.status);
   return (
     <div
       className={`rounded border p-3 text-xs ${
-        operation.status === 'failed'
+        failed
           ? 'border-red-300 bg-red-50 text-red-800'
-          : operation.status === 'completed'
+          : completed
           ? 'border-green-300 bg-green-50 text-green-800'
           : 'border-blue-300 bg-blue-50 text-blue-800'
       }`}
     >
-      <div className="font-semibold">
-        Download {operation.modelId ? `"${operation.modelId}"` : ''}: {operation.status}
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-semibold">
+          Download {operation.modelId ? `"${operation.modelId}"` : ''}: {operation.status}
+        </div>
+        {onCancel ? (
+          <TextActionButton tone="danger" icon={<FaTimes />} onClick={onCancel} title="Cancel this download operation.">
+            Cancel
+          </TextActionButton>
+        ) : null}
       </div>
       {operation.error ? <div className="mt-1 font-mono">{operation.error}</div> : null}
     </div>

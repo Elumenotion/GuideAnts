@@ -34,23 +34,44 @@ public static class SqlServerDatabaseInitializer
             throw new InvalidOperationException("Database name exceeds maximum length (128).");
         }
 
+        var createdCatalog = false;
         builder.InitialCatalog = "master";
         using (var connection = new SqlConnection(builder.ConnectionString))
         {
             connection.Open();
             using var command = connection.CreateCommand();
             command.CommandText = """
+                DECLARE @created bit = 0;
+
                 IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = @dbName)
                 BEGIN
-                    DECLARE @sql nvarchar(max) = N'CREATE DATABASE ' + QUOTENAME(@dbName);
-                    EXEC (@sql);
+                    DECLARE @createSql nvarchar(max) = N'CREATE DATABASE ' + QUOTENAME(@dbName);
+                    EXEC (@createSql);
+
+                    -- New installs default to SIMPLE so transaction logs auto-truncate and do not require log backups.
+                    DECLARE @recoverySql nvarchar(max) = N'ALTER DATABASE ' + QUOTENAME(@dbName) + N' SET RECOVERY SIMPLE WITH NO_WAIT';
+                    EXEC (@recoverySql);
+
+                    SET @created = 1;
                 END
+
+                SELECT @created;
                 """;
             var p = command.CreateParameter();
             p.ParameterName = "@dbName";
             p.Value = catalog;
             command.Parameters.Add(p);
-            command.ExecuteNonQuery();
+            var scalarResult = command.ExecuteScalar();
+            createdCatalog = Convert.ToInt32(scalarResult) == 1;
+        }
+
+        if (createdCatalog)
+        {
+            logger.LogInformation("Created SQL Server catalog '{Catalog}' and set recovery model to SIMPLE.", catalog);
+        }
+        else
+        {
+            logger.LogInformation("SQL Server catalog '{Catalog}' already exists; keeping current recovery model.", catalog);
         }
 
         logger.LogInformation("SQL Server catalog '{Catalog}' is ready; applying EF Core migrations.", catalog);

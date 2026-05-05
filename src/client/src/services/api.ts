@@ -1325,6 +1325,14 @@ export const api = {
                     `/settings/services/${encodeURIComponent(serviceId)}/local-models/operations/${encodeURIComponent(operationId)}`
                 ),
 
+            cancelOperation: (serviceId: string, operationId: string) =>
+                callApi<any>(
+                    `/settings/services/${encodeURIComponent(serviceId)}/local-models/operations/${encodeURIComponent(operationId)}/cancel`,
+                    {
+                        method: 'POST',
+                    }
+                ),
+
             get: (serviceId: string, modelRef: string) =>
                 callApi<any>(`/settings/services/${encodeURIComponent(serviceId)}/local-models/${encodeURIComponent(modelRef)}`),
 
