@@ -521,7 +521,28 @@ export function AddModelWizard({
       ) : null}
 
       {step === 'providerConfig' ? (
-        <div>
+        <div className="space-y-4">
+          {value.provider !== 'llama-cpp' ? (
+            <div className="space-y-2">
+              <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime Profile</label>
+              <select
+                value={value.runtimeProfileId}
+                onChange={(event) => setValue((previous) => ({ ...previous, runtimeProfileId: event.target.value }))}
+                disabled={profilesLoading}
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">{profilesLoading ? 'Loading profiles...' : 'Select runtime profile (optional)'}</option>
+                {profiles.map((profile) => (
+                  <option key={profile.profileId} value={profile.profileId}>
+                    {profile.displayName} ({profile.profileId})
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-500">
+                Assigns sampling parameter controls (Temperature, Top P) to this model in guide and assistant builders.
+              </p>
+            </div>
+          ) : null}
           {renderProviderForm(
             value,
             (updates) => setValue((previous) => ({ ...previous, ...updates })),

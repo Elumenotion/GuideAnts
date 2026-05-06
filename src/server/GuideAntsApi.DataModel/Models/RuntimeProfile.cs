@@ -49,6 +49,15 @@ namespace GuideAntsApi.DataModel.Models
         [Required]
         public string ThinkingControlJson { get; set; } = "{}";
 
+        /// <summary>
+        /// Discriminates between local (llama-cpp) and cloud profiles.
+        /// Local profiles expose all fields; cloud profiles expose only
+        /// sampling parameters.
+        /// </summary>
+        [Required]
+        [StringLength(16)]
+        public string Kind { get; set; } = "local";
+
         [Required]
         public DateTime Created { get; set; } = DateTime.UtcNow;
 

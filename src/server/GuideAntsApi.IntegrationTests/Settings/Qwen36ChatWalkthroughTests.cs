@@ -28,7 +28,7 @@ namespace GuideAntsApi.IntegrationTests.Settings;
 ///   <item>Assert R-12.6 behavior — the validator does not fail merely because
 ///         the runtime is momentarily unloaded at validator time.</item>
 ///   <item>Cover the failure modes: unknown model, blank provider, missing
-///         LocalRuntimeJson.</item>
+///         RuntimeConfigJson.</item>
 /// </list>
 /// No notebook / guide / crew is seeded here — chat dispatch in the routing
 /// factory is assistant-driven but only reads <see cref="Model"/> and
@@ -44,7 +44,7 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
     private const string RouterAlias = "qwen3.6-35b-a3b";
     private const string RuntimeProfileId = "qwen3_6";
 
-    private static readonly string LocalRuntimeJson = JsonSerializer.Serialize(new
+    private static readonly string RuntimeConfigJson = JsonSerializer.Serialize(new
     {
         routerModelId = RouterAlias,
         runtimeProfileId = RuntimeProfileId,
@@ -95,7 +95,7 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
         qwen.RuntimeState.Should().Be("unloaded",
             "StubLlamaServerRuntimeClient has not been asked to load this alias yet");
         qwen.CatalogModelIds.Should().Contain(CatalogModelId,
-            "LocalRuntimeJson.routerModelId MUST tie the catalog row back to the router alias");
+            "RuntimeConfigJson.routerModelId MUST tie the catalog row back to the router alias");
     }
 
     [TestMethod]
@@ -182,7 +182,7 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
     {
         // A catalog row with an empty provider reaches the resolver and trips the
         // second-layer guard (provider required before any validator runs).
-        await SeedCatalogModelAsync(CatalogModelId, provider: string.Empty, localRuntimeJson: LocalRuntimeJson);
+        await SeedCatalogModelAsync(CatalogModelId, provider: string.Empty, RuntimeConfigJson: RuntimeConfigJson);
 
         using var scope = SharedFactory!.Services.CreateScope();
         var factory = scope.ServiceProvider.GetRequiredService<IChatCompletionClientFactory>();
@@ -195,11 +195,11 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
     }
 
     [TestMethod]
-    public async Task DispatchChat_LlamaCppWithoutLocalRuntimeJson_ThrowsModelNotReady()
+    public async Task DispatchChat_LlamaCppWithoutRuntimeConfigJson_ThrowsModelNotReady()
     {
-        // R-3.1.(c): an llama-cpp catalog row without LocalRuntimeJson cannot be
+        // R-3.1.(c): an llama-cpp catalog row without RuntimeConfigJson cannot be
         // dispatched. The validator must emit ROUTING_MODEL_NOT_READY.
-        await SeedCatalogModelAsync(CatalogModelId, provider: "llama-cpp", localRuntimeJson: null);
+        await SeedCatalogModelAsync(CatalogModelId, provider: "llama-cpp", RuntimeConfigJson: null);
 
         using var scope = SharedFactory!.Services.CreateScope();
         var factory = scope.ServiceProvider.GetRequiredService<IChatCompletionClientFactory>();
@@ -267,7 +267,7 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
         SeedCatalogModelAsync(
             modelId: CatalogModelId,
             provider: "llama-cpp",
-            localRuntimeJson: LocalRuntimeJson,
+            RuntimeConfigJson: RuntimeConfigJson,
             displayName: "Qwen3.6 35B A3B (local)");
 
     private static void SeedRouterAliasWithArtifacts()
@@ -277,3 +277,4 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
         RouterStub.SeedEntry(RouterAlias, modelRel, mmprojRel);
     }
 }
+

@@ -378,7 +378,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
     {
         var name = LocalModelDisplayName(displayName);
         var loaded = llamaStatus.LoadedModels
-            .Where(m => m.LocalRuntime != null)
+            .Where(m => m.RuntimeConfig != null)
             .Select(m => string.IsNullOrWhiteSpace(m.DisplayName) ? m.ModelId : m.DisplayName)
             .Distinct(StringComparer.Ordinal)
             .ToList();
@@ -723,3 +723,4 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         }
     }
 }
+

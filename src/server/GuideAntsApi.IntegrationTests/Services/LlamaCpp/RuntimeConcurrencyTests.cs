@@ -234,7 +234,7 @@ public sealed class RuntimeConcurrencyTests : SettingsRoutingIntegrationTestBase
 
         SeedAliasArtifacts(alias);
         await SeedCatalogModelAsync(modelId, "llama-cpp",
-            localRuntimeJson: BuildLocalRuntimeJson(alias));
+            RuntimeConfigJson: BuildRuntimeConfigJson(alias));
 
         LlamaStub.SeedState(alias, "loading");
 
@@ -271,7 +271,7 @@ public sealed class RuntimeConcurrencyTests : SettingsRoutingIntegrationTestBase
     /// load is in flight for the backing llama alias. The snapshot behavior
     /// (the adjacent <c>ChatTargetReadiness_DuringInFlightLoad_ReportsLoadingStateBlocker</c>
     /// test) is for the readiness probe only; chat dispatch validates static
-    /// shape (provider, LocalRuntimeJson, runtime profile) and lets
+    /// shape (provider, RuntimeConfigJson, runtime profile) and lets
     /// <see cref="GuideAntsApi.Services.LlamaCpp.NotebookModelRuntimeService"/>
     /// orchestrate the load lifecycle.
     /// </summary>
@@ -284,7 +284,7 @@ public sealed class RuntimeConcurrencyTests : SettingsRoutingIntegrationTestBase
         SeedAliasArtifacts(alias);
         await EnsureConcurrencyRuntimeProfileAsync();
         await SeedCatalogModelAsync(modelId, "llama-cpp",
-            localRuntimeJson: BuildLocalRuntimeJson(alias));
+            RuntimeConfigJson: BuildRuntimeConfigJson(alias));
 
         LlamaStub.SeedState(alias, "loading");
 
@@ -366,7 +366,7 @@ public sealed class RuntimeConcurrencyTests : SettingsRoutingIntegrationTestBase
     private static string UniqueAlias(string prefix) =>
         $"g3-{prefix}-{Guid.NewGuid():N}";
 
-    private static string BuildLocalRuntimeJson(string alias) => $$"""
+    private static string BuildRuntimeConfigJson(string alias) => $$"""
         {
           "routerModelId": "{{alias}}",
           "runtimeProfileId": "concurrency_profile"
@@ -406,3 +406,4 @@ public sealed class RuntimeConcurrencyTests : SettingsRoutingIntegrationTestBase
             "Either the POST /runtime/load handler failed to reach the coordinator, or the stub gate fired too early.");
     }
 }
+

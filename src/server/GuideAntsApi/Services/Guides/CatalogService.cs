@@ -35,27 +35,27 @@ public class CatalogService : ICatalogService
                 m.ReasoningChoicesJson,
                 m.IsActive,
                 m.DisplayOrder,
-                m.LocalRuntimeJson
+                m.RuntimeConfigJson
             })
             .ToListAsync();
 
         var results = new List<ModelDto>();
         foreach (var m in models)
         {
-            LocalRuntimeDescriptorDto? localRuntime = null;
+            ModelRuntimeConfigDto? runtimeConfig = null;
             IReadOnlyList<SamplingParameterPolicyDto>? samplingPolicy = null;
             IReadOnlyList<string>? reasoningChoices = null;
             string? defaultReasoningChoice = null;
 
-            if (!string.IsNullOrEmpty(m.LocalRuntimeJson))
+            if (!string.IsNullOrEmpty(m.RuntimeConfigJson))
             {
-                localRuntime = JsonSerializer.Deserialize<LocalRuntimeDescriptorDto>(m.LocalRuntimeJson, JsonCaseInsensitive);
+                runtimeConfig = JsonSerializer.Deserialize<ModelRuntimeConfigDto>(m.RuntimeConfigJson, JsonCaseInsensitive);
 
-                if (localRuntime != null)
+                if (runtimeConfig != null && !string.IsNullOrWhiteSpace(runtimeConfig.RuntimeProfileId))
                 {
                     try
                     {
-                        var profile = await _runtimeProfileResolver.ResolveAsync(localRuntime.RuntimeProfileId);
+                        var profile = await _runtimeProfileResolver.ResolveAsync(runtimeConfig.RuntimeProfileId);
 
                         samplingPolicy = profile.SamplingParameters
                             .Values
@@ -82,7 +82,7 @@ public class CatalogService : ICatalogService
 
             results.Add(new ModelDto(
                 m.ModelId, m.DisplayName, m.Description, m.ReasoningChoicesJson,
-                m.IsActive, m.DisplayOrder, localRuntime,
+                m.IsActive, m.DisplayOrder, runtimeConfig,
                 samplingPolicy, reasoningChoices, defaultReasoningChoice));
         }
 

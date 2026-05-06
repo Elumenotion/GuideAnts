@@ -13,6 +13,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Moq;
 using System.Text.Json.Nodes;
+using System.Text.Json;
 
 namespace GuideAntsApi.Tests.Settings;
 
@@ -33,12 +34,11 @@ public sealed class ServiceEditorUpdateValidationTests
         var act = async () => await service.UpdateServiceProviderFieldsAsync(
             "Embeddings",
             ServiceProviderIds.EmbeddingsAzureOpenAiEmbedding,
-            new ProviderFieldsUpdateRequest(
-                new Dictionary<string, string?>
+            new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
                     ["TimeoutSeconds"] = "30",
                     ["NotARealField"] = "x"
-                }),
+                })),
             CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -59,11 +59,10 @@ public sealed class ServiceEditorUpdateValidationTests
         var act = async () => await service.UpdateServiceProviderFieldsAsync(
             "Embeddings",
             ServiceProviderIds.EmbeddingsLocalEmbHttp,
-            new ProviderFieldsUpdateRequest(
-                new Dictionary<string, string?>
+            new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
                     ["TimeoutSeconds"] = "not-a-number"
-                }),
+                })),
             CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -84,11 +83,10 @@ public sealed class ServiceEditorUpdateValidationTests
         await service.UpdateServiceProviderFieldsAsync(
             "Embeddings",
             ServiceProviderIds.EmbeddingsHuggingFaceInference,
-            new ProviderFieldsUpdateRequest(
-                new Dictionary<string, string?>
+            new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
                     ["ModelId"] = "sentence-transformers/all-MiniLM-L6-v2"
-                }),
+                })),
             CancellationToken.None);
 
         await service.SetServiceActiveProviderAsync(
@@ -121,11 +119,10 @@ public sealed class ServiceEditorUpdateValidationTests
         await service.UpdateServiceProviderFieldsAsync(
             "Embeddings",
             ServiceProviderIds.EmbeddingsOpenAiEmbedding,
-            new ProviderFieldsUpdateRequest(
-                new Dictionary<string, string?>
+            new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
                     ["ModelId"] = "text-embedding-3-small"
-                }),
+                })),
             CancellationToken.None);
 
         await service.SetServiceActiveProviderAsync(
@@ -158,12 +155,11 @@ public sealed class ServiceEditorUpdateValidationTests
         await service.UpdateServiceProviderFieldsAsync(
             "SpeechSynthesis",
             ServiceProviderIds.SpeechSynthesisOpenAiTts,
-            new ProviderFieldsUpdateRequest(
-                new Dictionary<string, string?>
+            new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
                     ["ModelId"] = "tts-1",
                     ["VoiceName"] = "alloy"
-                }),
+                })),
             CancellationToken.None);
 
         await service.SetServiceActiveProviderAsync(
@@ -197,11 +193,10 @@ public sealed class ServiceEditorUpdateValidationTests
         await service.UpdateServiceProviderFieldsAsync(
             "SpeechTranscription",
             ServiceProviderIds.SpeechTranscriptionGoogleSpeechToText,
-            new ProviderFieldsUpdateRequest(
-                new Dictionary<string, string?>
+            new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
                     ["ModelId"] = "gemini-2.5-flash"
-                }),
+                })),
             CancellationToken.None);
 
         await service.SetServiceActiveProviderAsync(
@@ -246,11 +241,10 @@ public sealed class ServiceEditorUpdateValidationTests
         var act = async () => await service.UpdateServiceProviderFieldsAsync(
             "Embeddings",
             ServiceProviderIds.EmbeddingsAzureOpenAiEmbedding,
-            new ProviderFieldsUpdateRequest(
-                new Dictionary<string, string?>
+            new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
                     ["Endpoint"] = "https://embedding-api.example.com/"
-                }),
+                })),
             CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -363,4 +357,14 @@ public sealed class ServiceEditorUpdateValidationTests
             settingsSecrets.Object,
             runtimeProfileResolver.Object);
     }
+
+    private static IReadOnlyDictionary<string, JsonElement> JF(Dictionary<string, string?> fields)
+    {
+        var json = JsonSerializer.Serialize(fields);
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value.Clone(), StringComparer.Ordinal);
+    }
 }
+
+

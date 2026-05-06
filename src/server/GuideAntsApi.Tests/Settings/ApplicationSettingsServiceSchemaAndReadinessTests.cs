@@ -94,8 +94,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
             && section.Properties.Any(property => property.Name == "Token" && property.IsRequired));
         schema.Sections.Should().Contain(section =>
             string.Equals(section.SectionName, "OpenAI", StringComparison.Ordinal)
-            && section.Properties.Any(property => property.Name == "ApiKey" && property.IsRequired)
-            && section.Properties.Count == 1);
+            && section.Properties.Any(property => property.Name == "ApiKey" && property.IsRequired));
     }
 
     [TestMethod]

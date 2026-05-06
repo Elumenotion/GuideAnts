@@ -179,7 +179,7 @@ public sealed record SettingsModelDto(
     string Provider,
     string? Description,
     string? ReasoningChoicesJson,
-    string? LocalRuntimeJson,
+    string? RuntimeConfigJson,
     bool IsActive,
     int? DisplayOrder,
     DateTime Created,
@@ -191,7 +191,7 @@ public sealed record CreateSettingsModelRequest(
     string Provider,
     string? Description,
     string? ReasoningChoicesJson,
-    string? LocalRuntimeJson,
+    string? RuntimeConfigJson,
     bool IsActive,
     int? DisplayOrder);
 
@@ -201,7 +201,7 @@ public sealed record UpdateSettingsModelRequest(
     string Provider,
     string? Description,
     string? ReasoningChoicesJson,
-    string? LocalRuntimeJson,
+    string? RuntimeConfigJson,
     bool IsActive,
     int? DisplayOrder);
 
@@ -260,6 +260,7 @@ public sealed record SettingsRuntimeProfileDto(
     string? ThoughtBlockPattern,
     string SamplingParametersJson,
     string ThinkingControlJson,
+    string Kind,
     DateTime Created,
     DateTime? Updated);
 
@@ -270,7 +271,8 @@ public sealed record CreateRuntimeProfileRequest(
     bool CombineSystemAndDeveloperMessages,
     string? ThoughtBlockPattern,
     string SamplingParametersJson,
-    string ThinkingControlJson);
+    string ThinkingControlJson,
+    string Kind = "local");
 
 public sealed record UpdateRuntimeProfileRequest(
     string ProfileId,
@@ -279,7 +281,8 @@ public sealed record UpdateRuntimeProfileRequest(
     bool CombineSystemAndDeveloperMessages,
     string? ThoughtBlockPattern,
     string SamplingParametersJson,
-    string ThinkingControlJson);
+    string ThinkingControlJson,
+    string Kind = "local");
 
 public sealed record EmbeddingsRebuildResponse(
     Guid JobId,

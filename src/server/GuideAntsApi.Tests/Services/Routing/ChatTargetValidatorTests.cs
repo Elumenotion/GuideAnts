@@ -19,7 +19,7 @@ public sealed class ChatTargetValidatorTests
             ["OpenAI:ApiKey"] = "sk-test"
         });
 
-        Action act = () => validator.Validate(new ChatTarget("gpt-4.1", "openai-chat", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("gpt-4.1", "openai-chat", RuntimeConfigJson: null));
         act.Should().NotThrow();
     }
 
@@ -32,7 +32,7 @@ public sealed class ChatTargetValidatorTests
             ["AzureOpenAI:ApiKey"] = "test-key"
         });
 
-        Action act = () => validator.Validate(new ChatTarget("gpt-4.1", "azure-openai-chat", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("gpt-4.1", "azure-openai-chat", RuntimeConfigJson: null));
         act.Should().NotThrow();
     }
 
@@ -45,7 +45,7 @@ public sealed class ChatTargetValidatorTests
             ["AzureOpenAI:ApiKey"] = "test-key"
         });
 
-        Action act = () => validator.Validate(new ChatTarget("o3", "azure-openai-responses", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("o3", "azure-openai-responses", RuntimeConfigJson: null));
         act.Should().NotThrow();
     }
 
@@ -57,7 +57,7 @@ public sealed class ChatTargetValidatorTests
         // ProviderNotReady blocker pointing at the OpenAI section.
         var validator = CreateValidator(new Dictionary<string, string?>());
 
-        Action act = () => validator.Validate(new ChatTarget("gpt-4.1", "openai-chat", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("gpt-4.1", "openai-chat", RuntimeConfigJson: null));
         act.Should().Throw<RoutingException>()
             .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
                          && ex.ProviderSection == "OpenAI"
@@ -69,7 +69,7 @@ public sealed class ChatTargetValidatorTests
     {
         var validator = CreateValidator(new Dictionary<string, string?>());
 
-        Action act = () => validator.Validate(new ChatTarget("gpt-4.1", "azure-openai-chat", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("gpt-4.1", "azure-openai-chat", RuntimeConfigJson: null));
         act.Should().Throw<RoutingException>()
             .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
                          && ex.ProviderSection == "AzureOpenAI"
@@ -84,7 +84,7 @@ public sealed class ChatTargetValidatorTests
             ["Anthropic:ApiKey"] = "sk-ant-xxx"
         });
 
-        Action act = () => validator.Validate(new ChatTarget("claude-sonnet-4-5", "anthropic", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("claude-sonnet-4-5", "anthropic", RuntimeConfigJson: null));
         act.Should().NotThrow();
     }
 
@@ -93,7 +93,7 @@ public sealed class ChatTargetValidatorTests
     {
         var validator = CreateValidator(new Dictionary<string, string?>());
 
-        Action act = () => validator.Validate(new ChatTarget("claude-sonnet-4-5", "anthropic", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("claude-sonnet-4-5", "anthropic", RuntimeConfigJson: null));
         act.Should().Throw<RoutingException>()
             .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
                          && ex.ProviderSection == "Anthropic");
@@ -104,7 +104,7 @@ public sealed class ChatTargetValidatorTests
     {
         var validator = CreateValidator(new Dictionary<string, string?>());
 
-        Action act = () => validator.Validate(new ChatTarget("model-x", "some-other-vendor", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("model-x", "some-other-vendor", RuntimeConfigJson: null));
         act.Should().Throw<RoutingException>()
             .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
                          && ex.ModelId == "model-x");
@@ -118,7 +118,7 @@ public sealed class ChatTargetValidatorTests
             ["GoogleGeminiApi:ApiKey"] = "gemini-key"
         });
 
-        Action act = () => validator.Validate(new ChatTarget("gemini-2.5-pro", "google-gemini-chat", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("gemini-2.5-pro", "google-gemini-chat", RuntimeConfigJson: null));
         act.Should().NotThrow();
     }
 
@@ -129,7 +129,7 @@ public sealed class ChatTargetValidatorTests
         {
         });
 
-        Action act = () => validator.Validate(new ChatTarget("gemini-2.5-pro", "google-gemini-chat", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("gemini-2.5-pro", "google-gemini-chat", RuntimeConfigJson: null));
         act.Should().Throw<RoutingException>()
             .Where(ex => ex.Code == RoutingErrorCodes.ProviderNotReady
                          && ex.ProviderSection == "GoogleGeminiApi");
@@ -143,7 +143,7 @@ public sealed class ChatTargetValidatorTests
             ["HuggingFace:Token"] = "hf_xxx"
         });
 
-        Action act = () => validator.Validate(new ChatTarget("meta-llama/llama-4-scout", "hf-inference-chat", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("meta-llama/llama-4-scout", "hf-inference-chat", RuntimeConfigJson: null));
         act.Should().NotThrow();
     }
 
@@ -155,27 +155,27 @@ public sealed class ChatTargetValidatorTests
             ["OpenRouter:ApiKey"] = "or_xxx"
         });
 
-        Action act = () => validator.Validate(new ChatTarget("openai/gpt-4o-mini", "openrouter-chat", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("openai/gpt-4o-mini", "openrouter-chat", RuntimeConfigJson: null));
         act.Should().NotThrow();
     }
 
     [TestMethod]
-    public void Validate_Throws_ModelNotReady_WhenLlamaCppHasNoLocalRuntimeJson()
+    public void Validate_Throws_ModelNotReady_WhenLlamaCppHasNoRuntimeConfigJson()
     {
         var validator = CreateValidator(new Dictionary<string, string?>());
 
-        Action act = () => validator.Validate(new ChatTarget("qwen-local", "llama-cpp", LocalRuntimeJson: null));
+        Action act = () => validator.Validate(new ChatTarget("qwen-local", "llama-cpp", RuntimeConfigJson: null));
         act.Should().Throw<RoutingException>()
             .Where(ex => ex.Code == RoutingErrorCodes.ModelNotReady
                          && ex.ModelId == "qwen-local");
     }
 
     [TestMethod]
-    public void Validate_Throws_ModelNotReady_WhenLlamaCppLocalRuntimeJsonIsMalformed()
+    public void Validate_Throws_ModelNotReady_WhenLlamaCppRuntimeConfigJsonIsMalformed()
     {
         var validator = CreateValidator(new Dictionary<string, string?>());
 
-        var target = new ChatTarget("qwen-local", "llama-cpp", LocalRuntimeJson: "{ not valid json ::");
+        var target = new ChatTarget("qwen-local", "llama-cpp", RuntimeConfigJson: "{ not valid json ::");
         Action act = () => validator.Validate(target);
         act.Should().Throw<RoutingException>()
             .Where(ex => ex.Code == RoutingErrorCodes.ModelNotReady
@@ -213,7 +213,7 @@ public sealed class ChatTargetValidatorTests
     /// Phase H.2 (R-12.5): the chat-dispatch validator must NOT inspect live
     /// llama runtime state. If a load is in flight for the alias, the
     /// validator must still succeed provided the static inputs (provider,
-    /// LocalRuntimeJson, runtime profile) are well-formed — the runtime
+    /// RuntimeConfigJson, runtime profile) are well-formed — the runtime
     /// readiness snapshot lives on <c>IRoutingReadinessService.ProbeChatTargetAsync</c>,
     /// not on this path.
     ///
@@ -292,3 +292,4 @@ public sealed class ChatTargetValidatorTests
     private static IConfiguration BuildConfiguration(Dictionary<string, string?> values) =>
         new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 }
+

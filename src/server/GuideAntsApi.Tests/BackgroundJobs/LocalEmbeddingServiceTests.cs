@@ -158,6 +158,9 @@ public sealed class LocalEmbeddingServiceTests
             new OpenRouterEmbeddingService(
                 new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
                 BuildConfiguration()),
+            new OpenAiEmbeddingService(
+                new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
+                BuildConfiguration()),
             new FakeServiceModeResolver(
                 RoutedServiceNames.Embeddings,
                 providerSection: "LocalServiceHosts:EmbeddingsBaseUrl"));
@@ -187,6 +190,9 @@ public sealed class LocalEmbeddingServiceTests
                 new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
                 BuildConfiguration()),
             new OpenRouterEmbeddingService(
+                new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
+                BuildConfiguration()),
+            new OpenAiEmbeddingService(
                 new HttpClient(new DelegatingStubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)))),
                 BuildConfiguration()),
             new FakeServiceModeResolver(

@@ -322,7 +322,7 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
         private static bool AssistantUsesLocalRuntime(Assistant assistant)
         {
             return string.Equals(assistant.Model?.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-                || !string.IsNullOrWhiteSpace(assistant.Model?.LocalRuntimeJson);
+                || !string.IsNullOrWhiteSpace(assistant.Model?.RuntimeConfigJson);
         }
 
         private static DomainAuth? BuildDomainAuth(Assistant assistant)

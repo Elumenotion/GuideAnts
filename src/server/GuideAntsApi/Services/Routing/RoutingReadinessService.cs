@@ -631,7 +631,7 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         var row = await db.Models
             .AsNoTracking()
             .Where(m => m.ModelId == modelId)
-            .Select(m => new CatalogRow(m.ModelId, m.Provider, m.IsActive, m.LocalRuntimeJson))
+            .Select(m => new CatalogRow(m.ModelId, m.Provider, m.IsActive, m.RuntimeConfigJson))
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -650,25 +650,25 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
 
     private async Task<(string? RuntimeState, IReadOnlyList<string> Blockers)> ProbeLlamaRuntimeAsync(CatalogRow row, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(row.LocalRuntimeJson))
+        if (string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
         {
             return (null, new[]
             {
-                $"{BlockerKeys.InvalidLocalRuntimeJson}: model '{row.ModelId}' is configured as llama-cpp but has no LocalRuntimeJson."
+                $"{BlockerKeys.InvalidLocalRuntimeJson}: model '{row.ModelId}' is configured as llama-cpp but has no RuntimeConfigJson."
             });
         }
 
         LocalRuntimeConfiguration parsed;
         try
         {
-            parsed = LocalRuntimeConfigurationParser.ParseRequired(row.ModelId, row.LocalRuntimeJson);
+            parsed = LocalRuntimeConfigurationParser.ParseRequired(row.ModelId, row.RuntimeConfigJson);
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "LocalRuntimeJson parse failed for model {ModelId} during readiness probe.", row.ModelId);
+            _logger.LogDebug(ex, "RuntimeConfigJson parse failed for model {ModelId} during readiness probe.", row.ModelId);
             return (null, new[]
             {
-                $"{BlockerKeys.InvalidLocalRuntimeJson}: model '{row.ModelId}' has invalid LocalRuntimeJson: {ex.Message}"
+                $"{BlockerKeys.InvalidLocalRuntimeJson}: model '{row.ModelId}' has invalid RuntimeConfigJson: {ex.Message}"
             });
         }
 
@@ -719,5 +719,5 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
             .ConfigureAwait(false);
     }
 
-    private sealed record CatalogRow(string ModelId, string Provider, bool IsActive, string? LocalRuntimeJson);
+    private sealed record CatalogRow(string ModelId, string Provider, bool IsActive, string? RuntimeConfigJson);
 }

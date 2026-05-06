@@ -279,7 +279,7 @@ export interface SettingsModelDto {
   provider: string;
   description?: string;
   reasoningChoicesJson?: string;
-  localRuntimeJson?: string;
+  runtimeConfigJson?: string;
   isActive: boolean;
   displayOrder?: number;
   created: string;
@@ -292,7 +292,7 @@ export interface CreateSettingsModelRequest {
   provider: string;
   description?: string;
   reasoningChoicesJson?: string;
-  localRuntimeJson?: string;
+  runtimeConfigJson?: string;
   isActive: boolean;
   displayOrder?: number;
 }
@@ -303,7 +303,7 @@ export interface UpdateSettingsModelRequest {
   provider: string;
   description?: string;
   reasoningChoicesJson?: string;
-  localRuntimeJson?: string;
+  runtimeConfigJson?: string;
   isActive: boolean;
   displayOrder?: number;
 }
@@ -373,6 +373,7 @@ export interface SettingsRuntimeProfileDto {
   thoughtBlockPattern?: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
+  kind: 'local' | 'cloud' | string;
   created: string;
   updated?: string;
 }
@@ -385,6 +386,7 @@ export interface CreateRuntimeProfileRequest {
   thoughtBlockPattern?: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
+  kind?: 'local' | 'cloud' | string;
 }
 
 export interface UpdateRuntimeProfileRequest {
@@ -395,6 +397,7 @@ export interface UpdateRuntimeProfileRequest {
   thoughtBlockPattern?: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
+  kind?: 'local' | 'cloud' | string;
 }
 
 export interface EmbeddingsRebuildResponse {

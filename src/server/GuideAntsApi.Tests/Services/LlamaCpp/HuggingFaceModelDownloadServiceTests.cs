@@ -41,7 +41,7 @@ public class HuggingFaceModelDownloadServiceTests
                 Provider: "llama-cpp",
                 Description: null,
                 ReasoningChoicesJson: "[\"enabled\"]",
-                LocalRuntimeJson: "{\"routerModelId\":\"router-a\"}",
+                RuntimeConfigJson: "{\"routerModelId\":\"router-a\"}",
                 IsActive: true,
                 DisplayOrder: 1,
                 Created: DateTime.UtcNow,
@@ -179,3 +179,4 @@ public class HuggingFaceModelDownloadServiceTests
         }
     }
 }
+

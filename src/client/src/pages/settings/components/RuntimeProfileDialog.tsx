@@ -53,13 +53,31 @@ export function RuntimeProfileDialog({
     >
       <div className="space-y-4">
         <p className="text-sm text-gray-600">
-          Runtime profiles define sampling parameters and behavior for llama-cpp models.
+          Runtime profiles define sampling parameters for models. Cloud profiles expose Temperature and Top P sliders
+          in guide and assistant builders. Local (llama-cpp) profiles also configure thinking control and message normalization.
         </p>
+        {!editing ? (
+          <div className="space-y-2">
+            <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Profile Kind</label>
+            <select
+              value={value.kind}
+              onChange={(event) => onChange('kind', event.target.value as 'local' | 'cloud')}
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="cloud">cloud — for OpenAI, Anthropic, Gemini, etc.</option>
+              <option value="local">local — for llama-cpp models</option>
+            </select>
+          </div>
+        ) : (
+          <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+            Kind: <span className="font-mono font-medium">{value.kind}</span>
+          </div>
+        )}
         <RuntimeProfileEditor
           mode="full"
           value={value}
           onChange={onChange}
-          onInsertTemplate={onInsertTemplate}
+          onInsertTemplate={value.kind !== 'cloud' ? onInsertTemplate : undefined}
           disableIdentityFields={editing}
         />
       </div>

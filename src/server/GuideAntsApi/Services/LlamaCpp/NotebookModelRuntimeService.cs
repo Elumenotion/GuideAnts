@@ -76,7 +76,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         };
 
         // Short-circuit if no local models are required
-        if (!requiredModels.Any(m => m.LocalRuntime != null))
+        if (!requiredModels.Any(m => m.RuntimeConfig != null))
         {
             status.State = "ready";
             return status;
@@ -93,12 +93,12 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
             var allModels = await GetLlamaModelsFromCatalogAsync(cancellationToken);
             status.LoadedModels = allModels
-                .Where(m => m.LocalRuntime != null && loadedRouterIds.Contains(NormalizeRouterModelId(m.LocalRuntime.RouterModelId)))
+                .Where(m => m.RuntimeConfig != null && loadedRouterIds.Contains(NormalizeRouterModelId(m.RuntimeConfig.RouterModelId)))
                 .ToList();
 
             var requiredRouterIds = requiredModels
-                .Where(m => m.LocalRuntime != null)
-                .Select(m => NormalizeRouterModelId(m.LocalRuntime!.RouterModelId))
+                .Where(m => m.RuntimeConfig != null)
+                .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId))
                 .ToHashSet();
 
             // Check if any active operation
@@ -217,8 +217,8 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     InvalidateRouterModelsCache();
 
                     var requiredRouterIds = requiredModels
-                        .Where(m => m.LocalRuntime != null)
-                        .Select(m => NormalizeRouterModelId(m.LocalRuntime!.RouterModelId))
+                        .Where(m => m.RuntimeConfig != null)
+                        .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId))
                         .ToHashSet();
 
                     foreach (var id in requiredRouterIds)
@@ -256,8 +256,8 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             InvalidateRouterModelsCache();
             
             var requiredRouterIds = requiredModels
-                .Where(m => m.LocalRuntime != null)
-                .Select(m => NormalizeRouterModelId(m.LocalRuntime!.RouterModelId))
+                .Where(m => m.RuntimeConfig != null)
+                .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId))
                 .ToHashSet();
 
             var routerStateAtStart = await GetRouterModelsAsync(useCache: false, CancellationToken.None);
@@ -268,7 +268,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
             var toUnload = loadedRouterIds.Except(requiredRouterIds).ToList();
             var toLoad = requiredModels
-                .Where(m => m.LocalRuntime != null && !loadedRouterIds.Contains(NormalizeRouterModelId(m.LocalRuntime.RouterModelId)))
+                .Where(m => m.RuntimeConfig != null && !loadedRouterIds.Contains(NormalizeRouterModelId(m.RuntimeConfig.RouterModelId)))
                 .ToList();
 
             if (toUnload.Any())
@@ -288,9 +288,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 op.State = "loading";
                 foreach (var model in toLoad)
                 {
-                    var routerModelId = NormalizeRouterModelId(model.LocalRuntime!.RouterModelId);
+                    var routerModelId = NormalizeRouterModelId(model.RuntimeConfig!.RouterModelId);
                     await using var _loadAliasLock = await _coordinator.AcquireAliasLockAsync(routerModelId, CancellationToken.None);
-                    await _llamaClient.LoadModelAsync(routerModelId, model.LocalRuntime.LoadParams);
+                    await _llamaClient.LoadModelAsync(routerModelId, model.RuntimeConfig.LoadParams);
                 }
             }
 
@@ -380,7 +380,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 m.ReasoningChoicesJson,
                 m.IsActive,
                 m.DisplayOrder,
-                m.LocalRuntimeJson
+                m.RuntimeConfigJson
             })
             .ToListAsync(cancellationToken);
 
@@ -391,9 +391,9 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             m.ReasoningChoicesJson,
             m.IsActive,
             m.DisplayOrder,
-            string.IsNullOrEmpty(m.LocalRuntimeJson)
+            string.IsNullOrEmpty(m.RuntimeConfigJson)
                 ? null
-                : ToLocalRuntimeDescriptor(m.ModelId, m.LocalRuntimeJson),
+                : ToLocalRuntimeDescriptor(m.ModelId, m.RuntimeConfigJson),
             SamplingParameterPolicy: null,
             ReasoningChoices: null,
             DefaultReasoningChoice: null
@@ -468,13 +468,14 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         return false;
     }
 
-    private LocalRuntimeDescriptorDto ToLocalRuntimeDescriptor(string modelId, string localRuntimeJson)
+    private ModelRuntimeConfigDto ToLocalRuntimeDescriptor(string modelId, string runtimeConfigJson)
     {
-        var parsed = LocalRuntimeConfigurationParser.Parse(modelId, localRuntimeJson);
+        var parsed = LocalRuntimeConfigurationParser.Parse(modelId, runtimeConfigJson);
         _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
-        return new LocalRuntimeDescriptorDto(
+        return new ModelRuntimeConfigDto(
             parsed.RouterModelId,
             parsed.RuntimeProfileId,
             parsed.LoadParams);
     }
 }
+

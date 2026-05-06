@@ -83,7 +83,7 @@ export function ProfilesTab({
           <div>
             <h2 className="text-base font-semibold text-gray-900">Runtime Profiles</h2>
             <p className="mt-1 text-sm text-gray-600">
-              Runtime profiles define sampling parameters and behavior for llama-cpp models.
+              Runtime profiles define sampling parameters and behavior for cloud and local models.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -142,17 +142,23 @@ export function ProfilesTab({
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Profile ID</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Display Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Updated</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-gray-500">Actions</th>
-                </tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Profile ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Display Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Kind</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Updated</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-gray-500">Actions</th>
+                  </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white">
                 {profiles.map((profile) => (
                   <tr key={profile.profileId}>
                     <td className="whitespace-nowrap px-4 py-3 text-sm font-mono text-gray-900">{profile.profileId}</td>
                     <td className="px-4 py-3 text-sm text-gray-900">{profile.displayName}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${profile.kind === 'cloud' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {profile.kind ?? 'local'}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(profile.updated ?? profile.created)}</td>
                     <td className="px-4 py-3 text-right text-sm">
                       <div
@@ -188,7 +194,7 @@ export function ProfilesTab({
                 ))}
                 {profiles.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-sm text-gray-600">
+                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-600">
                       No runtime profiles configured yet.
                     </td>
                   </tr>

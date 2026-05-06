@@ -1,6 +1,6 @@
 -- UpsertLocalLlamaQwenModels
 -- Idempotent onboarding script for local llama.cpp model rows (Qwen + Gemma).
--- Uses canonical LocalRuntimeJson shape:
+-- Uses canonical RuntimeConfigJson shape:
 -- { "routerModelId", "runtimeProfileId", "loadParams" }
 
 SET ANSI_NULLS ON;
@@ -10,7 +10,7 @@ DECLARE @provider nvarchar(32) = N'llama-cpp';
 DECLARE @now datetime2 = GETUTCDATE();
 
 IF COL_LENGTH('dbo.Models', 'ReasoningChoicesJson') IS NULL
-   OR COL_LENGTH('dbo.Models', 'LocalRuntimeJson') IS NULL
+   OR COL_LENGTH('dbo.Models', 'RuntimeConfigJson') IS NULL
 BEGIN
     PRINT 'Required columns not found in dbo.Models. Apply latest migrations first.';
     RETURN;
@@ -23,7 +23,7 @@ DECLARE @models TABLE
     Description nvarchar(1024) NULL,
     ReasoningChoicesJson nvarchar(max) NULL,
     DisplayOrder int NOT NULL,
-    LocalRuntimeJson nvarchar(max) NOT NULL
+    RuntimeConfigJson nvarchar(max) NOT NULL
 );
 
 INSERT INTO @models
@@ -33,7 +33,7 @@ INSERT INTO @models
     Description,
     ReasoningChoicesJson,
     DisplayOrder,
-    LocalRuntimeJson
+    RuntimeConfigJson
 )
 VALUES
 (
@@ -70,7 +70,7 @@ WHEN MATCHED THEN
         target.Provider = @provider,
         target.Description = source.Description,
         target.ReasoningChoicesJson = source.ReasoningChoicesJson,
-        target.LocalRuntimeJson = source.LocalRuntimeJson,
+        target.RuntimeConfigJson = source.RuntimeConfigJson,
         target.IsActive = 1,
         target.DisplayOrder = source.DisplayOrder,
         target.Updated = @now
@@ -82,7 +82,7 @@ WHEN NOT MATCHED BY TARGET THEN
         Provider,
         Description,
         ReasoningChoicesJson,
-        LocalRuntimeJson,
+        RuntimeConfigJson,
         IsActive,
         DisplayOrder,
         Created,
@@ -95,7 +95,7 @@ WHEN NOT MATCHED BY TARGET THEN
         @provider,
         source.Description,
         source.ReasoningChoicesJson,
-        source.LocalRuntimeJson,
+        source.RuntimeConfigJson,
         1,
         source.DisplayOrder,
         @now,

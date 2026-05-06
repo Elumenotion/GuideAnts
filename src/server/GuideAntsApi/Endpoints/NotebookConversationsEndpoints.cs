@@ -167,7 +167,7 @@ public static class NotebookConversationsEndpoints
 
             // Preflight local runtime readiness
             var runtimeStatus = await runtimeService.GetRuntimeStatusAsync(notebookId, targetAssistantId, ctx.RequestAborted);
-            if (runtimeStatus.State != "ready" && runtimeStatus.RequiredModels.Any(m => m.LocalRuntime != null))
+            if (runtimeStatus.State != "ready" && runtimeStatus.RequiredModels.Any(m => m.RuntimeConfig != null))
             {
                 return Results.Conflict(new { 
                     error = "Local models are not ready.",
@@ -493,3 +493,4 @@ public static class NotebookConversationsEndpoints
         return result;
     }
 } 
+

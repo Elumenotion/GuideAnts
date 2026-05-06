@@ -101,7 +101,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local", 
             Provider = "llama-cpp", 
             IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -134,7 +134,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local", 
             Provider = "llama-cpp", 
             IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -169,7 +169,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -219,7 +219,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            LocalRuntimeJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -250,3 +250,4 @@ public class NotebookModelRuntimeServiceTests
         }
     }
 }
+

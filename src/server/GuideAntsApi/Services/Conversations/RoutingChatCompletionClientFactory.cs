@@ -83,7 +83,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
 
         if (provider == Provider.LlamaCpp)
         {
-            var localRuntime = LocalRuntimeConfigurationParser.ParseRequired(target.ModelId, target.LocalRuntimeJson);
+            var localRuntime = LocalRuntimeConfigurationParser.ParseRequired(target.ModelId, target.RuntimeConfigJson);
             var profileData = _runtimeProfileResolver
                 .ResolveAsync(localRuntime.RuntimeProfileId)
                 .GetAwaiter().GetResult();

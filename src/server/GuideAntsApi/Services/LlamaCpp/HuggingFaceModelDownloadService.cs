@@ -259,7 +259,7 @@ public sealed class HuggingFaceModelDownloadService : IHuggingFaceModelDownloadS
             return null;
         }
 
-        var localRuntimeJson = BuildLocalRuntimeJson(request);
+        var localRuntimeJson = BuildRuntimeConfigJson(request);
         var reasoningChoicesJson = await DeriveReasoningChoicesJsonAsync(profileId, cancellationToken).ConfigureAwait(false);
         var createRequest = new CreateSettingsModelRequest(
             ModelId: modelId,
@@ -269,7 +269,7 @@ public sealed class HuggingFaceModelDownloadService : IHuggingFaceModelDownloadS
                 ? null
                 : request.CatalogDescription.Trim(),
             ReasoningChoicesJson: reasoningChoicesJson,
-            LocalRuntimeJson: localRuntimeJson,
+            RuntimeConfigJson: localRuntimeJson,
             IsActive: request.CatalogIsActive ?? true,
             DisplayOrder: request.CatalogDisplayOrder);
 
@@ -279,7 +279,7 @@ public sealed class HuggingFaceModelDownloadService : IHuggingFaceModelDownloadS
             RuntimeProfileId: profileId);
     }
 
-    private static string BuildLocalRuntimeJson(StartModelDownloadRequest request)
+    private static string BuildRuntimeConfigJson(StartModelDownloadRequest request)
     {
         JsonObject? loadParams = null;
         if (!string.IsNullOrWhiteSpace(request.CatalogLoadParamsJson))

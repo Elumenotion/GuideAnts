@@ -92,7 +92,7 @@ export function CatalogRowEditModal({ model, profiles, profilesLoading, inventor
       // so `buildCatalogEditRequest` can re-derive and persist `ReasoningChoicesJson`.
       // Without this the save silently clears the dispatch-time reasoning surface.
       const selectedProfile = value.provider === 'llama-cpp'
-        ? profiles.find((profile) => profile.profileId === value.localRuntimeProfileId.trim())
+        ? profiles.find((profile) => profile.profileId === value.runtimeProfileId.trim())
         : undefined;
       const request = buildCatalogEditRequest(value, {
         llamaProfileThinkingControlJson: selectedProfile?.thinkingControlJson ?? undefined,
@@ -185,6 +185,23 @@ export function CatalogRowEditModal({ model, profiles, profilesLoading, inventor
           </div>
 
           <div className="border-t border-gray-200 pt-3">{renderEditForm(value, (updates) => setValue((previous) => (previous ? { ...previous, ...updates } : previous)), profiles, profilesLoading, inventory)}</div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime Profile</label>
+            <select
+              value={value.runtimeProfileId}
+              onChange={(event) => setValue((previous) => (previous ? { ...previous, runtimeProfileId: event.target.value } : previous))}
+              disabled={profilesLoading}
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">{profilesLoading ? 'Loading profiles...' : 'Select runtime profile'}</option>
+              {profiles.map((profile) => (
+                <option key={profile.profileId} value={profile.profileId}>
+                  {profile.displayName} ({profile.profileId})
+                </option>
+              ))}
+            </select>
+          </div>
 
           {error ? <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
         </div>

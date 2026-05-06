@@ -247,7 +247,7 @@ public static class SettingsEndpoints
                     BuildModelCreateRequest(
                         request,
                         BuildCloudReasoningChoicesJson(request),
-                        localRuntimeJson: null),
+                        runtimeConfigJson: BuildCloudRuntimeConfigJson(request)),
                     cancellationToken).ConfigureAwait(false);
 
                 return Results.Ok(new AddModelResponse(
@@ -1500,14 +1500,14 @@ public static class SettingsEndpoints
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(model.LocalRuntimeJson))
+        if (string.IsNullOrWhiteSpace(model.RuntimeConfigJson))
         {
             return false;
         }
 
         try
         {
-            routerModelId = LocalRuntimeConfigurationParser.Parse(model.ModelId, model.LocalRuntimeJson)
+            routerModelId = LocalRuntimeConfigurationParser.Parse(model.ModelId, model.RuntimeConfigJson)
                 .RouterModelId
                 .Trim();
             return routerModelId.Length > 0;
@@ -1689,7 +1689,7 @@ public static class SettingsEndpoints
             chatTargetValidator.Validate(new ChatTarget(
                 ModelId: modelId,
                 Provider: provider,
-                LocalRuntimeJson: string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
+                RuntimeConfigJson: string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
                     ? BuildLlamaLocalRuntimeJson(request)
                     : null));
         }
@@ -1750,7 +1750,7 @@ public static class SettingsEndpoints
     private static CreateSettingsModelRequest BuildModelCreateRequest(
         AddModelRequest request,
         string? reasoningChoicesJson,
-        string? localRuntimeJson)
+        string? runtimeConfigJson)
     {
         return new CreateSettingsModelRequest(
             ModelId: request.Catalog.ModelId.Trim(),
@@ -1760,9 +1760,37 @@ public static class SettingsEndpoints
                 ? null
                 : request.Catalog.Description.Trim(),
             ReasoningChoicesJson: reasoningChoicesJson,
-            LocalRuntimeJson: localRuntimeJson,
+            RuntimeConfigJson: runtimeConfigJson,
             IsActive: request.Catalog.IsActive,
             DisplayOrder: request.Catalog.DisplayOrder);
+    }
+
+    private static string? BuildCloudRuntimeConfigJson(AddModelRequest request)
+    {
+        if (request.ProviderConfig == null)
+        {
+            return null;
+        }
+
+        if (!request.ProviderConfig.TryGetPropertyValue("runtimeProfileId", out var profileIdNode)
+            || profileIdNode is null)
+        {
+            return null;
+        }
+
+        string? profileId = null;
+        if (profileIdNode is System.Text.Json.Nodes.JsonValue strValue
+            && strValue.TryGetValue<string>(out var parsedStr))
+        {
+            profileId = parsedStr?.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(profileId))
+        {
+            return null;
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(new { runtimeProfileId = profileId });
     }
 
     private static string BuildLlamaLocalRuntimeJson(AddModelRequest request)

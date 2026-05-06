@@ -10,7 +10,7 @@ import {
 } from '../../../types/settings';
 import { ActiveAddOperationState } from '../types';
 import { getCatalogProviderDisplayName } from '../constants/displayLabels';
-import { formatDateTime, parseCanonicalLocalRuntimeJson } from '../utils';
+import { formatDateTime, parseCanonicalLocalRuntimeJson, parseRuntimeProfileId } from '../utils';
 import { IconActionButton, TextActionButton } from './shared/ActionButtons';
 import { CatalogRowEditModal } from './catalog/CatalogRowEditModal';
 
@@ -50,11 +50,11 @@ function classifyLocalRuntime(model: SettingsModelDto): LocalRuntimeClassificati
   if (model.provider !== 'llama-cpp') {
     return { state: 'n/a' };
   }
-  if (!model.localRuntimeJson || model.localRuntimeJson.trim().length === 0) {
+  if (!model.runtimeConfigJson || model.runtimeConfigJson.trim().length === 0) {
     return { state: 'missing-json' };
   }
   try {
-    const raw = JSON.parse(model.localRuntimeJson) as Record<string, unknown>;
+    const raw = JSON.parse(model.runtimeConfigJson) as Record<string, unknown>;
     const routerModelId = typeof raw.routerModelId === 'string' ? raw.routerModelId : null;
     const runtimeProfileId = typeof raw.runtimeProfileId === 'string' ? raw.runtimeProfileId : null;
     if (!routerModelId || !runtimeProfileId) {
@@ -229,7 +229,7 @@ export function ModelsTab({
     if (model.provider !== 'llama-cpp') {
       return null;
     }
-    const parsed = parseCanonicalLocalRuntimeJson(model.localRuntimeJson);
+    const parsed = parseCanonicalLocalRuntimeJson(model.runtimeConfigJson);
     if (!parsed?.routerModelId) {
       return { label: 'Invalid local JSON', tone: 'err' };
     }
@@ -320,8 +320,7 @@ export function ModelsTab({
                 {orderedModels.map((model) => {
                   const llamaBadge = localLlamaBadge(model);
                   const runtimeClassification = classifyLocalRuntime(model);
-                  const profileId =
-                    runtimeClassification.state === 'ok' ? runtimeClassification.runtimeProfileId : null;
+                  const profileId = parseRuntimeProfileId(model.runtimeConfigJson) || null;
                   const usedBy = profileId ? profileUsage.get(profileId) ?? [] : [];
                   const othersUsing = usedBy.filter((id) => id !== model.modelId);
                   const highlighted = highlightedModelId === model.modelId;

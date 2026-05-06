@@ -76,6 +76,30 @@ const defaultFormData: FormData = {
   crewMemberIds: [],
 };
 
+function normalizeFormValue<K extends keyof FormData>(key: K, value: FormData[K]): FormData[K] {
+  if (key === 'reasoningEffort' && value === '') {
+    return undefined as FormData[K];
+  }
+  return value;
+}
+
+function areFormValuesEqual<T>(left: T, right: T): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+
+  if (
+    left !== null &&
+    right !== null &&
+    typeof left === 'object' &&
+    typeof right === 'object'
+  ) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  return false;
+}
+
 interface BaseEntityEditorProps {
   entityType: 'assistant' | 'guide';
   entityId?: string;
@@ -817,9 +841,37 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
   };
 
   const updateForm = useCallback((updates: Partial<FormData>) => {
-    setFormData((prev) => ({ ...prev, ...updates }));
+    const updateKeys = Object.keys(updates) as (keyof FormData)[];
+    let hasChanges = false;
+
+    for (const key of updateKeys) {
+      const currentValue = formData[key];
+      const nextValue = normalizeFormValue(
+        key,
+        updates[key] as FormData[typeof key]
+      ) as FormData[typeof key];
+      if (!areFormValuesEqual(currentValue, nextValue)) {
+        hasChanges = true;
+        break;
+      }
+    }
+
+    if (!hasChanges) {
+      return;
+    }
+
+    setFormData((prev) => {
+      const next = { ...prev };
+      for (const key of updateKeys) {
+        (next as any)[key] = normalizeFormValue(
+          key,
+          updates[key] as FormData[typeof key]
+        );
+      }
+      return next;
+    });
     setIsDirty(true);
-  }, []);
+  }, [formData]);
 
   const handlePreviewMarkdown = useCallback((fileId: string) => {
     setPreviewFileId(fileId);
@@ -869,19 +921,14 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
 
   const handleModelChange = useCallback((newModelId?: string, selectedModel?: ModelDto) => {
     const normalizedModelId = newModelId;
-
-    setFormData((prev) => {
-      const model = selectedModel
-        ?? catalogModels.find((catalogModel) => catalogModel.modelId === normalizedModelId);
-      const normalizedReasoningEffort = normalizeReasoningEffortForModel(model, prev.reasoningEffort);
-      return {
-        ...prev,
-        modelId: normalizedModelId,
-        reasoningEffort: normalizedReasoningEffort
-      };
+    const model = selectedModel
+      ?? catalogModels.find((catalogModel) => catalogModel.modelId === normalizedModelId);
+    const normalizedReasoningEffort = normalizeReasoningEffortForModel(model, formData.reasoningEffort);
+    updateForm({
+      modelId: normalizedModelId,
+      reasoningEffort: normalizedReasoningEffort
     });
-    setIsDirty(true);
-  }, [catalogModels]);
+  }, [catalogModels, formData.reasoningEffort, updateForm]);
 
   if (loading) {
     return (

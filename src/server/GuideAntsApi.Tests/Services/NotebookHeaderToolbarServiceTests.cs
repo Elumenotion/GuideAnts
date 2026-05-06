@@ -49,7 +49,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                     Provider: "google-vertex-chat",
                     Description: null,
                     ReasoningChoicesJson: null,
-                    LocalRuntimeJson: null,
+                    RuntimeConfigJson: null,
                     IsActive: true,
                     DisplayOrder: 1,
                     Created: DateTime.UtcNow,
@@ -60,7 +60,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                     Provider: "google-gemini-chat",
                     Description: null,
                     ReasoningChoicesJson: null,
-                    LocalRuntimeJson: null,
+                    RuntimeConfigJson: null,
                     IsActive: true,
                     DisplayOrder: 2,
                     Created: DateTime.UtcNow,
@@ -169,7 +169,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                     Provider: "llama-cpp",
                     Description: null,
                     ReasoningChoicesJson: null,
-                    LocalRuntimeJson: "{\"routerModelId\":\"qwen-local\"}",
+                    RuntimeConfigJson: "{\"routerModelId\":\"qwen-local\"}",
                     IsActive: true,
                     DisplayOrder: 1,
                     Created: DateTime.UtcNow,
@@ -266,7 +266,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                     Provider: "llama-cpp",
                     Description: null,
                     ReasoningChoicesJson: null,
-                    LocalRuntimeJson: "{\"routerModelId\":\"qwen-local\"}",
+                    RuntimeConfigJson: "{\"routerModelId\":\"qwen-local\"}",
                     IsActive: true,
                     DisplayOrder: 1,
                     Created: DateTime.UtcNow,
@@ -277,7 +277,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                     Provider: "llama-cpp",
                     Description: null,
                     ReasoningChoicesJson: null,
-                    LocalRuntimeJson: "{\"routerModelId\":\"mistral-local\"}",
+                    RuntimeConfigJson: "{\"routerModelId\":\"mistral-local\"}",
                     IsActive: true,
                     DisplayOrder: 2,
                     Created: DateTime.UtcNow,
@@ -334,7 +334,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                         ReasoningChoicesJson: null,
                         IsActive: true,
                         DisplayOrder: 2,
-                        LocalRuntime: new LocalRuntimeDescriptorDto("mistral-local", "default", null),
+                        RuntimeConfig: new ModelRuntimeConfigDto("mistral-local", "default", null),
                         SamplingParameterPolicy: null,
                         ReasoningChoices: null,
                         DefaultReasoningChoice: null)
@@ -403,3 +403,4 @@ public sealed class NotebookHeaderToolbarServiceTests
                 Warnings: Array.Empty<string>()));
     }
 }
+

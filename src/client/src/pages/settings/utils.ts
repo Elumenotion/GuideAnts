@@ -25,6 +25,7 @@ export function createEmptyProfileForm(): ProfileFormState {
     thoughtBlockPattern: '',
     samplingParametersJson: '{}',
     thinkingControlJson: '{}',
+    kind: 'local',
   };
 }
 
@@ -55,6 +56,7 @@ export function buildProfileCreateRequest(form: ProfileFormState): CreateRuntime
     thoughtBlockPattern: form.thoughtBlockPattern.trim() || undefined,
     samplingParametersJson: form.samplingParametersJson,
     thinkingControlJson: form.thinkingControlJson,
+    kind: form.kind,
   };
 }
 
@@ -72,6 +74,7 @@ type RuntimeProfileContractShape = Pick<
   | 'thoughtBlockPattern'
   | 'samplingParametersJson'
   | 'thinkingControlJson'
+  | 'kind'
 >;
 
 export function createProfileFormFromContractShape(profile: RuntimeProfileContractShape): ProfileFormState {
@@ -83,6 +86,7 @@ export function createProfileFormFromContractShape(profile: RuntimeProfileContra
     thoughtBlockPattern: profile.thoughtBlockPattern ?? '',
     samplingParametersJson: profile.samplingParametersJson,
     thinkingControlJson: profile.thinkingControlJson,
+    kind: (profile.kind === 'cloud' ? 'cloud' : 'local') as 'local' | 'cloud',
   };
 }
 
@@ -137,6 +141,7 @@ export function importRuntimeProfile(json: string): ProfileFormState {
     thoughtBlockPattern: candidate.thoughtBlockPattern ?? undefined,
     samplingParametersJson: candidate.samplingParametersJson,
     thinkingControlJson: candidate.thinkingControlJson,
+    kind: typeof candidate.kind === 'string' ? candidate.kind : 'local',
   });
 
   buildProfileCreateRequest(form);
@@ -154,9 +159,9 @@ export function createEmptyAddModelWizardState(preselectedProvider?: string | nu
     catalogIsActive: true,
     openAiReasoningEffortEnabled: false,
     anthropicThinkingEnabled: provider === 'anthropic',
+    runtimeProfileId: '',
     llamaInstallSource: 'huggingface',
     llamaRouterModelId: '',
-    llamaRuntimeProfileId: '',
     llamaHuggingFaceRepository: '',
     llamaHuggingFaceQuantIncludePattern: '',
     llamaHuggingFaceMmprojIncludePattern: '',
@@ -251,6 +256,16 @@ function parseOptionalRouterCacheRamMib(raw: string): number | undefined {
   return n;
 }
 
+export function parseRuntimeProfileId(runtimeConfigJson?: string): string {
+  if (!runtimeConfigJson) return '';
+  try {
+    const raw = JSON.parse(runtimeConfigJson) as Record<string, unknown>;
+    return typeof raw.runtimeProfileId === 'string' ? raw.runtimeProfileId : '';
+  } catch {
+    return '';
+  }
+}
+
 export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): CanonicalLocalRuntimeConfig | null {
   if (!localRuntimeJson) {
     return null;
@@ -296,7 +311,7 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
 }
 
 export function createCatalogEditStateFromModel(model: SettingsModelDto): CatalogEditState {
-  const parsedRuntime = parseCanonicalLocalRuntimeJson(model.localRuntimeJson);
+  const parsedRuntime = parseCanonicalLocalRuntimeJson(model.runtimeConfigJson);
   const reasoningChoices = parseReasoningChoices(model.reasoningChoicesJson);
   return {
     modelId: model.modelId,
@@ -315,8 +330,8 @@ export function createCatalogEditStateFromModel(model: SettingsModelDto): Catalo
       || reasoningChoices.includes('low')
       || reasoningChoices.includes('medium')
       || reasoningChoices.includes('high'),
+    runtimeProfileId: parseRuntimeProfileId(model.runtimeConfigJson),
     localRuntimeRouterModelId: parsedRuntime?.routerModelId ?? '',
-    localRuntimeProfileId: parsedRuntime?.runtimeProfileId ?? '',
     localRuntimeLoadParamsJson: parsedRuntime?.loadParams ? JSON.stringify(parsedRuntime.loadParams, null, 2) : '',
     localRuntimeParallelToolCalls: parsedRuntime?.parallelToolCalls === true,
     localRuntimeRouterContextSize:
@@ -333,8 +348,8 @@ export function createCatalogEditStateFromModel(model: SettingsModelDto): Catalo
 export function buildCanonicalLocalRuntimeFromGuidedForm(
   form: Pick<
     CatalogEditState,
+    | 'runtimeProfileId'
     | 'localRuntimeRouterModelId'
-    | 'localRuntimeProfileId'
     | 'localRuntimeLoadParamsJson'
     | 'localRuntimeParallelToolCalls'
     | 'localRuntimeRouterContextSize'
@@ -342,7 +357,7 @@ export function buildCanonicalLocalRuntimeFromGuidedForm(
   >
 ): string | undefined {
   const routerModelId = form.localRuntimeRouterModelId.trim();
-  const runtimeProfileId = form.localRuntimeProfileId.trim();
+  const runtimeProfileId = form.runtimeProfileId.trim();
   const loadParamsText = form.localRuntimeLoadParamsJson.trim();
   const parallelToolCalls = form.localRuntimeParallelToolCalls;
   const ctxSizeText = form.localRuntimeRouterContextSize?.trim() ?? '';
@@ -420,15 +435,21 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
   ) {
     providerConfig = {
       reasoningEffortEnabled: state.openAiReasoningEffortEnabled,
+      runtimeProfileId: state.runtimeProfileId.trim() || undefined,
     };
   } else if (provider === 'anthropic') {
     providerConfig = {
       thinkingEnabled: state.anthropicThinkingEnabled,
+      runtimeProfileId: state.runtimeProfileId.trim() || undefined,
+    };
+  } else if (provider !== 'llama-cpp' && state.runtimeProfileId.trim()) {
+    providerConfig = {
+      runtimeProfileId: state.runtimeProfileId.trim(),
     };
   }
   let install: AddModelRequest['install'] | undefined;
   if (provider === 'llama-cpp') {
-    const runtimeProfileId = state.llamaRuntimeProfileId.trim();
+    const runtimeProfileId = state.runtimeProfileId.trim();
     if (!runtimeProfileId) {
       throw new Error('Runtime profile is required for llama-cpp.');
     }
@@ -558,12 +579,14 @@ export function buildCatalogEditRequest(
     reasoningChoicesJson = deriveReasoningChoicesJsonFromProfile(options?.llamaProfileThinkingControlJson);
   }
 
-  let localRuntimeJson: string | undefined;
+  let runtimeConfigJson: string | undefined;
   if (provider === 'llama-cpp') {
-    localRuntimeJson = buildCanonicalLocalRuntimeFromGuidedForm(state);
-    if (!localRuntimeJson) {
+    runtimeConfigJson = buildCanonicalLocalRuntimeFromGuidedForm(state);
+    if (!runtimeConfigJson) {
       throw new Error('Local runtime configuration is required for llama-cpp models.');
     }
+  } else if (state.runtimeProfileId.trim()) {
+    runtimeConfigJson = JSON.stringify({ runtimeProfileId: state.runtimeProfileId.trim() });
   }
 
   return {
@@ -572,7 +595,7 @@ export function buildCatalogEditRequest(
     provider,
     description: normalizeOptionalString(state.description),
     reasoningChoicesJson,
-    localRuntimeJson,
+    runtimeConfigJson,
     isActive: state.isActive,
     displayOrder: normalizeDisplayOrder(state.displayOrder),
   };

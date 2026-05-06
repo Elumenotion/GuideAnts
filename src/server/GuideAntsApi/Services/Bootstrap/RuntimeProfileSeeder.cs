@@ -96,6 +96,7 @@ public sealed class RuntimeProfileSeeder : IRuntimeProfileSeeder
             ThoughtBlockPattern = GetOptionalString(root, "thoughtBlockPattern"),
             SamplingParametersJson = GetNestedObjectAsString(root, "samplingParametersJson", fileName),
             ThinkingControlJson = GetNestedObjectAsString(root, "thinkingControlJson", fileName),
+            Kind = GetOptionalString(root, "kind") ?? "local",
             Created = DateTime.UtcNow,
             Updated = DateTime.UtcNow
         };

@@ -2,8 +2,8 @@ using System.Text.Json.Nodes;
 
 namespace GuideAntsApi.Models.Guides;
 
-// Local runtime descriptor for local models
-public record LocalRuntimeDescriptorDto(
+// Runtime config descriptor for all model providers
+public record ModelRuntimeConfigDto(
     string RouterModelId,
     string RuntimeProfileId,
     JsonObject? LoadParams
@@ -28,7 +28,7 @@ public record ModelDto(
     string? ReasoningChoicesJson,
     bool IsActive,
     int? DisplayOrder,
-    LocalRuntimeDescriptorDto? LocalRuntime,
+    ModelRuntimeConfigDto? RuntimeConfig,
     IReadOnlyList<SamplingParameterPolicyDto>? SamplingParameterPolicy,
     IReadOnlyList<string>? ReasoningChoices,
     string? DefaultReasoningChoice

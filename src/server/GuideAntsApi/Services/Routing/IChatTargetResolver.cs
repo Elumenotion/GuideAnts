@@ -10,7 +10,7 @@ namespace GuideAntsApi.Services.Routing;
 public sealed record ChatTarget(
     string ModelId,
     string Provider,
-    string? LocalRuntimeJson);
+    string? RuntimeConfigJson);
 
 public interface IChatTargetResolver
 {
@@ -50,7 +50,7 @@ public sealed class ChatTargetResolver : IChatTargetResolver
         var row = db.Models
             .AsNoTracking()
             .Where(m => m.ModelId == modelId)
-            .Select(m => new { m.ModelId, m.Provider, m.LocalRuntimeJson })
+            .Select(m => new { m.ModelId, m.Provider, m.RuntimeConfigJson })
             .FirstOrDefault();
 
         if (row == null)
@@ -70,6 +70,6 @@ public sealed class ChatTargetResolver : IChatTargetResolver
                 serviceId: "Chat");
         }
 
-        return new ChatTarget(row.ModelId, row.Provider.Trim(), row.LocalRuntimeJson);
+        return new ChatTarget(row.ModelId, row.Provider.Trim(), row.RuntimeConfigJson);
     }
 }

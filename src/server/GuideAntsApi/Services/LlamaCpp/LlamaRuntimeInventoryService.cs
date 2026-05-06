@@ -75,21 +75,21 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
         var catalogRows = await context.Models
             .AsNoTracking()
             .Where(m => m.Provider == "llama-cpp")
-            .Select(m => new { m.ModelId, m.LocalRuntimeJson })
+            .Select(m => new { m.ModelId, m.RuntimeConfigJson })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
         var catalogByRouter = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var row in catalogRows)
         {
-            if (string.IsNullOrWhiteSpace(row.LocalRuntimeJson))
+            if (string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
             {
                 continue;
             }
 
             try
             {
-                var parsed = LocalRuntimeConfigurationParser.Parse(row.ModelId, row.LocalRuntimeJson);
+                var parsed = LocalRuntimeConfigurationParser.Parse(row.ModelId, row.RuntimeConfigJson);
                 if (!catalogByRouter.TryGetValue(parsed.RouterModelId, out var list))
                 {
                     list = [];
@@ -100,7 +100,7 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Skipping catalog model {ModelId} for inventory (invalid LocalRuntimeJson).", row.ModelId);
+                _logger.LogDebug(ex, "Skipping catalog model {ModelId} for inventory (invalid RuntimeConfigJson).", row.ModelId);
             }
         }
 

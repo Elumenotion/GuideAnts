@@ -27,7 +27,7 @@ public sealed class ApplicationSettingsServiceModelTests
             Provider: "anthropic",
             Description: null,
             ReasoningChoicesJson: "[\"minimal\",\"low\",\"medium\",\"high\"]",
-            LocalRuntimeJson: null,
+            RuntimeConfigJson: null,
             IsActive: true,
             DisplayOrder: null));
 
@@ -111,3 +111,4 @@ public sealed class ApplicationSettingsServiceModelTests
             runtimeProfileResolver.Object);
     }
 }
+

@@ -43,11 +43,11 @@ namespace GuideAntsApi.DataModel.Models
         public string? ReasoningChoicesJson { get; set; }
 
         /// <summary>
-        /// Optional JSON string containing local runtime configuration for local models (e.g., llama-cpp).
-        /// Canonical shape for llama-cpp:
-        /// { routerModelId, runtimeProfileId, loadParams?, parallelToolCalls? }.
+        /// Optional JSON string containing runtime configuration for this model.
+        /// For llama-cpp: { routerModelId, runtimeProfileId, loadParams?, parallelToolCalls? }.
+        /// For cloud models: { runtimeProfileId } — references the profile that defines sampling parameters.
         /// </summary>
-        public string? LocalRuntimeJson { get; set; }
+        public string? RuntimeConfigJson { get; set; }
 
         /// <summary>
         /// Whether this model is currently available for selection.

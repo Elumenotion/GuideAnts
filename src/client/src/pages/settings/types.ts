@@ -59,9 +59,10 @@ export interface AddModelWizardState {
   catalogIsActive: boolean;
   openAiReasoningEffortEnabled: boolean;
   anthropicThinkingEnabled: boolean;
+  /** Runtime profile ID — applies to all providers. */
+  runtimeProfileId: string;
   llamaInstallSource: 'huggingface' | 'existingAlias';
   llamaRouterModelId: string;
-  llamaRuntimeProfileId: string;
   llamaHuggingFaceRepository: string;
   llamaHuggingFaceQuantIncludePattern: string;
   llamaHuggingFaceMmprojIncludePattern: string;
@@ -82,8 +83,9 @@ export interface CatalogEditState {
   isActive: boolean;
   openAiReasoningEffortEnabled: boolean;
   anthropicThinkingEnabled: boolean;
+  /** Runtime profile ID — applies to all providers. */
+  runtimeProfileId: string;
   localRuntimeRouterModelId: string;
-  localRuntimeProfileId: string;
   localRuntimeLoadParamsJson: string;
   localRuntimeParallelToolCalls: boolean;
   localRuntimeRouterContextSize: string;
@@ -113,4 +115,5 @@ export interface ProfileFormState {
   thoughtBlockPattern: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
+  kind: 'local' | 'cloud';
 }

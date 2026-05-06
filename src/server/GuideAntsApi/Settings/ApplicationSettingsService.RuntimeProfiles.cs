@@ -48,6 +48,7 @@ public sealed partial class ApplicationSettingsService
             ThoughtBlockPattern = request.ThoughtBlockPattern,
             SamplingParametersJson = request.SamplingParametersJson,
             ThinkingControlJson = request.ThinkingControlJson,
+            Kind = request.Kind.Trim(),
             Created = DateTime.UtcNow,
             Updated = DateTime.UtcNow
         };
@@ -79,6 +80,7 @@ public sealed partial class ApplicationSettingsService
         entity.ThoughtBlockPattern = request.ThoughtBlockPattern;
         entity.SamplingParametersJson = request.SamplingParametersJson;
         entity.ThinkingControlJson = request.ThinkingControlJson;
+        entity.Kind = request.Kind.Trim();
         entity.Updated = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -96,7 +98,7 @@ public sealed partial class ApplicationSettingsService
 
         var referencedByModel = await _db.Models
             .AsNoTracking()
-            .AnyAsync(m => m.LocalRuntimeJson != null && m.LocalRuntimeJson.Contains(profileId), cancellationToken);
+            .AnyAsync(m => m.RuntimeConfigJson != null && m.RuntimeConfigJson.Contains(profileId), cancellationToken);
         if (referencedByModel)
         {
             throw new InvalidOperationException(
@@ -119,6 +121,7 @@ public sealed partial class ApplicationSettingsService
             entity.ThoughtBlockPattern,
             entity.SamplingParametersJson,
             entity.ThinkingControlJson,
+            entity.Kind,
             entity.Created,
             entity.Updated);
     }

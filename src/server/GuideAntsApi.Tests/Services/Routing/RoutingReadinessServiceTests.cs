@@ -210,7 +210,7 @@ public sealed class RoutingReadinessServiceTests
             ModelId = "qwen-local",
             DisplayName = "Qwen Local",
             Provider = "llama-cpp",
-            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
+            RuntimeConfigJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
             IsActive = true,
             Created = DateTime.UtcNow
         });
@@ -547,7 +547,7 @@ public sealed class RoutingReadinessServiceTests
             ModelId = "qwen-local",
             DisplayName = "Qwen Local",
             Provider = "llama-cpp",
-            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
+            RuntimeConfigJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
             IsActive = true,
             Created = DateTime.UtcNow
         });
@@ -608,7 +608,7 @@ public sealed class RoutingReadinessServiceTests
             ModelId = "qwen-local",
             DisplayName = "Qwen Local",
             Provider = "llama-cpp",
-            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
+            RuntimeConfigJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
             IsActive = true,
             Created = DateTime.UtcNow
         });
@@ -666,7 +666,7 @@ public sealed class RoutingReadinessServiceTests
             ModelId = "qwen-local",
             DisplayName = "Qwen Local",
             Provider = "llama-cpp",
-            LocalRuntimeJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
+            RuntimeConfigJson = $"{{\"routerModelId\":\"{routerAlias}\",\"runtimeProfileId\":\"qwen3_5\"}}",
             IsActive = true,
             Created = DateTime.UtcNow
         });
@@ -758,6 +758,15 @@ public sealed class RoutingReadinessServiceTests
     public async Task ProbeModeAsync_OpenAi_AcceptsValidModels(string serviceName, string modelId)
     {
         using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = modelId,
+            DisplayName = modelId,
+            Provider = "openai",
+            IsActive = true,
+            Created = DateTime.UtcNow
+        });
+        db.SaveChanges();
         SeedMode(db, serviceName, new ServiceMode(
             ModeId: "openai",
             ProviderSection: "OpenAI",
@@ -863,6 +872,15 @@ public sealed class RoutingReadinessServiceTests
     public async Task ProbeModeAsync_OpenAiSpeechSynthesis_ReturnsReady_WhenVoiceNameProvided()
     {
         using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "tts-1",
+            DisplayName = "tts-1",
+            Provider = "openai",
+            IsActive = true,
+            Created = DateTime.UtcNow
+        });
+        db.SaveChanges();
         SeedMode(db, RoutedServiceNames.SpeechSynthesis, new ServiceMode(
             ModeId: "openai",
             ProviderSection: "OpenAI",
@@ -895,6 +913,15 @@ public sealed class RoutingReadinessServiceTests
     public async Task ProbeModeAsync_OpenAi_ReturnsBlocked_WhenApiKeyMissing()
     {
         using var db = CreateDb();
+        db.Models.Add(new Model
+        {
+            ModelId = "text-embedding-3-small",
+            DisplayName = "text-embedding-3-small",
+            Provider = "openai",
+            IsActive = true,
+            Created = DateTime.UtcNow
+        });
+        db.SaveChanges();
         SeedMode(db, RoutedServiceNames.Embeddings, new ServiceMode(
             ModeId: "openai",
             ProviderSection: "OpenAI",
@@ -1158,3 +1185,4 @@ public sealed class RoutingReadinessServiceTests
             runtimeProfileResolver.Object);
     }
 }
+

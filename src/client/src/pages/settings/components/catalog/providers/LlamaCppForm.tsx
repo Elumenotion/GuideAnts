@@ -131,7 +131,7 @@ export function LlamaCppAddForm({
     (inventoryError.toLowerCase().includes('no local llama server')
       || inventoryError.includes('127.0.0.1:9')
       || inventoryError.toLowerCase().includes('connection refused'));
-  const selectedProfile = profiles.find((profile) => profile.profileId === value.llamaRuntimeProfileId.trim());
+  const selectedProfile = profiles.find((profile) => profile.profileId === value.runtimeProfileId.trim());
   const derivedReasoningChoices = (() => {
     if (!selectedProfile?.thinkingControlJson) {
       return [];
@@ -156,7 +156,7 @@ export function LlamaCppAddForm({
     try {
       const request = buildProfileCreateRequest(customProfileForm);
       const created = await onCreateCustomRuntimeProfile(request);
-      onChange({ llamaRuntimeProfileId: created.profileId });
+      onChange({ runtimeProfileId: created.profileId });
       setShowCustomProfileEditor(false);
       setCustomProfileForm(createEmptyProfileForm());
     } catch (error) {
@@ -226,12 +226,12 @@ export function LlamaCppAddForm({
           ) : null}
         </div>
         <RuntimeProfileSelect
-          value={value.llamaRuntimeProfileId}
-          onChange={(nextValue) => onChange({ llamaRuntimeProfileId: nextValue })}
+          value={value.runtimeProfileId}
+          onChange={(nextValue) => onChange({ runtimeProfileId: nextValue })}
           profiles={profiles}
           profilesLoading={profilesLoading}
         />
-        {value.llamaRuntimeProfileId.trim().length > 0 ? (
+        {value.runtimeProfileId.trim().length > 0 ? (
           <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
             {derivedReasoningChoices.length > 0 ? (
               <span>
@@ -388,12 +388,12 @@ export function LlamaCppAddForm({
   );
 }
 
-export function LlamaCppEditForm({ value, onChange, profiles, profilesLoading, inventory }: ProviderEditForm) {
+export function LlamaCppEditForm({ value, onChange, profiles, inventory }: Omit<ProviderEditForm, 'profilesLoading'> & { profilesLoading?: boolean }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const routerAlias = value.localRuntimeRouterModelId.trim();
   const inventoryRow = inventory?.find((row) => row.routerModelId === routerAlias);
   const otherCatalogRowsOnAlias = inventoryRow?.catalogModelIds.filter((id) => id !== value.modelId) ?? [];
-  const selectedProfile = profiles.find((profile) => profile.profileId === value.localRuntimeProfileId.trim());
+  const selectedProfile = profiles.find((profile) => profile.profileId === value.runtimeProfileId.trim());
   const derivedReasoningChoices = (() => {
     if (!selectedProfile?.thinkingControlJson) {
       return [];
@@ -468,27 +468,18 @@ export function LlamaCppEditForm({ value, onChange, profiles, profilesLoading, i
         )}
       </div>
 
-      <div className="space-y-2">
-        <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime Profile</label>
-        <RuntimeProfileSelect
-          value={value.localRuntimeProfileId}
-          onChange={(nextValue) => onChange({ localRuntimeProfileId: nextValue })}
-          profiles={profiles}
-          profilesLoading={profilesLoading}
-        />
-        {value.localRuntimeProfileId.trim().length > 0 ? (
-          <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-            {derivedReasoningChoices.length > 0 ? (
-              <span>
-                Reasoning choices exposed by this profile:{' '}
-                <span className="font-mono">[{derivedReasoningChoices.join(', ')}]</span>
-              </span>
-            ) : (
-              <span>This profile exposes no reasoning choices; the catalog row ReasoningChoicesJson will be null.</span>
-            )}
-          </div>
-        ) : null}
-      </div>
+      {value.runtimeProfileId.trim().length > 0 ? (
+        <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+          {derivedReasoningChoices.length > 0 ? (
+            <span>
+              Reasoning choices exposed by this profile:{' '}
+              <span className="font-mono">[{derivedReasoningChoices.join(', ')}]</span>
+            </span>
+          ) : (
+            <span>This profile exposes no reasoning choices; the catalog row ReasoningChoicesJson will be null.</span>
+          )}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="space-y-1">
@@ -504,7 +495,7 @@ export function LlamaCppEditForm({ value, onChange, profiles, profilesLoading, i
             placeholder="(container default)"
           />
           <p className="text-[11px] text-gray-500">
-            Saved in LocalRuntimeJson and synced to <code className="font-mono">router-models.ini</code>. Clear the field to
+            Saved in RuntimeConfigJson and synced to <code className="font-mono">router-models.ini</code>. Clear the field to
             remove the override.
           </p>
         </div>

@@ -24,36 +24,36 @@ public static class LocalRuntimeConfigurationParser
         PropertyNameCaseInsensitive = true
     };
 
-    public static LocalRuntimeConfiguration ParseRequired(string modelId, string? localRuntimeJson)
+    public static LocalRuntimeConfiguration ParseRequired(string modelId, string? runtimeConfigJson)
     {
-        if (string.IsNullOrWhiteSpace(localRuntimeJson))
+        if (string.IsNullOrWhiteSpace(runtimeConfigJson))
         {
             throw new InvalidOperationException(
-                $"Model '{modelId}' is configured as llama-cpp but is missing LocalRuntimeJson.");
+                $"Model '{modelId}' is configured as llama-cpp but is missing RuntimeConfigJson.");
         }
 
-        return Parse(modelId, localRuntimeJson);
+        return Parse(modelId, runtimeConfigJson);
     }
 
-    public static LocalRuntimeConfiguration Parse(string modelId, string localRuntimeJson)
+    public static LocalRuntimeConfiguration Parse(string modelId, string runtimeConfigJson)
     {
         LocalRuntimeConfigurationPayload? parsed;
         try
         {
             parsed = JsonSerializer.Deserialize<LocalRuntimeConfigurationPayload>(
-                localRuntimeJson,
+                runtimeConfigJson,
                 DeserializeJsonOptions);
         }
         catch (JsonException ex)
         {
             throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson is invalid JSON.", ex);
+                $"Model '{modelId}' RuntimeConfigJson is invalid JSON.", ex);
         }
 
         if (parsed is null)
         {
             throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson must be a JSON object.");
+                $"Model '{modelId}' RuntimeConfigJson must be a JSON object.");
         }
 
         var missingFields = new List<string>();
@@ -70,14 +70,14 @@ public static class LocalRuntimeConfigurationParser
         if (missingFields.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson is missing required field(s): {string.Join(", ", missingFields)}.");
+                $"Model '{modelId}' RuntimeConfigJson is missing required field(s): {string.Join(", ", missingFields)}.");
         }
 
         var routerModelId = parsed.RouterModelId!.Trim();
         if (routerModelId.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson field 'routerModelId' must not include '.gguf' suffix.");
+                $"Model '{modelId}' RuntimeConfigJson field 'routerModelId' must not include '.gguf' suffix.");
         }
 
         ValidateOptionalRange(modelId, "routerContextSize", parsed.RouterContextSize, min: 1024, max: 1_048_576);
@@ -133,7 +133,7 @@ public static class LocalRuntimeConfigurationParser
         if (value.Value < min || value.Value > max)
         {
             throw new InvalidOperationException(
-                $"Model '{modelId}' LocalRuntimeJson property '{fieldName}' must be between {min} and {max}.");
+                $"Model '{modelId}' RuntimeConfigJson property '{fieldName}' must be between {min} and {max}.");
         }
     }
 

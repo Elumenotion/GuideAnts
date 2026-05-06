@@ -194,7 +194,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             ModelId = "qwen3.5-27b",
             DisplayName = "Qwen 3.5 27B",
             Provider = "llama-cpp",
-            LocalRuntimeJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"Qwen3.5-27B-Q6_K\"}}",
+            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"Qwen3.5-27B-Q6_K\"}}",
             IsActive = true
         });
         db.SaveChanges();
@@ -263,7 +263,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
     }
 
     [TestMethod]
-    public async Task CreateClient_UsesParallelToolCallsSetting_FromLocalRuntimeJson()
+    public async Task CreateClient_UsesParallelToolCallsSetting_FromRuntimeConfigJson()
     {
         using var db = CreateDb();
         db.Models.Add(new Model
@@ -271,7 +271,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             ModelId = "qwen3.5-27b",
             DisplayName = "Qwen 3.5 27B",
             Provider = "llama-cpp",
-            LocalRuntimeJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\",\"parallelToolCalls\":true}",
+            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\",\"parallelToolCalls\":true}",
             IsActive = true
         });
         db.SaveChanges();
@@ -306,7 +306,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
     }
 
     [TestMethod]
-    public void CreateClient_Throws_ForLlamaModelWithoutLocalRuntimeJson()
+    public void CreateClient_Throws_ForLlamaModelWithoutRuntimeConfigJson()
     {
         using var db = CreateDb();
         db.Models.Add(new Model
@@ -322,7 +322,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
 
         Action act = () => factory.CreateClient("qwen3.5-27b");
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("Model 'qwen3.5-27b' is configured as llama-cpp but is missing LocalRuntimeJson.");
+            .WithMessage("Model 'qwen3.5-27b' is configured as llama-cpp but is missing RuntimeConfigJson.");
     }
 
     [TestMethod]
@@ -334,7 +334,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             ModelId = "qwen3.5-27b",
             DisplayName = "Qwen 3.5 27B",
             Provider = "llama-cpp",
-            LocalRuntimeJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"unknown_profile\"}",
+            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"unknown_profile\"}",
             IsActive = true
         });
         db.SaveChanges();
@@ -562,3 +562,4 @@ public sealed class RoutingChatCompletionClientFactoryTests
         }
     }
 }
+

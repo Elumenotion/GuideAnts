@@ -100,7 +100,7 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
     protected static async Task<Model> SeedCatalogModelAsync(
         string modelId,
         string provider,
-        string? localRuntimeJson = null,
+        string? RuntimeConfigJson = null,
         string displayName = "Test Model",
         bool isActive = true)
     {
@@ -111,7 +111,7 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
         if (existing != null)
         {
             existing.Provider = provider;
-            existing.LocalRuntimeJson = localRuntimeJson;
+            existing.RuntimeConfigJson = RuntimeConfigJson;
             existing.IsActive = isActive;
             existing.DisplayName = displayName;
         }
@@ -123,7 +123,7 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
                 DisplayName = displayName,
                 Provider = provider,
                 IsActive = isActive,
-                LocalRuntimeJson = localRuntimeJson
+                RuntimeConfigJson = RuntimeConfigJson
             };
             db.Models.Add(existing);
         }
@@ -132,3 +132,4 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
         return existing;
     }
 }
+

@@ -31,7 +31,7 @@ public sealed partial class ApplicationSettingsService
         }
 
         var normalizedReasoningChoices = NormalizeReasoningChoicesJson(modelId, request.ReasoningChoicesJson);
-        var normalizedLocalRuntimeJson = NormalizeLocalRuntimeJson(modelId, provider, request.LocalRuntimeJson);
+        var normalizedRuntimeConfigJson = NormalizeRuntimeConfigJson(modelId, provider, request.RuntimeConfigJson);
         ValidateProviderReasoningChoices(modelId, provider, normalizedReasoningChoices);
 
         var model = new Model
@@ -41,7 +41,7 @@ public sealed partial class ApplicationSettingsService
             Provider = provider,
             Description = request.Description,
             ReasoningChoicesJson = normalizedReasoningChoices,
-            LocalRuntimeJson = normalizedLocalRuntimeJson,
+            RuntimeConfigJson = normalizedRuntimeConfigJson,
             IsActive = request.IsActive,
             DisplayOrder = request.DisplayOrder,
             Created = DateTime.UtcNow,
@@ -50,7 +50,7 @@ public sealed partial class ApplicationSettingsService
 
         _db.Models.Add(model);
         await _db.SaveChangesAsync(cancellationToken);
-        await TrySyncRouterIniAfterLlamaModelPersistAsync(modelId, provider, model.LocalRuntimeJson, cancellationToken)
+        await TrySyncRouterIniAfterLlamaModelPersistAsync(modelId, provider, model.RuntimeConfigJson, cancellationToken)
             .ConfigureAwait(false);
         return ToSettingsModelDto(model);
     }
@@ -70,20 +70,20 @@ public sealed partial class ApplicationSettingsService
 
         var provider = request.Provider.Trim();
         var normalizedReasoningChoices = NormalizeReasoningChoicesJson(request.ModelId.Trim(), request.ReasoningChoicesJson);
-        var normalizedLocalRuntimeJson = NormalizeLocalRuntimeJson(request.ModelId.Trim(), provider, request.LocalRuntimeJson);
+        var normalizedRuntimeConfigJson = NormalizeRuntimeConfigJson(request.ModelId.Trim(), provider, request.RuntimeConfigJson);
         ValidateProviderReasoningChoices(request.ModelId.Trim(), provider, normalizedReasoningChoices);
 
         model.DisplayName = request.DisplayName.Trim();
         model.Provider = provider;
         model.Description = request.Description;
         model.ReasoningChoicesJson = normalizedReasoningChoices;
-        model.LocalRuntimeJson = normalizedLocalRuntimeJson;
+        model.RuntimeConfigJson = normalizedRuntimeConfigJson;
         model.IsActive = request.IsActive;
         model.DisplayOrder = request.DisplayOrder;
         model.Updated = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
-        await TrySyncRouterIniAfterLlamaModelPersistAsync(modelId, provider, model.LocalRuntimeJson, cancellationToken)
+        await TrySyncRouterIniAfterLlamaModelPersistAsync(modelId, provider, model.RuntimeConfigJson, cancellationToken)
             .ConfigureAwait(false);
         return ToSettingsModelDto(model);
     }
@@ -107,7 +107,7 @@ public sealed partial class ApplicationSettingsService
             .AsNoTracking()
             .OrderBy(x => x.DisplayOrder)
             .ThenBy(x => x.ModelId)
-            .Select(x => new { x.ModelId, x.DisplayName, x.Provider, x.IsActive, x.LocalRuntimeJson })
+            .Select(x => new { x.ModelId, x.DisplayName, x.Provider, x.IsActive, x.RuntimeConfigJson })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -117,33 +117,33 @@ public sealed partial class ApplicationSettingsService
                 DisplayName: m.DisplayName,
                 Provider: m.Provider,
                 IsActive: m.IsActive,
-                HasLocalRuntime: !string.IsNullOrWhiteSpace(m.LocalRuntimeJson)))
+                HasLocalRuntime: !string.IsNullOrWhiteSpace(m.RuntimeConfigJson)))
             .ToList();
     }
 
-    private string? NormalizeLocalRuntimeJson(string modelId, string provider, string? localRuntimeJson)
+    private string? NormalizeRuntimeConfigJson(string modelId, string provider, string? runtimeConfigJson)
     {
         if (!string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
         {
-            return string.IsNullOrWhiteSpace(localRuntimeJson) ? null : localRuntimeJson.Trim();
+            return string.IsNullOrWhiteSpace(runtimeConfigJson) ? null : runtimeConfigJson.Trim();
         }
 
-        var parsed = LocalRuntimeConfigurationParser.ParseRequired(modelId, localRuntimeJson);
+        var parsed = LocalRuntimeConfigurationParser.ParseRequired(modelId, runtimeConfigJson);
         _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
         return LocalRuntimeConfigurationParser.SerializeCanonical(parsed);
     }
 
     private async Task TrySyncRouterIniAfterLlamaModelPersistAsync(
-        string modelId, string provider, string? localRuntimeJson, CancellationToken cancellationToken)
+        string modelId, string provider, string? runtimeConfigJson, CancellationToken cancellationToken)
     {
         if (_llamaRouterIniSync is null
             || !string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-            || string.IsNullOrWhiteSpace(localRuntimeJson))
+            || string.IsNullOrWhiteSpace(runtimeConfigJson))
         {
             return;
         }
 
-        var parsed = LocalRuntimeConfigurationParser.Parse(modelId, localRuntimeJson);
+        var parsed = LocalRuntimeConfigurationParser.Parse(modelId, runtimeConfigJson);
         await _llamaRouterIniSync.TrySyncFromLocalRuntimeAsync(parsed, cancellationToken).ConfigureAwait(false);
     }
 
@@ -216,7 +216,7 @@ public sealed partial class ApplicationSettingsService
             model.Provider,
             model.Description,
             model.ReasoningChoicesJson,
-            model.LocalRuntimeJson,
+            model.RuntimeConfigJson,
             model.IsActive,
             model.DisplayOrder,
             model.Created,

@@ -9,7 +9,7 @@ public interface IChatTargetValidator
     /// Validates that the resolved chat target can actually dispatch:
     ///   - provider is supported
     ///   - required provider-section fields are populated in configuration
-    ///   - llama-cpp targets have valid <c>LocalRuntimeJson</c> with a known runtime profile
+    ///   - llama-cpp targets have valid <c>RuntimeConfigJson</c> with a known runtime profile
     ///
     /// Per R-12.5/12.6 this method must NOT be called while a
     /// <c>NotebookModelRuntimeService</c> load is in flight: run it at chat dispatch
@@ -185,12 +185,12 @@ public sealed class ChatTargetValidator : IChatTargetValidator
 
     private void ValidateLlamaCpp(ChatTarget target)
     {
-        if (string.IsNullOrWhiteSpace(target.LocalRuntimeJson))
+        if (string.IsNullOrWhiteSpace(target.RuntimeConfigJson))
         {
             throw new RoutingException(
                 RoutingErrorCodes.ModelNotReady,
-                $"Model '{target.ModelId}' is configured as llama-cpp but is missing LocalRuntimeJson.",
-                action: $"Open Settings → Models & Runtime → Catalog and set a LocalRuntime configuration for '{target.ModelId}'.",
+                $"Model '{target.ModelId}' is configured as llama-cpp but is missing RuntimeConfigJson.",
+                action: $"Open Settings → Models & Runtime → Catalog and set a runtime configuration for '{target.ModelId}'.",
                 serviceId: "Chat",
                 modelId: target.ModelId,
                 providerSection: "LlamaCpp");
@@ -199,14 +199,14 @@ public sealed class ChatTargetValidator : IChatTargetValidator
         LocalRuntimeConfiguration parsed;
         try
         {
-            parsed = LocalRuntimeConfigurationParser.ParseRequired(target.ModelId, target.LocalRuntimeJson);
+            parsed = LocalRuntimeConfigurationParser.ParseRequired(target.ModelId, target.RuntimeConfigJson);
         }
         catch (Exception ex)
         {
             throw new RoutingException(
                 RoutingErrorCodes.ModelNotReady,
-                $"Model '{target.ModelId}' has invalid LocalRuntimeJson: {ex.Message}",
-                action: $"Fix the LocalRuntimeJson payload for '{target.ModelId}' in Settings → Models & Runtime → Catalog.",
+                $"Model '{target.ModelId}' has invalid RuntimeConfigJson: {ex.Message}",
+                action: $"Fix the RuntimeConfigJson payload for '{target.ModelId}' in Settings → Models & Runtime → Catalog.",
                 serviceId: "Chat",
                 modelId: target.ModelId,
                 providerSection: "LlamaCpp",

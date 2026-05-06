@@ -1012,7 +1012,7 @@ public class GuidesService(
         {
             try
             {
-                var runtime = LocalRuntimeConfigurationParser.ParseRequired(model.ModelId, model.LocalRuntimeJson);
+                var runtime = LocalRuntimeConfigurationParser.ParseRequired(model.ModelId, model.RuntimeConfigJson);
                 var runtimeProfile = await _runtimeProfileResolver.ResolveAsync(runtime.RuntimeProfileId);
 
                 if (!result.Profiles.Contains(runtimeProfile.ProfileId, StringComparer.OrdinalIgnoreCase))
@@ -1081,7 +1081,7 @@ public class GuidesService(
                 m.ModelId,
                 m.Provider,
                 m.ReasoningChoicesJson,
-                m.LocalRuntimeJson
+                m.RuntimeConfigJson
             })
             .FirstOrDefaultAsync();
 
@@ -1092,7 +1092,7 @@ public class GuidesService(
 
         if (string.Equals(model.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
         {
-            var runtime = LocalRuntimeConfigurationParser.ParseRequired(model.ModelId, model.LocalRuntimeJson);
+            var runtime = LocalRuntimeConfigurationParser.ParseRequired(model.ModelId, model.RuntimeConfigJson);
             var profile = await _runtimeProfileResolver.ResolveAsync(runtime.RuntimeProfileId);
 
             ValidateSamplingParameters(model.ModelId, profile, temperature, topP, samplingOverrides);
