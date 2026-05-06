@@ -1587,8 +1587,11 @@ namespace GuideAntsApi.Services
                 ["prompt"] = prompt,
                 ["n"] = Math.Max(1, n),
                 ["size"] = size,
-                ["response_format"] = "b64_json"
             };
+            if (OpenAiImageModelUsesLegacyResponseFormat(model))
+            {
+                requestBody["response_format"] = "b64_json";
+            }
 
             using var client = _httpClientFactory.CreateClient();
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
@@ -1639,7 +1642,10 @@ namespace GuideAntsApi.Services
             content.Add(new StringContent(model), "model");
             content.Add(new StringContent(size), "size");
             content.Add(new StringContent(Math.Max(1, n).ToString()), "n");
-            content.Add(new StringContent("b64_json"), "response_format");
+            if (OpenAiImageModelUsesLegacyResponseFormat(model))
+            {
+                content.Add(new StringContent("b64_json"), "response_format");
+            }
 
             using var client = _httpClientFactory.CreateClient();
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
@@ -1653,6 +1659,21 @@ namespace GuideAntsApi.Services
             }
 
             return await SaveResponseAndReturnBytes(result);
+        }
+
+        /// <summary>
+        /// DALL·E 2/3 accept <c>response_format</c> (<c>url</c> vs <c>b64_json</c>). GPT Image models
+        /// return <c>data[].b64_json</c> by default and reject this parameter.
+        /// </summary>
+        private static bool OpenAiImageModelUsesLegacyResponseFormat(string modelId)
+        {
+            var m = modelId.Trim();
+            if (m.Length == 0)
+            {
+                return true;
+            }
+
+            return !m.StartsWith("gpt-image", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string RequireImageModelId(string providerSection, string? modelId, string action)
