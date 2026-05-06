@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AddModelWizard } from '../AddModelWizard';
 
 describe('AddModelWizard provider options', () => {
-  it('shows new cloud provider options in provider selector', () => {
+  it('hides incomplete providers in provider selector', () => {
     render(
       <AddModelWizard
         isOpen
@@ -21,8 +21,8 @@ describe('AddModelWizard provider options', () => {
       />
     );
 
-    expect(screen.getByRole('option', { name: 'google-gemini-chat' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'hf-inference-chat' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'openrouter-chat' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Google Gemini API' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Hugging Face Inference' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'OpenRouter' })).not.toBeInTheDocument();
   });
 });

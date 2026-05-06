@@ -96,7 +96,7 @@ public sealed class RuntimeProfileSeeder : IRuntimeProfileSeeder
             ThoughtBlockPattern = GetOptionalString(root, "thoughtBlockPattern"),
             SamplingParametersJson = GetNestedObjectAsString(root, "samplingParametersJson", fileName),
             ThinkingControlJson = GetNestedObjectAsString(root, "thinkingControlJson", fileName),
-            Kind = GetOptionalString(root, "kind") ?? "local",
+            ProvidersJson = GetArrayAsString(root, "providers"),
             Created = DateTime.UtcNow,
             Updated = DateTime.UtcNow
         };
@@ -130,6 +130,13 @@ public sealed class RuntimeProfileSeeder : IRuntimeProfileSeeder
     private static string? GetOptionalString(JsonElement root, string propertyName)
     {
         return root.TryGetProperty(propertyName, out var element) ? element.GetString() : null;
+    }
+
+    private static string GetArrayAsString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Array)
+            return "[]";
+        return element.GetRawText();
     }
 
     /// <summary>

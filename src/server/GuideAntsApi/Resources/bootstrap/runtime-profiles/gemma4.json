@@ -2,6 +2,7 @@
   "profileId": "gemma4",
   "displayName": "Gemma 4",
   "description": "Profile for Gemma 4 model family. Thinking via <|think|> system message prefix.",
+  "providers": ["llama-cpp"],
   "combineSystemAndDeveloperMessages": true,
   "thoughtBlockPattern": "<\\|channel>thought[\\s\\S]*?<channel\\|>",
   "samplingParametersJson": {

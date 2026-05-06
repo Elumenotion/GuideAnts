@@ -57,8 +57,6 @@ export interface AddModelWizardState {
   catalogDescription: string;
   catalogDisplayOrder: string;
   catalogIsActive: boolean;
-  openAiReasoningEffortEnabled: boolean;
-  anthropicThinkingEnabled: boolean;
   /** Runtime profile ID — applies to all providers. */
   runtimeProfileId: string;
   llamaInstallSource: 'huggingface' | 'existingAlias';
@@ -81,8 +79,6 @@ export interface CatalogEditState {
   description: string;
   displayOrder: string;
   isActive: boolean;
-  openAiReasoningEffortEnabled: boolean;
-  anthropicThinkingEnabled: boolean;
   /** Runtime profile ID — applies to all providers. */
   runtimeProfileId: string;
   localRuntimeRouterModelId: string;
@@ -115,5 +111,6 @@ export interface ProfileFormState {
   thoughtBlockPattern: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
-  kind: 'local' | 'cloud';
+  /** Provider IDs this profile applies to, e.g. ["llama-cpp"] or ["openai-chat","azure-openai-chat"]. */
+  providers: string[];
 }

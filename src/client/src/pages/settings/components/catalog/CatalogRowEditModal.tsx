@@ -88,14 +88,9 @@ export function CatalogRowEditModal({ model, profiles, profilesLoading, inventor
     setSaving(true);
     setError(null);
     try {
-      // For llama-cpp rows, pass the selected runtime profile's thinkingControlJson
-      // so `buildCatalogEditRequest` can re-derive and persist `ReasoningChoicesJson`.
-      // Without this the save silently clears the dispatch-time reasoning surface.
-      const selectedProfile = value.provider === 'llama-cpp'
-        ? profiles.find((profile) => profile.profileId === value.runtimeProfileId.trim())
-        : undefined;
+      const selectedProfile = profiles.find((profile) => profile.profileId === value.runtimeProfileId.trim());
       const request = buildCatalogEditRequest(value, {
-        llamaProfileThinkingControlJson: selectedProfile?.thinkingControlJson ?? undefined,
+        profileThinkingControlJson: selectedProfile?.thinkingControlJson ?? undefined,
       });
       await api.settings.updateModel(model.modelId, request);
       await onSaved();
@@ -194,12 +189,20 @@ export function CatalogRowEditModal({ model, profiles, profilesLoading, inventor
               disabled={profilesLoading}
               className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="">{profilesLoading ? 'Loading profiles...' : 'Select runtime profile'}</option>
-              {profiles.map((profile) => (
-                <option key={profile.profileId} value={profile.profileId}>
-                  {profile.displayName} ({profile.profileId})
-                </option>
-              ))}
+              <option value="">
+                {profilesLoading
+                  ? 'Loading profiles...'
+                  : profiles.filter((p) => p.providers.includes(value.provider)).length === 0
+                  ? `No profiles defined for ${value.provider}`
+                  : 'Select runtime profile'}
+              </option>
+              {profiles
+                .filter((p) => p.providers.includes(value.provider))
+                .map((profile) => (
+                  <option key={profile.profileId} value={profile.profileId}>
+                    {profile.displayName} ({profile.profileId})
+                  </option>
+                ))}
             </select>
           </div>
 

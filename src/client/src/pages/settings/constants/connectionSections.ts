@@ -14,6 +14,7 @@ export interface ConnectionOwnershipCategory {
  * Remove entries here to re-enable them once ready.
  */
 export const HIDDEN_CLOUD_PROVIDER_SECTIONS = new Set<string>(['OpenRouter', 'HuggingFace']);
+export const HIDDEN_CHAT_MODEL_PROVIDERS = new Set<string>(['hf-inference-chat', 'openrouter-chat']);
 
 export const CONNECTION_OWNERSHIP_CATEGORIES: readonly ConnectionOwnershipCategory[] = [
   {

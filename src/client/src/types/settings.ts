@@ -373,7 +373,7 @@ export interface SettingsRuntimeProfileDto {
   thoughtBlockPattern?: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
-  kind: 'local' | 'cloud' | string;
+  providers: string[];
   created: string;
   updated?: string;
 }
@@ -386,7 +386,7 @@ export interface CreateRuntimeProfileRequest {
   thoughtBlockPattern?: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
-  kind?: 'local' | 'cloud' | string;
+  providers?: string[];
 }
 
 export interface UpdateRuntimeProfileRequest {
@@ -397,7 +397,7 @@ export interface UpdateRuntimeProfileRequest {
   thoughtBlockPattern?: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
-  kind?: 'local' | 'cloud' | string;
+  providers?: string[];
 }
 
 export interface EmbeddingsRebuildResponse {

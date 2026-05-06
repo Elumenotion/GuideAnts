@@ -208,25 +208,46 @@ public sealed class GoogleGeminiChatClient : IChatCompletionClient
                 GenerationConfig: new GoogleGeminiGenerationConfig(
                     Temperature: request.Temperature,
                     TopP: request.TopP,
-                    ThinkingConfig: ToThinkingConfig(request.ReasoningEffort)));
+                    ThinkingConfig: ToThinkingConfig(request.ReasoningEffort, model)));
         }
 
-        private static GoogleGeminiThinkingConfig? ToThinkingConfig(string? reasoningEffort)
+        // Gemini 2.5 series uses thinkingBudget (integer token count).
+        // Gemini 3+ series uses thinkingLevel (string).
+        private static GoogleGeminiThinkingConfig? ToThinkingConfig(string? reasoningEffort, string model)
         {
             if (string.IsNullOrWhiteSpace(reasoningEffort))
             {
                 return null;
             }
 
-            return reasoningEffort.Trim().ToLowerInvariant() switch
+            var m = model.ToLowerInvariant();
+            bool isGemini25 = m.Contains("gemini-2.5") || m.Contains("gemini-2-5");
+
+            if (isGemini25)
             {
-                "minimal" => new GoogleGeminiThinkingConfig("MINIMAL"),
-                "low" => new GoogleGeminiThinkingConfig("LOW"),
-                "medium" => new GoogleGeminiThinkingConfig("MEDIUM"),
-                "high" => new GoogleGeminiThinkingConfig("HIGH"),
+                int budget = reasoningEffort.Trim().ToLowerInvariant() switch
+                {
+                    "none"   => 0,      // Flash only: disables thinking
+                    "low"    => 2048,
+                    "medium" => 8192,
+                    "high"   => 24576,
+                    _ => throw new InvalidOperationException(
+                        $"Unsupported Google Gemini reasoning_effort '{reasoningEffort}'.")
+                };
+                return new GoogleGeminiThinkingConfig(ThinkingBudget: budget, ThinkingLevel: null);
+            }
+
+            // Gemini 3+ — thinkingLevel string
+            string level = reasoningEffort.Trim().ToLowerInvariant() switch
+            {
+                "minimal" => "minimal",
+                "low"     => "low",
+                "medium"  => "medium",
+                "high"    => "high",
                 _ => throw new InvalidOperationException(
                     $"Unsupported Google Gemini reasoning_effort '{reasoningEffort}'.")
             };
+            return new GoogleGeminiThinkingConfig(ThinkingBudget: null, ThinkingLevel: level);
         }
 
         private static IEnumerable<GoogleGeminiPart> ToSystemParts(ChatMessage message)
@@ -634,7 +655,8 @@ internal sealed record GoogleGeminiGenerationConfig(
     GoogleGeminiThinkingConfig? ThinkingConfig);
 
 internal sealed record GoogleGeminiThinkingConfig(
-    string ThinkingLevel);
+    int? ThinkingBudget,
+    string? ThinkingLevel);
 
 internal sealed record GoogleGeminiTool(
     IReadOnlyList<GoogleGeminiFunctionDeclaration> FunctionDeclarations);

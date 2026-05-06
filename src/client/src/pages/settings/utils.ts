@@ -25,7 +25,7 @@ export function createEmptyProfileForm(): ProfileFormState {
     thoughtBlockPattern: '',
     samplingParametersJson: '{}',
     thinkingControlJson: '{}',
-    kind: 'local',
+    providers: [],
   };
 }
 
@@ -56,7 +56,7 @@ export function buildProfileCreateRequest(form: ProfileFormState): CreateRuntime
     thoughtBlockPattern: form.thoughtBlockPattern.trim() || undefined,
     samplingParametersJson: form.samplingParametersJson,
     thinkingControlJson: form.thinkingControlJson,
-    kind: form.kind,
+    providers: form.providers,
   };
 }
 
@@ -74,7 +74,7 @@ type RuntimeProfileContractShape = Pick<
   | 'thoughtBlockPattern'
   | 'samplingParametersJson'
   | 'thinkingControlJson'
-  | 'kind'
+  | 'providers'
 >;
 
 export function createProfileFormFromContractShape(profile: RuntimeProfileContractShape): ProfileFormState {
@@ -86,7 +86,7 @@ export function createProfileFormFromContractShape(profile: RuntimeProfileContra
     thoughtBlockPattern: profile.thoughtBlockPattern ?? '',
     samplingParametersJson: profile.samplingParametersJson,
     thinkingControlJson: profile.thinkingControlJson,
-    kind: (profile.kind === 'cloud' ? 'cloud' : 'local') as 'local' | 'cloud',
+    providers: profile.providers ?? [],
   };
 }
 
@@ -141,7 +141,7 @@ export function importRuntimeProfile(json: string): ProfileFormState {
     thoughtBlockPattern: candidate.thoughtBlockPattern ?? undefined,
     samplingParametersJson: candidate.samplingParametersJson,
     thinkingControlJson: candidate.thinkingControlJson,
-    kind: typeof candidate.kind === 'string' ? candidate.kind : 'local',
+    providers: Array.isArray(candidate.providers) ? (candidate.providers as string[]) : [],
   });
 
   buildProfileCreateRequest(form);
@@ -157,8 +157,6 @@ export function createEmptyAddModelWizardState(preselectedProvider?: string | nu
     catalogDescription: '',
     catalogDisplayOrder: '',
     catalogIsActive: true,
-    openAiReasoningEffortEnabled: false,
-    anthropicThinkingEnabled: provider === 'anthropic',
     runtimeProfileId: '',
     llamaInstallSource: 'huggingface',
     llamaRouterModelId: '',
@@ -312,7 +310,6 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
 
 export function createCatalogEditStateFromModel(model: SettingsModelDto): CatalogEditState {
   const parsedRuntime = parseCanonicalLocalRuntimeJson(model.runtimeConfigJson);
-  const reasoningChoices = parseReasoningChoices(model.reasoningChoicesJson);
   return {
     modelId: model.modelId,
     provider: model.provider,
@@ -320,16 +317,6 @@ export function createCatalogEditStateFromModel(model: SettingsModelDto): Catalo
     description: model.description ?? '',
     displayOrder: model.displayOrder?.toString() ?? '',
     isActive: model.isActive,
-    openAiReasoningEffortEnabled:
-      reasoningChoices.includes('minimal')
-      || reasoningChoices.includes('low')
-      || reasoningChoices.includes('medium')
-      || reasoningChoices.includes('high'),
-    anthropicThinkingEnabled:
-      reasoningChoices.includes('minimal')
-      || reasoningChoices.includes('low')
-      || reasoningChoices.includes('medium')
-      || reasoningChoices.includes('high'),
     runtimeProfileId: parseRuntimeProfileId(model.runtimeConfigJson),
     localRuntimeRouterModelId: parsedRuntime?.routerModelId ?? '',
     localRuntimeLoadParamsJson: parsedRuntime?.loadParams ? JSON.stringify(parsedRuntime.loadParams, null, 2) : '',
@@ -427,22 +414,7 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
     throw new Error('Catalog display name is required.');
   }
   let providerConfig: Record<string, unknown> | undefined;
-  if (
-    provider === 'openai-chat'
-    || provider === 'openai-responses'
-    || provider === 'azure-openai-chat'
-    || provider === 'azure-openai-responses'
-  ) {
-    providerConfig = {
-      reasoningEffortEnabled: state.openAiReasoningEffortEnabled,
-      runtimeProfileId: state.runtimeProfileId.trim() || undefined,
-    };
-  } else if (provider === 'anthropic') {
-    providerConfig = {
-      thinkingEnabled: state.anthropicThinkingEnabled,
-      runtimeProfileId: state.runtimeProfileId.trim() || undefined,
-    };
-  } else if (provider !== 'llama-cpp' && state.runtimeProfileId.trim()) {
+  if (provider !== 'llama-cpp' && state.runtimeProfileId.trim()) {
     providerConfig = {
       runtimeProfileId: state.runtimeProfileId.trim(),
     };
@@ -546,7 +518,7 @@ function deriveReasoningChoicesJsonFromProfile(profileThinkingControlJson?: stri
 
 export function buildCatalogEditRequest(
   state: CatalogEditState,
-  options?: { llamaProfileThinkingControlJson?: string }
+  options?: { profileThinkingControlJson?: string }
 ): UpdateSettingsModelRequest {
   const modelId = state.modelId.trim();
   const provider = state.provider.trim();
@@ -561,23 +533,7 @@ export function buildCatalogEditRequest(
     throw new Error('Display name is required.');
   }
 
-  let reasoningChoicesJson: string | undefined;
-  if (
-    provider === 'openai-chat'
-    || provider === 'openai-responses'
-    || provider === 'azure-openai-chat'
-    || provider === 'azure-openai-responses'
-  ) {
-    reasoningChoicesJson = state.openAiReasoningEffortEnabled
-      ? JSON.stringify(['minimal', 'low', 'medium', 'high'])
-      : undefined;
-  } else if (provider === 'anthropic') {
-    reasoningChoicesJson = state.anthropicThinkingEnabled
-      ? JSON.stringify(['minimal', 'low', 'medium', 'high'])
-      : undefined;
-  } else if (provider === 'llama-cpp') {
-    reasoningChoicesJson = deriveReasoningChoicesJsonFromProfile(options?.llamaProfileThinkingControlJson);
-  }
+  const reasoningChoicesJson = deriveReasoningChoicesJsonFromProfile(options?.profileThinkingControlJson);
 
   let runtimeConfigJson: string | undefined;
   if (provider === 'llama-cpp') {
@@ -601,23 +557,6 @@ export function buildCatalogEditRequest(
   };
 }
 
-function parseReasoningChoices(reasoningChoicesJson?: string): string[] {
-  if (!reasoningChoicesJson || reasoningChoicesJson.trim().length === 0) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(reasoningChoicesJson) as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0);
-  } catch {
-    return [];
-  }
-}
 
 export function payloadSignature(payload: Record<string, unknown>): string {
   const sortedKeys = Object.keys(payload).sort((left, right) => left.localeCompare(right));

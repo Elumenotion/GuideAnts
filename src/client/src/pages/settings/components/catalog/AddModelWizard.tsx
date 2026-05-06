@@ -11,6 +11,7 @@ import {
 import { ActiveAddOperationState, AddModelProvider, AddModelWizardState } from '../../types';
 import { buildAddModelRequest, createEmptyAddModelWizardState, getErrorMessage } from '../../utils';
 import { getCatalogProviderDisplayName } from '../../constants/displayLabels';
+import { HIDDEN_CHAT_MODEL_PROVIDERS } from '../../constants/connectionSections';
 import { TextActionButton } from '../shared/ActionButtons';
 import { SettingsModal } from '../shared/SettingsModal';
 import { AnthropicAddForm } from './providers/AnthropicForm';
@@ -22,6 +23,7 @@ import { LlamaCppAddForm } from './providers/LlamaCppForm';
 import { OpenAiChatAddForm } from './providers/OpenAiChatForm';
 import { OpenAiResponsesAddForm } from './providers/OpenAiResponsesForm';
 import { OpenRouterAddForm } from './providers/OpenRouterForm';
+import { KnownCloudModel, ModelIdTypeahead } from './ModelIdTypeahead';
 
 const ADD_MODEL_STEPS = [
   { id: 'queued', label: 'Queued', help: 'Waiting for install worker.' },
@@ -30,6 +32,22 @@ const ADD_MODEL_STEPS = [
   { id: 'registeringAlias', label: 'Registering alias', help: 'Writing router alias mapping.' },
   { id: 'completed', label: 'Completed', help: 'Model is ready for runtime operations.' },
 ] as const;
+
+const CATALOG_PROVIDER_OPTIONS: readonly AddModelProvider[] = [
+  'openai-chat',
+  'openai-responses',
+  'azure-openai-chat',
+  'azure-openai-responses',
+  'anthropic',
+  'llama-cpp',
+  'google-gemini-chat',
+  'hf-inference-chat',
+  'openrouter-chat',
+];
+
+const VISIBLE_CATALOG_PROVIDER_OPTIONS = CATALOG_PROVIDER_OPTIONS.filter(
+  (provider) => !HIDDEN_CHAT_MODEL_PROVIDERS.has(provider)
+);
 
 interface AddModelWizardProps {
   isOpen: boolean;
@@ -217,6 +235,9 @@ export function AddModelWizard({
       return;
     }
     const next = createEmptyAddModelWizardState(providerPreselect);
+    if (next.provider && HIDDEN_CHAT_MODEL_PROVIDERS.has(next.provider)) {
+      next.provider = '';
+    }
     if (next.provider) {
       setStep('catalog');
     } else {
@@ -443,23 +464,16 @@ export function AddModelWizard({
               setValue((previous) => ({
                 ...previous,
                 provider,
-                anthropicThinkingEnabled: provider === 'anthropic'
-                  ? true
-                  : previous.anthropicThinkingEnabled,
               }));
             }}
             className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="">Select provider</option>
-            <option value="openai-chat">openai-chat</option>
-            <option value="openai-responses">openai-responses</option>
-            <option value="azure-openai-chat">Microsoft Foundry (Completions)</option>
-            <option value="azure-openai-responses">Microsoft Foundry (Responses)</option>
-            <option value="anthropic">anthropic</option>
-            <option value="llama-cpp">llama-cpp</option>
-            <option value="google-gemini-chat">google-gemini-chat</option>
-            <option value="hf-inference-chat">hf-inference-chat</option>
-            <option value="openrouter-chat">openrouter-chat</option>
+            {VISIBLE_CATALOG_PROVIDER_OPTIONS.map((p) => (
+              <option key={p} value={p}>
+                {getCatalogProviderDisplayName(p)}
+              </option>
+            ))}
           </select>
         </div>
       ) : null}
@@ -468,15 +482,25 @@ export function AddModelWizard({
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Model ID</label>
-            <input
-              type="text"
+            <ModelIdTypeahead
+              provider={value.provider}
               value={value.catalogModelId}
-              onChange={(event) => {
+              onChange={(next) => {
                 setModelIdError(null);
-                setValue((previous) => ({ ...previous, catalogModelId: event.target.value }));
+                setValue((previous) => ({ ...previous, catalogModelId: next }));
+              }}
+              onSelectSuggestion={(suggestion: KnownCloudModel) => {
+                setModelIdError(null);
+                setValue((previous) => ({
+                  ...previous,
+                  catalogModelId: suggestion.modelId,
+                  catalogDisplayName: suggestion.displayName,
+                  catalogDescription: suggestion.description ?? '',
+                  runtimeProfileId: suggestion.runtimeProfileId ?? '',
+                }));
               }}
               onBlur={() => void validateModelId()}
-              className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              hasError={!!modelIdError}
             />
             {checkingModelId ? <p className="text-xs text-gray-500">Validating id…</p> : null}
             {modelIdError ? <p className="text-xs text-red-700">{modelIdError}</p> : null}
@@ -531,12 +555,20 @@ export function AddModelWizard({
                 disabled={profilesLoading}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                <option value="">{profilesLoading ? 'Loading profiles...' : 'Select runtime profile (optional)'}</option>
-                {profiles.map((profile) => (
-                  <option key={profile.profileId} value={profile.profileId}>
-                    {profile.displayName} ({profile.profileId})
-                  </option>
-                ))}
+                <option value="">
+                  {profilesLoading
+                    ? 'Loading profiles...'
+                    : profiles.filter((p) => p.providers.includes(value.provider)).length === 0
+                    ? `No profiles defined for ${value.provider}`
+                    : 'Select runtime profile'}
+                </option>
+                {profiles
+                  .filter((p) => p.providers.includes(value.provider))
+                  .map((profile) => (
+                    <option key={profile.profileId} value={profile.profileId}>
+                      {profile.displayName} ({profile.profileId})
+                    </option>
+                  ))}
               </select>
               <p className="text-[11px] text-gray-500">
                 Assigns sampling parameter controls (Temperature, Top P) to this model in guide and assistant builders.

@@ -23,7 +23,7 @@ export function RuntimeProfileEditor({
   disableIdentityFields = false,
 }: RuntimeProfileEditorProps) {
   const inline = mode === 'inline';
-  const isLocal = value.kind !== 'cloud';
+  const isLocal = value.providers.includes('llama-cpp');
 
   return (
     <div className={inline ? 'space-y-3' : 'grid grid-cols-1 gap-4 md:grid-cols-2'}>

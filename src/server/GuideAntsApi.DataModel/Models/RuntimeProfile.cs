@@ -50,13 +50,12 @@ namespace GuideAntsApi.DataModel.Models
         public string ThinkingControlJson { get; set; } = "{}";
 
         /// <summary>
-        /// Discriminates between local (llama-cpp) and cloud profiles.
-        /// Local profiles expose all fields; cloud profiles expose only
-        /// sampling parameters.
+        /// JSON array of provider strings this profile applies to.
+        /// E.g. ["llama-cpp"], ["openai-chat","azure-openai-chat"], ["google-gemini-chat"].
+        /// Used to filter the profile list in the UI when a provider is already selected.
         /// </summary>
         [Required]
-        [StringLength(16)]
-        public string Kind { get; set; } = "local";
+        public string ProvidersJson { get; set; } = "[]";
 
         [Required]
         public DateTime Created { get; set; } = DateTime.UtcNow;

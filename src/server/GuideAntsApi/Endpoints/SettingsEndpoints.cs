@@ -243,10 +243,15 @@ public static class SettingsEndpoints
                             Error: null)));
                 }
 
+                var cloudReasoningChoicesJson = await DeriveCloudReasoningChoicesJsonAsync(
+                    runtimeProfileResolver,
+                    request,
+                    cancellationToken).ConfigureAwait(false);
+
                 var created = await settingsService.CreateModelAsync(
                     BuildModelCreateRequest(
                         request,
-                        BuildCloudReasoningChoicesJson(request),
+                        cloudReasoningChoicesJson,
                         runtimeConfigJson: BuildCloudRuntimeConfigJson(request)),
                     cancellationToken).ConfigureAwait(false);
 
@@ -1889,27 +1894,19 @@ public static class SettingsEndpoints
         return choices.Count == 0 ? null : JsonSerializer.Serialize(choices);
     }
 
-    private static string? BuildCloudReasoningChoicesJson(AddModelRequest request)
+    private static async Task<string?> DeriveCloudReasoningChoicesJsonAsync(
+        IRuntimeProfileResolver runtimeProfileResolver,
+        AddModelRequest request,
+        CancellationToken cancellationToken)
     {
-        var provider = request.Provider.Trim();
-        if (string.Equals(provider, "openai-chat", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(provider, "openai-responses", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(provider, "azure-openai-chat", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(provider, "azure-openai-responses", StringComparison.OrdinalIgnoreCase))
+        var runtimeProfileId = GetProviderConfigString(request.ProviderConfig, "runtimeProfileId");
+        if (string.IsNullOrWhiteSpace(runtimeProfileId))
         {
-            return GetProviderConfigBoolean(request.ProviderConfig, "reasoningEffortEnabled")
-                ? JsonSerializer.Serialize(new[] { "minimal", "low", "medium", "high" })
-                : null;
+            return null;
         }
 
-        if (string.Equals(provider, "anthropic", StringComparison.OrdinalIgnoreCase))
-        {
-            return GetProviderConfigBoolean(request.ProviderConfig, "thinkingEnabled")
-                ? JsonSerializer.Serialize(new[] { "minimal", "low", "medium", "high" })
-                : null;
-        }
-
-        return null;
+        return await DeriveLlamaReasoningChoicesJsonAsync(runtimeProfileResolver, runtimeProfileId, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static bool GetProviderConfigBoolean(JsonObject? providerConfig, string propertyName)
@@ -1927,6 +1924,23 @@ public static class SettingsEndpoints
         }
 
         return bool.TryParse(node.ToJsonString(), out var fallback) && fallback;
+    }
+
+    private static string? GetProviderConfigString(JsonObject? providerConfig, string propertyName)
+    {
+        if (providerConfig is null
+            || !providerConfig.TryGetPropertyValue(propertyName, out var node)
+            || node is null)
+        {
+            return null;
+        }
+
+        if (node is JsonValue value && value.TryGetValue<string>(out var str))
+        {
+            return str;
+        }
+
+        return null;
     }
 
     private static AddModelErrorDto MapAddModelRoutingError(RoutingException exception)

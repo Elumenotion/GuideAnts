@@ -2,7 +2,7 @@
   "profileId": "openai_chat_standard",
   "displayName": "OpenAI Chat Standard",
   "description": "Standard sampling profile for OpenAI chat-completions models (gpt-4.1, gpt-4o, etc.).",
-  "kind": "cloud",
+  "providers": ["openai-chat", "azure-openai-chat"],
   "combineSystemAndDeveloperMessages": false,
   "samplingParametersJson": {
     "temperature": { "key": "temperature", "label": "Temperature", "description": "Controls randomness: lower is focused, higher is creative", "min": 0.0, "max": 2.0, "step": 0.1, "default": 1.0, "displayOrder": 0, "exposedInGuideBuilder": true },

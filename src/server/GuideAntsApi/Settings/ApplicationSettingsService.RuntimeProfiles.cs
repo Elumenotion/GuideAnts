@@ -48,7 +48,7 @@ public sealed partial class ApplicationSettingsService
             ThoughtBlockPattern = request.ThoughtBlockPattern,
             SamplingParametersJson = request.SamplingParametersJson,
             ThinkingControlJson = request.ThinkingControlJson,
-            Kind = request.Kind.Trim(),
+            ProvidersJson = SerializeProviders(request.Providers),
             Created = DateTime.UtcNow,
             Updated = DateTime.UtcNow
         };
@@ -80,7 +80,7 @@ public sealed partial class ApplicationSettingsService
         entity.ThoughtBlockPattern = request.ThoughtBlockPattern;
         entity.SamplingParametersJson = request.SamplingParametersJson;
         entity.ThinkingControlJson = request.ThinkingControlJson;
-        entity.Kind = request.Kind.Trim();
+        entity.ProvidersJson = SerializeProviders(request.Providers);
         entity.Updated = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -121,7 +121,7 @@ public sealed partial class ApplicationSettingsService
             entity.ThoughtBlockPattern,
             entity.SamplingParametersJson,
             entity.ThinkingControlJson,
-            entity.Kind,
+            DeserializeProviders(entity.ProvidersJson),
             entity.Created,
             entity.Updated);
     }
@@ -193,4 +193,14 @@ public sealed partial class ApplicationSettingsService
     {
         PropertyNameCaseInsensitive = true
     };
+
+    private static string SerializeProviders(IReadOnlyList<string>? providers)
+        => JsonSerializer.Serialize(providers ?? []);
+
+    private static IReadOnlyList<string> DeserializeProviders(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? []; }
+        catch { return []; }
+    }
 }

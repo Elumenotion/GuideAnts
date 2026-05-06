@@ -1,0 +1,141 @@
+[
+  {
+    "modelId": "gpt-4.1",
+    "displayName": "GPT-4.1",
+    "providers": ["openai-chat", "azure-openai-chat"],
+    "description": "Flagship model for deep reasoning, creativity, and enterprise-grade performance.",
+    "runtimeProfileId": "openai_chat_standard",
+    "reasoningEffortEnabled": false
+  },
+  {
+    "modelId": "gpt-4.1-mini",
+    "displayName": "GPT-4.1 Mini",
+    "providers": ["openai-chat", "azure-openai-chat"],
+    "description": "Balanced performance and cost. Ideal for most general-purpose tasks.",
+    "runtimeProfileId": "openai_chat_standard",
+    "reasoningEffortEnabled": false
+  },
+  {
+    "modelId": "gpt-4.1-nano",
+    "displayName": "GPT-4.1 Nano",
+    "providers": ["openai-chat", "azure-openai-chat"],
+    "description": "Fastest and most cost-efficient GPT-4.1 model for latency-sensitive tasks.",
+    "runtimeProfileId": "openai_chat_standard",
+    "reasoningEffortEnabled": false
+  },
+  {
+    "modelId": "gpt-4o",
+    "displayName": "GPT-4o",
+    "providers": ["openai-chat", "azure-openai-chat"],
+    "description": "Multimodal flagship model with vision, audio, and text capabilities.",
+    "runtimeProfileId": "openai_chat_standard",
+    "reasoningEffortEnabled": false
+  },
+  {
+    "modelId": "gpt-4o-mini",
+    "displayName": "GPT-4o Mini",
+    "providers": ["openai-chat", "azure-openai-chat"],
+    "description": "Small, efficient multimodal model optimised for speed and cost.",
+    "runtimeProfileId": "openai_chat_standard",
+    "reasoningEffortEnabled": false
+  },
+  {
+    "modelId": "gpt-5-chat",
+    "displayName": "GPT-5 Chat",
+    "providers": ["openai-chat", "azure-openai-chat"],
+    "description": "GPT-5 via the chat-completions endpoint.",
+    "runtimeProfileId": "openai_chat_standard",
+    "reasoningEffortEnabled": false
+  },
+  {
+    "modelId": "gpt-5.1",
+    "displayName": "GPT-5.1",
+    "providers": ["openai-chat", "azure-openai-chat"],
+    "description": "GPT-5.1 via the chat-completions endpoint.",
+    "runtimeProfileId": "openai_chat_standard",
+    "reasoningEffortEnabled": false
+  },
+  {
+    "modelId": "o3",
+    "displayName": "o3",
+    "providers": ["openai-responses", "azure-openai-responses"],
+    "description": "Advanced reasoning model. Reasoning effort is configurable.",
+    "runtimeProfileId": "openai_responses_reasoning",
+    "reasoningEffortEnabled": true
+  },
+  {
+    "modelId": "o4-mini",
+    "displayName": "o4 Mini",
+    "providers": ["openai-responses", "azure-openai-responses"],
+    "description": "Compact reasoning model balancing speed and reasoning depth.",
+    "runtimeProfileId": "openai_responses_reasoning",
+    "reasoningEffortEnabled": true
+  },
+  {
+    "modelId": "gpt-5",
+    "displayName": "GPT-5",
+    "providers": ["openai-responses", "azure-openai-responses"],
+    "description": "GPT-5 via the Responses API with extended reasoning support.",
+    "runtimeProfileId": "openai_responses_reasoning",
+    "reasoningEffortEnabled": true
+  },
+  {
+    "modelId": "gpt-5-mini",
+    "displayName": "GPT-5 Mini",
+    "providers": ["openai-responses", "azure-openai-responses"],
+    "description": "Compact GPT-5 via the Responses API.",
+    "runtimeProfileId": "openai_responses_reasoning",
+    "reasoningEffortEnabled": true
+  },
+  {
+    "modelId": "gpt-5-nano",
+    "displayName": "GPT-5 Nano",
+    "providers": ["openai-responses", "azure-openai-responses"],
+    "description": "Smallest GPT-5 Responses model, optimised for cost and latency.",
+    "runtimeProfileId": "openai_responses_reasoning",
+    "reasoningEffortEnabled": true
+  },
+  {
+    "modelId": "gpt-5.2-codex",
+    "displayName": "GPT-5.2 Codex",
+    "providers": ["openai-responses", "azure-openai-responses"],
+    "description": "Code-specialised Responses-API model with extended reasoning.",
+    "runtimeProfileId": "openai_responses_reasoning",
+    "reasoningEffortEnabled": true
+  },
+  {
+    "modelId": "claude-opus-4-5",
+    "displayName": "Claude Opus 4.5",
+    "providers": ["anthropic"],
+    "description": "Anthropic's most capable model. Best for complex reasoning and long-context tasks.",
+    "runtimeProfileId": "anthropic_standard"
+  },
+  {
+    "modelId": "claude-sonnet-4-5",
+    "displayName": "Claude Sonnet 4.5",
+    "providers": ["anthropic"],
+    "description": "Balanced capability and speed. Strong reasoning with extended thinking support.",
+    "runtimeProfileId": "anthropic_standard"
+  },
+  {
+    "modelId": "claude-haiku-4-5",
+    "displayName": "Claude Haiku 4.5",
+    "providers": ["anthropic"],
+    "description": "Fastest and most compact Claude model for responsive, high-volume tasks.",
+    "runtimeProfileId": "anthropic_standard"
+  },
+  {
+    "modelId": "gemini-2.5-pro",
+    "displayName": "Gemini 2.5 Pro",
+    "providers": ["google-gemini-chat"],
+    "description": "Google's most capable Gemini model with multimodal reasoning.",
+    "runtimeProfileId": ""
+  },
+  {
+    "modelId": "gemini-2.5-flash",
+    "displayName": "Gemini 2.5 Flash",
+    "providers": ["google-gemini-chat"],
+    "description": "Fast and cost-efficient Gemini model for high-throughput workloads.",
+    "runtimeProfileId": ""
+  }
+]

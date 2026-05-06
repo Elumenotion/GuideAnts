@@ -2,6 +2,7 @@
   "profileId": "qwen3_6",
   "displayName": "Qwen 3.6",
   "description": "Profile for Qwen 3.6 model family. Thinking via chat_template_kwargs.enable_thinking.",
+  "providers": ["llama-cpp"],
   "combineSystemAndDeveloperMessages": true,
   "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
   "samplingParametersJson": {

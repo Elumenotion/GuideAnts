@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 
@@ -188,7 +189,7 @@ public sealed partial class ApplicationSettingsService
             return [$"ReasoningEffort cannot be set because catalog model '{defaultModelId}' does not exist."];
         }
 
-        var reasoningChoices = ParseReasoningChoices(model.ReasoningChoicesJson);
+        var reasoningChoices = await ResolveEffectiveReasoningChoicesAsync(model, cancellationToken);
         if (reasoningChoices.Count == 0)
         {
             return [$"Catalog model '{defaultModelId}' does not declare any reasoning choices."];
@@ -412,6 +413,53 @@ public sealed partial class ApplicationSettingsService
                 ?? [];
         }
         catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static readonly JsonSerializerOptions SectionsJsonCaseInsensitive = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    /// <summary>
+    /// Returns the effective reasoning choices for a model: the model's own
+    /// <c>ReasoningChoicesJson</c> when present, otherwise the choices declared
+    /// by the model's assigned runtime profile's ThinkingControl (e.g. Gemini).
+    /// This mirrors the same resolution logic used by <c>CatalogService</c>.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> ResolveEffectiveReasoningChoicesAsync(
+        DataModel.Models.Model model,
+        CancellationToken cancellationToken)
+    {
+        var modelChoices = ParseReasoningChoices(model.ReasoningChoicesJson);
+        if (modelChoices.Count > 0)
+        {
+            return modelChoices;
+        }
+
+        if (string.IsNullOrEmpty(model.RuntimeConfigJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            var runtimeConfig = JsonSerializer.Deserialize<ModelRuntimeConfigDto>(
+                model.RuntimeConfigJson, SectionsJsonCaseInsensitive);
+
+            if (string.IsNullOrWhiteSpace(runtimeConfig?.RuntimeProfileId))
+            {
+                return [];
+            }
+
+            var profile = await _runtimeProfileResolver.ResolveAsync(
+                runtimeConfig.RuntimeProfileId, cancellationToken);
+
+            return profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? [];
+        }
+        catch
         {
             return [];
         }

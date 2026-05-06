@@ -2,7 +2,7 @@
   "profileId": "openai_responses_reasoning",
   "displayName": "OpenAI Responses (Reasoning)",
   "description": "Profile for OpenAI Responses-API reasoning models (o3, o4-mini, gpt-5). Reasoning effort is controlled via the model's ReasoningChoicesJson; no sampling sliders.",
-  "kind": "cloud",
+  "providers": ["openai-responses", "azure-openai-responses"],
   "combineSystemAndDeveloperMessages": false,
   "samplingParametersJson": {},
   "thinkingControlJson": {

@@ -260,7 +260,7 @@ public sealed record SettingsRuntimeProfileDto(
     string? ThoughtBlockPattern,
     string SamplingParametersJson,
     string ThinkingControlJson,
-    string Kind,
+    IReadOnlyList<string> Providers,
     DateTime Created,
     DateTime? Updated);
 
@@ -272,7 +272,7 @@ public sealed record CreateRuntimeProfileRequest(
     string? ThoughtBlockPattern,
     string SamplingParametersJson,
     string ThinkingControlJson,
-    string Kind = "local");
+    IReadOnlyList<string>? Providers = null);
 
 public sealed record UpdateRuntimeProfileRequest(
     string ProfileId,
@@ -282,7 +282,7 @@ public sealed record UpdateRuntimeProfileRequest(
     string? ThoughtBlockPattern,
     string SamplingParametersJson,
     string ThinkingControlJson,
-    string Kind = "local");
+    IReadOnlyList<string>? Providers = null);
 
 public sealed record EmbeddingsRebuildResponse(
     Guid JobId,

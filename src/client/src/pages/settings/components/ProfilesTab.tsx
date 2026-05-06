@@ -144,7 +144,7 @@ export function ProfilesTab({
                 <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Profile ID</th>
                     <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Display Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Kind</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Providers</th>
                     <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Updated</th>
                     <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-gray-500">Actions</th>
                   </tr>
@@ -155,9 +155,15 @@ export function ProfilesTab({
                     <td className="whitespace-nowrap px-4 py-3 text-sm font-mono text-gray-900">{profile.profileId}</td>
                     <td className="px-4 py-3 text-sm text-gray-900">{profile.displayName}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">
-                      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${profile.kind === 'cloud' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
-                        {profile.kind ?? 'local'}
-                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {profile.providers.length === 0 ? (
+                          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-mono text-gray-500">—</span>
+                        ) : profile.providers.map((p) => (
+                          <span key={p} className={`rounded px-1.5 py-0.5 text-xs font-mono font-medium ${p === 'llama-cpp' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                            {p}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(profile.updated ?? profile.created)}</td>
                     <td className="px-4 py-3 text-right text-sm">
