@@ -387,7 +387,6 @@ FodyWeavers.xsd
 /docker/build/Sandboxes/python311TorchCPU/ScriptExecutionAgent
 /docker/build/guideants-ai/ScriptExecutionAgent
 /docker/build/guideants-ai/requirements.txt
-/docker/.env
 /docker/.buildx-cache-deps
 /docker/.buildx-cache-final
 /docker/build/Sandboxes/python311TorchCUDA/temp

@@ -1,4 +1,4 @@
-# Waterfall Docker Build Processes
+# GuideAnts Docker Build Processes
 
 This document covers the active Docker build paths under `docker/` and explains how images are produced for local compose runs.
 
@@ -7,6 +7,7 @@ This document covers the active Docker build paths under `docker/` and explains 
 | Image / Service | Build Source | Built By | Used By |
 |---|---|---|---|
 | `guideants-ai-deps:<backend>-<hash12>` | `docker/build/guideants-ai/Dockerfile.<backend>` | `docker/build/build_guideants_ai.ps1` | cache/reuse layer for final GuideAnts AI image |
+| `guideants-ai-deps:<backend>-cache` | `docker/build/guideants-ai/Dockerfile.<backend>` | `docker/build/build_guideants_ai.ps1` | stable local cache source for future deps rebuilds |
 | `guideants-ai:<backend>-<YYDDD>.<HHmm>` | `docker/build/guideants-ai/Dockerfile.<backend>` | `docker/build/build_guideants_ai.ps1` | `guideants-ai` service (`GA_AI_CUDA_IMAGE` / `GA_AI_CPU_IMAGE` / `GA_AI_ROCM_IMAGE`) |
 | `guideants-webapi-ui:<YYDDD>.<HHmm>` | `docker/build/webapi-ui/Dockerfile` | `docker/build/build_webapi_ui.ps1` | `guideants-webapi-ui` profile service (`GA_WEBAPI_UI_IMAGE`) |
 | `mssql2025-express-fts` | `docker/build/mssql-fts/Dockerfile` | `docker/build/build_guideants_ai.ps1 -All` | `mssql-express` service |
@@ -17,6 +18,19 @@ Notes:
 - `docker/docker-compose.cuda.yml` and `docker/docker-compose.cpu.yml` reference image tags via `docker/.env` (`GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, `GA_WEBAPI_UI_IMAGE`).
 - `guideants-webapi-ui` is optional and only starts when compose profile `webapi-ui` is enabled.
 - GitHub Actions now publish GHCR copies of the AI, PlantUML, SearXNG, webapi slim, and webapi mssql images without changing the local compose image-selection flow.
+
+## GuideAnts AI Cache Requirements
+
+The AI image is deliberately split into `deps-*` and `final-*` stages. These requirements must hold for local development builds:
+
+- Heavy runtime dependencies belong in `deps-*`; app/service code and runtime wiring belong in `final-*`.
+- `sd-cli` and `sd-server` are runtime dependencies, so they belong in `deps-*`, not `final-*`.
+- A deps change may create a new `guideants-ai-deps:<backend>-<hash12>` image, but the hash change itself must not force Docker to rebuild every deps layer from scratch.
+- When one deps instruction changes, Docker must still have a stable cache source for unchanged earlier deps layers and intermediate builder stages.
+- The hash tag is for exact image selection. The stable `guideants-ai-deps:<backend>-cache` tag is for layer reuse across deps hash changes.
+- `-RebuildBase` is the only normal path that intentionally disables this cache behavior.
+
+The build script supports those requirements by tagging every deps build with both the hash tag and stable cache tag, importing the stable cache tag with `--cache-from`, and exporting deps cache with `mode=max` plus inline cache metadata.
 
 ## GHCR Publish Workflows
 
@@ -63,10 +77,11 @@ Script flow:
 4. Copies backend-specific `requirements.txt` from sandbox folder, then strips `torch*` entries so torch stays backend-controlled in Dockerfile.
 5. Computes a deterministic dependency hash from Dockerfile + dependency input files.
 6. Builds or reuses `guideants-ai-deps:<backend>-<hash12>` from `deps-cpu` / `deps-cuda13` / `deps-rocm`.
-7. Runs final build with `--target <final-target>`, `--cache-from <deps-image>`, and backend-specific deps image build args.
-8. Cleans staged artifacts (`ScriptExecutionAgent`, staged `requirements.txt`).
-9. Writes `GA_AI_CUDA_IMAGE=<new tag>`, `GA_AI_CPU_IMAGE=<new tag>`, or `GA_AI_ROCM_IMAGE=<new tag>` into `docker/.env`.
-10. If `-All` is set, also builds PlantUML and MSSQL FTS images, then invokes `build_webapi_ui.ps1` to build the compose-used WebAPI+UI image.
+7. Tags the same deps image as `guideants-ai-deps:<backend>-cache`, so future deps rebuilds can reuse unchanged layers from the previous deps image even when the hash changes.
+8. Runs final build with `--target <final-target>`, `--cache-from <deps-image>`, and backend-specific deps image build args.
+9. Cleans staged artifacts (`ScriptExecutionAgent`, staged `requirements.txt`).
+10. Writes `GA_AI_CUDA_IMAGE=<new tag>`, `GA_AI_CPU_IMAGE=<new tag>`, or `GA_AI_ROCM_IMAGE=<new tag>` into `docker/.env`.
+11. If `-All` is set, also builds PlantUML and MSSQL FTS images, then invokes `build_webapi_ui.ps1` to build the compose-used WebAPI+UI image.
 
 ## 3) AI Multi-Stage Build (Why It Matters)
 
@@ -85,17 +100,19 @@ What is in `pydeps-*` (heavy Python build stage):
 What is in `deps-*` (heavy runtime dependency layer, tagged for reuse):
 - runtime OS deps (`ffmpeg`, `nginx`, `graphviz`, etc.)
 - copied `/opt/venv` from `pydeps-*`
+- backend-specific `sd-cli` and `sd-server` binaries copied from `sd-cli-*-builder`
 - Playwright package + Chromium install
 
 What is in `final-*` (light app/service layer):
 - `ScriptExecutionAgent` publish artifacts copy
-- `nginx.conf`, `entrypoint.sh`, `start-llama.sh`, `start-asr.sh`
-- ASR app copy (`asr-service/`) and process wiring
+- service/runtime scripts and config (`nginx.conf`, `entrypoint.sh`, `start-*.sh`, router seed)
+- service app folders (`llama-admin-service/`, `asr-service/`, `sd-service/`, `tts-service/`, `emb-service/`, `media-service/`)
 - health check and entrypoint wiring
 
 Why this is the clean extension path:
 - Most service-extension changes (gateway routes, startup logic, agent publish output, runtime scripts) are in `final-*`.
-- Heavy dependency rebuilds are avoided by reusing `guideants-ai-deps:*` tags keyed off dependency file hashes.
+- Heavy dependency rebuilds are avoided by reusing hash tags for exact deps identity and stable `guideants-ai-deps:<backend>-cache` tags for layer reuse across deps hash changes.
+- The deps build exports `mode=max` BuildKit cache plus inline cache metadata, so intermediate builder stages can be reused when a later deps instruction changes.
 - `requirements.txt` is only reinstalled when dependency inputs change (or when `-RebuildBase` is used).
 
 This is the main optimization that keeps AI image iteration fast while still allowing new services/processes to be added cleanly.

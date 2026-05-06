@@ -154,16 +154,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=pydeps-rocm-builder /opt/venv /opt/venv
+COPY --from=sd-cli-rocm-builder /out/sd-cli /usr/local/bin/sd-cli
+COPY --from=sd-cli-rocm-builder /out/sd-server /usr/local/bin/sd-server
+RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install playwright \
     && playwright install --with-deps chromium
 
 FROM ${GA_DEPS_ROCM_IMAGE} AS final-rocm
-
-COPY --from=sd-cli-rocm-builder /out/sd-cli /usr/local/bin/sd-cli
-COPY --from=sd-cli-rocm-builder /out/sd-server /usr/local/bin/sd-server
-RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server
 
 COPY ScriptExecutionAgent/ /app/script-agent/
 COPY nginx.conf /etc/nginx/nginx.conf

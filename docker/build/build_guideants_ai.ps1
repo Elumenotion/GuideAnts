@@ -182,10 +182,13 @@ $depsHashInputs = @(
 )
 $depsHash = (Get-CombinedHash -Paths $depsHashInputs).Substring(0, 12)
 $depsTag = "guideants-ai-deps:${Backend}-${depsHash}"
+$depsCacheTag = "guideants-ai-deps:${Backend}-cache"
 Write-Host "Dependency image tag: $depsTag"
+Write-Host "Dependency cache tag: $depsCacheTag"
 
 try {
     $depsExists = Test-DockerImageExists -ImageTag $depsTag
+    $depsCacheExists = Test-DockerImageExists -ImageTag $depsCacheTag
     if ($RebuildBase -or -not $depsExists) {
         if ($RebuildBase) {
             Write-Host "Rebuilding dependency image without cache..." -ForegroundColor Yellow
@@ -203,11 +206,16 @@ try {
                 '--cache-from', "type=local,src=$depsCachePath",
                 '--cache-from', "type=local,src=$finalCachePath"
             )
+            if ($depsCacheExists) {
+                $depsBuildArgs += @('--cache-from', $depsCacheTag)
+            }
         }
         $depsBuildArgs += @(
-            '--cache-to', "type=local,dest=$depsCachePath,mode=min",
+            '--cache-to', "type=local,dest=$depsCachePath,mode=max",
+            '--cache-to', 'type=inline',
             '--target', $depsTarget,
             '-t', $depsTag,
+            '-t', $depsCacheTag,
             '-f', $dockerfilePath,
             $buildContext
         )
@@ -220,6 +228,11 @@ try {
     }
     else {
         Write-Host "Reusing cached dependency image: $depsTag" -ForegroundColor Green
+        docker tag $depsTag $depsCacheTag
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to tag dependency cache image $depsCacheTag from $depsTag"
+            exit 1
+        }
     }
 
     # --- Build final image (one Dockerfile, backend selected by target) ---
@@ -230,6 +243,7 @@ try {
     $dockerArgs += @(
         '--cache-from', "type=local,src=$depsCachePath",
         '--cache-from', "type=local,src=$finalCachePath",
+        '--cache-from', $depsCacheTag,
         '--cache-to', "type=local,dest=$finalCachePath,mode=min",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,

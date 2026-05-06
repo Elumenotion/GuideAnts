@@ -28,6 +28,24 @@ The build system is optimized for local iterative development:
 - backend selected interactively (CPU, CUDA 13, or ROCm)
 - deterministic dependency-image tags derived from dependency file hashes
 
+## Build Cache Requirements
+
+These requirements are intentional and must be preserved when changing the AI Dockerfiles or build script:
+
+- Heavy dependency work belongs in `deps-*`; application code, service scripts, gateway config, and startup wiring belong in `final-*`.
+- `sd-cli` and `sd-server` are runtime dependencies and must be produced before, and copied into, `deps-*`.
+- A dependency input change may require a new hash-tagged deps image, but it must not make Docker rebuild every deps layer from scratch solely because the hash tag changed.
+- When one deps instruction changes, Docker must still be able to reuse unchanged earlier layers from the previous deps image.
+- The changing hash tag must identify the deps contents used by the final image; it must not be the only cache identity available to future deps builds.
+- `-RebuildBase` is the explicit escape hatch for intentionally ignoring cache. Normal builds must preserve layer reuse.
+
+The local build script enforces this with two deps tags per backend:
+
+- `guideants-ai-deps:<backend>-<hash12>` is the exact deps image selected by dependency inputs.
+- `guideants-ai-deps:<backend>-cache` is the stable moving cache anchor used by later deps builds.
+
+The deps build also exports `mode=max` BuildKit cache and inline cache metadata. Those two features are required because the deps target depends on intermediate builder stages such as `sd-cli-*-builder` and `pydeps-*`; the cache must include those intermediate records, not only the final deps image layer.
+
 ## GHCR Publishing
 
 GitHub Actions publish the runtime images to GHCR as separate packages:
@@ -65,6 +83,7 @@ Workflow implementation details:
 
 - `sd-cli-cpu-builder` -> builds CPU `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
 - `sd-cli-cuda-builder` -> builds CUDA `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
+- `sd-cli-rocm-builder` -> builds ROCm/HIP `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
 
 - `runtime-cpu-base` -> OS/runtime base on `ghcr.io/ggml-org/llama.cpp:server`
 - `pydeps-cpu-builder` -> Python dependency build stage (includes build toolchain)
@@ -87,11 +106,11 @@ The script builds one target with `--target` based on prompt choice:
 - CUDA choice -> `--target final-cuda13`
 - ROCm choice -> `--target final-rocm`
 
-The backend choice is baked into the image:
+The backend choice is baked into the dependency image:
 
-- `final-cpu` gets `sd-cli` + `sd-server` from `sd-cli-cpu-builder`
-- `final-cuda13` gets CUDA-enabled `sd-cli` + `sd-server` from `sd-cli-cuda-builder`
-- `final-rocm` gets HIP-enabled `sd-cli` + `sd-server` from `sd-cli-rocm-builder`
+- `deps-cpu` gets `sd-cli` + `sd-server` from `sd-cli-cpu-builder`
+- `deps-cuda13` gets CUDA-enabled `sd-cli` + `sd-server` from `sd-cli-cuda-builder`
+- `deps-rocm` gets HIP-enabled `sd-cli` + `sd-server` from `sd-cli-rocm-builder`
 
 No startup toggle is used to switch stable-diffusion backend capability.
 
@@ -109,11 +128,16 @@ This removes duplicate torch/CUDA wheel installation and reduces image size.
 ### Caching behavior
 
 - BuildKit cache mounts are used for `apt` and `pip` in heavy stages.
+- The deps build exports a `mode=max` BuildKit cache and inline cache metadata so intermediate builder stages can be reused across deps hash changes.
 - The build script computes a hash from dependency inputs and tags dependency images:
   - `guideants-ai-deps:cpu-<hash12>`
   - `guideants-ai-deps:cuda13-<hash12>`
-- If the matching deps image exists, the final build reuses it via `--cache-from` and backend-specific build args.
-- If the deps image is missing (or `-RebuildBase` is passed), the script rebuilds it first.
+- Each successful deps build also updates a stable backend cache tag:
+  - `guideants-ai-deps:cpu-cache`
+  - `guideants-ai-deps:cuda13-cache`
+  - `guideants-ai-deps:rocm-cache`
+- If the matching hash-tagged deps image exists, the final build reuses it via backend-specific build args.
+- If the deps image is missing, the script rebuilds it with the stable cache tag as `--cache-from` so unchanged deps layers can be reused across hash changes.
 - `-RebuildBase` still forces no-cache builds for dependency and final targets.
 
 ## Script Behavior
@@ -134,10 +158,11 @@ Supported switches:
 3. Stage `ScriptExecutionAgent` and filtered `requirements.txt` into Docker build context
 4. Compute dependency hash from backend Dockerfile + requirement inputs
 5. Build/reuse backend-specific dependency image (`deps-cpu`, `deps-cuda13`, or `deps-rocm`)
-6. Build final runtime target (`final-cpu`, `final-cuda13`, or `final-rocm`) using the dependency image
-7. Clean staged artifacts
-8. Write `GA_AI_CUDA_IMAGE=<final-tag>`, `GA_AI_CPU_IMAGE=<final-tag>`, or `GA_AI_ROCM_IMAGE=<final-tag>` to `docker/.env`
-9. Optionally build PlantUML/MSSQL and invoke `build_webapi_ui.ps1` if `-All` was passed
+6. Tag the deps image with both the hash tag and stable backend cache tag
+7. Build final runtime target (`final-cpu`, `final-cuda13`, or `final-rocm`) using the dependency image
+8. Clean staged artifacts
+9. Write `GA_AI_CUDA_IMAGE=<final-tag>`, `GA_AI_CPU_IMAGE=<final-tag>`, or `GA_AI_ROCM_IMAGE=<final-tag>` to `docker/.env`
+10. Optionally build PlantUML/MSSQL and invoke `build_webapi_ui.ps1` if `-All` was passed
 
 ## File Layout
 
@@ -175,6 +200,7 @@ Two image categories are tagged:
 
 - dependency images (cache/reuse targets):
   - `guideants-ai-deps:<backend>-<hash12>`
+  - `guideants-ai-deps:<backend>-cache`
 - final runtime images (compose/runtime target):
   - `guideants-ai:<backend>-<YYDDD>.<HHmm>`
 
@@ -183,9 +209,10 @@ Examples:
 - `guideants-ai:cuda13-26096.1715`
 - `guideants-ai:cpu-26096.1715`
 - `guideants-ai-deps:cuda13-89ab1c2d3e4f`
+- `guideants-ai-deps:cuda13-cache`
 - `guideants-ai-deps:cpu-1a2b3c4d5e6f`
 
-`GA_AI_CUDA_IMAGE` or `GA_AI_CPU_IMAGE` in `docker/.env` is always updated to the latest built final tag.
+`GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, or `GA_AI_ROCM_IMAGE` in `docker/.env` is always updated to the latest built final tag.
 
 ## Running
 
