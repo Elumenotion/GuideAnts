@@ -1221,6 +1221,31 @@ public static class SettingsEndpoints
         .WithName("GetInfrastructureDependencies")
         .Produces<IReadOnlyList<SettingsRuntimeDependencyDto>>(StatusCodes.Status200OK);
 
+        group.MapPut("/infrastructure/dependencies/{key}", async (
+            string key,
+            [FromBody] InfrastructureDependencyOverrideRequestDto request,
+            IApplicationSettingsService settingsService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var updated = await settingsService.SetRuntimeDependencyOverrideAsync(
+                    key,
+                    request?.Value,
+                    cancellationToken);
+                return updated is null ? Results.NotFound() : Results.Ok(updated);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        })
+        .WithName("PutInfrastructureDependencyOverride")
+        .Accepts<InfrastructureDependencyOverrideRequestDto>("application/json")
+        .Produces<SettingsRuntimeDependencyDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status404NotFound);
+
         // Phase E (R-5.7): runtime-owned dependency reachability probes.
         // POST-with-body over GET-with-query-string so a batch of dozens of
         // items cannot push us past browser/proxy URL length limits, and so

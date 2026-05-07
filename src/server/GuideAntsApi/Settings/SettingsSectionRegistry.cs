@@ -432,6 +432,27 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         },
         new()
         {
+            SectionName = "LlamaCpp",
+            Properties =
+            [
+                new("BaseUrl", "LlamaCpp:BaseUrl")
+            ]
+        },
+        new()
+        {
+            SectionName = "LocalServiceHosts",
+            Properties =
+            [
+                new("SpeechTranscriptionBaseUrl", "LocalServiceHosts:SpeechTranscriptionBaseUrl"),
+                new("SpeechSynthesisBaseUrl", "LocalServiceHosts:SpeechSynthesisBaseUrl"),
+                new("ImageGenerationBaseUrl", "LocalServiceHosts:ImageGenerationBaseUrl"),
+                new("EmbeddingsBaseUrl", "LocalServiceHosts:EmbeddingsBaseUrl"),
+                new("MediaBaseUrl", "LocalServiceHosts:MediaBaseUrl"),
+                new("DocumentIntelligenceBaseUrl", "LocalServiceHosts:DocumentIntelligenceBaseUrl")
+            ]
+        },
+        new()
+        {
             SectionName = "ServiceRouting",
             BootstrapPayloadFactory = BuildServiceRoutingBootstrapPayload,
             Properties = []

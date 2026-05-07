@@ -21,12 +21,6 @@ public sealed class ApplicationSettingsConfigurationProvider(
     string contentRootPath,
     SettingsSecretsOptions settingsSecrets) : ConfigurationProvider
 {
-    private static readonly HashSet<string> NonDatabaseBackedSectionNames =
-    [
-        "LocalServiceHosts",
-        "LlamaCpp"
-    ];
-
     private readonly string _connectionString = connectionString;
     private readonly ISettingsSectionRegistry _registry = registry;
     private readonly SettingsSecretsOptions _settingsSecrets = CloneSecretsOptions(settingsSecrets);
@@ -60,11 +54,6 @@ public sealed class ApplicationSettingsConfigurationProvider(
             while (reader.Read())
             {
                 var sectionName = reader.GetString(0);
-                if (NonDatabaseBackedSectionNames.Contains(sectionName))
-                {
-                    continue;
-                }
-
                 var jsonValue = reader.IsDBNull(1) ? "{}" : reader.GetString(1);
                 var jsonObject = ApplicationSettingsJson.DeserializeObject(jsonValue);
 

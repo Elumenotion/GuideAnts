@@ -470,6 +470,9 @@ public sealed record InfrastructureProbeRequestItemDto(
 public sealed record InfrastructureProbeRequestDto(
     IReadOnlyList<InfrastructureProbeRequestItemDto> Items);
 
+public sealed record InfrastructureDependencyOverrideRequestDto(
+    string? Value);
+
 /// <summary>
 /// Phase E (R-5.7): a single probe result. The <see cref="Kind"/> discriminator
 /// selects which fields are populated.

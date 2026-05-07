@@ -1,6 +1,9 @@
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 using GuideAntsApi.Configuration;
+using GuideAntsApi.DataModel.Models;
+using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Nodes;
 
 namespace GuideAntsApi.Settings;
 
@@ -54,7 +57,7 @@ public sealed partial class ApplicationSettingsService
                 return new SettingsRuntimeDependencyDto(
                     Key: dependency.Key,
                     CurrentValue: serializedValue,
-                    ReadOnly: true,
+                    ReadOnly: dependency.ReadOnly,
                     UsedByProviderIds: dependency.UsedByProviderIds,
                     Source: RuntimeDependencySourceResolver.Resolve(_configuration, dependency.Key),
                     HasValue: hasValue,
@@ -111,28 +114,170 @@ public sealed partial class ApplicationSettingsService
         return Task.FromResult(BuildRuntimeDependencies());
     }
 
+    public async Task<SettingsRuntimeDependencyDto?> SetRuntimeDependencyOverrideAsync(
+        string key,
+        string? value,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new InvalidOperationException("Runtime dependency key is required.");
+        }
+
+        var contract = RuntimeDependencyCatalog.FirstOrDefault(d =>
+            string.Equals(d.Key, key, StringComparison.Ordinal));
+        if (contract is null)
+        {
+            return null;
+        }
+
+        if (contract.ReadOnly)
+        {
+            throw new InvalidOperationException($"Runtime dependency '{key}' is read-only.");
+        }
+
+        var separator = key.IndexOf(':');
+        if (separator <= 0 || separator >= key.Length - 1)
+        {
+            throw new InvalidOperationException($"Runtime dependency key '{key}' is not a supported Section:Field key.");
+        }
+
+        var sectionName = key[..separator];
+        var fieldName = key[(separator + 1)..];
+        if (!_registry.TryGet(sectionName, out var definition))
+        {
+            throw new InvalidOperationException($"Settings section '{sectionName}' is not supported.");
+        }
+
+        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken).ConfigureAwait(false);
+
+        var row = await _db.ApplicationSettings
+            .SingleOrDefaultAsync(x => x.SectionName == sectionName, cancellationToken)
+            .ConfigureAwait(false);
+        var trimmedValue = value?.Trim();
+        var normalizedValue = RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(trimmedValue);
+
+        if (string.IsNullOrWhiteSpace(normalizedValue))
+        {
+            if (row is not null)
+            {
+                var payload = ApplicationSettingsJson.DeserializeObject(row.JsonValue);
+                payload.Remove(fieldName);
+
+                if (payload.Count == 0)
+                {
+                    _db.ApplicationSettings.Remove(row);
+                }
+                else
+                {
+                    row.JsonValue = ApplicationSettingsJson.Serialize(payload);
+                    row.SchemaVersion = definition.SchemaVersion;
+                    row.UpdatedUtc = DateTime.UtcNow;
+                }
+
+                await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                ReloadConfiguration();
+            }
+
+            return BuildRuntimeDependencies().FirstOrDefault(d => string.Equals(d.Key, key, StringComparison.Ordinal));
+        }
+
+        ValidateRuntimeDependencyOverrideValue(contract, normalizedValue);
+
+        if (row is null)
+        {
+            var payload = new JsonObject
+            {
+                [fieldName] = normalizedValue
+            };
+            _db.ApplicationSettings.Add(new ApplicationSetting
+            {
+                SectionName = sectionName,
+                SchemaVersion = definition.SchemaVersion,
+                JsonValue = ApplicationSettingsJson.Serialize(payload),
+                CreatedUtc = DateTime.UtcNow,
+                UpdatedUtc = DateTime.UtcNow
+            });
+        }
+        else
+        {
+            var payload = ApplicationSettingsJson.DeserializeObject(row.JsonValue);
+            payload[fieldName] = normalizedValue;
+            row.JsonValue = ApplicationSettingsJson.Serialize(payload);
+            row.SchemaVersion = definition.SchemaVersion;
+            row.UpdatedUtc = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        ReloadConfiguration();
+        return BuildRuntimeDependencies().FirstOrDefault(d => string.Equals(d.Key, key, StringComparison.Ordinal));
+    }
+
+    private static void ValidateRuntimeDependencyOverrideValue(RuntimeDependencyContract contract, string value)
+    {
+        var expectedKind = ClassifyDependencyKind(contract.Key, null);
+        if (!string.Equals(expectedKind, "url", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            throw new InvalidOperationException($"Runtime dependency '{contract.Key}' must be an absolute URL.");
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Runtime dependency '{contract.Key}' must use http:// or https://.");
+        }
+
+        if (string.IsNullOrWhiteSpace(uri.Host))
+        {
+            throw new InvalidOperationException($"Runtime dependency '{contract.Key}' must include a host.");
+        }
+
+        if (string.Equals(contract.Key, "LlamaCpp:BaseUrl", StringComparison.Ordinal))
+        {
+            var normalizedPath = uri.AbsolutePath.TrimEnd('/');
+            normalizedPath = string.IsNullOrWhiteSpace(normalizedPath) ? "/" : normalizedPath;
+            if (!string.Equals(normalizedPath, "/llama-cpp", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Runtime dependency 'LlamaCpp:BaseUrl' must include the '/llama-cpp' path.");
+            }
+        }
+    }
+
     private static readonly IReadOnlyList<RuntimeDependencyContract> RuntimeDependencyCatalog =
     [
         new(
             Key: "LlamaCpp:BaseUrl",
-            UsedByProviderIds: []),
+            UsedByProviderIds: [],
+            ReadOnly: false),
         new(
             Key: "LocalServiceHosts:SpeechTranscriptionBaseUrl",
-            UsedByProviderIds: [ServiceProviderIds.SpeechTranscriptionLocalAsrHttp]),
+            UsedByProviderIds: [ServiceProviderIds.SpeechTranscriptionLocalAsrHttp],
+            ReadOnly: false),
         new(
             Key: "LocalServiceHosts:SpeechSynthesisBaseUrl",
-            UsedByProviderIds: [ServiceProviderIds.SpeechSynthesisLocalTtsHttp]),
+            UsedByProviderIds: [ServiceProviderIds.SpeechSynthesisLocalTtsHttp],
+            ReadOnly: false),
         new(
             Key: "LocalServiceHosts:ImageGenerationBaseUrl",
-            UsedByProviderIds: [ServiceProviderIds.ImageGenerationLocalSdHttp]),
+            UsedByProviderIds: [ServiceProviderIds.ImageGenerationLocalSdHttp],
+            ReadOnly: false),
         new(
             Key: "LocalServiceHosts:EmbeddingsBaseUrl",
-            UsedByProviderIds: [ServiceProviderIds.EmbeddingsLocalEmbHttp]),
+            UsedByProviderIds: [ServiceProviderIds.EmbeddingsLocalEmbHttp],
+            ReadOnly: false),
         new(
             Key: "LocalServiceHosts:MediaBaseUrl",
-            UsedByProviderIds: [ServiceProviderIds.SpeechTranscriptionLocalAsrHttp]),
+            UsedByProviderIds: [ServiceProviderIds.SpeechTranscriptionLocalAsrHttp],
+            ReadOnly: false),
         new(
             Key: "LocalServiceHosts:DocumentIntelligenceBaseUrl",
-            UsedByProviderIds: [ServiceProviderIds.DocumentIntelligenceLocalDoclingHttp])
+            UsedByProviderIds: [ServiceProviderIds.DocumentIntelligenceLocalDoclingHttp],
+            ReadOnly: false)
     ];
 }

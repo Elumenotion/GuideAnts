@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FaHeartbeat, FaSpinner, FaSyncAlt } from 'react-icons/fa';
+import { FaHeartbeat, FaSave, FaSpinner, FaSyncAlt, FaUndo } from 'react-icons/fa';
 import LoadingSpinner from '../../../components/LoadingSpinner';
+import { useToast } from '../../../components/common/Toast';
 import { api } from '../../../services/api';
 import {
   InfrastructureProbeRequestItemDto,
   InfrastructureProbeResultDto,
   SettingsRuntimeDependencyDto,
-  SettingsRuntimeDependencyKind,
-  SettingsRuntimeDependencySource,
 } from '../../../types/settings';
-import { IconActionButton, TextActionButton } from './shared/ActionButtons';
+import { TextActionButton } from './shared/ActionButtons';
 import { getRuntimeDependencyDisplayName } from '../constants/displayLabels';
 
 interface InfrastructureTabProps {
@@ -20,34 +19,6 @@ interface InfrastructureTabProps {
    */
   focusedRuntimeKey?: string | null;
   onFocusedRuntimeKeyHandled?: () => void;
-}
-
-const sourceBadgeClasses: Record<string, string> = {
-  appsettings: 'bg-blue-50 text-blue-700 ring-blue-600/20',
-  environment: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
-  compose: 'bg-purple-50 text-purple-700 ring-purple-600/20',
-  'user-secrets': 'bg-amber-50 text-amber-800 ring-amber-600/20',
-  'application-settings': 'bg-sky-50 text-sky-900 ring-sky-600/20',
-  unknown: 'bg-gray-100 text-gray-700 ring-gray-500/20',
-};
-
-const sourceLabels: Record<string, string> = {
-  appsettings: 'appsettings',
-  environment: 'env var',
-  compose: 'compose',
-  'user-secrets': 'user-secrets',
-  'application-settings': 'database',
-  unknown: 'unknown',
-};
-
-function SourceBadge({ source }: { source: string }) {
-  const cls = sourceBadgeClasses[source] ?? sourceBadgeClasses.unknown;
-  const label = sourceLabels[source] ?? source;
-  return (
-    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${cls}`}>
-      {label}
-    </span>
-  );
 }
 
 function truncate(value: string, max = 72): string {
@@ -65,6 +36,37 @@ function isLlamaCppPrefixIssue(dep: SettingsRuntimeDependencyDto): boolean {
   }
   const value = dep.currentValue ?? '';
   return !/^https?:\/\//i.test(value);
+}
+
+function validateDependencyDraft(dep: SettingsRuntimeDependencyDto, draftValue: string): string | null {
+  const value = draftValue.trim();
+  if (value.length === 0) {
+    return null;
+  }
+
+  if (dep.kind !== 'url') {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return 'Must be an absolute URL.';
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return 'Must use http:// or https://.';
+  }
+
+  if (dep.key === 'LlamaCpp:BaseUrl') {
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '') || '/';
+    if (normalizedPath.toLowerCase() !== '/llama-cpp') {
+      return "Must include the '/llama-cpp' path.";
+    }
+  }
+
+  return null;
 }
 
 function describeProbe(result: InfrastructureProbeResultDto | undefined): {
@@ -110,7 +112,7 @@ function ProbeBadge({ result }: { result: InfrastructureProbeResultDto | undefin
     pending: 'bg-gray-100 text-gray-600 ring-gray-500/20',
   };
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-wrap items-center gap-2">
       <span
         className={`inline-flex w-fit items-center rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${toneClasses[tone]}`}
       >
@@ -121,21 +123,18 @@ function ProbeBadge({ result }: { result: InfrastructureProbeResultDto | undefin
   );
 }
 
-function kindHint(kind: SettingsRuntimeDependencyKind | string): string {
-  if (kind === 'url') return 'URL';
-  if (kind === 'path') return 'Path';
-  return 'Value';
-}
-
 export function InfrastructureTab({ focusedRuntimeKey, onFocusedRuntimeKeyHandled }: InfrastructureTabProps) {
+  const { showToast } = useToast();
   const [dependencies, setDependencies] = useState<SettingsRuntimeDependencyDto[]>([]);
+  const [draftValues, setDraftValues] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [probeResults, setProbeResults] = useState<Record<string, InfrastructureProbeResultDto>>({});
   const [inFlightKey, setInFlightKey] = useState<string | null>(null);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
 
-  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const rowRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const loadDependencies = useCallback(async () => {
     setLoading(true);
@@ -153,6 +152,14 @@ export function InfrastructureTab({ focusedRuntimeKey, onFocusedRuntimeKeyHandle
   useEffect(() => {
     void loadDependencies();
   }, [loadDependencies]);
+
+  useEffect(() => {
+    setDraftValues(
+      Object.fromEntries(
+        dependencies.map((dependency) => [dependency.key, dependency.currentValue ?? ''])
+      )
+    );
+  }, [dependencies]);
 
   const runProbes = useCallback(
     async (deps: SettingsRuntimeDependencyDto[], source: 'auto' | 'user') => {
@@ -220,6 +227,68 @@ export function InfrastructureTab({ focusedRuntimeKey, onFocusedRuntimeKeyHandle
     void runProbes(dependencies, 'user');
   }, [dependencies, runProbes]);
 
+  const updateDraft = useCallback((key: string, value: string) => {
+    setDraftValues((previous) => ({ ...previous, [key]: value }));
+  }, []);
+
+  const resetDraft = useCallback((dependency: SettingsRuntimeDependencyDto) => {
+    setDraftValues((previous) => ({ ...previous, [dependency.key]: dependency.currentValue ?? '' }));
+  }, []);
+
+  const saveDependency = useCallback(
+    async (dependency: SettingsRuntimeDependencyDto) => {
+      if (dependency.readOnly) {
+        return;
+      }
+
+      const rawDraft = draftValues[dependency.key] ?? '';
+      const draftError = validateDependencyDraft(dependency, rawDraft);
+      if (draftError) {
+        showToast({
+          type: 'error',
+          title: 'Invalid infrastructure value',
+          message: `${dependency.key}: ${draftError}`,
+        });
+        return;
+      }
+
+      const nextValue = rawDraft.trim();
+      setSavingKey(dependency.key);
+      setLoadError(null);
+      try {
+        await api.settings.infrastructure.updateDependency(
+          dependency.key,
+          nextValue.length > 0 ? nextValue : null
+        );
+
+        await loadDependencies();
+        showToast({
+          type: 'success',
+          title: 'Infrastructure override saved',
+          message:
+            nextValue.length > 0
+              ? `${dependency.key} now uses the database override value.`
+              : `${dependency.key} override cleared. Runtime now falls back to env/appsettings.`,
+        });
+      } catch (error) {
+        const status = (error as { status?: number })?.status;
+        showToast({
+          type: 'error',
+          title: status === 409 ? 'Infrastructure settings changed elsewhere' : 'Failed to save infrastructure override',
+          message:
+            status === 409
+              ? 'Refresh and retry so your edit applies to the latest row version.'
+              : error instanceof Error
+                ? error.message
+                : 'The infrastructure update request failed.',
+        });
+      } finally {
+        setSavingKey(null);
+      }
+    },
+    [draftValues, loadDependencies, showToast]
+  );
+
   // Deep-link focus behavior: scroll to the target row and briefly highlight.
   useEffect(() => {
     if (!focusedRuntimeKey || dependencies.length === 0) {
@@ -260,8 +329,7 @@ export function InfrastructureTab({ focusedRuntimeKey, onFocusedRuntimeKeyHandle
         <div>
           <h2 className="text-base font-semibold text-gray-900">Infrastructure</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Runtime-owned dependency keys with source tracking and reachability diagnostics. Read-only — change values in
-            appsettings, environment variables, or docker-compose and refresh.
+            Edit local runtime endpoints and check whether each target is responding.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -291,96 +359,122 @@ export function InfrastructureTab({ focusedRuntimeKey, onFocusedRuntimeKeyHandle
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Key</th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Value</th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Source</th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Diagnostic</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 bg-white">
-            {sortedDependencies.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-sm text-gray-500">
-                  No runtime-owned dependencies are registered.
-                </td>
-              </tr>
-            )}
-            {sortedDependencies.map((dep) => {
-              const probeResult = probeResults[dep.key];
-              const displayName = getRuntimeDependencyDisplayName(dep.key);
-              const showPrefixWarning = isLlamaCppPrefixIssue(dep);
-              const canProbe = dep.hasValue && (dep.kind === 'url' || dep.kind === 'path');
-              const isHighlighted = highlightKey === dep.key;
-              return (
-                <tr
-                  key={dep.key}
-                  ref={(element) => {
-                    if (element) {
-                      rowRefs.current.set(dep.key, element);
-                    } else {
-                      rowRefs.current.delete(dep.key);
-                    }
-                  }}
-                  className={isHighlighted ? 'bg-yellow-50 transition-colors' : undefined}
-                >
-                  <td className="px-4 py-3 align-top text-sm">
-                    <div className="font-mono text-gray-900">{dep.key}</div>
-                    <div className="mt-0.5 text-xs text-gray-500">{displayName}</div>
-                    {dep.usedByProviderIds.length > 0 && (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {dep.usedByProviderIds.map((providerId) => (
-                          <span key={providerId} className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600">
-                            {providerId}
-                          </span>
-                        ))}
+      <div className="divide-y divide-gray-200">
+        <div className="hidden px-6 py-3 text-xs font-medium uppercase tracking-wide text-gray-500 lg:grid lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)_220px] lg:gap-6">
+          <div>Setting</div>
+          <div>Value</div>
+          <div>Health</div>
+        </div>
+
+        {sortedDependencies.length === 0 && (
+          <div className="px-6 py-8 text-center text-sm text-gray-500">
+            No runtime-owned dependencies are registered.
+          </div>
+        )}
+
+        {sortedDependencies.map((dep) => {
+          const probeResult = probeResults[dep.key];
+          const displayName = getRuntimeDependencyDisplayName(dep.key);
+          const showPrefixWarning = isLlamaCppPrefixIssue(dep);
+          const canProbe = dep.hasValue && (dep.kind === 'url' || dep.kind === 'path');
+          const isEditable = !dep.readOnly && !dep.isSecret;
+          const draftValue = draftValues[dep.key] ?? '';
+          const draftValidationError = isEditable ? validateDependencyDraft(dep, draftValue) : null;
+          const isDirty = isEditable && draftValue.trim() !== (dep.currentValue ?? '').trim();
+          const isSaving = savingKey === dep.key;
+          const isHighlighted = highlightKey === dep.key;
+
+          return (
+            <article
+              key={dep.key}
+              ref={(element) => {
+                if (element) {
+                  rowRefs.current.set(dep.key, element);
+                } else {
+                  rowRefs.current.delete(dep.key);
+                }
+              }}
+              className={`px-6 py-5 transition-colors ${isHighlighted ? 'bg-yellow-50' : 'bg-white'}`}
+            >
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)_220px] lg:gap-6">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold leading-6 text-gray-900">{displayName}</div>
+                  <div className="mt-1 break-all font-mono text-xs leading-5 text-gray-500">{dep.key}</div>
+                </div>
+
+                <div className="min-w-0">
+                  {isEditable ? (
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        value={draftValue}
+                        onChange={(event) => updateDraft(dep.key, event.target.value)}
+                        placeholder={dep.currentValue ?? ''}
+                        aria-label={`${displayName} value`}
+                        disabled={isSaving}
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <TextActionButton
+                          tone="primary"
+                          icon={isSaving ? <FaSpinner className="animate-spin" /> : <FaSave />}
+                          disabled={!isDirty || isSaving || !!draftValidationError}
+                          onClick={() => void saveDependency(dep)}
+                          title={`Save ${displayName} override`}
+                        >
+                          Save
+                        </TextActionButton>
+                        <TextActionButton
+                          tone="neutral"
+                          icon={<FaUndo />}
+                          disabled={!isDirty || isSaving}
+                          onClick={() => resetDraft(dep)}
+                          title={`Reset ${displayName} draft`}
+                        >
+                          Reset
+                        </TextActionButton>
+                        {isDirty && <span className="text-xs font-medium uppercase tracking-wide text-amber-700">Unsaved</span>}
+                        {draftValidationError && (
+                          <span className="text-xs font-medium text-red-700">{draftValidationError}</span>
+                        )}
+                      </div>
+                    </div>
+                  ) : dep.isSecret && dep.hasValue ? (
+                    <span className="font-mono text-gray-500">••••••••</span>
+                  ) : dep.hasValue ? (
+                    <span className="font-mono text-gray-800" title={dep.currentValue ?? ''}>
+                      {truncate(dep.currentValue ?? '')}
+                    </span>
+                  ) : (
+                    <span className="text-red-700">Missing</span>
+                  )}
+                </div>
+
+                <div className="min-w-0">
+                  <div className="space-y-3">
+                    {showPrefixWarning && (
+                      <div className="rounded border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
+                        Must start with <span className="font-mono">http://</span> or <span className="font-mono">https://</span>.
                       </div>
                     )}
-                  </td>
-                  <td className="px-4 py-3 align-top text-sm text-gray-700">
-                    {dep.isSecret && dep.hasValue ? (
-                      <span className="font-mono text-gray-500">••••••••</span>
-                    ) : dep.hasValue ? (
-                      <span className="font-mono text-gray-800" title={dep.currentValue ?? ''}>
-                        {truncate(dep.currentValue ?? '')}
-                      </span>
-                    ) : (
-                      <span className="text-red-700">Missing</span>
+                    <ProbeBadge result={probeResult} />
+                    {canProbe && (
+                      <TextActionButton
+                        tone="info"
+                        icon={inFlightKey === dep.key ? <FaSpinner className="animate-spin" /> : <FaHeartbeat />}
+                        disabled={inFlightKey === dep.key}
+                        onClick={() => void handleProbeOne(dep)}
+                        title={`${dep.kind === 'path' ? 'Check' : 'Probe'} ${displayName}`}
+                      >
+                        {dep.kind === 'path' ? 'Check' : 'Probe'}
+                      </TextActionButton>
                     )}
-                    <div className="mt-0.5 text-xs text-gray-500">{kindHint(dep.kind)}</div>
-                  </td>
-                  <td className="px-4 py-3 align-top text-sm">
-                    <SourceBadge source={(dep.source as SettingsRuntimeDependencySource) ?? 'unknown'} />
-                  </td>
-                  <td className="px-4 py-3 align-top text-sm">
-                    <div className="space-y-1.5">
-                      {showPrefixWarning && (
-                        <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                          LlamaCpp:BaseUrl must start with <span className="font-mono">http://</span> or{' '}
-                          <span className="font-mono">https://</span>.
-                        </div>
-                      )}
-                      <ProbeBadge result={probeResult} />
-                      {canProbe && (
-                        <IconActionButton
-                          label={dep.kind === 'path' ? 'Check' : 'Probe'}
-                          tone="info"
-                          icon={inFlightKey === dep.key ? <FaSpinner className="animate-spin" /> : <FaHeartbeat />}
-                          disabled={inFlightKey === dep.key}
-                          onClick={() => void handleProbeOne(dep)}
-                          title={`${dep.kind === 'path' ? 'Check path for' : 'Probe'} ${displayName}`}
-                        />
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </section>
   );

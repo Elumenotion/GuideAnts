@@ -85,7 +85,8 @@ public sealed partial class ApplicationSettingsService
 
     private sealed record RuntimeDependencyContract(
         string Key,
-        IReadOnlyList<string> UsedByProviderIds);
+        IReadOnlyList<string> UsedByProviderIds,
+        bool ReadOnly = true);
 
     private static readonly IReadOnlyList<ServiceContract> ServiceContracts =
     [

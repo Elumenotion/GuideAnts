@@ -94,6 +94,25 @@ The current operator/developer setup is centered on Docker Compose. The stack de
 
 The `guideants-ai` container is especially important: it is the local runtime surface behind llama.cpp, embeddings, speech transcription, speech synthesis, image generation, media extraction, and script execution. The Settings UI and API route each AI capability to the correct local or cloud backend rather than treating “the model” as one global switch.
 
+## Big Thanks To Upstream Projects
+
+GuideAnts is built on top of excellent open source work. Huge thanks to the teams and contributors behind these projects:
+
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) for local LLM inference/runtime foundations.
+- [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) for the local image-generation engine used in `guideants-ai`.
+- [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) for local speech transcription models/runtime (`qwen-asr`).
+- [VibeVoice](https://github.com/microsoft/VibeVoice) for local speech synthesis models/runtime.
+- [Transformers](https://github.com/huggingface/transformers) for model loading and inference integration across local services.
+- [sentence-transformers](https://github.com/UKPLab/sentence-transformers) for local embeddings support.
+- [Hugging Face Hub](https://github.com/huggingface/huggingface_hub) for model download and management workflows.
+- [PyTorch](https://github.com/pytorch/pytorch) for tensor/runtime acceleration across ASR, TTS, and embeddings.
+- [FastAPI](https://github.com/fastapi/fastapi) and [Uvicorn](https://github.com/encode/uvicorn) for the local Python service APIs.
+- [FFmpeg](https://github.com/FFmpeg/FFmpeg) for media extraction/transcoding.
+- [Playwright](https://github.com/microsoft/playwright-python) for browser automation used in local service workflows.
+- [Docling](https://github.com/docling-project/docling) for document intelligence and markdown extraction (`docling-serve`).
+- [SearXNG](https://github.com/searxng/searxng) for metasearch and web retrieval.
+- [PlantUML](https://github.com/plantuml/plantuml) and [Graphviz](https://gitlab.com/graphviz/graphviz) for diagram rendering.
+
 ## Repository Tour
 
 - [`docs/`](docs/) contains the most useful product and architecture writeups. This is where to look when you want intent, requirements, rollout notes, or operational behavior.

@@ -69,6 +69,10 @@ public interface IApplicationSettingsService
     /// caller should re-enumerate <c>IConfiguration</c> itself.
     /// </summary>
     Task<IReadOnlyList<SettingsRuntimeDependencyDto>> GetRuntimeDependenciesAsync(CancellationToken cancellationToken = default);
+    Task<SettingsRuntimeDependencyDto?> SetRuntimeDependencyOverrideAsync(
+        string key,
+        string? value,
+        CancellationToken cancellationToken = default);
 
     void ReloadConfiguration();
 }
@@ -95,6 +99,11 @@ public sealed partial class ApplicationSettingsService(
     private readonly ILlamaRouterIniSyncService? _llamaRouterIniSync = llamaRouterIniSync;
     private IServiceEditorMetadataProvider? _metadataProvider;
     private ILegacyProtectorAccessor? _protectorAccessor;
+    private static readonly HashSet<string> RuntimeOverrideSections = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "LlamaCpp",
+        "LocalServiceHosts"
+    };
 
     public async Task BootstrapAsync(IConfiguration bootstrapConfiguration, CancellationToken cancellationToken = default)
     {
@@ -108,14 +117,27 @@ public sealed partial class ApplicationSettingsService(
             .ToDictionaryAsync(x => x.SectionName, x => x, StringComparer.OrdinalIgnoreCase, cancellationToken);
 
         var changed = false;
-        if (existing.Remove("LlamaCpp", out var legacyLlamaCppRow))
-        {
-            _db.ApplicationSettings.Remove(legacyLlamaCppRow);
-            changed = true;
-        }
-
         foreach (var section in _registry.All)
         {
+            if (RuntimeOverrideSections.Contains(section.SectionName))
+            {
+                if (!existing.TryGetValue(section.SectionName, out var runtimeRow))
+                {
+                    // Runtime dependency sections are override-only: do not seed
+                    // from appsettings/env at bootstrap time.
+                    continue;
+                }
+
+                if (runtimeRow.SchemaVersion != section.SchemaVersion)
+                {
+                    runtimeRow.SchemaVersion = section.SchemaVersion;
+                    runtimeRow.UpdatedUtc = DateTime.UtcNow;
+                    changed = true;
+                }
+
+                continue;
+            }
+
             var bootstrapPayload = section.BuildBootstrapPayload(bootstrapConfiguration);
 
             if (!existing.TryGetValue(section.SectionName, out var row))

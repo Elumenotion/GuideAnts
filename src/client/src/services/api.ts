@@ -1273,6 +1273,12 @@ export const api = {
             listDependencies: () =>
                 callApi<SettingsRuntimeDependencyDto[]>('/settings/infrastructure/dependencies'),
 
+            updateDependency: (key: string, value: string | null) =>
+                callApi<SettingsRuntimeDependencyDto>(`/settings/infrastructure/dependencies/${encodeURIComponent(key)}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ value }),
+                }),
+
             probe: (items: InfrastructureProbeRequestItemDto[]) =>
                 callApi<InfrastructureProbeBatchDto>('/settings/infrastructure/probes', {
                     method: 'POST',

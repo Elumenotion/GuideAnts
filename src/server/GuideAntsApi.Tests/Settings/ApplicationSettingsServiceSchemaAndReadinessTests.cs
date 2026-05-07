@@ -31,7 +31,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         schema.Services.Should().NotBeEmpty();
         schema.Providers.Should().NotBeEmpty();
         schema.RuntimeDependencies.Should().NotBeEmpty();
-        schema.RuntimeDependencies.Should().OnlyContain(dependency => dependency.ReadOnly);
+        schema.RuntimeDependencies.Should().OnlyContain(dependency => dependency.ReadOnly == false);
         schema.Sections.Should().NotContain(section => string.Equals(section.SectionName, "Search", StringComparison.Ordinal));
         schema.Sections.Should().Contain(section =>
             string.Equals(section.SectionName, "ChatDefaults", StringComparison.Ordinal));
@@ -222,7 +222,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
     }
 
     [TestMethod]
-    public async Task BootstrapAsync_DoesNotRecreateLlamaCppApplicationSettingsRow()
+    public async Task BootstrapAsync_PreservesExistingLlamaCppApplicationSettingsRow()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration(new Dictionary<string, string?>());
@@ -239,7 +239,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
 
         await service.GetSectionSummariesAsync();
 
-        db.ApplicationSettings.Should().NotContain(row =>
+        db.ApplicationSettings.Should().Contain(row =>
             string.Equals(row.SectionName, "LlamaCpp", StringComparison.Ordinal));
     }
 
