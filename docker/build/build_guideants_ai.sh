@@ -183,14 +183,8 @@ BEGIN {
   line=$0
   gsub(/^[ \t]+|[ \t]+$/, "", line)
   if (line == "" || substr(line,1,1) == "#") { print $0; next }
-  pkg=line
-  sub(/[=<>!~[].*$/, "", pkg)
-  for (i=1; i<=length(pkg); i++) {
-    c=substr(pkg,i,1)
-    if (c >= "A" && c <= "Z") {
-      pkg=substr(pkg,1,i-1) tolower(c) substr(pkg,i+1)
-    }
-  }
+  split(line, parts, /[=<>!~\[]/)
+  pkg=tolower(parts[1])
   if (!(pkg in ignore)) { print $0 }
 }
 ' "$REQUIREMENTS_SRC" > "$REQ_DEST"

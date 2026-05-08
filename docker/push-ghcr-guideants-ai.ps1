@@ -1,6 +1,7 @@
 param(
     [string]$Owner,
     [string]$Registry = 'ghcr.io',
+    [string]$ComposeTag = 'main',
     [string]$Username = $env:GHCR_USERNAME,
     [string]$Token = $(if ($env:CR_PAT) { $env:CR_PAT } elseif ($env:GHCR_PAT) { $env:GHCR_PAT } elseif ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $null }),
     [switch]$SkipLogin,
@@ -185,15 +186,20 @@ if ($null -ne $rocmImage) {
 foreach ($target in $targets) {
     $buildRef = "$Registry/$Owner/$($target.PackageName):$($target.BuildTag)"
     $latestRef = "$Registry/$Owner/$($target.PackageName):latest"
+    $composeRef = "$Registry/$Owner/$($target.PackageName):$ComposeTag"
 
     Write-Host ""
     Write-Host "Pushing $($target.Variant) image" -ForegroundColor Cyan
     Write-Host "  Source:      $($target.SourceRef)"
     Write-Host "  Build tag:   $buildRef"
+    Write-Host "  Compose tag: $composeRef"
     Write-Host "  Latest tag:  $latestRef"
 
     Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $buildRef)
     Invoke-DockerCommand -Arguments @('push', $buildRef)
+
+    Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $composeRef)
+    Invoke-DockerCommand -Arguments @('push', $composeRef)
 
     Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $latestRef)
     Invoke-DockerCommand -Arguments @('push', $latestRef)
@@ -216,19 +222,19 @@ $extraTargets = @(
         Name        = 'plantuml'
         SourceRef   = $plantUmlSourceRef
         PackageName = 'guideants-plantuml'
-        Tags        = @($cpuImage.BuildTag, '1.2025.2', 'latest')
+        Tags        = @($cpuImage.BuildTag, '1.2025.2', $ComposeTag, 'latest')
     },
     [pscustomobject]@{
         Name        = 'mssql'
         SourceRef   = $mssqlSourceRef
         PackageName = 'mssql2025-express-fts'
-        Tags        = @($cpuImage.BuildTag, 'latest')
+        Tags        = @($cpuImage.BuildTag, $ComposeTag, 'latest')
     },
     [pscustomobject]@{
         Name        = 'searxng'
         SourceRef   = $searxngSourceRef
         PackageName = 'guideants-searxng'
-        Tags        = @($cpuImage.BuildTag, 'latest')
+        Tags        = @($cpuImage.BuildTag, $ComposeTag, 'latest')
     }
 )
 
