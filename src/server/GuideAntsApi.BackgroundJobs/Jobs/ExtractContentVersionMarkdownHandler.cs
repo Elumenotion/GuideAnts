@@ -145,6 +145,28 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
         }
         catch (Exception ex)
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                Logger.LogWarning(
+                    ex,
+                    "Extraction cancelled for ContentFileVersion {Id}; leaving current shadow state unchanged.",
+                    payload.ContentFileVersionId);
+                return false;
+            }
+
+            var currentStatus = await context.ContentFileMarkdownShadows
+                .Where(s => s.OriginalContentFileVersionId == payload.ContentFileVersionId)
+                .Select(s => s.Status)
+                .FirstOrDefaultAsync(CancellationToken.None);
+
+            if (currentStatus == MarkdownExtractionStatus.Completed)
+            {
+                Logger.LogInformation(
+                    "Extraction encountered an exception for ContentFileVersion {Id}, but shadow is already completed. Skipping failure downgrade.",
+                    payload.ContentFileVersionId);
+                return true;
+            }
+
             Logger.LogError(ex, "Extraction failed for ContentFileVersion {Id}", payload.ContentFileVersionId);
             shadow.Status = MarkdownExtractionStatus.Failed;
             shadow.ErrorMessage = ex.Message;

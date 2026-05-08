@@ -9,11 +9,16 @@ namespace GuideAntsApi.BackgroundJobs;
 public class JobQueueService : IJobQueueService
 {
     private readonly IDbContextFactory<ApplicationDbContext> _dbFactory;
+    private readonly IActiveJobExecutionRegistry _activeExecutionRegistry;
     private readonly ILogger<JobQueueService> _logger;
 
-    public JobQueueService(IDbContextFactory<ApplicationDbContext> dbFactory, ILogger<JobQueueService> logger)
+    public JobQueueService(
+        IDbContextFactory<ApplicationDbContext> dbFactory,
+        IActiveJobExecutionRegistry activeExecutionRegistry,
+        ILogger<JobQueueService> logger)
     {
         _dbFactory = dbFactory;
+        _activeExecutionRegistry = activeExecutionRegistry;
         _logger = logger;
     }
 
@@ -171,20 +176,82 @@ public class JobQueueService : IJobQueueService
         await using var context = await _dbFactory.CreateDbContextAsync(ct);
 
         var now = DateTime.UtcNow;
-        var affected = await context.JobQueue
-            .Where(j => j.Status == JobStatus.Processing && j.LeaseUntil != null && j.LeaseUntil < now)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(j => j.Status, JobStatus.Pending)
-                .SetProperty(j => j.ClaimToken, Guid.Empty) // Reset to unclaimed
-                .SetProperty(j => j.LeaseUntil, (DateTime?)null)
-                .SetProperty(j => j.UpdatedUtc, now), ct);
+        var reclaimGrace = TimeSpan.FromSeconds(30);
+        var reclaimCutoff = now.Subtract(reclaimGrace);
+        var recentActiveCutoff = now.Subtract(TimeSpan.FromSeconds(120));
+        var locallyActive = _activeExecutionRegistry.GetActiveSince(recentActiveCutoff);
 
-        if (affected > 0)
+        var expiredCandidates = await context.JobQueue
+            .Where(j => j.Status == JobStatus.Processing && j.LeaseUntil != null && j.LeaseUntil < now)
+            .Where(j => j.ClaimToken != Guid.Empty)
+            .Select(j => new
+            {
+                j.Id,
+                j.ClaimToken,
+                j.Attempts,
+                j.MaxAttempts,
+                j.LeaseUntil
+            })
+            .ToListAsync(ct);
+
+        var reclaimable = expiredCandidates
+            .Where(j => j.LeaseUntil < reclaimCutoff)
+            .Where(j => !locallyActive.Contains(new ActiveJobExecutionKey(j.Id, j.ClaimToken)))
+            .ToList();
+
+        var requeued = 0;
+        var failed = 0;
+
+        // Expired lease counts as an attempt so long-running jobs cannot churn forever.
+        foreach (var candidate in reclaimable)
         {
-            _logger.LogInformation("Requeued {Count} expired jobs", affected);
+            if (candidate.Attempts + 1 >= candidate.MaxAttempts)
+            {
+                failed += await context.JobQueue
+                    .Where(j => j.Id == candidate.Id && j.ClaimToken == candidate.ClaimToken && j.Status == JobStatus.Processing)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(j => j.Attempts, j => j.Attempts + 1)
+                        .SetProperty(j => j.Status, JobStatus.Failed)
+                        .SetProperty(j => j.ErrorMessage, j => $"Job lease expired and max attempts reached at {now:O}")
+                        .SetProperty(j => j.ClaimToken, Guid.Empty)
+                        .SetProperty(j => j.LeaseUntil, (DateTime?)null)
+                        .SetProperty(j => j.UpdatedUtc, now), ct);
+            }
+            else
+            {
+                requeued += await context.JobQueue
+                    .Where(j => j.Id == candidate.Id && j.ClaimToken == candidate.ClaimToken && j.Status == JobStatus.Processing)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(j => j.Attempts, j => j.Attempts + 1)
+                        .SetProperty(j => j.ErrorMessage, j => $"Job lease expired at {now:O}; requeued for retry")
+                        .SetProperty(j => j.Status, JobStatus.Pending)
+                        .SetProperty(j => j.ClaimToken, Guid.Empty) // Reset to unclaimed
+                        .SetProperty(j => j.LeaseUntil, (DateTime?)null)
+                        .SetProperty(j => j.AvailableAt, now)
+                        .SetProperty(j => j.UpdatedUtc, now), ct);
+            }
         }
 
-        return affected;
+        var skippedActive = expiredCandidates.Count - reclaimable.Count;
+
+        if (requeued > 0)
+        {
+            _logger.LogInformation("Requeued {Count} expired jobs", requeued);
+        }
+
+        if (failed > 0)
+        {
+            _logger.LogWarning("Marked {Count} expired jobs as failed after reaching max attempts", failed);
+        }
+
+        if (skippedActive > 0)
+        {
+            _logger.LogDebug(
+                "Skipped lease cleanup for {Count} locally-active expired jobs (multi-instance-safe first defense).",
+                skippedActive);
+        }
+
+        return requeued + failed;
     }
 
     public async Task<int> RequeueAllProcessingAsync(CancellationToken ct = default)

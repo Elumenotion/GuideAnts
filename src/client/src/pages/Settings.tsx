@@ -349,10 +349,20 @@ export default function Settings() {
         await loadProfiles();
         showToast({ type: 'success', title: `Runtime profile ${templates[template].profileId} created` });
       } catch (error) {
+        const message = getErrorMessage(error, 'Template creation failed.');
+        if (message.toLowerCase().includes('already exists')) {
+          await loadProfiles();
+          showToast({
+            type: 'success',
+            title: `Runtime profile ${templates[template].profileId} ready`,
+            message: 'Existing profile reused.',
+          });
+          return;
+        }
         showToast({
           type: 'error',
           title: 'Failed to create runtime profile',
-          message: getErrorMessage(error, 'Template creation failed.'),
+          message,
         });
       }
     },

@@ -25,6 +25,7 @@ public static class ServiceCollectionExtensions
         services.Configure<LocalServiceHostsOptions>(configuration.GetSection(LocalServiceHostsOptions.SectionName));
         
         // Register core services
+        services.AddSingleton<IActiveJobExecutionRegistry, ActiveJobExecutionRegistry>();
         services.AddScoped<IJobQueueService, JobQueueService>();
         services.AddHostedService<BackgroundJobProcessor>();
         services.AddSingleton<DoclingConversionLimiter>();

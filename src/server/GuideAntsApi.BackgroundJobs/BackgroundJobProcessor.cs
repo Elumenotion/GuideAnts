@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using GuideAntsApi.DataModel.Models;
 
 namespace GuideAntsApi.BackgroundJobs;
 
@@ -10,16 +11,19 @@ public class BackgroundJobProcessor : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly JobProcessorOptions _options;
     private readonly ILogger<BackgroundJobProcessor> _logger;
+    private readonly IActiveJobExecutionRegistry _activeExecutionRegistry;
     private readonly Dictionary<string, SemaphoreSlim> _concurrencyLimits;
     private readonly Dictionary<string, IJobHandler> _jobHandlers;
 
     public BackgroundJobProcessor(
         IServiceProvider serviceProvider,
         IOptions<JobProcessorOptions> options,
+        IActiveJobExecutionRegistry activeExecutionRegistry,
         ILogger<BackgroundJobProcessor> logger)
     {
         _serviceProvider = serviceProvider;
         _options = options.Value;
+        _activeExecutionRegistry = activeExecutionRegistry;
         _logger = logger;
         
         // Initialize concurrency limits for each job type
@@ -131,45 +135,49 @@ public class BackgroundJobProcessor : BackgroundService
 
     private async Task ProcessSingleJobAsync(string jobType, JobTypeOptions jobOptions, SemaphoreSlim limit, CancellationToken ct)
     {
+        JobQueue? claimedJob = null;
         try
         {
             using var scope = _serviceProvider.CreateScope();
             var jobQueueService = scope.ServiceProvider.GetRequiredService<IJobQueueService>();
 
             // Try to claim a job
-            var job = await jobQueueService.TryClaimAsync(jobType, jobOptions.LeaseSeconds, ct);
-            if (job == null)
+            claimedJob = await jobQueueService.TryClaimAsync(jobType, jobOptions.LeaseSeconds, ct);
+            if (claimedJob == null)
             {
                 return; // No jobs available
             }
 
-            _logger.LogDebug("Processing job {JobId} of type {JobType}", job.Id, job.JobType);
+            _activeExecutionRegistry.MarkActive(claimedJob.Id, claimedJob.ClaimToken);
+            _logger.LogDebug("Processing job {JobId} of type {JobType}", claimedJob.Id, claimedJob.JobType);
 
             // Find the appropriate handler
-            if (!_jobHandlers.TryGetValue(job.JobType, out var handler))
+            if (!_jobHandlers.TryGetValue(claimedJob.JobType, out var handler))
             {
-                _logger.LogError("No handler found for job type {JobType}, failing job {JobId}", job.JobType, job.Id);
-                await jobQueueService.FailAsync(job.Id, job.ClaimToken, $"No handler registered for job type: {job.JobType}", ct: ct);
+                _logger.LogError("No handler found for job type {JobType}, failing job {JobId}", claimedJob.JobType, claimedJob.Id);
+                await jobQueueService.FailAsync(claimedJob.Id, claimedJob.ClaimToken, $"No handler registered for job type: {claimedJob.JobType}", ct: ct);
                 return;
             }
 
             // Process the job
             bool success;
+            using var processingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             using var leaseRenewalCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var leaseRenewalTask = RenewLeaseLoopAsync(
                 jobQueueService,
-                job.Id,
-                job.ClaimToken,
+                claimedJob.Id,
+                claimedJob.ClaimToken,
                 jobOptions.LeaseSeconds,
+                processingCts,
                 leaseRenewalCts.Token);
 
             try
             {
-                success = await handler.HandleAsync(job.PayloadJson, ct);
+                success = await handler.HandleAsync(claimedJob.PayloadJson, processingCts.Token);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Job handler threw exception for job {JobId} of type {JobType}", job.Id, job.JobType);
+                _logger.LogError(ex, "Job handler threw exception for job {JobId} of type {JobType}", claimedJob.Id, claimedJob.JobType);
                 success = false;
             }
             finally
@@ -188,13 +196,33 @@ public class BackgroundJobProcessor : BackgroundService
             // Update job status
             if (success)
             {
-                await jobQueueService.CompleteAsync(job.Id, job.ClaimToken, ct);
-                _logger.LogInformation("Successfully processed job {JobId} of type {JobType}", job.Id, job.JobType);
+                var completed = await jobQueueService.CompleteAsync(claimedJob.Id, claimedJob.ClaimToken, ct);
+                if (completed)
+                {
+                    _logger.LogInformation("Successfully processed job {JobId} of type {JobType}", claimedJob.Id, claimedJob.JobType);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Job handler completed for {JobId} ({JobType}) but completion update failed; skipping success confirmation.",
+                        claimedJob.Id,
+                        claimedJob.JobType);
+                }
             }
             else
             {
-                await jobQueueService.FailAsync(job.Id, job.ClaimToken, "Job handler returned false", ct: ct);
-                _logger.LogWarning("Job handler failed for job {JobId} of type {JobType}", job.Id, job.JobType);
+                var failed = await jobQueueService.FailAsync(claimedJob.Id, claimedJob.ClaimToken, "Job handler returned false", ct: ct);
+                if (failed)
+                {
+                    _logger.LogWarning("Job handler failed for job {JobId} of type {JobType}", claimedJob.Id, claimedJob.JobType);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Job handler failed for {JobId} ({JobType}) but fail update was not applied (likely lease/token mismatch).",
+                        claimedJob.Id,
+                        claimedJob.JobType);
+                }
             }
         }
         catch (Exception ex)
@@ -203,6 +231,11 @@ public class BackgroundJobProcessor : BackgroundService
         }
         finally
         {
+            if (claimedJob != null)
+            {
+                _activeExecutionRegistry.MarkInactive(claimedJob.Id, claimedJob.ClaimToken);
+            }
+
             limit.Release(); // Always release the semaphore
         }
     }
@@ -231,6 +264,7 @@ public class BackgroundJobProcessor : BackgroundService
         Guid jobId,
         Guid claimToken,
         int leaseSeconds,
+        CancellationTokenSource processingCts,
         CancellationToken ct)
     {
         var renewEvery = TimeSpan.FromSeconds(Math.Max(5, leaseSeconds / 2));
@@ -253,10 +287,20 @@ public class BackgroundJobProcessor : BackgroundService
                 if (!renewed)
                 {
                     _logger.LogWarning(
-                        "Failed to renew lease for job {JobId}; stopping lease renewal loop.",
+                        "Failed to renew lease for job {JobId}; canceling active handler work and stopping lease renewal loop.",
                         jobId);
+                    try
+                    {
+                        processingCts.Cancel();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Handler scope already disposed.
+                    }
                     break;
                 }
+
+                _activeExecutionRegistry.Touch(jobId, claimToken);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

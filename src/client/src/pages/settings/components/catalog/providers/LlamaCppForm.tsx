@@ -194,21 +194,30 @@ export function LlamaCppAddForm({
             <div className="flex flex-wrap gap-1">
               <button
                 type="button"
-                onClick={() => void onCreateRuntimeProfile('qwen3_5')}
+                onClick={() => {
+                  void onCreateRuntimeProfile('qwen3_5');
+                  onChange({ runtimeProfileId: 'qwen3_5' });
+                }}
                 className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
               >
                 Insert qwen3_5
               </button>
               <button
                 type="button"
-                onClick={() => void onCreateRuntimeProfile('qwen3_6')}
+                onClick={() => {
+                  void onCreateRuntimeProfile('qwen3_6');
+                  onChange({ runtimeProfileId: 'qwen3_6' });
+                }}
                 className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
               >
                 Insert qwen3_6
               </button>
               <button
                 type="button"
-                onClick={() => void onCreateRuntimeProfile('gemma4')}
+                onClick={() => {
+                  void onCreateRuntimeProfile('gemma4');
+                  onChange({ runtimeProfileId: 'gemma4' });
+                }}
                 className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
               >
                 Insert gemma4
