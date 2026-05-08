@@ -1,0 +1,332 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REBUILD_BASE=false
+BUILD_ALL=false
+BACKEND=""
+
+usage() {
+  cat <<'EOF'
+Usage: build_guideants_ai.sh [options]
+
+Options:
+  --rebuild-base         Rebuild dependency/base layers without cache
+  --all                  Also build PlantUML, MSSQL FTS, SearXNG, and WebAPI+UI images
+  --backend <value>      Backend: cpu | cuda13 | rocm
+  -h, --help             Show help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --rebuild-base)
+      REBUILD_BASE=true
+      shift
+      ;;
+    --all)
+      BUILD_ALL=true
+      shift
+      ;;
+    --backend)
+      BACKEND="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Invalid argument: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOCKER_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$DOCKER_ROOT/.." && pwd)"
+SERVER_PATH="$REPO_ROOT/src/server"
+BUILD_CONTEXT="$SCRIPT_DIR/guideants-ai"
+DEPS_CACHE_PATH="$DOCKER_ROOT/.buildx-cache-deps"
+FINAL_CACHE_PATH="$DOCKER_ROOT/.buildx-cache-final"
+
+export DOCKER_BUILDKIT=1
+
+get_combined_hash() {
+  local -a paths=("$@")
+  local line
+  local joined=""
+
+  for path in "${paths[@]}"; do
+    if [[ ! -f "$path" ]]; then
+      echo "Hash input file not found: $path" >&2
+      return 1
+    fi
+    line="$path|$(sha256sum "$path" | awk '{print tolower($1)}')"
+    if [[ -z "$joined" ]]; then
+      joined="$line"
+    else
+      joined+=$'\n'"$line"
+    fi
+  done
+
+  printf "%s" "$joined" | sha256sum | awk '{print $1}'
+}
+
+docker_image_exists() {
+  local image_tag="$1"
+  docker image inspect "$image_tag" >/dev/null 2>&1
+}
+
+if [[ -z "$BACKEND" ]]; then
+  echo "Select backend:"
+  echo "  1) CPU-only"
+  echo "  2) CUDA 13"
+  echo "  3) ROCm"
+  read -r -p "Enter choice [1, 2, or 3]: " choice
+else
+  case "$BACKEND" in
+    cpu) choice="1" ;;
+    cuda13) choice="2" ;;
+    rocm) choice="3" ;;
+    *)
+      echo "Invalid backend: $BACKEND (expected cpu|cuda13|rocm)" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+case "$choice" in
+  1)
+    BACKEND="cpu"
+    FULL_TARGET="final-cpu"
+    DEPS_TARGET="deps-cpu"
+    DEPS_IMAGE_ARG="GA_DEPS_CPU_IMAGE"
+    REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311TorchCPU/requirements.txt"
+    DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.cpu"
+    ;;
+  2)
+    BACKEND="cuda13"
+    FULL_TARGET="final-cuda13"
+    DEPS_TARGET="deps-cuda13"
+    DEPS_IMAGE_ARG="GA_DEPS_CUDA13_IMAGE"
+    REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311TorchCUDA/requirements.txt"
+    DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.cuda"
+    ;;
+  3)
+    BACKEND="rocm"
+    FULL_TARGET="final-rocm"
+    DEPS_TARGET="deps-rocm"
+    DEPS_IMAGE_ARG="GA_DEPS_ROCM_IMAGE"
+    REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311TorchROCM/requirements.txt"
+    DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.rocm"
+    ;;
+  *)
+    echo "Invalid choice." >&2
+    exit 1
+    ;;
+esac
+
+JULIAN_DAY="$(date +%y%j)"
+TIME_STAMP="$(date +%H%M)"
+IMAGE_TAG="guideants-ai:${BACKEND}-${JULIAN_DAY}.${TIME_STAMP}"
+
+echo "============================================"
+echo "  Building GuideAnts AI"
+echo "============================================"
+echo "Backend:       $BACKEND"
+echo "Target stage:  $FULL_TARGET"
+echo "Image tag:     $IMAGE_TAG"
+echo "Deps target:   $DEPS_TARGET"
+echo "Rebuild base:  $REBUILD_BASE"
+if [[ "$BUILD_ALL" == "true" ]]; then
+  echo "All images:    Yes"
+fi
+echo
+
+[[ -f "$REQUIREMENTS_SRC" ]] || { echo "Requirements file not found at $REQUIREMENTS_SRC" >&2; exit 1; }
+[[ -f "$DOCKERFILE_PATH" ]] || { echo "Dockerfile not found at $DOCKERFILE_PATH" >&2; exit 1; }
+
+SCRIPT_AGENT_PROJECT="$SERVER_PATH/ScriptExecutionAgent"
+[[ -d "$SCRIPT_AGENT_PROJECT" ]] || { echo "ScriptExecutionAgent directory not found at $SCRIPT_AGENT_PROJECT" >&2; exit 1; }
+
+PUBLISH_OUTPUT="$SCRIPT_AGENT_PROJECT/publish"
+rm -rf "$PUBLISH_OUTPUT"
+
+(
+  cd "$SCRIPT_AGENT_PROJECT"
+  dotnet restore
+  dotnet publish -c Release -o ./publish
+)
+echo "ScriptExecutionAgent built successfully."
+
+AGENT_DEST="$BUILD_CONTEXT/ScriptExecutionAgent"
+REQ_DEST="$BUILD_CONTEXT/requirements.txt"
+cleanup() {
+  rm -rf "$AGENT_DEST"
+  rm -f "$REQ_DEST"
+}
+trap cleanup EXIT
+
+rm -rf "$AGENT_DEST"
+cp -R "$PUBLISH_OUTPUT" "$AGENT_DEST"
+
+awk '
+BEGIN {
+  ignore["torch"]=1
+  ignore["torchaudio"]=1
+  ignore["torchvision"]=1
+  ignore["torchtext"]=1
+}
+{
+  line=$0
+  gsub(/^[ \t]+|[ \t]+$/, "", line)
+  if (line == "" || substr(line,1,1) == "#") { print $0; next }
+  pkg=line
+  sub(/[=<>!~[].*$/, "", pkg)
+  for (i=1; i<=length(pkg); i++) {
+    c=substr(pkg,i,1)
+    if (c >= "A" && c <= "Z") {
+      pkg=substr(pkg,1,i-1) tolower(c) substr(pkg,i+1)
+    }
+  }
+  if (!(pkg in ignore)) { print $0 }
+}
+' "$REQUIREMENTS_SRC" > "$REQ_DEST"
+
+echo "Build context staged."
+
+DEPS_HASH_INPUTS=(
+  "$DOCKERFILE_PATH"
+  "$BUILD_CONTEXT/asr-requirements.txt"
+  "$BUILD_CONTEXT/tts-requirements.txt"
+  "$BUILD_CONTEXT/emb-requirements.txt"
+  "$REQ_DEST"
+)
+DEPS_HASH="$(get_combined_hash "${DEPS_HASH_INPUTS[@]}")"
+DEPS_HASH="${DEPS_HASH:0:12}"
+DEPS_TAG="guideants-ai-deps:${BACKEND}-${DEPS_HASH}"
+DEPS_CACHE_TAG="guideants-ai-deps:${BACKEND}-cache"
+
+echo "Dependency image tag: $DEPS_TAG"
+echo "Dependency cache tag: $DEPS_CACHE_TAG"
+
+DEPS_EXISTS=false
+DEPS_CACHE_EXISTS=false
+if docker_image_exists "$DEPS_TAG"; then DEPS_EXISTS=true; fi
+if docker_image_exists "$DEPS_CACHE_TAG"; then DEPS_CACHE_EXISTS=true; fi
+
+if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
+  if [[ "$REBUILD_BASE" == "true" ]]; then
+    echo "Rebuilding dependency image without cache..."
+  else
+    echo "Dependency image not found. Building $DEPS_TAG..."
+  fi
+
+  DEPS_BUILD_ARGS=(buildx build --load)
+  if [[ "$REBUILD_BASE" == "true" ]]; then
+    DEPS_BUILD_ARGS+=(--no-cache)
+  else
+    DEPS_BUILD_ARGS+=(
+      --cache-from "type=local,src=$DEPS_CACHE_PATH"
+      --cache-from "type=local,src=$FINAL_CACHE_PATH"
+    )
+    if [[ "$DEPS_CACHE_EXISTS" == "true" ]]; then
+      DEPS_BUILD_ARGS+=(--cache-from "$DEPS_CACHE_TAG")
+    fi
+  fi
+  DEPS_BUILD_ARGS+=(
+    --cache-to "type=local,dest=$DEPS_CACHE_PATH,mode=max"
+    --cache-to type=inline
+    --target "$DEPS_TARGET"
+    -t "$DEPS_TAG"
+    -t "$DEPS_CACHE_TAG"
+    -f "$DOCKERFILE_PATH"
+    "$BUILD_CONTEXT"
+  )
+  docker "${DEPS_BUILD_ARGS[@]}"
+else
+  echo "Reusing cached dependency image: $DEPS_TAG"
+  docker tag "$DEPS_TAG" "$DEPS_CACHE_TAG"
+fi
+
+DOCKER_ARGS=(buildx build --load)
+if [[ "$REBUILD_BASE" == "true" ]]; then
+  DOCKER_ARGS+=(--no-cache)
+fi
+DOCKER_ARGS+=(
+  --cache-from "type=local,src=$DEPS_CACHE_PATH"
+  --cache-from "type=local,src=$FINAL_CACHE_PATH"
+  --cache-from "$DEPS_CACHE_TAG"
+  --cache-to "type=local,dest=$FINAL_CACHE_PATH,mode=min"
+  --build-arg "${DEPS_IMAGE_ARG}=$DEPS_TAG"
+  --target "$FULL_TARGET"
+  -t "$IMAGE_TAG"
+  -f "$DOCKERFILE_PATH"
+  "$BUILD_CONTEXT"
+)
+docker "${DOCKER_ARGS[@]}"
+
+echo "Image built: $IMAGE_TAG"
+
+ENV_FILE="$DOCKER_ROOT/.env"
+case "$BACKEND" in
+  cuda13) IMAGE_ENV_KEY="GA_AI_CUDA_IMAGE" ;;
+  rocm) IMAGE_ENV_KEY="GA_AI_ROCM_IMAGE" ;;
+  *) IMAGE_ENV_KEY="GA_AI_CPU_IMAGE" ;;
+esac
+ENV_LINE="$IMAGE_ENV_KEY=$IMAGE_TAG"
+
+if [[ -f "$ENV_FILE" ]]; then
+  if grep -qE "^${IMAGE_ENV_KEY}=" "$ENV_FILE"; then
+    sed -i.bak -E "s|^${IMAGE_ENV_KEY}=.*$|${ENV_LINE}|" "$ENV_FILE"
+  else
+    printf "%s\n" "$ENV_LINE" >> "$ENV_FILE"
+  fi
+  rm -f "${ENV_FILE}.bak"
+else
+  printf "%s\n" "$ENV_LINE" > "$ENV_FILE"
+fi
+echo "Wrote $ENV_LINE to $ENV_FILE"
+
+if [[ "$BUILD_ALL" == "true" ]]; then
+  SCRIPT_AGENT_PUBLISH="$SERVER_PATH/ScriptExecutionAgent/publish"
+  PLANTUML_CONTAINER_PATH="$SCRIPT_DIR/Sandboxes/PlantUml"
+  PLANTUML_SCRIPT_AGENT_PATH="$PLANTUML_CONTAINER_PATH/ScriptExecutionAgent"
+
+  if [[ -d "$SCRIPT_AGENT_PUBLISH" && -d "$PLANTUML_CONTAINER_PATH" ]]; then
+    rm -rf "$PLANTUML_SCRIPT_AGENT_PATH"
+    cp -R "$SCRIPT_AGENT_PUBLISH" "$PLANTUML_SCRIPT_AGENT_PATH"
+    echo "Copied ScriptExecutionAgent to PlantUML container directory"
+  fi
+
+  timestamp="$(date +%Y%m%d%H%M%S)"
+  docker build -t plantuml-1.2025.2 -f "$SCRIPT_DIR/Sandboxes/PlantUml/dockerfile" --build-arg "SCRIPT_AGENT_VERSION=$timestamp" "$SCRIPT_DIR/Sandboxes/PlantUml"
+
+  MSSQL_BUILD_CONTEXT="$SCRIPT_DIR/mssql-fts"
+  MSSQL_DOCKERFILE_PATH="$MSSQL_BUILD_CONTEXT/Dockerfile"
+  [[ -f "$MSSQL_DOCKERFILE_PATH" ]] || { echo "MSSQL Dockerfile not found at $MSSQL_DOCKERFILE_PATH" >&2; exit 1; }
+  echo "Building mssql image: mssql2025-express-fts"
+  docker build -t mssql2025-express-fts -f "$MSSQL_DOCKERFILE_PATH" --build-arg MSSQL_PID=Express "$MSSQL_BUILD_CONTEXT"
+
+  SEARXNG_DOCKERFILE_PATH="$SCRIPT_DIR/searxng/Dockerfile"
+  [[ -f "$SEARXNG_DOCKERFILE_PATH" ]] || { echo "SearXNG Dockerfile not found at $SEARXNG_DOCKERFILE_PATH" >&2; exit 1; }
+  echo "Building searxng image: guideants-searxng:latest"
+  docker build -t guideants-searxng:latest -f "$SEARXNG_DOCKERFILE_PATH" "$REPO_ROOT"
+
+  WEBAPI_UI_BUILD_SCRIPT="$SCRIPT_DIR/build_webapi_ui.sh"
+  [[ -f "$WEBAPI_UI_BUILD_SCRIPT" ]] || { echo "WebAPI+UI build script not found at $WEBAPI_UI_BUILD_SCRIPT" >&2; exit 1; }
+
+  echo "Building WebAPI+UI image via build_webapi_ui.sh"
+  if [[ "$REBUILD_BASE" == "true" ]]; then
+    bash "$WEBAPI_UI_BUILD_SCRIPT" --no-cache --no-recreate
+  else
+    bash "$WEBAPI_UI_BUILD_SCRIPT" --no-recreate
+  fi
+fi
+
+echo
+echo "============================================"
+echo "  Build complete: $IMAGE_TAG"
+echo "============================================"
