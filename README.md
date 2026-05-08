@@ -2,6 +2,17 @@
 
 Guides + Assistants = GuideAnts (pronounced "guidance")
 
+<table>
+  <tr>
+    <td><img src="docs/images/Chat.png" alt="Chat"></td>
+    <td><img src="docs/images/Services.png" alt="Services"></td>
+    <td><img src="docs/images/GuideBuilder.png" alt="Guide Builder"></td>
+    <td><img src="docs/images/Telemetry.png" alt="Telemetry"></td>
+  </tr>
+</table>
+
+GuideAnts is a large, full-stack AI workspace system that combines notebook-style workspaces, reusable guides and assistants, file and lineage management with document intelligence and RAG, provider-routed multimodal AI services, with a modular architecture that works locally and scales to any cloud.
+
 ## Quickstart
 
 Use the root one-step launcher for your OS:
@@ -147,7 +158,3 @@ Typical work splits into one of three lanes:
 - frontend/product work in `src/client`
 - API/domain/runtime work in `src/server`
 - local infrastructure/runtime work in `docker`
-
-## In One Sentence
-
-GuideAnts is a large, full-stack AI workspace system that combines notebook-style workspaces, reusable guides and assistants, file and lineage management, provider-routed multimodal AI services, and a local-runtime-heavy deployment model in one repo.
