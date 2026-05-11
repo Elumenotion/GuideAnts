@@ -63,6 +63,7 @@ docker info >nul 2>nul || call :fail Docker daemon is not reachable. Start Docke
 call :check_wsl
 
 call :detect_backend
+call :validate_backend
 call :select_compose_file
 
 call :log Selected backend: %SELECTED_BACKEND%
@@ -131,6 +132,50 @@ exit /b 0
 :detect_amd
 for /f "delims=" %%a in ('powershell -NoProfile -Command "$g=(Get-CimInstance Win32_VideoController 2>$null | Select-Object -ExpandProperty Name) -join ''`n''; if($g -match ''AMD|Radeon''){''rocm''} else {''cpu''}"') do set "SELECTED_BACKEND=%%a"
 if not defined SELECTED_BACKEND set "SELECTED_BACKEND=cpu"
+exit /b 0
+
+:validate_backend
+if /I not "%SELECTED_BACKEND%"=="cuda13" exit /b 0
+
+set "NVIDIA_DRIVER_VERSION="
+for /f "delims=" %%a in ('nvidia-smi --query-gpu^=driver_version --format^=csv^,noheader 2^>nul') do (
+  if not defined NVIDIA_DRIVER_VERSION set "NVIDIA_DRIVER_VERSION=%%a"
+)
+
+if not defined NVIDIA_DRIVER_VERSION (
+  if not "%BACKEND_OVERRIDE%"=="" (
+    call :fail Could not read NVIDIA driver version from nvidia-smi. Remove --backend cuda13 or fix NVIDIA driver/runtime.
+  )
+  call :warn Could not read NVIDIA driver version from nvidia-smi. Falling back to cpu backend.
+  set "SELECTED_BACKEND=cpu"
+  exit /b 0
+)
+
+for /f "tokens=1 delims=." %%a in ("%NVIDIA_DRIVER_VERSION%") do set "NVIDIA_DRIVER_MAJOR=%%a"
+if not defined NVIDIA_DRIVER_MAJOR set "NVIDIA_DRIVER_MAJOR=0"
+set /a NVIDIA_DRIVER_MAJOR_NUM=%NVIDIA_DRIVER_MAJOR% >nul 2>nul
+if errorlevel 1 (
+  if not "%BACKEND_OVERRIDE%"=="" (
+    call :fail Could not parse NVIDIA driver version "%NVIDIA_DRIVER_VERSION%". Remove --backend cuda13 or fix NVIDIA drivers.
+    exit /b 1
+  )
+  call :warn Could not parse NVIDIA driver version "%NVIDIA_DRIVER_VERSION%". Falling back to cpu backend.
+  set "SELECTED_BACKEND=cpu"
+  exit /b 0
+)
+
+rem CUDA 13 requires NVIDIA R580+ drivers.
+if %NVIDIA_DRIVER_MAJOR_NUM% LSS 580 (
+  if not "%BACKEND_OVERRIDE%"=="" (
+    call :fail NVIDIA driver %NVIDIA_DRIVER_VERSION% is too old for cuda13. Install R580+ driver or use --backend cpu.
+    exit /b 1
+  )
+  call :warn NVIDIA driver %NVIDIA_DRIVER_VERSION% is below the CUDA 13 minimum ^(R580^). Falling back to cpu backend.
+  set "SELECTED_BACKEND=cpu"
+  exit /b 0
+)
+
+call :log NVIDIA driver %NVIDIA_DRIVER_VERSION% satisfies CUDA 13 minimum ^(R580^).
 exit /b 0
 
 :select_compose_file
