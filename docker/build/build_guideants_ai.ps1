@@ -87,25 +87,28 @@ $buildContext = Join-Path $PSScriptRoot 'guideants-ai'
 $depsCachePath = Join-Path $dockerRoot '.buildx-cache-deps'
 $finalCachePath = Join-Path $dockerRoot '.buildx-cache-final'
 
+foreach ($cachePath in @($depsCachePath, $finalCachePath)) {
+    if (-not (Test-Path $cachePath)) {
+        New-Item -ItemType Directory -Path $cachePath | Out-Null
+    }
+}
+
 # --- Select backend ---
 
 if ([string]::IsNullOrWhiteSpace($Backend)) {
-    $defaultBackend = $env:GA_DEFAULT_BACKEND
-    if (-not [string]::IsNullOrWhiteSpace($defaultBackend) -and $defaultBackend -in @('cpu', 'cuda13', 'rocm')) {
-        $Backend = $defaultBackend
-        Write-Host "Backend auto-selected from GA_DEFAULT_BACKEND: $Backend"
-    }
-    elseif (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
-        $Backend = 'cuda13'
-        Write-Host "Backend auto-selected: cuda13 (NVIDIA GPU detected)"
-    }
-    elseif (Get-Command rocminfo -ErrorAction SilentlyContinue) {
-        $Backend = 'rocm'
-        Write-Host "Backend auto-selected: rocm (ROCm detected)"
-    }
-    else {
-        $Backend = 'cpu'
-        Write-Host "Backend auto-selected: cpu (no CUDA/ROCm runtime detected)"
+    Write-Host "Select backend:"
+    Write-Host "  1) CPU-only"
+    Write-Host "  2) CUDA 13"
+    Write-Host "  3) ROCm"
+    $choice = Read-Host "Enter choice [1, 2, or 3]"
+    switch ($choice) {
+        '1' { $Backend = 'cpu' }
+        '2' { $Backend = 'cuda13' }
+        '3' { $Backend = 'rocm' }
+        default {
+            Write-Error "Invalid choice '$choice'. Valid values: 1, 2, or 3."
+            exit 1
+        }
     }
 }
 switch ($Backend) {
@@ -269,12 +272,8 @@ try {
                 '--cache-from', "type=local,src=$depsCachePath",
                 '--cache-from', "type=local,src=$finalCachePath"
             )
-            if ($depsCacheExists) {
-                $depsBuildArgs += @('--cache-from', $depsCacheTag)
-            }
         }
         $depsBuildArgs += @(
-            '--cache-to', "type=local,dest=$depsCachePath,mode=max",
             '--cache-to', 'type=inline',
             '--target', $depsTarget,
             '-t', $depsTag,
@@ -306,8 +305,6 @@ try {
     $dockerArgs += @(
         '--cache-from', "type=local,src=$depsCachePath",
         '--cache-from', "type=local,src=$finalCachePath",
-        '--cache-from', $depsCacheTag,
-        '--cache-to', "type=local,dest=$finalCachePath,mode=min",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,
