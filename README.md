@@ -137,17 +137,21 @@ GuideAnts is built on top of excellent open source work. Huge thanks to the team
 
 If you are new to the repo, these are the best first reads:
 
-1. [`docs/setup-guide.md`](docs/setup-guide.md) for the end-to-end local stack and Settings workflow.
-2. [`docs/settings-page-provider-model-llama-redesign.md`](docs/settings-page-provider-model-llama-redesign.md) for current Settings architecture and extension seams.
-3. [`docs/settings-and-llama-completion-requirements.md`](docs/settings-and-llama-completion-requirements.md) and [`docs/settings-service-provider-model-requirements.md`](docs/settings-service-provider-model-requirements.md) for normative requirements.
-4. [`docs/default-chat-models.md`](docs/default-chat-models.md), [`docs/llama-model-download-and-runtime-management.md`](docs/llama-model-download-and-runtime-management.md), and [`docs/add-ai-services-wizard.md`](docs/add-ai-services-wizard.md) for focused deep dives.
-5. [`docs/project-and-notebook-files-system.md`](docs/project-and-notebook-files-system.md) for the core project/notebook/file model.
-6. [`docker/guideants-ai-build.md`](docker/guideants-ai-build.md) and [`docker/build-processes.md`](docker/build-processes.md) for building the local images this repo expects.
+1. **[`docs/developer-config-guide.md`](docs/developer-config-guide.md) — start here if you are setting up a dev machine.** It has the full install checklist (Docker, PowerShell Core, Node, .NET, optional GPU drivers) with cross-platform install links, plus per-lane pre-requisites for client, server, and docker work.
+2. [`docs/setup-guide.md`](docs/setup-guide.md) for the end-to-end local stack and Settings workflow.
+3. [`docs/settings-page-provider-model-llama-redesign.md`](docs/settings-page-provider-model-llama-redesign.md) for current Settings architecture and extension seams.
+4. [`docs/settings-and-llama-completion-requirements.md`](docs/settings-and-llama-completion-requirements.md) and [`docs/settings-service-provider-model-requirements.md`](docs/settings-service-provider-model-requirements.md) for normative requirements.
+5. [`docs/default-chat-models.md`](docs/default-chat-models.md), [`docs/llama-model-download-and-runtime-management.md`](docs/llama-model-download-and-runtime-management.md), and [`docs/add-ai-services-wizard.md`](docs/add-ai-services-wizard.md) for focused deep dives.
+6. [`docs/project-and-notebook-files-system.md`](docs/project-and-notebook-files-system.md) for the core project/notebook/file model.
+7. [`docker/guideants-ai-build.md`](docker/guideants-ai-build.md) and [`docker/build-processes.md`](docker/build-processes.md) for building the local images this repo expects.
 
 ## Development Entry Points
 
+> **New to the codebase?** Read [`docs/developer-config-guide.md`](docs/developer-config-guide.md) first — it is the single source of truth for what to install and how the client, server, and docker lanes hang together.
+
 For day-to-day work, the main entry points are:
 
+- [`docs/developer-config-guide.md`](docs/developer-config-guide.md) for the install checklist and per-lane pre-requisites (client, server, docker)
 - [`src/client/package.json`](src/client/package.json) for browser/Electron dev, build, and test commands
 - [`src/server/GuideAntsApi.sln`](src/server/GuideAntsApi.sln) for the .NET solution
 - [`appsettings.example.json`](appsettings.example.json) and [`appsettings.Development.example.json`](appsettings.Development.example.json) for sanitized config templates

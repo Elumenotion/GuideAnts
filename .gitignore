@@ -411,3 +411,4 @@ FodyWeavers.xsd
 /output/playwright
 .installer_state.env
 /docker/.buildx-cache
+/docker/.build-state

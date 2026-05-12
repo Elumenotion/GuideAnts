@@ -415,7 +415,8 @@ if ($All) {
     }
 
     $searxngDockerfilePath = Join-Path $PSScriptRoot "searxng\Dockerfile"
-    $searxngBuildContext = Join-Path $repoRoot
+    # Build context is the repo root; avoid Join-Path with a missing child argument.
+    $searxngBuildContext = $repoRoot
     $searxngImageTag = "guideants-searxng:latest"
     $searxngHashFile = Join-Path $buildStateDir "searxng.hash"
     if (-not (Test-Path $searxngDockerfilePath)) {
