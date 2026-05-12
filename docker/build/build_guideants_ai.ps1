@@ -42,8 +42,12 @@ function Test-DockerImageExists {
         [string]$ImageTag
     )
 
-    docker image inspect $ImageTag *> $null
-    return ($LASTEXITCODE -eq 0)
+    $matches = docker image ls --format '{{.Repository}}:{{.Tag}}' $ImageTag 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    return $matches -contains $ImageTag
 }
 
 function Get-HashFromFile {
@@ -86,22 +90,26 @@ $finalCachePath = Join-Path $dockerRoot '.buildx-cache-final'
 # --- Select backend ---
 
 if ([string]::IsNullOrWhiteSpace($Backend)) {
-    Write-Host "Select backend:"
-    Write-Host "  1) CPU-only"
-    Write-Host "  2) CUDA 13"
-    Write-Host "  3) ROCm"
-    $choice = Read-Host "Enter choice [1, 2, or 3]"
-}
-else {
-    $choice = switch ($Backend) {
-        'cpu' { '1' }
-        'cuda13' { '2' }
-        'rocm' { '3' }
+    $defaultBackend = $env:GA_DEFAULT_BACKEND
+    if (-not [string]::IsNullOrWhiteSpace($defaultBackend) -and $defaultBackend -in @('cpu', 'cuda13', 'rocm')) {
+        $Backend = $defaultBackend
+        Write-Host "Backend auto-selected from GA_DEFAULT_BACKEND: $Backend"
+    }
+    elseif (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+        $Backend = 'cuda13'
+        Write-Host "Backend auto-selected: cuda13 (NVIDIA GPU detected)"
+    }
+    elseif (Get-Command rocminfo -ErrorAction SilentlyContinue) {
+        $Backend = 'rocm'
+        Write-Host "Backend auto-selected: rocm (ROCm detected)"
+    }
+    else {
+        $Backend = 'cpu'
+        Write-Host "Backend auto-selected: cpu (no CUDA/ROCm runtime detected)"
     }
 }
-
-switch ($choice) {
-    '1' {
+switch ($Backend) {
+    'cpu' {
         $Backend = 'cpu'
         $fullTarget = 'final-cpu'
         $depsTarget = 'deps-cpu'
@@ -109,7 +117,7 @@ switch ($choice) {
         $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchCPU\requirements.txt'
         $dockerfilePath = Join-Path $buildContext 'Dockerfile.cpu'
     }
-    '2' {
+    'cuda13' {
         $Backend = 'cuda13'
         $fullTarget = 'final-cuda13'
         $depsTarget = 'deps-cuda13'
@@ -117,7 +125,7 @@ switch ($choice) {
         $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchCUDA\requirements.txt'
         $dockerfilePath = Join-Path $buildContext 'Dockerfile.cuda'
     }
-    '3' {
+    'rocm' {
         $Backend = 'rocm'
         $fullTarget = 'final-rocm'
         $depsTarget = 'deps-rocm'
@@ -126,7 +134,7 @@ switch ($choice) {
         $dockerfilePath = Join-Path $buildContext 'Dockerfile.rocm'
     }
     default {
-        Write-Error "Invalid choice."
+        Write-Error "Invalid backend '$Backend'. Valid values: cpu, cuda13, rocm."
         exit 1
     }
 }
