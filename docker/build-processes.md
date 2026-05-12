@@ -202,7 +202,7 @@ The following folders contain sandbox/reference builds and are not first-class c
 - `docker/build/Sandboxes/python311TorchCUDA`
 - `docker/build/Sandboxes/python311TorchMARM64`
 - `docker/build/Sandboxes/whiper-large`
-- `docker/build/Sandboxes/Net9AndPython`
+- `docker/build/Sandboxes/Net8AndPython`
 
 These are useful for experimentation and dependency prototyping, while production/local-stack builds should follow Sections 2-6 above.
 
