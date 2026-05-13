@@ -172,37 +172,33 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                 return null;
             }
 
-            try
+            using var context = CreateContext();
+
+            var reasoningChoicesJson = await context.Models
+                .AsNoTracking()
+                .Where(m => m.ModelId == modelId)
+                .Select(m => m.ReasoningChoicesJson)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var requested = reasoningEffort.Trim();
+            var choices = ParseReasoningChoicesJson(reasoningChoicesJson);
+
+            if (choices.Count == 0)
             {
-                using var context = CreateContext();
-
-                var reasoningChoicesJson = await context.Models
-                    .AsNoTracking()
-                    .Where(m => m.ModelId == modelId)
-                    .Select(m => m.ReasoningChoicesJson)
-                    .FirstOrDefaultAsync(cancellationToken);
-
-                var requested = reasoningEffort.Trim();
-                if (IsNoReasoningChoice(requested))
-                {
-                    return null;
-                }
-
-                var choices = ParseReasoningChoicesJson(reasoningChoicesJson);
-                var matched = choices.FirstOrDefault(choice =>
-                    string.Equals(choice, requested, StringComparison.OrdinalIgnoreCase));
-
-                return IsNoReasoningChoice(matched) ? null : matched;
+                return requested;
             }
-            catch
+
+            var matched = choices.FirstOrDefault(choice =>
+                string.Equals(choice, requested, StringComparison.OrdinalIgnoreCase));
+
+            if (matched == null)
             {
-                return null;
+                throw new InvalidOperationException(
+                    $"Reasoning effort '{requested}' is not a valid choice for model '{modelId}'. " +
+                    $"Allowed choices: [{string.Join(", ", choices)}].");
             }
-        }
 
-        private static bool IsNoReasoningChoice(string? choice)
-        {
-            return string.Equals(choice?.Trim(), "none", StringComparison.OrdinalIgnoreCase);
+            return matched;
         }
 
         private static List<string> ParseReasoningChoicesJson(string? reasoningChoicesJson)
@@ -303,20 +299,16 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
 
         private static AssistantModelParameters NormalizeAssistantModelParameters(Assistant assistant)
         {
-            var reasoningEffort = IsNoReasoningChoice(assistant.ReasoningEffort)
-                ? null
-                : assistant.ReasoningEffort;
-
             if (AssistantUsesLocalRuntime(assistant))
             {
                 return new AssistantModelParameters(
                     assistant.Temperature,
                     assistant.TopP,
-                    reasoningEffort,
+                    assistant.ReasoningEffort,
                     assistant.SamplingParametersJson);
             }
 
-            return new AssistantModelParameters(null, null, reasoningEffort, null);
+            return new AssistantModelParameters(null, null, assistant.ReasoningEffort, null);
         }
 
         private static bool AssistantUsesLocalRuntime(Assistant assistant)
