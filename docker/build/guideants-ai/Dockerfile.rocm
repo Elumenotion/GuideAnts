@@ -112,6 +112,8 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV PYTHONUNBUFFERED=1
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
 
 FROM runtime-rocm-base AS pydeps-rocm-builder
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -121,6 +123,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         build-essential cmake git \
         graphviz graphviz-dev \
         libopenblas-dev liblapack-dev libboost-python-dev \
+        gdal-bin libgdal-dev \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -151,6 +154,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get install -y --no-install-recommends \
         graphviz ffmpeg bash sqlite3 nginx util-linux passwd \
         libopenblas0-pthread liblapack3 \
+        gdal-bin libgdal-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=pydeps-rocm-builder /opt/venv /opt/venv
