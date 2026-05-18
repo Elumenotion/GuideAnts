@@ -1,5 +1,13 @@
 # Cloud Provider Expansion Proposal
 
+> Historical - not current implementation guidance.
+>
+> Superseded by:
+> - [setup-guide.md](../../setup-guide.md)
+> - [chat-providers-architecture-and-extensibility.md](../../chat-providers-architecture-and-extensibility.md)
+> - [settings-architecture.md](../../settings-architecture.md)
+> - [settings-and-llama-completion-requirements.md](../../settings-and-llama-completion-requirements.md)
+
 Date: 2026-04-24
 
 ## Status
@@ -65,3 +73,4 @@ Focused verification completed on 2026-04-24:
 Result:
 - Passed: 40
 - Failed: 0
+

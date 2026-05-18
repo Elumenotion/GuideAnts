@@ -1,9 +1,13 @@
 # Settings + Llama Completion - Requirements
 
-Last updated: 2026-04-30
+Last updated: 2026-05-18
 
 This document is the normative requirements baseline for Settings, chat/non-chat routing,
 local llama runtime integration, and fail-fast behavior.
+
+Source-of-truth set:
+- [setup-guide.md](setup-guide.md)
+- [settings-architecture.md](settings-architecture.md)
 
 ## Glossary
 
@@ -73,7 +77,7 @@ local llama runtime integration, and fail-fast behavior.
 | R-6.2 | Catalog create flow MUST remain provider-driven wizard UX. |
 | R-6.3 | Catalog edit MUST remain provider-scoped and safe for existing rows. |
 | R-6.4 | Catalog rows MUST surface readiness/routability signals. |
-| R-6.5 | Provider coverage MUST include at least: `openai-chat`, `openai-responses`, `azure-openai-chat`, `azure-openai-responses`, `anthropic`, `llama-cpp`, `google-gemini-chat`, `hf-inference-chat`, `openrouter-chat`. |
+| R-6.5 | Provider coverage MUST be status-qualified: Stable (operator-supported) includes `openai-chat`, `openai-responses`, `azure-openai-chat`, `azure-openai-responses`, `anthropic`, `llama-cpp`, `google-gemini-chat`; Experimental/Hidden includes `hf-inference-chat`, `openrouter-chat`; roadmap providers are documented separately and are not shipped. |
 | R-6.6 | Runtime profiles MUST expose usage-aware lifecycle (including delete guard when referenced). |
 | R-6.7 | Runtime profile templates (`qwen3_5`, `qwen3_6`, `gemma4`) MUST remain available. |
 | R-6.8 | Local Llama Runtime surface MUST remain runtime-operations focused. |
@@ -146,8 +150,24 @@ local llama runtime integration, and fail-fast behavior.
 | R-12.9 | Automated coverage must include validator-orchestration interaction cases. |
 | R-12.10 | Settings-initiated unload behavior must not create undefined contention outcomes with in-flight notebook load orchestration. |
 
+## R-13. Non-chat service editor requirements
+
+| ID | Requirement |
+|----|-------------|
+| R-13.1 | Non-chat editor model remains `service -> provider -> model/runtime options`; provider fields are service-scoped and must not bleed across providers. |
+| R-13.2 | Services tab remains the owner for non-chat active provider/runtime behavior; Connections remains credential ownership; Infrastructure remains runtime dependency ownership. |
+| R-13.3 | Service editor renders in consistent order: header/readiness, provider selector, provider fields, service-level fields (if any), and action row. |
+| R-13.4 | Active provider label reflects persisted state; draft provider changes remain draft until save. |
+| R-13.5 | Provider switching preserves in-session drafts per provider; save must not mutate unrelated provider drafts. |
+| R-13.6 | Validation is scoped to operative fields for selected provider; hidden/non-operative fields must not block save. |
+| R-13.7 | Service provider options must come from server contracts; provider/model compatibility remains explicit and validated. |
+| R-13.8 | Save operations preserve row-version optimistic concurrency semantics (`409` on stale writes). |
+| R-13.9 | For local capability operations, actions remain explicit/stateful; destructive operations require confirmation; unavailable capability states must present operator-friendly copy. |
+| R-13.10 | Non-chat editor copy remains service-specific and must avoid chat/LLM-generic wording. |
+
 ## Non-goals
 
 - Redesigning notebook runtime orchestration.
 - Introducing silent fallback behavior.
 - Expanding default model scope beyond current product boundary without explicit follow-up requirements.
+

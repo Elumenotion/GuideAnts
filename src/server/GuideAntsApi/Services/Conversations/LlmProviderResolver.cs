@@ -16,6 +16,9 @@ internal static class LlmProviderResolver
             LlmProvider.LlamaCpp => "LocalLlamaCpp",
             LlmProvider.OpenAiPlatform => "OpenAI",
             LlmProvider.AzureOpenAi => "AzureOpenAI",
+            LlmProvider.GoogleGeminiChat => "GoogleGemini",
+            LlmProvider.HuggingFaceInference => "HuggingFace",
+            LlmProvider.OpenRouterChat => "OpenRouter",
             _ => throw new InvalidOperationException(
                 $"Unmapped LlmProvider '{provider}' in ResolveUsageServiceName.")
         };
@@ -66,8 +69,11 @@ internal static class LlmProviderResolver
             "openai-responses" => LlmProvider.OpenAiPlatform,
             "azure-openai-chat" => LlmProvider.AzureOpenAi,
             "azure-openai-responses" => LlmProvider.AzureOpenAi,
+            "google-gemini-chat" => LlmProvider.GoogleGeminiChat,
+            "hf-inference-chat" => LlmProvider.HuggingFaceInference,
+            "openrouter-chat" => LlmProvider.OpenRouterChat,
             _ => throw new InvalidOperationException(
-                $"Unsupported model provider '{provider}'. Expected one of: openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, llama-cpp.")
+                $"Unsupported model provider '{provider}'. Expected one of: openai-chat, openai-responses, azure-openai-chat, azure-openai-responses, anthropic, llama-cpp, google-gemini-chat, hf-inference-chat, openrouter-chat.")
         };
     }
 
@@ -76,6 +82,9 @@ internal static class LlmProviderResolver
         OpenAiPlatform,
         AzureOpenAi,
         Anthropic,
-        LlamaCpp
+        LlamaCpp,
+        GoogleGeminiChat,
+        HuggingFaceInference,
+        OpenRouterChat
     }
 }

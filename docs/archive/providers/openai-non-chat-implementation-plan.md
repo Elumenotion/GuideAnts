@@ -1,5 +1,13 @@
 # OpenAI Non-Chat Implementation Plan (STT, TTS, Images, Embeddings)
 
+> Historical - not current implementation guidance.
+>
+> Superseded by:
+> - [setup-guide.md](../../setup-guide.md)
+> - [settings-architecture.md](../../settings-architecture.md)
+> - [settings-and-llama-completion-requirements.md](../../settings-and-llama-completion-requirements.md)
+> - [settings-and-llama-completion-requirements.md#r-13-non-chat-service-editor-requirements](../../settings-and-llama-completion-requirements.md#r-13-non-chat-service-editor-requirements)
+
 ## Plan goals
 
 Add OpenAI as a cloud provider to four existing routed services:
@@ -608,3 +616,4 @@ Each editor already has a switch/branch per provider. Add the OpenAI case to eac
 7. Readiness correctly blocks modes with missing `ModelId`, missing `VoiceName` (TTS), and unrecognized model IDs.
 8. Tests pass for contracts, routing, runtime, and client behavior updates.
 9. No regressions in existing Azure/Local/Google/HuggingFace/OpenRouter paths.
+

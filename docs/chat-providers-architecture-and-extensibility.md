@@ -1,6 +1,14 @@
 # Chat Providers — Architecture and Extensibility
 
-This guide explains how the AntRunner chat stack is structured and how to add a **new chat provider** that plugs into the same execution pipeline as OpenAI (Chat Completions), OpenAI (Responses API), Anthropic, and llama.cpp.
+Last updated: 2026-05-18
+
+This guide explains how the AntRunner chat stack is structured and how to add a **new chat provider** that plugs into the same execution pipeline as OpenAI (Chat Completions), OpenAI (Responses API), Anthropic, llama.cpp, and the current provider extensions.
+
+Provider status convention used in this document:
+
+- **Stable (operator-supported)**: shipped and documented for normal operator setup.
+- **Experimental/Hidden**: implemented in code paths but partial/in-flight and not generally operator-facing.
+- **Roadmap**: planned only; not shipped.
 
 ---
 
@@ -127,13 +135,15 @@ The library projects are reusable without the host. In **GuideAntsApi**, **`Rout
 
 ### 5.1 How the model is chosen
 
-1. **`IChatTargetResolver.Resolve(deploymentId)`** loads **`Models`** row by **`ModelId`** and returns **`ChatTarget`** (`ModelId`, **`Provider`**, **`LocalRuntimeJson`** for local runtimes).
+1. **`IChatTargetResolver.Resolve(deploymentId)`** loads **`Models`** row by **`ModelId`** and returns **`ChatTarget`** (`ModelId`, **`Provider`**, **`RuntimeConfigJson`** for runtime-specific model configuration).
 2. **`IChatTargetValidator.Validate`** ensures the provider string is known and required configuration keys exist (OpenAI / Azure OpenAI / Anthropic / llama-cpp specifics).
 3. **`RoutingChatCompletionClientFactory.CreateClient`** maps **`Provider`** to the correct underlying factory. There is **no silent fallback** to another provider if resolution fails.
 
-### 5.2 Provider strings (catalog)
+### 5.2 Provider strings (catalog, status-aware)
 
-These are the values **`ParseProvider`** and **`ChatTargetValidator.KnownProviders`** expect:
+These are the values **`ParseProvider`** and **`ChatTargetValidator.KnownProviders`** expect.
+
+Stable (operator-supported):
 
 | Catalog `Provider` | Backend |
 |--------------------|--------|
@@ -142,7 +152,17 @@ These are the values **`ParseProvider`** and **`ChatTargetValidator.KnownProvide
 | `azure-openai-chat` | **`OpenAiChatClientFactory`** + Azure OpenAI config |
 | `azure-openai-responses` | **`OpenAiResponsesClientFactory`** + Azure OpenAI config |
 | `anthropic` | **`AnthropicChatClientFactory`** |
-| `llama-cpp` | **`LlamaCppChatClientFactory`** + **`LocalRuntimeJson`** + runtime profile resolution |
+| `llama-cpp` | **`LlamaCppChatClientFactory`** + **`RuntimeConfigJson`** + runtime profile resolution |
+| `google-gemini-chat` | **`GoogleGeminiChatClientFactory`** |
+
+Experimental/Hidden (implemented, partial/in-flight, not operator-facing setup guidance):
+
+| Catalog `Provider` | Backend |
+|--------------------|--------|
+| `hf-inference-chat` | **`HuggingFaceChatClientFactory`** |
+| `openrouter-chat` | **`OpenRouterChatClientFactory`** |
+
+These hidden providers may appear in routing/readiness code paths, but should not be treated as fully shipped operator-facing setup.
 
 ### 5.3 Keyed DI for OpenAI factories
 

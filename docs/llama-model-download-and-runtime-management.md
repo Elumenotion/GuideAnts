@@ -1,6 +1,6 @@
 # Llama Model Download + Runtime Management
 
-Last updated: 2026-04-30
+Last updated: 2026-05-18
 
 This document describes the shipped local llama lifecycle in GuideAnts:
 model onboarding, alias inventory, load/unload orchestration, and fail-fast behavior.
@@ -72,7 +72,8 @@ The wizard path is complementary to full Settings ownership; operators can use e
 
 ## 8. Related docs
 
-- Default chat model resolution: [default-chat-models.md](default-chat-models.md)
-- Settings architecture: [settings-page-provider-model-llama-redesign.md](settings-page-provider-model-llama-redesign.md)
+- Default chat model resolution: [settings-architecture.md#default-chat-model-behavior](settings-architecture.md#default-chat-model-behavior)
+- Settings architecture: [settings-architecture.md](settings-architecture.md)
 - Requirements baseline: [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)
 - Operator setup: [setup-guide.md](setup-guide.md)
+

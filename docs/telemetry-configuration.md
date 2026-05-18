@@ -1,6 +1,6 @@
 # GuideAnts Telemetry and Visibility Configuration
 
-Last updated: 2026-04-30
+Last updated: 2026-05-18
 
 This document summarizes current telemetry controls and investigation paths.
 
@@ -65,5 +65,6 @@ Use these probes before deep-diving into code when failures appear network/confi
 ## 6. Related docs
 
 - Setup and troubleshooting: [setup-guide.md](setup-guide.md)
-- Settings architecture: [settings-page-provider-model-llama-redesign.md](settings-page-provider-model-llama-redesign.md)
+- Settings architecture: [settings-architecture.md](settings-architecture.md)
 - Requirements baseline: [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)
+

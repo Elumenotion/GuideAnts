@@ -1,6 +1,6 @@
 # Add AI Services Wizard
 
-Last updated: 2026-05-05
+Last updated: 2026-05-18
 
 This document describes the **as-built** Home onboarding wizard behavior.
 
@@ -212,7 +212,8 @@ When extending wizard behavior:
 ## 8. Related docs
 
 - Operator setup: [setup-guide.md](setup-guide.md)
-- Settings architecture: [settings-page-provider-model-llama-redesign.md](settings-page-provider-model-llama-redesign.md)
-- Default chat model behavior: [default-chat-models.md](default-chat-models.md)
+- Settings architecture: [settings-architecture.md](settings-architecture.md)
+- Default chat model behavior: [settings-architecture.md#default-chat-model-behavior](settings-architecture.md#default-chat-model-behavior)
 - Requirements baseline: [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)
 - Llama lifecycle and runtime ops: [llama-model-download-and-runtime-management.md](llama-model-download-and-runtime-management.md)
+

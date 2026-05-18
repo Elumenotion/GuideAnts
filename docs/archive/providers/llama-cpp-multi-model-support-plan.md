@@ -1,5 +1,13 @@
 # Llama.cpp Multi-Model Support Plan (Qwen + Gemma + Guide Builder Parameters)
 
+> Historical - not current implementation guidance.
+>
+> Superseded by:
+> - [setup-guide.md](../../setup-guide.md)
+> - [settings-architecture.md](../../settings-architecture.md)
+> - [settings-and-llama-completion-requirements.md](../../settings-and-llama-completion-requirements.md)
+> - [llama-model-download-and-runtime-management.md](../../llama-model-download-and-runtime-management.md)
+
 ## Summary
 This plan adds Gemma support **alongside** existing Qwen support in the current `llama.cpp` infrastructure, while redesigning local model abstractions so future model families can be onboarded with small, well-scoped code changes rather than bespoke code paths.
 
@@ -243,3 +251,4 @@ Per-family profiles handle the "how to talk to this model family" concern. Per-q
   - Mitigation: UI tests for switch/reconcile/default scenarios and clear inline validation messaging.
 - Risk: Runtime orchestration bugs (observed during current development).
   - Mitigation: Prerequisites section requires existing runtime check bugs to be verified fixed before this work begins. Model-switch scenario is an explicit acceptance criterion with end-to-end test coverage.
+

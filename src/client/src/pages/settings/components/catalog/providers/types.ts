@@ -5,7 +5,7 @@ import { CreateRuntimeProfileRequest, LlamaRuntimeInventoryItemDto, SettingsRunt
  * Props shared by every provider-specific "edit" form used inside
  * `CatalogRowEditModal`. These components are plain form renderers chosen
  * by a `switch (provider)` — not GoF Strategy objects. See the naming note in
- * `docs/settings-page-provider-model-llama-redesign.md`.
+ * `docs/settings-architecture.md`.
  */
 export interface ProviderEditForm {
   value: CatalogEditState;
@@ -38,3 +38,4 @@ export interface ProviderAddForm {
   ) => Promise<void>;
   onCreateCustomRuntimeProfile?: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>;
 }
+

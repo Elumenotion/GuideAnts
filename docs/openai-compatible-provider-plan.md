@@ -1,5 +1,20 @@
 # Plan: Generic OpenAI-Compatible Endpoint Provider (`openai-compatible`)
 
+Last updated: 2026-05-18
+
+> Roadmap / Not shipped
+>
+> This document is a proposal and is **not current implementation guidance**.
+> Do not treat `openai-compatible` as an available operator-facing provider today.
+> For current shipped provider behavior, use:
+> - [setup-guide.md](setup-guide.md)
+> - [settings-architecture.md](settings-architecture.md)
+> - [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)
+> - [settings-architecture.md#default-chat-model-behavior](settings-architecture.md#default-chat-model-behavior)
+>
+> Terminology note: this proposal references `LocalRuntimeJson` in several sections.
+> Current schema/runtime docs use `RuntimeConfigJson`.
+
 ## Overview
 
 The new provider follows the same patterns as the existing providers but stores per-row endpoint configuration (`BaseUrl`, optional `ApiKey`) in `LocalRuntimeJson` — the same column `llama-cpp` uses, but with a distinct JSON schema. The `Provider` column (`"openai-compatible"`) discriminates which parser applies. The existing `OpenAiChatClientFactory` from `AntRunner.Chat.OpenAI` is reused, since that factory already knows how to point to an arbitrary endpoint via `OpenAISettings(domain:...)`.
@@ -125,3 +140,4 @@ No new factory registration if the approach reuses `OpenAiChatClientFactory` dir
 - **API key security**: `ApiKey` in `LocalRuntimeJson` is stored plaintext. Future work: encrypt the column, or support referencing a named credential from the `ApplicationSettings` encrypted store.
 - **Responses API variant**: Should there be an `openai-compatible-responses` provider (using `OpenAiResponsesClientFactory`) in addition to the completions variant? Many compatible servers only implement the Chat Completions endpoint, so a single `openai-compatible` using `openai-chat` routing is the right default.
 - **`OpenAiCompatChatClientFactory` vs reuse**: Decide during implementation whether to create a thin dedicated factory or reuse `OpenAiChatClientFactory` with a custom-configured `HttpClient`. The dedicated factory is cleaner if the `OpenAISettings` domain-extraction logic doesn't cleanly accept an arbitrary URL.
+

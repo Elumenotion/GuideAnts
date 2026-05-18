@@ -1,9 +1,14 @@
 # GuideAnts Setup Guide
 
-Last updated: 2026-05-05
+Last updated: 2026-05-18
 
 This is the setup-first operator guide for GuideAnts.
 Use it to get a working environment from zero to usable chat/services, then use linked docs for deeper architecture details.
+
+Source-of-truth set for provider/runtime setup:
+- [settings-architecture.md](settings-architecture.md)
+- [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)
+- [settings-architecture.md#default-chat-model-behavior](settings-architecture.md#default-chat-model-behavior)
 
 ## 1. Fast path (recommended)
 
@@ -248,6 +253,9 @@ Secrets are masked on read and encrypted at rest.
 Open **Models & Runtime**:
 
 - **Catalog**: add chat models (`llama-cpp`, OpenAI/Azure/Gemini/etc.).
+- Provider status for operator setup:
+  - Stable (operator-supported): `openai-chat`, `openai-responses`, `azure-openai-chat`, `azure-openai-responses`, `anthropic`, `llama-cpp`, `google-gemini-chat`
+  - Experimental/Hidden: `hf-inference-chat`, `openrouter-chat` (implemented but not generally operator-facing guidance)
 - **Runtime Profiles**: manage `qwen3_5`, `qwen3_6`, `gemma4` templates or custom profiles.
 - **Local Llama Runtime**: view inventory and run load/unload/delete alias actions.
 
@@ -326,7 +334,7 @@ Example flow (`Qwen3.5-9B-Q5_K_M-local`):
 ### 7b) Cloud model add
 
 1. Settings -> Models & Runtime -> Catalog -> Add Model.
-2. Pick provider (`openai-chat`, `openai-responses`, `azure-openai-*`, `google-gemini-chat`, etc.).
+2. Pick a stable provider (`openai-chat`, `openai-responses`, `azure-openai-*`, `anthropic`, `google-gemini-chat`, or `llama-cpp`).
 3. Fill model/provider config.
 4. Save.
 5. Verify row is available for chat routing.
@@ -459,11 +467,12 @@ Read in this order:
 
 1. [`add-ai-services-wizard.md`](add-ai-services-wizard.md)
 2. [`local-ai-setup-guide.md`](local-ai-setup-guide.md)
-3. [`settings-page-provider-model-llama-redesign.md`](settings-page-provider-model-llama-redesign.md)
+3. [`settings-architecture.md`](settings-architecture.md)
 4. [`settings-and-llama-completion-requirements.md`](settings-and-llama-completion-requirements.md)
-5. [`settings-service-provider-model-requirements.md`](settings-service-provider-model-requirements.md)
-6. [`default-chat-models.md`](default-chat-models.md)
+5. [`settings-and-llama-completion-requirements.md#r-13-non-chat-service-editor-requirements`](settings-and-llama-completion-requirements.md#r-13-non-chat-service-editor-requirements)
+6. [`settings-architecture.md#default-chat-model-behavior`](settings-architecture.md#default-chat-model-behavior)
 7. [`llama-model-download-and-runtime-management.md`](llama-model-download-and-runtime-management.md)
 8. [`telemetry-configuration.md`](telemetry-configuration.md)
 9. [`../docker/guideants-ai-build.md`](../docker/guideants-ai-build.md)
 10. [`../docker/build-processes.md`](../docker/build-processes.md)
+
