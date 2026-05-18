@@ -145,6 +145,10 @@ if [[ "$MODE" == "doctor" ]]; then
   exit 0
 fi
 
+if [[ "$(uname -m)" == "arm64" ]]; then
+  export DOCKER_DEFAULT_PLATFORM=linux/amd64
+fi
+
 pushd "$DOCKER_DIR" >/dev/null
 docker compose -f "$COMPOSE_FILE" up -d
 popd >/dev/null
