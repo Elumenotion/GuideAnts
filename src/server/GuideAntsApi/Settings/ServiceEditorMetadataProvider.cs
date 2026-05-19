@@ -74,8 +74,8 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 ],
                 [ServiceProviderIds.ImageGenerationHuggingFaceInference] =
                 [
-                    Field("ModelId", "text", true, operative: true),
-                    Field("AllowedModels", "text", false, operative: true),
+                    Field("TextToImageModelId", "text", true, operative: true),
+                    Field("ImageToImageModelId", "text", true, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
                 [ServiceProviderIds.ImageGenerationOpenRouterImage] =

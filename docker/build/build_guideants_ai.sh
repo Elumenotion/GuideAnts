@@ -128,9 +128,11 @@ case "$choice" in
     ;;
 esac
 
+# Build a unique tag per build, and also maintain a stable backend-specific latest tag.
 JULIAN_DAY="$(date +%y%j)"
 TIME_STAMP="$(date +%H%M)"
 IMAGE_TAG="guideants-ai:${BACKEND}-${JULIAN_DAY}.${TIME_STAMP}"
+LATEST_TAG="guideants-ai:${BACKEND}-latest"
 
 echo "============================================"
 echo "  Building GuideAnts AI"
@@ -138,6 +140,7 @@ echo "============================================"
 echo "Backend:       $BACKEND"
 echo "Target stage:  $FULL_TARGET"
 echo "Image tag:     $IMAGE_TAG"
+echo "Latest tag:    $LATEST_TAG"
 echo "Deps target:   $DEPS_TARGET"
 echo "Rebuild base:  $REBUILD_BASE"
 if [[ "$BUILD_ALL" == "true" ]]; then
@@ -257,6 +260,7 @@ DOCKER_ARGS+=(
   --build-arg "${DEPS_IMAGE_ARG}=$DEPS_TAG"
   --target "$FULL_TARGET"
   -t "$IMAGE_TAG"
+  -t "$LATEST_TAG"
   -f "$DOCKERFILE_PATH"
   "$BUILD_CONTEXT"
 )
@@ -270,7 +274,7 @@ case "$BACKEND" in
   rocm) IMAGE_ENV_KEY="GA_AI_ROCM_IMAGE" ;;
   *) IMAGE_ENV_KEY="GA_AI_CPU_IMAGE" ;;
 esac
-ENV_LINE="$IMAGE_ENV_KEY=$IMAGE_TAG"
+ENV_LINE="$IMAGE_ENV_KEY=$LATEST_TAG"
 
 if [[ -f "$ENV_FILE" ]]; then
   if grep -qE "^${IMAGE_ENV_KEY}=" "$ENV_FILE"; then
@@ -323,4 +327,5 @@ fi
 echo
 echo "============================================"
 echo "  Build complete: $IMAGE_TAG"
+echo "  Updated latest: $LATEST_TAG"
 echo "============================================"

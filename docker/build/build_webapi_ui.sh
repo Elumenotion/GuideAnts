@@ -142,14 +142,17 @@ esac
 [[ -f "$DOCKERFILE_PATH" ]] || { echo "Dockerfile not found at $DOCKERFILE_PATH" >&2; exit 1; }
 [[ -f "$CLIENT_ROOT/package.json" ]] || { echo "Client package.json not found at $CLIENT_ROOT/package.json" >&2; exit 1; }
 
+# Build a unique tag per build, and also maintain a stable latest tag.
 JULIAN_DAY="$(date +%y%j)"
 TIME_STAMP="$(date +%H%M)"
 IMAGE_TAG="${IMAGE_REPOSITORY}:${JULIAN_DAY}.${TIME_STAMP}"
+LATEST_TAG="${IMAGE_REPOSITORY}:latest"
 
 echo "============================================"
 echo "  Building GuideAnts API + Browser UI ($FLAVOR)"
 echo "============================================"
 echo "Image tag: $IMAGE_TAG"
+echo "Latest tag: $LATEST_TAG"
 echo "Target:    $DOCKER_TARGET"
 echo "No cache:  $NO_CACHE"
 echo "App cache: $USE_APP_BUILD_CACHE"
@@ -183,6 +186,7 @@ fi
 DOCKER_ARGS+=(
   --target "$DOCKER_TARGET"
   -t "$IMAGE_TAG"
+  -t "$LATEST_TAG"
   -f "$DOCKERFILE_PATH"
   "$BUILD_CONTEXT"
 )
@@ -210,7 +214,7 @@ fi
 if [[ -z "${ENV_MAP[$IMAGE_ENV_KEY]+x}" ]]; then
   ENV_ORDER+=("$IMAGE_ENV_KEY")
 fi
-ENV_MAP["$IMAGE_ENV_KEY"]="$IMAGE_TAG"
+ENV_MAP["$IMAGE_ENV_KEY"]="$LATEST_TAG"
 
 {
   for key in "${ENV_ORDER[@]}"; do
@@ -218,8 +222,8 @@ ENV_MAP["$IMAGE_ENV_KEY"]="$IMAGE_TAG"
   done
 } > "$ENV_FILE"
 
-if ! grep -q "^${IMAGE_ENV_KEY}=${IMAGE_TAG}\$" "$ENV_FILE"; then
-  echo "Failed to persist ${IMAGE_ENV_KEY}=$IMAGE_TAG to $ENV_FILE" >&2
+if ! grep -q "^${IMAGE_ENV_KEY}=${LATEST_TAG}\$" "$ENV_FILE"; then
+  echo "Failed to persist ${IMAGE_ENV_KEY}=$LATEST_TAG to $ENV_FILE" >&2
   exit 1
 fi
 
