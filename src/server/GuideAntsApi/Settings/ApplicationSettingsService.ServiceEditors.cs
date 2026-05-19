@@ -11,6 +11,8 @@ namespace GuideAntsApi.Settings;
 
 public sealed partial class ApplicationSettingsService
 {
+    private const string DefaultHuggingFaceSpeechSynthesisModelId = "ResembleAI/chatterbox";
+
     public async Task<ServiceEditorStateDto> GetServiceEditorStateAsync(
         string serviceId,
         CancellationToken cancellationToken = default)
@@ -416,7 +418,8 @@ public sealed partial class ApplicationSettingsService
     private static bool TryResolveServiceModeField(ServiceContract contract, string fieldName, out string modeFieldName)
     {
         if (string.Equals(fieldName, "ModelId", StringComparison.Ordinal)
-            || string.Equals(fieldName, "Deployment", StringComparison.Ordinal))
+            || string.Equals(fieldName, "Deployment", StringComparison.Ordinal)
+            || string.Equals(fieldName, "TextToImageModelId", StringComparison.Ordinal))
         {
             modeFieldName = "ModelId";
             return true;
@@ -425,6 +428,7 @@ public sealed partial class ApplicationSettingsService
         if (string.Equals(fieldName, "VoiceName", StringComparison.Ordinal)
             || string.Equals(fieldName, "EditModelDeployment", StringComparison.Ordinal)
             || string.Equals(fieldName, "AllowedModels", StringComparison.Ordinal)
+            || string.Equals(fieldName, "ImageToImageModelId", StringComparison.Ordinal)
             || string.Equals(fieldName, "MaxAudioBytes", StringComparison.Ordinal)
             || string.Equals(fieldName, "ApiVersion", StringComparison.Ordinal)
             || (string.Equals(fieldName, "MaxRetries", StringComparison.Ordinal)
@@ -544,10 +548,11 @@ public sealed partial class ApplicationSettingsService
         }
 
         var modeId = BuildExplicitServiceModeId(provider, modes);
+        var initialModelId = ResolveInitialServiceModeModelId(contract.ServiceId, provider.ProviderId);
         modes.Add(new ServiceMode(
             ModeId: modeId,
             ProviderSection: provider.ProviderSectionKey,
-            ModelId: null,
+            ModelId: initialModelId,
             RequestPresetJson: null,
             Enabled: false,
             IsDefault: false));
@@ -555,6 +560,17 @@ public sealed partial class ApplicationSettingsService
         var defaultModeId = modes.FirstOrDefault(mode => mode.IsDefault)?.ModeId;
         ServiceModesPayload.WriteModesFor(payload, canonicalService, modes, defaultModeId);
         await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string? ResolveInitialServiceModeModelId(string serviceId, string providerId)
+    {
+        if (string.Equals(serviceId, RoutedServiceNames.SpeechSynthesis, StringComparison.Ordinal)
+            && string.Equals(providerId, ServiceProviderIds.SpeechSynthesisHuggingFaceInference, StringComparison.Ordinal))
+        {
+            return DefaultHuggingFaceSpeechSynthesisModelId;
+        }
+
+        return null;
     }
 
     private static string BuildExplicitServiceModeId(

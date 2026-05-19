@@ -140,7 +140,7 @@ Dockerfile stages:
 
 Script behavior:
 1. Builds timestamped tag `guideants-webapi-ui:<YYDDD>.<HHmm>`.
-2. By default, disables cache for `ui-build` and `api-build` stages (`--no-cache-filter`) for deterministic app rebuilds.
+2. Rebuilds `api-build` by default; pass `-UseAppBuildCache` to allow Docker cache reuse for that stage.
 3. Writes/repairs `GA_WEBAPI_UI_IMAGE` in `docker/.env`.
 4. Recreates `guideants-webapi-ui` container unless `-NoRecreate` is passed.
 

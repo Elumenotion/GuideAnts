@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.BackgroundJobs.Services.Embeddings;
@@ -9,6 +10,8 @@ internal sealed class HuggingFaceEmbeddingService(
     HttpClient client,
     IConfiguration configuration) : IEmbeddingService
 {
+    private sealed record HfProviderRoute(string Provider, string ProviderId);
+
     private readonly HttpClient _client = client;
     private readonly IConfiguration _configuration = configuration;
 
@@ -28,6 +31,8 @@ internal sealed class HuggingFaceEmbeddingService(
         string? requestPresetJson,
         CancellationToken cancellationToken = default)
     {
+        _ = requestPresetJson;
+
         var inputs = texts.ToArray();
         if (inputs.Length == 0)
         {
@@ -38,15 +43,14 @@ internal sealed class HuggingFaceEmbeddingService(
         {
             throw new InvalidOperationException("Hugging Face embeddings model id is required.");
         }
-        ValidateEmbeddingModelCapability(modelId, requestPresetJson);
-
         var token = _configuration["HuggingFace:Token"];
         if (string.IsNullOrWhiteSpace(token))
         {
             throw new InvalidOperationException("HuggingFace:Token is required for Hugging Face embeddings.");
         }
 
-        var endpoint = $"https://api-inference.huggingface.co/models/{modelId}";
+        var route = await ResolveHuggingFaceEmbeddingRouteAsync(modelId, token, cancellationToken).ConfigureAwait(false);
+        var endpoint = ResolveHuggingFaceEmbeddingsEndpoint(route);
         var requestDto = new HuggingFaceEmbeddingRequest(inputs.Length == 1 ? inputs[0] : inputs);
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
@@ -88,81 +92,95 @@ internal sealed class HuggingFaceEmbeddingService(
         throw new InvalidOperationException("Hugging Face embeddings response shape was not recognized.");
     }
 
-    private sealed record HuggingFaceEmbeddingRequest(object Inputs);
+    private sealed record HuggingFaceEmbeddingRequest([property: JsonPropertyName("inputs")] object Inputs);
 
-    private void ValidateEmbeddingModelCapability(string modelId, string? requestPresetJson)
+    private string ResolveHuggingFaceEmbeddingsEndpoint(HfProviderRoute route)
     {
-        var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            if (IsModelAllowed(modelId, configured))
-            {
-                return;
-            }
+        var configuredRouterBase = _configuration["HuggingFace:RouterBaseUrl"];
+        var routerBase = string.IsNullOrWhiteSpace(configuredRouterBase)
+            ? "https://router.huggingface.co/v1"
+            : configuredRouterBase;
 
+        var normalized = routerBase.TrimEnd('/');
+        if (normalized.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[..^3];
+        }
+
+        if (string.Equals(route.Provider, "hf-inference", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{normalized}/hf-inference/models/{route.ProviderId}";
+        }
+
+        return $"{normalized}/{route.Provider}/{route.ProviderId}";
+    }
+
+    private async Task<HfProviderRoute> ResolveHuggingFaceEmbeddingRouteAsync(
+        string modelId,
+        string token,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"https://huggingface.co/api/models/{modelId}?expand[]=inferenceProviderMapping");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
             throw new InvalidOperationException(
-                $"Hugging Face model '{modelId}' is not in the Embeddings service-mode AllowedModels preset.");
+                $"Failed to resolve Hugging Face providers for '{modelId}': {(int)response.StatusCode} {body}");
         }
 
-        // Conservative default heuristic for embedding-capable public model namespaces.
-        if (modelId.Contains("embed", StringComparison.OrdinalIgnoreCase)
-            || modelId.StartsWith("sentence-transformers/", StringComparison.OrdinalIgnoreCase)
-            || modelId.StartsWith("intfloat/", StringComparison.OrdinalIgnoreCase)
-            || modelId.StartsWith("BAAI/", StringComparison.OrdinalIgnoreCase))
+        using var document = JsonDocument.Parse(body);
+        if (!document.RootElement.TryGetProperty("inferenceProviderMapping", out var mapping)
+            || mapping.ValueKind != JsonValueKind.Object)
         {
-            return;
+            throw new InvalidOperationException(
+                $"Model '{modelId}' has no inference provider mapping.");
         }
 
+        var liveTasks = new List<string>();
+        foreach (var provider in mapping.EnumerateObject())
+        {
+            if (provider.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var status = provider.Value.TryGetProperty("status", out var statusNode)
+                ? statusNode.GetString()
+                : null;
+            var task = provider.Value.TryGetProperty("task", out var taskNode)
+                ? taskNode.GetString()
+                : null;
+            var providerId = provider.Value.TryGetProperty("providerId", out var providerIdNode)
+                ? providerIdNode.GetString()
+                : null;
+
+            if (!string.Equals(status, "live", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(task))
+            {
+                liveTasks.Add(task);
+            }
+
+            if (string.Equals(task, "feature-extraction", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(providerId))
+            {
+                return new HfProviderRoute(provider.Name, providerId);
+            }
+        }
+
+        var discovered = liveTasks.Count == 0
+            ? "<none>"
+            : string.Join(", ", liveTasks.Distinct(StringComparer.OrdinalIgnoreCase));
         throw new InvalidOperationException(
-            $"Hugging Face model '{modelId}' is not recognized as embedding-capable. " +
-            "Set Embeddings service-mode AllowedModels to explicitly allow it.");
+            $"No live Hugging Face feature-extraction route found for model '{modelId}'. Live mapped task(s): {discovered}.");
     }
 
-    private static bool IsModelAllowed(string modelId, string allowlistCsv)
-    {
-        var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var entry in entries)
-        {
-            if (entry.EndsWith('*'))
-            {
-                var prefix = entry[..^1];
-                if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-            else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
-    {
-        if (string.IsNullOrWhiteSpace(requestPresetJson))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(requestPresetJson);
-            if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !document.RootElement.TryGetProperty(fieldName, out var node))
-            {
-                return null;
-            }
-
-            return node.ValueKind == JsonValueKind.String
-                ? node.GetString()?.Trim()
-                : node.ToString().Trim();
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 }

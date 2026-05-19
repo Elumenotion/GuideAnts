@@ -110,15 +110,17 @@ if (-not (Test-Path $dockerfilePath)) {
     exit 1
 }
 
-# Julian date (2-digit year + day-of-year) + time tag: e.g. 26099.1530
+# Build a unique tag per build, and also maintain a stable latest tag.
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
 $imageTag = "${imageRepository}:${julianDay}.${timeStamp}"
+$latestTag = "${imageRepository}:latest"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Building GuideAnts API + Browser UI ($Flavor)" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Image tag: $imageTag"
+Write-Host "Latest tag: $latestTag"
 Write-Host "Target:    $dockerTarget"
 Write-Host "No cache:  $NoCache"
 Write-Host "App cache: $UseAppBuildCache"
@@ -166,13 +168,14 @@ if ($NoCache) {
     $dockerArgs += '--no-cache'
 }
 elseif (-not $UseAppBuildCache) {
-    # Rebuild API stage each run so packaging is deterministic.
+    # Rebuild API stage by default so app changes are always republished.
     $dockerArgs += @('--no-cache-filter', 'api-build')
 }
 
 $dockerArgs += @(
     '--target', $dockerTarget,
     '-t', $imageTag,
+    '-t', $latestTag,
     '-f', $dockerfilePath,
     $buildContext
 )
@@ -184,7 +187,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $envFile = Join-Path $dockerRoot '.env'
-$envLine = "${imageEnvKey}=$imageTag"
+$envLine = "${imageEnvKey}=$latestTag"
 
 if (Test-Path $envFile) {
     $raw = Get-Content -Path $envFile -Raw
@@ -209,7 +212,7 @@ if (Test-Path $envFile) {
         }
     }
 
-    $entries[$imageEnvKey] = $imageTag
+    $entries[$imageEnvKey] = $latestTag
     $lines = @($entries.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
     Set-Content -Path $envFile -Value (($lines -join "`r`n") + "`r`n") -Encoding UTF8
 }
@@ -227,8 +230,8 @@ foreach ($line in ($envRawAfterWrite -split "`r?`n")) {
     }
 }
 
-if (-not $envEntriesAfterWrite.ContainsKey($imageEnvKey) -or $envEntriesAfterWrite[$imageEnvKey] -ne $imageTag) {
-    Write-Error "Failed to persist ${imageEnvKey}=$imageTag to $envFile"
+if (-not $envEntriesAfterWrite.ContainsKey($imageEnvKey) -or $envEntriesAfterWrite[$imageEnvKey] -ne $latestTag) {
+    Write-Error "Failed to persist ${imageEnvKey}=$latestTag to $envFile"
     exit 1
 }
 

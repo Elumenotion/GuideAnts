@@ -142,10 +142,11 @@ switch ($Backend) {
     }
 }
 
-# Julian date (2-digit year + day-of-year) + time tag: e.g. cuda13-26096.1430
+# Build a unique tag per build, and also maintain a stable backend-specific latest tag.
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
 $imageTag = "guideants-ai:${Backend}-${julianDay}.${timeStamp}"
+$latestTag = "guideants-ai:${Backend}-latest"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Building GuideAnts AI" -ForegroundColor Cyan
@@ -153,6 +154,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Backend:       $Backend"
 Write-Host "Target stage:  $fullTarget"
 Write-Host "Image tag:     $imageTag"
+Write-Host "Latest tag:    $latestTag"
 Write-Host "Deps target:   $depsTarget"
 Write-Host "Rebuild base:  $RebuildBase"
 if ($All) { Write-Host "All images:    Yes" }
@@ -308,6 +310,7 @@ try {
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,
+        '-t', $latestTag,
         '-f', $dockerfilePath,
         $buildContext
     )
@@ -336,7 +339,7 @@ $imageEnvKey = switch ($Backend) {
     'rocm' { 'GA_AI_ROCM_IMAGE' }
     default { 'GA_AI_CPU_IMAGE' }
 }
-$envLine = "$imageEnvKey=$imageTag"
+$envLine = "$imageEnvKey=$latestTag"
 
 if (Test-Path $envFile) {
     $lines = Get-Content $envFile
@@ -498,4 +501,5 @@ if ($All) {
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Build complete: $imageTag" -ForegroundColor Cyan
+Write-Host "  Updated latest: $latestTag" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
