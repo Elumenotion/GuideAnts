@@ -39,6 +39,7 @@ import {
   createEmptyProfileForm,
   getErrorMessage,
 } from './settings/utils';
+import { useLocalModelOnboardingOperation } from '../features/localModelOnboarding/useOperationPolling';
 
 export default function Settings() {
   const { showToast } = useToast();
@@ -177,58 +178,46 @@ export default function Settings() {
     void loadLlamaInventory();
   }, [loadSectionSummaries, loadModels, loadProfiles, loadLlamaInventory]);
 
-  useEffect(() => {
-    if (!activeAddOperation) {
-      return;
-    }
-    let cancelled = false;
-    const run = async () => {
-      let delay = 1000;
-      while (!cancelled) {
-        try {
-          const op = (await api.settings.getDownloadStatus(activeAddOperation.operationId)) as ModelDownloadOperationDto;
-          if (cancelled) {
-            return;
-          }
-          setActiveAddOperationStatus(op.status);
-          if (op.status === 'completed') {
-            setActiveAddOperation(null);
-            setActiveAddOperationStatus('completed');
-            await loadModels();
-            await loadLlamaInventory('refresh');
-            await loadSectionSummaries();
-            showToast({ type: 'success', title: `Model ${activeAddOperation.catalogModelId} added` });
-            return;
-          }
-          if (op.status === 'failed') {
-            setActiveAddOperation(null);
-            showToast({
-              type: 'error',
-              title: 'Add model failed',
-              message: op.error?.message ?? op.errorMessage ?? 'Add model operation failed.',
-            });
-            return;
-          }
-        } catch (error) {
-          if (!cancelled) {
-            setActiveAddOperation(null);
-            showToast({
-              type: 'error',
-              title: 'Add model polling failed',
-              message: getErrorMessage(error, 'Could not read add-model operation status.'),
-            });
-          }
-          return;
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, delay));
-        delay = Math.min(delay * 1.5, 4000);
+  useLocalModelOnboardingOperation({
+    operationId: activeAddOperation?.operationId ?? null,
+    enabled: Boolean(activeAddOperation) && !wizardOpen,
+    onUpdate: (op: ModelDownloadOperationDto) => {
+      setActiveAddOperationStatus(op.status);
+    },
+    onTerminal: (op: ModelDownloadOperationDto) => {
+      if (!activeAddOperation) {
+        return;
       }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeAddOperation, loadLlamaInventory, loadModels, loadSectionSummaries, setActiveAddOperation, showToast]);
+
+      if (op.status === 'completed') {
+        setActiveAddOperation(null);
+        setActiveAddOperationStatus('completed');
+        void (async () => {
+          await loadModels();
+          await loadLlamaInventory('refresh');
+          await loadSectionSummaries();
+          showToast({ type: 'success', title: `Model ${activeAddOperation.catalogModelId} added` });
+        })();
+        return;
+      }
+
+      setActiveAddOperation(null);
+      showToast({
+        type: 'error',
+        title: 'Add model failed',
+        message: op.error?.message ?? op.errorMessage ?? 'Add model operation failed.',
+      });
+    },
+    onPollFailureThreshold: () => {
+      setActiveAddOperation(null);
+      showToast({
+        type: 'error',
+        title: 'Add model polling failed',
+        message: 'Could not read add-model operation status.',
+      });
+    },
+    intervalMs: 2000,
+  });
 
   const orderedModels = useMemo(() => {
     return [...models].sort((left, right) => {

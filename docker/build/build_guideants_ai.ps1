@@ -172,6 +172,7 @@ switch ($Backend) {
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
 $imageTag = "guideants-ai:${Backend}-${julianDay}.${timeStamp}"
+$latestImageTag = "guideants-ai:${Backend}-latest"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Building GuideAnts AI" -ForegroundColor Cyan
@@ -179,6 +180,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Backend:       $Backend"
 Write-Host "Target stage:  $fullTarget"
 Write-Host "Image tag:     $imageTag"
+Write-Host "Latest alias:  $latestImageTag"
 Write-Host "Deps target:   $depsTarget"
 Write-Host "Rebuild base:  $RebuildBase"
 if ($All) { Write-Host "All images:    Yes" }
@@ -339,6 +341,7 @@ try {
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,
+        '-t', $latestImageTag,
         '-f', $dockerfilePath,
         $buildContext
     )
@@ -373,7 +376,7 @@ $imageEnvKey = switch ($Backend) {
     'rocm' { 'GA_AI_ROCM_IMAGE' }
     default { 'GA_AI_CPU_IMAGE' }
 }
-$envLine = "$imageEnvKey=$imageTag"
+$envLine = "$imageEnvKey=$latestImageTag"
 
 if (Test-Path $envFile) {
     $lines = Get-Content $envFile
@@ -535,4 +538,5 @@ if ($All) {
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Build complete: $imageTag" -ForegroundColor Cyan
+Write-Host "  Latest alias:   $latestImageTag" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan

@@ -1,6 +1,6 @@
 # Llama Model Download + Runtime Management
 
-Last updated: 2026-05-18
+Last updated: 2026-05-20
 
 This document describes the shipped local llama lifecycle in GuideAnts:
 model onboarding, alias inventory, load/unload orchestration, and fail-fast behavior.
@@ -32,8 +32,9 @@ model onboarding, alias inventory, load/unload orchestration, and fail-fast beha
 - `POST /api/settings/llama/runtime/load`
 - `POST /api/settings/llama/runtime/unload`
 - `GET /api/settings/llama/runtime/status`
-- `POST /api/settings/llama/downloads`
-- `GET /api/settings/llama/downloads/{operationId}`
+- `POST /api/settings/models:add` (**authoritative onboarding write API** for both Settings and Home Wizard local model onboarding)
+- `POST /api/settings/llama/downloads` (internal low-level runtime endpoint; requires `X-Guideants-Internal-Onboarding: true` and is not used directly by onboarding UIs)
+- `GET /api/settings/llama/downloads/{operationId}` (operation polling)
 - `DELETE /api/settings/llama/router/entries/{routerModelId}`
 - `GET /api/settings/llama/huggingface/repositories/{owner}/{repo}/files`
 

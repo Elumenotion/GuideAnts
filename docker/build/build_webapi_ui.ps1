@@ -115,11 +115,13 @@ if (-not (Test-Path $dockerfilePath)) {
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
 $imageTag = "${imageRepository}:${julianDay}.${timeStamp}"
+$latestImageTag = "${imageRepository}:latest"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Building GuideAnts API + Browser UI ($Flavor)" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Image tag: $imageTag"
+Write-Host "Latest alias: $latestImageTag"
 Write-Host "Target:    $dockerTarget"
 Write-Host "No cache:  $NoCache"
 $appBuildCacheEnabled = $true
@@ -181,6 +183,7 @@ elseif (-not $appBuildCacheEnabled) {
 $dockerArgs += @(
     '--target', $dockerTarget,
     '-t', $imageTag,
+    '-t', $latestImageTag,
     '-f', $dockerfilePath,
     $buildContext
 )
@@ -192,7 +195,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $envFile = Join-Path $dockerRoot '.env'
-$envLine = "${imageEnvKey}=$imageTag"
+$envLine = "${imageEnvKey}=$latestImageTag"
 
 if (Test-Path $envFile) {
     $raw = Get-Content -Path $envFile -Raw
@@ -217,7 +220,7 @@ if (Test-Path $envFile) {
         }
     }
 
-    $entries[$imageEnvKey] = $imageTag
+    $entries[$imageEnvKey] = $latestImageTag
     $lines = @($entries.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
     Set-Content -Path $envFile -Value (($lines -join "`r`n") + "`r`n") -Encoding UTF8
 }
@@ -235,8 +238,8 @@ foreach ($line in ($envRawAfterWrite -split "`r?`n")) {
     }
 }
 
-if (-not $envEntriesAfterWrite.ContainsKey($imageEnvKey) -or $envEntriesAfterWrite[$imageEnvKey] -ne $imageTag) {
-    Write-Error "Failed to persist ${imageEnvKey}=$imageTag to $envFile"
+if (-not $envEntriesAfterWrite.ContainsKey($imageEnvKey) -or $envEntriesAfterWrite[$imageEnvKey] -ne $latestImageTag) {
+    Write-Error "Failed to persist ${imageEnvKey}=$latestImageTag to $envFile"
     exit 1
 }
 
@@ -274,7 +277,7 @@ if (-not $NoRecreate -and ($useRunningComposeStack -or (Test-Path $composeFile))
         Pop-Location
     }
 
-    Write-Host "Recreated $serviceName with image $imageTag" -ForegroundColor Green
+    Write-Host "Recreated $serviceName with image $latestImageTag" -ForegroundColor Green
 }
 elseif ($NoRecreate) {
     Write-Host "Skipping compose service recreate (-NoRecreate)." -ForegroundColor Yellow

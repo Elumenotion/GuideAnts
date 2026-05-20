@@ -79,6 +79,7 @@ import {
   toExistingOpenAiModels,
 } from './addAiServicesWizard/utils';
 import { useLocalAiWizardState } from './addAiServicesWizard/useLocalAiWizardState';
+import { isLocalModelOnboardingInFlight } from '../../features/localModelOnboarding/status';
 
 interface AddAiServicesWizardProps {
   isOpen: boolean;
@@ -354,6 +355,25 @@ function isLocalAiServiceStep(step: AddAiServicesWizardStep): step is
     || step === 'localAiSpeechSynthesis'
     || step === 'localAiDocumentIntelligence'
     || step === 'localAiEmbeddings';
+}
+
+function hasReasoningEffortValidationError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const body = (error as { body?: unknown }).body;
+  if (!body || typeof body !== 'object') {
+    return false;
+  }
+
+  const errors = (body as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) {
+    return false;
+  }
+
+  return errors.some((entry) =>
+    typeof entry === 'string' && entry.toLowerCase().includes('reasoningeffort'));
 }
 
 const OPTIONAL_SERVICE_KEYS: OptionalServiceKey[] = [
@@ -1112,7 +1132,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
 
   const persistGlobalDefaultModel = useCallback(async (modelId: string) => {
     const chatDefaults = await api.settings.chatDefaults.get();
-    await api.settings.chatDefaults.update({
+    const request = {
       rowVersion: chatDefaults.rowVersion,
       defaultModelId: modelId,
       overrideAllChatModels: chatDefaults.overrideAllChatModels,
@@ -1120,7 +1140,19 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       topP: chatDefaults.topP ?? null,
       reasoningEffort: chatDefaults.reasoningEffort ?? null,
       samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
-    });
+    };
+    try {
+      await api.settings.chatDefaults.update(request);
+    } catch (error) {
+      if (!hasReasoningEffortValidationError(error)) {
+        throw error;
+      }
+
+      await api.settings.chatDefaults.update({
+        ...request,
+        reasoningEffort: null,
+      });
+    }
   }, []);
 
   const persistFoundryModels = useCallback(async () => {
@@ -1163,11 +1195,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       await api.settings.addModel(request);
     }
 
+    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
     const forcedDefaultModelId = existingCount === 0 && pendingDrafts.length > 0
       ? pendingDrafts[0].modelId
       : null;
-    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
-    const targetDefaultModelId = forcedDefaultModelId ?? selectedDefaultModelId;
+    const targetDefaultModelId = selectedDefaultModelId ?? forcedDefaultModelId;
 
     let defaultSaveWarning: string | null = null;
     if (targetDefaultModelId) {
@@ -1229,11 +1261,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       await api.settings.addModel(request);
     }
 
+    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
     const forcedDefaultModelId = existingCount === 0 && pendingDrafts.length > 0
       ? pendingDrafts[0].modelId
       : null;
-    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
-    const targetDefaultModelId = forcedDefaultModelId ?? selectedDefaultModelId;
+    const targetDefaultModelId = selectedDefaultModelId ?? forcedDefaultModelId;
 
     let defaultSaveWarning: string | null = null;
     if (targetDefaultModelId) {
@@ -1295,11 +1327,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       await api.settings.addModel(request);
     }
 
+    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
     const forcedDefaultModelId = existingCount === 0 && pendingDrafts.length > 0
       ? pendingDrafts[0].modelId
       : null;
-    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
-    const targetDefaultModelId = forcedDefaultModelId ?? selectedDefaultModelId;
+    const targetDefaultModelId = selectedDefaultModelId ?? forcedDefaultModelId;
 
     let defaultSaveWarning: string | null = null;
     if (targetDefaultModelId) {
@@ -1853,9 +1885,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     localAiStepOperation?.inFlight,
   ]);
 
-  const localAiHasActiveDownloads = localAi.draftModels.some(
-    (d) => d.asyncStatus === 'submitted' || d.asyncStatus === 'downloading'
-  );
+  const localAiHasActiveDownloads = localAi.draftModels.some((d) => isLocalModelOnboardingInFlight(d.asyncStatus));
   const isCurrentLocalAiServiceStep = provider === 'local-ai' && isLocalAiServiceStep(step);
   const localAiNavigationBlockedByOperation = isCurrentLocalAiServiceStep && Boolean(localAiStepOperation?.inFlight);
 

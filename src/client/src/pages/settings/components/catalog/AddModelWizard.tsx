@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FaSpinner } from 'react-icons/fa';
 import { api } from '../../../../services/api';
 import {
@@ -24,6 +24,10 @@ import { OpenAiChatAddForm } from './providers/OpenAiChatForm';
 import { OpenAiResponsesAddForm } from './providers/OpenAiResponsesForm';
 import { OpenRouterAddForm } from './providers/OpenRouterForm';
 import { KnownCloudModel, ModelIdTypeahead } from './ModelIdTypeahead';
+import {
+  localModelOnboardingProgressStep,
+} from '../../../../features/localModelOnboarding/status';
+import { useLocalModelOnboardingOperation } from '../../../../features/localModelOnboarding/useOperationPolling';
 
 const ADD_MODEL_STEPS = [
   { id: 'queued', label: 'Queued', help: 'Waiting for install worker.' },
@@ -127,26 +131,6 @@ function parseAddModelError(error: unknown): AddModelErrorDto | null {
   };
 }
 
-function operationStep(status: string): (typeof ADD_MODEL_STEPS)[number]['id'] {
-  const normalized = status.trim();
-  if (normalized === 'queued') {
-    return 'queued';
-  }
-  if (normalized === 'resolving' || normalized === 'resolvingFiles') {
-    return 'resolvingFiles';
-  }
-  if (normalized === 'downloading') {
-    return 'downloading';
-  }
-  if (normalized === 'registering' || normalized === 'registeringAlias') {
-    return 'registeringAlias';
-  }
-  if (normalized === 'completed') {
-    return 'completed';
-  }
-  return 'downloading';
-}
-
 function AddOperationProgress({
   currentStatus,
   progress,
@@ -156,7 +140,7 @@ function AddOperationProgress({
   progress: number | null;
   error: AddModelErrorDto | null;
 }) {
-  const step = operationStep(currentStatus);
+  const step = localModelOnboardingProgressStep(currentStatus);
   const currentIndex = ADD_MODEL_STEPS.findIndex((item) => item.id === step);
   return (
     <div className="space-y-3">
@@ -254,49 +238,34 @@ export function AddModelWizard({
     setCheckingModelId(false);
   }, [isOpen, providerPreselect]);
 
-  useEffect(() => {
-    if (!operationId) {
-      return;
+  const handleOperationUpdate = useCallback((op: { status: string; progress?: number | null; error?: AddModelErrorDto | null }) => {
+    setOperationStatus(op.status);
+    setOperationProgress(typeof op.progress === 'number' ? op.progress : null);
+    setOperationError(op.error ?? null);
+  }, []);
+
+  const handleOperationTerminal = useCallback((op: { status: string }) => {
+    onSetActiveAddOperation(null);
+    if (op.status === 'completed') {
+      void onCatalogChanged();
     }
-    let cancelled = false;
-    const run = async () => {
-      let delayMs = 1000;
-      while (!cancelled) {
-        try {
-          const op = await api.settings.getDownloadStatus(operationId);
-          if (cancelled) {
-            return;
-          }
-          setOperationStatus(op.status);
-          setOperationProgress(typeof op.progress === 'number' ? op.progress : null);
-          setOperationError(op.error ?? null);
-          if (op.status === 'completed') {
-            onSetActiveAddOperation(null);
-            await onCatalogChanged();
-            return;
-          }
-          if (op.status === 'failed') {
-            return;
-          }
-        } catch (error) {
-          if (!cancelled) {
-            setOperationError({
-              code: 'INSTALL_STEP_FAILED',
-              step: 'downloading',
-              message: getErrorMessage(error, 'Failed to poll operation status.'),
-            });
-          }
-          return;
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, delayMs));
-        delayMs = Math.min(delayMs * 1.5, 4000);
-      }
-    };
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [operationId, onCatalogChanged, onSetActiveAddOperation]);
+  }, [onCatalogChanged, onSetActiveAddOperation]);
+
+  const handleOperationPollFailureThreshold = useCallback(() => {
+    setOperationError({
+      code: 'INSTALL_STEP_FAILED',
+      step: 'downloading',
+      message: 'Failed to poll operation status.',
+    });
+  }, []);
+
+  useLocalModelOnboardingOperation({
+    operationId,
+    onUpdate: handleOperationUpdate,
+    onTerminal: handleOperationTerminal,
+    onPollFailureThreshold: handleOperationPollFailureThreshold,
+    intervalMs: 2000,
+  });
 
   const canContinueFromProvider = value.provider.trim().length > 0;
   const canContinueFromCatalog = useMemo(() => {
@@ -378,6 +347,7 @@ export function AddModelWizard({
       onClose={onClose}
       maxWidthClass="max-w-3xl"
       disableDismiss={submitting}
+      disableOverlayDismiss
       footer={
         step === 'progress' ? (
           <TextActionButton tone="neutral" onClick={onClose} title="Close wizard">
@@ -617,7 +587,13 @@ export function AddModelWizard({
           <AddOperationProgress currentStatus={operationStatus} progress={operationProgress} error={operationError} />
           {operationStatus === 'failed' ? (
             <div className="flex gap-2">
-              <TextActionButton tone="primary" onClick={() => void submit()} title="Retry add operation">
+              <TextActionButton
+                tone="primary"
+                icon={submitting ? <FaSpinner className="animate-spin" /> : undefined}
+                disabled={submitting}
+                onClick={() => void submit()}
+                title="Retry add operation"
+              >
                 Retry from failed step
               </TextActionButton>
             </div>

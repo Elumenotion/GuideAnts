@@ -13,6 +13,8 @@ import {
 } from '../../types/settings';
 import { AddModelWizardState, CanonicalLocalRuntimeConfig, CatalogEditState, ProfileFormState } from './types';
 import { getServiceProviderDisplayName } from './constants/displayLabels';
+import { buildLocalModelOnboardingRequest } from '../../features/localModelOnboarding/buildCommand';
+import { validateLocalModelOnboardingDraft } from '../../features/localModelOnboarding/validateDraft';
 
 export const SECRET_MASK = '********';
 
@@ -413,64 +415,37 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
   if (!displayName) {
     throw new Error('Catalog display name is required.');
   }
+  if (provider === 'llama-cpp') {
+    const draft = {
+      installSource: state.llamaInstallSource,
+      runtimeProfileId: state.runtimeProfileId,
+      routerModelId: state.llamaRouterModelId,
+      huggingFaceRepository: state.llamaHuggingFaceRepository,
+      huggingFaceQuantIncludePattern: state.llamaHuggingFaceQuantIncludePattern,
+      huggingFaceMmprojIncludePattern: state.llamaHuggingFaceMmprojIncludePattern,
+      huggingFaceTargetDirectory: state.llamaHuggingFaceTargetDirectory,
+      existingAliasRouterModelId: state.llamaExistingAliasRouterModelId,
+      routerContextSize: state.llamaRouterContextSize,
+      routerCacheRamMib: state.llamaRouterCacheRamMib,
+      catalogModelId: state.catalogModelId,
+      catalogDisplayName: state.catalogDisplayName,
+      catalogDescription: state.catalogDescription,
+      catalogDisplayOrder: state.catalogDisplayOrder,
+      catalogIsActive: state.catalogIsActive,
+    } as const;
+    const validationErrors = validateLocalModelOnboardingDraft(draft);
+    if (validationErrors.length > 0) {
+      throw new Error(validationErrors[0]);
+    }
+    return buildLocalModelOnboardingRequest(draft, {
+      onboardingUi: 'settings',
+    });
+  }
   let providerConfig: Record<string, unknown> | undefined;
-  if (provider !== 'llama-cpp' && state.runtimeProfileId.trim()) {
+  if (state.runtimeProfileId.trim()) {
     providerConfig = {
       runtimeProfileId: state.runtimeProfileId.trim(),
     };
-  }
-  let install: AddModelRequest['install'] | undefined;
-  if (provider === 'llama-cpp') {
-    const runtimeProfileId = state.runtimeProfileId.trim();
-    if (!runtimeProfileId) {
-      throw new Error('Runtime profile is required for llama-cpp.');
-    }
-    const routerContextSize = parseOptionalRouterContextSize(state.llamaRouterContextSize);
-    const routerCacheRamMib = parseOptionalRouterCacheRamMib(state.llamaRouterCacheRamMib);
-    const routerKnobs: { routerContextSize?: number; routerCacheRamMib?: number } = {};
-    if (routerContextSize !== undefined) {
-      routerKnobs.routerContextSize = routerContextSize;
-    }
-    if (routerCacheRamMib !== undefined) {
-      routerKnobs.routerCacheRamMib = routerCacheRamMib;
-    }
-    if (state.llamaInstallSource === 'existingAlias') {
-      const alias = state.llamaExistingAliasRouterModelId.trim();
-      if (!alias) {
-        throw new Error('Pick an existing alias to attach.');
-      }
-      install = {
-        source: 'existingAlias',
-        routerModelId: alias,
-        runtimeProfileId,
-        existingAlias: { routerModelId: alias },
-        ...routerKnobs,
-      };
-    } else {
-      const routerModelId = state.llamaRouterModelId.trim();
-      if (!routerModelId) {
-        throw new Error('Router alias is required for Hugging Face install.');
-      }
-      const repository = state.llamaHuggingFaceRepository.trim();
-      const quantPattern = state.llamaHuggingFaceQuantIncludePattern.trim();
-      const mmprojPattern = state.llamaHuggingFaceMmprojIncludePattern.trim();
-      const targetDirectory = state.llamaHuggingFaceTargetDirectory.trim();
-      if (!repository || !quantPattern || !mmprojPattern || !targetDirectory) {
-        throw new Error('Repository, quant pattern, mmproj pattern, and target directory are required.');
-      }
-      install = {
-        source: 'huggingface',
-        routerModelId,
-        runtimeProfileId,
-        huggingFace: {
-          repository,
-          quantIncludePattern: quantPattern,
-          mmprojIncludePattern: mmprojPattern,
-          targetDirectory,
-        },
-        ...routerKnobs,
-      };
-    }
   }
   return {
     provider,
@@ -482,7 +457,6 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
       isActive: state.catalogIsActive,
     },
     providerConfig,
-    install,
   };
 }
 

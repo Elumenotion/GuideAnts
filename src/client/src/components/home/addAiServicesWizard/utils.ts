@@ -32,6 +32,8 @@ import type {
   OptionalServiceKey,
   WizardLoadSnapshot,
 } from './types';
+import { buildLocalModelOnboardingRequest } from '../../../features/localModelOnboarding/buildCommand';
+import { validateLocalModelOnboardingDraft } from '../../../features/localModelOnboarding/validateDraft';
 
 export function mapProviderLabelToModelProviderId(value: FoundryModelProviderLabel): string {
   return MODEL_PROVIDER_LABEL_TO_ID[value];
@@ -496,77 +498,44 @@ export function toExistingLocalModels(models: SettingsModelDto[]): SettingsModel
 }
 
 export function buildLocalAiModelRequest(draft: LocalAiModelDraft): AddModelRequest {
-  const runtimeProfileId = draft.runtimeProfileId.trim();
-  if (!runtimeProfileId) {
-    throw new Error('Runtime profile is required for local AI model installation.');
+  const onboardingDraft = {
+    installSource: draft.installSource,
+    runtimeProfileId: draft.runtimeProfileId,
+    routerModelId: draft.routerModelId,
+    huggingFaceRepository: draft.huggingFaceRepository,
+    huggingFaceQuantIncludePattern: draft.huggingFaceQuantIncludePattern,
+    huggingFaceMmprojIncludePattern: draft.huggingFaceMmprojIncludePattern,
+    huggingFaceTargetDirectory: draft.huggingFaceTargetDirectory,
+    existingAliasRouterModelId: draft.existingAliasRouterModelId,
+    routerContextSize: draft.routerContextSize,
+    routerCacheRamMib: draft.routerCacheRamMib,
+    catalogModelId: draft.catalogModelId,
+    catalogDisplayName: draft.catalogDisplayName,
+    catalogIsActive: true,
+  } as const;
+  const validationErrors = validateLocalModelOnboardingDraft(onboardingDraft, {
+    defaultCatalogModelId: draft.installSource === 'existingAlias'
+      ? draft.existingAliasRouterModelId
+      : draft.routerModelId,
+    defaultCatalogDisplayName: draft.installSource === 'existingAlias'
+      ? draft.existingAliasRouterModelId
+      : draft.routerModelId,
+    defaultTargetDirectory: draft.routerModelId,
+  });
+  if (validationErrors.length > 0) {
+    throw new Error(validationErrors[0]);
   }
-  const catalogModelId = draft.catalogModelId.trim();
-  if (!catalogModelId) {
-    throw new Error('Model ID is required.');
-  }
-  const routerKnobs: Record<string, number> = {};
-  const ctxSize = parseInt(draft.routerContextSize.trim(), 10);
-  if (!isNaN(ctxSize) && ctxSize > 0) {
-    routerKnobs.routerContextSize = ctxSize;
-  }
-  const cacheRam = parseInt(draft.routerCacheRamMib.trim(), 10);
-  if (!isNaN(cacheRam) && cacheRam > 0) {
-    routerKnobs.routerCacheRamMib = cacheRam;
-  }
-
-  if (draft.installSource === 'existingAlias') {
-    const alias = draft.existingAliasRouterModelId.trim();
-    if (!alias) {
-      throw new Error('Existing alias is required.');
-    }
-    return {
-      provider: 'llama-cpp',
-      catalog: {
-        modelId: catalogModelId,
-        displayName: (draft.catalogDisplayName.trim() || catalogModelId),
-        isActive: true,
-      },
-      install: {
-        source: 'existingAlias',
-        routerModelId: alias,
-        runtimeProfileId,
-        existingAlias: { routerModelId: alias },
-        ...routerKnobs,
-      },
-    };
-  }
-
-  const routerModelId = draft.routerModelId.trim();
-  if (!routerModelId) {
-    throw new Error('Router alias is required for Hugging Face install.');
-  }
-  const repository = draft.huggingFaceRepository.trim();
-  const quantPattern = draft.huggingFaceQuantIncludePattern.trim();
-  const mmprojPattern = draft.huggingFaceMmprojIncludePattern.trim();
-  const targetDirectory = draft.huggingFaceTargetDirectory.trim();
-  if (!repository || !quantPattern) {
-    throw new Error('Repository and model file selection are required.');
-  }
-  return {
-    provider: 'llama-cpp',
-    catalog: {
-      modelId: catalogModelId,
-      displayName: (draft.catalogDisplayName.trim() || catalogModelId),
-      isActive: true,
-    },
-    install: {
-      source: 'huggingface',
-      routerModelId,
-      runtimeProfileId,
-      huggingFace: {
-        repository,
-        quantIncludePattern: quantPattern,
-        mmprojIncludePattern: mmprojPattern || quantPattern,
-        targetDirectory: targetDirectory || routerModelId,
-      },
-      ...routerKnobs,
-    },
-  };
+  return buildLocalModelOnboardingRequest(onboardingDraft, {
+    onboardingUi: 'wizard',
+    defaultCatalogModelId: draft.installSource === 'existingAlias'
+      ? draft.existingAliasRouterModelId
+      : draft.routerModelId,
+    defaultCatalogDisplayName: draft.installSource === 'existingAlias'
+      ? draft.existingAliasRouterModelId
+      : draft.routerModelId,
+    defaultTargetDirectory: draft.routerModelId,
+    defaultCatalogIsActive: true,
+  });
 }
 
 function localAiOptionalServiceStatus(

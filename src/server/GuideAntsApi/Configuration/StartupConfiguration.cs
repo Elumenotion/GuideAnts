@@ -22,6 +22,7 @@ using AntRunner.Chat.OpenRouter;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Services.Infrastructure;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.NotebookHeaderToolbar;
 
@@ -105,6 +106,8 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.LlamaCpp.INotebookModelRuntimeService, GuideAntsApi.Services.LlamaCpp.NotebookModelRuntimeService>();
         services.AddSingleton<IRouterModelsConfigService, RouterModelsConfigService>();
         services.AddScoped<ILlamaRuntimeInventoryService, LlamaRuntimeInventoryService>();
+        services.AddScoped<ILocalModelOnboardingValidator, LocalModelOnboardingValidator>();
+        services.AddScoped<ILocalModelOnboardingOrchestrator, LocalModelOnboardingOrchestrator>();
         services.AddSingleton<GuideAntsApi.Services.HuggingFace.IHuggingFaceTokenResolver, GuideAntsApi.Services.HuggingFace.HuggingFaceTokenResolver>();
         services.AddSingleton<IHuggingFaceModelDownloadService, HuggingFaceModelDownloadService>();
         // Thin HF REST adapter used by the Add Model wizard to populate file
