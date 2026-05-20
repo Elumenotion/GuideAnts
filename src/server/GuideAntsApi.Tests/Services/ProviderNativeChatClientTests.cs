@@ -218,6 +218,97 @@ public sealed class ProviderNativeChatClientTests
     }
 
     [TestMethod]
+    public async Task HuggingFace_GetCompletionAsync_WithAssistantToolCallsAndEmptyContentPart_SendsRequest()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(
+            """
+            {
+              "choices": [
+                {
+                  "message": { "content": "done", "role": "assistant" },
+                  "finish_reason": "stop"
+                }
+              ],
+              "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+            }
+            """));
+        using var httpClient = new HttpClient(handler);
+        var client = new HuggingFaceChatClient(
+            httpClient,
+            new HuggingFaceChatConfig
+            {
+                Token = "hf-token",
+                RouterBaseUrl = "https://router.huggingface.co/v1"
+            },
+            "deepseek-ai/DeepSeek-V4-Pro");
+
+        var toolCall = new ChatToolCall
+        {
+            Id = "call_1",
+            Type = "function",
+            Function = new ChatToolCallFunction
+            {
+                Name = "Media_Creator",
+                Arguments = JsonSerializer.SerializeToElement("""{"instructions":"test"}""")
+            }
+        };
+
+        var request = new ChatCompletionRequest(
+            messages:
+            [
+                new ChatMessage(ChatRole.System, "You are helpful."),
+                new ChatMessage(ChatRole.User, "Recolour the rose."),
+                new ChatMessage(ChatRole.Assistant, [new ChatContent("")], [toolCall]),
+                new ChatMessage("call_1", "Media_Creator", [new ChatContent("ERROR: tool failed")])
+            ],
+            model: null);
+
+        var response = await client.GetCompletionAsync(request);
+
+        handler.LastRequestUri.Should().NotBeNull();
+        using var requestJson = JsonDocument.Parse(handler.LastRequestBody);
+        var assistantMessage = requestJson.RootElement
+            .GetProperty("messages")[2];
+        assistantMessage.GetProperty("role").GetString().Should().Be("assistant");
+        assistantMessage.TryGetProperty("tool_calls", out _).Should().BeTrue();
+        if (assistantMessage.TryGetProperty("content", out var contentElement))
+        {
+            (contentElement.ValueKind == JsonValueKind.Null
+                || (contentElement.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(contentElement.GetString())))
+                .Should().BeTrue();
+        }
+        response.FirstChoice!.Message.GetText().Should().Be("done");
+    }
+
+    [TestMethod]
+    public async Task HuggingFace_GetCompletionAsync_WithUnsupportedContent_ThrowsDescriptiveErrorBeforeSend()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse("""{"choices":[]}"""));
+        using var httpClient = new HttpClient(handler);
+        var client = new HuggingFaceChatClient(
+            httpClient,
+            new HuggingFaceChatConfig
+            {
+                Token = "hf-token",
+                RouterBaseUrl = "https://router.huggingface.co/v1"
+            },
+            "meta-llama/llama-4-scout");
+
+        var request = new ChatCompletionRequest(
+            messages:
+            [
+                new ChatMessage(ChatRole.User, [new ChatContent()])
+            ],
+            model: null);
+
+        Func<Task> act = () => client.GetCompletionAsync(request);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("A message content part could not be mapped for the Hugging Face chat provider*");
+        handler.LastRequestUri.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task GoogleGemini_GetCompletionAsync_UsesGenerateContentEndpointAndMapsTools()
     {
         var handler = new CapturingHandler(_ => JsonResponse(
