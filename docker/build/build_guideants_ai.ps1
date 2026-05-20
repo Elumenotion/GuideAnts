@@ -80,16 +80,42 @@ function Get-FilePathsRecursive {
     )
 }
 
+function Promote-LocalBuildxCache {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CurrentPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$NewPath
+    )
+
+    if (-not (Test-Path $NewPath)) {
+        return
+    }
+
+    if (Test-Path $CurrentPath) {
+        Remove-Item -Path $CurrentPath -Recurse -Force
+    }
+    Move-Item -Path $NewPath -Destination $CurrentPath
+}
+
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $dockerRoot = Split-Path $PSScriptRoot -Parent
 $serverPath = Join-Path $repoRoot 'src\server'
 $buildContext = Join-Path $PSScriptRoot 'guideants-ai'
 $depsCachePath = Join-Path $dockerRoot '.buildx-cache-deps'
 $finalCachePath = Join-Path $dockerRoot '.buildx-cache-final'
+$depsCachePathNew = "$depsCachePath-new"
+$finalCachePathNew = "$finalCachePath-new"
 
 foreach ($cachePath in @($depsCachePath, $finalCachePath)) {
     if (-not (Test-Path $cachePath)) {
         New-Item -ItemType Directory -Path $cachePath | Out-Null
+    }
+}
+foreach ($newCachePath in @($depsCachePathNew, $finalCachePathNew)) {
+    if (Test-Path $newCachePath) {
+        Remove-Item -Path $newCachePath -Recurse -Force
     }
 }
 
@@ -272,9 +298,12 @@ try {
                 '--cache-from', "type=local,src=$depsCachePath",
                 '--cache-from', "type=local,src=$finalCachePath"
             )
+            if ($depsCacheExists) {
+                $depsBuildArgs += @('--cache-from', $depsCacheTag)
+            }
         }
         $depsBuildArgs += @(
-            '--cache-to', 'type=inline',
+            '--cache-to', "type=local,dest=$depsCachePathNew,mode=min",
             '--target', $depsTarget,
             '-t', $depsTag,
             '-t', $depsCacheTag,
@@ -287,6 +316,7 @@ try {
             Write-Error "Dependency image build failed with exit code $LASTEXITCODE"
             exit 1
         }
+        Promote-LocalBuildxCache -CurrentPath $depsCachePath -NewPath $depsCachePathNew
     }
     else {
         Write-Host "Reusing cached dependency image: $depsTag" -ForegroundColor Green
@@ -305,6 +335,7 @@ try {
     $dockerArgs += @(
         '--cache-from', "type=local,src=$depsCachePath",
         '--cache-from', "type=local,src=$finalCachePath",
+        '--cache-to', "type=local,dest=$finalCachePathNew,mode=min",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,
@@ -317,6 +348,7 @@ try {
         Write-Error "Image build failed with exit code $LASTEXITCODE"
         exit 1
     }
+    Promote-LocalBuildxCache -CurrentPath $finalCachePath -NewPath $finalCachePathNew
 
     Write-Host "Image built: $imageTag" -ForegroundColor Green
 }
@@ -326,6 +358,11 @@ finally {
     }
     if (Test-Path $reqDest) {
         Remove-Item -Path $reqDest -Force
+    }
+    foreach ($newCachePath in @($depsCachePathNew, $finalCachePathNew)) {
+        if (Test-Path $newCachePath) {
+            Remove-Item -Path $newCachePath -Recurse -Force
+        }
     }
 }
 

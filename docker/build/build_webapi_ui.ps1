@@ -3,7 +3,8 @@ param(
     [string]$Flavor = 'Full',
     [switch]$NoCache,
     [switch]$NoRecreate,
-    [switch]$UseAppBuildCache
+    [switch]$UseAppBuildCache,
+    [switch]$NoAppBuildCache
 )
 
 $ErrorActionPreference = 'Stop'
@@ -121,7 +122,14 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Image tag: $imageTag"
 Write-Host "Target:    $dockerTarget"
 Write-Host "No cache:  $NoCache"
-Write-Host "App cache: $UseAppBuildCache"
+$appBuildCacheEnabled = $true
+if ($NoAppBuildCache) {
+    $appBuildCacheEnabled = $false
+}
+if ($UseAppBuildCache) {
+    $appBuildCacheEnabled = $true
+}
+Write-Host "App cache: $appBuildCacheEnabled"
 Write-Host "Recreate: $(-not $NoRecreate)"
 Write-Host ""
 
@@ -165,7 +173,7 @@ $dockerArgs = @('build')
 if ($NoCache) {
     $dockerArgs += '--no-cache'
 }
-elseif (-not $UseAppBuildCache) {
+elseif (-not $appBuildCacheEnabled) {
     # Rebuild API stage each run so packaging is deterministic.
     $dockerArgs += @('--no-cache-filter', 'api-build')
 }

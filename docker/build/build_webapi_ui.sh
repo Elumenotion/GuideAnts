@@ -4,7 +4,7 @@ set -euo pipefail
 FLAVOR="Full"
 NO_CACHE=false
 NO_RECREATE=false
-USE_APP_BUILD_CACHE=false
+USE_APP_BUILD_CACHE=true
 
 usage() {
   cat <<'EOF'
@@ -14,7 +14,8 @@ Options:
   --flavor <Full|Slim|Mssql>  Build flavor (default: Full)
   --no-cache                  Build without cache
   --no-recreate               Skip docker compose service recreate
-  --use-app-build-cache       Allow docker cache for api-build stage
+  --use-app-build-cache       Allow docker cache for api-build stage (default)
+  --no-app-build-cache        Rebuild api-build stage each run
   -h, --help                  Show help
 EOF
 }
@@ -35,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --use-app-build-cache)
       USE_APP_BUILD_CACHE=true
+      shift
+      ;;
+    --no-app-build-cache)
+      USE_APP_BUILD_CACHE=false
       shift
       ;;
     -h|--help)
