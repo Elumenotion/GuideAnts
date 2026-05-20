@@ -161,7 +161,6 @@ public sealed class SpeechSynthesisServiceTests
             configurationValues: new Dictionary<string, string?>
             {
                 ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:TtsAllowedModels"] = "hf-tts-model"
             },
             modelId: "hf-tts-model");
 
@@ -208,7 +207,6 @@ public sealed class SpeechSynthesisServiceTests
             {
                 ["OpenRouter:ApiKey"] = "or-key",
                 ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1",
-                ["OpenRouter:TtsAllowedModels"] = "or-tts-model"
             },
             modelId: "or-tts-model");
 

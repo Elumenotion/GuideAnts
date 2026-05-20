@@ -38,7 +38,6 @@ internal sealed class HuggingFaceEmbeddingService(
         {
             throw new InvalidOperationException("Hugging Face embeddings model id is required.");
         }
-        ValidateEmbeddingModelCapability(modelId, requestPresetJson);
 
         var token = _configuration["HuggingFace:Token"];
         if (string.IsNullOrWhiteSpace(token))
@@ -90,79 +89,4 @@ internal sealed class HuggingFaceEmbeddingService(
 
     private sealed record HuggingFaceEmbeddingRequest(object Inputs);
 
-    private void ValidateEmbeddingModelCapability(string modelId, string? requestPresetJson)
-    {
-        var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            if (IsModelAllowed(modelId, configured))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"Hugging Face model '{modelId}' is not in the Embeddings service-mode AllowedModels preset.");
-        }
-
-        // Conservative default heuristic for embedding-capable public model namespaces.
-        if (modelId.Contains("embed", StringComparison.OrdinalIgnoreCase)
-            || modelId.StartsWith("sentence-transformers/", StringComparison.OrdinalIgnoreCase)
-            || modelId.StartsWith("intfloat/", StringComparison.OrdinalIgnoreCase)
-            || modelId.StartsWith("BAAI/", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        throw new InvalidOperationException(
-            $"Hugging Face model '{modelId}' is not recognized as embedding-capable. " +
-            "Set Embeddings service-mode AllowedModels to explicitly allow it.");
-    }
-
-    private static bool IsModelAllowed(string modelId, string allowlistCsv)
-    {
-        var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var entry in entries)
-        {
-            if (entry.EndsWith('*'))
-            {
-                var prefix = entry[..^1];
-                if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-            else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
-    {
-        if (string.IsNullOrWhiteSpace(requestPresetJson))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(requestPresetJson);
-            if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !document.RootElement.TryGetProperty(fieldName, out var node))
-            {
-                return null;
-            }
-
-            return node.ValueKind == JsonValueKind.String
-                ? node.GetString()?.Trim()
-                : node.ToString().Trim();
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 }

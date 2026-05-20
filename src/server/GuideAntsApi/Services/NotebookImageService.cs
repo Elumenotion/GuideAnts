@@ -1457,7 +1457,6 @@ namespace GuideAntsApi.Services
                 HuggingFaceProviderSection,
                 modelId,
                 "Set ServiceModes.ImageGeneration model id for HuggingFace.");
-            ValidateHuggingFaceImageModel(model, requestPresetJson);
             var token = _configuration["HuggingFace:Token"];
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -1512,7 +1511,6 @@ namespace GuideAntsApi.Services
                 OpenRouterProviderSection,
                 modelId,
                 "Set ServiceModes.ImageGeneration model id for OpenRouter.");
-            ValidateOpenRouterImageModel(model, requestPresetJson);
             var apiKey = _configuration["OpenRouter:ApiKey"];
             var baseUrl = _configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
             if (string.IsNullOrWhiteSpace(apiKey))
@@ -1691,80 +1689,6 @@ namespace GuideAntsApi.Services
                 providerSection: providerSection);
         }
 
-        private void ValidateHuggingFaceImageModel(string modelId, string? requestPresetJson)
-        {
-            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                if (IsModelAllowed(modelId, configured))
-                {
-                    return;
-                }
-
-                throw new InvalidOperationException(
-                    $"Hugging Face image model '{modelId}' is not in the ImageGeneration service-mode AllowedModels preset.");
-            }
-
-            if (modelId.Contains("image", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("diffusion", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("flux", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"Hugging Face model '{modelId}' is not recognized as image-capable. " +
-                "Set ImageGeneration service-mode AllowedModels to explicitly allow it.");
-        }
-
-        private void ValidateOpenRouterImageModel(string modelId, string? requestPresetJson)
-        {
-            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                if (IsModelAllowed(modelId, configured))
-                {
-                    return;
-                }
-
-                throw new InvalidOperationException(
-                    $"OpenRouter image model '{modelId}' is not in the ImageGeneration service-mode AllowedModels preset.");
-            }
-
-            if (modelId.Contains("image", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("imagen", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("flux", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"OpenRouter model '{modelId}' is not recognized as image-capable/output_modalities=image capable. " +
-                "Set ImageGeneration service-mode AllowedModels to explicitly allow it.");
-        }
-
-        private static bool IsModelAllowed(string modelId, string allowlistCsv)
-        {
-            var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            foreach (var entry in entries)
-            {
-                if (entry.EndsWith('*'))
-                {
-                    var prefix = entry[..^1];
-                    if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-                else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
         {
             if (string.IsNullOrWhiteSpace(requestPresetJson))
@@ -1931,7 +1855,6 @@ namespace GuideAntsApi.Services
                     providerSection: HuggingFaceProviderSection);
             }
             var model = modelId;
-            ValidateHuggingFaceImageModel(model, requestPresetJson);
             var endpoint = $"https://api-inference.huggingface.co/models/{model}";
             var requestBody = JsonSerializer.Serialize(new HuggingFaceImageGenerationRequest(prompt), ProviderPayloadJson);
 
@@ -1978,7 +1901,6 @@ namespace GuideAntsApi.Services
                     providerSection: OpenRouterProviderSection);
             }
             var model = modelId;
-            ValidateOpenRouterImageModel(model, requestPresetJson);
             var endpoint = $"{baseUrl.TrimEnd('/')}/chat/completions";
             var requestBody = new OpenRouterImageChatRequest(
                 Model: model,

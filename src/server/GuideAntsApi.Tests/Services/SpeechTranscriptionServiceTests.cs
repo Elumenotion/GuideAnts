@@ -230,7 +230,6 @@ public sealed class SpeechTranscriptionServiceTests
             configurationValues: new Dictionary<string, string?>
             {
                 ["GoogleGeminiApi:ApiKey"] = "gemini-key",
-                ["HuggingFace:AsrAllowedModels"] = "some-other-model"
             },
             modelId: "gemini-2.5-flash");
 
@@ -266,8 +265,6 @@ public sealed class SpeechTranscriptionServiceTests
             configurationValues: new Dictionary<string, string?>
             {
                 ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:AsrAllowedModels"] = "hf-asr-model",
-                ["OpenRouter:TranscriptionAllowedModels"] = "some-other-model"
             },
             modelId: "hf-asr-model");
 
@@ -303,7 +300,6 @@ public sealed class SpeechTranscriptionServiceTests
             {
                 ["OpenRouter:ApiKey"] = "or-key",
                 ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1",
-                ["OpenRouter:TranscriptionAllowedModels"] = "openai/whisper-1"
             },
             modelId: "openai/whisper-1");
 

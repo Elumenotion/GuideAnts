@@ -190,7 +190,6 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         {
             return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "Hugging Face TTS requires mode.ModelId.");
         }
-        ValidateHuggingFaceTtsModel(mode.ModelId, mode.RequestPresetJson);
 
         var token = _configuration["HuggingFace:Token"];
         if (string.IsNullOrWhiteSpace(token))
@@ -230,7 +229,6 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         {
             return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "OpenRouter TTS requires mode.ModelId.");
         }
-        ValidateOpenRouterTtsModel(mode.ModelId, mode.RequestPresetJson);
 
         var apiKey = _configuration["OpenRouter:ApiKey"];
         var baseUrl = _configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
@@ -632,106 +630,6 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         writer.Write(pcmBytes);
         writer.Flush();
         return stream.ToArray();
-    }
-
-    private void ValidateHuggingFaceTtsModel(string modelId, string? requestPresetJson)
-    {
-        var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            if (IsModelAllowed(modelId, configured))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"Hugging Face TTS model '{modelId}' is not in the SpeechSynthesis service-mode AllowedModels preset.");
-        }
-
-        if (modelId.Contains("tts", StringComparison.OrdinalIgnoreCase)
-            || modelId.Contains("speech", StringComparison.OrdinalIgnoreCase)
-            || modelId.Contains("kokoro", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        throw new InvalidOperationException(
-            $"Hugging Face model '{modelId}' is not recognized as TTS-capable. " +
-            "Set SpeechSynthesis service-mode AllowedModels to explicitly allow it.");
-    }
-
-    private void ValidateOpenRouterTtsModel(string modelId, string? requestPresetJson)
-    {
-        var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            if (IsModelAllowed(modelId, configured))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"OpenRouter TTS model '{modelId}' is not in the SpeechSynthesis service-mode AllowedModels preset.");
-        }
-
-        if (modelId.Contains("tts", StringComparison.OrdinalIgnoreCase)
-            || modelId.Contains("audio", StringComparison.OrdinalIgnoreCase)
-            || modelId.Contains("speech", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        throw new InvalidOperationException(
-            $"OpenRouter model '{modelId}' is not recognized as TTS-capable. " +
-            "Set SpeechSynthesis service-mode AllowedModels to explicitly allow it.");
-    }
-
-    private static bool IsModelAllowed(string modelId, string allowlistCsv)
-    {
-        var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var entry in entries)
-        {
-            if (entry.EndsWith('*'))
-            {
-                var prefix = entry[..^1];
-                if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-            else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
-    {
-        if (string.IsNullOrWhiteSpace(requestPresetJson))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(requestPresetJson);
-            if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !document.RootElement.TryGetProperty(fieldName, out var node))
-            {
-                return null;
-            }
-
-            return node.ValueKind == JsonValueKind.String
-                ? node.GetString()?.Trim()
-                : node.ToString().Trim();
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     private sealed record GoogleGeminiGenerateContentRequest(

@@ -220,21 +220,14 @@ if (string.Equals(providerSection, "OpenAI", StringComparison.OrdinalIgnoreCase)
 }
 ```
 
-**b) `ModelCapabilityBlockers`** — Add an `"OpenAI"` dispatch:
+**b) `ModelCapabilityBlockers`** — _Deprecated historical note_:
 
 ```csharp
-if (string.Equals(providerSection, "OpenAI", StringComparison.OrdinalIgnoreCase))
-{
-    return OpenAiCapabilityBlockers(service, modelId, mode.RequestPresetJson);
-}
+// Historical design draft only.
+// Current implementation no longer performs model-capability heuristic blocking.
 ```
 
-**c) New method `OpenAiCapabilityBlockers`** — Validate model IDs per service using heuristic or AllowedModels preset, following the same `IsAllowedByConfigOrHeuristic` pattern as HuggingFace/OpenRouter:
-
-- **Embeddings**: heuristic matches `embed` prefix.
-- **ImageGeneration**: heuristic matches `dall-e`, `gpt-image`.
-- **SpeechTranscription**: heuristic matches `whisper`, `transcribe`.
-- **SpeechSynthesis**: heuristic matches `tts`.
+**c) New method `OpenAiCapabilityBlockers`** — _Deprecated_. Model capability heuristic blockers were removed from readiness/runtime; provider/API responses are now the source of truth.
 
 **d) `AdditionalModeFieldBlockers`** — Add a check for `SpeechSynthesis` + `OpenAI` requiring `VoiceName` in `RequestPresetJson` (parallel to the existing Google Gemini VoiceName requirement).
 
@@ -561,7 +554,6 @@ Each editor already has a switch/branch per provider. Add the OpenAI case to eac
   - Verify validation accepts/rejects mode updates for new providers.
 - `src/server/GuideAntsApi.Tests/Services/Routing/RoutingReadinessServiceTests.cs`
   - Verify `RequiresExplicitModelId` returns `true` for OpenAI on all four services.
-  - Verify `OpenAiCapabilityBlockers` accepts valid models and rejects invalid models.
   - Verify VoiceName requirement for SpeechSynthesis + OpenAI.
 
 ### Runtime tests
@@ -595,7 +587,7 @@ Each editor already has a switch/branch per provider. Add the OpenAI case to eac
 1. Add provider ID constants to `ServiceProviderIds`.
 2. Add provider contracts to `ApplicationSettingsService.Contracts.cs` for all four services.
 3. Add metadata to `ServiceEditorMetadataProvider` for all four providers.
-4. Add readiness rules (`RequiresExplicitModelId`, `OpenAiCapabilityBlockers`, VoiceName blocker).
+4. Add readiness rules (`RequiresExplicitModelId`, VoiceName blocker).
 5. Implement OpenAI Embeddings runtime (lowest risk, easiest to validate).
 6. Implement OpenAI SpeechTranscription runtime.
 7. Implement OpenAI SpeechSynthesis runtime.

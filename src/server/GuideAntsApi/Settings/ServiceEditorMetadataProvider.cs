@@ -34,13 +34,11 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [ServiceProviderIds.EmbeddingsHuggingFaceInference] =
                 [
                     Field("ModelId", "text", true, operative: true),
-                    Field("AllowedModels", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
                 [ServiceProviderIds.EmbeddingsOpenRouterEmbeddings] =
                 [
                     Field("ModelId", "text", true, operative: true),
-                    Field("AllowedModels", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
                 [ServiceProviderIds.EmbeddingsOpenAiEmbedding] =
@@ -75,13 +73,11 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [ServiceProviderIds.ImageGenerationHuggingFaceInference] =
                 [
                     Field("ModelId", "text", true, operative: true),
-                    Field("AllowedModels", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
                 [ServiceProviderIds.ImageGenerationOpenRouterImage] =
                 [
                     Field("ModelId", "text", true, operative: true),
-                    Field("AllowedModels", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
                 [ServiceProviderIds.ImageGenerationOpenAiImages] =
@@ -133,13 +129,11 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [ServiceProviderIds.SpeechTranscriptionHuggingFaceInference] =
                 [
                     Field("ModelId", "text", true, operative: true),
-                    Field("AllowedModels", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
                 [ServiceProviderIds.SpeechTranscriptionOpenRouterAudio] =
                 [
                     Field("ModelId", "text", true, operative: true),
-                    Field("AllowedModels", "text", false, operative: true),
                     Field("MaxAudioBytes", "int", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
@@ -173,13 +167,11 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [ServiceProviderIds.SpeechSynthesisHuggingFaceInference] =
                 [
                     Field("ModelId", "text", true, operative: true),
-                    Field("AllowedModels", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
                 [ServiceProviderIds.SpeechSynthesisOpenRouterTts] =
                 [
                     Field("ModelId", "text", true, operative: true),
-                    Field("AllowedModels", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
                 [ServiceProviderIds.SpeechSynthesisOpenAiTts] =
