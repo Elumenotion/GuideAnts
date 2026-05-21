@@ -1,5 +1,4 @@
 using System.Net;
-using System.Linq;
 using System.Text;
 using FluentAssertions;
 using GuideAntsApi.Options;
@@ -143,19 +142,13 @@ public sealed class SpeechSynthesisServiceTests
     public async Task SynthesizeToWavAsync_UsesHuggingFaceProviderWithTypedPayload()
     {
         var wavBytes = Encoding.UTF8.GetBytes("fake-hf-wav");
-        var handler = new CapturingHandler(request =>
+        var handler = new CapturingHandler(_ =>
         {
-            if (request.RequestUri?.Host == "huggingface.co")
-            {
-                return BuildHuggingFaceProviderMappingResponse(provider: "hf-inference", providerId: "hf-tts-model");
-            }
-
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(wavBytes)
             };
             response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
-            response.Headers.Add("x-audio-duration-seconds", "3.6");
             return response;
         });
 
@@ -177,186 +170,9 @@ public sealed class SpeechSynthesisServiceTests
             var result = await service.SynthesizeToWavAsync("<speak>Hello HF</speak>", outputPath);
 
             result.Success.Should().BeTrue();
-            result.DurationSeconds.Should().Be(4);
-            handler.RequestUris.Should().Contain(uri => uri.Contains("https://huggingface.co/api/models/hf-tts-model?expand[]=inferenceProviderMapping", StringComparison.Ordinal));
             handler.LastRequestUri.Should().NotBeNull();
-            handler.LastRequestUri!.ToString().Should().Be("https://router.huggingface.co/hf-inference/models/hf-tts-model");
+            handler.LastRequestUri!.ToString().Should().Be("https://api-inference.huggingface.co/models/hf-tts-model");
             handler.LastRequestBody.Should().Contain("\"inputs\":\"Hello HF\"");
-        }
-        finally
-        {
-            if (File.Exists(outputPath))
-            {
-                File.Delete(outputPath);
-            }
-        }
-    }
-
-    [TestMethod]
-    public async Task SynthesizeToWavAsync_HuggingFace_ReturnsFailureWithHttpStatusAndBody_OnRateLimit()
-    {
-        var handler = new CapturingHandler(request =>
-        {
-            if (request.RequestUri?.Host == "huggingface.co")
-            {
-                return BuildHuggingFaceProviderMappingResponse(provider: "hf-inference", providerId: "hf-tts-model");
-            }
-
-            return new HttpResponseMessage((HttpStatusCode)429)
-            {
-                Content = new StringContent("{\"error\":\"rate limited\"}", Encoding.UTF8, "application/json")
-            };
-        });
-
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(
-            httpClient,
-            providerSection: HuggingFaceProviderSection,
-            synthesisOptions: new SpeechSynthesisOptions(),
-            localServiceHostsOptions: new LocalServiceHostsOptions(),
-            configurationValues: new Dictionary<string, string?>
-            {
-                ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:TtsAllowedModels"] = "hf-tts-model"
-            },
-            modelId: "hf-tts-model");
-
-        var outputPath = Path.Combine(Path.GetTempPath(), $"tts-hf-rate-limit-{Guid.NewGuid():N}.wav");
-        try
-        {
-            var result = await service.SynthesizeToWavAsync("<speak>Hello HF</speak>", outputPath);
-
-            result.Success.Should().BeFalse();
-            result.ErrorMessage.Should().Contain("Hugging Face TTS failed");
-            result.ErrorMessage.Should().Contain("429");
-            result.ErrorMessage.Should().Contain("rate limited");
-        }
-        finally
-        {
-            if (File.Exists(outputPath))
-            {
-                File.Delete(outputPath);
-            }
-        }
-    }
-
-    [TestMethod]
-    public async Task SynthesizeToWavAsync_HuggingFace_FailsOnUnexpectedContentType()
-    {
-        var handler = new CapturingHandler(request =>
-        {
-            if (request.RequestUri?.Host == "huggingface.co")
-            {
-                return BuildHuggingFaceProviderMappingResponse(provider: "hf-inference", providerId: "hf-tts-model");
-            }
-
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"error\":\"not-audio\"}", Encoding.UTF8, "application/json")
-            };
-        });
-
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(
-            httpClient,
-            providerSection: HuggingFaceProviderSection,
-            synthesisOptions: new SpeechSynthesisOptions(),
-            localServiceHostsOptions: new LocalServiceHostsOptions(),
-            configurationValues: new Dictionary<string, string?>
-            {
-                ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:TtsAllowedModels"] = "hf-tts-model"
-            },
-            modelId: "hf-tts-model");
-
-        var outputPath = Path.Combine(Path.GetTempPath(), $"tts-hf-bad-content-type-{Guid.NewGuid():N}.wav");
-        try
-        {
-            var result = await service.SynthesizeToWavAsync("<speak>Hello HF</speak>", outputPath);
-
-            result.Success.Should().BeFalse();
-            result.ErrorMessage.Should().Contain("unexpected content-type");
-        }
-        finally
-        {
-            if (File.Exists(outputPath))
-            {
-                File.Delete(outputPath);
-            }
-        }
-    }
-
-    [TestMethod]
-    public async Task SynthesizeToWavAsync_HuggingFaceReplicate_UsesPredictionsRouteAndDownloadsAudio()
-    {
-        var wavBytes = Encoding.UTF8.GetBytes("fake-replicate-wav");
-        const string expectedAudioUrl = "https://replicate.delivery/mock/output.wav";
-        var handler = new CapturingHandler(request =>
-        {
-            if (request.RequestUri?.Host == "huggingface.co")
-            {
-                return BuildHuggingFaceProviderMappingResponse(provider: "replicate", providerId: "resemble-ai/chatterbox-turbo");
-            }
-
-            if (request.RequestUri?.ToString() == "https://router.huggingface.co/replicate/v1/models/resemble-ai/chatterbox-turbo/predictions")
-            {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        $$"""{"status":"succeeded","output":"{{expectedAudioUrl}}"}""",
-                        Encoding.UTF8,
-                        "application/json")
-                };
-            }
-
-            if (request.RequestUri?.ToString() == expectedAudioUrl)
-            {
-                var download = new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new ByteArrayContent(wavBytes)
-                };
-                download.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
-                return download;
-            }
-
-            return new HttpResponseMessage(HttpStatusCode.NotFound)
-            {
-                Content = new StringContent("unexpected request")
-            };
-        });
-
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(
-            httpClient,
-            providerSection: HuggingFaceProviderSection,
-            synthesisOptions: new SpeechSynthesisOptions(),
-            localServiceHostsOptions: new LocalServiceHostsOptions(),
-            configurationValues: new Dictionary<string, string?>
-            {
-                ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1",
-                ["HuggingFace:TtsAllowedModels"] = "ResembleAI/chatterbox"
-            },
-            modelId: "ResembleAI/chatterbox");
-
-        var outputPath = Path.Combine(Path.GetTempPath(), $"tts-hf-replicate-{Guid.NewGuid():N}.wav");
-        try
-        {
-            var result = await service.SynthesizeToWavAsync("<speak>Hello HF</speak>", outputPath);
-
-            result.Success.Should().BeTrue();
-            File.ReadAllBytes(outputPath).Should().Equal(wavBytes);
-            handler.RequestUris.Should().Contain("https://router.huggingface.co/replicate/v1/models/resemble-ai/chatterbox-turbo/predictions");
-            handler.RequestUris.Should().Contain(expectedAudioUrl);
-            var replicateRequest = handler.CapturedRequests
-                .FirstOrDefault(entry => string.Equals(
-                    entry.Uri,
-                    "https://router.huggingface.co/replicate/v1/models/resemble-ai/chatterbox-turbo/predictions",
-                    StringComparison.Ordinal));
-            replicateRequest.Should().NotBeNull();
-            replicateRequest!.Body.Should().Contain("\"input\":{\"text\":\"Hello HF\"}");
-            replicateRequest.Headers.Should().ContainKey("Prefer");
-            replicateRequest.Headers["Prefer"].Should().Contain("wait");
         }
         finally
         {
@@ -463,44 +279,17 @@ public sealed class SpeechSynthesisServiceTests
             NullLogger<SpeechSynthesisService>.Instance);
     }
 
-    private static HttpResponseMessage BuildHuggingFaceProviderMappingResponse(string provider, string providerId)
-    {
-        var payload = $$"""
-        {
-          "inferenceProviderMapping": {
-            "{{provider}}": {
-              "status": "live",
-              "providerId": "{{providerId}}",
-              "task": "text-to-speech"
-            }
-          }
-        }
-        """;
-
-        return new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(payload, Encoding.UTF8, "application/json")
-        };
-    }
-
     private sealed class CapturingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
-        public sealed record CapturedRequest(string Uri, string Body, Dictionary<string, string> Headers);
 
         public Uri? LastRequestUri { get; private set; }
         public string LastRequestBody { get; private set; } = string.Empty;
         public Dictionary<string, string> LastRequestHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public List<string> RequestUris { get; } = [];
-        public List<CapturedRequest> CapturedRequests { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequestUri = request.RequestUri;
-            if (request.RequestUri != null)
-            {
-                RequestUris.Add(request.RequestUri.ToString());
-            }
             LastRequestHeaders.Clear();
             foreach (var header in request.Headers)
             {
@@ -510,13 +299,6 @@ public sealed class SpeechSynthesisServiceTests
             LastRequestBody = request.Content is null
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken);
-            if (request.RequestUri != null)
-            {
-                CapturedRequests.Add(new CapturedRequest(
-                    request.RequestUri.ToString(),
-                    LastRequestBody,
-                    new Dictionary<string, string>(LastRequestHeaders, StringComparer.OrdinalIgnoreCase)));
-            }
 
             return _responder(request);
         }

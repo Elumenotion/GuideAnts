@@ -17,8 +17,6 @@ namespace GuideAntsApi.Services.Components;
 /// </summary>
 public sealed class SpeechSynthesisService : ISpeechSynthesisService
 {
-    private sealed record HfProviderRoute(string Provider, string ProviderId);
-
     private const string AzureProviderSection = "AzureSpeechService";
     private const string LocalProviderSection = "LocalServiceHosts:SpeechSynthesisBaseUrl";
     private const string GoogleGeminiProviderSection = "GoogleGeminiApi";
@@ -199,235 +197,25 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
             return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "HuggingFace:Token is required.");
         }
 
-        var routes = await ResolveHuggingFaceTtsProvidersAsync(mode.ModelId!, token, cancellationToken);
-        var text = StripSsmlMarkup(ssml);
-        string? lastError = null;
-
-        foreach (var route in routes)
+        var endpoint = $"https://api-inference.huggingface.co/models/{mode.ModelId}";
+        var payload = JsonSerializer.Serialize(new HuggingFaceTtsRequest(StripSsmlMarkup(ssml)), ProviderPayloadJson);
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            var endpoint = ResolveHuggingFaceTtsEndpoint(route);
-            var requestPayload = BuildHuggingFaceTtsPayload(route, text);
-            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
-            {
-                Content = new StringContent(requestPayload, Encoding.UTF8, "application/json")
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Headers.Add("x-request-id", requestId);
-            if (string.Equals(route.Provider, "replicate", StringComparison.OrdinalIgnoreCase))
-            {
-                request.Headers.TryAddWithoutValidation("Prefer", "wait");
-            }
-
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                lastError = $"{route.Provider}: {(int)response.StatusCode} {errorBody}";
-                continue;
-            }
-
-            var mediaType = response.Content.Headers.ContentType?.MediaType;
-            if (!IsHuggingFaceAudioMediaType(mediaType))
-            {
-                var body = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (TryExtractHuggingFaceTtsAudioUrl(route.Provider, body, out var audioUrl))
-                {
-                    using var audioResponse = await _httpClient.GetAsync(audioUrl, cancellationToken);
-                    if (!audioResponse.IsSuccessStatusCode)
-                    {
-                        var audioErrorBody = await audioResponse.Content.ReadAsStringAsync(cancellationToken);
-                        lastError = $"{route.Provider}: failed to download audio from '{audioUrl}' - {(int)audioResponse.StatusCode} {audioErrorBody}";
-                        continue;
-                    }
-
-                    var downloadedBytes = await audioResponse.Content.ReadAsByteArrayAsync(cancellationToken);
-                    await File.WriteAllBytesAsync(outputPath, downloadedBytes, cancellationToken);
-                    return new ISpeechSynthesisService.SpeechSynthesisResult(true, 0);
-                }
-
-                lastError = $"{route.Provider}: unexpected content-type '{mediaType ?? "<none>"}': {body}";
-                continue;
-            }
-
-            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-            await File.WriteAllBytesAsync(outputPath, bytes, cancellationToken);
-            return new ISpeechSynthesisService.SpeechSynthesisResult(true, ParseDurationSeconds(response));
-        }
-
-        return new ISpeechSynthesisService.SpeechSynthesisResult(
-            false,
-            0,
-            $"Hugging Face TTS failed for model '{mode.ModelId}': {lastError ?? "No compatible live provider route was found."}");
-    }
-
-    private string ResolveHuggingFaceTtsEndpoint(HfProviderRoute route)
-    {
-        var configuredRouterBase = _configuration["HuggingFace:RouterBaseUrl"];
-        var routerBase = string.IsNullOrWhiteSpace(configuredRouterBase)
-            ? "https://router.huggingface.co/v1"
-            : configuredRouterBase;
-
-        var normalized = routerBase.TrimEnd('/');
-        if (normalized.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = normalized[..^3];
-        }
-
-        if (string.Equals(route.Provider, "hf-inference", StringComparison.OrdinalIgnoreCase))
-        {
-            return $"{normalized}/hf-inference/models/{route.ProviderId}";
-        }
-
-        if (string.Equals(route.Provider, "replicate", StringComparison.OrdinalIgnoreCase))
-        {
-            return $"{normalized}/replicate/v1/models/{route.ProviderId}/predictions";
-        }
-
-        return $"{normalized}/{route.Provider}/{route.ProviderId}";
-    }
-
-    private static string BuildHuggingFaceTtsPayload(HfProviderRoute route, string text)
-    {
-        if (string.Equals(route.Provider, "replicate", StringComparison.OrdinalIgnoreCase))
-        {
-            return JsonSerializer.Serialize(
-                new { input = new { text } },
-                ProviderPayloadJson);
-        }
-
-        if (string.Equals(route.Provider, "fal-ai", StringComparison.OrdinalIgnoreCase))
-        {
-            return JsonSerializer.Serialize(
-                new { text },
-                ProviderPayloadJson);
-        }
-
-        return JsonSerializer.Serialize(new HuggingFaceTtsRequest(text), ProviderPayloadJson);
-    }
-
-    private static bool TryExtractHuggingFaceTtsAudioUrl(
-        string provider,
-        string responseBody,
-        out string audioUrl)
-    {
-        audioUrl = string.Empty;
-        try
-        {
-            using var document = JsonDocument.Parse(responseBody);
-            var root = document.RootElement;
-            if (string.Equals(provider, "replicate", StringComparison.OrdinalIgnoreCase)
-                && root.ValueKind == JsonValueKind.Object
-                && root.TryGetProperty("output", out var outputNode))
-            {
-                if (outputNode.ValueKind == JsonValueKind.String)
-                {
-                    var value = outputNode.GetString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        audioUrl = value;
-                        return true;
-                    }
-                }
-
-                if (outputNode.ValueKind == JsonValueKind.Array
-                    && outputNode.GetArrayLength() > 0
-                    && outputNode[0].ValueKind == JsonValueKind.String)
-                {
-                    var value = outputNode[0].GetString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        audioUrl = value;
-                        return true;
-                    }
-                }
-            }
-
-            if (string.Equals(provider, "fal-ai", StringComparison.OrdinalIgnoreCase)
-                && root.ValueKind == JsonValueKind.Object
-                && root.TryGetProperty("audio", out var audioNode)
-                && audioNode.ValueKind == JsonValueKind.Object
-                && audioNode.TryGetProperty("url", out var urlNode)
-                && urlNode.ValueKind == JsonValueKind.String)
-            {
-                var value = urlNode.GetString();
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    audioUrl = value;
-                    return true;
-                }
-            }
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-
-        return false;
-    }
-
-    private async Task<IReadOnlyList<HfProviderRoute>> ResolveHuggingFaceTtsProvidersAsync(
-        string modelId,
-        string token,
-        CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"https://huggingface.co/api/models/{modelId}?expand[]=inferenceProviderMapping");
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Add("x-request-id", requestId);
+
         using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(
-                $"Failed to resolve Hugging Face providers for '{modelId}': {(int)response.StatusCode} {body}");
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, $"Hugging Face TTS failed: {(int)response.StatusCode} {errorBody}");
         }
 
-        using var document = JsonDocument.Parse(body);
-        if (!document.RootElement.TryGetProperty("inferenceProviderMapping", out var mapping)
-            || mapping.ValueKind != JsonValueKind.Object)
-        {
-            throw new InvalidOperationException(
-                $"Model '{modelId}' has no inference provider mapping.");
-        }
-
-        var routes = new List<HfProviderRoute>();
-        foreach (var provider in mapping.EnumerateObject())
-        {
-            if (provider.Value.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            var status = provider.Value.TryGetProperty("status", out var statusNode)
-                ? statusNode.GetString()
-                : null;
-            var task = provider.Value.TryGetProperty("task", out var taskNode)
-                ? taskNode.GetString()
-                : null;
-            var providerId = provider.Value.TryGetProperty("providerId", out var providerIdNode)
-                ? providerIdNode.GetString()
-                : null;
-
-            if (!string.Equals(status, "live", StringComparison.OrdinalIgnoreCase)
-                || string.IsNullOrWhiteSpace(providerId))
-            {
-                continue;
-            }
-
-            if (string.Equals(task, "text-to-speech", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(task, "text-to-audio", StringComparison.OrdinalIgnoreCase))
-            {
-                routes.Add(new HfProviderRoute(provider.Name, providerId));
-            }
-        }
-
-        if (routes.Count == 0)
-        {
-            throw new InvalidOperationException(
-                $"No live Hugging Face inference provider found for model '{modelId}' and task 'text-to-speech'.");
-        }
-
-        return routes;
+        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        await File.WriteAllBytesAsync(outputPath, bytes, cancellationToken);
+        return new ISpeechSynthesisService.SpeechSynthesisResult(true, 0);
     }
 
     private async Task<ISpeechSynthesisService.SpeechSynthesisResult> SynthesizeViaOpenRouterAsync(
@@ -815,17 +603,6 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         string.Equals(mimeType, "audio/wav", StringComparison.OrdinalIgnoreCase)
         || string.Equals(mimeType, "audio/x-wav", StringComparison.OrdinalIgnoreCase)
         || string.Equals(mimeType, "audio/wave", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsHuggingFaceAudioMediaType(string? mediaType)
-    {
-        if (string.IsNullOrWhiteSpace(mediaType))
-        {
-            return false;
-        }
-
-        return mediaType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mediaType, "application/octet-stream", StringComparison.OrdinalIgnoreCase);
-    }
 
     private static byte[] WrapPcm16Mono24KhzAsWav(byte[] pcmBytes)
     {

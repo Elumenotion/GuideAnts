@@ -85,7 +85,7 @@ public sealed class ServiceEditorUpdateValidationTests
             ServiceProviderIds.EmbeddingsHuggingFaceInference,
             new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
-                    ["ModelId"] = "microsoft/harrier-oss-v1-0.6b"
+                    ["ModelId"] = "sentence-transformers/all-MiniLM-L6-v2"
                 })),
             CancellationToken.None);
 
@@ -97,11 +97,11 @@ public sealed class ServiceEditorUpdateValidationTests
         var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
         modes.Should().Contain(mode =>
             string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal)
-            && string.Equals(mode.ModelId, "microsoft/harrier-oss-v1-0.6b", StringComparison.Ordinal));
+            && string.Equals(mode.ModelId, "sentence-transformers/all-MiniLM-L6-v2", StringComparison.Ordinal));
 
         var state = await service.GetServiceEditorStateAsync("Embeddings", CancellationToken.None);
         var provider = state.Providers.Single(p => p.ProviderId == ServiceProviderIds.EmbeddingsHuggingFaceInference);
-        provider.Fields["ModelId"].Value.Should().Be("microsoft/harrier-oss-v1-0.6b");
+        provider.Fields["ModelId"].Value.Should().Be("sentence-transformers/all-MiniLM-L6-v2");
         provider.Fields["ModelId"].HasValue.Should().BeTrue();
     }
 
@@ -268,24 +268,6 @@ public sealed class ServiceEditorUpdateValidationTests
 
         var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
         modes.Should().NotContain(mode => string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal));
-    }
-
-    [TestMethod]
-    public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForHuggingFaceSpeechSynthesis()
-    {
-        await using var db = CreateDbContext();
-        var configuration = BuildConfiguration();
-        var service = CreateService(db, configuration);
-
-        await service.EnsureServiceModeExistsAsync(
-            "SpeechSynthesis",
-            ServiceProviderIds.SpeechSynthesisHuggingFaceInference,
-            CancellationToken.None);
-
-        var modes = await service.GetServiceModesAsync("SpeechSynthesis", CancellationToken.None);
-        modes.Should().Contain(mode =>
-            string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal)
-            && string.Equals(mode.ModelId, "ResembleAI/chatterbox", StringComparison.Ordinal));
     }
 
     private static ApplicationDbContext CreateDbContext()

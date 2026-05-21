@@ -12,7 +12,7 @@ export type AddAiServicesWizardStep =
   | 'optionalServices'
   | 'finish';
 
-export type AddAiServicesWizardProvider = 'foundry' | 'google-gemini' | 'openai' | 'huggingface' | 'local-ai';
+export type AddAiServicesWizardProvider = 'foundry' | 'google-gemini' | 'openai' | 'local-ai';
 
 export type FoundryModelProviderLabel = 'Completions' | 'Responses';
 
@@ -41,13 +41,6 @@ export interface OpenAiModelDraft {
   persisted: boolean;
 }
 
-export interface HuggingFaceModelDraft {
-  localId: string;
-  modelId: string;
-  setAsGlobalDefault: boolean;
-  persisted: boolean;
-}
-
 export interface ExistingFoundryModel {
   modelId: string;
   provider: FoundryModelProviderLabel;
@@ -62,11 +55,6 @@ export interface ExistingGeminiModel {
 export interface ExistingOpenAiModel {
   modelId: string;
   provider: OpenAiModelProviderLabel;
-  raw: SettingsModelDto;
-}
-
-export interface ExistingHuggingFaceModel {
-  modelId: string;
   raw: SettingsModelDto;
 }
 
@@ -88,12 +76,6 @@ export interface OpenAiCoreConnectionFormState {
   apiKey: string;
   endpoint: string;
   apiKeyHasStoredValue: boolean;
-}
-
-export interface HuggingFaceCoreConnectionFormState {
-  token: string;
-  routerBaseUrl: string;
-  tokenHasStoredValue: boolean;
 }
 
 export interface FoundryOptionalServicesFormState {
@@ -163,25 +145,6 @@ export interface GeminiOptionalServicesFormState {
   enableSpeechSynthesis: boolean;
   speechSynthesisModelId: string;
   speechSynthesisVoiceName: string;
-  speechSynthesisTimeoutSeconds: string;
-}
-
-export interface HuggingFaceOptionalServicesFormState {
-  enableEmbeddings: boolean;
-  embeddingsModelId: string;
-  embeddingsTimeoutSeconds: string;
-
-  enableImages: boolean;
-  imagesTextToImageModelId: string;
-  imagesImageToImageModelId: string;
-  imagesTimeoutSeconds: string;
-
-  enableSpeechTranscription: boolean;
-  speechTranscriptionModelId: string;
-  speechTranscriptionTimeoutSeconds: string;
-
-  enableSpeechSynthesis: boolean;
-  speechSynthesisModelId: string;
   speechSynthesisTimeoutSeconds: string;
 }
 

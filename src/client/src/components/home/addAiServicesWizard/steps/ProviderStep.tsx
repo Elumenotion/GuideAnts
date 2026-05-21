@@ -12,7 +12,7 @@ export function ProviderStep({ value, onChange }: ProviderStepProps) {
       <div>
         <h3 className="text-sm font-semibold text-gray-900">Choose a provider</h3>
         <p className="mt-1 text-sm text-gray-600">
-          This wizard supports Microsoft Foundry, Google Gemini, OpenAI, Hugging Face, and Local AI setup paths.
+          This wizard supports Microsoft Foundry, Google Gemini, OpenAI, and Local AI setup paths.
         </p>
       </div>
       <label className="block text-xs font-semibold uppercase tracking-wide text-gray-600" htmlFor="add-ai-services-provider">

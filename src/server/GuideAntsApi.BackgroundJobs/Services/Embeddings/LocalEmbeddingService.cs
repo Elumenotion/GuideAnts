@@ -13,6 +13,7 @@ internal sealed class LocalEmbeddingService(
     ILogger<LocalEmbeddingService> logger) : IEmbeddingService
 {
     private const int SourceVectorDimensions = 1024;
+    private const int TargetVectorDimensions = 1536;
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -111,7 +112,9 @@ internal sealed class LocalEmbeddingService(
                         $"Local embeddings vector {i} has length {embedding.Length}; expected {SourceVectorDimensions}.");
                 }
 
-                paddedVectors[i] = EmbeddingVectorDimensions.NormalizeToTarget(embedding);
+                var padded = new float[TargetVectorDimensions];
+                Array.Copy(embedding, padded, embedding.Length);
+                paddedVectors[i] = padded;
             }
 
             _logger.LogInformation(
@@ -120,7 +123,7 @@ internal sealed class LocalEmbeddingService(
                 purposeValue,
                 parsed.ModelRef,
                 SourceVectorDimensions,
-                EmbeddingVectorDimensions.Target,
+                TargetVectorDimensions,
                 minIntervalMs);
 
             return paddedVectors;

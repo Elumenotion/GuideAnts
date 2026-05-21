@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.BackgroundJobs.Services.Embeddings;
@@ -10,8 +9,6 @@ internal sealed class HuggingFaceEmbeddingService(
     HttpClient client,
     IConfiguration configuration) : IEmbeddingService
 {
-    private sealed record HfProviderRoute(string Provider, string ProviderId);
-
     private readonly HttpClient _client = client;
     private readonly IConfiguration _configuration = configuration;
 
@@ -31,8 +28,6 @@ internal sealed class HuggingFaceEmbeddingService(
         string? requestPresetJson,
         CancellationToken cancellationToken = default)
     {
-        _ = requestPresetJson;
-
         var inputs = texts.ToArray();
         if (inputs.Length == 0)
         {
@@ -50,8 +45,7 @@ internal sealed class HuggingFaceEmbeddingService(
             throw new InvalidOperationException("HuggingFace:Token is required for Hugging Face embeddings.");
         }
 
-        var route = await ResolveHuggingFaceEmbeddingRouteAsync(modelId, token, cancellationToken).ConfigureAwait(false);
-        var endpoint = ResolveHuggingFaceEmbeddingsEndpoint(route);
+        var endpoint = $"https://api-inference.huggingface.co/models/{modelId}";
         var requestDto = new HuggingFaceEmbeddingRequest(inputs.Length == 1 ? inputs[0] : inputs);
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
@@ -93,6 +87,6 @@ internal sealed class HuggingFaceEmbeddingService(
         throw new InvalidOperationException("Hugging Face embeddings response shape was not recognized.");
     }
 
-    private sealed record HuggingFaceEmbeddingRequest([property: JsonPropertyName("inputs")] object Inputs);
+    private sealed record HuggingFaceEmbeddingRequest(object Inputs);
 
 }

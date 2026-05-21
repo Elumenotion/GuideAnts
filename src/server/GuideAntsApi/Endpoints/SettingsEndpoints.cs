@@ -1776,21 +1776,8 @@ public static class SettingsEndpoints
             return null;
         }
 
-        var profile = await runtimeProfileResolver.ResolveAsync(runtimeProfileId.Trim(), cancellationToken)
+        return await DeriveLlamaReasoningChoicesJsonAsync(runtimeProfileResolver, runtimeProfileId, cancellationToken)
             .ConfigureAwait(false);
-
-        if (profile.ThinkingControl?.ChoiceActions is null)
-        {
-            return null;
-        }
-
-        var choices = profile.ThinkingControl.ChoiceActions.Keys
-            .Where(choice => !string.IsNullOrWhiteSpace(choice))
-            .Select(choice => choice.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        return choices.Count == 0 ? null : JsonSerializer.Serialize(choices);
     }
 
     private static bool GetProviderConfigBoolean(JsonObject? providerConfig, string propertyName)

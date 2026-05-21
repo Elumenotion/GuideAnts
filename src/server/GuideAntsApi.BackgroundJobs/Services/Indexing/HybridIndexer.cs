@@ -261,5 +261,4 @@ internal sealed class HybridIndexer(
 
         return chunks;
     }
-
 }

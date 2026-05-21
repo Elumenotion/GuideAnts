@@ -111,7 +111,7 @@ if (-not (Test-Path $dockerfilePath)) {
     exit 1
 }
 
-# Build a unique tag per build, and also maintain a stable latest tag.
+# Julian date (2-digit year + day-of-year) + time tag: e.g. 26099.1530
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
 $imageTag = "${imageRepository}:${julianDay}.${timeStamp}"

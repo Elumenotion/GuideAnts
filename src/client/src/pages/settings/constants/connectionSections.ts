@@ -13,8 +13,8 @@ export interface ConnectionOwnershipCategory {
  * Cloud provider sections hidden from the UI because their integrations are incomplete.
  * Remove entries here to re-enable them once ready.
  */
-export const HIDDEN_CLOUD_PROVIDER_SECTIONS = new Set<string>(['OpenRouter']);
-export const HIDDEN_CHAT_MODEL_PROVIDERS = new Set<string>(['openrouter-chat']);
+export const HIDDEN_CLOUD_PROVIDER_SECTIONS = new Set<string>(['OpenRouter', 'HuggingFace']);
+export const HIDDEN_CHAT_MODEL_PROVIDERS = new Set<string>(['hf-inference-chat', 'openrouter-chat']);
 
 export const CONNECTION_OWNERSHIP_CATEGORIES: readonly ConnectionOwnershipCategory[] = [
   {

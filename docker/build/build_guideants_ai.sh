@@ -142,7 +142,6 @@ case "$choice" in
     ;;
 esac
 
-# Build a unique tag per build, and also maintain a stable backend-specific latest tag.
 JULIAN_DAY="$(date +%y%j)"
 TIME_STAMP="$(date +%H%M)"
 IMAGE_TAG="guideants-ai:${BACKEND}-${JULIAN_DAY}.${TIME_STAMP}"
