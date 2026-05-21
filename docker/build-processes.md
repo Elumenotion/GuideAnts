@@ -32,6 +32,8 @@ The AI image is deliberately split into `deps-*` and `final-*` stages. These req
 
 The build script supports those requirements by tagging every deps build with both the hash tag and stable cache tag, importing the stable cache tag with `--cache-from`, and exporting deps cache with `mode=min` to prioritize local developer throughput.
 
+If the active Buildx driver does not support cache export, the build scripts automatically skip `--cache-to` for that run and emit a warning instead of failing.
+
 ## GHCR Publish Workflows
 
 The repo publishes the following GHCR packages from GitHub Actions:
@@ -82,6 +84,13 @@ Script flow:
 9. Cleans staged artifacts (`ScriptExecutionAgent`, staged `requirements.txt`).
 10. Writes `GA_AI_CUDA_IMAGE=<new tag>`, `GA_AI_CPU_IMAGE=<new tag>`, or `GA_AI_ROCM_IMAGE=<new tag>` into `docker/.env`.
 11. If `-All` is set, also builds PlantUML and MSSQL FTS images, then invokes `build_webapi_ui.ps1` to build the compose-used WebAPI+UI image.
+
+Recommended one-time local setup for maximum cache effectiveness:
+
+```powershell
+docker buildx create --name guideants-builder --driver docker-container --use
+docker buildx inspect --bootstrap
+```
 
 ## 3) AI Multi-Stage Build (Why It Matters)
 

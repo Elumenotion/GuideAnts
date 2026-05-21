@@ -247,7 +247,7 @@ Already covered above: Docker, Compose plugin, optional GPU runtime, ~60 GB disk
 | Image | Build tool | Extra pre-requisites |
 |---|---|---|
 | `guideants-webapi-ui` (`docker/build/webapi-ui/Dockerfile`) | `build_webapi_ui.ps1` / `.sh` | Requires the client UI to be built first via `npm run browser:build:docker` (produces `src/client/dist-browser/`). Multi-stage uses `mcr.microsoft.com/dotnet/sdk:8.0`. |
-| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage), BuildKit (`DOCKER_BUILDKIT=1`), and the chosen backend's CUDA/ROCm base images. CUDA build pins NVIDIA CUDA 13. |
+| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage), BuildKit (`DOCKER_BUILDKIT=1`), and the chosen backend's CUDA/ROCm base images. CUDA build pins NVIDIA CUDA 13. Build scripts auto-detect Buildx cache-export support and continue without `--cache-to` (with a warning) when unsupported. |
 | `mssql2025-express-fts` (`docker/build/mssql-fts/Dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `plantuml-1.2025.2` (`docker/build/Sandboxes/PlantUml/dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `guideants-searxng` | `docker compose build searxng` | Repo-root build context. |
@@ -323,6 +323,14 @@ The launcher auto-picks `cuda13`, `rocm`, or `cpu` and pulls GHCR images. No SDK
 2. BuildKit enabled (`DOCKER_BUILDKIT=1` — the build scripts set this).
 3. For CUDA AI image builds: NVIDIA container runtime + enough disk for multi-stage CUDA 13 images.
 4. PowerShell scripts at `docker/build/build_guideants_ai.ps1` (`-All` builds AI + MSSQL FTS + PlantUML + WebAPI/UI).
+5. For best cache performance, use a Buildx builder with `docker-container` driver:
+
+```powershell
+docker buildx create --name guideants-builder --driver docker-container --use
+docker buildx inspect --bootstrap
+```
+
+If not configured, builds still run; the script emits a warning and disables cache export for that run.
 
 ---
 

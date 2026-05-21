@@ -99,6 +99,28 @@ function Promote-LocalBuildxCache {
     Move-Item -Path $NewPath -Destination $CurrentPath
 }
 
+function Test-BuildxCacheExportSupport {
+    $inspectOutput = docker buildx inspect --bootstrap 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Could not inspect Docker Buildx builder. Disabling local cache export (--cache-to) for this run."
+        return $false
+    }
+
+    $driverLine = $inspectOutput | Where-Object { $_ -match '^\s*Driver:\s*' } | Select-Object -First 1
+    if (-not $driverLine) {
+        Write-Warning "Could not determine Buildx driver. Disabling local cache export (--cache-to) for this run."
+        return $false
+    }
+
+    $driver = (($driverLine -replace '^\s*Driver:\s*', '').Trim()).ToLowerInvariant()
+    if ($driver -eq 'docker') {
+        Write-Warning "Buildx driver 'docker' does not support cache export. Continuing without --cache-to."
+        return $false
+    }
+
+    return $true
+}
+
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $dockerRoot = Split-Path $PSScriptRoot -Parent
 $serverPath = Join-Path $repoRoot 'src\server'
@@ -107,6 +129,7 @@ $depsCachePath = Join-Path $dockerRoot '.buildx-cache-deps'
 $finalCachePath = Join-Path $dockerRoot '.buildx-cache-final'
 $depsCachePathNew = "$depsCachePath-new"
 $finalCachePathNew = "$finalCachePath-new"
+$supportsCacheExport = Test-BuildxCacheExportSupport
 
 foreach ($cachePath in @($depsCachePath, $finalCachePath)) {
     if (-not (Test-Path $cachePath)) {
@@ -305,13 +328,15 @@ try {
             }
         }
         $depsBuildArgs += @(
-            '--cache-to', "type=local,dest=$depsCachePathNew,mode=min",
             '--target', $depsTarget,
             '-t', $depsTag,
             '-t', $depsCacheTag,
             '-f', $dockerfilePath,
             $buildContext
         )
+        if ($supportsCacheExport) {
+            $depsBuildArgs += @('--cache-to', "type=local,dest=$depsCachePathNew,mode=min")
+        }
 
         docker @depsBuildArgs
         if ($LASTEXITCODE -ne 0) {
@@ -337,7 +362,6 @@ try {
     $dockerArgs += @(
         '--cache-from', "type=local,src=$depsCachePath",
         '--cache-from', "type=local,src=$finalCachePath",
-        '--cache-to', "type=local,dest=$finalCachePathNew,mode=min",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,
@@ -345,6 +369,9 @@ try {
         '-f', $dockerfilePath,
         $buildContext
     )
+    if ($supportsCacheExport) {
+        $dockerArgs += @('--cache-to', "type=local,dest=$finalCachePathNew,mode=min")
+    }
 
     docker @dockerArgs
     if ($LASTEXITCODE -ne 0) {

@@ -46,6 +46,8 @@ The local build script enforces this with two deps tags per backend:
 
 The deps build exports local BuildKit cache metadata with `mode=min` by default to optimize developer throughput. This reduces cache export overhead on local machines while preserving the stable deps cache tag (`guideants-ai-deps:<backend>-cache`) for reuse across dependency hash changes.
 
+If the active Buildx driver does not support cache export (for example `docker`), the build scripts now automatically continue without `--cache-to` and emit a warning. This avoids hard failures on machines with different Docker Buildx defaults.
+
 ## GHCR Publishing
 
 GitHub Actions publish the runtime images to GHCR as separate packages:
@@ -163,6 +165,17 @@ Supported switches:
 8. Clean staged artifacts
 9. Write `GA_AI_CUDA_IMAGE=<final-tag>`, `GA_AI_CPU_IMAGE=<final-tag>`, or `GA_AI_ROCM_IMAGE=<final-tag>` to `docker/.env`
 10. Optionally build PlantUML/MSSQL and invoke `build_webapi_ui.ps1` if `-All` was passed
+
+### Buildx Driver Recommendation
+
+For reliable local cache export and best build times, use a `docker-container` Buildx builder:
+
+```powershell
+docker buildx create --name guideants-builder --driver docker-container --use
+docker buildx inspect --bootstrap
+```
+
+Without this setup, builds still succeed, but cache export is disabled for that run and a warning is shown.
 
 ## File Layout
 
