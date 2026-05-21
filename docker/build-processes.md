@@ -32,6 +32,23 @@ The AI image is deliberately split into `deps-*` and `final-*` stages. These req
 
 The build script supports those requirements by tagging every deps build with both the hash tag and stable cache tag, importing the stable cache tag with `--cache-from`, and exporting deps cache with `mode=min` to prioritize local developer throughput.
 
+### Cache Export Prerequisite (Important)
+
+The AI build script uses `docker buildx build --cache-to ...` for local cache export.
+If Docker returns:
+
+`Cache export is not supported for the docker driver.`
+
+then the active Buildx path does not support cache export in its current configuration.
+On Windows Docker Desktop, align these first:
+
+1. Use the Desktop Linux context:
+   - `docker context use desktop-linux`
+   - `docker buildx use desktop-linux`
+2. Enable Docker Desktop **containerd image store** ("Use containerd for pulling and storing images"), then restart Docker Desktop.
+
+After restart, re-run `docker buildx inspect --bootstrap` and then `build_guideants_ai.ps1`.
+
 ## GHCR Publish Workflows
 
 The repo publishes the following GHCR packages from GitHub Actions:
@@ -179,6 +196,38 @@ docker compose -f docker-compose.cuda.yml up -d --no-deps --force-recreate guide
 ```
 
 Because the build scripts update `.env`, compose picks up the newest `GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, and `GA_WEBAPI_UI_IMAGE` automatically.
+
+## 6.1) Windows CRLF Shebang Failure (`/usr/bin/env: 'bash\r'`)
+
+If `guideants-webapi-ui` or `searxng` immediately restart with logs like:
+
+`/usr/bin/env: 'bash\r': No such file or directory`
+
+the container entrypoint script was copied into the image with Windows CRLF line endings.
+
+Why it may happen on one Windows machine but not another:
+- Git on that machine may be configured with `core.autocrlf=true` (often from system `gitconfig`).
+- Without an explicit `.gitattributes` override, shell scripts can be checked out as CRLF on that machine.
+
+Repository guardrail:
+- Root `.gitattributes` now enforces LF for shell scripts: `*.sh text eol=lf`.
+
+Recovery steps:
+1. Rebuild WebAPI+UI with a clean Docker build path:
+   - `pwsh .\docker\build\build_webapi_ui.ps1 -NoCache`
+2. Recreate the service:
+   - `docker compose -f docker-compose.cuda.yml up -d --no-deps --force-recreate guideants-webapi-ui`
+3. Rebuild SearXNG:
+   - `docker compose -f docker-compose.cuda.yml build searxng`
+4. Recreate SearXNG:
+   - `docker compose -f docker-compose.cuda.yml up -d --no-deps --force-recreate searxng`
+
+Note on `-RebuildBase`:
+- `build_guideants_ai.ps1 -RebuildBase -All` applies no-cache behavior to GuideAnts AI and WebAPI+UI builds.
+- The SearXNG build in `-All` currently uses a normal `docker build` path (not forced `--no-cache`).
+- If you suspect a stale cached SearXNG image, remove and rebuild:
+  - `docker rmi guideants-searxng:latest`
+  - then rerun your build script.
 
 ## 7) SQL Recovery Model On New Installs
 

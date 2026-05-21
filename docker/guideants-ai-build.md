@@ -140,6 +140,22 @@ This removes duplicate torch/CUDA wheel installation and reduces image size.
 - If the deps image is missing, the script rebuilds it with the stable cache tag as `--cache-from` so unchanged deps layers can be reused across hash changes.
 - `-RebuildBase` still forces no-cache builds for dependency and final targets.
 
+#### Troubleshooting: `Cache export is not supported for the docker driver`
+
+If the build fails with:
+
+`Cache export is not supported for the docker driver.`
+
+the `--cache-to` export path is unsupported in the current Buildx/engine configuration.
+Use this recovery sequence on Windows Docker Desktop:
+
+1. `docker context use desktop-linux`
+2. `docker buildx use desktop-linux`
+3. In Docker Desktop settings, enable **containerd image store** ("Use containerd for pulling and storing images")
+4. Restart Docker Desktop
+5. Verify with `docker buildx inspect --bootstrap`
+6. Re-run `build_guideants_ai.ps1`
+
 ## Script Behavior
 
 Build script: `docker/build/build_guideants_ai.ps1`
@@ -150,6 +166,35 @@ Supported switches:
 - `-RebuildBase`: prompt for backend, force rebuild without cache
 - `-All`: build GuideAnts AI, PlantUML, MSSQL, and the compose-used WebAPI+UI image
 - `-RebuildBase -All`: full no-cache GuideAnts AI build plus additional images
+
+### Troubleshooting: `/usr/bin/env: 'bash\r': No such file or directory`
+
+If `guideants-webapi-ui` or `guideants-searxng` containers restart with:
+
+`/usr/bin/env: 'bash\r': No such file or directory`
+
+the image contains entrypoint scripts with CRLF line endings.
+
+Machine-specific cause on Windows:
+- Git may be configured with `core.autocrlf=true` on one machine and not others.
+- With only generic `text=auto`, `.sh` files can be checked out as CRLF and copied into Linux images as `bash\r`.
+
+Repository safeguard:
+- Root `.gitattributes` enforces LF for shell scripts: `*.sh text eol=lf`.
+
+Recommended rebuild commands:
+1. WebAPI+UI:
+   - `pwsh .\docker\build\build_webapi_ui.ps1 -NoCache`
+2. SearXNG:
+   - `docker compose -f docker/docker-compose.cuda.yml build searxng`
+   - `docker compose -f docker/docker-compose.cuda.yml up -d --no-deps --force-recreate searxng`
+
+Cache note:
+- `-RebuildBase` forces no-cache for GuideAnts AI dependency/final targets.
+- In `-All`, SearXNG currently builds via a normal `docker build` path.
+- If SearXNG appears stale, run:
+  - `docker rmi guideants-searxng:latest`
+  - rerun the build command/script.
 
 ### Build flow
 

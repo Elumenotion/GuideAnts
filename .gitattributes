@@ -3,6 +3,9 @@
 ###############################################################################
 * text=auto
 
+# Shell scripts must stay LF for Linux containers.
+*.sh text eol=lf
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #
