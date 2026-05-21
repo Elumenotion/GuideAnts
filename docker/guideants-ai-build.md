@@ -44,7 +44,7 @@ The local build script enforces this with two deps tags per backend:
 - `guideants-ai-deps:<backend>-<hash12>` is the exact deps image selected by dependency inputs.
 - `guideants-ai-deps:<backend>-cache` is the stable moving cache anchor used by later deps builds.
 
-The deps build also exports `mode=max` BuildKit cache and inline cache metadata. Those two features are required because the deps target depends on intermediate builder stages such as `sd-cli-*-builder` and `pydeps-*`; the cache must include those intermediate records, not only the final deps image layer.
+The deps build exports local BuildKit cache metadata with `mode=min` by default to optimize developer throughput. This reduces cache export overhead on local machines while preserving the stable deps cache tag (`guideants-ai-deps:<backend>-cache`) for reuse across dependency hash changes.
 
 ## GHCR Publishing
 
@@ -128,7 +128,7 @@ This removes duplicate torch/CUDA wheel installation and reduces image size.
 ### Caching behavior
 
 - BuildKit cache mounts are used for `apt` and `pip` in heavy stages.
-- The deps build exports a `mode=max` BuildKit cache and inline cache metadata so intermediate builder stages can be reused across deps hash changes.
+- The deps build exports a `mode=min` local BuildKit cache to keep local iteration fast while still enabling reuse across deps hash changes.
 - The build script computes a hash from dependency inputs and tags dependency images:
   - `guideants-ai-deps:cpu-<hash12>`
   - `guideants-ai-deps:cuda13-<hash12>`

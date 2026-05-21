@@ -831,10 +831,9 @@ public sealed class RoutingReadinessServiceTests
         var result = await service.ProbeModeAsync(serviceName, "openai");
 
         result.Status.Should().Be("blocked",
-            $"model '{modelId}' should not be recognized as capable for {serviceName} on OpenAI");
+            $"model '{modelId}' should be blocked for {serviceName} on OpenAI");
         result.Blockers.Should().Contain(b =>
-            b.StartsWith(RoutingReadinessService.BlockerKeys.ModelMissing, StringComparison.Ordinal)
-            && b.Contains("not recognized", StringComparison.Ordinal));
+            b.StartsWith(RoutingReadinessService.BlockerKeys.ModelMissing, StringComparison.Ordinal));
     }
 
     [TestMethod]

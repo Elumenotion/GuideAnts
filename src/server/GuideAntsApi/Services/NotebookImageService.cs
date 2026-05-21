@@ -806,9 +806,798 @@ namespace GuideAntsApi.Services
         /// </summary>
         public static void InitializeServiceProvider(IServiceProvider serviceProvider)
         {
+            _ = size;
+            _ = n;
+            _ = outputFormat;
+            var model = RequireImageModelId(
+                HuggingFaceProviderSection,
+                modelId,
+                "Set ServiceModes.ImageGeneration model id for HuggingFace.");
+            var token = _configuration["HuggingFace:Token"];
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException("HuggingFace:Token is required.");
+            }
+
+            imageBytes = AttachmentMessageBuilder.ResizeImageIfNeeded(
+                imageBytes,
+                string.IsNullOrWhiteSpace(imageContentType) ? "application/octet-stream" : imageContentType);
+
+            var endpoint = $"https://api-inference.huggingface.co/models/{model}";
+            using var client = _httpClientFactory.CreateClient();
+            using var form = new MultipartFormDataContent();
+            form.Add(new StringContent(prompt ?? string.Empty), "inputs");
+            form.Add(new StringContent(
+                JsonSerializer.Serialize(
+                    new HuggingFaceImageEditParameters(Math.Max(1, n), 7.5),
+                    ProviderPayloadJson),
+                Encoding.UTF8,
+                "application/json"), "parameters");
+            var imagePart = new ByteArrayContent(imageBytes);
+            imagePart.Headers.ContentType = new MediaTypeHeaderValue(
+                string.IsNullOrWhiteSpace(imageContentType) ? "application/octet-stream" : imageContentType);
+            form.Add(imagePart, "image", string.IsNullOrWhiteSpace(imageFileName) ? "image.png" : imageFileName);
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = form };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            using var response = await client.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                throw new InvalidOperationException($"Hugging Face image edit failed: {(int)response.StatusCode} {errorBody}");
+            }
+
+            return await response.Content.ReadAsByteArrayAsync();
+        }
+
+        private async Task<byte[]?> GenerateImageEditViaOpenRouter(
+            string prompt,
+            string size,
+            int n,
+            string outputFormat,
+            byte[] imageBytes,
+            string? imageContentType,
+            string? imageFileName,
+            string? modelId,
+            string? requestPresetJson)
+        {
+            _ = outputFormat;
+            var model = RequireImageModelId(
+                OpenRouterProviderSection,
+                modelId,
+                "Set ServiceModes.ImageGeneration model id for OpenRouter.");
+            var apiKey = _configuration["OpenRouter:ApiKey"];
+            var baseUrl = _configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("OpenRouter:ApiKey is required.");
+            }
+
+            imageBytes = AttachmentMessageBuilder.ResizeImageIfNeeded(
+                imageBytes,
+                string.IsNullOrWhiteSpace(imageContentType) ? "application/octet-stream" : imageContentType);
+            var endpoint = $"{baseUrl.TrimEnd('/')}/chat/completions";
+            var dataUrl = BuildDataUrl(
+                string.IsNullOrWhiteSpace(imageContentType) ? "application/octet-stream" : imageContentType,
+                imageBytes);
+            var requestBody = new OpenRouterImageChatRequest(
+                Model: model,
+                Messages:
+                [
+                    new OpenRouterImageChatMessage(
+                        "user",
+                        [
+                            new OpenRouterImageContentPart("text", prompt ?? string.Empty, null),
+                            new OpenRouterImageContentPart(
+                                "image_url",
+                                null,
+                                new OpenRouterImageUrl(dataUrl))
+                        ])
+                ],
+                Modalities: ["image"],
+                N: Math.Max(1, n),
+                Size: size);
+
+            using var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(requestBody, ProviderPayloadJson), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using var response = await client.SendAsync(request);
+            var result = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"OpenRouter image edit failed: {(int)response.StatusCode} {result}");
+            }
+
+            return await SaveResponseAndReturnBytes(result);
+        }
+
+        private async Task<byte[]?> GenerateImageViaOpenAi(
+            string prompt,
+            string size,
+            int n,
+            string? modelId)
+        {
+            var apiKey = _configuration["OpenAI:ApiKey"];
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("OpenAI:ApiKey is required.");
+            }
+
+            var model = RequireImageModelId(
+                OpenAiProviderSection,
+                modelId,
+                "Set ServiceModes.ImageGeneration model id for OpenAI.");
+
+            var baseUrl = (_configuration["OpenAI:Endpoint"] ?? "https://api.openai.com/v1").TrimEnd('/');
+            var endpoint = $"{baseUrl}/images/generations";
+            var requestBody = new Dictionary<string, object>
+            {
+                ["model"] = model,
+                ["prompt"] = prompt,
+                ["n"] = Math.Max(1, n),
+                ["size"] = size,
+            };
+            if (OpenAiImageModelUsesLegacyResponseFormat(model))
+            {
+                requestBody["response_format"] = "b64_json";
+            }
+
+            using var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using var response = await client.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"OpenAI image generation failed: {(int)response.StatusCode} {responseBody}");
+            }
+
+            return await SaveResponseAndReturnBytes(responseBody);
+        }
+
+        private async Task<byte[]?> GenerateImageEditViaOpenAi(
+            string prompt,
+            string size,
+            int n,
+            byte[] imageBytes,
+            string? imageContentType,
+            string? imageFileName,
+            string? modelId)
+        {
+            var apiKey = _configuration["OpenAI:ApiKey"];
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("OpenAI:ApiKey is required.");
+            }
+
+            var model = RequireImageModelId(
+                OpenAiProviderSection,
+                modelId,
+                "Set ServiceModes.ImageGeneration model id for OpenAI.");
+
+            var baseUrl = (_configuration["OpenAI:Endpoint"] ?? "https://api.openai.com/v1").TrimEnd('/');
+            var endpoint = $"{baseUrl}/images/edits";
+
+            using var content = new MultipartFormDataContent();
+            var imageContent = new ByteArrayContent(imageBytes);
+            imageContent.Headers.ContentType = new MediaTypeHeaderValue(
+                string.IsNullOrWhiteSpace(imageContentType) ? "application/octet-stream" : imageContentType);
+            content.Add(imageContent, "image", imageFileName ?? "image.png");
+            content.Add(new StringContent(prompt), "prompt");
+            content.Add(new StringContent(model), "model");
+            content.Add(new StringContent(size), "size");
+            content.Add(new StringContent(Math.Max(1, n).ToString()), "n");
+            if (OpenAiImageModelUsesLegacyResponseFormat(model))
+            {
+                content.Add(new StringContent("b64_json"), "response_format");
+            }
+
+            using var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using var response = await client.SendAsync(request);
+            var result = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"OpenAI image edit failed: {(int)response.StatusCode} {result}");
+            }
+
+            return await SaveResponseAndReturnBytes(result);
+        }
+
+        /// <summary>
+        /// DALL·E 2/3 accept <c>response_format</c> (<c>url</c> vs <c>b64_json</c>). GPT Image models
+        /// return <c>data[].b64_json</c> by default and reject this parameter.
+        /// </summary>
+        private static bool OpenAiImageModelUsesLegacyResponseFormat(string modelId)
+        {
+            var m = modelId.Trim();
+            if (m.Length == 0)
+            {
+                return true;
+            }
+
+            return !m.StartsWith("gpt-image", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string RequireImageModelId(string providerSection, string? modelId, string action)
+        {
+            if (!string.IsNullOrWhiteSpace(modelId))
+            {
+                return modelId;
+            }
+
+            throw new RoutingException(
+                RoutingErrorCodes.ProviderNotReady,
+                $"ImageGeneration mode for {providerSection} must include a model id.",
+                action: action,
+                serviceId: RoutedServiceNames.ImageGeneration,
+                providerSection: providerSection);
+        }
+
+        private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(requestPresetJson))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(requestPresetJson);
+                if (document.RootElement.ValueKind != JsonValueKind.Object
+                    || !document.RootElement.TryGetProperty(fieldName, out var node))
+                {
+                    return null;
+                }
+
+                return node.ValueKind == JsonValueKind.String
+                    ? node.GetString()?.Trim()
+                    : node.ToString().Trim();
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        private static string GetAspectRatioForImageSize(string size) => size switch
+        {
+            "1024x1792" => "9:16",
+            "1792x1024" => "16:9",
+            _ => "1:1"
+        };
+
+        private static string GetGoogleGeminiImageSize(string size)
+        {
+            var parts = size.Split('x', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length != 2
+                || !int.TryParse(parts[0], out var width)
+                || !int.TryParse(parts[1], out var height))
+            {
+                return "1K";
+            }
+
+            var maxEdge = Math.Max(width, height);
+            return maxEdge switch
+            {
+                <= 512 => "512",
+                <= 1024 => "1K",
+                <= 2048 => "2K",
+                _ => "4K"
+            };
+        }
+
+        private static string NormalizeGoogleGeminiModelName(string modelId)
+        {
+            var trimmed = modelId.Trim();
+            return trimmed.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
+                ? trimmed
+                : $"models/{trimmed}";
+        }
+
+        private static string BuildDataUrl(string contentType, byte[] bytes) =>
+            $"data:{contentType};base64,{Convert.ToBase64String(bytes)}";
+
+        private static string[] GetValidImageSizes(string deploymentName)
+        {
+            if (string.Equals(deploymentName, "google-imagen", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(deploymentName, "hf-image", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(deploymentName, "openrouter-image", StringComparison.OrdinalIgnoreCase))
+            {
+                return CurrentImageSizes;
+            }
+
+            if (deploymentName.Contains("flux", StringComparison.OrdinalIgnoreCase))
+            {
+                return CurrentImageSizes;
+            }
+
+            if (string.Equals(deploymentName, "gpt-image-1.5", StringComparison.OrdinalIgnoreCase))
+            {
+                return GptImage15Sizes;
+            }
+
+            return CurrentImageSizes;
+        }
+
+        private async Task<byte[]?> GenerateImageViaGoogleGemini(string prompt, string size, int n, string outputFormat, string? modelId)
+        {
+            _ = outputFormat;
+            var apiKey = _configuration["GoogleGeminiApi:ApiKey"];
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("GoogleGeminiApi:ApiKey is required.");
+            }
+
+            if (string.IsNullOrWhiteSpace(modelId))
+            {
+                throw new RoutingException(
+                    RoutingErrorCodes.ProviderNotReady,
+                    "ImageGeneration mode for GoogleGeminiApi must include a model id.",
+                    action: "Set ServiceModes.ImageGeneration model id for GoogleGeminiApi.",
+                    serviceId: RoutedServiceNames.ImageGeneration,
+                    providerSection: GoogleGeminiProviderSection);
+            }
+            var model = modelId;
+            var endpoint = $"https://generativelanguage.googleapis.com/v1beta/{NormalizeGoogleGeminiModelName(model)}:generateContent";
+
+            var requestBody = new GoogleGeminiGenerateContentRequest(
+                Contents:
+                [
+                    new GoogleGeminiContent(
+                        "user",
+                        [
+                            new GoogleGeminiPart(Text: prompt)
+                        ])
+                ],
+                GenerationConfig: new GoogleGeminiImageGenerationConfig(
+                    ResponseModalities: ["IMAGE"],
+                    CandidateCount: Math.Max(1, n),
+                    ImageConfig: new GoogleGeminiImageConfig(
+                        GetAspectRatioForImageSize(size),
+                        GetGoogleGeminiImageSize(size))));
+
+            using var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(requestBody, ProviderPayloadJson), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Add("x-goog-api-key", apiKey);
+            using var response = await client.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"Google Gemini image generation failed: {(int)response.StatusCode} {responseBody}");
+            }
+
+            return await SaveResponseAndReturnBytes(responseBody);
+        }
+
+        private async Task<byte[]?> GenerateImageViaHuggingFace(
+            string prompt,
+            string size,
+            int n,
+            string outputFormat,
+            string? modelId,
+            string? requestPresetJson)
+        {
+            _ = size;
+            _ = n;
+            _ = outputFormat;
+            var token = _configuration["HuggingFace:Token"];
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException("HuggingFace:Token is required.");
+            }
+
+            if (string.IsNullOrWhiteSpace(modelId))
+            {
+                throw new RoutingException(
+                    RoutingErrorCodes.ProviderNotReady,
+                    "ImageGeneration mode for HuggingFace must include a model id.",
+                    action: "Set ServiceModes.ImageGeneration model id for HuggingFace.",
+                    serviceId: RoutedServiceNames.ImageGeneration,
+                    providerSection: HuggingFaceProviderSection);
+            }
+            var model = modelId;
+            var endpoint = $"https://api-inference.huggingface.co/models/{model}";
+            var requestBody = JsonSerializer.Serialize(new HuggingFaceImageGenerationRequest(prompt), ProviderPayloadJson);
+
+            using var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(requestBody, Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            using var response = await client.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                throw new InvalidOperationException($"Hugging Face image generation failed: {(int)response.StatusCode} {errorBody}");
+            }
+
+            return await response.Content.ReadAsByteArrayAsync();
+        }
+
+        private async Task<byte[]?> GenerateImageViaOpenRouter(
+            string prompt,
+            string size,
+            int n,
+            string outputFormat,
+            string? modelId,
+            string? requestPresetJson)
+        {
+            _ = outputFormat;
+            var apiKey = _configuration["OpenRouter:ApiKey"];
+            var baseUrl = _configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("OpenRouter:ApiKey is required.");
+            }
+
+            if (string.IsNullOrWhiteSpace(modelId))
+            {
+                throw new RoutingException(
+                    RoutingErrorCodes.ProviderNotReady,
+                    "ImageGeneration mode for OpenRouter must include a model id.",
+                    action: "Set ServiceModes.ImageGeneration model id for OpenRouter.",
+                    serviceId: RoutedServiceNames.ImageGeneration,
+                    providerSection: OpenRouterProviderSection);
+            }
+            var model = modelId;
+            var endpoint = $"{baseUrl.TrimEnd('/')}/chat/completions";
+            var requestBody = new OpenRouterImageChatRequest(
+                Model: model,
+                Messages:
+                [
+                    new OpenRouterImageChatMessage(
+                        "user",
+                        [
+                            new OpenRouterImageContentPart("text", prompt, null)
+                        ])
+                ],
+                Modalities: ["image"],
+                N: Math.Max(1, n),
+                Size: size);
+
+            using var client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(requestBody, ProviderPayloadJson), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using var response = await client.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException($"OpenRouter image generation failed: {(int)response.StatusCode} {responseBody}");
+            }
+
+            return await SaveResponseAndReturnBytes(responseBody);
+        }
+
+
+
+        /// <summary>
+        /// Saves response and returns the first image bytes (based on provided implementation)
+        /// </summary>
+        private Task<byte[]?> SaveResponseAndReturnBytes(string responseJson)
+        {
+            try
+            {
+                var json = JsonDocument.Parse(responseJson);
+
+                // Handle error payloads explicitly to avoid obscuring the root cause
+                if (json.RootElement.TryGetProperty("error", out var errorElement))
+                {
+                    var code = errorElement.TryGetProperty("code", out var codeEl) ? codeEl.ToString() : null;
+                    var message = errorElement.TryGetProperty("message", out var msgEl) ? msgEl.ToString() : null;
+                    var status = errorElement.TryGetProperty("status", out var statusEl) ? statusEl.ToString() : null;
+                    var composed = string.Join(" ", new[] { status, code }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                    var finalMessage = string.IsNullOrWhiteSpace(composed) ? (message ?? "Unknown error") : ($"{composed}: {message}");
+                    throw new InvalidOperationException(finalMessage);
+                }
+
+                if (json.RootElement.TryGetProperty("data", out var data))
+                {
+                    if (data.ValueKind == JsonValueKind.Array && data.GetArrayLength() > 0)
+                    {
+                        var firstImage = data[0];
+                        if (firstImage.TryGetProperty("b64_json", out var b64Property))
+                        {
+                            var b64 = b64Property.GetString();
+                            if (!string.IsNullOrEmpty(b64))
+                            {
+                                var bytes = Convert.FromBase64String(b64);
+                                _logger.LogInformation("Image generated successfully, size: {Size} bytes", bytes.Length);
+                                return Task.FromResult<byte[]?>(bytes);
+                            }
+                        }
+                    }
+                }
+
+                if (TryExtractOpenRouterChatImageBytes(json.RootElement, out var openRouterBytes))
+                {
+                    return Task.FromResult<byte[]?>(openRouterBytes);
+                }
+
+                if (TryExtractGoogleGeminiImageBytes(json.RootElement, out var googleGeminiBytes))
+                {
+                    return Task.FromResult<byte[]?>(googleGeminiBytes);
+                }
+
+                if (json.RootElement.TryGetProperty("predictions", out var predictions) &&
+                    predictions.ValueKind == JsonValueKind.Array &&
+                    predictions.GetArrayLength() > 0)
+                {
+                    var first = predictions[0];
+                    if (first.TryGetProperty("bytesBase64Encoded", out var bytesEl))
+                    {
+                        var b64 = bytesEl.GetString();
+                        if (!string.IsNullOrWhiteSpace(b64))
+                        {
+                            return Task.FromResult<byte[]?>(Convert.FromBase64String(b64));
+                        }
+                    }
+                }
+
+                _logger.LogError("Image generation response did not contain data. Raw response: {Response}", responseJson);
+                return Task.FromResult<byte[]?>(null);
+            }
+            catch (InvalidOperationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Failed to parse image generation response: {Message}. Raw response: {Response}", ex.Message, responseJson);
+                return Task.FromResult<byte[]?>(null);
+            }
+        }
+
+        private static string ExtractErrorMessage(string responseJson)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(responseJson);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("error", out var error))
+                {
+                    var code = error.TryGetProperty("code", out var codeEl) ? codeEl.ToString() : null;
+                    var message = error.TryGetProperty("message", out var msgEl) ? msgEl.ToString() : null;
+                    var status = error.TryGetProperty("status", out var statusEl) ? statusEl.ToString() : null;
+                    var composed = string.Join(" ", new[] { status, code }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                    return string.IsNullOrWhiteSpace(composed) ? (message ?? "") : ($"{composed}: {message}");
+                }
+                if (root.TryGetProperty("message", out var msg))
+                {
+                    return msg.ToString();
+                }
+            }
+            catch
+            {
+                // ignore parse errors; we will fall back to raw json
+            }
+            return responseJson;
+        }
+
+        private static bool TryExtractGoogleGeminiImageBytes(JsonElement root, out byte[]? bytes)
+        {
+            bytes = null;
+            if (!root.TryGetProperty("candidates", out var candidates)
+                || candidates.ValueKind != JsonValueKind.Array
+                || candidates.GetArrayLength() == 0)
+            {
+                return false;
+            }
+
+            foreach (var candidate in candidates.EnumerateArray())
+            {
+                if (!candidate.TryGetProperty("content", out var content)
+                    || content.ValueKind != JsonValueKind.Object
+                    || !content.TryGetProperty("parts", out var parts)
+                    || parts.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var part in parts.EnumerateArray())
+                {
+                    if (!part.TryGetProperty("inlineData", out var inlineData)
+                        || inlineData.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
+                    if (!inlineData.TryGetProperty("data", out var dataElement))
+                    {
+                        continue;
+                    }
+
+                    var base64 = dataElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(base64))
+                    {
+                        bytes = Convert.FromBase64String(base64);
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryExtractOpenRouterChatImageBytes(JsonElement root, out byte[]? bytes)
+        {
+            bytes = null;
+            if (!root.TryGetProperty("choices", out var choices)
+                || choices.ValueKind != JsonValueKind.Array
+                || choices.GetArrayLength() == 0)
+            {
+                return false;
+            }
+
+            var message = choices[0].TryGetProperty("message", out var messageElement)
+                ? messageElement
+                : default;
+
+            if (message.ValueKind == JsonValueKind.Object)
+            {
+                if (message.TryGetProperty("images", out var images)
+                    && TryExtractImageBytesFromImageCollection(images, out bytes))
+                {
+                    return true;
+                }
+
+                if (message.TryGetProperty("content", out var content)
+                    && content.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var part in content.EnumerateArray())
+                    {
+                        if (part.ValueKind != JsonValueKind.Object)
+                        {
+                            continue;
+                        }
+
+                        if (part.TryGetProperty("image_url", out var imageUrl)
+                            && TryExtractImageBytesFromImageUrl(imageUrl, out bytes))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryExtractImageBytesFromImageCollection(JsonElement images, out byte[]? bytes)
+        {
+            bytes = null;
+            if (images.ValueKind != JsonValueKind.Array || images.GetArrayLength() == 0)
+            {
+                return false;
+            }
+
+            var first = images[0];
+            if (first.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (first.TryGetProperty("image_url", out var imageUrl))
+            {
+                return TryExtractImageBytesFromImageUrl(imageUrl, out bytes);
+            }
+
+            if (first.TryGetProperty("b64_json", out var b64Property))
+            {
+                var base64 = b64Property.GetString();
+                if (!string.IsNullOrWhiteSpace(base64))
+                {
+                    bytes = Convert.FromBase64String(base64);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryExtractImageBytesFromImageUrl(JsonElement imageUrl, out byte[]? bytes)
+        {
+            bytes = null;
+            var url = imageUrl.ValueKind == JsonValueKind.Object && imageUrl.TryGetProperty("url", out var urlProp)
+                ? urlProp.GetString()
+                : imageUrl.GetString();
+            if (string.IsNullOrWhiteSpace(url) || !url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var commaIndex = url.IndexOf(',');
+            if (commaIndex < 0)
+            {
+                return false;
+            }
+
+            bytes = Convert.FromBase64String(url[(commaIndex + 1)..]);
+            return true;
+        }
+
+        private sealed record GoogleGeminiGenerateContentRequest(
+            IReadOnlyList<GoogleGeminiContent> Contents,
+            GoogleGeminiImageGenerationConfig GenerationConfig);
+
+        private sealed record GoogleGeminiImageGenerationConfig(
+            IReadOnlyList<string> ResponseModalities,
+            int CandidateCount,
+            GoogleGeminiImageConfig ImageConfig);
+
+        private sealed record GoogleGeminiImageConfig(
+            string AspectRatio,
+            string ImageSize);
+
+        private sealed record GoogleGeminiContent(
+            string Role,
+            IReadOnlyList<GoogleGeminiPart> Parts);
+
+        private sealed record GoogleGeminiPart(
+            string? Text = null,
+            GoogleGeminiBlob? InlineData = null);
+
+        private sealed record GoogleGeminiBlob(string MimeType, string Data);
+
+        private sealed record HuggingFaceImageGenerationRequest(string Inputs);
+
+        private sealed record HuggingFaceImageEditParameters(
+            [property: JsonPropertyName("num_images")] int NumImages,
+            [property: JsonPropertyName("guidance_scale")] double GuidanceScale);
+
+        private sealed record OpenRouterImageChatRequest(
+            string Model,
+            IReadOnlyList<OpenRouterImageChatMessage> Messages,
+            IReadOnlyList<string> Modalities,
+            int N,
+            string Size);
+
+        private sealed record OpenRouterImageChatMessage(
+            string Role,
+            IReadOnlyList<OpenRouterImageContentPart> Content);
+
+        private sealed record OpenRouterImageContentPart(
+            string Type,
+            string? Text,
+            [property: JsonPropertyName("image_url")] OpenRouterImageUrl? ImageUrl);
+
+        private sealed record OpenRouterImageUrl(string Url);
+
+
+        // Static service provider for tool calling system compatibility
+        private static IServiceProvider? _staticServiceProvider;
+
+        /// <summary>
+        /// Initializes the static service provider for tool calling system compatibility
+        /// </summary>
+        public static void InitializeServiceProvider(IServiceProvider serviceProvider)
+        {
             _staticServiceProvider = serviceProvider;
         }
 
+        /// <summary>
+        /// Static wrapper method for tool calling system compatibility
+        /// </summary>
         [Tool(
             OperationId = "generate_image",
             Summary = "Generate an image using AI"

@@ -829,7 +829,7 @@ class StartDownloadRequest(BaseModel):
 
     repository: str
     quantIncludePattern: str
-    mmprojIncludePattern: str
+    mmprojIncludePattern: str | None = None
     routerModelId: str
     targetDirectory: str
     hfToken: str | None = None
@@ -906,7 +906,8 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
         files = list_hf_repository_files(request.repository, token)
 
         quant_regex = build_regex_from_include_pattern(request.quantIncludePattern.strip())
-        mmproj_regex = build_regex_from_include_pattern(request.mmprojIncludePattern.strip())
+        mmproj_pattern = (request.mmprojIncludePattern or "").strip()
+        mmproj_regex = build_regex_from_include_pattern(mmproj_pattern) if mmproj_pattern else None
 
         quant_candidates = [
             f
@@ -918,27 +919,29 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
         ]
         quant_candidates.sort(key=lambda f: f.get("size") or 0, reverse=True)
 
-        mmproj_candidates = [
-            f
-            for f in files
-            if f.get("type") == "file"
-            and isinstance(f.get("path"), str)
-            and "mmproj" in f["path"].lower()
-            and mmproj_regex.match(f["path"]) is not None
-        ]
-        mmproj_candidates.sort(key=lambda f: f.get("size") or 0, reverse=True)
+        mmproj_candidates: list[dict[str, Any]] = []
+        if mmproj_regex is not None:
+            mmproj_candidates = [
+                f
+                for f in files
+                if f.get("type") == "file"
+                and isinstance(f.get("path"), str)
+                and "mmproj" in f["path"].lower()
+                and mmproj_regex.match(f["path"]) is not None
+            ]
+            mmproj_candidates.sort(key=lambda f: f.get("size") or 0, reverse=True)
 
         if not quant_candidates:
             fail_operation(operation_id, "No GGUF file matched the quant include pattern.")
             return
-        if not mmproj_candidates:
+        if mmproj_regex is not None and not mmproj_candidates:
             fail_operation(operation_id, "No mmproj file matched the mmproj include pattern.")
             return
 
         quant_file = quant_candidates[0]
-        mmproj_file = mmproj_candidates[0]
+        mmproj_file = mmproj_candidates[0] if mmproj_candidates else None
         quant_path = str(quant_file["path"])
-        mmproj_path = str(mmproj_file["path"])
+        mmproj_path = str(mmproj_file["path"]) if mmproj_file is not None else None
 
         target_subdir = request.targetDirectory.strip().strip("/\\")
         if not target_subdir:
@@ -954,16 +957,18 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
         os.makedirs(target_dir, exist_ok=True)
 
         quant_name = os.path.basename(quant_path.replace("\\", "/"))
-        mmproj_name = os.path.basename(mmproj_path.replace("\\", "/"))
+        mmproj_name = os.path.basename(mmproj_path.replace("\\", "/")) if mmproj_path else None
         quant_dest = os.path.join(target_dir, quant_name)
-        mmproj_dest = os.path.join(target_dir, mmproj_name)
+        mmproj_dest = os.path.join(target_dir, mmproj_name) if mmproj_name else None
 
-        if not request.allowOverwrite and (os.path.exists(quant_dest) or os.path.exists(mmproj_dest)):
+        has_existing_quant = os.path.exists(quant_dest)
+        has_existing_mmproj = bool(mmproj_dest) and os.path.exists(mmproj_dest)
+        if not request.allowOverwrite and (has_existing_quant or has_existing_mmproj):
             fail_operation(operation_id, "Target file(s) already exist. Enable AllowOverwrite or remove existing files.")
             return
 
         quant_size = quant_file.get("size")
-        mmproj_size = mmproj_file.get("size")
+        mmproj_size = mmproj_file.get("size") if mmproj_file is not None else None
 
         quant_tmp = quant_dest + ".tmp"
         quant_existing = os.path.getsize(quant_tmp) if os.path.exists(quant_tmp) else 0
@@ -982,13 +987,6 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
                 progress = 0.05
             update_operation(operation_id, progress=min(progress, 0.5))
 
-        def report_mmproj(bytes_read: int) -> None:
-            if isinstance(mmproj_size, int) and mmproj_size > 0:
-                progress = 0.50 + 0.45 * (bytes_read / float(mmproj_size))
-            else:
-                progress = 0.50
-            update_operation(operation_id, progress=min(progress, 0.95))
-
         download_hf_file(
             request.repository.strip(),
             quant_path,
@@ -996,22 +994,36 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
             token,
             progress_callback=report_quant,
         )
-        mmproj_tmp = mmproj_dest + ".tmp"
-        mmproj_existing = os.path.getsize(mmproj_tmp) if os.path.exists(mmproj_tmp) else 0
-        if mmproj_existing > 0 and isinstance(mmproj_size, int) and mmproj_size > 0:
-            resume_pct = round(100 * mmproj_existing / mmproj_size)
-            initial_progress = 0.50 + 0.45 * (mmproj_existing / float(mmproj_size))
-            update_operation(operation_id, progress=min(initial_progress, 0.95),
-                             log_line=f"Resuming {mmproj_path} ({resume_pct}% already downloaded)")
+        if mmproj_path and mmproj_dest:
+            def report_mmproj(bytes_read: int) -> None:
+                if isinstance(mmproj_size, int) and mmproj_size > 0:
+                    progress = 0.50 + 0.45 * (bytes_read / float(mmproj_size))
+                else:
+                    progress = 0.50
+                update_operation(operation_id, progress=min(progress, 0.95))
+
+            mmproj_tmp = mmproj_dest + ".tmp"
+            mmproj_existing = os.path.getsize(mmproj_tmp) if os.path.exists(mmproj_tmp) else 0
+            if mmproj_existing > 0 and isinstance(mmproj_size, int) and mmproj_size > 0:
+                resume_pct = round(100 * mmproj_existing / mmproj_size)
+                initial_progress = 0.50 + 0.45 * (mmproj_existing / float(mmproj_size))
+                update_operation(operation_id, progress=min(initial_progress, 0.95),
+                                 log_line=f"Resuming {mmproj_path} ({resume_pct}% already downloaded)")
+            else:
+                update_operation(operation_id, log_line=f"Downloading {mmproj_path}")
+            download_hf_file(
+                request.repository.strip(),
+                mmproj_path,
+                mmproj_dest,
+                token,
+                progress_callback=report_mmproj,
+            )
         else:
-            update_operation(operation_id, log_line=f"Downloading {mmproj_path}")
-        download_hf_file(
-            request.repository.strip(),
-            mmproj_path,
-            mmproj_dest,
-            token,
-            progress_callback=report_mmproj,
-        )
+            update_operation(
+                operation_id,
+                progress=0.95,
+                log_line="No mmproj pattern provided; skipping vision projector download."
+            )
 
         update_operation(operation_id, status="registeringAlias", progress=0.92, log_line="Registering router alias.")
         # Paths written into router-models.ini are container paths that
@@ -1019,7 +1031,11 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
         # GA_LLAMA_MODEL_DIR mount in docker-compose.yml
         # (/models-local/llama).
         model_container_path = f"/models-local/llama/{target_subdir}/{quant_name}"
-        mmproj_container_path = f"/models-local/llama/{target_subdir}/{mmproj_name}"
+        mmproj_container_path = (
+            f"/models-local/llama/{target_subdir}/{mmproj_name}"
+            if mmproj_name
+            else ""
+        )
         upsert_router_entry(alias, model_container_path, mmproj_container_path)
 
         update_operation(
@@ -1077,8 +1093,6 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="alias is required")
     if not request.modelPath.strip():
         raise HTTPException(status_code=400, detail="modelPath is required")
-    if not request.mmprojPath.strip():
-        raise HTTPException(status_code=400, detail="mmprojPath is required")
 
     set_fields = _pydantic_set_fields(request)
     update_context = "contextSize" in set_fields
@@ -1147,21 +1161,42 @@ def start_download(request: StartDownloadRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="repository is required")
     if not request.quantIncludePattern.strip():
         raise HTTPException(status_code=400, detail="quantIncludePattern is required")
-    if not request.mmprojIncludePattern.strip():
-        raise HTTPException(status_code=400, detail="mmprojIncludePattern is required")
     if not request.routerModelId.strip():
         raise HTTPException(status_code=400, detail="routerModelId is required")
     if not request.targetDirectory.strip():
         raise HTTPException(status_code=400, detail="targetDirectory is required")
 
-    operation_id = uuid.uuid4().hex
-    state = DownloadOperationState(
-        operation_id=operation_id,
-        router_model_id=request.routerModelId.strip(),
-        status="queued",
-        progress=0.0,
-    )
+    alias = request.routerModelId.strip()
+    in_flight_statuses = {"queued", "resolvingFiles", "downloading", "registeringAlias"}
+
     with OPERATIONS_LOCK:
+        existing = next(
+            (
+                op
+                for op in OPERATIONS.values()
+                if op.router_model_id == alias and op.status in in_flight_statuses
+            ),
+            None,
+        )
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": f"A download for alias '{alias}' is already in progress.",
+                    "operationId": existing.operation_id,
+                    "status": existing.status,
+                    "routerModelId": existing.router_model_id,
+                    "progress": existing.progress,
+                },
+            )
+
+        operation_id = uuid.uuid4().hex
+        state = DownloadOperationState(
+            operation_id=operation_id,
+            router_model_id=alias,
+            status="queued",
+            progress=0.0,
+        )
         OPERATIONS[operation_id] = state
 
     worker = threading.Thread(

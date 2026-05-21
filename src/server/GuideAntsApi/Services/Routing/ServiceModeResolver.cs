@@ -106,6 +106,7 @@ public static class ServiceModesPayload
     public const string ModesProperty = "Modes";
     private const string DefaultModeIdProperty = "defaultModeId";
     private const string ModesListProperty = "modes";
+    private const string DeprecatedLegacyModelPresetField = "Allowed" + "Models";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -154,7 +155,11 @@ public static class ServiceModesPayload
                 var isDefault = mode.IsDefault
                                 || (!string.IsNullOrWhiteSpace(defaultModeId)
                                     && string.Equals(mode.ModeId, defaultModeId, StringComparison.Ordinal));
-                list.Add(mode with { IsDefault = isDefault });
+                list.Add(mode with
+                {
+                    IsDefault = isDefault,
+                    RequestPresetJson = StripDeprecatedPresetFields(mode.RequestPresetJson)
+                });
             }
             catch (JsonException)
             {
@@ -178,7 +183,11 @@ public static class ServiceModesPayload
         var listArray = new JsonArray();
         foreach (var mode in modes)
         {
-            var node = JsonSerializer.SerializeToNode(mode, SerializerOptions);
+            var modeToWrite = mode with
+            {
+                RequestPresetJson = StripDeprecatedPresetFields(mode.RequestPresetJson)
+            };
+            var node = JsonSerializer.SerializeToNode(modeToWrite, SerializerOptions);
             if (node is JsonObject modeObject)
             {
                 listArray.Add(modeObject);
@@ -224,5 +233,30 @@ public static class ServiceModesPayload
         var fresh = new JsonObject();
         rootPayload[ModesProperty] = fresh;
         return fresh;
+    }
+
+    private static string? StripDeprecatedPresetFields(string? requestPresetJson)
+    {
+        if (string.IsNullOrWhiteSpace(requestPresetJson))
+        {
+            return requestPresetJson;
+        }
+
+        try
+        {
+            var payload = ApplicationSettingsJson.DeserializeObject(requestPresetJson);
+            if (!payload.Remove(DeprecatedLegacyModelPresetField))
+            {
+                return requestPresetJson;
+            }
+
+            return payload.Count == 0
+                ? null
+                : payload.ToJsonString(SerializerOptions);
+        }
+        catch (JsonException)
+        {
+            return requestPresetJson;
+        }
     }
 }

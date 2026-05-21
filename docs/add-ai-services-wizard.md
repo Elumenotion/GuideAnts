@@ -1,6 +1,6 @@
 # Add AI Services Wizard
 
-Last updated: 2026-05-18
+Last updated: 2026-05-20
 
 This document describes the **as-built** Home onboarding wizard behavior.
 
@@ -132,6 +132,7 @@ The local AI path differs structurally from the cloud provider paths. It uses a 
 - Supports two install sources: `huggingface` (repo browse + GGUF file pick) and `existingAlias` (attach an unregistered live alias from inventory).
 - Models are added to a draft queue and installed individually via `POST /api/settings/models:add`.
 - Async installs (`operationId` present in response) are polled via `GET /api/settings/llama/downloads/{operationId}` and show step-by-step progress (Queued → Resolving files → Downloading → Registering alias → Completed).
+- Local onboarding payload construction, alias eligibility, status normalization, and polling behavior are shared with `Settings -> Models & Runtime -> Add Model` through `src/client/src/features/localModelOnboarding/*`.
 - Runtime profiles are loaded lazily from `GET /api/settings/runtime-profiles` when the step becomes active.
 - Llama inventory is loaded lazily from `GET /api/settings/llama/runtime/inventory` when the step becomes active.
 

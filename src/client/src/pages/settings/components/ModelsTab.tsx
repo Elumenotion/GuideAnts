@@ -243,7 +243,7 @@ export function ModelsTab({
     if (!row.modelPath && !row.mmprojPath) {
       return { label: 'Unregistered', tone: 'warn' };
     }
-    if (!row.hasModelFile || !row.hasMmprojFile) {
+    if (!row.hasModelFile) {
       return { label: 'Missing artifact', tone: 'err' };
     }
     if (row.runtimeState === 'loaded') {

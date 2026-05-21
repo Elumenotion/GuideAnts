@@ -80,16 +80,42 @@ function Get-FilePathsRecursive {
     )
 }
 
+function Promote-LocalBuildxCache {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CurrentPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$NewPath
+    )
+
+    if (-not (Test-Path $NewPath)) {
+        return
+    }
+
+    if (Test-Path $CurrentPath) {
+        Remove-Item -Path $CurrentPath -Recurse -Force
+    }
+    Move-Item -Path $NewPath -Destination $CurrentPath
+}
+
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $dockerRoot = Split-Path $PSScriptRoot -Parent
 $serverPath = Join-Path $repoRoot 'src\server'
 $buildContext = Join-Path $PSScriptRoot 'guideants-ai'
 $depsCachePath = Join-Path $dockerRoot '.buildx-cache-deps'
 $finalCachePath = Join-Path $dockerRoot '.buildx-cache-final'
+$depsCachePathNew = "$depsCachePath-new"
+$finalCachePathNew = "$finalCachePath-new"
 
 foreach ($cachePath in @($depsCachePath, $finalCachePath)) {
     if (-not (Test-Path $cachePath)) {
         New-Item -ItemType Directory -Path $cachePath | Out-Null
+    }
+}
+foreach ($newCachePath in @($depsCachePathNew, $finalCachePathNew)) {
+    if (Test-Path $newCachePath) {
+        Remove-Item -Path $newCachePath -Recurse -Force
     }
 }
 
@@ -146,7 +172,7 @@ switch ($Backend) {
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
 $imageTag = "guideants-ai:${Backend}-${julianDay}.${timeStamp}"
-$latestTag = "guideants-ai:${Backend}-latest"
+$latestImageTag = "guideants-ai:${Backend}-latest"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Building GuideAnts AI" -ForegroundColor Cyan
@@ -154,7 +180,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Backend:       $Backend"
 Write-Host "Target stage:  $fullTarget"
 Write-Host "Image tag:     $imageTag"
-Write-Host "Latest tag:    $latestTag"
+Write-Host "Latest alias:  $latestImageTag"
 Write-Host "Deps target:   $depsTarget"
 Write-Host "Rebuild base:  $RebuildBase"
 if ($All) { Write-Host "All images:    Yes" }
@@ -274,9 +300,12 @@ try {
                 '--cache-from', "type=local,src=$depsCachePath",
                 '--cache-from', "type=local,src=$finalCachePath"
             )
+            if ($depsCacheExists) {
+                $depsBuildArgs += @('--cache-from', $depsCacheTag)
+            }
         }
         $depsBuildArgs += @(
-            '--cache-to', 'type=inline',
+            '--cache-to', "type=local,dest=$depsCachePathNew,mode=min",
             '--target', $depsTarget,
             '-t', $depsTag,
             '-t', $depsCacheTag,
@@ -289,6 +318,7 @@ try {
             Write-Error "Dependency image build failed with exit code $LASTEXITCODE"
             exit 1
         }
+        Promote-LocalBuildxCache -CurrentPath $depsCachePath -NewPath $depsCachePathNew
     }
     else {
         Write-Host "Reusing cached dependency image: $depsTag" -ForegroundColor Green
@@ -307,10 +337,11 @@ try {
     $dockerArgs += @(
         '--cache-from', "type=local,src=$depsCachePath",
         '--cache-from', "type=local,src=$finalCachePath",
+        '--cache-to', "type=local,dest=$finalCachePathNew,mode=min",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,
-        '-t', $latestTag,
+        '-t', $latestImageTag,
         '-f', $dockerfilePath,
         $buildContext
     )
@@ -320,6 +351,7 @@ try {
         Write-Error "Image build failed with exit code $LASTEXITCODE"
         exit 1
     }
+    Promote-LocalBuildxCache -CurrentPath $finalCachePath -NewPath $finalCachePathNew
 
     Write-Host "Image built: $imageTag" -ForegroundColor Green
 }
@@ -330,6 +362,11 @@ finally {
     if (Test-Path $reqDest) {
         Remove-Item -Path $reqDest -Force
     }
+    foreach ($newCachePath in @($depsCachePathNew, $finalCachePathNew)) {
+        if (Test-Path $newCachePath) {
+            Remove-Item -Path $newCachePath -Recurse -Force
+        }
+    }
 }
 
 # --- Write backend-specific GuideAnts AI image tag to docker/.env ---
@@ -339,7 +376,7 @@ $imageEnvKey = switch ($Backend) {
     'rocm' { 'GA_AI_ROCM_IMAGE' }
     default { 'GA_AI_CPU_IMAGE' }
 }
-$envLine = "$imageEnvKey=$latestTag"
+$envLine = "$imageEnvKey=$latestImageTag"
 
 if (Test-Path $envFile) {
     $lines = Get-Content $envFile
@@ -501,5 +538,5 @@ if ($All) {
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Build complete: $imageTag" -ForegroundColor Cyan
-Write-Host "  Updated latest: $latestTag" -ForegroundColor Cyan
+Write-Host "  Latest alias:   $latestImageTag" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan

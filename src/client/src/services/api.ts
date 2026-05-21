@@ -20,7 +20,6 @@ import {
     LlamaRuntimeInventoryItemDto,
     LlamaRuntimeAliasStatusDto,
     ModelDownloadOperationDto,
-    StartModelDownloadRequest,
     HuggingFaceRepositoryListingDto,
     ChatTargetReadinessDto,
     SettingsOverviewDto,
@@ -1113,18 +1112,6 @@ export const api = {
                 body: JSON.stringify(request),
             }),
 
-        attachExistingAlias: (request: Omit<AddModelRequest, 'install'> & { install: NonNullable<AddModelRequest['install']> }) =>
-            callApi<AddModelResponse>('/settings/models:add', {
-                method: 'POST',
-                body: JSON.stringify({
-                    ...request,
-                    install: {
-                        ...request.install,
-                        source: 'existingAlias',
-                    },
-                }),
-            }),
-
         updateModel: (modelId: string, request: UpdateSettingsModelRequest) =>
             callApi<SettingsModelDto>(`/settings/models/${encodeURIComponent(modelId)}`, {
                 method: 'PUT',
@@ -1179,12 +1166,6 @@ export const api = {
             callApi<void>('/settings/llama/runtime/unload', {
                 method: 'POST',
                 body: JSON.stringify({ routerModelId }),
-            }),
-
-        startModelDownload: (request: StartModelDownloadRequest) =>
-            callApi<ModelDownloadOperationDto>('/settings/llama/downloads', {
-                method: 'POST',
-                body: JSON.stringify(request),
             }),
 
         getDownloadStatus: (operationId: string) =>

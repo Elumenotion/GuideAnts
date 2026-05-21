@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using FluentAssertions;
+using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.LlamaCpp;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -99,6 +100,37 @@ public sealed class LlamaRuntimeAdminClientTests
         var act = async () => await client.RestartLlamaServerAsync();
 
         await act.Should().ThrowAsync<TimeoutException>();
+    }
+
+    [TestMethod]
+    public async Task StartDownloadAsync_ThrowsConflictException_WithExistingOperation()
+    {
+        var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.Conflict)
+        {
+            Content = new StringContent(
+                "{\"detail\":{\"operationId\":\"op-existing\",\"status\":\"downloading\",\"routerModelId\":\"qwen-local\",\"progress\":0.4}}",
+                Encoding.UTF8,
+                "application/json")
+        });
+
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:8086/"),
+        };
+
+        var client = new LlamaRuntimeAdminClient(httpClient, NullLogger<LlamaRuntimeAdminClient>.Instance);
+
+        var request = new StartModelDownloadRequest(
+            Repository: "unsloth/Qwen3.6-9B-GGUF",
+            QuantIncludePattern: "*Q5_K_M*",
+            MmprojIncludePattern: string.Empty,
+            RouterModelId: "qwen-local",
+            TargetDirectory: "qwen-local");
+
+        var act = async () => await client.StartDownloadAsync(request, null, false, CancellationToken.None);
+
+        var ex = await act.Should().ThrowAsync<LlamaRuntimeAdminConflictException>();
+        ex.Which.ExistingOperation.OperationId.Should().Be("op-existing");
     }
 
     private sealed class CapturingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler

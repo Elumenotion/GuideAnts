@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using GuideAntsApi.Models.Settings;
 
@@ -21,6 +22,17 @@ public sealed record LlamaAdminRestartResultDto(
     [property: JsonPropertyName("termed")] bool Termed,
     [property: JsonPropertyName("oldPid")] int? OldPid,
     [property: JsonPropertyName("newPid")] int? NewPid);
+
+public sealed class LlamaRuntimeAdminConflictException : Exception
+{
+    public LlamaRuntimeAdminConflictException(ModelDownloadOperationDto existingOperation)
+        : base($"Llama admin reported a conflicting in-flight operation: {existingOperation.OperationId}")
+    {
+        ExistingOperation = existingOperation;
+    }
+
+    public ModelDownloadOperationDto ExistingOperation { get; }
+}
 
 public sealed record LlamaAdminStartDownloadRequest(
     string Repository,
@@ -186,6 +198,15 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
 
         using var response = await _httpClient.PostAsJsonAsync("downloads", payload, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.Conflict)
+        {
+            var existing = TryParseConflictOperation(body, request.RouterModelId);
+            if (existing is not null)
+            {
+                throw new LlamaRuntimeAdminConflictException(existing);
+            }
+        }
+
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException(
@@ -194,6 +215,59 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
 
         var parsed = JsonSerializer.Deserialize<ModelDownloadOperationDto>(body, DeserializeOptions);
         return parsed ?? throw new InvalidOperationException("Llama admin returned an empty download operation payload.");
+    }
+
+    private static ModelDownloadOperationDto? TryParseConflictOperation(string body, string fallbackRouterModelId)
+    {
+        try
+        {
+            var root = JsonNode.Parse(body) as JsonObject;
+            var detail = root?["detail"] as JsonObject ?? root;
+            if (detail is null)
+            {
+                return null;
+            }
+
+            var operationId = detail["operationId"]?.GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(operationId))
+            {
+                return null;
+            }
+
+            var status = detail["status"]?.GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                status = "queued";
+            }
+
+            var routerModelId = detail["routerModelId"]?.GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(routerModelId))
+            {
+                routerModelId = fallbackRouterModelId?.Trim();
+            }
+            if (string.IsNullOrWhiteSpace(routerModelId))
+            {
+                routerModelId = string.Empty;
+            }
+
+            var progress = detail["progress"] is JsonValue progressNode
+                && progressNode.TryGetValue<double>(out var parsedProgress)
+                    ? parsedProgress
+                    : (double?)null;
+
+            var message = detail["error"]?.GetValue<string>()?.Trim();
+            return new ModelDownloadOperationDto(
+                OperationId: operationId,
+                Status: status,
+                RouterModelId: routerModelId,
+                Progress: progress,
+                ErrorMessage: message,
+                LogLine: message);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public async Task<ModelDownloadOperationDto?> GetDownloadStatusAsync(

@@ -58,7 +58,6 @@ const CATALOG_PROVIDER_LABELS: Record<string, string> = {
 
 const COMMON_FIELD_LABELS: Record<string, string> = {
   ApiVersion: 'API Version',
-  AllowedModels: 'Allowed Models',
   AsyncStatusPollIntervalMs: 'Poll Interval (ms)',
   Deployment: 'Deployment',
   Dimensions: 'Dimensions',
@@ -108,7 +107,6 @@ const PROVIDER_FIELD_LABEL_OVERRIDES: Record<string, Record<string, string>> = {
 
 const COMMON_FIELD_HELP_TEXT: Record<string, string> = {
   ApiVersion: 'Date-style API version (for example 2025-04-01-preview).',
-  AllowedModels: 'Optional comma-separated allowlist.',
   AsyncStatusPollIntervalMs: 'Polling interval for async operations in milliseconds.',
   Deployment: 'Deployment name used by this route.',
   Dimensions: 'Output embedding dimensions. Supported by text-embedding-3-* models only.',

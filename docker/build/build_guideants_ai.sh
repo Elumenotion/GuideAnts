@@ -50,8 +50,22 @@ SERVER_PATH="$REPO_ROOT/src/server"
 BUILD_CONTEXT="$SCRIPT_DIR/guideants-ai"
 DEPS_CACHE_PATH="$DOCKER_ROOT/.buildx-cache-deps"
 FINAL_CACHE_PATH="$DOCKER_ROOT/.buildx-cache-final"
+DEPS_CACHE_PATH_NEW="${DEPS_CACHE_PATH}-new"
+FINAL_CACHE_PATH_NEW="${FINAL_CACHE_PATH}-new"
 
 export DOCKER_BUILDKIT=1
+
+mkdir -p "$DEPS_CACHE_PATH" "$FINAL_CACHE_PATH"
+rm -rf "$DEPS_CACHE_PATH_NEW" "$FINAL_CACHE_PATH_NEW"
+
+promote_local_cache() {
+  local current_path="$1"
+  local new_path="$2"
+
+  [[ -d "$new_path" ]] || return 0
+  rm -rf "$current_path"
+  mv "$new_path" "$current_path"
+}
 
 get_combined_hash() {
   local -a paths=("$@")
@@ -132,7 +146,7 @@ esac
 JULIAN_DAY="$(date +%y%j)"
 TIME_STAMP="$(date +%H%M)"
 IMAGE_TAG="guideants-ai:${BACKEND}-${JULIAN_DAY}.${TIME_STAMP}"
-LATEST_TAG="guideants-ai:${BACKEND}-latest"
+LATEST_IMAGE_TAG="guideants-ai:${BACKEND}-latest"
 
 echo "============================================"
 echo "  Building GuideAnts AI"
@@ -140,7 +154,7 @@ echo "============================================"
 echo "Backend:       $BACKEND"
 echo "Target stage:  $FULL_TARGET"
 echo "Image tag:     $IMAGE_TAG"
-echo "Latest tag:    $LATEST_TAG"
+echo "Latest alias:  $LATEST_IMAGE_TAG"
 echo "Deps target:   $DEPS_TARGET"
 echo "Rebuild base:  $REBUILD_BASE"
 if [[ "$BUILD_ALL" == "true" ]]; then
@@ -234,15 +248,17 @@ if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
     fi
   fi
   DEPS_BUILD_ARGS+=(
-    --cache-to "type=local,dest=$DEPS_CACHE_PATH,mode=max"
-    --cache-to type=inline
     --target "$DEPS_TARGET"
     -t "$DEPS_TAG"
     -t "$DEPS_CACHE_TAG"
     -f "$DOCKERFILE_PATH"
     "$BUILD_CONTEXT"
   )
+  DEPS_BUILD_ARGS+=(
+    --cache-to "type=local,dest=$DEPS_CACHE_PATH_NEW,mode=min"
+  )
   docker "${DEPS_BUILD_ARGS[@]}"
+  promote_local_cache "$DEPS_CACHE_PATH" "$DEPS_CACHE_PATH_NEW"
 else
   echo "Reusing cached dependency image: $DEPS_TAG"
   docker tag "$DEPS_TAG" "$DEPS_CACHE_TAG"
@@ -256,15 +272,16 @@ DOCKER_ARGS+=(
   --cache-from "type=local,src=$DEPS_CACHE_PATH"
   --cache-from "type=local,src=$FINAL_CACHE_PATH"
   --cache-from "$DEPS_CACHE_TAG"
-  --cache-to "type=local,dest=$FINAL_CACHE_PATH,mode=min"
+  --cache-to "type=local,dest=$FINAL_CACHE_PATH_NEW,mode=min"
   --build-arg "${DEPS_IMAGE_ARG}=$DEPS_TAG"
   --target "$FULL_TARGET"
   -t "$IMAGE_TAG"
-  -t "$LATEST_TAG"
+  -t "$LATEST_IMAGE_TAG"
   -f "$DOCKERFILE_PATH"
   "$BUILD_CONTEXT"
 )
 docker "${DOCKER_ARGS[@]}"
+promote_local_cache "$FINAL_CACHE_PATH" "$FINAL_CACHE_PATH_NEW"
 
 echo "Image built: $IMAGE_TAG"
 
@@ -274,7 +291,7 @@ case "$BACKEND" in
   rocm) IMAGE_ENV_KEY="GA_AI_ROCM_IMAGE" ;;
   *) IMAGE_ENV_KEY="GA_AI_CPU_IMAGE" ;;
 esac
-ENV_LINE="$IMAGE_ENV_KEY=$LATEST_TAG"
+ENV_LINE="$IMAGE_ENV_KEY=$LATEST_IMAGE_TAG"
 
 if [[ -f "$ENV_FILE" ]]; then
   if grep -qE "^${IMAGE_ENV_KEY}=" "$ENV_FILE"; then
@@ -327,5 +344,5 @@ fi
 echo
 echo "============================================"
 echo "  Build complete: $IMAGE_TAG"
-echo "  Updated latest: $LATEST_TAG"
+echo "  Latest alias:   $LATEST_IMAGE_TAG"
 echo "============================================"

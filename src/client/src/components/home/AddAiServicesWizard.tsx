@@ -60,7 +60,7 @@ import { useFoundryWizardState } from './addAiServicesWizard/useFoundryWizardSta
 import { useGeminiWizardState } from './addAiServicesWizard/useGeminiWizardState';
 import { useHuggingFaceWizardState } from './addAiServicesWizard/useHuggingFaceWizardState';
 import { useLocalAiWizardState } from './addAiServicesWizard/useLocalAiWizardState';
-import { useOpenAiWizardState } from './addAiServicesWizard/useOpenAiWizardState';
+import { isLocalModelOnboardingInFlight } from '../../features/localModelOnboarding/status';
 
 interface AddAiServicesWizardProps {
   isOpen: boolean;
@@ -127,6 +127,25 @@ function isLocalAiServiceStep(step: AddAiServicesWizardStep): step is
     || step === 'localAiSpeechSynthesis'
     || step === 'localAiDocumentIntelligence'
     || step === 'localAiEmbeddings';
+}
+
+function hasReasoningEffortValidationError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const body = (error as { body?: unknown }).body;
+  if (!body || typeof body !== 'object') {
+    return false;
+  }
+
+  const errors = (body as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) {
+    return false;
+  }
+
+  return errors.some((entry) =>
+    typeof entry === 'string' && entry.toLowerCase().includes('reasoningeffort'));
 }
 
 const OPTIONAL_SERVICE_KEYS: OptionalServiceKey[] = [
@@ -401,9 +420,932 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     onOpenSettings(dontAutoOpenAgain);
   }, [dontAutoOpenAgain, onOpenSettings]);
 
-  // ---------------------------------------------------------------------------
-  // Persistence orchestration
-  // ---------------------------------------------------------------------------
+  const withSecretPreserved = (value: string, hasStoredValue: boolean): string => {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+    return hasStoredValue ? SECRET_MASK : '';
+  };
+
+  const updateSection = async (
+    sectionName: string,
+    payload: Record<string, unknown>,
+    currentSectionsByName: Record<string, SettingsSectionDto>
+  ): Promise<Record<string, SettingsSectionDto>> => {
+    const section = currentSectionsByName[sectionName];
+    if (!section) {
+      return currentSectionsByName;
+    }
+
+    const updated = await api.settings.updateSection(sectionName, {
+      rowVersion: section.rowVersion,
+      payload,
+    });
+
+    return {
+      ...currentSectionsByName,
+      [sectionName]: updated,
+    };
+  };
+
+  const validateFoundryCoreConnection = (): boolean => {
+    const errors: Partial<Record<'resource' | 'apiKey' | 'apiVersion', string>> = {};
+
+    if (!foundryCoreForm.resource.trim()) {
+      errors.resource = 'Resource is required.';
+    }
+
+    const keyValue = foundryCoreForm.apiKey.trim();
+    if (!keyValue && !foundryCoreForm.apiKeyHasStoredValue) {
+      errors.apiKey = 'API key is required.';
+    }
+    if (keyValue && keyValue !== SECRET_MASK && keyValue.length < 8) {
+      errors.apiKey = 'API key looks too short.';
+    }
+
+    if (!foundryCoreForm.apiVersion.trim()) {
+      errors.apiVersion = 'API version is required.';
+    }
+
+    setFoundryCoreErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const validateGeminiCoreConnection = (): boolean => {
+    const errors: Partial<Record<'apiKey', string>> = {};
+
+    const keyValue = geminiCoreForm.apiKey.trim();
+    if (!keyValue && !geminiCoreForm.apiKeyHasStoredValue) {
+      errors.apiKey = 'API key is required.';
+    }
+    if (keyValue && keyValue !== SECRET_MASK && keyValue.length < 8) {
+      errors.apiKey = 'API key looks too short.';
+    }
+
+    setGeminiCoreErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const validateOpenAiCoreConnection = (): boolean => {
+    const errors: Partial<Record<'apiKey' | 'endpoint', string>> = {};
+
+    const keyValue = openAiCoreForm.apiKey.trim();
+    if (!keyValue && !openAiCoreForm.apiKeyHasStoredValue) {
+      errors.apiKey = 'API key is required.';
+    }
+    if (keyValue && keyValue !== SECRET_MASK && keyValue.length < 8) {
+      errors.apiKey = 'API key looks too short.';
+    }
+
+    setOpenAiCoreErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const persistFoundryCoreConnection = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+    if (!validateFoundryCoreConnection()) {
+      throw new Error('Connection details are incomplete.');
+    }
+
+    const patchedApiVersion = foundryCoreForm.apiVersion.trim() || snapshot.defaults.azureOpenAiApiVersion;
+    const payload = {
+      Resource: foundryCoreForm.resource.trim(),
+      ApiKey: withSecretPreserved(foundryCoreForm.apiKey, foundryCoreForm.apiKeyHasStoredValue),
+      ApiVersion: patchedApiVersion,
+    };
+
+    let nextSections = snapshot.sectionsByName;
+    nextSections = await updateSection(FOUNDRY_CORE_SECTION, payload, nextSections);
+
+    const [sectionSummaries, models] = await Promise.all([
+      api.settings.getSections(),
+      api.settings.getModels(),
+    ]);
+
+    const nextSnapshot: WizardLoadSnapshot = {
+      ...snapshot,
+      sectionsByName: nextSections,
+      sectionSummaries,
+      models,
+    };
+
+    setSnapshot(nextSnapshot);
+    setFoundryCoreForm((previous) => ({
+      ...previous,
+      apiVersion: patchedApiVersion,
+      apiKey: payload.ApiKey,
+      apiKeyHasStoredValue: true,
+    }));
+  }, [foundryCoreForm.apiKey, foundryCoreForm.apiKeyHasStoredValue, foundryCoreForm.apiVersion, foundryCoreForm.resource, snapshot]);
+
+  const persistGeminiCoreConnection = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+    if (!validateGeminiCoreConnection()) {
+      throw new Error('Connection details are incomplete.');
+    }
+
+    const payload = {
+      ApiKey: withSecretPreserved(geminiCoreForm.apiKey, geminiCoreForm.apiKeyHasStoredValue),
+    };
+
+    let nextSections = snapshot.sectionsByName;
+    nextSections = await updateSection(GEMINI_CORE_SECTION, payload, nextSections);
+
+    const [sectionSummaries, models] = await Promise.all([
+      api.settings.getSections(),
+      api.settings.getModels(),
+    ]);
+
+    const nextSnapshot: WizardLoadSnapshot = {
+      ...snapshot,
+      sectionsByName: nextSections,
+      sectionSummaries,
+      models,
+    };
+
+    setSnapshot(nextSnapshot);
+    setGeminiCoreForm((previous) => ({
+      ...previous,
+      apiKey: payload.ApiKey,
+      apiKeyHasStoredValue: true,
+    }));
+  }, [geminiCoreForm.apiKey, geminiCoreForm.apiKeyHasStoredValue, snapshot]);
+
+  const persistOpenAiCoreConnection = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+    if (!validateOpenAiCoreConnection()) {
+      throw new Error('Connection details are incomplete.');
+    }
+
+    const payload: Record<string, unknown> = {
+      ApiKey: withSecretPreserved(openAiCoreForm.apiKey, openAiCoreForm.apiKeyHasStoredValue),
+    };
+    const endpointTrimmed = openAiCoreForm.endpoint.trim();
+    if (endpointTrimmed) {
+      payload.Endpoint = endpointTrimmed;
+    }
+
+    let nextSections = snapshot.sectionsByName;
+    nextSections = await updateSection(OPENAI_CORE_SECTION, payload, nextSections);
+
+    const [sectionSummaries, models] = await Promise.all([
+      api.settings.getSections(),
+      api.settings.getModels(),
+    ]);
+
+    const nextSnapshot: WizardLoadSnapshot = {
+      ...snapshot,
+      sectionsByName: nextSections,
+      sectionSummaries,
+      models,
+    };
+
+    setSnapshot(nextSnapshot);
+    setOpenAiCoreForm((previous) => ({
+      ...previous,
+      apiKey: payload.ApiKey as string,
+      apiKeyHasStoredValue: true,
+    }));
+  }, [openAiCoreForm.apiKey, openAiCoreForm.apiKeyHasStoredValue, openAiCoreForm.endpoint, snapshot]);
+
+  const addFoundryDraftModel = useCallback(() => {
+    const normalizedId = foundryDraftModelId.trim();
+    if (!normalizedId) {
+      setModelAddError('Model is required.');
+      return;
+    }
+
+    const existingModel = snapshot?.models.find(
+      (model) => model.modelId.trim().toLowerCase() === normalizedId.toLowerCase()
+    );
+    if (existingModel) {
+      setModelAddError(`Model '${normalizedId}' already exists with provider '${existingModel.provider}'.`);
+      return;
+    }
+
+    if (hasModelId(foundryDraftModels, normalizedId)) {
+      setModelAddError(`Model '${normalizedId}' is already queued.`);
+      return;
+    }
+
+    if (hasModelTuple(foundryDraftModels, { modelId: normalizedId, provider: foundryDraftModelProvider })) {
+      setModelAddError('This model/provider combination is already queued.');
+      return;
+    }
+
+    const isFirstModelOverall =
+      existingCatalogModelCount === 0
+      && foundryDraftModels.length === 0
+      && geminiDraftModels.length === 0;
+    const shouldSetAsGlobalDefault = isFirstModelOverall || setFoundryDraftAsGlobalDefault;
+
+    const localId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setFoundryDraftModels((previous) => {
+      const next = shouldSetAsGlobalDefault
+        ? previous.map((model) => ({ ...model, setAsGlobalDefault: false }))
+        : previous;
+      return [...next, makeDraftModel(localId, normalizedId, foundryDraftModelProvider, shouldSetAsGlobalDefault)];
+    });
+
+    setFoundryDraftModelId('');
+    setSetFoundryDraftAsGlobalDefault(false);
+    setModelAddError(null);
+    setModelStepError(null);
+  }, [
+    existingCatalogModelCount,
+    foundryDraftModelId,
+    foundryDraftModelProvider,
+    foundryDraftModels,
+    geminiDraftModels.length,
+    setFoundryDraftAsGlobalDefault,
+    snapshot,
+  ]);
+
+  const addGeminiDraftModel = useCallback(() => {
+    const normalizedId = geminiDraftModelId.trim();
+    if (!normalizedId) {
+      setModelAddError('Model is required.');
+      return;
+    }
+
+    const existingModel = snapshot?.models.find(
+      (model) => model.modelId.trim().toLowerCase() === normalizedId.toLowerCase()
+    );
+    if (existingModel) {
+      setModelAddError(`Model '${normalizedId}' already exists with provider '${existingModel.provider}'.`);
+      return;
+    }
+
+    if (hasModelId(geminiDraftModels, normalizedId)) {
+      setModelAddError(`Model '${normalizedId}' is already queued.`);
+      return;
+    }
+
+    const isFirstModelOverall =
+      existingCatalogModelCount === 0
+      && geminiDraftModels.length === 0
+      && foundryDraftModels.length === 0;
+    const shouldSetAsGlobalDefault = isFirstModelOverall || setGeminiDraftAsGlobalDefault;
+
+    const localId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setGeminiDraftModels((previous) => {
+      const next = shouldSetAsGlobalDefault
+        ? previous.map((model) => ({ ...model, setAsGlobalDefault: false }))
+        : previous;
+      return [...next, makeGeminiDraftModel(localId, normalizedId, shouldSetAsGlobalDefault)];
+    });
+
+    setGeminiDraftModelId(GEMINI_DEFAULT_CHAT_MODEL_ID);
+    setSetGeminiDraftAsGlobalDefault(false);
+    setModelAddError(null);
+    setModelStepError(null);
+  }, [
+    existingCatalogModelCount,
+    foundryDraftModels.length,
+    geminiDraftModelId,
+    geminiDraftModels,
+    setGeminiDraftAsGlobalDefault,
+    snapshot,
+  ]);
+
+  const addOpenAiDraftModel = useCallback(() => {
+    const normalizedId = openAiDraftModelId.trim();
+    if (!normalizedId) {
+      setModelAddError('Model is required.');
+      return;
+    }
+
+    const existingModel = snapshot?.models.find(
+      (model) => model.modelId.trim().toLowerCase() === normalizedId.toLowerCase()
+    );
+    if (existingModel) {
+      setModelAddError(`Model '${normalizedId}' already exists with provider '${existingModel.provider}'.`);
+      return;
+    }
+
+    if (hasModelId(openAiDraftModels, normalizedId)) {
+      setModelAddError(`Model '${normalizedId}' is already queued.`);
+      return;
+    }
+
+    if (hasModelTuple(openAiDraftModels, { modelId: normalizedId, provider: openAiDraftModelProvider })) {
+      setModelAddError('This model/provider combination is already queued.');
+      return;
+    }
+
+    const isFirstModelOverall =
+      existingCatalogModelCount === 0
+      && openAiDraftModels.length === 0
+      && foundryDraftModels.length === 0
+      && geminiDraftModels.length === 0;
+    const shouldSetAsGlobalDefault = isFirstModelOverall || setOpenAiDraftAsGlobalDefault;
+
+    const localId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setOpenAiDraftModels((previous) => {
+      const next = shouldSetAsGlobalDefault
+        ? previous.map((model) => ({ ...model, setAsGlobalDefault: false }))
+        : previous;
+      return [...next, makeOpenAiDraftModel(localId, normalizedId, openAiDraftModelProvider, shouldSetAsGlobalDefault)];
+    });
+
+    setOpenAiDraftModelId('');
+    setSetOpenAiDraftAsGlobalDefault(false);
+    setModelAddError(null);
+    setModelStepError(null);
+  }, [
+    existingCatalogModelCount,
+    foundryDraftModels.length,
+    geminiDraftModels.length,
+    openAiDraftModelId,
+    openAiDraftModelProvider,
+    openAiDraftModels,
+    setOpenAiDraftAsGlobalDefault,
+    snapshot,
+  ]);
+
+  const persistGlobalDefaultModel = useCallback(async (modelId: string) => {
+    const chatDefaults = await api.settings.chatDefaults.get();
+    const request = {
+      rowVersion: chatDefaults.rowVersion,
+      defaultModelId: modelId,
+      overrideAllChatModels: chatDefaults.overrideAllChatModels,
+      temperature: chatDefaults.temperature ?? null,
+      topP: chatDefaults.topP ?? null,
+      reasoningEffort: chatDefaults.reasoningEffort ?? null,
+      samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
+    };
+    try {
+      await api.settings.chatDefaults.update(request);
+    } catch (error) {
+      if (!hasReasoningEffortValidationError(error)) {
+        throw error;
+      }
+
+      await api.settings.chatDefaults.update({
+        ...request,
+        reasoningEffort: null,
+      });
+    }
+  }, []);
+
+  const persistFoundryModels = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+
+    const existingCount = snapshot.models.length;
+    const pendingDrafts = foundryDraftModels.filter((model) => !model.persisted);
+
+    if (existingCount + pendingDrafts.length === 0) {
+      setModelStepError('At least one model is required.');
+      throw new Error('Model requirement not met.');
+    }
+
+    const seenModelIds = new Set<string>();
+    for (const model of pendingDrafts) {
+      const normalized = model.modelId.trim().toLowerCase();
+      if (seenModelIds.has(normalized)) {
+        setModelStepError(`Model '${model.modelId}' is queued more than once. Use distinct model ids.`);
+        throw new Error('Duplicate model ids were queued.');
+      }
+      seenModelIds.add(normalized);
+    }
+
+    const latestModels = await api.settings.getModels();
+    const existingById = new Map(latestModels.map((model) => [model.modelId.trim().toLowerCase(), model]));
+    const existingConflict = pendingDrafts.find((model) => existingById.has(model.modelId.trim().toLowerCase()));
+    if (existingConflict) {
+      const conflict = existingById.get(existingConflict.modelId.trim().toLowerCase());
+      const providerName = conflict?.provider ?? 'unknown';
+      setModelStepError(
+        `Model '${existingConflict.modelId}' already exists with provider '${providerName}'. Choose a different model id.`
+      );
+      throw new Error('Model id conflict detected.');
+    }
+
+    for (const model of pendingDrafts) {
+      const request = buildAddModelRequest(model.modelId, model.provider);
+      await api.settings.addModel(request);
+    }
+
+    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
+    const forcedDefaultModelId = existingCount === 0 && pendingDrafts.length > 0
+      ? pendingDrafts[0].modelId
+      : null;
+    const targetDefaultModelId = selectedDefaultModelId ?? forcedDefaultModelId;
+
+    let defaultSaveWarning: string | null = null;
+    if (targetDefaultModelId) {
+      try {
+        await persistGlobalDefaultModel(targetDefaultModelId);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unknown error.';
+        defaultSaveWarning = `Model was added, but setting '${targetDefaultModelId}' as global default failed: ${detail}`;
+      }
+    }
+
+    const refreshed = await loadSnapshot();
+    setSnapshot(refreshed);
+    setFoundryDraftModels([]);
+    setSetFoundryDraftAsGlobalDefault(refreshed.models.length === 0);
+    setModelStepError(null);
+    if (defaultSaveWarning) {
+      setGlobalError(defaultSaveWarning);
+    }
+  }, [foundryDraftModels, loadSnapshot, persistGlobalDefaultModel, snapshot]);
+
+  const persistGeminiModels = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+
+    const existingCount = snapshot.models.length;
+    const pendingDrafts = geminiDraftModels.filter((model) => !model.persisted);
+
+    if (existingCount + pendingDrafts.length === 0) {
+      setModelStepError('At least one Gemini model is required.');
+      throw new Error('Model requirement not met.');
+    }
+
+    const seenModelIds = new Set<string>();
+    for (const model of pendingDrafts) {
+      const normalized = model.modelId.trim().toLowerCase();
+      if (seenModelIds.has(normalized)) {
+        setModelStepError(`Model '${model.modelId}' is queued more than once. Use distinct model ids.`);
+        throw new Error('Duplicate model ids were queued.');
+      }
+      seenModelIds.add(normalized);
+    }
+
+    const latestModels = await api.settings.getModels();
+    const existingById = new Map(latestModels.map((model) => [model.modelId.trim().toLowerCase(), model]));
+    const existingConflict = pendingDrafts.find((model) => existingById.has(model.modelId.trim().toLowerCase()));
+    if (existingConflict) {
+      const conflict = existingById.get(existingConflict.modelId.trim().toLowerCase());
+      const providerName = conflict?.provider ?? 'unknown';
+      setModelStepError(
+        `Model '${existingConflict.modelId}' already exists with provider '${providerName}'. Choose a different model id.`
+      );
+      throw new Error('Model id conflict detected.');
+    }
+
+    for (const model of pendingDrafts) {
+      const request = buildAddGeminiModelRequest(model.modelId);
+      await api.settings.addModel(request);
+    }
+
+    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
+    const forcedDefaultModelId = existingCount === 0 && pendingDrafts.length > 0
+      ? pendingDrafts[0].modelId
+      : null;
+    const targetDefaultModelId = selectedDefaultModelId ?? forcedDefaultModelId;
+
+    let defaultSaveWarning: string | null = null;
+    if (targetDefaultModelId) {
+      try {
+        await persistGlobalDefaultModel(targetDefaultModelId);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unknown error.';
+        defaultSaveWarning = `Model was added, but setting '${targetDefaultModelId}' as global default failed: ${detail}`;
+      }
+    }
+
+    const refreshed = await loadSnapshot();
+    setSnapshot(refreshed);
+    setGeminiDraftModels([]);
+    setSetGeminiDraftAsGlobalDefault(refreshed.models.length === 0);
+    setModelStepError(null);
+    if (defaultSaveWarning) {
+      setGlobalError(defaultSaveWarning);
+    }
+  }, [geminiDraftModels, loadSnapshot, persistGlobalDefaultModel, snapshot]);
+
+  const persistOpenAiModels = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+
+    const existingCount = snapshot.models.length;
+    const pendingDrafts = openAiDraftModels.filter((model) => !model.persisted);
+
+    if (existingCount + pendingDrafts.length === 0) {
+      setModelStepError('At least one OpenAI model is required.');
+      throw new Error('Model requirement not met.');
+    }
+
+    const seenModelIds = new Set<string>();
+    for (const model of pendingDrafts) {
+      const normalized = model.modelId.trim().toLowerCase();
+      if (seenModelIds.has(normalized)) {
+        setModelStepError(`Model '${model.modelId}' is queued more than once. Use distinct model ids.`);
+        throw new Error('Duplicate model ids were queued.');
+      }
+      seenModelIds.add(normalized);
+    }
+
+    const latestModels = await api.settings.getModels();
+    const existingById = new Map(latestModels.map((model) => [model.modelId.trim().toLowerCase(), model]));
+    const existingConflict = pendingDrafts.find((model) => existingById.has(model.modelId.trim().toLowerCase()));
+    if (existingConflict) {
+      const conflict = existingById.get(existingConflict.modelId.trim().toLowerCase());
+      const providerName = conflict?.provider ?? 'unknown';
+      setModelStepError(
+        `Model '${existingConflict.modelId}' already exists with provider '${providerName}'. Choose a different model id.`
+      );
+      throw new Error('Model id conflict detected.');
+    }
+
+    for (const model of pendingDrafts) {
+      const request = buildAddOpenAiModelRequest(model.modelId, model.provider);
+      await api.settings.addModel(request);
+    }
+
+    const selectedDefaultModelId = pendingDrafts.find((model) => model.setAsGlobalDefault)?.modelId ?? null;
+    const forcedDefaultModelId = existingCount === 0 && pendingDrafts.length > 0
+      ? pendingDrafts[0].modelId
+      : null;
+    const targetDefaultModelId = selectedDefaultModelId ?? forcedDefaultModelId;
+
+    let defaultSaveWarning: string | null = null;
+    if (targetDefaultModelId) {
+      try {
+        await persistGlobalDefaultModel(targetDefaultModelId);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unknown error.';
+        defaultSaveWarning = `Model was added, but setting '${targetDefaultModelId}' as global default failed: ${detail}`;
+      }
+    }
+
+    const refreshed = await loadSnapshot();
+    setSnapshot(refreshed);
+    setOpenAiDraftModels([]);
+    setSetOpenAiDraftAsGlobalDefault(refreshed.models.length === 0);
+    setModelStepError(null);
+    if (defaultSaveWarning) {
+      setGlobalError(defaultSaveWarning);
+    }
+  }, [openAiDraftModels, loadSnapshot, persistGlobalDefaultModel, snapshot]);
+
+  const validateFoundryOptionalServices = useCallback((): boolean => {
+    const errors: Record<string, string> = {};
+
+    const getEndpoint = (value: string, linked: boolean) => (linked ? derivedFoundryCoreEndpoint : value).trim();
+    const requireSecret = (value: string, hasStoredValue: boolean) => value.trim().length > 0 || hasStoredValue;
+
+    if (foundryOptionalForm.enableEmbeddings) {
+      if (!getEndpoint(foundryOptionalForm.embeddingsEndpoint, foundryOptionalForm.linkEmbeddingsEndpointToCore)) {
+        errors.embeddingsEndpoint = 'Endpoint is required.';
+      }
+      if (!requireSecret(foundryOptionalForm.embeddingsApiKey, foundryOptionalForm.embeddingsApiKeyHasStoredValue)) {
+        errors.embeddingsApiKey = 'API key is required.';
+      }
+      if (!foundryOptionalForm.embeddingsDeployment.trim()) {
+        errors.embeddingsDeployment = 'Deployment is required.';
+      }
+    }
+
+    if (foundryOptionalForm.enableImages) {
+      if (!getEndpoint(foundryOptionalForm.imagesEndpoint, foundryOptionalForm.linkImagesEndpointToCore)) {
+        errors.imagesEndpoint = 'Endpoint is required.';
+      }
+      if (!requireSecret(foundryOptionalForm.imagesApiKey, foundryOptionalForm.imagesApiKeyHasStoredValue)) {
+        errors.imagesApiKey = 'API key is required.';
+      }
+      if (!foundryOptionalForm.imagesApiVersion.trim()) {
+        errors.imagesApiVersion = 'API version is required.';
+      }
+      if (!foundryOptionalForm.imagesDeployment.trim()) {
+        errors.imagesDeployment = 'Generation deployment is required.';
+      }
+      if (!foundryOptionalForm.imagesEditDeployment.trim()) {
+        errors.imagesEditDeployment = 'Edit deployment is required.';
+      }
+    }
+
+    if (foundryOptionalForm.enableSpeech) {
+      if (!foundryOptionalForm.speechEndpoint.trim()) {
+        errors.speechEndpoint = 'Endpoint is required.';
+      }
+      if (!requireSecret(foundryOptionalForm.speechApiKey, foundryOptionalForm.speechApiKeyHasStoredValue)) {
+        errors.speechApiKey = 'API key is required.';
+      }
+      if (!foundryOptionalForm.speechRegion.trim()) {
+        errors.speechRegion = 'Region is required.';
+      }
+    }
+
+    if (foundryOptionalForm.enableDocumentIntelligence) {
+      if (!foundryOptionalForm.documentIntelligenceEndpoint.trim()) {
+        errors.documentIntelligenceEndpoint = 'Endpoint is required.';
+      }
+      if (
+        !requireSecret(
+          foundryOptionalForm.documentIntelligenceApiKey,
+          foundryOptionalForm.documentIntelligenceApiKeyHasStoredValue
+        )
+      ) {
+        errors.documentIntelligenceApiKey = 'API key is required.';
+      }
+    }
+
+    setFoundryOptionalErrors(errors);
+    return Object.keys(errors).length === 0;
+  }, [derivedFoundryCoreEndpoint, foundryOptionalForm]);
+
+  const isPositiveIntegerValue = (value: string): boolean => {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0;
+  };
+
+  const validateGeminiOptionalServices = useCallback((): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (geminiOptionalForm.enableEmbeddings) {
+      if (!geminiOptionalForm.embeddingsModelId.trim()) {
+        errors.embeddingsModelId = 'Embedding model id is required.';
+      }
+      if (!isPositiveIntegerValue(geminiOptionalForm.embeddingsTimeoutSeconds)) {
+        errors.embeddingsTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    if (geminiOptionalForm.enableImages) {
+      if (!geminiOptionalForm.imagesModelId.trim()) {
+        errors.imagesModelId = 'Image model id is required.';
+      }
+      if (!isPositiveIntegerValue(geminiOptionalForm.imagesTimeoutSeconds)) {
+        errors.imagesTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    if (geminiOptionalForm.enableSpeechTranscription) {
+      if (!geminiOptionalForm.speechTranscriptionModelId.trim()) {
+        errors.speechTranscriptionModelId = 'Transcription model id is required.';
+      }
+      if (!isPositiveIntegerValue(geminiOptionalForm.speechTranscriptionTimeoutSeconds)) {
+        errors.speechTranscriptionTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    if (geminiOptionalForm.enableSpeechSynthesis) {
+      if (!geminiOptionalForm.speechSynthesisModelId.trim()) {
+        errors.speechSynthesisModelId = 'TTS model id is required.';
+      }
+      if (!geminiOptionalForm.speechSynthesisVoiceName.trim()) {
+        errors.speechSynthesisVoiceName = 'Voice name is required.';
+      }
+      if (!isPositiveIntegerValue(geminiOptionalForm.speechSynthesisTimeoutSeconds)) {
+        errors.speechSynthesisTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    setGeminiOptionalErrors(errors);
+    return Object.keys(errors).length === 0;
+  }, [geminiOptionalForm]);
+
+  const persistFoundryOptionalServices = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+    if (!validateFoundryOptionalServices()) {
+      throw new Error('Optional service inputs are incomplete.');
+    }
+
+    let nextSections = snapshot.sectionsByName;
+    const ensureEndpoint = (value: string, linked: boolean) => (linked ? derivedFoundryCoreEndpoint : value).trim();
+
+    if (foundryOptionalForm.enableEmbeddings) {
+      nextSections = await updateSection(
+        FOUNDRY_EMBEDDINGS_SECTION,
+        {
+          Endpoint: ensureEndpoint(foundryOptionalForm.embeddingsEndpoint, foundryOptionalForm.linkEmbeddingsEndpointToCore),
+          ApiKey: withSecretPreserved(foundryOptionalForm.embeddingsApiKey, foundryOptionalForm.embeddingsApiKeyHasStoredValue),
+        },
+        nextSections
+      );
+      await api.settings.services.updateProviderFields('Embeddings', FOUNDRY_SERVICE_PROVIDER_IDS.Embeddings, {
+        Deployment: foundryOptionalForm.embeddingsDeployment.trim(),
+      });
+      await api.settings.services.updateActiveProvider('Embeddings', FOUNDRY_SERVICE_PROVIDER_IDS.Embeddings);
+    }
+
+    if (foundryOptionalForm.enableImages) {
+      nextSections = await updateSection(
+        FOUNDRY_IMAGES_SECTION,
+        {
+          Endpoint: ensureEndpoint(foundryOptionalForm.imagesEndpoint, foundryOptionalForm.linkImagesEndpointToCore),
+          ApiKey: withSecretPreserved(foundryOptionalForm.imagesApiKey, foundryOptionalForm.imagesApiKeyHasStoredValue),
+          ApiVersion: foundryOptionalForm.imagesApiVersion.trim(),
+        },
+        nextSections
+      );
+      await api.settings.services.updateProviderFields('ImageGeneration', FOUNDRY_SERVICE_PROVIDER_IDS.ImageGeneration, {
+        Deployment: foundryOptionalForm.imagesDeployment.trim(),
+        EditModelDeployment: foundryOptionalForm.imagesEditDeployment.trim(),
+      });
+      await api.settings.services.updateActiveProvider('ImageGeneration', FOUNDRY_SERVICE_PROVIDER_IDS.ImageGeneration);
+    }
+
+    if (foundryOptionalForm.enableSpeech) {
+      nextSections = await updateSection(
+        FOUNDRY_SPEECH_SECTION,
+        {
+          Endpoint: foundryOptionalForm.speechEndpoint.trim(),
+          ApiKey: withSecretPreserved(foundryOptionalForm.speechApiKey, foundryOptionalForm.speechApiKeyHasStoredValue),
+          Region: foundryOptionalForm.speechRegion.trim(),
+        },
+        nextSections
+      );
+      await api.settings.services.updateActiveProvider('SpeechTranscription', FOUNDRY_SERVICE_PROVIDER_IDS.SpeechTranscription);
+      await api.settings.services.updateActiveProvider('SpeechSynthesis', FOUNDRY_SERVICE_PROVIDER_IDS.SpeechSynthesis);
+    }
+
+    if (foundryOptionalForm.enableDocumentIntelligence) {
+      nextSections = await updateSection(
+        FOUNDRY_DOCUMENT_INTELLIGENCE_SECTION,
+        {
+          Endpoint: foundryOptionalForm.documentIntelligenceEndpoint.trim(),
+          ApiKey: withSecretPreserved(
+            foundryOptionalForm.documentIntelligenceApiKey,
+            foundryOptionalForm.documentIntelligenceApiKeyHasStoredValue
+          ),
+        },
+        nextSections
+      );
+      await api.settings.services.updateActiveProvider('DocumentIntelligence', FOUNDRY_SERVICE_PROVIDER_IDS.DocumentIntelligence);
+    }
+
+    const refreshed = await loadSnapshot();
+    setSnapshot(refreshed);
+    setFoundryOptionalForm((previous) => ({
+      ...previous,
+      embeddingsApiKey: previous.enableEmbeddings ? SECRET_MASK : previous.embeddingsApiKey,
+      embeddingsApiKeyHasStoredValue: previous.enableEmbeddings ? true : previous.embeddingsApiKeyHasStoredValue,
+      imagesApiKey: previous.enableImages ? SECRET_MASK : previous.imagesApiKey,
+      imagesApiKeyHasStoredValue: previous.enableImages ? true : previous.imagesApiKeyHasStoredValue,
+      speechApiKey: previous.enableSpeech ? SECRET_MASK : previous.speechApiKey,
+      speechApiKeyHasStoredValue: previous.enableSpeech ? true : previous.speechApiKeyHasStoredValue,
+      documentIntelligenceApiKey: previous.enableDocumentIntelligence ? SECRET_MASK : previous.documentIntelligenceApiKey,
+      documentIntelligenceApiKeyHasStoredValue: previous.enableDocumentIntelligence
+        ? true
+        : previous.documentIntelligenceApiKeyHasStoredValue,
+    }));
+    setFoundryOptionalErrors({});
+  }, [derivedFoundryCoreEndpoint, foundryOptionalForm, loadSnapshot, snapshot, validateFoundryOptionalServices]);
+
+  const persistGeminiOptionalServices = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+    if (!validateGeminiOptionalServices()) {
+      throw new Error('Optional service inputs are incomplete.');
+    }
+
+    if (geminiOptionalForm.enableEmbeddings) {
+      await api.settings.services.updateProviderFields('Embeddings', GEMINI_SERVICE_PROVIDER_IDS.Embeddings, {
+        ModelId: geminiOptionalForm.embeddingsModelId.trim(),
+        TimeoutSeconds: geminiOptionalForm.embeddingsTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('Embeddings', GEMINI_SERVICE_PROVIDER_IDS.Embeddings);
+    }
+
+    if (geminiOptionalForm.enableImages) {
+      await api.settings.services.updateProviderFields('ImageGeneration', GEMINI_SERVICE_PROVIDER_IDS.ImageGeneration, {
+        ModelId: geminiOptionalForm.imagesModelId.trim(),
+        TimeoutSeconds: geminiOptionalForm.imagesTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('ImageGeneration', GEMINI_SERVICE_PROVIDER_IDS.ImageGeneration);
+    }
+
+    if (geminiOptionalForm.enableSpeechTranscription) {
+      await api.settings.services.updateProviderFields('SpeechTranscription', GEMINI_SERVICE_PROVIDER_IDS.SpeechTranscription, {
+        ModelId: geminiOptionalForm.speechTranscriptionModelId.trim(),
+        TimeoutSeconds: geminiOptionalForm.speechTranscriptionTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('SpeechTranscription', GEMINI_SERVICE_PROVIDER_IDS.SpeechTranscription);
+    }
+
+    if (geminiOptionalForm.enableSpeechSynthesis) {
+      await api.settings.services.updateProviderFields('SpeechSynthesis', GEMINI_SERVICE_PROVIDER_IDS.SpeechSynthesis, {
+        ModelId: geminiOptionalForm.speechSynthesisModelId.trim(),
+        VoiceName: geminiOptionalForm.speechSynthesisVoiceName.trim(),
+        TimeoutSeconds: geminiOptionalForm.speechSynthesisTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('SpeechSynthesis', GEMINI_SERVICE_PROVIDER_IDS.SpeechSynthesis);
+    }
+
+    const refreshed = await loadSnapshot();
+    setSnapshot(refreshed);
+    setGeminiOptionalErrors({});
+  }, [geminiOptionalForm, loadSnapshot, snapshot, validateGeminiOptionalServices]);
+
+  const validateOpenAiOptionalServices = useCallback((): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (openAiOptionalForm.enableSpeechTranscription) {
+      if (!openAiOptionalForm.speechTranscriptionModelId.trim()) {
+        errors.speechTranscriptionModelId = 'Transcription model id is required.';
+      }
+      if (!isPositiveIntegerValue(openAiOptionalForm.speechTranscriptionTimeoutSeconds)) {
+        errors.speechTranscriptionTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    if (openAiOptionalForm.enableSpeechSynthesis) {
+      if (!openAiOptionalForm.speechSynthesisModelId.trim()) {
+        errors.speechSynthesisModelId = 'TTS model id is required.';
+      }
+      if (!openAiOptionalForm.speechSynthesisVoiceName.trim()) {
+        errors.speechSynthesisVoiceName = 'Voice name is required.';
+      }
+      if (!isPositiveIntegerValue(openAiOptionalForm.speechSynthesisTimeoutSeconds)) {
+        errors.speechSynthesisTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    if (openAiOptionalForm.enableImages) {
+      if (!openAiOptionalForm.imagesModelId.trim()) {
+        errors.imagesModelId = 'Image model id is required.';
+      }
+      if (!isPositiveIntegerValue(openAiOptionalForm.imagesTimeoutSeconds)) {
+        errors.imagesTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+    }
+
+    if (openAiOptionalForm.enableEmbeddings) {
+      if (!openAiOptionalForm.embeddingsModelId.trim()) {
+        errors.embeddingsModelId = 'Embedding model id is required.';
+      }
+      if (!isPositiveIntegerValue(openAiOptionalForm.embeddingsTimeoutSeconds)) {
+        errors.embeddingsTimeoutSeconds = 'Timeout must be a positive integer.';
+      }
+      const dimensionsValue = openAiOptionalForm.embeddingsDimensions.trim();
+      if (dimensionsValue && !isPositiveIntegerValue(dimensionsValue)) {
+        errors.embeddingsDimensions = 'Dimensions must be a positive integer if provided.';
+      }
+    }
+
+    setOpenAiOptionalErrors(errors);
+    return Object.keys(errors).length === 0;
+  }, [openAiOptionalForm]);
+
+  const persistOpenAiOptionalServices = useCallback(async () => {
+    if (!snapshot) {
+      throw new Error('Wizard state is not loaded.');
+    }
+    if (!validateOpenAiOptionalServices()) {
+      throw new Error('Optional service inputs are incomplete.');
+    }
+
+    if (openAiOptionalForm.enableSpeechTranscription) {
+      await api.settings.services.updateProviderFields('SpeechTranscription', OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription, {
+        ModelId: openAiOptionalForm.speechTranscriptionModelId.trim(),
+        TimeoutSeconds: openAiOptionalForm.speechTranscriptionTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('SpeechTranscription', OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription);
+    }
+
+    if (openAiOptionalForm.enableSpeechSynthesis) {
+      await api.settings.services.updateProviderFields('SpeechSynthesis', OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis, {
+        ModelId: openAiOptionalForm.speechSynthesisModelId.trim(),
+        VoiceName: openAiOptionalForm.speechSynthesisVoiceName.trim(),
+        TimeoutSeconds: openAiOptionalForm.speechSynthesisTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('SpeechSynthesis', OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis);
+    }
+
+    if (openAiOptionalForm.enableImages) {
+      await api.settings.services.updateProviderFields('ImageGeneration', OPENAI_SERVICE_PROVIDER_IDS.ImageGeneration, {
+        ModelId: openAiOptionalForm.imagesModelId.trim(),
+        TimeoutSeconds: openAiOptionalForm.imagesTimeoutSeconds.trim(),
+      });
+      await api.settings.services.updateActiveProvider('ImageGeneration', OPENAI_SERVICE_PROVIDER_IDS.ImageGeneration);
+    }
+
+    if (openAiOptionalForm.enableEmbeddings) {
+      const fields: Record<string, string> = {
+        ModelId: openAiOptionalForm.embeddingsModelId.trim(),
+        TimeoutSeconds: openAiOptionalForm.embeddingsTimeoutSeconds.trim(),
+      };
+      const dimensionsValue = openAiOptionalForm.embeddingsDimensions.trim();
+      if (dimensionsValue) {
+        fields.Dimensions = dimensionsValue;
+      }
+      await api.settings.services.updateProviderFields('Embeddings', OPENAI_SERVICE_PROVIDER_IDS.Embeddings, fields);
+      await api.settings.services.updateActiveProvider('Embeddings', OPENAI_SERVICE_PROVIDER_IDS.Embeddings);
+    }
+
+    const refreshed = await loadSnapshot();
+    setSnapshot(refreshed);
+    setOpenAiOptionalErrors({});
+  }, [openAiOptionalForm, loadSnapshot, snapshot, validateOpenAiOptionalServices]);
 
   const persistCurrentStep = useCallback(async () => {
     if (!snapshot) throw new Error('Wizard state is not loaded.');
@@ -568,9 +1510,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     localAiStepOperation?.inFlight,
   ]);
 
-  const localAiHasActiveDownloads = localAi.draftModels.some(
-    (d) => d.asyncStatus === 'submitted' || d.asyncStatus === 'downloading'
-  );
+  const localAiHasActiveDownloads = localAi.draftModels.some((d) => isLocalModelOnboardingInFlight(d.asyncStatus));
   const isCurrentLocalAiServiceStep = provider === 'local-ai' && isLocalAiServiceStep(step);
   const localAiNavigationBlockedByOperation = isCurrentLocalAiServiceStep && Boolean(localAiStepOperation?.inFlight);
 

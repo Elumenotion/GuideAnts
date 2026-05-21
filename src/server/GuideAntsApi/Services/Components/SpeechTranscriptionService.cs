@@ -329,8 +329,6 @@ namespace GuideAntsApi.Services.Components
                     serviceId: RoutedServiceNames.SpeechTranscription,
                     modeId: mode.ModeId);
             }
-            ValidateHuggingFaceAsrModel(mode.ModelId!, mode.RequestPresetJson);
-            var includeTimestamps = ResolveHuggingFaceTimestampPreference(mode.RequestPresetJson);
 
             var token = _configurationForSection("HuggingFace", "Token");
             if (string.IsNullOrWhiteSpace(token))
@@ -514,7 +512,6 @@ namespace GuideAntsApi.Services.Components
             {
                 throw new InvalidOperationException("OpenRouter:ApiKey is required.");
             }
-            ValidateOpenRouterAsrModel(mode.ModelId!, mode.RequestPresetJson);
 
             audioContent.Position = 0;
             await using var memory = new MemoryStream();
@@ -694,86 +691,12 @@ namespace GuideAntsApi.Services.Components
             return 25L * 1024 * 1024;
         }
 
-        private void ValidateHuggingFaceAsrModel(string modelId, string? requestPresetJson)
-        {
-            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                if (IsModelAllowed(modelId, configured))
-                {
-                    return;
-                }
-
-                throw new InvalidOperationException(
-                    $"Hugging Face ASR model '{modelId}' is not in the SpeechTranscription service-mode AllowedModels preset.");
-            }
-
-            if (modelId.Contains("asr", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("whisper", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("wav2vec", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"Hugging Face model '{modelId}' is not recognized as ASR-capable. " +
-                "Set SpeechTranscription service-mode AllowedModels to explicitly allow it.");
-        }
-
         private void ValidateGoogleGeminiTranscriptionModel(string modelId)
         {
             if (string.IsNullOrWhiteSpace(modelId))
             {
                 throw new InvalidOperationException("Google Gemini transcription model id is required.");
             }
-        }
-
-        private void ValidateOpenRouterAsrModel(string modelId, string? requestPresetJson)
-        {
-            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                if (IsModelAllowed(modelId, configured))
-                {
-                    return;
-                }
-
-                throw new InvalidOperationException(
-                    $"OpenRouter transcription model '{modelId}' is not in the SpeechTranscription service-mode AllowedModels preset.");
-            }
-
-            if (modelId.Contains("transcribe", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("whisper", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("audio", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"OpenRouter model '{modelId}' is not recognized as transcription-capable. " +
-                "Set SpeechTranscription service-mode AllowedModels to explicitly allow it.");
-        }
-
-        private static bool IsModelAllowed(string modelId, string allowlistCsv)
-        {
-            var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            foreach (var entry in entries)
-            {
-                if (entry.EndsWith('*'))
-                {
-                    var prefix = entry[..^1];
-                    if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-                else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)

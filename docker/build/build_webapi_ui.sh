@@ -4,7 +4,7 @@ set -euo pipefail
 FLAVOR="Full"
 NO_CACHE=false
 NO_RECREATE=false
-USE_APP_BUILD_CACHE=false
+USE_APP_BUILD_CACHE=true
 
 usage() {
   cat <<'EOF'
@@ -14,7 +14,8 @@ Options:
   --flavor <Full|Slim|Mssql>  Build flavor (default: Full)
   --no-cache                  Build without cache
   --no-recreate               Skip docker compose service recreate
-  --use-app-build-cache       Allow docker cache for api-build stage
+  --use-app-build-cache       Allow docker cache for api-build stage (default)
+  --no-app-build-cache        Rebuild api-build stage each run
   -h, --help                  Show help
 EOF
 }
@@ -35,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --use-app-build-cache)
       USE_APP_BUILD_CACHE=true
+      shift
+      ;;
+    --no-app-build-cache)
+      USE_APP_BUILD_CACHE=false
       shift
       ;;
     -h|--help)
@@ -146,13 +151,13 @@ esac
 JULIAN_DAY="$(date +%y%j)"
 TIME_STAMP="$(date +%H%M)"
 IMAGE_TAG="${IMAGE_REPOSITORY}:${JULIAN_DAY}.${TIME_STAMP}"
-LATEST_TAG="${IMAGE_REPOSITORY}:latest"
+LATEST_IMAGE_TAG="${IMAGE_REPOSITORY}:latest"
 
 echo "============================================"
 echo "  Building GuideAnts API + Browser UI ($FLAVOR)"
 echo "============================================"
 echo "Image tag: $IMAGE_TAG"
-echo "Latest tag: $LATEST_TAG"
+echo "Latest alias: $LATEST_IMAGE_TAG"
 echo "Target:    $DOCKER_TARGET"
 echo "No cache:  $NO_CACHE"
 echo "App cache: $USE_APP_BUILD_CACHE"
@@ -186,7 +191,7 @@ fi
 DOCKER_ARGS+=(
   --target "$DOCKER_TARGET"
   -t "$IMAGE_TAG"
-  -t "$LATEST_TAG"
+  -t "$LATEST_IMAGE_TAG"
   -f "$DOCKERFILE_PATH"
   "$BUILD_CONTEXT"
 )
@@ -214,7 +219,7 @@ fi
 if [[ -z "${ENV_MAP[$IMAGE_ENV_KEY]+x}" ]]; then
   ENV_ORDER+=("$IMAGE_ENV_KEY")
 fi
-ENV_MAP["$IMAGE_ENV_KEY"]="$LATEST_TAG"
+ENV_MAP["$IMAGE_ENV_KEY"]="$LATEST_IMAGE_TAG"
 
 {
   for key in "${ENV_ORDER[@]}"; do
@@ -222,8 +227,8 @@ ENV_MAP["$IMAGE_ENV_KEY"]="$LATEST_TAG"
   done
 } > "$ENV_FILE"
 
-if ! grep -q "^${IMAGE_ENV_KEY}=${LATEST_TAG}\$" "$ENV_FILE"; then
-  echo "Failed to persist ${IMAGE_ENV_KEY}=$LATEST_TAG to $ENV_FILE" >&2
+if ! grep -q "^${IMAGE_ENV_KEY}=${LATEST_IMAGE_TAG}\$" "$ENV_FILE"; then
+  echo "Failed to persist ${IMAGE_ENV_KEY}=$LATEST_IMAGE_TAG to $ENV_FILE" >&2
   exit 1
 fi
 

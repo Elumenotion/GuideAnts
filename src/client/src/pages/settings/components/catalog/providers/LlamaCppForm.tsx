@@ -10,6 +10,7 @@ import {
 } from '../../../editors/common';
 import type { RolePickerSpec } from '../../../editors/common';
 import { ProviderAddForm, ProviderEditForm } from './types';
+import { selectAttachableAliases } from '../../../../../features/localModelOnboarding/selectors';
 
 const LLAMA_ROLES: RolePickerSpec[] = [
   {
@@ -120,7 +121,7 @@ export function LlamaCppAddForm({
   const [customProfileForm, setCustomProfileForm] = useState<ProfileFormState>(() => createEmptyProfileForm());
   const [creatingCustomProfile, setCreatingCustomProfile] = useState(false);
   const [customProfileError, setCustomProfileError] = useState<string | null>(null);
-  const existingAliasRows = inventory.filter((row) => row.catalogModelIds.length === 0 && row.hasModelFile && row.hasMmprojFile);
+  const existingAliasRows = selectAttachableAliases(inventory);
   const selectedAttachAlias = value.llamaExistingAliasRouterModelId.trim();
   const selectedAttachRow = existingAliasRows.find((row) => row.routerModelId === selectedAttachAlias);
   const chosenHfAlias = value.llamaRouterModelId.trim();
@@ -353,7 +354,7 @@ export function LlamaCppAddForm({
           {llamaRuntimeUnavailable ? (
             <p className="text-xs text-amber-700">Attach existing alias requires a configured local llama server.</p>
           ) : selectedAttachAlias && !selectedAttachRow ? (
-            <p className="text-xs text-amber-700">Choose an alias with model/mmproj files and no catalog model bindings.</p>
+            <p className="text-xs text-amber-700">Choose an alias with a model file and no catalog model bindings.</p>
           ) : null}
         </div>
       ) : (

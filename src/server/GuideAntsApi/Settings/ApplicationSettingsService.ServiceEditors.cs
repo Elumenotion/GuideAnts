@@ -427,8 +427,6 @@ public sealed partial class ApplicationSettingsService
 
         if (string.Equals(fieldName, "VoiceName", StringComparison.Ordinal)
             || string.Equals(fieldName, "EditModelDeployment", StringComparison.Ordinal)
-            || string.Equals(fieldName, "AllowedModels", StringComparison.Ordinal)
-            || string.Equals(fieldName, "ImageToImageModelId", StringComparison.Ordinal)
             || string.Equals(fieldName, "MaxAudioBytes", StringComparison.Ordinal)
             || string.Equals(fieldName, "ApiVersion", StringComparison.Ordinal)
             || (string.Equals(fieldName, "MaxRetries", StringComparison.Ordinal)
