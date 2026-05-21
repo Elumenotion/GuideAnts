@@ -67,6 +67,33 @@ promote_local_cache() {
   mv "$new_path" "$current_path"
 }
 
+buildx_supports_cache_export() {
+  local inspect_output
+  if ! inspect_output="$(docker buildx inspect --bootstrap 2>/dev/null)"; then
+    echo "WARNING: Could not inspect Docker Buildx builder. Disabling local cache export (--cache-to) for this run." >&2
+    return 1
+  fi
+
+  local driver
+  driver="$(printf '%s\n' "$inspect_output" | awk -F': ' '/^[[:space:]]*Driver:/ {print tolower($2); exit}')"
+  if [[ -z "$driver" ]]; then
+    echo "WARNING: Could not determine Buildx driver. Disabling local cache export (--cache-to) for this run." >&2
+    return 1
+  fi
+
+  if [[ "$driver" == "docker" ]]; then
+    echo "WARNING: Buildx driver 'docker' does not support cache export. Continuing without --cache-to." >&2
+    return 1
+  fi
+
+  return 0
+}
+
+BUILDX_CACHE_EXPORT_SUPPORTED=false
+if buildx_supports_cache_export; then
+  BUILDX_CACHE_EXPORT_SUPPORTED=true
+fi
+
 get_combined_hash() {
   local -a paths=("$@")
   local line
@@ -253,9 +280,11 @@ if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
     -f "$DOCKERFILE_PATH"
     "$BUILD_CONTEXT"
   )
-  DEPS_BUILD_ARGS+=(
-    --cache-to "type=local,dest=$DEPS_CACHE_PATH_NEW,mode=min"
-  )
+  if [[ "$BUILDX_CACHE_EXPORT_SUPPORTED" == "true" ]]; then
+    DEPS_BUILD_ARGS+=(
+      --cache-to "type=local,dest=$DEPS_CACHE_PATH_NEW,mode=min"
+    )
+  fi
   docker "${DEPS_BUILD_ARGS[@]}"
   promote_local_cache "$DEPS_CACHE_PATH" "$DEPS_CACHE_PATH_NEW"
 else
@@ -271,7 +300,6 @@ DOCKER_ARGS+=(
   --cache-from "type=local,src=$DEPS_CACHE_PATH"
   --cache-from "type=local,src=$FINAL_CACHE_PATH"
   --cache-from "$DEPS_CACHE_TAG"
-  --cache-to "type=local,dest=$FINAL_CACHE_PATH_NEW,mode=min"
   --build-arg "${DEPS_IMAGE_ARG}=$DEPS_TAG"
   --target "$FULL_TARGET"
   -t "$IMAGE_TAG"
@@ -279,6 +307,11 @@ DOCKER_ARGS+=(
   -f "$DOCKERFILE_PATH"
   "$BUILD_CONTEXT"
 )
+if [[ "$BUILDX_CACHE_EXPORT_SUPPORTED" == "true" ]]; then
+  DOCKER_ARGS+=(
+    --cache-to "type=local,dest=$FINAL_CACHE_PATH_NEW,mode=min"
+  )
+fi
 docker "${DOCKER_ARGS[@]}"
 promote_local_cache "$FINAL_CACHE_PATH" "$FINAL_CACHE_PATH_NEW"
 

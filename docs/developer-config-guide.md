@@ -351,10 +351,6 @@ The launcher auto-picks `cuda13`, `rocm`, or `cpu` and pulls GHCR images. No SDK
 2. BuildKit enabled (`DOCKER_BUILDKIT=1` — the build scripts set this).
 3. For CUDA AI image builds: NVIDIA container runtime + enough disk for multi-stage CUDA 13 images.
 4. PowerShell scripts at `docker/build/build_guideants_ai.ps1` (`-All` builds AI + MSSQL FTS + PlantUML + WebAPI/UI).
-5. If you hit `Cache export is not supported for the docker driver.`:
-   - `docker context use desktop-linux`
-   - `docker buildx use desktop-linux`
-   - enable Docker Desktop **containerd image store** and restart Docker Desktop.
 
 ---
 

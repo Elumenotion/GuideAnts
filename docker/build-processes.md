@@ -32,23 +32,6 @@ The AI image is deliberately split into `deps-*` and `final-*` stages. These req
 
 The build script supports those requirements by tagging every deps build with both the hash tag and stable cache tag, importing the stable cache tag with `--cache-from`, and exporting deps cache with `mode=min` to prioritize local developer throughput.
 
-### Cache Export Prerequisite (Important)
-
-The AI build script uses `docker buildx build --cache-to ...` for local cache export.
-If Docker returns:
-
-`Cache export is not supported for the docker driver.`
-
-then the active Buildx path does not support cache export in its current configuration.
-On Windows Docker Desktop, align these first:
-
-1. Use the Desktop Linux context:
-   - `docker context use desktop-linux`
-   - `docker buildx use desktop-linux`
-2. Enable Docker Desktop **containerd image store** ("Use containerd for pulling and storing images"), then restart Docker Desktop.
-
-After restart, re-run `docker buildx inspect --bootstrap` and then `build_guideants_ai.ps1`.
-
 ## GHCR Publish Workflows
 
 The repo publishes the following GHCR packages from GitHub Actions:
@@ -99,6 +82,13 @@ Script flow:
 9. Cleans staged artifacts (`ScriptExecutionAgent`, staged `requirements.txt`).
 10. Writes `GA_AI_CUDA_IMAGE=<new tag>`, `GA_AI_CPU_IMAGE=<new tag>`, or `GA_AI_ROCM_IMAGE=<new tag>` into `docker/.env`.
 11. If `-All` is set, also builds PlantUML and MSSQL FTS images, then invokes `build_webapi_ui.ps1` to build the compose-used WebAPI+UI image.
+
+Recommended one-time local setup for maximum cache effectiveness:
+
+```powershell
+docker buildx create --name guideants-builder --driver docker-container --use
+docker buildx inspect --bootstrap
+```
 
 ## 3) AI Multi-Stage Build (Why It Matters)
 
