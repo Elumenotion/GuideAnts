@@ -668,6 +668,26 @@ public sealed class LlamaCppChatClientTests
     }
 
     [TestMethod]
+    public async Task StreamCompletionAsync_Classifies400ModelIsNotLoaded_AsNotReady()
+    {
+        // Some llama-server builds emit this shorter variant.
+        const string noModelBody =
+            "{\"message\":\"model is not loaded\"}";
+        var handler = new StaticResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(noModelBody, Encoding.UTF8, "application/json")
+        });
+        var client = CreateClient(handler);
+
+        var act = async () => await client.StreamCompletionAsync(BuildRequest(), _ => { });
+
+        var ex = await act.Should().ThrowAsync<LlamaRuntimeCrashedException>();
+        ex.Which.Reason.Should().Be(LlamaRuntimeCrashReason.NotReady);
+        ex.Which.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        ex.Which.UpstreamDetail.Should().Be("model is not loaded");
+    }
+
+    [TestMethod]
     public async Task StreamCompletionAsync_DoesNotClassifyOther400s_AsNotReady()
     {
         // A caller bug (e.g. malformed tool schema) must stay as HttpRequestException so it is

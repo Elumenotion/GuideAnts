@@ -365,6 +365,115 @@ public sealed class NotebookHeaderToolbarServiceTests
         toolbar.Chat.Blockers.Should().BeEmpty();
     }
 
+    [TestMethod]
+    public async Task GetToolbarAsync_PrefersReadinessRuntimeState_WhenRuntimeCacheIsStale()
+    {
+        await using var db = CreateDb();
+        var project = new Project
+        {
+            Title = "Project",
+            Slug = "project"
+        };
+        var notebook = new Notebook
+        {
+            Title = "Notebook",
+            Slug = "notebook",
+            ProjectId = project.Id,
+            Project = project
+        };
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        await db.SaveChangesAsync();
+
+        var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        settings
+            .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new SettingsModelDto(
+                    ModelId: "qwen-local",
+                    DisplayName: "Qwen Local",
+                    Provider: "llama-cpp",
+                    Description: null,
+                    ReasoningChoicesJson: null,
+                    RuntimeConfigJson: "{\"routerModelId\":\"qwen-local\"}",
+                    IsActive: true,
+                    DisplayOrder: 1,
+                    Created: DateTime.UtcNow,
+                    Updated: null)
+            ]);
+        settings
+            .Setup(x => x.GetServiceEditorStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string serviceId, CancellationToken _) => CreateReadyServiceState(serviceId));
+
+        var readiness = new Mock<IRoutingReadinessService>(MockBehavior.Strict);
+        readiness
+            .Setup(x => x.ProbeChatTargetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string>()))
+            .ReturnsAsync((string modelId, CancellationToken _, string referenceKind) =>
+                new ChatTargetReadinessDto(
+                    ModelId: modelId,
+                    Provider: "llama-cpp",
+                    Status: "blocked",
+                    Blockers:
+                    [
+                        "RUNTIME_STATE: alias 'qwen-local' runtime state is 'unloaded' (expected 'loaded')."
+                    ],
+                    RuntimeState: "unloaded",
+                    AssistantUsageCount: 0,
+                    ReferenceKind: referenceKind));
+
+        var chatModelResolver = new Mock<IChatModelResolver>(MockBehavior.Strict);
+        chatModelResolver
+            .Setup(x => x.Resolve(It.IsAny<string?>()))
+            .Returns(new ResolvedChatModel("qwen-local", ChatModelReferenceKind.Direct, null, null, null));
+
+        var conversations = new Mock<IConversationManager>(MockBehavior.Strict);
+
+        var llamaRuntime = new Mock<INotebookModelRuntimeService>(MockBehavior.Strict);
+        // Simulate stale cached snapshot claiming ready/local-on while readiness probe says unloaded.
+        llamaRuntime
+            .Setup(x => x.GetRuntimeStatusAsync(notebook.Id, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NotebookLlamaRuntimeStatusDto
+            {
+                State = "ready",
+                LoadedModels =
+                [
+                    new ModelDto(
+                        "qwen-local",
+                        "Qwen Local",
+                        Description: null,
+                        ReasoningChoicesJson: null,
+                        IsActive: true,
+                        DisplayOrder: 1,
+                        RuntimeConfig: new ModelRuntimeConfigDto("qwen-local", "default", null),
+                        SamplingParameterPolicy: null,
+                        ReasoningChoices: null,
+                        DefaultReasoningChoice: null)
+                ]
+            });
+
+        var configuration = new ConfigurationBuilder().Build();
+
+        var sut = new NotebookHeaderToolbarService(
+            db,
+            settings.Object,
+            readiness.Object,
+            chatModelResolver.Object,
+            conversations.Object,
+            llamaRuntime.Object,
+            configuration,
+            Mock.Of<IHttpClientFactory>(),
+            NullLogger<NotebookHeaderToolbarService>.Instance);
+
+        var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
+
+        toolbar.Chat.SupportsLocalRuntimePower.Should().BeTrue();
+        toolbar.Chat.LocalRuntimeOn.Should().BeFalse("readiness reports runtime state as unloaded");
+        toolbar.Chat.Status.Should().Be("requiresLoad");
+        toolbar.Chat.Blockers.Should().BeEmpty();
+        toolbar.Chat.Summary.Should().Contain("Load Qwen Local");
+    }
+
     private static ApplicationDbContext CreateDb()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -403,4 +512,3 @@ public sealed class NotebookHeaderToolbarServiceTests
                 Warnings: Array.Empty<string>()));
     }
 }
-

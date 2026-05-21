@@ -35,6 +35,24 @@ export function useConversationActions(
 
   const sendMessage = useCallback(
     async (content: string, attachments: PendingAttachment[] = []) => {
+      const isRuntimeNotReadyError = (error: any): boolean => {
+        const bodyText = (() => {
+          const body = error?.body;
+          if (typeof body === 'string') return body;
+          if (body && typeof body === 'object') {
+            const pieces = [body.error, body.message, body.detail]
+              .filter((v: unknown) => typeof v === 'string') as string[];
+            return pieces.join(' ');
+          }
+          return '';
+        })();
+        const raw = `${error?.message ?? ''} ${bodyText}`.toLowerCase();
+        return raw.includes('model is not loaded')
+          || raw.includes('no model is loaded')
+          || raw.includes('does not have a model loaded')
+          || raw.includes('server has no model loaded');
+      };
+
       const authStatus = await ensureValidTokensForTemplate(state.notebookTemplate || null, projectId);
 
       if (authStatus.needsAuth) {
@@ -219,6 +237,11 @@ export function useConversationActions(
             }
             return;
           }
+        }
+
+        if (error?.status === 400 && isRuntimeNotReadyError(error)) {
+          dispatchRuntimeStatusWindowEvent(assistant?.id, { state: 'requires_load' });
+          return;
         }
 
         const errorMsg = error instanceof Error ? error.message : 'Chat request failed';
