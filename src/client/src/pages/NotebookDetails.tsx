@@ -153,6 +153,14 @@ function NotebookDetailsContent() {
         upstreamDetail: string | null;
     } | null>(null);
 
+    const refreshNotebookToolbar = useCallback(() => {
+        try {
+            window.dispatchEvent(new Event('refresh-notebook-toolbar'));
+        } catch {
+            // Best-effort UI sync hook for runtime status transitions.
+        }
+    }, []);
+
     // "No chat model configured" dialog — shown once per conversation entry when
     // the toolbar reports no effective model. The user can dismiss it and still
     // browse the conversation read-only; sending is independently blocked.
@@ -184,6 +192,7 @@ function NotebookDetailsContent() {
             setRuntimeStatus(status);
             setIsPolling(false);
             setRuntimeModalOpen(false);
+            refreshNotebookToolbar();
             return;
         }
 
@@ -198,7 +207,7 @@ function NotebookDetailsContent() {
         setRuntimeStatus(status);
         setRuntimeModalOpen(true);
         setIsPolling(false);
-    }, []);
+    }, [refreshNotebookToolbar]);
 
     // Check llama runtime when notebook loads and assistants are available
     useEffect(() => {
@@ -274,6 +283,7 @@ function NotebookDetailsContent() {
                         setIsPolling(false);
                         setRuntimeModalOpen(false);
                         setRuntimeStatus((prev: any) => ({ ...prev, state: 'ready', activeOperation: op }));
+                        refreshNotebookToolbar();
                     } else if (op.state === 'failed') {
                         setIsPolling(false);
                         setRuntimeStatus((prev: any) => ({ ...prev, state: 'failed', activeOperation: op }));
@@ -309,7 +319,7 @@ function NotebookDetailsContent() {
         return () => {
             if (pollInterval) clearInterval(pollInterval);
         };
-    }, [isPolling, runtimeStatus?.activeOperation?.operationId, projectId, notebookId, showToast]);
+    }, [isPolling, runtimeStatus?.activeOperation?.operationId, projectId, notebookId, showToast, refreshNotebookToolbar]);
 
     const handleStartLoad = async () => {
         if (!projectId || !notebookId) return;
@@ -319,6 +329,7 @@ function NotebookDetailsContent() {
                 setRuntimeStatus((prev: any) => ({ ...prev, state: 'ready', activeOperation: op }));
                 setIsPolling(false);
                 setRuntimeModalOpen(false);
+                refreshNotebookToolbar();
                 return;
             }
             if (op?.state === 'failed') {
@@ -1296,6 +1307,13 @@ function NotebookDetailsContent() {
                 // user gets a chance to pick a smaller model or change context size first.
                 setCrashState(null);
                 runtimeCheckedNotebookRef.current = null;
+                try {
+                    window.dispatchEvent(new CustomEvent('llama-runtime-restarted', {
+                        detail: { notebookId }
+                    }));
+                } catch {
+                    // Best-effort cache invalidation signal for conversation runtime checks.
+                }
                 const runtimeStatusPayload = { state: 'requires_load' };
                 window.dispatchEvent(new CustomEvent('llama-runtime-requires-load', {
                     detail: {

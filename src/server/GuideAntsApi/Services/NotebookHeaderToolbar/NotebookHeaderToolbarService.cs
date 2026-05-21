@@ -158,6 +158,13 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             && llamaStatus.LoadedModels.Any(m => string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal));
         var localRuntimeOn = supportsLocalLlama
             && (selectedLocalModelLoaded || string.Equals(llamaStatus.State, "ready", StringComparison.OrdinalIgnoreCase));
+        // Runtime status from NotebookModelRuntimeService may be briefly stale due cached router snapshots.
+        // When readiness has a concrete llama runtime state, trust it to avoid contradictory UI like
+        // "Loaded" while chat is blocked on RUNTIME_STATE: ... 'unloaded'.
+        if (supportsLocalLlama && !string.IsNullOrWhiteSpace(chatReadiness?.RuntimeState))
+        {
+            localRuntimeOn = string.Equals(chatReadiness!.RuntimeState, "loaded", StringComparison.OrdinalIgnoreCase);
+        }
         var inProg = llamaStatus.ActiveOperation;
         var chatInProgressId = inProg is { State: not "ready" and not "failed" } ? inProg.OperationId : null;
         var chatInProgressState = inProg?.State;

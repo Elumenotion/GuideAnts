@@ -85,7 +85,10 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         // Check current router state
         try
         {
-            var routerState = await GetRouterModelsAsync(useCache: true, cancellationToken);
+            // Runtime readiness is used as a hard preflight gate before chat dispatch.
+            // It must reflect live llama-router state, not the long-lived 5-minute cache,
+            // otherwise we can return "ready" and then hit upstream 400 "model is not loaded".
+            var routerState = await GetRouterModelsAsync(useCache: false, cancellationToken);
             var loadedRouterIds = routerState.Data
                 .Where(IsRouterModelLoaded)
                 .Select(d => NormalizeRouterModelId(d.Id))

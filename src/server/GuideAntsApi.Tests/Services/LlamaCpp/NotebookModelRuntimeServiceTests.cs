@@ -154,7 +154,7 @@ public class NotebookModelRuntimeServiceTests
     }
 
     [TestMethod]
-    public async Task GetRuntimeStatusAsync_ReusesCachedRouterSnapshot_ForRepeatedChecks()
+    public async Task GetRuntimeStatusAsync_AlwaysUsesFreshRouterSnapshot_ForRepeatedChecks()
     {
         // Arrange
         var notebookId = Guid.NewGuid();
@@ -190,11 +190,11 @@ public class NotebookModelRuntimeServiceTests
         // Assert
         Assert.AreEqual("ready", first.State);
         Assert.AreEqual("ready", second.State);
-        _mockLlamaClient.Verify(c => c.ListModelsAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _mockLlamaClient.Verify(c => c.ListModelsAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [TestMethod]
-    public async Task GetRuntimeStatusAsync_WithSizeLimitedCache_DoesNotThrowAndCaches()
+    public async Task GetRuntimeStatusAsync_WithSizeLimitedCache_DoesNotThrowAndUsesFreshState()
     {
         // Arrange
         var limitedCache = new MemoryCache(new MemoryCacheOptions { SizeLimit = 100 });
@@ -242,7 +242,7 @@ public class NotebookModelRuntimeServiceTests
             // Assert
             Assert.AreEqual("ready", first.State);
             Assert.AreEqual("ready", second.State);
-            _mockLlamaClient.Verify(c => c.ListModelsAsync(It.IsAny<CancellationToken>()), Times.Once);
+            _mockLlamaClient.Verify(c => c.ListModelsAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
         }
         finally
         {
