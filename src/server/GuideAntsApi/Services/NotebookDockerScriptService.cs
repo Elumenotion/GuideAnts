@@ -2,6 +2,7 @@ using AntRunner.ToolCalling.Functions;
 using AntRunner.ToolCalling;
 using System.Text;
 using System.Text.Json;
+using GuideAntsApi.Configuration;
 using GuideAntsApi.Services.Components;
 
 namespace GuideAntsApi.Services
@@ -17,9 +18,6 @@ namespace GuideAntsApi.Services
 
     public class NotebookDockerScriptService : INotebookDockerScriptService
     {
-        private const string GuideantsAiContainerName = "guideants-ai";
-        private const string PlantUmlContainerName = "plantuml";
-
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<NotebookDockerScriptService> _logger;
         private readonly IServiceProvider _serviceProvider;
@@ -301,43 +299,26 @@ namespace GuideAntsApi.Services
 
         private string ResolveScriptExecutionBaseUrl(string containerName)
         {
-            var configuredContainerUrl = _configuration[$"ServiceRouting:Containers:{containerName}:BaseUrl"];
-            var apiRuntimeContext = _configuration["API_RUNTIME_CONTEXT"];
+            var configKey = ServiceRoutingContracts.ContainerBaseUrlKey(containerName);
+            var configuredContainerUrl = _configuration[configKey];
             var envSuffix = Environment.GetEnvironmentVariable("CONTAINER_APP_ENV_DNS_SUFFIX");
-            return ResolveScriptExecutionBaseUrl(containerName, configuredContainerUrl, apiRuntimeContext, envSuffix);
+            return ResolveScriptExecutionBaseUrl(containerName, configuredContainerUrl, envSuffix, configKey);
         }
 
         internal static string ResolveScriptExecutionBaseUrl(
             string containerName,
             string? configuredContainerUrl,
-            string? apiRuntimeContext,
-            string? envSuffix)
+            string? envSuffix,
+            string? configKey = null)
         {
             if (!string.IsNullOrWhiteSpace(envSuffix))
             {
-                if (string.Equals(containerName, GuideantsAiContainerName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(containerName, ServiceRoutingContracts.GuideantsAiContainerName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return $"http://{containerName}.internal.{envSuffix}/sandbox";
+                    return $"http://{containerName}.internal.{envSuffix}{ServiceRoutingContracts.SandboxPath}";
                 }
 
                 return $"http://{containerName}.internal.{envSuffix}";
-            }
-
-            // In compose, tool execution must always target sibling container DNS names.
-            // Do not allow settings-backed ServiceRouting overrides to redirect this path.
-            if (string.Equals(apiRuntimeContext, "compose", StringComparison.OrdinalIgnoreCase))
-            {
-                if (string.Equals(containerName, GuideantsAiContainerName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return "http://guideants-ai:80/sandbox";
-                }
-
-                if (string.Equals(containerName, PlantUmlContainerName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return "http://plantuml:80";
-                }
-
-                return $"http://{containerName}";
             }
 
             if (!string.IsNullOrWhiteSpace(configuredContainerUrl))
@@ -345,19 +326,11 @@ namespace GuideAntsApi.Services
                 return configuredContainerUrl.Trim();
             }
 
-            // Local non-compose development fallback: preserve the legacy localhost
-            // behavior so API-outside-container + tool-containers-on-localhost keeps working.
-            if (string.Equals(containerName, GuideantsAiContainerName, StringComparison.OrdinalIgnoreCase))
-            {
-                return "http://localhost:8110/sandbox";
-            }
-
-            if (string.Equals(containerName, PlantUmlContainerName, StringComparison.OrdinalIgnoreCase))
-            {
-                return "http://localhost:8111";
-            }
-
-            return $"http://{containerName}";
+            var resolvedConfigKey = string.IsNullOrWhiteSpace(configKey)
+                ? ServiceRoutingContracts.ContainerBaseUrlKey(containerName)
+                : configKey;
+            throw new InvalidOperationException(
+                $"{resolvedConfigKey} is required for script execution routing.");
         }
 
         // Static service provider for tool calling system compatibility

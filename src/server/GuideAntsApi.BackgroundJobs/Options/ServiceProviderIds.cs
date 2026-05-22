@@ -13,6 +13,6 @@ public sealed class LocalServiceHostsOptions
 {
     public const string SectionName = "LocalServiceHosts";
 
-    public string EmbeddingsBaseUrl { get; set; } = "http://localhost:8110";
-    public string DocumentIntelligenceBaseUrl { get; set; } = "http://localhost:5001";
+    public string EmbeddingsBaseUrl { get; set; } = string.Empty;
+    public string DocumentIntelligenceBaseUrl { get; set; } = string.Empty;
 }

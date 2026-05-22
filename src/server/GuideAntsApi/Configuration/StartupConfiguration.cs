@@ -132,22 +132,38 @@ public static class StartupConfiguration
             var options = serviceProvider.GetRequiredService<IOptions<BrowserRenderingOptions>>().Value;
             client.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, options.TimeoutMs));
 
+            if (string.IsNullOrWhiteSpace(options.BaseUrl))
+            {
+                throw new InvalidOperationException("BrowserRendering:BaseUrl is required.");
+            }
+
             var trimmedBaseUrl = options.BaseUrl.TrimEnd('/');
             if (Uri.TryCreate(trimmedBaseUrl, UriKind.Absolute, out var baseUri))
             {
                 client.BaseAddress = baseUri;
+                return;
             }
+
+            throw new InvalidOperationException("BrowserRendering:BaseUrl must be an absolute URI.");
         });
         services.AddHttpClient<IWebSearchService, SearXngWebSearchService>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetRequiredService<IOptions<SearXngSearchOptions>>().Value;
             client.Timeout = TimeSpan.FromMilliseconds(Math.Max(1000, options.TimeoutMs));
 
+            if (string.IsNullOrWhiteSpace(options.BaseUrl))
+            {
+                throw new InvalidOperationException("SearXngSearch:BaseUrl is required.");
+            }
+
             var trimmedBaseUrl = options.BaseUrl.TrimEnd('/');
             if (Uri.TryCreate(trimmedBaseUrl, UriKind.Absolute, out var baseUri))
             {
                 client.BaseAddress = baseUri;
+                return;
             }
+
+            throw new InvalidOperationException("SearXngSearch:BaseUrl must be an absolute URI.");
         });
 
 
@@ -525,12 +541,12 @@ public static class StartupConfiguration
         };
 
         var path = builder.Path.TrimEnd('/');
-        if (path.EndsWith("/llama-cpp", StringComparison.OrdinalIgnoreCase))
+        if (path.EndsWith(ServiceRoutingContracts.LlamaCppPath, StringComparison.OrdinalIgnoreCase))
         {
-            path = path[..^"/llama-cpp".Length];
+            path = path[..^ServiceRoutingContracts.LlamaCppPath.Length];
         }
 
-        path = path.TrimEnd('/') + "/llama-admin/";
+        path = path.TrimEnd('/') + ServiceRoutingContracts.LlamaAdminPath + "/";
         builder.Path = path;
         return builder.Uri;
     }

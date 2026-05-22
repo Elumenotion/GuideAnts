@@ -139,6 +139,11 @@ public sealed class SearXngWebSearchService(
 
     private Uri BuildSearchUri(string query, int pageNumber)
     {
+        if (string.IsNullOrWhiteSpace(_options.BaseUrl))
+        {
+            throw new InvalidOperationException("SearXngSearch:BaseUrl is required.");
+        }
+
         var baseUrl = _options.BaseUrl.TrimEnd('/');
         var queryParts = new[]
         {
