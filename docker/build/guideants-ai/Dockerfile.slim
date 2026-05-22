@@ -74,6 +74,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential cmake git \
+        graphviz-dev pkg-config \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
