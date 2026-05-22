@@ -21,10 +21,17 @@ import {
   buildLocalAiModelRequest,
   toExistingLocalModels,
 } from './utils';
+import {
+  createLocalModelOnboardingPoller,
+} from '../../../features/localModelOnboarding/useOperationPolling';
+import {
+  isLocalModelOnboardingInFlight,
+  normalizeLocalModelOnboardingStatus,
+} from '../../../features/localModelOnboarding/status';
 
 async function persistGlobalDefault(catalogModelId: string): Promise<void> {
   const chatDefaults = await api.settings.chatDefaults.get();
-  await api.settings.chatDefaults.update({
+  const request = {
     rowVersion: chatDefaults.rowVersion,
     defaultModelId: catalogModelId,
     overrideAllChatModels: chatDefaults.overrideAllChatModels,
@@ -32,7 +39,27 @@ async function persistGlobalDefault(catalogModelId: string): Promise<void> {
     topP: chatDefaults.topP ?? null,
     reasoningEffort: chatDefaults.reasoningEffort ?? null,
     samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
-  });
+  };
+
+  try {
+    await api.settings.chatDefaults.update(request);
+  } catch (error) {
+    const body = (error as { body?: unknown })?.body;
+    const errors = body && typeof body === 'object'
+      ? (body as { errors?: unknown }).errors
+      : undefined;
+    const hasReasoningEffortError = Array.isArray(errors)
+      && errors.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('reasoningeffort'));
+
+    if (!hasReasoningEffortError) {
+      throw error;
+    }
+
+    await api.settings.chatDefaults.update({
+      ...request,
+      reasoningEffort: null,
+    });
+  }
 }
 
 function getServiceProviderFieldValue(
@@ -185,8 +212,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
 
   const [snapshot, setLocalSnapshot] = useState<WizardLoadSnapshot | null>(null);
 
-  const pollingRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
-  const pollFailureCounts = useRef<Map<string, number>>(new Map());
+  const pollingRefs = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     draftModelsRef.current = draftModels;
@@ -247,7 +273,6 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
       clearInterval(existing);
       pollingRefs.current.delete(localId);
     }
-    pollFailureCounts.current.delete(localId);
   }, []);
 
   const POLL_FAILURE_THRESHOLD = 5;
@@ -263,55 +288,53 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     catalogModelId: string,
     shouldSetDefault: boolean
   ) => {
-    pollFailureCounts.current.set(localId, 0);
-
-    const interval = setInterval(() => {
-      void (async () => {
-        try {
-          const op = await api.settings.getDownloadStatus(operationId);
-          pollFailureCounts.current.set(localId, 0);
-
-          const done = op.status === 'completed' || op.status === 'failed' || op.status === 'error';
-          if (done) {
-            stopPolling(localId);
-            if (op.status === 'completed' && shouldSetDefault) {
-              try {
-                await persistGlobalDefault(catalogModelId);
-              } catch {
-                // non-fatal — model is installed even if default can't be set
-              }
+    const interval = createLocalModelOnboardingPoller({
+      operationId,
+      onUpdate: (op) => {
+        setDraftModels((prev) =>
+          prev.map((d) => {
+            if (d.localId !== localId) return d;
+            return {
+              ...d,
+              asyncStatus: normalizeLocalModelOnboardingStatus(op.status),
+              asyncProgress: op.progress ?? null,
+              asyncError: op.errorMessage ?? null,
+            };
+          })
+        );
+      },
+      onTerminal: (op) => {
+        stopPolling(localId);
+        if (op.status === 'completed' && shouldSetDefault) {
+          void (async () => {
+            try {
+              await persistGlobalDefault(catalogModelId);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Unknown error.';
+              setInstallError(
+                `Model was installed, but setting '${catalogModelId}' as global default failed: ${message}`
+              );
             }
-          }
-          setDraftModels((prev) =>
-            prev.map((d) => {
-              if (d.localId !== localId) return d;
-              return {
-                ...d,
-                asyncStatus: op.status === 'completed' ? 'completed' : op.status === 'failed' || op.status === 'error' ? 'error' : 'downloading',
-                asyncProgress: op.progress ?? null,
-                asyncError: op.errorMessage ?? null,
-              };
-            })
-          );
-        } catch {
-          const count = (pollFailureCounts.current.get(localId) ?? 0) + 1;
-          pollFailureCounts.current.set(localId, count);
-          if (count >= POLL_FAILURE_THRESHOLD) {
-            stopPolling(localId);
-            setDraftModels((prev) =>
-              prev.map((d) => {
-                if (d.localId !== localId) return d;
-                return {
-                  ...d,
-                  asyncStatus: 'error' as const,
-                  asyncError: 'Download status is no longer reachable. The runtime container may have restarted.',
-                };
-              })
-            );
-          }
+          })();
         }
-      })();
-    }, 2000);
+      },
+      onPollFailureThreshold: () => {
+        stopPolling(localId);
+        setDraftModels((prev) =>
+          prev.map((d) => {
+            if (d.localId !== localId) return d;
+            return {
+              ...d,
+              asyncStatus: 'error' as const,
+              asyncError: 'Download status is no longer reachable. The runtime container may have restarted.',
+            };
+          })
+        );
+      },
+      intervalMs: 2000,
+      failureThreshold: POLL_FAILURE_THRESHOLD,
+    });
+
     pollingRefs.current.set(localId, interval);
   }, [stopPolling]);
 
@@ -347,7 +370,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
 
       if (operationId) {
         setDraftModels((prev) =>
-          prev.map((d) => d.localId === localId ? { ...d, asyncOperationId: operationId, asyncStatus: 'downloading' as const } : d)
+          prev.map((d) => d.localId === localId ? { ...d, asyncOperationId: operationId, asyncStatus: 'queued' as const } : d)
         );
         pollDownload(localId, operationId, draft.catalogModelId, formData.setAsGlobalDefault);
       } else {
@@ -357,8 +380,11 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
         if (formData.setAsGlobalDefault) {
           try {
             await persistGlobalDefault(draft.catalogModelId);
-          } catch {
-            // non-fatal
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error.';
+            setInstallError(
+              `Model was installed, but setting '${draft.catalogModelId}' as global default failed: ${message}`
+            );
           }
         }
       }
@@ -438,7 +464,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     }
 
     const hasActiveDownloads = current.some(
-      (d) => d.asyncStatus === 'submitted' || d.asyncStatus === 'downloading'
+      (d) => isLocalModelOnboardingInFlight(d.asyncStatus)
     );
     if (hasActiveDownloads) {
       setModelStepError('Model downloads are in progress — please wait for them to complete before continuing.');

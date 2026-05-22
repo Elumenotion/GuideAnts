@@ -1,0 +1,25 @@
+{
+  "profileId": "gpt_oss",
+  "displayName": "gpt-oss",
+  "description": "Shared profile for gpt-oss family (20b/120b) on llama.cpp. Uses chat_template_kwargs.reasoning_effort.",
+  "providers": ["llama-cpp"],
+  "combineSystemAndDeveloperMessages": false,
+  "samplingParametersJson": {
+    "temperature": { "key": "temperature", "label": "Temperature", "description": "Controls randomness: lower is focused, higher is creative", "min": 0.0, "max": 2.0, "step": 0.1, "default": 1.0, "displayOrder": 0, "exposedInGuideBuilder": true },
+    "top_p": { "key": "top_p", "label": "Top P", "description": "Nucleus sampling: controls diversity of token selection", "min": 0.0, "max": 1.0, "step": 0.05, "default": 1.0, "displayOrder": 1, "exposedInGuideBuilder": true }
+  },
+  "thinkingControlJson": {
+    "defaultChoice": "medium",
+    "choiceActions": {
+      "low": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.reasoning_effort", "value": "low" }
+      ],
+      "medium": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.reasoning_effort", "value": "medium" }
+      ],
+      "high": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.reasoning_effort", "value": "high" }
+      ]
+    }
+  }
+}

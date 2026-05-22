@@ -10,6 +10,11 @@ import {
 import type { RolePickerSpec } from '../../../../pages/settings/editors/common';
 import type { LocalAiInstallFormData } from '../useLocalAiWizardState';
 import type { LocalAiModelDraft } from '../types';
+import {
+  isLocalModelOnboardingInFlight,
+  localModelOnboardingProgressStep,
+} from '../../../../features/localModelOnboarding/status';
+import { selectAttachableAliases } from '../../../../features/localModelOnboarding/selectors';
 
 const LLAMA_ROLES: RolePickerSpec[] = [
   {
@@ -37,15 +42,6 @@ const ADD_STEPS = [
   { id: 'completed', label: 'Completed' },
 ] as const;
 
-function operationStep(status: string): (typeof ADD_STEPS)[number]['id'] {
-  if (status === 'queued') return 'queued';
-  if (status === 'resolving' || status === 'resolvingFiles') return 'resolvingFiles';
-  if (status === 'downloading') return 'downloading';
-  if (status === 'registering' || status === 'registeringAlias') return 'registeringAlias';
-  if (status === 'completed') return 'completed';
-  return 'downloading';
-}
-
 export function DraftProgress({ draft }: { draft: LocalAiModelDraft }) {
   if (draft.asyncStatus === 'submitted') {
     return (
@@ -66,7 +62,7 @@ export function DraftProgress({ draft }: { draft: LocalAiModelDraft }) {
     );
   }
 
-  const currentStep = operationStep(draft.asyncStatus);
+  const currentStep = localModelOnboardingProgressStep(draft.asyncStatus);
   const currentIndex = ADD_STEPS.findIndex((s) => s.id === currentStep);
   const pct = draft.asyncProgress != null
     ? Math.round(Math.min(1, Math.max(0, draft.asyncProgress)) * 100)
@@ -149,11 +145,11 @@ export function LocalAiModelsStep({
   const [catalogDisplayName, setCatalogDisplayName] = useState('');
 
   const totalInstalled = existingModels.length + draftModels.filter((d) => d.asyncStatus === 'completed').length;
-  const hasInflightInstall = draftModels.some((d) => d.asyncStatus === 'submitted' || d.asyncStatus === 'downloading');
+  const hasInflightInstall = draftModels.some((d) => isLocalModelOnboardingInFlight(d.asyncStatus));
   const isFirstModel = totalInstalled === 0 && !hasInflightInstall;
   const [setAsGlobalDefault, setSetAsGlobalDefault] = useState(false);
 
-  const unattachedAliases = inventory.filter((row) => row.catalogModelIds.length === 0 && row.hasModelFile);
+  const unattachedAliases = selectAttachableAliases(inventory);
   const llamaUnavailable = !inventoryLoading && inventory.length === 0;
 
   const [submitting, setSubmitting] = useState(false);

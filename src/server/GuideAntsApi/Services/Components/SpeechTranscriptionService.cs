@@ -329,8 +329,6 @@ namespace GuideAntsApi.Services.Components
                     serviceId: RoutedServiceNames.SpeechTranscription,
                     modeId: mode.ModeId);
             }
-            ValidateHuggingFaceAsrModel(mode.ModelId!, mode.RequestPresetJson);
-            var includeTimestamps = ResolveHuggingFaceTimestampPreference(mode.RequestPresetJson);
 
             var token = _configurationForSection("HuggingFace", "Token");
             if (string.IsNullOrWhiteSpace(token))
@@ -341,24 +339,12 @@ namespace GuideAntsApi.Services.Components
             audioContent.Position = 0;
             await using var memory = new MemoryStream();
             await audioContent.CopyToAsync(memory, cancellationToken);
-            var endpoint = ResolveHuggingFaceAsrEndpoint(mode.ModelId!);
+            var endpoint = $"https://api-inference.huggingface.co/models/{mode.ModelId}";
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
             {
-                Content = includeTimestamps
-                    ? new StringContent(
-                        JsonSerializer.Serialize(
-                            new HuggingFaceAsrRequest(
-                                Inputs: Convert.ToBase64String(memory.ToArray()),
-                                Parameters: new HuggingFaceAsrParameters(ReturnTimestamps: true)),
-                            ProviderPayloadJson),
-                        Encoding.UTF8,
-                        "application/json")
-                    : new ByteArrayContent(memory.ToArray())
+                Content = new ByteArrayContent(memory.ToArray())
             };
-            if (!includeTimestamps)
-            {
-                request.Content.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
-            }
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             request.Headers.Add("x-request-id", requestId);
 
@@ -371,7 +357,11 @@ namespace GuideAntsApi.Services.Components
                 throw new InvalidOperationException($"Hugging Face ASR failed ({(int)response.StatusCode}): {body}");
             }
 
-            var text = ParseHuggingFaceAsrText(body, includeTimestamps);
+            var parsed = JsonSerializer.Deserialize<HuggingFaceAsrResponse>(body, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            var text = parsed?.Text ?? string.Empty;
             _logger.LogWarning(
                 "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
                 HuggingFaceProviderSection,
@@ -383,110 +373,6 @@ namespace GuideAntsApi.Services.Components
                 text.Length);
 
             return new TranscriptionResult(text, 0);
-        }
-
-        private string ResolveHuggingFaceAsrEndpoint(string modelId)
-        {
-            var configuredRouterBase = _configurationForSection("HuggingFace", "RouterBaseUrl");
-            var routerBase = string.IsNullOrWhiteSpace(configuredRouterBase)
-                ? "https://router.huggingface.co/v1"
-                : configuredRouterBase;
-
-            var normalized = routerBase.TrimEnd('/');
-            if (normalized.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
-            {
-                normalized = normalized[..^3];
-            }
-
-            return $"{normalized}/hf-inference/models/{modelId}";
-        }
-
-        private static bool ResolveHuggingFaceTimestampPreference(string? requestPresetJson)
-        {
-            var explicitReturnTimestamps = ReadServiceModePresetField(requestPresetJson, "ReturnTimestamps");
-            if (bool.TryParse(explicitReturnTimestamps, out var parsedReturnTimestamps))
-            {
-                return parsedReturnTimestamps;
-            }
-
-            var explicitTimestamps = ReadServiceModePresetField(requestPresetJson, "Timestamps");
-            if (bool.TryParse(explicitTimestamps, out var parsedTimestamps))
-            {
-                return parsedTimestamps;
-            }
-
-            return false;
-        }
-
-        private static string ParseHuggingFaceAsrText(string body, bool includeTimestamps)
-        {
-            using var document = JsonDocument.Parse(body);
-            var root = document.RootElement;
-
-            if (root.ValueKind == JsonValueKind.Object)
-            {
-                if (root.TryGetProperty("text", out var textNode)
-                    && textNode.ValueKind == JsonValueKind.String)
-                {
-                    var plainText = textNode.GetString() ?? string.Empty;
-                    if (!includeTimestamps)
-                    {
-                        return plainText;
-                    }
-
-                    if (root.TryGetProperty("chunks", out var chunksNode)
-                        && chunksNode.ValueKind == JsonValueKind.Array)
-                    {
-                        var timestamped = BuildTimestampedAsrText(chunksNode);
-                        if (!string.IsNullOrWhiteSpace(timestamped))
-                        {
-                            return timestamped;
-                        }
-                    }
-
-                    return plainText;
-                }
-            }
-
-            var fallback = JsonSerializer.Deserialize<HuggingFaceAsrResponse>(body, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
-            return fallback?.Text ?? string.Empty;
-        }
-
-        private static string BuildTimestampedAsrText(JsonElement chunksNode)
-        {
-            var lines = new List<string>();
-            foreach (var chunk in chunksNode.EnumerateArray())
-            {
-                if (chunk.ValueKind != JsonValueKind.Object)
-                {
-                    continue;
-                }
-
-                var text = chunk.TryGetProperty("text", out var textNode) && textNode.ValueKind == JsonValueKind.String
-                    ? textNode.GetString()
-                    : null;
-                if (string.IsNullOrWhiteSpace(text))
-                {
-                    continue;
-                }
-
-                var prefix = string.Empty;
-                if (chunk.TryGetProperty("timestamp", out var timestampNode)
-                    && timestampNode.ValueKind == JsonValueKind.Array
-                    && timestampNode.GetArrayLength() >= 2)
-                {
-                    var start = timestampNode[0].ToString();
-                    var end = timestampNode[1].ToString();
-                    prefix = $"[{start}-{end}] ";
-                }
-
-                lines.Add(prefix + text.Trim());
-            }
-
-            return lines.Count == 0 ? string.Empty : string.Join(Environment.NewLine, lines);
         }
 
         private async Task<TranscriptionResult> TranscribeViaOpenRouterWithDurationAsync(
@@ -514,7 +400,6 @@ namespace GuideAntsApi.Services.Components
             {
                 throw new InvalidOperationException("OpenRouter:ApiKey is required.");
             }
-            ValidateOpenRouterAsrModel(mode.ModelId!, mode.RequestPresetJson);
 
             audioContent.Position = 0;
             await using var memory = new MemoryStream();
@@ -694,86 +579,12 @@ namespace GuideAntsApi.Services.Components
             return 25L * 1024 * 1024;
         }
 
-        private void ValidateHuggingFaceAsrModel(string modelId, string? requestPresetJson)
-        {
-            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                if (IsModelAllowed(modelId, configured))
-                {
-                    return;
-                }
-
-                throw new InvalidOperationException(
-                    $"Hugging Face ASR model '{modelId}' is not in the SpeechTranscription service-mode AllowedModels preset.");
-            }
-
-            if (modelId.Contains("asr", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("whisper", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("wav2vec", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"Hugging Face model '{modelId}' is not recognized as ASR-capable. " +
-                "Set SpeechTranscription service-mode AllowedModels to explicitly allow it.");
-        }
-
         private void ValidateGoogleGeminiTranscriptionModel(string modelId)
         {
             if (string.IsNullOrWhiteSpace(modelId))
             {
                 throw new InvalidOperationException("Google Gemini transcription model id is required.");
             }
-        }
-
-        private void ValidateOpenRouterAsrModel(string modelId, string? requestPresetJson)
-        {
-            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                if (IsModelAllowed(modelId, configured))
-                {
-                    return;
-                }
-
-                throw new InvalidOperationException(
-                    $"OpenRouter transcription model '{modelId}' is not in the SpeechTranscription service-mode AllowedModels preset.");
-            }
-
-            if (modelId.Contains("transcribe", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("whisper", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("audio", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"OpenRouter model '{modelId}' is not recognized as transcription-capable. " +
-                "Set SpeechTranscription service-mode AllowedModels to explicitly allow it.");
-        }
-
-        private static bool IsModelAllowed(string modelId, string allowlistCsv)
-        {
-            var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            foreach (var entry in entries)
-            {
-                if (entry.EndsWith('*'))
-                {
-                    var prefix = entry[..^1];
-                    if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-                else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
@@ -1225,13 +1036,6 @@ namespace GuideAntsApi.Services.Components
         IReadOnlyList<GoogleGeminiCandidate> Candidates);
 
     public sealed record GoogleGeminiCandidate(GoogleGeminiContent? Content);
-
-    public sealed record HuggingFaceAsrRequest(
-        [property: JsonPropertyName("inputs")] string Inputs,
-        [property: JsonPropertyName("parameters")] HuggingFaceAsrParameters Parameters);
-
-    public sealed record HuggingFaceAsrParameters(
-        [property: JsonPropertyName("return_timestamps")] bool ReturnTimestamps);
 
     public sealed record HuggingFaceAsrResponse(string? Text);
 

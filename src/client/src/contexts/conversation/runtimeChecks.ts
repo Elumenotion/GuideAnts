@@ -30,6 +30,11 @@ export const getNotebookRuntimeReadyCache = (notebookId: string): Set<string> =>
   return cache;
 };
 
+export const clearNotebookRuntimeReadyCache = (notebookId: string): void => {
+  const cache = runtimeReadyCacheByNotebook.get(notebookId);
+  cache?.clear();
+};
+
 /**
  * Checks llama runtime status for a given assistant and dispatches
  * window events so the runtime modal can react.

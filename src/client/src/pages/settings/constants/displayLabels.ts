@@ -58,7 +58,6 @@ const CATALOG_PROVIDER_LABELS: Record<string, string> = {
 
 const COMMON_FIELD_LABELS: Record<string, string> = {
   ApiVersion: 'API Version',
-  AllowedModels: 'Allowed Models',
   AsyncStatusPollIntervalMs: 'Poll Interval (ms)',
   Deployment: 'Deployment',
   Dimensions: 'Dimensions',
@@ -92,7 +91,7 @@ const PROVIDER_FIELD_LABEL_OVERRIDES: Record<string, Record<string, string>> = {
   'Embeddings.HuggingFace.Inference': { ModelId: 'Embedding Model ID' },
   'Embeddings.OpenRouter.Embeddings': { ModelId: 'Embedding Model ID' },
   'ImageGeneration.Google.Imagen': { ModelId: 'Image Model ID' },
-  'ImageGeneration.HuggingFace.Inference': { ModelId: 'Text-to-Image Model ID', TextToImageModelId: 'Text-to-Image Model ID', ImageToImageModelId: 'Image-to-Image Model ID' },
+  'ImageGeneration.HuggingFace.Inference': { ModelId: 'Image Model ID' },
   'ImageGeneration.OpenRouter.Image': { ModelId: 'Image Model ID' },
   'SpeechTranscription.Google.SpeechToText': { ModelId: 'Transcription Model ID' },
   'SpeechTranscription.HuggingFace.Inference': { ModelId: 'ASR Model ID' },
@@ -108,7 +107,6 @@ const PROVIDER_FIELD_LABEL_OVERRIDES: Record<string, Record<string, string>> = {
 
 const COMMON_FIELD_HELP_TEXT: Record<string, string> = {
   ApiVersion: 'Date-style API version (for example 2025-04-01-preview).',
-  AllowedModels: 'Optional comma-separated allowlist.',
   AsyncStatusPollIntervalMs: 'Polling interval for async operations in milliseconds.',
   Deployment: 'Deployment name used by this route.',
   Dimensions: 'Output embedding dimensions. Supported by text-embedding-3-* models only.',
@@ -118,8 +116,6 @@ const COMMON_FIELD_HELP_TEXT: Record<string, string> = {
   MaxAudioBytes: 'Maximum accepted audio payload size in bytes.',
   MaxConcurrentConversions: 'Maximum concurrent conversion jobs.',
   MaxRetries: 'Retry count for transient failures.',
-  TextToImageModelId: 'Hugging Face model used for text-to-image generation (e.g. Tongyi-MAI/Z-Image-Turbo).',
-  ImageToImageModelId: 'Hugging Face model used for image-to-image editing (e.g. black-forest-labs/FLUX.2-dev).',
   ModelId: 'Provider model id routed through this mode.',
   TimeoutSeconds: 'Request timeout in seconds.',
   VoiceName: 'Voice identifier used for synthesis.',

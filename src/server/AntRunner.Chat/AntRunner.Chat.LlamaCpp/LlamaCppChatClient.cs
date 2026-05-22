@@ -314,7 +314,8 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
     [
         "does not have a model loaded",
         "the server has no model loaded",
-        "no model is loaded"
+        "no model is loaded",
+        "model is not loaded"
     ];
 
     private static bool ResponseBodyIndicatesRuntimeNotReady(string? body)
@@ -398,6 +399,14 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
                 {
                     return Clip(msgEl.GetString(), maxChars);
                 }
+            }
+
+            // Some llama-server builds return {"message":"..."} without an "error" object.
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("message", out var rootMsgEl)
+                && rootMsgEl.ValueKind == JsonValueKind.String)
+            {
+                return Clip(rootMsgEl.GetString(), maxChars);
             }
         }
         catch (JsonException)

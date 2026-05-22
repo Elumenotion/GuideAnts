@@ -415,4 +415,4 @@ FodyWeavers.xsd
 .installer_state.env
 /docker/.buildx-cache
 /docker/.build-state
-/_hf_test
+/docker/.buildx-cache-deps-new

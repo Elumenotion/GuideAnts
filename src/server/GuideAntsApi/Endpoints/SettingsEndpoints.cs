@@ -5,6 +5,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.HuggingFace;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Configuration;
@@ -178,70 +179,43 @@ public static class SettingsEndpoints
         .Produces<SettingsModelDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status400BadRequest);
 
+        // Canonical onboarding write API for both Settings and Home Wizard local model flows.
         group.MapPost("/models:add", async (
             [FromBody] AddModelRequest request,
             IApplicationSettingsService settingsService,
             IChatTargetValidator chatTargetValidator,
             IRuntimeProfileResolver runtimeProfileResolver,
-            ILlamaRuntimeInventoryService inventoryService,
-            IHuggingFaceModelDownloadService downloadService,
-            IHuggingFaceTokenResolver huggingFaceTokenResolver,
-            IConfiguration configuration,
+            ILocalModelOnboardingValidator localModelOnboardingValidator,
+            ILocalModelOnboardingOrchestrator localModelOnboardingOrchestrator,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             try
             {
-                await ValidateAddModelRequestAsync(
-                    request,
-                    configuration,
-                    settingsService,
-                    chatTargetValidator,
-                    inventoryService,
-                    huggingFaceTokenResolver,
-                    cancellationToken).ConfigureAwait(false);
-
                 var provider = request.Provider.Trim();
                 if (string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
                 {
-                    var localRuntimeJson = BuildLlamaLocalRuntimeJson(request);
-                    var reasoningChoicesJson = await DeriveLlamaReasoningChoicesJsonAsync(
-                        runtimeProfileResolver,
-                        request.Install!.RuntimeProfileId,
-                        cancellationToken).ConfigureAwait(false);
+                    var command = LocalModelOnboardingCommand.FromAddModelRequest(request);
+                    var logger = loggerFactory.CreateLogger("LocalModelOnboarding");
+                    logger.LogInformation(
+                        "Local model onboarding request. ui={OnboardingUi} source={InstallSource} catalogModelId={CatalogModelId} routerModelId={RouterModelId}",
+                        string.IsNullOrWhiteSpace(command.OnboardingUi) ? "unknown" : command.OnboardingUi,
+                        command.InstallSource,
+                        command.CatalogModelId,
+                        command.RouterModelId);
 
-                    var createRequest = BuildModelCreateRequest(
-                        request,
-                        reasoningChoicesJson,
-                        localRuntimeJson);
-
-                    if (string.Equals(request.Install!.Source, "existingAlias", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var attached = await downloadService.AttachExistingAliasAsync(
-                            createRequest,
-                            request.Install.RouterModelId,
-                            cancellationToken).ConfigureAwait(false);
-
-                        return Results.Ok(new AddModelResponse(
-                            OperationId: null,
-                            AddOperation: new AddModelOperationDto(
-                                Kind: "sync",
-                                CatalogModel: attached,
-                                Status: "completed",
-                                Error: null)));
-                    }
-
-                    var op = await downloadService.StartDownloadAsync(
-                        BuildStartModelDownloadRequest(request),
-                        cancellationToken).ConfigureAwait(false);
-
-                    return Results.Ok(new AddModelResponse(
-                        OperationId: op.OperationId,
-                        AddOperation: new AddModelOperationDto(
-                            Kind: "async",
-                            CatalogModel: null,
-                            Status: "inProgress",
-                            Error: null)));
+                    await localModelOnboardingValidator.ValidateAsync(request, command, cancellationToken).ConfigureAwait(false);
+                    var onboardingResult = await localModelOnboardingOrchestrator
+                        .OnboardAsync(request, command, cancellationToken)
+                        .ConfigureAwait(false);
+                    return Results.Ok(onboardingResult.ToResponse());
                 }
+
+                await ValidateAddModelRequestAsync(
+                    request,
+                    settingsService,
+                    chatTargetValidator,
+                    cancellationToken).ConfigureAwait(false);
 
                 var cloudReasoningChoicesJson = await DeriveCloudReasoningChoicesJsonAsync(
                     runtimeProfileResolver,
@@ -1433,11 +1407,25 @@ public static class SettingsEndpoints
         .WithName("GetLlamaRuntimeStatus")
         .Produces<IReadOnlyList<LlamaRuntimeAliasStatusDto>>(StatusCodes.Status200OK);
 
+        // Internal low-level endpoint for runtime/admin integration. UI onboarding should use /api/settings/models:add.
         llamaGroup.MapPost("/downloads", async (
+            HttpRequest httpRequest,
             [FromBody] StartModelDownloadRequest request,
             IHuggingFaceModelDownloadService downloadService,
             CancellationToken cancellationToken) =>
         {
+            var internalAllowed = string.Equals(
+                httpRequest.Headers["X-Guideants-Internal-Onboarding"].ToString(),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+            if (!internalAllowed)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "Direct onboarding downloads are internal-only. Use POST /api/settings/models:add."
+                });
+            }
+
             try
             {
                 var op = await downloadService.StartDownloadAsync(request, cancellationToken);
@@ -1454,10 +1442,10 @@ public static class SettingsEndpoints
 
         llamaGroup.MapGet("/downloads/{operationId}", async (
             string operationId,
-            IHuggingFaceModelDownloadService downloadService,
+            ILocalModelOnboardingOrchestrator localModelOnboardingOrchestrator,
             CancellationToken cancellationToken) =>
         {
-            var op = await downloadService.GetOperationStatusAsync(operationId, cancellationToken);
+            var op = await localModelOnboardingOrchestrator.GetOperationStatusAsync(operationId, cancellationToken);
             return op == null ? Results.NotFound() : Results.Ok(op);
         })
         .WithName("GetLlamaModelDownloadStatus")
@@ -1648,11 +1636,8 @@ public static class SettingsEndpoints
 
     private static async Task ValidateAddModelRequestAsync(
         AddModelRequest request,
-        IConfiguration configuration,
         IApplicationSettingsService settingsService,
         IChatTargetValidator chatTargetValidator,
-        ILlamaRuntimeInventoryService inventoryService,
-        IHuggingFaceTokenResolver huggingFaceTokenResolver,
         CancellationToken cancellationToken)
     {
         if (request.Catalog is null)
@@ -1704,76 +1689,16 @@ public static class SettingsEndpoints
                 remediation: "Back up to Step 2 and choose a different model ID.");
         }
 
-        if (string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-            && !RuntimeConfigurationPlaceholders.HasUsableUrl(configuration["LlamaCpp:BaseUrl"]))
-        {
-            throw new AddModelException(
-                code: "PROVIDER_CREDENTIALS_MISSING",
-                step: "validation",
-                message: "Provider section 'LlamaCpp' is not ready: no local llama server is configured for this container yet.",
-                remediation: "Configure a llama server base URL for this container, or choose a cloud chat provider instead.");
-        }
-
         try
         {
             chatTargetValidator.Validate(new ChatTarget(
                 ModelId: modelId,
                 Provider: provider,
-                RuntimeConfigJson: string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-                    ? BuildLlamaLocalRuntimeJson(request)
-                    : null));
+                RuntimeConfigJson: null));
         }
         catch (RoutingException ex)
         {
             throw MapAddModelRoutingException(ex);
-        }
-
-        if (!string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (request.Install is null)
-        {
-            throw new AddModelException(
-                code: "INSTALL_STEP_FAILED",
-                step: "validation",
-                message: "Install details are required for llama-cpp models.",
-                remediation: "Complete Step 3 and pick an install source.");
-        }
-
-        var source = (request.Install.Source ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(source))
-        {
-            throw new AddModelException(
-                code: "INSTALL_STEP_FAILED",
-                step: "validation",
-                message: "Install source is required for llama-cpp models.",
-                remediation: "Choose either Hugging Face or Attach existing alias in Step 3.");
-        }
-
-        if (string.Equals(source, "huggingface", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.IsNullOrWhiteSpace(huggingFaceTokenResolver.Resolve()))
-            {
-                throw new AddModelException(
-                    code: "HUGGINGFACE_TOKEN_MISSING",
-                    step: "validation",
-                    message: "No Hugging Face token is configured.",
-                    remediation: "Open Connections → Hugging Face and save a token before retrying.");
-            }
-
-            var inventory = await inventoryService.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
-            var existingAlias = inventory.FirstOrDefault(item =>
-                string.Equals(item.RouterModelId, request.Install.RouterModelId?.Trim(), StringComparison.Ordinal));
-            if (existingAlias is not null && existingAlias.CatalogModelIds.Count > 0)
-            {
-                throw new AddModelException(
-                    code: "ROUTER_ALIAS_TAKEN",
-                    step: "validation",
-                    message: $"Router alias '{existingAlias.RouterModelId}' is already referenced by catalog rows: {string.Join(", ", existingAlias.CatalogModelIds)}.",
-                    remediation: "Back up to Step 3 and choose a different alias.");
-            }
         }
     }
 
@@ -1823,85 +1748,6 @@ public static class SettingsEndpoints
         return System.Text.Json.JsonSerializer.Serialize(new { runtimeProfileId = profileId });
     }
 
-    private static string BuildLlamaLocalRuntimeJson(AddModelRequest request)
-    {
-        if (request.Install is null)
-        {
-            throw new AddModelException(
-                code: "INSTALL_STEP_FAILED",
-                step: "validation",
-                message: "Install details are required for llama-cpp models.",
-                remediation: "Complete Step 3 and retry.");
-        }
-
-        var routerModelId = (request.Install.RouterModelId ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(routerModelId))
-        {
-            throw new AddModelException(
-                code: "ROUTER_ALIAS_TAKEN",
-                step: "validation",
-                message: "Router alias is required.",
-                remediation: "Enter a router alias in Step 3.");
-        }
-
-        var runtimeProfileId = (request.Install.RuntimeProfileId ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(runtimeProfileId))
-        {
-            throw new AddModelException(
-                code: "RUNTIME_PROFILE_NOT_FOUND",
-                step: "validation",
-                message: "Runtime profile is required.",
-                remediation: "Pick a runtime profile in Step 3.");
-        }
-
-        int? ctx = request.Install?.RouterContextSize;
-        int? cache = request.Install?.RouterCacheRamMib;
-
-        var config = new LocalRuntimeConfiguration(
-            RouterModelId: routerModelId,
-            RuntimeProfileId: runtimeProfileId,
-            LoadParams: new JsonObject
-            {
-                ["model"] = routerModelId,
-            },
-            ParallelToolCalls: false,
-            RouterContextSize: ctx,
-            RouterCacheRamMib: cache);
-
-        return LocalRuntimeConfigurationParser.SerializeCanonical(config);
-    }
-
-    private static StartModelDownloadRequest BuildStartModelDownloadRequest(AddModelRequest request)
-    {
-        if (request.Install?.HuggingFace is null)
-        {
-            throw new AddModelException(
-                code: "INSTALL_STEP_FAILED",
-                step: "validation",
-                message: "Hugging Face install details are required.",
-                remediation: "Complete the Hugging Face source fields in Step 3.");
-        }
-
-        return new StartModelDownloadRequest(
-            Repository: request.Install.HuggingFace.Repository.Trim(),
-            QuantIncludePattern: request.Install.HuggingFace.QuantIncludePattern.Trim(),
-            MmprojIncludePattern: request.Install.HuggingFace.MmprojIncludePattern.Trim(),
-            RouterModelId: request.Install.RouterModelId.Trim(),
-            TargetDirectory: request.Install.HuggingFace.TargetDirectory.Trim(),
-            CatalogModelId: request.Catalog.ModelId.Trim(),
-            CatalogDisplayName: request.Catalog.DisplayName.Trim(),
-            CatalogRuntimeProfileId: request.Install.RuntimeProfileId.Trim(),
-            CatalogDescription: string.IsNullOrWhiteSpace(request.Catalog.Description)
-                ? null
-                : request.Catalog.Description.Trim(),
-            CatalogIsActive: request.Catalog.IsActive,
-            CatalogDisplayOrder: request.Catalog.DisplayOrder,
-            CatalogLoadParamsJson: JsonSerializer.Serialize(new { model = request.Install.RouterModelId.Trim() }),
-            CatalogParallelToolCalls: false,
-            CatalogRouterContextSize: request.Install?.RouterContextSize,
-            CatalogRouterCacheRamMib: request.Install?.RouterCacheRamMib);
-    }
-
     private static async Task<string?> DeriveLlamaReasoningChoicesJsonAsync(
         IRuntimeProfileResolver runtimeProfileResolver,
         string runtimeProfileId,
@@ -1930,21 +1776,8 @@ public static class SettingsEndpoints
             return null;
         }
 
-        var profile = await runtimeProfileResolver.ResolveAsync(runtimeProfileId.Trim(), cancellationToken)
+        return await DeriveLlamaReasoningChoicesJsonAsync(runtimeProfileResolver, runtimeProfileId, cancellationToken)
             .ConfigureAwait(false);
-
-        if (profile.ThinkingControl?.ChoiceActions is null)
-        {
-            return null;
-        }
-
-        var choices = profile.ThinkingControl.ChoiceActions.Keys
-            .Where(choice => !string.IsNullOrWhiteSpace(choice))
-            .Select(choice => choice.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        return choices.Count == 0 ? null : JsonSerializer.Serialize(choices);
     }
 
     private static bool GetProviderConfigBoolean(JsonObject? providerConfig, string propertyName)

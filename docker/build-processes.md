@@ -30,7 +30,7 @@ The AI image is deliberately split into `deps-*` and `final-*` stages. These req
 - The hash tag is for exact image selection. The stable `guideants-ai-deps:<backend>-cache` tag is for layer reuse across deps hash changes.
 - `-RebuildBase` is the only normal path that intentionally disables this cache behavior.
 
-The build script supports those requirements by tagging every deps build with both the hash tag and stable cache tag, importing the stable cache tag with `--cache-from`, and exporting deps cache with `mode=max` plus inline cache metadata.
+The build script supports those requirements by tagging every deps build with both the hash tag and stable cache tag, importing the stable cache tag with `--cache-from`, and exporting deps cache with `mode=min` to prioritize local developer throughput.
 
 ## GHCR Publish Workflows
 
@@ -83,6 +83,13 @@ Script flow:
 10. Writes `GA_AI_CUDA_IMAGE=<new tag>`, `GA_AI_CPU_IMAGE=<new tag>`, or `GA_AI_ROCM_IMAGE=<new tag>` into `docker/.env`.
 11. If `-All` is set, also builds PlantUML and MSSQL FTS images, then invokes `build_webapi_ui.ps1` to build the compose-used WebAPI+UI image.
 
+Recommended one-time local setup for maximum cache effectiveness:
+
+```powershell
+docker buildx create --name guideants-builder --driver docker-container --use
+docker buildx inspect --bootstrap
+```
+
 ## 3) AI Multi-Stage Build (Why It Matters)
 
 The AI build uses backend-specific Dockerfiles, each split into runtime base, Python dependency build, dependency runtime image, and final app layer:
@@ -112,7 +119,7 @@ What is in `final-*` (light app/service layer):
 Why this is the clean extension path:
 - Most service-extension changes (gateway routes, startup logic, agent publish output, runtime scripts) are in `final-*`.
 - Heavy dependency rebuilds are avoided by reusing hash tags for exact deps identity and stable `guideants-ai-deps:<backend>-cache` tags for layer reuse across deps hash changes.
-- The deps build exports `mode=max` BuildKit cache plus inline cache metadata, so intermediate builder stages can be reused when a later deps instruction changes.
+- The deps build exports `mode=min` local BuildKit cache so layer reuse remains effective while cache export overhead stays lower for local development.
 - `requirements.txt` is only reinstalled when dependency inputs change (or when `-RebuildBase` is used).
 
 This is the main optimization that keeps AI image iteration fast while still allowing new services/processes to be added cleanly.
@@ -140,7 +147,7 @@ Dockerfile stages:
 
 Script behavior:
 1. Builds timestamped tag `guideants-webapi-ui:<YYDDD>.<HHmm>`.
-2. Rebuilds `api-build` by default; pass `-UseAppBuildCache` to allow Docker cache reuse for that stage.
+2. By default, allows app-stage cache reuse for faster local iteration. Use `-NoAppBuildCache` when you need deterministic `api-build` stage rebuilds.
 3. Writes/repairs `GA_WEBAPI_UI_IMAGE` in `docker/.env`.
 4. Recreates `guideants-webapi-ui` container unless `-NoRecreate` is passed.
 
@@ -179,6 +186,38 @@ docker compose -f docker-compose.cuda.yml up -d --no-deps --force-recreate guide
 ```
 
 Because the build scripts update `.env`, compose picks up the newest `GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, and `GA_WEBAPI_UI_IMAGE` automatically.
+
+## 6.1) Windows CRLF Shebang Failure (`/usr/bin/env: 'bash\r'`)
+
+If `guideants-webapi-ui` or `searxng` immediately restart with logs like:
+
+`/usr/bin/env: 'bash\r': No such file or directory`
+
+the container entrypoint script was copied into the image with Windows CRLF line endings.
+
+Why it may happen on one Windows machine but not another:
+- Git on that machine may be configured with `core.autocrlf=true` (often from system `gitconfig`).
+- Without an explicit `.gitattributes` override, shell scripts can be checked out as CRLF on that machine.
+
+Repository guardrail:
+- Root `.gitattributes` now enforces LF for shell scripts: `*.sh text eol=lf`.
+
+Recovery steps:
+1. Rebuild WebAPI+UI with a clean Docker build path:
+   - `pwsh .\docker\build\build_webapi_ui.ps1 -NoCache`
+2. Recreate the service:
+   - `docker compose -f docker-compose.cuda.yml up -d --no-deps --force-recreate guideants-webapi-ui`
+3. Rebuild SearXNG:
+   - `docker compose -f docker-compose.cuda.yml build searxng`
+4. Recreate SearXNG:
+   - `docker compose -f docker-compose.cuda.yml up -d --no-deps --force-recreate searxng`
+
+Note on `-RebuildBase`:
+- `build_guideants_ai.ps1 -RebuildBase -All` applies no-cache behavior to GuideAnts AI and WebAPI+UI builds.
+- The SearXNG build in `-All` currently uses a normal `docker build` path (not forced `--no-cache`).
+- If you suspect a stale cached SearXNG image, remove and rebuild:
+  - `docker rmi guideants-searxng:latest`
+  - then rerun your build script.
 
 ## 7) SQL Recovery Model On New Installs
 

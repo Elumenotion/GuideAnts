@@ -230,7 +230,6 @@ public sealed class SpeechTranscriptionServiceTests
             configurationValues: new Dictionary<string, string?>
             {
                 ["GoogleGeminiApi:ApiKey"] = "gemini-key",
-                ["HuggingFace:AsrAllowedModels"] = "some-other-model"
             },
             modelId: "gemini-2.5-flash");
 
@@ -266,9 +265,6 @@ public sealed class SpeechTranscriptionServiceTests
             configurationValues: new Dictionary<string, string?>
             {
                 ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1",
-                ["HuggingFace:AsrAllowedModels"] = "hf-asr-model",
-                ["OpenRouter:TranscriptionAllowedModels"] = "some-other-model"
             },
             modelId: "hf-asr-model");
 
@@ -277,78 +273,8 @@ public sealed class SpeechTranscriptionServiceTests
 
         result.Text.Should().Be("hello hugging face");
         handler.LastRequestUri.Should().NotBeNull();
-        handler.LastRequestUri!.ToString().Should().Be("https://router.huggingface.co/hf-inference/models/hf-asr-model");
+        handler.LastRequestUri!.ToString().Should().Be("https://api-inference.huggingface.co/models/hf-asr-model");
         handler.LastRequestHeaders.Should().ContainKey("Authorization");
-    }
-
-    [TestMethod]
-    public async Task TranscribeAudioWithDurationAsync_HuggingFace_ThrowsWithHttpStatusAndBody_OnRateLimit()
-    {
-        var handler = new CapturingHandler(_ =>
-            new HttpResponseMessage((HttpStatusCode)429)
-            {
-                Content = new StringContent(
-                    "{\"error\":\"rate limited\"}",
-                    Encoding.UTF8,
-                    "application/json")
-            });
-
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(
-            httpClient,
-            providerSection: HuggingFaceProviderSection,
-            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused" },
-            transcriptionOptions: new SpeechTranscriptionOptions { TimeoutSeconds = 120 },
-            localServiceHostsOptions: new LocalServiceHostsOptions(),
-            configurationValues: new Dictionary<string, string?>
-            {
-                ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:AsrAllowedModels"] = "hf-asr-model"
-            },
-            modelId: "hf-asr-model");
-
-        await using var audio = new MemoryStream(new byte[1024]);
-        var act = async () => await service.TranscribeAudioWithDurationAsync(audio, "recording.wav", "audio/wav");
-
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Hugging Face ASR failed (429)*rate limited*");
-    }
-
-    [TestMethod]
-    public async Task TranscribeAudioWithDurationAsync_HuggingFace_UsesTimestampPayloadAndParsesChunks()
-    {
-        var handler = new CapturingHandler(_ =>
-            new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(
-                    "{\"text\":\"hello hugging face\",\"chunks\":[{\"text\":\"hello\",\"timestamp\":[0.0,0.8]},{\"text\":\"hugging face\",\"timestamp\":[0.8,1.7]}]}",
-                    Encoding.UTF8,
-                    "application/json")
-            });
-
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(
-            httpClient,
-            providerSection: HuggingFaceProviderSection,
-            azureOptions: new AzureSpeechServiceOptions { Endpoint = "https://azure-speech.example.com", ApiKey = "unused" },
-            transcriptionOptions: new SpeechTranscriptionOptions { TimeoutSeconds = 120 },
-            localServiceHostsOptions: new LocalServiceHostsOptions(),
-            configurationValues: new Dictionary<string, string?>
-            {
-                ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:AsrAllowedModels"] = "hf-asr-model"
-            },
-            modelId: "hf-asr-model",
-            requestPresetJson: "{\"ReturnTimestamps\":true}");
-
-        await using var audio = new MemoryStream(new byte[1024]);
-        var result = await service.TranscribeAudioWithDurationAsync(audio, "recording.wav", "audio/wav");
-
-        result.Text.Should().Contain("[0.0-0.8] hello");
-        result.Text.Should().Contain("[0.8-1.7] hugging face");
-        handler.LastRequestBody.Should().Contain("\"return_timestamps\":true");
-        handler.LastRequestBody.Should().Contain("\"inputs\":");
-        handler.LastRequestBody.Should().NotContain("Content-Type: audio/wav");
     }
 
     [TestMethod]
@@ -374,7 +300,6 @@ public sealed class SpeechTranscriptionServiceTests
             {
                 ["OpenRouter:ApiKey"] = "or-key",
                 ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1",
-                ["OpenRouter:TranscriptionAllowedModels"] = "openai/whisper-1"
             },
             modelId: "openai/whisper-1");
 
@@ -395,8 +320,7 @@ public sealed class SpeechTranscriptionServiceTests
         LocalServiceHostsOptions localServiceHostsOptions,
         Mock<IVideoAudioExtractionService>? videoService = null,
         IDictionary<string, string?>? configurationValues = null,
-        string? modelId = null,
-        string? requestPresetJson = null)
+        string? modelId = null)
     {
         var speechOptionsMonitor = new Mock<IOptionsMonitor<AzureSpeechServiceOptions>>();
         speechOptionsMonitor.SetupGet(x => x.CurrentValue).Returns(azureOptions);
@@ -431,7 +355,7 @@ public sealed class SpeechTranscriptionServiceTests
                     ModeId: "default",
                     ProviderSection: providerSection,
                     ModelId: modelId,
-                    RequestPresetJson: requestPresetJson,
+                    RequestPresetJson: null,
                     Enabled: true,
                     IsDefault: true)));
         var configuration = new ConfigurationBuilder()

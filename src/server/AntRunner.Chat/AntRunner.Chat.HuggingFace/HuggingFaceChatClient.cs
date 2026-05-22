@@ -39,16 +39,12 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         ChatCompletionRequest request,
         CancellationToken cancellationToken = default)
     {
-        var payload = CreatePayloadOrThrow(request, stream: false);
+        var payload = HuggingFaceRequestMapper.ToRequest(request, ResolveModel(request), stream: false);
         using var message = CreateRequestMessage(payload);
         using var response = await _httpClient.SendAsync(message, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogError(
-                "Hugging Face chat request failed. status={StatusCode} body={Body}",
-                (int)response.StatusCode,
-                body);
             throw new InvalidOperationException(
                 $"Hugging Face chat request failed ({(int)response.StatusCode}): {body}");
         }
@@ -63,7 +59,7 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         Action<ChatCompletionChunk> onChunk,
         CancellationToken cancellationToken = default)
     {
-        var payload = CreatePayloadOrThrow(request, stream: true);
+        var payload = HuggingFaceRequestMapper.ToRequest(request, ResolveModel(request), stream: true);
         using var message = CreateRequestMessage(payload);
         using var response = await _httpClient.SendAsync(
             message,
@@ -72,10 +68,6 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            _logger.LogError(
-                "Hugging Face chat stream failed. status={StatusCode} body={Body}",
-                (int)response.StatusCode,
-                errorBody);
             throw new InvalidOperationException(
                 $"Hugging Face chat stream failed ({(int)response.StatusCode}): {errorBody}");
         }
@@ -149,26 +141,6 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
         return model;
     }
 
-    private HuggingFaceChatRequest CreatePayloadOrThrow(ChatCompletionRequest request, bool stream)
-    {
-        var model = ResolveModel(request);
-        try
-        {
-            return HuggingFaceRequestMapper.ToRequest(request, model, stream);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
-        {
-            _logger.LogError(
-                ex,
-                "Failed to map Hugging Face request payload. model={Model} stream={Stream} messageCount={MessageCount} messageShapes={MessageShapes}",
-                model,
-                stream,
-                request.Messages.Count,
-                HuggingFaceRequestMapper.DescribeMessageShapes(request.Messages));
-            throw;
-        }
-    }
-
     private static bool ProcessServerSentEvent(
         string payload,
         HuggingFaceStreamingAccumulator accumulator,
@@ -198,15 +170,9 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
     {
         public static HuggingFaceChatRequest ToRequest(ChatCompletionRequest request, string model, bool stream)
         {
-            var messages = new List<HuggingFaceChatMessage>(request.Messages.Count);
-            for (var messageIndex = 0; messageIndex < request.Messages.Count; messageIndex++)
-            {
-                messages.Add(ToMessage(request.Messages[messageIndex], messageIndex));
-            }
-
             return new HuggingFaceChatRequest(
                 Model: model,
-                Messages: messages,
+                Messages: request.Messages.Select(ToMessage).ToList(),
                 Tools: request.Tools?.Select(ToTool).ToList(),
                 Temperature: request.Temperature,
                 TopP: request.TopP,
@@ -214,27 +180,7 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
                 Stream: stream);
         }
 
-        public static string DescribeMessageShapes(IReadOnlyList<ChatMessage> messages)
-        {
-            if (messages.Count == 0)
-            {
-                return "[]";
-            }
-
-            var parts = new List<string>(messages.Count);
-            for (var messageIndex = 0; messageIndex < messages.Count; messageIndex++)
-            {
-                var message = messages[messageIndex];
-                var contentShape = message.Content.Count == 0
-                    ? "content=[]"
-                    : $"content=[{string.Join(",", message.Content.Select(DescribeContentShape))}]";
-                parts.Add($"#{messageIndex} role={message.Role} {contentShape}");
-            }
-
-            return string.Join("; ", parts);
-        }
-
-        private static HuggingFaceChatMessage ToMessage(ChatMessage message, int messageIndex)
+        private static HuggingFaceChatMessage ToMessage(ChatMessage message)
         {
             if (message.Role == ChatRole.Tool)
             {
@@ -247,28 +193,12 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
                     message.FunctionName);
             }
 
-            var mappableContent = GetMappableContent(message.Content);
-            if (mappableContent.Count == 0
-                && message.Content.Count > 0
-                && (message.ToolCalls == null || message.ToolCalls.Count == 0))
-            {
-                ToContentPart(message.Content[0], message.Role, messageIndex, 0);
-            }
-
-            string? contentText = null;
-            IReadOnlyList<HuggingFaceChatContentPart>? contentParts = null;
-
-            if (mappableContent.Count == 1 && mappableContent[0].IsText)
-            {
-                contentText = mappableContent[0].Text;
-            }
-            else if (mappableContent.Count > 0)
-            {
-                contentParts = mappableContent
-                    .Select((content, contentIndex) => ToContentPart(content, message.Role, messageIndex, contentIndex))
-                    .ToList();
-            }
-
+            var contentText = message.Content.Count == 1 && message.Content[0].IsText
+                ? message.Content[0].Text
+                : null;
+            var contentParts = contentText == null
+                ? message.Content.Select(ToContentPart).ToList()
+                : null;
             var toolCalls = message.ToolCalls?.Count > 0
                 ? message.ToolCalls.Select(ToToolCall).ToList()
                 : null;
@@ -280,35 +210,6 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
                 toolCalls,
                 null,
                 null);
-        }
-
-        /// <summary>
-        /// Drops empty text parts (e.g. <c>new ChatContent("")</c>) that are not <see cref="ChatContent.IsText"/>
-        /// but still appear in <see cref="ChatMessage.Content"/> after tool-call turns.
-        /// </summary>
-        private static IReadOnlyList<ChatContent> GetMappableContent(IReadOnlyList<ChatContent> content)
-        {
-            if (content.Count == 0)
-            {
-                return content;
-            }
-
-            var filtered = new List<ChatContent>(content.Count);
-            foreach (var part in content)
-            {
-                if (part.IsImage)
-                {
-                    filtered.Add(part);
-                    continue;
-                }
-
-                if (part.IsText)
-                {
-                    filtered.Add(part);
-                }
-            }
-
-            return filtered;
         }
 
         private static HuggingFaceChatTool ToTool(ChatToolDefinition tool)
@@ -336,7 +237,7 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
                         ? toolCall.Function.Arguments.GetString() ?? "{}"
                         : toolCall.Function.Arguments.GetRawText()));
 
-        private static HuggingFaceChatContentPart ToContentPart(ChatContent content, ChatRole role, int messageIndex, int contentIndex)
+        private static HuggingFaceChatContentPart ToContentPart(ChatContent content)
         {
             if (content.IsText)
             {
@@ -351,32 +252,7 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
                     new HuggingFaceChatImageUrl(content.ImageUrl.Url));
             }
 
-            var shape = DescribeContentShape(content);
-            var userFacing = content.IsImage
-                ? "The chat model routed through Hugging Face does not support image inputs. "
-                  + "Either switch to a vision-capable model or remove the image attachment."
-                : $"A message content part could not be mapped for the Hugging Face chat provider "
-                  + $"(message[{messageIndex}] role='{ToRole(role)}' part[{contentIndex}]: {shape}).";
-
-            throw new InvalidOperationException(userFacing);
-        }
-
-        private static string DescribeContentShape(ChatContent content)
-        {
-            var textState = content.Text switch
-            {
-                null => "null",
-                "" => "empty",
-                _ => "present"
-            };
-            var imageState = content.ImageUrl?.Url switch
-            {
-                null => "null",
-                "" => "empty",
-                _ => "present"
-            };
-
-            return $"isText={content.IsText},isImage={content.IsImage},text={textState},imageUrl={imageState}";
+            throw new InvalidOperationException("Unsupported Hugging Face content item.");
         }
 
         private static string ToRole(ChatRole role) => role switch

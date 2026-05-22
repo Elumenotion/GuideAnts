@@ -50,8 +50,49 @@ SERVER_PATH="$REPO_ROOT/src/server"
 BUILD_CONTEXT="$SCRIPT_DIR/guideants-ai"
 DEPS_CACHE_PATH="$DOCKER_ROOT/.buildx-cache-deps"
 FINAL_CACHE_PATH="$DOCKER_ROOT/.buildx-cache-final"
+DEPS_CACHE_PATH_NEW="${DEPS_CACHE_PATH}-new"
+FINAL_CACHE_PATH_NEW="${FINAL_CACHE_PATH}-new"
 
 export DOCKER_BUILDKIT=1
+
+mkdir -p "$DEPS_CACHE_PATH" "$FINAL_CACHE_PATH"
+rm -rf "$DEPS_CACHE_PATH_NEW" "$FINAL_CACHE_PATH_NEW"
+
+promote_local_cache() {
+  local current_path="$1"
+  local new_path="$2"
+
+  [[ -d "$new_path" ]] || return 0
+  rm -rf "$current_path"
+  mv "$new_path" "$current_path"
+}
+
+buildx_supports_cache_export() {
+  local inspect_output
+  if ! inspect_output="$(docker buildx inspect --bootstrap 2>/dev/null)"; then
+    echo "WARNING: Could not inspect Docker Buildx builder. Disabling local cache export (--cache-to) for this run." >&2
+    return 1
+  fi
+
+  local driver
+  driver="$(printf '%s\n' "$inspect_output" | awk -F': ' '/^[[:space:]]*Driver:/ {print tolower($2); exit}')"
+  if [[ -z "$driver" ]]; then
+    echo "WARNING: Could not determine Buildx driver. Disabling local cache export (--cache-to) for this run." >&2
+    return 1
+  fi
+
+  if [[ "$driver" == "docker" ]]; then
+    echo "WARNING: Buildx driver 'docker' does not support cache export. Continuing without --cache-to." >&2
+    return 1
+  fi
+
+  return 0
+}
+
+BUILDX_CACHE_EXPORT_SUPPORTED=false
+if buildx_supports_cache_export; then
+  BUILDX_CACHE_EXPORT_SUPPORTED=true
+fi
 
 get_combined_hash() {
   local -a paths=("$@")
@@ -138,11 +179,10 @@ case "$choice" in
     ;;
 esac
 
-# Build a unique tag per build, and also maintain a stable backend-specific latest tag.
 JULIAN_DAY="$(date +%y%j)"
 TIME_STAMP="$(date +%H%M)"
 IMAGE_TAG="guideants-ai:${BACKEND}-${JULIAN_DAY}.${TIME_STAMP}"
-LATEST_TAG="guideants-ai:${BACKEND}-latest"
+LATEST_IMAGE_TAG="guideants-ai:${BACKEND}-latest"
 
 echo "============================================"
 echo "  Building GuideAnts AI"
@@ -150,7 +190,7 @@ echo "============================================"
 echo "Backend:       $BACKEND"
 echo "Target stage:  $FULL_TARGET"
 echo "Image tag:     $IMAGE_TAG"
-echo "Latest tag:    $LATEST_TAG"
+echo "Latest alias:  $LATEST_IMAGE_TAG"
 echo "Deps target:   $DEPS_TARGET"
 echo "Rebuild base:  $REBUILD_BASE"
 if [[ "$BUILD_ALL" == "true" ]]; then
@@ -244,15 +284,19 @@ if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
     fi
   fi
   DEPS_BUILD_ARGS+=(
-    --cache-to "type=local,dest=$DEPS_CACHE_PATH,mode=max"
-    --cache-to type=inline
     --target "$DEPS_TARGET"
     -t "$DEPS_TAG"
     -t "$DEPS_CACHE_TAG"
     -f "$DOCKERFILE_PATH"
     "$BUILD_CONTEXT"
   )
+  if [[ "$BUILDX_CACHE_EXPORT_SUPPORTED" == "true" ]]; then
+    DEPS_BUILD_ARGS+=(
+      --cache-to "type=local,dest=$DEPS_CACHE_PATH_NEW,mode=min"
+    )
+  fi
   docker "${DEPS_BUILD_ARGS[@]}"
+  promote_local_cache "$DEPS_CACHE_PATH" "$DEPS_CACHE_PATH_NEW"
 else
   echo "Reusing cached dependency image: $DEPS_TAG"
   docker tag "$DEPS_TAG" "$DEPS_CACHE_TAG"
@@ -266,15 +310,20 @@ DOCKER_ARGS+=(
   --cache-from "type=local,src=$DEPS_CACHE_PATH"
   --cache-from "type=local,src=$FINAL_CACHE_PATH"
   --cache-from "$DEPS_CACHE_TAG"
-  --cache-to "type=local,dest=$FINAL_CACHE_PATH,mode=min"
   --build-arg "${DEPS_IMAGE_ARG}=$DEPS_TAG"
   --target "$FULL_TARGET"
   -t "$IMAGE_TAG"
-  -t "$LATEST_TAG"
+  -t "$LATEST_IMAGE_TAG"
   -f "$DOCKERFILE_PATH"
   "$BUILD_CONTEXT"
 )
+if [[ "$BUILDX_CACHE_EXPORT_SUPPORTED" == "true" ]]; then
+  DOCKER_ARGS+=(
+    --cache-to "type=local,dest=$FINAL_CACHE_PATH_NEW,mode=min"
+  )
+fi
 docker "${DOCKER_ARGS[@]}"
+promote_local_cache "$FINAL_CACHE_PATH" "$FINAL_CACHE_PATH_NEW"
 
 echo "Image built: $IMAGE_TAG"
 
@@ -285,7 +334,7 @@ case "$BACKEND" in
   slim) IMAGE_ENV_KEY="GA_AI_SLIM_IMAGE" ;;
   *) IMAGE_ENV_KEY="GA_AI_CPU_IMAGE" ;;
 esac
-ENV_LINE="$IMAGE_ENV_KEY=$LATEST_TAG"
+ENV_LINE="$IMAGE_ENV_KEY=$LATEST_IMAGE_TAG"
 
 if [[ -f "$ENV_FILE" ]]; then
   if grep -qE "^${IMAGE_ENV_KEY}=" "$ENV_FILE"; then
@@ -343,7 +392,5 @@ DEPS_SIZE_MB="$([ -n "$DEPS_SIZE" ]  && awk "BEGIN{printf \"%.1f MB\", $DEPS_SIZ
 echo
 echo "============================================"
 echo "  Build complete: $IMAGE_TAG"
-echo "  Updated latest: $LATEST_TAG"
-echo "  Final image:    $FINAL_SIZE_MB"
-echo "  Deps image:     $DEPS_SIZE_MB"
+echo "  Latest alias:   $LATEST_IMAGE_TAG"
 echo "============================================"

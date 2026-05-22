@@ -35,7 +35,7 @@ internal sealed class ProviderRoutedEmbeddingService(
             .ResolveAsync(RoutedServiceNames.Embeddings, modeId: null, cancellationToken)
             .ConfigureAwait(false);
 
-        var vectors = mode.ProviderSection switch
+        return mode.ProviderSection switch
         {
             AzureProviderSection => await _azureEmbeddingService
                 .GetEmbeddingsAsync(texts, purpose, cancellationToken)
@@ -65,8 +65,6 @@ internal sealed class ProviderRoutedEmbeddingService(
                 serviceId: RoutedServiceNames.Embeddings,
                 modeId: mode.ModeId)
         };
-
-        return EmbeddingVectorDimensions.NormalizeBatchToTarget(vectors);
     }
 
     private static string RequireModelId(ServiceMode mode)

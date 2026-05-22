@@ -44,7 +44,9 @@ The local build script enforces this with two deps tags per backend:
 - `guideants-ai-deps:<backend>-<hash12>` is the exact deps image selected by dependency inputs.
 - `guideants-ai-deps:<backend>-cache` is the stable moving cache anchor used by later deps builds.
 
-The deps build also exports `mode=max` BuildKit cache and inline cache metadata. Those two features are required because the deps target depends on intermediate builder stages such as `sd-cli-*-builder` and `pydeps-*`; the cache must include those intermediate records, not only the final deps image layer.
+The deps build exports local BuildKit cache metadata with `mode=min` by default to optimize developer throughput. This reduces cache export overhead on local machines while preserving the stable deps cache tag (`guideants-ai-deps:<backend>-cache`) for reuse across dependency hash changes.
+
+If the active Buildx driver does not support cache export (for example `docker`), the build scripts now automatically continue without `--cache-to` and emit a warning. This avoids hard failures on machines with different Docker Buildx defaults.
 
 ## GHCR Publishing
 
@@ -128,7 +130,7 @@ This removes duplicate torch/CUDA wheel installation and reduces image size.
 ### Caching behavior
 
 - BuildKit cache mounts are used for `apt` and `pip` in heavy stages.
-- The deps build exports a `mode=max` BuildKit cache and inline cache metadata so intermediate builder stages can be reused across deps hash changes.
+- The deps build exports a `mode=min` local BuildKit cache to keep local iteration fast while still enabling reuse across deps hash changes.
 - The build script computes a hash from dependency inputs and tags dependency images:
   - `guideants-ai-deps:cpu-<hash12>`
   - `guideants-ai-deps:cuda13-<hash12>`
@@ -140,6 +142,22 @@ This removes duplicate torch/CUDA wheel installation and reduces image size.
 - If the deps image is missing, the script rebuilds it with the stable cache tag as `--cache-from` so unchanged deps layers can be reused across hash changes.
 - `-RebuildBase` still forces no-cache builds for dependency and final targets.
 
+#### Troubleshooting: `Cache export is not supported for the docker driver`
+
+If the build fails with:
+
+`Cache export is not supported for the docker driver.`
+
+the `--cache-to` export path is unsupported in the current Buildx/engine configuration.
+Use this recovery sequence on Windows Docker Desktop:
+
+1. `docker context use desktop-linux`
+2. `docker buildx use desktop-linux`
+3. In Docker Desktop settings, enable **containerd image store** ("Use containerd for pulling and storing images")
+4. Restart Docker Desktop
+5. Verify with `docker buildx inspect --bootstrap`
+6. Re-run `build_guideants_ai.ps1`
+
 ## Script Behavior
 
 Build script: `docker/build/build_guideants_ai.ps1`
@@ -150,6 +168,35 @@ Supported switches:
 - `-RebuildBase`: prompt for backend, force rebuild without cache
 - `-All`: build GuideAnts AI, PlantUML, MSSQL, and the compose-used WebAPI+UI image
 - `-RebuildBase -All`: full no-cache GuideAnts AI build plus additional images
+
+### Troubleshooting: `/usr/bin/env: 'bash\r': No such file or directory`
+
+If `guideants-webapi-ui` or `guideants-searxng` containers restart with:
+
+`/usr/bin/env: 'bash\r': No such file or directory`
+
+the image contains entrypoint scripts with CRLF line endings.
+
+Machine-specific cause on Windows:
+- Git may be configured with `core.autocrlf=true` on one machine and not others.
+- With only generic `text=auto`, `.sh` files can be checked out as CRLF and copied into Linux images as `bash\r`.
+
+Repository safeguard:
+- Root `.gitattributes` enforces LF for shell scripts: `*.sh text eol=lf`.
+
+Recommended rebuild commands:
+1. WebAPI+UI:
+   - `pwsh .\docker\build\build_webapi_ui.ps1 -NoCache`
+2. SearXNG:
+   - `docker compose -f docker/docker-compose.cuda.yml build searxng`
+   - `docker compose -f docker/docker-compose.cuda.yml up -d --no-deps --force-recreate searxng`
+
+Cache note:
+- `-RebuildBase` forces no-cache for GuideAnts AI dependency/final targets.
+- In `-All`, SearXNG currently builds via a normal `docker build` path.
+- If SearXNG appears stale, run:
+  - `docker rmi guideants-searxng:latest`
+  - rerun the build command/script.
 
 ### Build flow
 
@@ -163,6 +210,17 @@ Supported switches:
 8. Clean staged artifacts
 9. Write `GA_AI_CUDA_IMAGE=<final-tag>`, `GA_AI_CPU_IMAGE=<final-tag>`, or `GA_AI_ROCM_IMAGE=<final-tag>` to `docker/.env`
 10. Optionally build PlantUML/MSSQL and invoke `build_webapi_ui.ps1` if `-All` was passed
+
+### Buildx Driver Recommendation
+
+For reliable local cache export and best build times, use a `docker-container` Buildx builder:
+
+```powershell
+docker buildx create --name guideants-builder --driver docker-container --use
+docker buildx inspect --bootstrap
+```
+
+Without this setup, builds still succeed, but cache export is disabled for that run and a warning is shown.
 
 ## File Layout
 

@@ -8,23 +8,25 @@ import {
 } from '../utils';
 
 describe('buildAddModelRequest', () => {
-  it('builds openai-chat request with reasoning toggle', () => {
+  it('builds openai-chat request with runtime profile', () => {
     const state = createEmptyAddModelWizardState('openai-chat');
     state.catalogModelId = 'gpt-4o-chat';
     state.catalogDisplayName = 'GPT-4o Chat';
-    state.openAiReasoningEffortEnabled = true;
+    state.runtimeProfileId = 'openai_default';
 
     const request = buildAddModelRequest(state);
 
     expect(request.provider).toBe('openai-chat');
-    expect(request.providerConfig).toEqual({ reasoningEffortEnabled: true });
+    expect(request.providerConfig).toEqual({ runtimeProfileId: 'openai_default' });
     expect(request.install).toBeUndefined();
   });
 
-  it('defaults anthropic add-model state to thinking choices enabled', () => {
+  it('defaults anthropic add-model state with expected empty fields', () => {
     const state = createEmptyAddModelWizardState('anthropic');
 
-    expect(state.anthropicThinkingEnabled).toBe(true);
+    expect(state.provider).toBe('anthropic');
+    expect(state.runtimeProfileId).toBe('');
+    expect(state.catalogIsActive).toBe(true);
   });
 
   it('builds llama-cpp huggingface request', () => {
@@ -32,16 +34,17 @@ describe('buildAddModelRequest', () => {
     state.catalogModelId = 'qwen3.5-local';
     state.catalogDisplayName = 'Qwen3.5 Local';
     state.llamaInstallSource = 'huggingface';
-    state.llamaRuntimeProfileId = 'qwen3_5';
+    state.runtimeProfileId = 'qwen3_5';
     state.llamaRouterModelId = 'Qwen3.5-9B-Q5_K_M';
     state.llamaHuggingFaceRepository = 'unsloth/Qwen3.5-9B-GGUF';
     state.llamaHuggingFaceQuantIncludePattern = '*Q5_K_M*';
-    state.llamaHuggingFaceMmprojIncludePattern = '*mmproj*';
+    state.llamaHuggingFaceMmprojIncludePattern = '';
     state.llamaHuggingFaceTargetDirectory = 'Qwen3.5-9B-Q5_K_M';
 
     const request = buildAddModelRequest(state);
 
     expect(request.provider).toBe('llama-cpp');
+    expect(request.providerConfig).toEqual({ onboardingUi: 'settings' });
     expect(request.install?.source).toBe('huggingface');
     expect(request.install?.huggingFace?.repository).toBe('unsloth/Qwen3.5-9B-GGUF');
   });
@@ -51,7 +54,7 @@ describe('buildAddModelRequest', () => {
     state.catalogModelId = 'adopted-alias-model';
     state.catalogDisplayName = 'Adopted Alias Model';
     state.llamaInstallSource = 'existingAlias';
-    state.llamaRuntimeProfileId = 'qwen3_5';
+    state.runtimeProfileId = 'qwen3_5';
     state.llamaExistingAliasRouterModelId = 'Qwen3.5-9B-Q5_K_M';
 
     const request = buildAddModelRequest(state);
@@ -62,7 +65,7 @@ describe('buildAddModelRequest', () => {
 });
 
 describe('buildCatalogEditRequest', () => {
-  it('builds llama-cpp edit request with canonical localRuntimeJson', () => {
+  it('builds llama-cpp edit request with canonical runtimeConfigJson', () => {
     const request = buildCatalogEditRequest({
       modelId: 'qwen-local',
       provider: 'llama-cpp',
@@ -70,10 +73,8 @@ describe('buildCatalogEditRequest', () => {
       description: '',
       displayOrder: '',
       isActive: true,
-      openAiReasoningEffortEnabled: false,
-      anthropicThinkingEnabled: false,
+      runtimeProfileId: 'qwen3_5',
       localRuntimeRouterModelId: 'QwenAlias',
-      localRuntimeProfileId: 'qwen3_5',
       localRuntimeLoadParamsJson: '{"model":"QwenAlias"}',
       localRuntimeParallelToolCalls: false,
       localRuntimeRouterContextSize: '',
@@ -81,8 +82,8 @@ describe('buildCatalogEditRequest', () => {
     });
 
     expect(request.modelId).toBe('qwen-local');
-    expect(request.localRuntimeJson).toContain('"routerModelId": "QwenAlias"');
-    expect(request.localRuntimeJson).toContain('"runtimeProfileId": "qwen3_5"');
+    expect(request.runtimeConfigJson).toContain('"routerModelId": "QwenAlias"');
+    expect(request.runtimeConfigJson).toContain('"runtimeProfileId": "qwen3_5"');
   });
 });
 
@@ -96,6 +97,7 @@ describe('runtime profile import/export helpers', () => {
       thoughtBlockPattern: '',
       samplingParametersJson: '{"temperature":{"kind":"number","defaultValue":0.7}}',
       thinkingControlJson: '{"defaultChoice":"medium","choiceActions":{"minimal":[],"medium":[]}}',
+      providers: [],
       created: '2026-04-22T00:00:00Z',
       updated: '2026-04-22T00:00:00Z',
     });
@@ -108,6 +110,7 @@ describe('runtime profile import/export helpers', () => {
       thoughtBlockPattern: '',
       samplingParametersJson: '{"temperature":{"kind":"number","defaultValue":0.7}}',
       thinkingControlJson: '{"defaultChoice":"medium","choiceActions":{"minimal":[],"medium":[]}}',
+      providers: [],
     });
   });
 

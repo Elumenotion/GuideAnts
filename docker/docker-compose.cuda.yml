@@ -43,7 +43,7 @@ services:
       # GA_*_MODEL_DIR env var below. Populated by
       # docker/scripts/migrate-local-models-to-single-volume.ps1 before
       # the stack is started for the first time on this host.
-      - ai_local_models:/models-local
+      - ai_local_models_setup_tests:/models-local
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
@@ -248,7 +248,7 @@ volumes:
   mssql_data:
   mssql_ftdata:
   mssql_log:
-  ai_local_models:
+  ai_local_models_setup_tests:
 
 networks:
   guideants-network:

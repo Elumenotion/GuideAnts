@@ -38,7 +38,6 @@ internal sealed class OpenRouterEmbeddingService(
         {
             throw new InvalidOperationException("OpenRouter embeddings model id is required.");
         }
-        ValidateEmbeddingModelCapability(modelId, requestPresetJson);
         var baseUrl = (_configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1").TrimEnd('/');
         var apiKey = _configuration["OpenRouter:ApiKey"];
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -79,75 +78,4 @@ internal sealed class OpenRouterEmbeddingService(
         internal static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true };
     }
 
-    private void ValidateEmbeddingModelCapability(string modelId, string? requestPresetJson)
-    {
-        var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            if (IsModelAllowed(modelId, configured))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"OpenRouter model '{modelId}' is not in the Embeddings service-mode AllowedModels preset.");
-        }
-
-        if (modelId.Contains("embed", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        throw new InvalidOperationException(
-            $"OpenRouter model '{modelId}' is not recognized as embedding-capable. " +
-            "Set Embeddings service-mode AllowedModels to explicitly allow it.");
-    }
-
-    private static bool IsModelAllowed(string modelId, string allowlistCsv)
-    {
-        var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var entry in entries)
-        {
-            if (entry.EndsWith('*'))
-            {
-                var prefix = entry[..^1];
-                if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-            else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
-    {
-        if (string.IsNullOrWhiteSpace(requestPresetJson))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(requestPresetJson);
-            if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !document.RootElement.TryGetProperty(fieldName, out var node))
-            {
-                return null;
-            }
-
-            return node.ValueKind == JsonValueKind.String
-                ? node.GetString()?.Trim()
-                : node.ToString().Trim();
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 }

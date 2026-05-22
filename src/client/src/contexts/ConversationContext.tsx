@@ -8,7 +8,7 @@ import { ensureValidTokensForTemplate } from '../utils/notebookAuth';
 import type { ConversationContextProps, ProviderProps } from './conversation/types';
 export type { StreamingMode } from './conversation/types';
 import { reducer, initialState } from './conversation/reducer';
-import { getNotebookRuntimeReadyCache, checkRuntimeStatus } from './conversation/runtimeChecks';
+import { getNotebookRuntimeReadyCache, checkRuntimeStatus, clearNotebookRuntimeReadyCache } from './conversation/runtimeChecks';
 import { useStreamingEventHandler } from './conversation/useStreamingEventHandler';
 import { useConversationActions } from './conversation/useConversationActions';
 
@@ -191,6 +191,32 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
+
+  // --- Invalidate runtime cache on runtime restart/load-state signals ---
+  useEffect(() => {
+    const clearCache = () => {
+      clearNotebookRuntimeReadyCache(notebookId);
+    };
+
+    const onRestarted = (event: Event) => {
+      const customEvent = event as CustomEvent<{ notebookId?: string }>;
+      const targetNotebookId = customEvent.detail?.notebookId;
+      if (!targetNotebookId || targetNotebookId === notebookId) {
+        clearCache();
+      }
+    };
+
+    window.addEventListener('llama-runtime-restarted', onRestarted as EventListener);
+    window.addEventListener('llama-runtime-requires-load', clearCache);
+    window.addEventListener('llama-runtime-loading', clearCache);
+    window.addEventListener('llama-runtime-crashed', clearCache);
+    return () => {
+      window.removeEventListener('llama-runtime-restarted', onRestarted as EventListener);
+      window.removeEventListener('llama-runtime-requires-load', clearCache);
+      window.removeEventListener('llama-runtime-loading', clearCache);
+      window.removeEventListener('llama-runtime-crashed', clearCache);
+    };
+  }, [notebookId]);
 
   // --- Refresh on conversation/notebook change ---
   useEffect(() => {

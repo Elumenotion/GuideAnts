@@ -2,6 +2,8 @@
 
 This guide walks through adding cloud models via **Settings → Models & Runtime**, with special attention to configuring Runtime Profiles.
 
+Last updated: 2026-05-20
+
 ---
 
 ## Overview
@@ -120,6 +122,8 @@ Switch to the **Catalog** sub-tab and click **Add Model**.
 ![Catalog tab (empty)](images/07-catalog-empty.png)
 
 The wizard walks through five steps.
+
+For local llama-cpp onboarding, both this Settings wizard and Home's Add AI Services Wizard now use the same canonical backend command flow through `POST /api/settings/models:add`, shared validation, shared status mapping, and shared operation polling behavior.
 
 ### Step 1 — Choose Provider
 

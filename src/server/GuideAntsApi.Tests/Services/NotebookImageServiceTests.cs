@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text;
 using AntRunner.ToolCalling;
 using FluentAssertions;
@@ -229,33 +228,11 @@ public sealed class NotebookImageServiceTests
     public async Task GenerateImageAsync_UsesHuggingFaceProvider_WhenModeSelectsHuggingFace()
     {
         using var scope = CreateEnvironmentScope();
-        var fakeImageBytes = Encoding.UTF8.GetBytes("fake-image-bytes");
-        var handler = new CapturingHandler(req =>
-        {
-            var url = req.RequestUri?.ToString() ?? "";
-            if (url.Contains("/api/models/", StringComparison.Ordinal))
+        var handler = new CapturingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
             {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        HfProviderMappingPayload("replicate", "stability-ai/sdxl"),
-                        Encoding.UTF8, "application/json")
-                };
-            }
-            if (url.Contains("router.huggingface.co", StringComparison.Ordinal))
-            {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        "{\"output\":[\"https://cdn.replicate.com/image.png\"]}",
-                        Encoding.UTF8, "application/json")
-                };
-            }
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(fakeImageBytes)
-            };
-        });
+                Content = new ByteArrayContent(Encoding.UTF8.GetBytes("fake-image-binary"))
+            });
 
         using var httpClient = new HttpClient(handler);
         var service = CreateService(
@@ -271,151 +248,8 @@ public sealed class NotebookImageServiceTests
         var result = await service.GenerateImageAsync("a test image", "hf-provider.png", context: context);
 
         result.StandardError.Should().BeNullOrEmpty();
-        handler.RequestUris.Should().Contain(uri => uri.Contains("/api/models/stabilityai/stable-diffusion-xl-base-1.0", StringComparison.Ordinal));
-        handler.RequestUris.Should().Contain(uri => uri.Contains("router.huggingface.co/replicate/", StringComparison.Ordinal));
-    }
-
-    [TestMethod]
-    public async Task GenerateImageAsync_HuggingFace_ThrowsWithHttpStatusAndBody_OnRateLimit()
-    {
-        using var scope = CreateEnvironmentScope();
-        var handler = new CapturingHandler(req =>
-        {
-            var url = req.RequestUri?.ToString() ?? "";
-            if (url.Contains("/api/models/", StringComparison.Ordinal))
-            {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        HfProviderMappingPayload("replicate", "stability-ai/sdxl"),
-                        Encoding.UTF8, "application/json")
-                };
-            }
-            return new HttpResponseMessage((HttpStatusCode)429)
-            {
-                Content = new StringContent("{\"error\":\"too many requests\"}", Encoding.UTF8, "application/json")
-            };
-        });
-
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(
-            httpClient,
-            providerSection: HuggingFaceProviderSection,
-            new Dictionary<string, string?>
-            {
-                ["HuggingFace:Token"] = "hf-token"
-            },
-            modelId: "stabilityai/stable-diffusion-xl-base-1.0");
-
-        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        var result = await service.GenerateImageAsync("a test image", "hf-provider-rate-limit.png", context: context);
-
-        result.StandardError.Should().Contain("Hugging Face image generation failed: 429");
-        result.StandardError.Should().Contain("too many requests");
-    }
-
-    [TestMethod]
-    public async Task GenerateImageAsync_HuggingFace_UsesProviderSpecificRequestBody()
-    {
-        using var scope = CreateEnvironmentScope();
-        var fakeImageBytes = Encoding.UTF8.GetBytes("fake-image-bytes");
-        var handler = new CapturingHandler(req =>
-        {
-            var url = req.RequestUri?.ToString() ?? "";
-            if (url.Contains("/api/models/", StringComparison.Ordinal))
-            {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        HfProviderMappingPayload("replicate", "tongyi-mai/z-image-turbo"),
-                        Encoding.UTF8, "application/json")
-                };
-            }
-            if (url.Contains("router.huggingface.co", StringComparison.Ordinal))
-            {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        "{\"output\":[\"https://cdn.replicate.com/image.png\"]}",
-                        Encoding.UTF8, "application/json")
-                };
-            }
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(fakeImageBytes) };
-        });
-
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(
-            httpClient,
-            providerSection: HuggingFaceProviderSection,
-            new Dictionary<string, string?>
-            {
-                ["HuggingFace:Token"] = "hf-token"
-            },
-            modelId: "Tongyi-MAI/Z-Image-Turbo");
-
-        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        var result = await service.GenerateImageAsync("a test image", "hf-provider-params.png", size: "1792x1024", n: 2, outputFormat: "jpeg", context: context);
-
-        result.StandardError.Should().BeNullOrEmpty();
-        // Replicate wraps inputs under "input"; body must carry prompt, width, height — NOT the old OpenAI format
-        handler.RequestBodies.Should().Contain(body => body.Contains("\"prompt\":\"a test image\""));
-        handler.RequestBodies.Should().Contain(body => body.Contains("\"width\":1792"));
-        handler.RequestBodies.Should().Contain(body => body.Contains("\"height\":1024"));
-        handler.RequestBodies.Should().NotContain(body => body.Contains("\"model\":"));
-        handler.RequestBodies.Should().NotContain(body => body.Contains("\"response_format\":"));
-        handler.RequestBodies.Should().NotContain(body => body.Contains("\"size\":"));
-        handler.RequestBodies.Should().NotContain(body => body.Contains("\"n\":", StringComparison.Ordinal));
-    }
-
-    [TestMethod]
-    public async Task GenerateImageAsync_HuggingFace_CallsModelMappingLookup_AndUsesResolvedProvider()
-    {
-        using var scope = CreateEnvironmentScope();
-        var fakeImageBytes = Encoding.UTF8.GetBytes("fake-image-bytes");
-        var handler = new CapturingHandler(req =>
-        {
-            var url = req.RequestUri?.ToString() ?? "";
-            if (url.Contains("/api/models/", StringComparison.Ordinal))
-            {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        HfProviderMappingPayload("replicate", "tongyi-mai/z-image-turbo"),
-                        Encoding.UTF8, "application/json")
-                };
-            }
-            if (url.Contains("router.huggingface.co", StringComparison.Ordinal))
-            {
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        "{\"output\":[\"https://cdn.replicate.com/image.png\"]}",
-                        Encoding.UTF8, "application/json")
-                };
-            }
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(fakeImageBytes) };
-        });
-
-        using var httpClient = new HttpClient(handler);
-        var service = CreateService(
-            httpClient,
-            providerSection: HuggingFaceProviderSection,
-            new Dictionary<string, string?>
-            {
-                ["HuggingFace:Token"] = "hf-token"
-            },
-            modelId: "Tongyi-MAI/Z-Image-Turbo");
-
-        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        var result = await service.GenerateImageAsync("a test image", "hf-segment-encoded-path.png", context: context);
-
-        result.StandardError.Should().BeNullOrEmpty();
-        // Provider resolution lookup must be called
-        handler.RequestUris.Should().Contain(uri => uri.Contains("/api/models/Tongyi-MAI/Z-Image-Turbo", StringComparison.Ordinal));
-        // Router call must use the resolved provider path, not a hardcoded model path
-        handler.RequestUris.Should().Contain(uri =>
-            uri.Contains("router.huggingface.co/replicate/", StringComparison.Ordinal) &&
-            uri.Contains("tongyi-mai/z-image-turbo", StringComparison.OrdinalIgnoreCase));
+        handler.LastRequestUri.Should().NotBeNull();
+        handler.LastRequestUri!.ToString().Should().Contain("api-inference.huggingface.co/models/");
     }
 
     [TestMethod]
@@ -457,7 +291,6 @@ public sealed class NotebookImageServiceTests
         string providerSection,
         IDictionary<string, string?> values,
         string? modelId = null,
-        string? requestPresetJson = null,
         IServiceProvider? serviceProvider = null)
     {
         var configuration = new ConfigurationBuilder()
@@ -476,7 +309,7 @@ public sealed class NotebookImageServiceTests
                     ModeId: "default",
                     ProviderSection: providerSection,
                     ModelId: modelId,
-                    RequestPresetJson: requestPresetJson,
+                    RequestPresetJson: null,
                     Enabled: true,
                     IsDefault: true)));
 
@@ -532,9 +365,6 @@ public sealed class NotebookImageServiceTests
         }
     }
 
-    private static string HfProviderMappingPayload(string provider, string providerId, string task = "text-to-image") =>
-        "{\"inferenceProviderMapping\":{\"" + provider + "\":{\"status\":\"live\",\"task\":\"" + task + "\",\"providerId\":\"" + providerId + "\"}}}";
-
     private sealed class EnvironmentScope(
         string tempRoot,
         string? previousFileStorage,
@@ -567,20 +397,13 @@ public sealed class NotebookImageServiceTests
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
         public Uri? LastRequestUri { get; private set; }
         public string LastRequestBody { get; private set; } = string.Empty;
-        public List<string> RequestUris { get; } = [];
-        public List<string> RequestBodies { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequestUri = request.RequestUri;
-            if (request.RequestUri is not null)
-            {
-                RequestUris.Add(request.RequestUri.ToString());
-            }
             LastRequestBody = request.Content is null
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken);
-            RequestBodies.Add(LastRequestBody);
             return _responder(request);
         }
     }

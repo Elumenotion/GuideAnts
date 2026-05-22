@@ -80,16 +80,65 @@ function Get-FilePathsRecursive {
     )
 }
 
+function Promote-LocalBuildxCache {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CurrentPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$NewPath
+    )
+
+    if (-not (Test-Path $NewPath)) {
+        return
+    }
+
+    if (Test-Path $CurrentPath) {
+        Remove-Item -Path $CurrentPath -Recurse -Force
+    }
+    Move-Item -Path $NewPath -Destination $CurrentPath
+}
+
+function Test-BuildxCacheExportSupport {
+    $inspectOutput = docker buildx inspect --bootstrap 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Could not inspect Docker Buildx builder. Disabling local cache export (--cache-to) for this run."
+        return $false
+    }
+
+    $driverLine = $inspectOutput | Where-Object { $_ -match '^\s*Driver:\s*' } | Select-Object -First 1
+    if (-not $driverLine) {
+        Write-Warning "Could not determine Buildx driver. Disabling local cache export (--cache-to) for this run."
+        return $false
+    }
+
+    $driver = (($driverLine -replace '^\s*Driver:\s*', '').Trim()).ToLowerInvariant()
+    if ($driver -eq 'docker') {
+        Write-Warning "Buildx driver 'docker' does not support cache export. Continuing without --cache-to."
+        return $false
+    }
+
+    return $true
+}
+
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $dockerRoot = Split-Path $PSScriptRoot -Parent
 $serverPath = Join-Path $repoRoot 'src\server'
 $buildContext = Join-Path $PSScriptRoot 'guideants-ai'
 $depsCachePath = Join-Path $dockerRoot '.buildx-cache-deps'
 $finalCachePath = Join-Path $dockerRoot '.buildx-cache-final'
+$depsCachePathNew = "$depsCachePath-new"
+$finalCachePathNew = "$finalCachePath-new"
+$supportsCacheExport = Test-BuildxCacheExportSupport
 
 foreach ($cachePath in @($depsCachePath, $finalCachePath)) {
     if (-not (Test-Path $cachePath)) {
         New-Item -ItemType Directory -Path $cachePath | Out-Null
+    }
+}
+foreach ($newCachePath in @($depsCachePathNew, $finalCachePathNew)) {
+    if (Test-Path $newCachePath) {
+        Remove-Item -Path $newCachePath -Recurse -Force
     }
 }
 
@@ -152,11 +201,11 @@ switch ($Backend) {
     }
 }
 
-# Build a unique tag per build, and also maintain a stable backend-specific latest tag.
+# Julian date (2-digit year + day-of-year) + time tag: e.g. cuda13-26096.1430
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
 $imageTag = "guideants-ai:${Backend}-${julianDay}.${timeStamp}"
-$latestTag = "guideants-ai:${Backend}-latest"
+$latestImageTag = "guideants-ai:${Backend}-latest"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Building GuideAnts AI" -ForegroundColor Cyan
@@ -164,7 +213,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Backend:       $Backend"
 Write-Host "Target stage:  $fullTarget"
 Write-Host "Image tag:     $imageTag"
-Write-Host "Latest tag:    $latestTag"
+Write-Host "Latest alias:  $latestImageTag"
 Write-Host "Deps target:   $depsTarget"
 Write-Host "Rebuild base:  $RebuildBase"
 if ($All) { Write-Host "All images:    Yes" }
@@ -284,21 +333,27 @@ try {
                 '--cache-from', "type=local,src=$depsCachePath",
                 '--cache-from', "type=local,src=$finalCachePath"
             )
+            if ($depsCacheExists) {
+                $depsBuildArgs += @('--cache-from', $depsCacheTag)
+            }
         }
         $depsBuildArgs += @(
-            '--cache-to', 'type=inline',
             '--target', $depsTarget,
             '-t', $depsTag,
             '-t', $depsCacheTag,
             '-f', $dockerfilePath,
             $buildContext
         )
+        if ($supportsCacheExport) {
+            $depsBuildArgs += @('--cache-to', "type=local,dest=$depsCachePathNew,mode=min")
+        }
 
         docker @depsBuildArgs
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Dependency image build failed with exit code $LASTEXITCODE"
             exit 1
         }
+        Promote-LocalBuildxCache -CurrentPath $depsCachePath -NewPath $depsCachePathNew
     }
     else {
         Write-Host "Reusing cached dependency image: $depsTag" -ForegroundColor Green
@@ -320,16 +375,20 @@ try {
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,
-        '-t', $latestTag,
+        '-t', $latestImageTag,
         '-f', $dockerfilePath,
         $buildContext
     )
+    if ($supportsCacheExport) {
+        $dockerArgs += @('--cache-to', "type=local,dest=$finalCachePathNew,mode=min")
+    }
 
     docker @dockerArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Image build failed with exit code $LASTEXITCODE"
         exit 1
     }
+    Promote-LocalBuildxCache -CurrentPath $finalCachePath -NewPath $finalCachePathNew
 
     Write-Host "Image built: $imageTag" -ForegroundColor Green
 }
@@ -339,6 +398,11 @@ finally {
     }
     if (Test-Path $reqDest) {
         Remove-Item -Path $reqDest -Force
+    }
+    foreach ($newCachePath in @($depsCachePathNew, $finalCachePathNew)) {
+        if (Test-Path $newCachePath) {
+            Remove-Item -Path $newCachePath -Recurse -Force
+        }
     }
 }
 
@@ -350,7 +414,7 @@ $imageEnvKey = switch ($Backend) {
     'slim' { 'GA_AI_SLIM_IMAGE' }
     default { 'GA_AI_CPU_IMAGE' }
 }
-$envLine = "$imageEnvKey=$latestTag"
+$envLine = "$imageEnvKey=$latestImageTag"
 
 if (Test-Path $envFile) {
     $lines = Get-Content $envFile
@@ -517,7 +581,5 @@ $depsSizeMB  = if ($depsSize)  { "$([math]::Round([long]$depsSize  / 1MB, 1)) MB
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Build complete: $imageTag" -ForegroundColor Cyan
-Write-Host "  Updated latest: $latestTag" -ForegroundColor Cyan
-Write-Host "  Final image:    $finalSizeMB" -ForegroundColor Cyan
-Write-Host "  Deps image:     $depsSizeMB" -ForegroundColor Cyan
+Write-Host "  Latest alias:   $latestImageTag" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan

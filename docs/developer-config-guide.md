@@ -247,10 +247,38 @@ Already covered above: Docker, Compose plugin, optional GPU runtime, ~60 GB disk
 | Image | Build tool | Extra pre-requisites |
 |---|---|---|
 | `guideants-webapi-ui` (`docker/build/webapi-ui/Dockerfile`) | `build_webapi_ui.ps1` / `.sh` | Requires the client UI to be built first via `npm run browser:build:docker` (produces `src/client/dist-browser/`). Multi-stage uses `mcr.microsoft.com/dotnet/sdk:8.0`. |
-| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage), BuildKit (`DOCKER_BUILDKIT=1`), and the chosen backend's CUDA/ROCm base images. CUDA build pins NVIDIA CUDA 13. |
+| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage), BuildKit (`DOCKER_BUILDKIT=1`), and the chosen backend's CUDA/ROCm base images. CUDA build pins NVIDIA CUDA 13. For cache export (`--cache-to`), use `desktop-linux` context and enable Docker Desktop containerd image store. |
 | `mssql2025-express-fts` (`docker/build/mssql-fts/Dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `plantuml-1.2025.2` (`docker/build/Sandboxes/PlantUml/dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `guideants-searxng` | `docker compose build searxng` | Repo-root build context. |
+
+### Windows line endings and Linux container entrypoints
+
+If freshly built Linux containers fail at startup with:
+
+`/usr/bin/env: 'bash\r': No such file or directory`
+
+this indicates CRLF line endings in a shell entrypoint copied into the image.
+
+Why this can be machine-specific:
+- One Windows machine may have Git `core.autocrlf=true` while others do not.
+- Without explicit attributes, `.sh` files can be checked out as CRLF on that machine.
+
+Repo policy:
+- `.gitattributes` enforces LF for shell scripts: `*.sh text eol=lf`.
+
+Recovery:
+1. Rebuild WebAPI+UI with no cache:
+   - `pwsh .\docker\build\build_webapi_ui.ps1 -NoCache`
+2. Recreate service:
+   - `docker compose -f docker/docker-compose.cuda.yml up -d --no-deps --force-recreate guideants-webapi-ui`
+3. Rebuild/recreate SearXNG:
+   - `docker compose -f docker/docker-compose.cuda.yml build searxng`
+   - `docker compose -f docker/docker-compose.cuda.yml up -d --no-deps --force-recreate searxng`
+
+If SearXNG still appears stale, remove and rebuild:
+- `docker rmi guideants-searxng:latest`
+- rerun the SearXNG build.
 
 The AI build is heavy: it compiles `stable-diffusion.cpp` with CUDA archs `75;80;86;89;90` and pulls a Python 3.11.11 venv plus `llama.cpp` runtime base. BuildKit cache is mandatory for sane iteration (the script tags `guideants-ai-deps:<backend>-cache` for layer reuse).
 

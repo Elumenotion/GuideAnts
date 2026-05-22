@@ -3,7 +3,8 @@ param(
     [string]$Flavor = 'Full',
     [switch]$NoCache,
     [switch]$NoRecreate,
-    [switch]$UseAppBuildCache
+    [switch]$UseAppBuildCache,
+    [switch]$NoAppBuildCache
 )
 
 $ErrorActionPreference = 'Stop'
@@ -110,20 +111,27 @@ if (-not (Test-Path $dockerfilePath)) {
     exit 1
 }
 
-# Build a unique tag per build, and also maintain a stable latest tag.
+# Julian date (2-digit year + day-of-year) + time tag: e.g. 26099.1530
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
 $imageTag = "${imageRepository}:${julianDay}.${timeStamp}"
-$latestTag = "${imageRepository}:latest"
+$latestImageTag = "${imageRepository}:latest"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Building GuideAnts API + Browser UI ($Flavor)" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "Image tag: $imageTag"
-Write-Host "Latest tag: $latestTag"
+Write-Host "Latest alias: $latestImageTag"
 Write-Host "Target:    $dockerTarget"
 Write-Host "No cache:  $NoCache"
-Write-Host "App cache: $UseAppBuildCache"
+$appBuildCacheEnabled = $true
+if ($NoAppBuildCache) {
+    $appBuildCacheEnabled = $false
+}
+if ($UseAppBuildCache) {
+    $appBuildCacheEnabled = $true
+}
+Write-Host "App cache: $appBuildCacheEnabled"
 Write-Host "Recreate: $(-not $NoRecreate)"
 Write-Host ""
 
@@ -167,15 +175,15 @@ $dockerArgs = @('build')
 if ($NoCache) {
     $dockerArgs += '--no-cache'
 }
-elseif (-not $UseAppBuildCache) {
-    # Rebuild API stage by default so app changes are always republished.
+elseif (-not $appBuildCacheEnabled) {
+    # Rebuild API stage each run so packaging is deterministic.
     $dockerArgs += @('--no-cache-filter', 'api-build')
 }
 
 $dockerArgs += @(
     '--target', $dockerTarget,
     '-t', $imageTag,
-    '-t', $latestTag,
+    '-t', $latestImageTag,
     '-f', $dockerfilePath,
     $buildContext
 )
@@ -187,7 +195,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $envFile = Join-Path $dockerRoot '.env'
-$envLine = "${imageEnvKey}=$latestTag"
+$envLine = "${imageEnvKey}=$latestImageTag"
 
 if (Test-Path $envFile) {
     $raw = Get-Content -Path $envFile -Raw
@@ -212,7 +220,7 @@ if (Test-Path $envFile) {
         }
     }
 
-    $entries[$imageEnvKey] = $latestTag
+    $entries[$imageEnvKey] = $latestImageTag
     $lines = @($entries.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
     Set-Content -Path $envFile -Value (($lines -join "`r`n") + "`r`n") -Encoding UTF8
 }
@@ -230,8 +238,8 @@ foreach ($line in ($envRawAfterWrite -split "`r?`n")) {
     }
 }
 
-if (-not $envEntriesAfterWrite.ContainsKey($imageEnvKey) -or $envEntriesAfterWrite[$imageEnvKey] -ne $latestTag) {
-    Write-Error "Failed to persist ${imageEnvKey}=$latestTag to $envFile"
+if (-not $envEntriesAfterWrite.ContainsKey($imageEnvKey) -or $envEntriesAfterWrite[$imageEnvKey] -ne $latestImageTag) {
+    Write-Error "Failed to persist ${imageEnvKey}=$latestImageTag to $envFile"
     exit 1
 }
 
@@ -269,7 +277,7 @@ if (-not $NoRecreate -and ($useRunningComposeStack -or (Test-Path $composeFile))
         Pop-Location
     }
 
-    Write-Host "Recreated $serviceName with image $imageTag" -ForegroundColor Green
+    Write-Host "Recreated $serviceName with image $latestImageTag" -ForegroundColor Green
 }
 elseif ($NoRecreate) {
     Write-Host "Skipping compose service recreate (-NoRecreate)." -ForegroundColor Yellow

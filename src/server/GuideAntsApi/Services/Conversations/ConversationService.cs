@@ -38,18 +38,18 @@ public class ConversationService : IConversationService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _storagePath;
     private readonly IChatCompletionClientFactory _chatClientFactory;
-
+    
     // Conversation-level locking for streaming operations (local concurrency only)
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _conversationLocks = new();
-
+    
     private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly IContextOptionsService _contextOptionsService;
     private readonly IOptions<MarkdownAttachmentOptions> _markdownAttachmentOptions;
     private readonly IChatModelResolver _chatModelResolver;
 
-    public ConversationService(IHttpClientFactory httpClientFactory,
-        ITurnManager turnManager,
+    public ConversationService(IHttpClientFactory httpClientFactory, 
+        ITurnManager turnManager, 
         IConversationBroadcastHub broadcastHub,
         IDistributedConversationLock distributedLock,
         IServiceScopeFactory scopeFactory,
@@ -58,10 +58,10 @@ public class ConversationService : IConversationService
         IContextOptionsService contextOptionsService,
         IOptions<MarkdownAttachmentOptions> markdownAttachmentOptions,
         IChatModelResolver chatModelResolver,
-        INotebookFileService? notebookFileService = null,
+        INotebookFileService? notebookFileService = null, 
         INotebookFileSyncService? notebookFileSyncService = null,
-        IMarkdownExtractionService? markdownExtractionService = null,
-        ILogger<ConversationService>? logger = null,
+        IMarkdownExtractionService? markdownExtractionService = null, 
+        ILogger<ConversationService>? logger = null, 
         IConfiguration? configuration = null)
     {
         _httpClientFactory = httpClientFactory;
@@ -86,7 +86,7 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         var conv = await db.NotebookConversations
             .Include(c => c.Notebook)
             .Include(c => c.Messages)
@@ -99,7 +99,7 @@ public class ConversationService : IConversationService
         if (conv == null) return null;
 
 
-        return ToDto(conv);
+return ToDto(conv);
     }
 
     /// <summary>
@@ -110,17 +110,17 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         // First check access
         var projectId = await db.NotebookConversations
             .Where(c => c.Id == conversationId)
             .Select(c => c.Notebook.ProjectId)
             .FirstOrDefaultAsync();
-
+            
         if (projectId == Guid.Empty) return null;
 
 
-        // Use READ UNCOMMITTED for this read-only query — prevents blocking by retention cleanup
+// Use READ UNCOMMITTED for this read-only query — prevents blocking by retention cleanup
         // lock escalation on NotebookConversationMessages/ConversationTurns tables.
         await db.Database.ExecuteSqlRawAsync("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
 
@@ -136,7 +136,7 @@ public class ConversationService : IConversationService
                 c.Id,
                 c.Title,
                 c.Created,
-                AssistantName = c.Turns.OrderByDescending(t => t.TurnIndex).FirstOrDefault() != null
+                AssistantName = c.Turns.OrderByDescending(t => t.TurnIndex).FirstOrDefault() != null 
                     ? c.Turns.OrderByDescending(t => t.TurnIndex).FirstOrDefault()!.AssistantName
                     : c.Messages.Where(m => m.Role == DataModelChatRole.Assistant).OrderByDescending(m => m.Created).FirstOrDefault() != null
                         ? c.Messages.Where(m => m.Role == DataModelChatRole.Assistant).OrderByDescending(m => m.Created).FirstOrDefault()!.AssistantName
@@ -264,7 +264,7 @@ public class ConversationService : IConversationService
             )).ToList();
 
             // Check if this is the last assistant message for its turn
-            var isLastAssistantInTurn = lastAssistantMessagePerTurn.TryGetValue(msg.TurnIndex, out var lastAssistantId)
+            var isLastAssistantInTurn = lastAssistantMessagePerTurn.TryGetValue(msg.TurnIndex, out var lastAssistantId) 
                 && lastAssistantId == msg.Id;
 
             // Get turn files if this is the last assistant message
@@ -321,7 +321,7 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         _logger.LogCritical("🚨 UNDO LAST called for conversation {ConversationId}", conversationId);
         var conv = await db.NotebookConversations
             .Include(c => c.Notebook)
@@ -331,7 +331,7 @@ public class ConversationService : IConversationService
             ?? throw new KeyNotFoundException("Conversation not found");
 
 
-        // Find the last turn that has a user message
+// Find the last turn that has a user message
         var lastUserMessage = conv.Messages
             .Where(m => m.Role == DataModelChatRole.User)
             .OrderByDescending(m => m.TurnIndex)
@@ -351,26 +351,25 @@ public class ConversationService : IConversationService
             .Where(t => t.TurnIndex >= lastUserMessage.TurnIndex)
             .ToListAsync();
 
-        _logger.LogCritical("🚨 UNDO LAST removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}",
+        _logger.LogCritical("🚨 UNDO LAST removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}", 
             messagesToRemove.Count, turnsToRemove.Count, lastUserMessage.TurnIndex, conversationId);
-
+        
         db.NotebookConversationMessages.RemoveRange(messagesToRemove);
         db.ConversationTurns.RemoveRange(turnsToRemove);
         await db.SaveChangesAsync();
-
+        
         // CRITICAL: Release conversation lock if it exists (fixes stuck "locked state" bug)
         await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
         _logger.LogInformation("Released conversation lock during undo for {ConversationId}", conversationId);
-
+        
         // Broadcast turn_removed event to all observers
-        await _broadcastHub.BroadcastToConversationAsync(conversationId,
-            new StreamingEvent(StreamingEventTypes.TurnRemoved, JsonSerializer.Serialize(new
-            {
+        await _broadcastHub.BroadcastToConversationAsync(conversationId, 
+            new StreamingEvent(StreamingEventTypes.TurnRemoved, JsonSerializer.Serialize(new { 
                 turnIndex = lastUserMessage.TurnIndex,
                 messagesRemoved = messagesToRemove.Count,
-                timestamp = DateTime.UtcNow
+                timestamp = DateTime.UtcNow 
             }, _jsonOptions)));
-
+        
         _logger.LogCritical("🚨 UNDO LAST completed for conversation {ConversationId}", conversationId);
     }
 
@@ -378,7 +377,7 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         _logger.LogCritical("🚨 UNDO FOR MESSAGE called for conversation {ConversationId}, message {MessageId}", conversationId, messageId);
         var conv = await db.NotebookConversations
             .Include(c => c.Notebook)
@@ -388,8 +387,8 @@ public class ConversationService : IConversationService
             ?? throw new KeyNotFoundException("Conversation not found");
 
 
-        var targetMessage = conv.Messages.FirstOrDefault(m => m.Id == messageId)
-                    ?? throw new KeyNotFoundException("Message not found");
+var targetMessage = conv.Messages.FirstOrDefault(m => m.Id == messageId)
+            ?? throw new KeyNotFoundException("Message not found");
 
         // Remove all messages from this turn onwards
         var messagesToRemove = conv.Messages
@@ -402,26 +401,25 @@ public class ConversationService : IConversationService
             .Where(t => t.TurnIndex >= targetMessage.TurnIndex)
             .ToListAsync();
 
-        _logger.LogCritical("🚨 UNDO FOR MESSAGE removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}",
+        _logger.LogCritical("🚨 UNDO FOR MESSAGE removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}", 
             messagesToRemove.Count, turnsToRemove.Count, targetMessage.TurnIndex, conversationId);
-
+        
         db.NotebookConversationMessages.RemoveRange(messagesToRemove);
         db.ConversationTurns.RemoveRange(turnsToRemove);
         await db.SaveChangesAsync();
-
+        
         // CRITICAL: Release conversation lock if it exists (fixes stuck "locked state" bug)
         await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
         _logger.LogInformation("Released conversation lock during undo for {ConversationId}", conversationId);
-
+        
         // Broadcast turn_removed event to all observers
-        await _broadcastHub.BroadcastToConversationAsync(conversationId,
-            new StreamingEvent(StreamingEventTypes.TurnRemoved, JsonSerializer.Serialize(new
-            {
+        await _broadcastHub.BroadcastToConversationAsync(conversationId, 
+            new StreamingEvent(StreamingEventTypes.TurnRemoved, JsonSerializer.Serialize(new { 
                 turnIndex = targetMessage.TurnIndex,
                 messagesRemoved = messagesToRemove.Count,
-                timestamp = DateTime.UtcNow
+                timestamp = DateTime.UtcNow 
             }, _jsonOptions)));
-
+        
         _logger.LogCritical("🚨 UNDO FOR MESSAGE completed for conversation {ConversationId}", conversationId);
     }
 
@@ -430,7 +428,7 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         var message = await db.NotebookConversationMessages
             .Include(m => m.NotebookConversation)
                 .ThenInclude(nc => nc.Notebook)
@@ -439,7 +437,7 @@ public class ConversationService : IConversationService
             ?? throw new KeyNotFoundException("Message not found");
 
 
-        // Only allow editing assistant messages
+// Only allow editing assistant messages
         if (message.Role != DataModelChatRole.Assistant)
         {
             throw new InvalidOperationException("Only assistant messages can be edited");
@@ -464,7 +462,7 @@ public class ConversationService : IConversationService
         message.IsEdited = true;
         message.LastEditedByUserId = null;
         message.LastEditedAt = DateTime.UtcNow;
-
+        
         // Clear tool calls since user is providing new content
         message.ToolCalls = null;
 
@@ -475,7 +473,7 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         var projectId = await db.Notebooks
             .Where(n => n.Id == notebookId)
             .Select(n => n.ProjectId)
@@ -484,7 +482,7 @@ public class ConversationService : IConversationService
         if (projectId == Guid.Empty) return [];
 
 
-        // Use READ UNCOMMITTED — this read-only list must not be blocked by retention cleanup
+// Use READ UNCOMMITTED — this read-only list must not be blocked by retention cleanup
         // locks on NotebookConversations or UsageEvents for this notebook.
         await db.Database.ExecuteSqlRawAsync("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED");
 
@@ -510,12 +508,12 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         var notebook = await db.Notebooks.FirstOrDefaultAsync(n => n.Id == notebookId);
         if (notebook == null) throw new KeyNotFoundException("Notebook not found");
 
 
-        var conv = new NotebookConversation
+var conv = new NotebookConversation
         {
             NotebookId = notebookId,
             Title = string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim()
@@ -529,14 +527,14 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         var conv = await db.NotebookConversations
             .Include(c => c.Notebook)
-            .FirstOrDefaultAsync(c => c.Id == conversationId)
+            .FirstOrDefaultAsync(c => c.Id == conversationId) 
             ?? throw new KeyNotFoundException();
 
 
-        conv.Title = string.IsNullOrWhiteSpace(title) ? conv.Title : title.Trim();
+conv.Title = string.IsNullOrWhiteSpace(title) ? conv.Title : title.Trim();
         await db.SaveChangesAsync();
     }
 
@@ -544,7 +542,7 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         var conv = await db.NotebookConversations
             .Include(c => c.Notebook)
             .FirstOrDefaultAsync(c => c.Id == conversationId);
@@ -552,9 +550,9 @@ public class ConversationService : IConversationService
         if (conv == null) return;
 
 
-        _logger.LogCritical("🚨 DELETING CONVERSATION {ConversationId} - THIS WILL CASCADE DELETE ALL MESSAGES!", conversationId);
+_logger.LogCritical("🚨 DELETING CONVERSATION {ConversationId} - THIS WILL CASCADE DELETE ALL MESSAGES!", conversationId);
         db.NotebookConversations.Remove(conv);
-
+        
         try
         {
             await db.SaveChangesAsync();
@@ -566,13 +564,13 @@ public class ConversationService : IConversationService
             // verify it's gone and treat as success (desired outcome achieved)
             var stillExists = await db.NotebookConversations
                 .AnyAsync(c => c.Id == conversationId);
-
+            
             if (!stillExists)
             {
                 _logger.LogInformation("Conversation {ConversationId} was already deleted by another request - treating as success", conversationId);
                 return;
             }
-
+            
             // If it still exists, something else went wrong - rethrow
             throw;
         }
@@ -583,7 +581,7 @@ public class ConversationService : IConversationService
     public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var userName = "User";
-
+        
         // Validate user identity before proceeding - fail securely if uncertain
         if (string.IsNullOrWhiteSpace(userName))
         {
@@ -592,7 +590,7 @@ public class ConversationService : IConversationService
 
         // Try to acquire distributed lock (cross-container coordination)
         var lockAcquired = await _distributedLock.TryAcquireLockAsync(conversationId, userName, cancellationToken);
-
+        
         if (lockAcquired == null)
         {
             // Another user has the lock
@@ -617,12 +615,11 @@ public class ConversationService : IConversationService
             lockSemaphoreAcquired = true;
 
             // Notify all subscribers that this conversation is now locked for streaming
-            await _broadcastHub.BroadcastToConversationAsync(conversationId,
-                new StreamingEvent(StreamingEventTypes.ConversationLocked, JsonSerializer.Serialize(new
-                {
+            await _broadcastHub.BroadcastToConversationAsync(conversationId, 
+                new StreamingEvent(StreamingEventTypes.ConversationLocked, JsonSerializer.Serialize(new { 
                     activeUserId = Guid.Empty,
                     activeUserName = userName,
-                    timestamp = DateTime.UtcNow
+                    timestamp = DateTime.UtcNow 
                 }, _jsonOptions)));
             conversationLockEventSent = true;
 
@@ -631,7 +628,7 @@ public class ConversationService : IConversationService
 
             // 2. Create DB turn, system message (if needed) and user message
             await CreateTurnAndUserMessageAsync(ctx, cancellationToken);
-
+            
             // Set turn status to streaming
             using (var scope = _scopeFactory.CreateScope())
             {
@@ -642,11 +639,10 @@ public class ConversationService : IConversationService
                 turn.LastUpdated = DateTime.UtcNow;
                 await db.SaveChangesAsync(cancellationToken);
             }
-
+            
             // Broadcast turn creation to observers
             await _broadcastHub.BroadcastToConversationAsync(conversationId,
-                new StreamingEvent(StreamingEventTypes.TurnCreated, JsonSerializer.Serialize(new
-                {
+                new StreamingEvent(StreamingEventTypes.TurnCreated, JsonSerializer.Serialize(new {
                     turnIndex = ctx.TurnIndex,
                     userId = Guid.Empty,
                     userName = userName,
@@ -667,8 +663,7 @@ public class ConversationService : IConversationService
 
             // Notify that streaming has started
             await _broadcastHub.BroadcastToConversationAsync(conversationId,
-                new StreamingEvent(StreamingEventTypes.StreamingStarted, JsonSerializer.Serialize(new
-                {
+                new StreamingEvent(StreamingEventTypes.StreamingStarted, JsonSerializer.Serialize(new {
                     assistantName = ctx.AssistantName,
                     turnIndex = ctx.TurnIndex,
                     timestamp = DateTime.UtcNow
@@ -679,14 +674,14 @@ public class ConversationService : IConversationService
             {
                 // Broadcast all events to conversation observers
                 await _broadcastHub.BroadcastToConversationAsync(conversationId, ev);
-
+                
                 // Yield to the active streaming client
                 yield return ev;
             }
-
+            
             // If we reach here, streaming completed successfully
             streamingSucceeded = true;
-
+            
             // Mark turn as completed
             using (var scope = _scopeFactory.CreateScope())
             {
@@ -697,7 +692,7 @@ public class ConversationService : IConversationService
                 turn.LastUpdated = DateTime.UtcNow;
                 await db.SaveChangesAsync(cancellationToken);
             }
-
+            
             // Do not block unlock on a full notebook walk. File-producing tools already reconcile
             // synchronously before they return; if a turn reported changes, queue a best-effort
             // follow-up sync for any stragglers instead of holding the conversation open.
@@ -770,8 +765,7 @@ public class ConversationService : IConversationService
                 try
                 {
                     await _broadcastHub.BroadcastToConversationAsync(conversationId,
-                        new StreamingEvent(StreamingEventTypes.ConversationUnlocked, JsonSerializer.Serialize(new
-                        {
+                        new StreamingEvent(StreamingEventTypes.ConversationUnlocked, JsonSerializer.Serialize(new {
                             timestamp = DateTime.UtcNow
                         }, _jsonOptions)));
                 }
@@ -789,6 +783,12 @@ public class ConversationService : IConversationService
             yield return completeEvent;
         }
     }
+
+    private static string? GetUserDisplayName()
+    {
+        return "User";
+    }
+
 
     private static string DetermineEventType(string role, string message)
     {
@@ -809,14 +809,14 @@ public class ConversationService : IConversationService
             // Create a new scope to get a fresh DbContext instance to avoid concurrency issues
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+            
             // Look up guide by ID - Assistants table is source of truth
             var guide = await db.Assistants
                 .AsNoTracking()
                 .Include(a => a.Model)
                 .Where(a => a.Id == templateId && a.Kind == AssistantKind.Guide && a.IsActive)
                 .FirstOrDefaultAsync();
-
+            
             return guide?.Model!.ModelId;
         }
         catch (Exception ex)
@@ -825,6 +825,12 @@ public class ConversationService : IConversationService
             System.Diagnostics.Debug.WriteLine($"Failed to read guide default model: {ex.Message}");
             return null;
         }
+    }
+
+    private sealed class TemplateManifestForDefaults
+    {
+        public string? DefaultModel { get; set; }
+        public string? DefaultAssistant { get; set; }
     }
 
     /// <summary>
@@ -939,7 +945,7 @@ public class ConversationService : IConversationService
         // - Keep tool messages from the NEW assistant (so it can see results of its own tool calls)
         // - Exclude tool messages from other assistants (avoid confusion)
         // IMPORTANT: Order chronologically first to maintain conversation flow
-
+        
         // First pass: collect all tool call IDs from assistant messages that belong to the NEW assistant
         var validToolCallIds = new HashSet<string>();
         foreach (var m in dedupedMessages.Where(m => m.Role == DataModelChatRole.Assistant && !string.IsNullOrEmpty(m.ToolCalls)))
@@ -963,7 +969,7 @@ public class ConversationService : IConversationService
                 }
             }
         }
-
+        
         var filteredMessages = new List<ChatMessage>();
         foreach (var m in dedupedMessages.OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence))
         {
@@ -1004,20 +1010,20 @@ public class ConversationService : IConversationService
             {
                 // Create OpenAI message with multiple content items
                 var contents = new List<ChatContent>();
-
+                
                 // Add text content if present
                 if (!string.IsNullOrEmpty(m.Content))
                 {
                     contents.Add(new ChatContent(m.Content));
                 }
-
+                
                 // Add file contents
                 foreach (var attachment in attachments)
                 {
                     var fileContents = await CreateOpenAiContentFromNotebookFileAsync(attachment.NotebookFileId);
                     contents.AddRange(fileContents);
                 }
-
+                
                 if (contents.Count > 0)
                 {
                     var role = m.Role switch
@@ -1035,7 +1041,7 @@ public class ConversationService : IConversationService
                     continue;
                 }
             }
-
+            
             filteredMessages.Add(ToChatMessage(m));
         }
 
@@ -1050,9 +1056,9 @@ public class ConversationService : IConversationService
         // Always add handoff message during assistant switches, even if filtered messages is empty
         if (conv.Messages.Any())
         {
-            newMessages.Add(new ChatMessage(ChatMessageRole.System,
-                    "The previous messages between the user and assistant above are from a conversation with a different assistant. " +
-                    "Use them to understand the conversation context, but follow the system messages that were provided at the start of this message sequence."));
+        newMessages.Add(new ChatMessage(ChatMessageRole.System, 
+                "The previous messages between the user and assistant above are from a conversation with a different assistant. " +
+                "Use them to understand the conversation context, but follow the system messages that were provided at the start of this message sequence."));
         }
 
         return newMessages;
@@ -1085,7 +1091,7 @@ public class ConversationService : IConversationService
             // Only collect tool call IDs from assistant messages that will actually be included
             // This includes: user messages, assistant messages without tool calls, and assistant messages with tool calls from current assistant
             bool willBeIncluded = dbMsg.AssistantName == assistantName;
-
+            
             if (willBeIncluded)
             {
                 try
@@ -1116,7 +1122,7 @@ public class ConversationService : IConversationService
                     continue; // Skip orphaned tool responses
                 }
             }
-
+            
             // Filter assistant messages with tool calls to only include those from the current assistant
             if (dbMsg.Role == DataModelChatRole.Assistant && !string.IsNullOrEmpty(dbMsg.ToolCalls))
             {
@@ -1125,7 +1131,7 @@ public class ConversationService : IConversationService
                     continue; // Skip tool call messages from other assistants
                 }
             }
-
+            
             // Include partial/streaming assistant messages for context continuity
             // (external DTOs filter these out, but internal resume needs them)
 
@@ -1145,20 +1151,20 @@ public class ConversationService : IConversationService
             {
                 // Create OpenAI message with multiple content items
                 var contents = new List<ChatContent>();
-
+                
                 // Add text content if present
                 if (!string.IsNullOrEmpty(dbMsg.Content))
                 {
                     contents.Add(new ChatContent(dbMsg.Content));
                 }
-
+                
                 // Add file contents
                 foreach (var attachment in attachments)
                 {
                     var fileContents = await CreateOpenAiContentFromNotebookFileAsync(attachment.NotebookFileId, cancellationToken);
                     contents.AddRange(fileContents);
                 }
-
+                
                 if (contents.Count > 0)
                 {
                     var role = dbMsg.Role switch
@@ -1168,7 +1174,7 @@ public class ConversationService : IConversationService
                         DataModelChatRole.Tool => ChatMessageRole.Tool,
                         _ => ChatMessageRole.System
                     };
-
+                    
                     list.Add(new ChatMessage(role, contents));
                     continue;
                 }
@@ -1195,7 +1201,7 @@ public class ConversationService : IConversationService
         Func<T, bool> hasToolCalls)
     {
         var messageList = messages.ToList();
-
+        
         // Build set of (turn, content) pairs that have a message WITH ToolCalls
         var turnContentWithToolCalls = new HashSet<(int turn, string content)>();
         foreach (var m in messageList.Where(m => getRole(m) == DataModelChatRole.Assistant && hasToolCalls(m)))
@@ -1203,7 +1209,7 @@ public class ConversationService : IConversationService
             var key = (getTurnIndex(m), getContent(m)?.Trim() ?? "");
             turnContentWithToolCalls.Add(key);
         }
-
+        
         // Filter out duplicates: skip assistant messages without ToolCalls if same content exists with ToolCalls
         var result = new List<T>();
         foreach (var m in messageList)
@@ -1219,7 +1225,7 @@ public class ConversationService : IConversationService
             }
             result.Add(m);
         }
-
+        
         return result;
     }
 
@@ -1284,7 +1290,7 @@ public class ConversationService : IConversationService
     private static ConversationDto ToDto(NotebookConversation c)
     {
         var messages = c.Messages.Where(m => m.IsStreaming != true).ToList();
-
+        
         // Filter out duplicate assistant messages (legacy data where streaming created duplicates)
         var filteredMessages = FilterDuplicateAssistantMessages(
             messages,
@@ -1293,7 +1299,7 @@ public class ConversationService : IConversationService
             m => m.Content,
             m => !string.IsNullOrEmpty(m.ToolCalls)
         );
-
+        
         var orderedMessages = filteredMessages
             .OrderBy(m => m.TurnIndex)
             .ThenBy(m => m.MessageSequence)
@@ -1515,12 +1521,12 @@ public class ConversationService : IConversationService
     {
         var messages = new List<ChatMessage>();
         if (_notebookFileService == null) return messages;
-
+        
         try
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+            
             var notebookFile = await db.NotebookFiles
                 .Include(nf => nf.Notebook)
                 .FirstOrDefaultAsync(nf => nf.Id == notebookFileId, cancellationToken);
@@ -1562,14 +1568,14 @@ public class ConversationService : IConversationService
         for (int i = 0; i < attachments.Count; i++)
         {
             var attachment = attachments[i];
-
+            
             // Verify file exists and belongs to notebook
             var notebookFile = await db.NotebookFiles
                 .FirstOrDefaultAsync(f => f.Id == attachment.NotebookFileId && f.NotebookId == notebookId, cancellationToken);
-
+            
             if (notebookFile == null)
             {
-                _logger.LogWarning("Attachment file {NotebookFileId} not found or doesn't belong to notebook {NotebookId}",
+                _logger.LogWarning("Attachment file {NotebookFileId} not found or doesn't belong to notebook {NotebookId}", 
                     attachment.NotebookFileId, notebookId);
                 continue;
             }
@@ -1585,10 +1591,10 @@ public class ConversationService : IConversationService
 
             db.MessageAttachments.Add(messageAttachment);
         }
-
+        
         await db.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Added {Count} attachments to message {MessageId}",
+        
+        _logger.LogInformation("Added {Count} attachments to message {MessageId}", 
             attachments.Count, userMessageId);
     }
 
@@ -1599,12 +1605,12 @@ public class ConversationService : IConversationService
     {
         var contents = new List<ChatContent>();
         if (_notebookFileService == null) return contents;
-
+        
         try
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+            
             var notebookFile = await db.NotebookFiles
                 .Include(nf => nf.Notebook)
                 .FirstOrDefaultAsync(nf => nf.Id == notebookFileId, cancellationToken);
@@ -1688,7 +1694,7 @@ public class ConversationService : IConversationService
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         var conv = await db.NotebookConversations
             .Include(c => c.Messages)
                 .ThenInclude(m => m.EditHistory)
@@ -1701,7 +1707,7 @@ public class ConversationService : IConversationService
             ?? throw new KeyNotFoundException("Conversation not found");
 
 
-        var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.com" };
+var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.com" };
 
         var assistantName = string.IsNullOrWhiteSpace(request.AssistantName) ? "assistant" : request.AssistantName;
 
@@ -1776,7 +1782,7 @@ public class ConversationService : IConversationService
         // Create a new scope to get a fresh DbContext instance to avoid concurrency issues
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+        
         // Determine next turn index
         var turnIndex = await db.ConversationTurns
             .Where(t => t.NotebookConversationId == ctx.ConversationId)
@@ -1915,7 +1921,7 @@ public class ConversationService : IConversationService
             var fileUrlMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var assistantMessageIds = new List<Guid>();
             var thinkingEmittedInStream = false;
-
+            
             int flushCounter = 0;
             const int FLUSH_INTERVAL = 20;
 
@@ -1948,11 +1954,11 @@ public class ConversationService : IConversationService
                         AssistantId = ctx.AssistantId
                     };
                     db.NotebookConversationMessages.Add(msg);
-
+                    
                     // Update turn's LastUpdated for polling detection
                     var turn = db.ConversationTurns.First(t => t.Id == ctx.DbTurn!.Id);
                     turn.LastUpdated = DateTime.UtcNow;
-
+                    
                     db.SaveChanges();
                     currentAssistantMessageId = msg.Id;
                     assistantMessageIds.Add(msg.Id);
@@ -1973,14 +1979,14 @@ public class ConversationService : IConversationService
                             db2.Attach(stub);
                             stub.Content = currentAssistantContent.ToString();
                             db2.Entry(stub).Property(x => x.Content).IsModified = true;
-
+                            
                             // Update turn's LastUpdated for polling detection
                             var turn = db2.ConversationTurns.First(t => t.Id == ctx.DbTurn!.Id);
                             turn.LastUpdated = DateTime.UtcNow;
-
+                            
                             db2.SaveChanges();
                         }
-
+                        
                         // Broadcast periodic progress to observers (less frequent than token events)
                         _ = Task.Run(async () =>
                         {
@@ -1995,8 +2001,7 @@ public class ConversationService : IConversationService
                                 }
 
                                 await _broadcastHub.BroadcastToConversationAsync(conversationId,
-                                    new StreamingEvent(StreamingEventTypes.StreamingProgress, JsonSerializer.Serialize(new
-                                    {
+                                    new StreamingEvent(StreamingEventTypes.StreamingProgress, JsonSerializer.Serialize(new {
                                         userId = Guid.Empty,
                                         activeUserName = activeUserName,
                                         contentLength = currentAssistantContent.Length,
@@ -2029,7 +2034,7 @@ public class ConversationService : IConversationService
                         // TOOL CALL MESSAGE: Update existing streaming message or create new one
                         var hostUrl = _configuration?["ANTRUNNER_SERVICES_HOST_URL"] ?? Environment.GetEnvironmentVariable("ANTRUNNER_SERVICES_HOST_URL");
                         var toolCallAssistantText = SanitizeAssistantContent(e.Message ?? string.Empty, fileUrlMap, hostUrl);
-
+                        
                         var toolCallsJson = e.ToolCallsJson;
                         List<ChatToolCall>? toolCallsForDb = null;
                         try
@@ -2044,7 +2049,7 @@ public class ConversationService : IConversationService
                                 ctx.Conversation.Id,
                                 ctx.TurnIndex);
                         }
-
+                        
                         if (currentAssistantMessageId != null)
                         {
                             // UPDATE existing streaming message with ToolCalls (avoids duplicate rows)
@@ -2058,11 +2063,11 @@ public class ConversationService : IConversationService
                             dbUpdate.Entry(stub).Property(x => x.Content).IsModified = true;
                             dbUpdate.Entry(stub).Property(x => x.ToolCalls).IsModified = true;
                             dbUpdate.Entry(stub).Property(x => x.IsStreaming).IsModified = true;
-
+                            
                             // Update turn's LastUpdated for polling detection
                             var turn = dbUpdate.ConversationTurns.First(t => t.Id == ctx.DbTurn!.Id);
                             turn.LastUpdated = DateTime.UtcNow;
-
+                            
                             dbUpdate.SaveChanges();
                         }
                         else
@@ -2082,15 +2087,15 @@ public class ConversationService : IConversationService
                                 Created = DateTime.UtcNow,
                                 AssistantId = ctx.AssistantId
                             };
-
+                            
                             using var scopeCreate = _scopeFactory.CreateScope();
                             var dbCreate = scopeCreate.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                             dbCreate.NotebookConversationMessages.Add(toolCallMessage);
-
+                            
                             // Update turn's LastUpdated for polling detection
                             var turn = dbCreate.ConversationTurns.First(t => t.Id == ctx.DbTurn!.Id);
                             turn.LastUpdated = DateTime.UtcNow;
-
+                            
                             dbCreate.SaveChanges();
                             assistantMessageIds.Add(toolCallMessage.Id);
                         }
@@ -2127,7 +2132,7 @@ public class ConversationService : IConversationService
                             infra.Writer.TryWrite(assistantToolCallEvent);
                         }
                         catch { /* non-fatal if we cannot emit */ }
-
+                        
                         // Don't set currentAssistantMessageId - this message is complete
                         currentAssistantMessageId = null;
                         currentAssistantContent.Clear();
@@ -2150,16 +2155,16 @@ public class ConversationService : IConversationService
                             Created = DateTime.UtcNow,
                             AssistantId = ctx.AssistantId
                         };
-
+                        
                         using (var scopeContent = _scopeFactory.CreateScope())
                         {
                             var dbContent = scopeContent.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                             dbContent.NotebookConversationMessages.Add(contentMessage);
-
+                            
                             // Update turn's LastUpdated for polling detection
                             var turn = dbContent.ConversationTurns.First(t => t.Id == ctx.DbTurn!.Id);
                             turn.LastUpdated = DateTime.UtcNow;
-
+                            
                             dbContent.SaveChanges();
                         }
 
@@ -2174,19 +2179,19 @@ public class ConversationService : IConversationService
                         // STREAMING MESSAGE: Update existing streaming message
                         var hostUrl = _configuration?["ANTRUNNER_SERVICES_HOST_URL"] ?? Environment.GetEnvironmentVariable("ANTRUNNER_SERVICES_HOST_URL");
                         var sanitized = SanitizeAssistantContent(e.Message ?? string.Empty, fileUrlMap, hostUrl);
-
+                        
                         using (var scopeUpdate = _scopeFactory.CreateScope())
                         {
                             var dbUpdate = scopeUpdate.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                             var stubUpdate = new NotebookConversationMessage { Id = currentAssistantMessageId.Value };
                             dbUpdate.Attach(stubUpdate);
-
+                            
                             stubUpdate.Content = sanitized;
                             stubUpdate.IsStreaming = false;
-
+                            
                             dbUpdate.Entry(stubUpdate).Property(x => x.Content).IsModified = true;
                             dbUpdate.Entry(stubUpdate).Property(x => x.IsStreaming).IsModified = true;
-
+                            
                             if (!string.IsNullOrEmpty(e.ToolCallsJson))
                             {
                                 stubUpdate.ToolCalls = e.ToolCallsJson;
@@ -2200,7 +2205,7 @@ public class ConversationService : IConversationService
                             // Persist
                             dbUpdate.SaveChanges();
                         }
-
+                        
                         currentAssistantMessageId = null;
                         currentAssistantContent.Clear();
                         infra.OnMessageAdded(_, new MessageAddedEventArgs("assistant", sanitized));
@@ -2241,11 +2246,11 @@ public class ConversationService : IConversationService
                         {
                             var dbTool = scopeTool.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                             dbTool.NotebookConversationMessages.Add(toolMessage);
-
+                            
                             // Update turn's LastUpdated for polling detection
                             var turn = dbTool.ConversationTurns.First(t => t.Id == ctx.DbTurn!.Id);
                             turn.LastUpdated = DateTime.UtcNow;
-
+                            
                             dbTool.SaveChanges();
                         }
 
@@ -2298,13 +2303,13 @@ public class ConversationService : IConversationService
                 {
                     using var scopeFinal = _scopeFactory.CreateScope();
                     var dbFinal = scopeFinal.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+                    
                     // Check if it's still streaming
                     var existingMsg = await dbFinal.NotebookConversationMessages
                         .Where(m => m.Id == currentAssistantMessageId.Value)
                         .Select(m => new { m.IsStreaming })
                         .FirstOrDefaultAsync(noneCt);
-
+                    
                     if (existingMsg != null && (existingMsg.IsStreaming ?? false))
                     {
                         // Update to finalize
@@ -2314,11 +2319,11 @@ public class ConversationService : IConversationService
                         stubFinal.IsStreaming = false;
                         dbFinal.Entry(stubFinal).Property(x => x.Content).IsModified = true;
                         dbFinal.Entry(stubFinal).Property(x => x.IsStreaming).IsModified = true;
-
+                        
                         // Update turn's LastUpdated for polling detection
                         var turnFinal = dbFinal.ConversationTurns.First(t => t.Id == ctx.DbTurn!.Id);
                         turnFinal.LastUpdated = DateTime.UtcNow;
-
+                        
                         await dbFinal.SaveChangesAsync(noneCt);
                     }
                 }
@@ -2334,7 +2339,7 @@ public class ConversationService : IConversationService
                 {
                     using var scopeUsage = _scopeFactory.CreateScope();
                     var dbUsage = scopeUsage.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
+                    
                     // Get all tool messages for this turn
                     var toolMessages = await dbUsage.NotebookConversationMessages
                         .Where(m => m.NotebookConversationId == ctx.Conversation.Id
@@ -2355,8 +2360,7 @@ public class ConversationService : IConversationService
                             notebookId: ctx.Conversation.NotebookId,
                             conversationId: ctx.Conversation.Id,
                             functionName: toolMsg.FunctionName!,
-                            metadataJson: JsonSerializer.Serialize(new
-                            {
+                            metadataJson: JsonSerializer.Serialize(new {
                                 toolCallId = toolMsg.ToolCallId,
                                 functionName = toolMsg.FunctionName,
                                 contentLength = toolMsg.ContentLength
@@ -2383,7 +2387,7 @@ public class ConversationService : IConversationService
                         turnDb.Attach(ctx.DbTurn!);
                         ctx.DbTurn!.ChatRunOutputJson = JsonSerializer.Serialize(output, _jsonOptions);
                         ctx.DbTurn!.UsageJson = output.Usage != null ? JsonSerializer.Serialize(output.Usage, _jsonOptions) : null;
-
+                        
                         // Store file changes tracked during tool execution
                         if (output.NewFiles != null && output.NewFiles.Count > 0)
                         {
@@ -2393,7 +2397,7 @@ public class ConversationService : IConversationService
                         {
                             ctx.DbTurn!.FilesModified = JsonSerializer.Serialize(output.ModifiedFiles, _jsonOptions);
                         }
-
+                        
                         await turnDb.SaveChangesAsync(noneCt);
                     }
 
@@ -2461,11 +2465,11 @@ public class ConversationService : IConversationService
                     stubCancel.IsStreaming = false;
                     dbCancel.Entry(stubCancel).Property(x => x.Content).IsModified = true;
                     dbCancel.Entry(stubCancel).Property(x => x.IsStreaming).IsModified = true;
-
+                    
                     // Update turn's LastUpdated for polling detection
                     var turnCancel = dbCancel.ConversationTurns.First(t => t.Id == ctx.DbTurn!.Id);
                     turnCancel.LastUpdated = DateTime.UtcNow;
-
+                    
                     await dbCancel.SaveChangesAsync(noneCt);
                 }
 
@@ -2501,11 +2505,11 @@ public class ConversationService : IConversationService
                     stubErr.IsStreaming = false;
                     dbErr.Entry(stubErr).Property(x => x.Content).IsModified = true;
                     dbErr.Entry(stubErr).Property(x => x.IsStreaming).IsModified = true;
-
+                    
                     // Update turn's LastUpdated for polling detection
                     var turnErr = dbErr.ConversationTurns.First(t => t.Id == ctx.DbTurn!.Id);
                     turnErr.LastUpdated = DateTime.UtcNow;
-
+                    
                     await dbErr.SaveChangesAsync(noneCt);
                 }
 
@@ -2888,7 +2892,7 @@ public class ConversationService : IConversationService
 
         return result;
     }
-
+    
     private static string AppendQueryParamIfMissing(string url, string key, string value)
     {
         try
@@ -2912,26 +2916,26 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-
-
+        
+        
+        
         // Normalize query parameters
         var page = Math.Max(1, query.Page);
         var pageSize = Math.Max(1, Math.Min(100, query.PageSize)); // Limit to 100 max
         var searchTerm = query.Search?.Trim();
         var sortBy = query.SortBy?.ToLower() ?? "date";
         var sortOrder = query.SortOrder?.ToLower() ?? "desc";
-
+        
         // Optimized approach: Start from messages where user participated, 
         // then get distinct conversations. This leverages the (UserId, NotebookConversationId) index.
         // Avoids loading all messages via Include() which was causing 3+ second queries.
-
+        
         // Step 1: Get conversation IDs where user has authored at least one message
         // Uses index: IX_NotebookConversationMessages_UserId_NotebookConversationId
         var userConversationIds = db.NotebookConversationMessages
             .Select(m => m.NotebookConversationId)
             .Distinct();
-
+        
         // Step 2: Build efficient query with projections (no Include needed)
         var queryable = db.NotebookConversations
             .Where(c => userConversationIds.Contains(c.Id) && !c.Notebook.Project.Deleted)
@@ -2949,22 +2953,22 @@ public class ConversationService : IConversationService
                     .Where(m => m.NotebookConversationId == c.Id)
                     .Max(m => (DateTime?)m.Created) ?? c.Created
             });
-
+        
         // Apply search filter (case-insensitive)
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
             var searchLower = searchTerm.ToLower();
-            queryable = queryable.Where(c =>
+            queryable = queryable.Where(c => 
                 c.Title.ToLower().Contains(searchLower) ||
                 c.NotebookTitle.ToLower().Contains(searchLower) ||
                 c.ProjectTitle.ToLower().Contains(searchLower)
             );
         }
-
+        
         // Apply sorting
         queryable = sortBy switch
         {
-            "project" => sortOrder == "asc"
+            "project" => sortOrder == "asc" 
                 ? queryable.OrderBy(c => c.ProjectTitle).ThenByDescending(c => c.LastActivity)
                 : queryable.OrderByDescending(c => c.ProjectTitle).ThenByDescending(c => c.LastActivity),
             "notebook" => sortOrder == "asc"
@@ -2974,10 +2978,10 @@ public class ConversationService : IConversationService
                 ? queryable.OrderBy(c => c.LastActivity)
                 : queryable.OrderByDescending(c => c.LastActivity)
         };
-
+        
         // Get total count before pagination
         var totalCount = await queryable.CountAsync();
-
+        
         // Apply pagination
         var items = await queryable
             .Skip((page - 1) * pageSize)
@@ -2993,9 +2997,9 @@ public class ConversationService : IConversationService
                 c.LastActivity
             ))
             .ToListAsync();
-
+        
         var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
-
+        
         return new PagedUserConversationsDto(
             Items: items,
             TotalCount: totalCount,

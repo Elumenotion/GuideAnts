@@ -3,6 +3,7 @@ import {
   dispatchRuntimeStatusWindowEvent,
   getRuntimeBlockingMessage,
   getNotebookRuntimeReadyCache,
+  clearNotebookRuntimeReadyCache,
   checkRuntimeStatus,
 } from '../conversation/runtimeChecks';
 
@@ -90,6 +91,18 @@ describe('runtimeChecks', () => {
       const a = getNotebookRuntimeReadyCache('nb-cache-a');
       const b = getNotebookRuntimeReadyCache('nb-cache-b');
       expect(a).not.toBe(b);
+    });
+
+    it('clears cache for one notebook without affecting others', () => {
+      const a = getNotebookRuntimeReadyCache('nb-clear-a');
+      const b = getNotebookRuntimeReadyCache('nb-clear-b');
+      a.add('assistant-a');
+      b.add('assistant-b');
+
+      clearNotebookRuntimeReadyCache('nb-clear-a');
+
+      expect(a.size).toBe(0);
+      expect(b.has('assistant-b')).toBe(true);
     });
   });
 

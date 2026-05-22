@@ -1,3 +1,5 @@
 *
 !.gitignore
 !.gitkeep
+!settings.yml
+!limiter.toml
