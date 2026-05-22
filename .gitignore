@@ -229,6 +229,9 @@ _pkginfo.txt
 # but keep track of directories ending in .cache
 !?*.[Cc]ache/
 
+# macOS Finder metadata files
+.DS_Store
+
 # Others
 ClientBin/
 ~$*
