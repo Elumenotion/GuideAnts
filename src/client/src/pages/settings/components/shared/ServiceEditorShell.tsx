@@ -7,7 +7,7 @@ interface ServiceEditorShellProps {
   activeProviderLabel: string;
   /** When set, user is editing another provider before save */
   editingProviderLabel?: string | null;
-  readinessStatus: 'ready' | 'blocked' | string;
+  readinessStatus: 'ready' | 'blocked' | 'not-configured' | string;
   readinessSummary: string;
   providerSelector: ReactNode;
   providerSettings: ReactNode;
@@ -26,6 +26,12 @@ export function ServiceEditorShell({
   serviceSettings,
   actions,
 }: ServiceEditorShellProps) {
+  const isNotConfigured = activeProviderLabel === 'Not configured';
+  const effectiveReadinessStatus = isNotConfigured ? 'not-configured' : readinessStatus;
+  const effectiveReadinessSummary = isNotConfigured
+    ? 'No active provider configured yet. Select a provider and save to activate it.'
+    : readinessSummary;
+
   return (
     <div className="space-y-4">
       <section className="rounded border border-gray-200 p-4">
@@ -38,9 +44,9 @@ export function ServiceEditorShell({
                 Editing configuration for: <span className="font-medium">{editingProviderLabel}</span> (not active until you save)
               </p>
             ) : null}
-            <p className="mt-1 text-xs text-gray-500">{readinessSummary}</p>
+            <p className="mt-1 text-xs text-gray-500">{effectiveReadinessSummary}</p>
           </div>
-          <ReadinessBadge status={readinessStatus} />
+          <ReadinessBadge status={effectiveReadinessStatus} />
         </div>
       </section>
 
