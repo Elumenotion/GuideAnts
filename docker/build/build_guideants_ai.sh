@@ -12,7 +12,7 @@ Usage: build_guideants_ai.sh [options]
 Options:
   --rebuild-base         Rebuild dependency/base layers without cache
   --all                  Also build PlantUML, MSSQL FTS, SearXNG, and WebAPI+UI images
-  --backend <value>      Backend: cpu | cuda13 | rocm
+  --backend <value>      Backend: cpu | cuda13 | rocm | slim
   -h, --help             Show help
 EOF
 }
@@ -125,14 +125,16 @@ if [[ -z "$BACKEND" ]]; then
   echo "  1) CPU-only"
   echo "  2) CUDA 13"
   echo "  3) ROCm"
-  read -r -p "Enter choice [1, 2, or 3]: " choice
+  echo "  4) Slim"
+  read -r -p "Enter choice [1, 2, 3, or 4]: " choice
 else
   case "$BACKEND" in
     cpu) choice="1" ;;
     cuda13) choice="2" ;;
     rocm) choice="3" ;;
+    slim) choice="4" ;;
     *)
-      echo "Invalid backend: $BACKEND (expected cpu|cuda13|rocm)" >&2
+      echo "Invalid backend: $BACKEND (expected cpu|cuda13|rocm|slim)" >&2
       exit 1
       ;;
   esac
@@ -162,6 +164,14 @@ case "$choice" in
     DEPS_IMAGE_ARG="GA_DEPS_ROCM_IMAGE"
     REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311TorchROCM/requirements.txt"
     DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.rocm"
+    ;;
+  4)
+    BACKEND="slim"
+    FULL_TARGET="final-slim"
+    DEPS_TARGET="deps-slim"
+    DEPS_IMAGE_ARG="GA_DEPS_SLIM_IMAGE"
+    REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311Slim/requirements.txt"
+    DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.slim"
     ;;
   *)
     echo "Invalid choice." >&2
@@ -321,6 +331,7 @@ ENV_FILE="$DOCKER_ROOT/.env"
 case "$BACKEND" in
   cuda13) IMAGE_ENV_KEY="GA_AI_CUDA_IMAGE" ;;
   rocm) IMAGE_ENV_KEY="GA_AI_ROCM_IMAGE" ;;
+  slim) IMAGE_ENV_KEY="GA_AI_SLIM_IMAGE" ;;
   *) IMAGE_ENV_KEY="GA_AI_CPU_IMAGE" ;;
 esac
 ENV_LINE="$IMAGE_ENV_KEY=$LATEST_IMAGE_TAG"

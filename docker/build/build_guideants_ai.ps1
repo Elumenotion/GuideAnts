@@ -1,7 +1,7 @@
 param(
     [switch]$RebuildBase,
     [switch]$All,
-    [ValidateSet('cpu', 'cuda13', 'rocm')]
+    [ValidateSet('cpu', 'cuda13', 'rocm', 'slim')]
     [string]$Backend
 )
 
@@ -149,13 +149,15 @@ if ([string]::IsNullOrWhiteSpace($Backend)) {
     Write-Host "  1) CPU-only"
     Write-Host "  2) CUDA 13"
     Write-Host "  3) ROCm"
-    $choice = Read-Host "Enter choice [1, 2, or 3]"
+    Write-Host "  4) Slim"
+    $choice = Read-Host "Enter choice [1, 2, 3, or 4]"
     switch ($choice) {
         '1' { $Backend = 'cpu' }
         '2' { $Backend = 'cuda13' }
         '3' { $Backend = 'rocm' }
+        '4' { $Backend = 'slim' }
         default {
-            Write-Error "Invalid choice '$choice'. Valid values: 1, 2, or 3."
+            Write-Error "Invalid choice '$choice'. Valid values: 1, 2, 3, or 4."
             exit 1
         }
     }
@@ -185,8 +187,16 @@ switch ($Backend) {
         $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchROCM\requirements.txt'
         $dockerfilePath = Join-Path $buildContext 'Dockerfile.rocm'
     }
+    'slim' {
+        $Backend = 'slim'
+        $fullTarget = 'final-slim'
+        $depsTarget = 'deps-slim'
+        $depsImageArg = 'GA_DEPS_SLIM_IMAGE'
+        $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311Slim\requirements.txt'
+        $dockerfilePath = Join-Path $buildContext 'Dockerfile.slim'
+    }
     default {
-        Write-Error "Invalid backend '$Backend'. Valid values: cpu, cuda13, rocm."
+        Write-Error "Invalid backend '$Backend'. Valid values: cpu, cuda13, rocm, slim."
         exit 1
     }
 }
@@ -401,6 +411,7 @@ $envFile = Join-Path $dockerRoot '.env'
 $imageEnvKey = switch ($Backend) {
     'cuda13' { 'GA_AI_CUDA_IMAGE' }
     'rocm' { 'GA_AI_ROCM_IMAGE' }
+    'slim' { 'GA_AI_SLIM_IMAGE' }
     default { 'GA_AI_CPU_IMAGE' }
 }
 $envLine = "$imageEnvKey=$latestImageTag"
