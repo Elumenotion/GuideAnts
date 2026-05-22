@@ -19,6 +19,7 @@ import { isSelectableLocalVoiceModelEntry } from '../common/localModelSelection'
 import {
   isOperationFailedStatus,
   isOperationInFlight,
+  normalizeOperationStatus,
   isOperationTerminalStatus,
   LOCAL_OPERATION_UNREACHABLE_MESSAGE,
   type LocalDownloadOperationState,
@@ -51,6 +52,7 @@ type DownloadOp = {
   operationId: string;
   modelId?: string;
   tokenizerId?: string;
+  modelRef?: string;
   status: string;
   error?: string | null;
 };
@@ -110,6 +112,23 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
     setPhase('available');
     setErrorMessage(undefined);
     setErrorUpstream(undefined);
+  };
+
+  const tryAutoLoadDownloadedModel = async (operation: DownloadOp): Promise<void> => {
+    if (normalizeOperationStatus(operation.status) !== 'completed') {
+      return;
+    }
+    const modelRef = operation.modelRef?.trim();
+    if (!modelRef) {
+      return;
+    }
+
+    setEngineBusy({ op: 'load', modelRef });
+    try {
+      await api.settings.localModels.load(SERVICE_ID, { model_path: modelRef });
+    } finally {
+      setEngineBusy(null);
+    }
   };
 
   useEffect(() => {
@@ -206,9 +225,17 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
       pollRef.current = startLocalOperationPoll<DownloadOp>({
         poll: () => api.settings.localModels.getOperation(SERVICE_ID, op.operationId) as Promise<DownloadOp>,
         onUpdate: (latest) => setActiveDownload(latest),
-        onTerminal: () => {
+        onTerminal: (latest) => {
           stopPolling();
-          void refresh();
+          void (async () => {
+            try {
+              await tryAutoLoadDownloadedModel(latest);
+            } catch (e) {
+              setActionError(e instanceof Error ? e.message : 'Auto-load failed.');
+            } finally {
+              await refresh();
+            }
+          })();
         },
         onPollFailureThreshold: () => {
           stopPolling();

@@ -30,6 +30,7 @@ vi.mock('../../common/localOperationPolling', async () => {
       const terminal = {
         operationId: 'op-1',
         modelId: 'acme/emb',
+        modelRef: 'acme--emb',
         status: 'completed',
         error: null,
       };
@@ -156,6 +157,53 @@ describe('EmbRuntimeManager', () => {
 
     await waitFor(() => {
       expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('Embeddings', { model_id: 'acme/emb' });
+    });
+  });
+
+  it('auto-loads downloaded model using operation modelRef contract', async () => {
+    (api.settings.localModels.listOutcome as any).mockResolvedValue({
+      kind: 'available',
+      payload: {
+        modelDir: '/models-local/emb',
+        items: [{ modelRef: 'acme--emb', isDirectory: true, sizeBytes: 0, active: false }],
+      },
+    });
+    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValue({
+      kind: 'available',
+      payload: { ready: false, loaded: false, modelRef: null },
+    });
+    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
+      repository: 'acme/emb',
+      gated: false,
+      tokenUsed: false,
+      modelCardUrl: null,
+      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
+    });
+    (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
+      operationId: 'op-1',
+      modelId: 'acme/emb',
+      modelRef: 'acme--emb',
+      status: 'queued',
+      error: null,
+    });
+    (api.settings.localModels.load as any).mockResolvedValueOnce({ status: 'loaded' });
+
+    render(<EmbRuntimeManager enabled />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Add model/i)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    fireEvent.change(screen.getByPlaceholderText(/microsoft\/harrier/i), { target: { value: 'acme/emb' } });
+    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
+
+    await waitFor(() => {
+      expect(api.settings.localModels.load).toHaveBeenCalledWith('Embeddings', { model_path: 'acme--emb' });
     });
   });
 

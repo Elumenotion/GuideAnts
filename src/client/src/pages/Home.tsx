@@ -134,7 +134,9 @@ const Home = () => {
           (section) => CONNECTION_SECTION_NAME_SET.has(section.sectionName)
             && section.readinessStatus === 'configured'
         );
-        const needsWizard = configuredConnections.length === 0 || models.length === 0;
+        // Local-only deployments are valid; if either side is present we
+        // should not force onboarding on every home-page visit.
+        const needsWizard = configuredConnections.length === 0 && models.length === 0;
         if (needsWizard) {
           setShowAddAiServicesWizard(true);
         }

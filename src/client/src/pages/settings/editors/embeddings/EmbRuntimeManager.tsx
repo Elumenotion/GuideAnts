@@ -14,6 +14,7 @@ import { isSelectableLocalVoiceModelEntry } from '../common/localModelSelection'
 import {
   isOperationFailedStatus,
   isOperationInFlight,
+  normalizeOperationStatus,
   isOperationTerminalStatus,
   LOCAL_OPERATION_UNREACHABLE_MESSAGE,
   type LocalDownloadOperationState,
@@ -52,6 +53,7 @@ type EmbReadiness = {
 type DownloadOp = {
   operationId: string;
   modelId?: string;
+  modelRef?: string;
   status: string;
   error?: string | null;
 };
@@ -62,12 +64,14 @@ interface EmbRuntimeManagerProps {
   enabled: boolean;
   onDownloadOperationChange?: (state: LocalDownloadOperationState | null) => void;
   onRuntimeReadinessChange?: (state: LocalRuntimeReadinessState | null) => void;
+  onModelAutoLoaded?: (modelRef: string) => void;
 }
 
 export function EmbRuntimeManager({
   enabled,
   onDownloadOperationChange,
   onRuntimeReadinessChange,
+  onModelAutoLoaded,
 }: EmbRuntimeManagerProps) {
   const [phase, setPhase] = useState<LocalCapabilityPhase>('loading');
   const [list, setList] = useState<EmbListPayload | undefined>(undefined);
@@ -91,6 +95,24 @@ export function EmbRuntimeManager({
     }
   };
 
+  const tryAutoLoadDownloadedModel = async (operation: DownloadOp): Promise<void> => {
+    if (normalizeOperationStatus(operation.status) !== 'completed') {
+      return;
+    }
+    const modelRef = operation.modelRef?.trim();
+    if (!modelRef) {
+      return;
+    }
+
+    setEngineBusy({ op: 'load', modelRef });
+    try {
+      await api.settings.localModels.load(SERVICE_ID, { model_path: modelRef });
+      onModelAutoLoaded?.(modelRef);
+    } finally {
+      setEngineBusy(null);
+    }
+  };
+
   const refresh = async (): Promise<void> => {
     setActionError(null);
     setPhase((p) => (p === 'available' ? 'available' : 'loading'));
@@ -98,6 +120,14 @@ export function EmbRuntimeManager({
       api.settings.localModels.listOutcome(SERVICE_ID),
       api.settings.localModels.runtimeReadinessOutcome(SERVICE_ID),
     ]);
+    if (!listOutcome || (listOutcome.kind !== 'available' && listOutcome.kind !== 'error')) {
+      setPhase('error');
+      setList(undefined);
+      setReadiness(undefined);
+      setErrorMessage('Model list response was unavailable.');
+      setErrorUpstream(undefined);
+      return;
+    }
     if (listOutcome.kind === 'error') {
       setPhase('error');
       setList(undefined);
@@ -209,9 +239,17 @@ export function EmbRuntimeManager({
       pollRef.current = startLocalOperationPoll<DownloadOp>({
         poll: () => api.settings.localModels.getOperation(SERVICE_ID, op.operationId) as Promise<DownloadOp>,
         onUpdate: (latest) => setActiveDownload(latest),
-        onTerminal: () => {
+        onTerminal: (latest) => {
           stopPolling();
-          void refresh();
+          void (async () => {
+            try {
+              await tryAutoLoadDownloadedModel(latest);
+            } catch (e) {
+              setActionError(e instanceof Error ? e.message : 'Auto-load failed.');
+            } finally {
+              await refresh();
+            }
+          })();
         },
         onPollFailureThreshold: () => {
           stopPolling();
@@ -361,7 +399,7 @@ export function EmbRuntimeManager({
                     <td className="px-3 py-2 text-xs">
                       {m.active ? (
                         <span className="inline-flex items-center rounded bg-blue-100 px-2 py-0.5 font-semibold text-blue-800">
-                          Loaded
+                          Selected
                         </span>
                       ) : (
                         <span className="text-gray-500">—</span>
@@ -381,7 +419,7 @@ export function EmbRuntimeManager({
                           onClick={() => void handleLoadRow(m.modelRef)}
                           title={
                             m.active
-                              ? 'This model is already loaded.'
+                              ? 'This model is selected on disk. Load remains available if runtime is not currently ready.'
                               : 'Load this model into the embedding engine.'
                           }
                         />
