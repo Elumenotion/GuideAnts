@@ -183,40 +183,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
 {
     public const string TelemetrySectionName = "Telemetry";
 
-    /// <summary>
-    /// Builds <c>{"Containers":{ "containerId": {"BaseUrl":"..."} }}</c> for DB seeding.
-    /// Starts from in-code defaults (local dev), then overlays <c>ServiceRouting:Containers:*:BaseUrl</c>
-    /// from configuration (environment / compose) so overrides win without duplicating values in appsettings.
-    /// </summary>
-    private static JsonObject BuildServiceRoutingBootstrapPayload(IConfiguration configuration)
-    {
-        var containers = new JsonObject();
-        foreach (var (containerId, baseUrl) in DefaultServiceRoutingContainers)
-        {
-            containers[containerId] = new JsonObject { ["BaseUrl"] = baseUrl };
-        }
-
-        foreach (var containerSection in configuration.GetSection("ServiceRouting:Containers").GetChildren())
-        {
-            var configured = containerSection["BaseUrl"];
-            if (string.IsNullOrWhiteSpace(configured))
-            {
-                continue;
-            }
-
-            containers[containerSection.Key] = new JsonObject { ["BaseUrl"] = configured.Trim() };
-        }
-
-        return new JsonObject { ["Containers"] = containers };
-    }
-
-    /// <summary>Default container base URLs for new installs; configuration overlays these keys.</summary>
-    private static readonly (string ContainerId, string BaseUrl)[] DefaultServiceRoutingContainers =
-    [
-        ("guideants-ai", "http://localhost:8110/sandbox"),
-        ("plantuml", "http://localhost:8111"),
-    ];
-
     private static JsonObject BuildTelemetryBootstrapPayload(IConfiguration _)
     {
         var payload = new JsonObject();
@@ -450,12 +416,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
                 new("MediaBaseUrl", "LocalServiceHosts:MediaBaseUrl"),
                 new("DocumentIntelligenceBaseUrl", "LocalServiceHosts:DocumentIntelligenceBaseUrl")
             ]
-        },
-        new()
-        {
-            SectionName = "ServiceRouting",
-            BootstrapPayloadFactory = BuildServiceRoutingBootstrapPayload,
-            Properties = []
         },
         // Non-chat routing mode matrix (R-1.3). Chat is deliberately NOT represented here —
         // chat routing is assistant-driven (R-1.1). The Modes property is a JSON object keyed

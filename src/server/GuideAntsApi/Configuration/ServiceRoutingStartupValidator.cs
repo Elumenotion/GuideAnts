@@ -28,7 +28,8 @@ public static class ServiceRoutingStartupValidator
 
         var llamaBaseUrl = configuration["LlamaCpp:BaseUrl"];
         ValidateLlamaBaseUrl(llamaBaseUrl, errors);
-        ValidateGuideantsAiBaseUrl(configuration, errors);
+        var requireExplicitServiceRouting = ShouldRequireExplicitServiceRouting(configuration);
+        ValidateGuideantsAiBaseUrl(configuration, errors, requireExplicitServiceRouting);
 
         foreach (var containerSection in configuration.GetSection("ServiceRouting:Containers").GetChildren())
         {
@@ -121,13 +122,31 @@ public static class ServiceRoutingStartupValidator
         }
     }
 
-    private static void ValidateGuideantsAiBaseUrl(IConfiguration configuration, List<string> errors)
+    private static bool ShouldRequireExplicitServiceRouting(IConfiguration configuration)
+    {
+        var runtimeContext = configuration["API_RUNTIME_CONTEXT"];
+        if (string.Equals(runtimeContext, "compose", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var envSuffix = configuration["CONTAINER_APP_ENV_DNS_SUFFIX"];
+        return !string.IsNullOrWhiteSpace(envSuffix);
+    }
+
+    private static void ValidateGuideantsAiBaseUrl(
+        IConfiguration configuration,
+        List<string> errors,
+        bool requireExplicitServiceRouting)
     {
         var baseUrl = configuration["ServiceRouting:Containers:guideants-ai:BaseUrl"];
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            errors.Add(
-                "ServiceRouting:Containers:guideants-ai:BaseUrl is required and must include the '/sandbox' prefix for hard cutover routing.");
+            if (requireExplicitServiceRouting)
+            {
+                errors.Add(
+                    "ServiceRouting:Containers:guideants-ai:BaseUrl is required and must include the '/sandbox' prefix for hard cutover routing.");
+            }
             return;
         }
 

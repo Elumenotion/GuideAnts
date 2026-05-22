@@ -302,12 +302,17 @@ namespace GuideAntsApi.Services
         private string ResolveScriptExecutionBaseUrl(string containerName)
         {
             var configuredContainerUrl = _configuration[$"ServiceRouting:Containers:{containerName}:BaseUrl"];
-            if (!string.IsNullOrWhiteSpace(configuredContainerUrl))
-            {
-                return configuredContainerUrl.Trim();
-            }
-
+            var apiRuntimeContext = _configuration["API_RUNTIME_CONTEXT"];
             var envSuffix = Environment.GetEnvironmentVariable("CONTAINER_APP_ENV_DNS_SUFFIX");
+            return ResolveScriptExecutionBaseUrl(containerName, configuredContainerUrl, apiRuntimeContext, envSuffix);
+        }
+
+        internal static string ResolveScriptExecutionBaseUrl(
+            string containerName,
+            string? configuredContainerUrl,
+            string? apiRuntimeContext,
+            string? envSuffix)
+        {
             if (!string.IsNullOrWhiteSpace(envSuffix))
             {
                 if (string.Equals(containerName, GuideantsAiContainerName, StringComparison.OrdinalIgnoreCase))
@@ -318,6 +323,30 @@ namespace GuideAntsApi.Services
                 return $"http://{containerName}.internal.{envSuffix}";
             }
 
+            // In compose, tool execution must always target sibling container DNS names.
+            // Do not allow settings-backed ServiceRouting overrides to redirect this path.
+            if (string.Equals(apiRuntimeContext, "compose", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.Equals(containerName, GuideantsAiContainerName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return "http://guideants-ai:80/sandbox";
+                }
+
+                if (string.Equals(containerName, PlantUmlContainerName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return "http://plantuml:80";
+                }
+
+                return $"http://{containerName}";
+            }
+
+            if (!string.IsNullOrWhiteSpace(configuredContainerUrl))
+            {
+                return configuredContainerUrl.Trim();
+            }
+
+            // Local non-compose development fallback: preserve the legacy localhost
+            // behavior so API-outside-container + tool-containers-on-localhost keeps working.
             if (string.Equals(containerName, GuideantsAiContainerName, StringComparison.OrdinalIgnoreCase))
             {
                 return "http://localhost:8110/sandbox";

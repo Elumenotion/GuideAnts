@@ -185,6 +185,8 @@ services:
       - LocalServiceHosts__MediaBaseUrl=http://guideants-ai:80
       - LocalServiceHosts__DocumentIntelligenceBaseUrl=http://docling-serve:5001
       - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
+      - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox
+      - ServiceRouting__Containers__plantuml__BaseUrl=http://plantuml:80
       # Optional: HF CLI/scripts and Hugging Face downloads can read HF_TOKEN. Prefer storing the token in
       # Settings â†’ Providers â†’ Llama.cpp (Hugging Face token, DB-backed) for in-app downloads.
       - HF_TOKEN=${HF_TOKEN:-}

@@ -69,7 +69,10 @@ public sealed class ApplicationSettingsConfigurationProvider(
                 }
                 else
                 {
-                    FlattenSection(sectionName, jsonObject, null);
+                    // Do not hydrate unknown DB sections into live runtime configuration.
+                    // This prevents non-registry settings (for example legacy ServiceRouting rows)
+                    // from silently overriding environment/appsettings values.
+                    continue;
                 }
             }
         }

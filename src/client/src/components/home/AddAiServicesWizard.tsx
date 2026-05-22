@@ -2096,6 +2096,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               value={localAi.prereqsForm}
               errors={localAi.prereqsErrors}
               onChange={localAi.setPrereqsForm}
+              localChatModelCount={localAiTotalModelCount}
             />
           ) : (
             <OpenAiConnectionStep

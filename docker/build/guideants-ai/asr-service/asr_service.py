@@ -271,6 +271,21 @@ def list_model_entries() -> list[dict[str, Any]]:
     return items
 
 
+def canonical_model_folder_name(model_id: str) -> str:
+    normalized = (model_id or "").strip().strip("/")
+    if not normalized:
+        raise ValueError("model_id is required")
+
+    leaf = normalized.split("/")[-1].strip()
+    if not leaf:
+        raise ValueError("model_id must include a repository name")
+
+    if any(sep in leaf for sep in ("/", "\\", "..")):
+        raise ValueError("model_id resolved to an invalid local folder name")
+
+    return leaf
+
+
 def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
     operation_id = uuid.uuid4().hex
     operation = {
@@ -290,7 +305,7 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
             MODEL_DOWNLOAD_OPERATIONS[operation_id]["status"] = "running"
         model_dir = get_model_dir()
         os.makedirs(model_dir, exist_ok=True)
-        target_name = request.model_id.replace("/", "--")
+        target_name = canonical_model_folder_name(request.model_id)
         target_path = os.path.join(model_dir, target_name)
         try:
             from huggingface_hub import snapshot_download

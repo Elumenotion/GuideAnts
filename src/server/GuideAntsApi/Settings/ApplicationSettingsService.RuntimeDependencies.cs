@@ -149,8 +149,6 @@ public sealed partial class ApplicationSettingsService
             throw new InvalidOperationException($"Settings section '{sectionName}' is not supported.");
         }
 
-        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken).ConfigureAwait(false);
-
         var row = await _db.ApplicationSettings
             .SingleOrDefaultAsync(x => x.SectionName == sectionName, cancellationToken)
             .ConfigureAwait(false);
