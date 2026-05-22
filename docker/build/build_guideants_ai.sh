@@ -384,11 +384,6 @@ if [[ "$BUILD_ALL" == "true" ]]; then
   fi
 fi
 
-FINAL_SIZE="$(docker image inspect "$IMAGE_TAG" --format '{{.Size}}' 2>/dev/null || true)"
-DEPS_SIZE="$(docker image inspect "$DEPS_TAG" --format '{{.Size}}' 2>/dev/null || true)"
-FINAL_SIZE_MB="$([ -n "$FINAL_SIZE" ] && awk "BEGIN{printf \"%.1f MB\", $FINAL_SIZE/1048576}" || echo "unknown")"
-DEPS_SIZE_MB="$([ -n "$DEPS_SIZE" ]  && awk "BEGIN{printf \"%.1f MB\", $DEPS_SIZE/1048576}"  || echo "unknown")"
-
 echo
 echo "============================================"
 echo "  Build complete: $IMAGE_TAG"

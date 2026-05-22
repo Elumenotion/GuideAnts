@@ -573,11 +573,6 @@ if ($All) {
     }
 }
 
-$finalSize = docker image inspect $imageTag --format '{{.Size}}' 2>$null
-$depsSize  = docker image inspect $depsTag  --format '{{.Size}}' 2>$null
-$finalSizeMB = if ($finalSize) { "$([math]::Round([long]$finalSize / 1MB, 1)) MB" } else { "unknown" }
-$depsSizeMB  = if ($depsSize)  { "$([math]::Round([long]$depsSize  / 1MB, 1)) MB" } else { "unknown" }
-
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Build complete: $imageTag" -ForegroundColor Cyan
