@@ -465,8 +465,11 @@ public sealed class ProviderNativeChatClientTests
                         JsonNode.Parse("""{"type":"object","properties":{"city":{"type":"string"}}}""")))
             ],
             model: null,
-            temperature: 0.2,
-            topP: 0.9,
+            samplingParameters: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                ["temperature"] = 0.2,
+                ["top_p"] = 0.9
+            },
             reasoningEffort: reasoningEffort);
 
     private static HttpResponseMessage JsonResponse(string json) =>

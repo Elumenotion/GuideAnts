@@ -90,11 +90,12 @@ namespace AntRunner.Chat
         /// Changes the assistant being used in the conversation to the specified assistant name.
         /// </summary>
         /// <param name="assistantName">The name of the new assistant to use.</param>
-        /// <param name="useAssistantDefinitionModel">If true, will set the conversation to use the assistant definitions model, overiding whatever was set when the conversation was created</param>
-        public async Task ChangeAssistant(string assistantName, bool useAssistantDefinitionModel = false)
+        /// <param name="executionPolicy">Resolved execution policy for the target assistant.</param>
+        public async Task ChangeAssistant(string assistantName, ResolvedExecutionPolicy executionPolicy)
         {
             if (AssistantDefinition == null) throw new Exception("AssistantDefinition is null. Use the default public constructor exists to allow serialization, but you should nt use it directly.");
             if (_chatConfiguration == null) throw new Exception("_chatConfiguration is null. Use the default public constructor exists to allow serialization, but you should nt use it directly.");
+            ArgumentNullException.ThrowIfNull(executionPolicy);
 
             if (assistantName == AssistantDefinition.Name) return;
             var assistantDef = await AssistantUtility.GetAssistantCreateRequest(assistantName) ?? throw new Exception($"Can't find assistant definition for {assistantName}");
@@ -121,10 +122,8 @@ namespace AntRunner.Chat
             AssistantMessages[assistantName] = newAssistantMessages;
 
             _chatConfiguration.AssistantName = assistantName;
-            if (useAssistantDefinitionModel && string.IsNullOrWhiteSpace(_chatConfiguration.DeploymentId))
-            {
-                _chatConfiguration.DeploymentId = assistantDef.Model;
-            }
+            _chatConfiguration.DeploymentId = executionPolicy.ModelId;
+            _chatConfiguration.ExecutionPolicy = executionPolicy;
         }
 
         /// <summary>

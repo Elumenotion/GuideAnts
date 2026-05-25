@@ -1664,9 +1664,7 @@ _logger.LogCritical("🚨 DELETING CONVERSATION {ConversationId} - THIS WILL CAS
         public required User DbUser { get; init; }
         public required string AssistantName { get; init; }
         public string? ModelDeploymentId { get; init; }
-        public float? OverrideTemperature { get; init; }
-        public float? OverrideTopP { get; init; }
-        public string? OverrideReasoningEffort { get; init; }
+        public ResolvedExecutionPolicy? ExecutionPolicy { get; init; }
         public required List<ChatMessage> PreviousMessages { get; init; }
         public Guid? AssistantId { get; init; }
 
@@ -1714,44 +1712,23 @@ var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.co
         var modelDeploymentId = request.ModelDeploymentId;
         if (string.IsNullOrWhiteSpace(modelDeploymentId))
         {
-            // First try to get model from assistant definition
-            try
-            {
-                var assistantDef = await AssistantUtility.GetAssistantCreateRequest(assistantName);
-                if (assistantDef != null)
-                {
-                    modelDeploymentId = assistantDef.Model;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to get assistant definition for {AssistantName}, will use template default", assistantName);
-            }
-
-            // Fall back to guide default model if assistant doesn't specify a model
-            if (string.IsNullOrWhiteSpace(modelDeploymentId))
-            {
-                var guideId = conv.Notebook.GuideId ?? conv.Notebook.NotebookTemplateId;
-                if (guideId.HasValue)
-                {
-                    modelDeploymentId = await GetTemplateDefaultModelAsync(guideId.Value);
-                }
-            }
+            var assistantDef = await AssistantUtility.GetAssistantCreateRequest(assistantName)
+                ?? throw new InvalidOperationException($"Assistant definition not found for {assistantName}.");
+            modelDeploymentId = assistantDef.Model;
         }
 
         var requestedModelDeploymentId = modelDeploymentId;
         var resolvedModel = _chatModelResolver.Resolve(modelDeploymentId);
         modelDeploymentId = resolvedModel.ModelId;
         _logger.LogInformation(
-            "Conversation chat model resolved. ConversationId={ConversationId}, AssistantName={AssistantName}, RequestedModelId={RequestedModelId}, ResolvedModelId={ResolvedModelId}, ReferenceKind={ReferenceKind}, OverrideTemperature={OverrideTemperature}, OverrideTopP={OverrideTopP}, OverrideReasoningEffort={OverrideReasoningEffort}",
+            "Conversation chat model resolved. ConversationId={ConversationId}, AssistantName={AssistantName}, RequestedModelId={RequestedModelId}, ResolvedModelId={ResolvedModelId}, ReferenceKind={ReferenceKind}, Authority={Authority}, ParameterKeys=[{ParameterKeys}]",
             conversationId,
             assistantName,
             string.IsNullOrWhiteSpace(requestedModelDeploymentId) ? "(unset)" : requestedModelDeploymentId,
             resolvedModel.ModelId,
             resolvedModel.ReferenceKind,
-            resolvedModel.OverrideTemperature,
-            resolvedModel.OverrideTopP,
-            resolvedModel.OverrideReasoningEffort ?? "(null)");
+            resolvedModel.ExecutionPolicy.Authority,
+            string.Join(", ", resolvedModel.ExecutionPolicy.Parameters.Keys));
 
         var previousMessages = await PrepareMessagesForAssistantAsync(conv, assistantName, dbUser.Id, ct);
 
@@ -1769,9 +1746,7 @@ var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.co
             DbUser = dbUser,
             AssistantName = assistantName,
             ModelDeploymentId = modelDeploymentId,
-            OverrideTemperature = resolvedModel.OverrideTemperature,
-            OverrideTopP = resolvedModel.OverrideTopP,
-            OverrideReasoningEffort = resolvedModel.OverrideReasoningEffort,
+            ExecutionPolicy = resolvedModel.ExecutionPolicy,
             PreviousMessages = previousMessages,
             AssistantId = assistantId
         };
@@ -1852,9 +1827,7 @@ var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.co
             Instructions = ctx.Request.Instructions,
             oAuthUserAccessToken = ctx.Request.ExternalAuthTokens?.FirstOrDefault().Value,
             ExternalAuthTokens = ctx.Request.ExternalAuthTokens,
-            OverrideTemperature = ctx.OverrideTemperature,
-            OverrideTopP = ctx.OverrideTopP,
-            OverrideReasoningEffort = ctx.OverrideReasoningEffort,
+            ExecutionPolicy = ctx.ExecutionPolicy,
         };
     }
 

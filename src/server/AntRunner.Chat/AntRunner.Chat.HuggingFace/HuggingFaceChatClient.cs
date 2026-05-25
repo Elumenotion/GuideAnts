@@ -170,14 +170,50 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
     {
         public static HuggingFaceChatRequest ToRequest(ChatCompletionRequest request, string model, bool stream)
         {
+            var (temperature, topP, extensions) = ResolveSampling(request);
             return new HuggingFaceChatRequest(
                 Model: model,
                 Messages: request.Messages.Select(ToMessage).ToList(),
                 Tools: request.Tools?.Select(ToTool).ToList(),
-                Temperature: request.Temperature,
-                TopP: request.TopP,
+                Temperature: temperature,
+                TopP: topP,
                 ReasoningEffort: request.ReasoningEffort,
-                Stream: stream);
+                Stream: stream)
+            {
+                Extensions = extensions
+            };
+        }
+
+        private static (double? Temperature, double? TopP, Dictionary<string, JsonElement>? Extensions)
+            ResolveSampling(ChatCompletionRequest request)
+        {
+            double? temperature = null;
+            double? topP = null;
+            Dictionary<string, JsonElement>? extensions = null;
+            if (request.SamplingParameters == null)
+            {
+                return (temperature, topP, extensions);
+            }
+
+            foreach (var (key, value) in request.SamplingParameters)
+            {
+                if (string.Equals(key, "temperature", StringComparison.Ordinal))
+                {
+                    temperature = value;
+                    continue;
+                }
+
+                if (string.Equals(key, "top_p", StringComparison.Ordinal))
+                {
+                    topP = value;
+                    continue;
+                }
+
+                extensions ??= new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+                extensions[key] = JsonSerializer.SerializeToElement(value);
+            }
+
+            return (temperature, topP, extensions);
         }
 
         private static HuggingFaceChatMessage ToMessage(ChatMessage message)
@@ -555,7 +591,11 @@ internal sealed record HuggingFaceChatRequest(
     double? Temperature,
     [property: JsonPropertyName("top_p")] double? TopP,
     [property: JsonPropertyName("reasoning_effort")] string? ReasoningEffort,
-    bool Stream);
+    bool Stream)
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extensions { get; init; }
+}
 
 internal sealed class HuggingFaceChatMessage
 {

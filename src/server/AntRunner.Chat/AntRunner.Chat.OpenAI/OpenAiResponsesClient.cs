@@ -166,17 +166,55 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
 
             var tools = request.Tools?.Select(ToOpenAiTool).ToList();
             var reasoning = MapReasoning(request.Model, request.ReasoningEffort);
+            var (temperature, topP) = ResolveOpenAiSampling(request);
 
             var responseRequest = new CreateResponseRequest(
                 input: inputItems,
                 model: request.Model,
-                temperature: request.Temperature,
-                topP: request.TopP,
+                temperature: temperature,
+                topP: topP,
                 reasoning: reasoning,
                 tools: tools,
                 truncation: Truncation.Disabled);
 
             return responseRequest;
+        }
+
+        private static (double? Temperature, double? TopP) ResolveOpenAiSampling(ChatCompletionRequest request)
+        {
+            double? temperature = null;
+            double? topP = null;
+            if (request.SamplingParameters == null)
+            {
+                return (temperature, topP);
+            }
+
+            List<string>? unprojectedKeys = null;
+            foreach (var (key, value) in request.SamplingParameters)
+            {
+                if (string.Equals(key, "temperature", StringComparison.Ordinal))
+                {
+                    temperature = value;
+                    continue;
+                }
+
+                if (string.Equals(key, "top_p", StringComparison.Ordinal))
+                {
+                    topP = value;
+                    continue;
+                }
+
+                unprojectedKeys ??= [];
+                unprojectedKeys.Add(key);
+            }
+
+            if (unprojectedKeys is { Count: > 0 })
+            {
+                throw new InvalidOperationException(
+                    $"Unable to project sampling parameter(s) [{string.Join(", ", unprojectedKeys)}] to OpenAI Responses request fields.");
+            }
+
+            return (temperature, topP);
         }
 
         internal static ChatCompletionResponse FromResponse(Response response)

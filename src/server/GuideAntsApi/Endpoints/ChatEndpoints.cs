@@ -46,18 +46,7 @@ public static class ChatEndpoints
                 var assistantDef = await AssistantUtility.GetAssistantCreateRequest(assistantName);
                 var resolved = chatModelResolver.Resolve(chatRunOptions.DeploymentId ?? assistantDef?.Model);
                 chatRunOptions.DeploymentId = resolved.ModelId;
-                if (!chatRunOptions.OverrideTemperature.HasValue)
-                {
-                    chatRunOptions.OverrideTemperature = resolved.OverrideTemperature;
-                }
-                if (!chatRunOptions.OverrideTopP.HasValue)
-                {
-                    chatRunOptions.OverrideTopP = resolved.OverrideTopP;
-                }
-                if (string.IsNullOrWhiteSpace(chatRunOptions.OverrideReasoningEffort))
-                {
-                    chatRunOptions.OverrideReasoningEffort = resolved.OverrideReasoningEffort;
-                }
+                chatRunOptions.ExecutionPolicy = resolved.ExecutionPolicy;
 
                 var output = await ChatRunner.RunThread(chatRunOptions, chatClientFactory);
                 if (output != null)

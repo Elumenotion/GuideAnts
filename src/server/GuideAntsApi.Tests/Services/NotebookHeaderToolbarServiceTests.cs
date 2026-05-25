@@ -8,6 +8,7 @@ using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.NotebookHeaderToolbar;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
+using AntRunner.Chat.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -98,7 +99,14 @@ public sealed class NotebookHeaderToolbarServiceTests
         var chatModelResolver = new Mock<IChatModelResolver>(MockBehavior.Strict);
         chatModelResolver
             .Setup(x => x.Resolve(It.IsAny<string?>()))
-            .Returns(new ResolvedChatModel("gemini-2.5-flash", ChatModelReferenceKind.Direct, null, null, null));
+            .Returns(new ResolvedChatModel(
+                "gemini-2.5-flash",
+                ChatModelReferenceKind.Direct,
+                new ResolvedExecutionPolicy(
+                    "gemini-2.5-flash",
+                    "google-gemini-chat",
+                    ParameterAuthority.AssistantDefinition,
+                    new Dictionary<string, System.Text.Json.JsonElement>())));
 
         var conversations = new Mock<IConversationManager>(MockBehavior.Strict);
 
@@ -198,7 +206,14 @@ public sealed class NotebookHeaderToolbarServiceTests
         var chatModelResolver = new Mock<IChatModelResolver>(MockBehavior.Strict);
         chatModelResolver
             .Setup(x => x.Resolve(It.IsAny<string?>()))
-            .Returns(new ResolvedChatModel("qwen-local", ChatModelReferenceKind.Direct, null, null, null));
+            .Returns(new ResolvedChatModel(
+                "qwen-local",
+                ChatModelReferenceKind.Direct,
+                new ResolvedExecutionPolicy(
+                    "qwen-local",
+                    "llama-cpp",
+                    ParameterAuthority.AssistantDefinition,
+                    new Dictionary<string, System.Text.Json.JsonElement>())));
 
         var conversations = new Mock<IConversationManager>(MockBehavior.Strict);
 
@@ -315,7 +330,14 @@ public sealed class NotebookHeaderToolbarServiceTests
         var chatModelResolver = new Mock<IChatModelResolver>(MockBehavior.Strict);
         chatModelResolver
             .Setup(x => x.Resolve(It.IsAny<string?>()))
-            .Returns(new ResolvedChatModel("qwen-local", ChatModelReferenceKind.Direct, null, null, null));
+            .Returns(new ResolvedChatModel(
+                "qwen-local",
+                ChatModelReferenceKind.Direct,
+                new ResolvedExecutionPolicy(
+                    "qwen-local",
+                    "llama-cpp",
+                    ParameterAuthority.AssistantDefinition,
+                    new Dictionary<string, System.Text.Json.JsonElement>())));
 
         var conversations = new Mock<IConversationManager>(MockBehavior.Strict);
 
@@ -425,7 +447,14 @@ public sealed class NotebookHeaderToolbarServiceTests
         var chatModelResolver = new Mock<IChatModelResolver>(MockBehavior.Strict);
         chatModelResolver
             .Setup(x => x.Resolve(It.IsAny<string?>()))
-            .Returns(new ResolvedChatModel("qwen-local", ChatModelReferenceKind.Direct, null, null, null));
+            .Returns(new ResolvedChatModel(
+                "qwen-local",
+                ChatModelReferenceKind.Direct,
+                new ResolvedExecutionPolicy(
+                    "qwen-local",
+                    "llama-cpp",
+                    ParameterAuthority.AssistantDefinition,
+                    new Dictionary<string, System.Text.Json.JsonElement>())));
 
         var conversations = new Mock<IConversationManager>(MockBehavior.Strict);
 

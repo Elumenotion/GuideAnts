@@ -172,7 +172,7 @@ public sealed class RebuildEmbeddingsHandlerTests
             embeddings,
             queue);
 
-        await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => handler.HandleAsync(new RebuildEmbeddingsJob(), CancellationToken.None));
 
         await using var verify = new ApplicationDbContext(options);

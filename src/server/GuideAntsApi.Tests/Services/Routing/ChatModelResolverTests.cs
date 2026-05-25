@@ -1,6 +1,8 @@
 using FluentAssertions;
 using GuideAntsApi.Services.Routing;
 using Microsoft.Extensions.Configuration;
+using Moq;
+using AntRunner.Chat.Abstractions;
 
 namespace GuideAntsApi.Tests.Services.Routing;
 
@@ -14,8 +16,20 @@ public sealed class ChatModelResolverTests
             .Build();
     }
 
+    private static ChatModelResolver BuildResolver(IConfiguration configuration)
+    {
+        var targetResolver = new Mock<IChatTargetResolver>();
+        targetResolver
+            .Setup(r => r.Resolve(It.IsAny<string>()))
+            .Returns((string modelId) => new ChatTarget(
+                modelId,
+                modelId.Contains("gemini", StringComparison.OrdinalIgnoreCase) ? "google-gemini-chat" : "openai-responses",
+                null));
+        return new ChatModelResolver(configuration, targetResolver.Object);
+    }
+
     [TestMethod]
-    public void Resolve_OverrideAll_UsesDefault_IgnoresEntity_AndSetsReferenceKind()
+    public void Resolve_OverrideAll_UsesDefault_IgnoresEntity_AndSetsGlobalAuthority()
     {
         var config = BuildConfig(new Dictionary<string, string?>
         {
@@ -24,39 +38,41 @@ public sealed class ChatModelResolverTests
             ["ChatDefaults:Temperature"] = "0.42",
             ["ChatDefaults:TopP"] = "0.9",
             ["ChatDefaults:ReasoningEffort"] = "high",
+            ["ChatDefaults:SamplingParametersJson"] = """{"min_p":0.05}"""
         });
-        var resolver = new ChatModelResolver(config);
+        var resolver = BuildResolver(config);
 
         var result = resolver.Resolve("entity-model");
 
         result.ModelId.Should().Be("global-default");
         result.ReferenceKind.Should().Be(ChatModelReferenceKind.OverriddenToDefault);
-        result.OverrideTemperature.Should().BeApproximately(0.42f, 0.001f);
-        result.OverrideTopP.Should().BeApproximately(0.9f, 0.001f);
-        result.OverrideReasoningEffort.Should().Be("high");
+        result.ExecutionPolicy.Authority.Should().Be(ParameterAuthority.GlobalOverride);
+        result.ExecutionPolicy.Parameters["temperature"].GetDouble().Should().BeApproximately(0.42, 0.001);
+        result.ExecutionPolicy.Parameters["top_p"].GetDouble().Should().BeApproximately(0.9, 0.001);
+        result.ExecutionPolicy.Parameters["reasoning_effort"].GetString().Should().Be("high");
+        result.ExecutionPolicy.Parameters["min_p"].GetDouble().Should().BeApproximately(0.05, 0.001);
     }
 
     [TestMethod]
-    public void Resolve_EntityModel_WhenOverrideOff_IsDirect_WithoutOverrides()
+    public void Resolve_EntityModel_WhenOverrideOff_IsAssistantDefinition_WithEmptyParameterBag()
     {
         var config = BuildConfig(new Dictionary<string, string?>
         {
             ["ChatDefaults:OverrideAllChatModels"] = "false",
             ["ChatDefaults:DefaultModelId"] = "ignored-when-entity-set",
         });
-        var resolver = new ChatModelResolver(config);
+        var resolver = BuildResolver(config);
 
         var result = resolver.Resolve("my-model");
 
         result.ModelId.Should().Be("my-model");
         result.ReferenceKind.Should().Be(ChatModelReferenceKind.Direct);
-        result.OverrideTemperature.Should().BeNull();
-        result.OverrideTopP.Should().BeNull();
-        result.OverrideReasoningEffort.Should().BeNull();
+        result.ExecutionPolicy.Authority.Should().Be(ParameterAuthority.AssistantDefinition);
+        result.ExecutionPolicy.Parameters.Should().BeEmpty();
     }
 
     [TestMethod]
-    public void Resolve_BlankEntity_WithDefaultConfigured_IsDefaultedTo_WithOverrides()
+    public void Resolve_BlankEntity_WithDefaultConfigured_IsAssistantDefinition_WithDefaultParameterBag()
     {
         var config = BuildConfig(new Dictionary<string, string?>
         {
@@ -64,13 +80,14 @@ public sealed class ChatModelResolverTests
             ["ChatDefaults:DefaultModelId"] = "def",
             ["ChatDefaults:Temperature"] = "0.7",
         });
-        var resolver = new ChatModelResolver(config);
+        var resolver = BuildResolver(config);
 
         var result = resolver.Resolve("  ");
 
         result.ModelId.Should().Be("def");
         result.ReferenceKind.Should().Be(ChatModelReferenceKind.DefaultedTo);
-        result.OverrideTemperature.Should().BeApproximately(0.7f, 0.001f);
+        result.ExecutionPolicy.Authority.Should().Be(ParameterAuthority.AssistantDefinition);
+        result.ExecutionPolicy.Parameters["temperature"].GetDouble().Should().BeApproximately(0.7, 0.001);
     }
 
     [TestMethod]
@@ -81,7 +98,7 @@ public sealed class ChatModelResolverTests
             ["ChatDefaults:OverrideAllChatModels"] = "true",
             ["ChatDefaults:DefaultModelId"] = "",
         });
-        var resolver = new ChatModelResolver(config);
+        var resolver = BuildResolver(config);
 
         var act = () => resolver.Resolve(null);
         act.Should().Throw<RoutingException>();
@@ -95,7 +112,7 @@ public sealed class ChatModelResolverTests
             ["ChatDefaults:OverrideAllChatModels"] = "false",
             ["ChatDefaults:DefaultModelId"] = "",
         });
-        var resolver = new ChatModelResolver(config);
+        var resolver = BuildResolver(config);
 
         var act = () => resolver.Resolve(null);
         act.Should().Throw<RoutingException>();

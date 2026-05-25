@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
+using AntRunner.Chat.Abstractions;
 
 namespace AntRunner.Chat
 {
@@ -51,12 +52,9 @@ namespace AntRunner.Chat
         public string? DeploymentId { get; set; }
 
         /// <summary>
-        /// When set by the host (e.g. Settings → Default Chat Model), overrides assistant manifest sampling for this run.
+        /// Resolved execution policy for this run. When present, execution must consume this
+        /// policy as the single source-of-truth for model parameters.
         /// </summary>
-        public float? OverrideTemperature { get; set; }
-
-        public float? OverrideTopP { get; set; }
-
-        public string? OverrideReasoningEffort { get; set; }
+        public ResolvedExecutionPolicy? ExecutionPolicy { get; set; }
     }
 }

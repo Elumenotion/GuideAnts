@@ -72,10 +72,10 @@ public sealed class OpenAiChatClient : IChatCompletionClient
 
             _logger.LogInformation(
                 "OpenAI request. Model={Model}, Stream={Stream}, Messages={MessageCount}, Tools={ToolCount}, "
-                + "Temperature={Temperature}, TopP={TopP}, ReasoningEffort={ReasoningEffort}, "
+                + "ReasoningEffort={ReasoningEffort}, "
                 + "SamplingOverrides=[{SamplingOverrides}]",
                 request.Model, stream, request.Messages.Count, request.Tools?.Count ?? 0,
-                request.Temperature, request.TopP, request.ReasoningEffort, sampling ?? "none");
+                request.ReasoningEffort, sampling ?? "none");
         }
     }
 
@@ -86,14 +86,52 @@ public sealed class OpenAiChatClient : IChatCompletionClient
             var messages = request.Messages.Select(ToOpenAiMessage).ToList();
             var tools = request.Tools?.Select(ToOpenAiTool).ToList();
             var reasoningEffort = OpenAiReasoningSupport.MapReasoningEffort(request.Model, request.ReasoningEffort);
+            var (temperature, topP) = ResolveOpenAiSampling(request);
 
             return new ChatRequest(
                 messages,
                 tools: tools,
                 model: request.Model,
-                temperature: request.Temperature,
-                topP: request.TopP,
+                temperature: temperature,
+                topP: topP,
                 reasoningEffort: reasoningEffort);
+        }
+
+        private static (double? Temperature, double? TopP) ResolveOpenAiSampling(ChatCompletionRequest request)
+        {
+            double? temperature = null;
+            double? topP = null;
+            if (request.SamplingParameters == null)
+            {
+                return (temperature, topP);
+            }
+
+            List<string>? unprojectedKeys = null;
+            foreach (var (key, value) in request.SamplingParameters)
+            {
+                if (string.Equals(key, "temperature", StringComparison.Ordinal))
+                {
+                    temperature = value;
+                    continue;
+                }
+
+                if (string.Equals(key, "top_p", StringComparison.Ordinal))
+                {
+                    topP = value;
+                    continue;
+                }
+
+                unprojectedKeys ??= [];
+                unprojectedKeys.Add(key);
+            }
+
+            if (unprojectedKeys is { Count: > 0 })
+            {
+                throw new InvalidOperationException(
+                    $"Unable to project sampling parameter(s) [{string.Join(", ", unprojectedKeys)}] to OpenAI Chat request fields.");
+            }
+
+            return (temperature, topP);
         }
 
         internal static ChatCompletionResponse FromChatResponse(ChatResponse response)
