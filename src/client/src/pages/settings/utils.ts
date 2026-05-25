@@ -260,7 +260,17 @@ export function parseRuntimeProfileId(runtimeConfigJson?: string): string {
   if (!runtimeConfigJson) return '';
   try {
     const raw = JSON.parse(runtimeConfigJson) as Record<string, unknown>;
-    return typeof raw.runtimeProfileId === 'string' ? raw.runtimeProfileId : '';
+    if (typeof raw.runtimeProfileId === 'string') {
+      return raw.runtimeProfileId;
+    }
+    if (typeof raw.RuntimeProfileId === 'string') {
+      return raw.RuntimeProfileId;
+    }
+    const key = Object.keys(raw).find((k) => k.toLowerCase() === 'runtimeprofileid');
+    if (key && typeof raw[key] === 'string') {
+      return raw[key] as string;
+    }
+    return '';
   } catch {
     return '';
   }
@@ -271,37 +281,51 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
     return null;
   }
 
+  const getCaseInsensitive = (obj: Record<string, unknown>, key: string): unknown => {
+    if (key in obj) {
+      return obj[key];
+    }
+    const found = Object.keys(obj).find((k) => k.toLowerCase() === key.toLowerCase());
+    return found ? obj[found] : undefined;
+  };
+
   try {
     const parsed = JSON.parse(localRuntimeJson) as Record<string, unknown>;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return null;
     }
 
+    const routerModelId = getCaseInsensitive(parsed, 'routerModelId');
+    const runtimeProfileId = getCaseInsensitive(parsed, 'runtimeProfileId');
     if (
-      typeof parsed.routerModelId !== 'string' ||
-      typeof parsed.runtimeProfileId !== 'string'
+      typeof routerModelId !== 'string' ||
+      typeof runtimeProfileId !== 'string'
     ) {
       return null;
     }
 
     const normalized: CanonicalLocalRuntimeConfig = {
-      routerModelId: parsed.routerModelId,
-      runtimeProfileId: parsed.runtimeProfileId,
+      routerModelId,
+      runtimeProfileId,
     };
 
-    if (parsed.loadParams && typeof parsed.loadParams === 'object' && !Array.isArray(parsed.loadParams)) {
-      normalized.loadParams = parsed.loadParams as Record<string, unknown>;
+    const loadParams = getCaseInsensitive(parsed, 'loadParams');
+    if (loadParams && typeof loadParams === 'object' && !Array.isArray(loadParams)) {
+      normalized.loadParams = loadParams as Record<string, unknown>;
     }
 
-    if (typeof parsed.parallelToolCalls === 'boolean') {
-      normalized.parallelToolCalls = parsed.parallelToolCalls;
+    const parallelToolCalls = getCaseInsensitive(parsed, 'parallelToolCalls');
+    if (typeof parallelToolCalls === 'boolean') {
+      normalized.parallelToolCalls = parallelToolCalls;
     }
 
-    if (typeof parsed.routerContextSize === 'number' && Number.isFinite(parsed.routerContextSize)) {
-      normalized.routerContextSize = parsed.routerContextSize;
+    const routerContextSize = getCaseInsensitive(parsed, 'routerContextSize');
+    if (typeof routerContextSize === 'number' && Number.isFinite(routerContextSize)) {
+      normalized.routerContextSize = routerContextSize;
     }
-    if (typeof parsed.routerCacheRamMib === 'number' && Number.isFinite(parsed.routerCacheRamMib)) {
-      normalized.routerCacheRamMib = parsed.routerCacheRamMib;
+    const routerCacheRamMib = getCaseInsensitive(parsed, 'routerCacheRamMib');
+    if (typeof routerCacheRamMib === 'number' && Number.isFinite(routerCacheRamMib)) {
+      normalized.routerCacheRamMib = routerCacheRamMib;
     }
 
     return normalized;

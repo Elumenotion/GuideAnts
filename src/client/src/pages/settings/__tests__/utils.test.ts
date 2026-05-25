@@ -5,6 +5,8 @@ import {
   createEmptyAddModelWizardState,
   exportRuntimeProfile,
   importRuntimeProfile,
+  parseCanonicalLocalRuntimeJson,
+  parseRuntimeProfileId,
 } from '../utils';
 
 describe('buildAddModelRequest', () => {
@@ -126,5 +128,20 @@ describe('runtime profile import/export helpers', () => {
         })
       )
     ).toThrow('samplingParametersJson');
+  });
+
+  it('parses runtime profile id from legacy PascalCase runtime config', () => {
+    expect(parseRuntimeProfileId('{"RuntimeProfileId":"openai_chat_standard"}')).toBe('openai_chat_standard');
+  });
+
+  it('imports canonical local runtime config from legacy PascalCase keys', () => {
+    const parsed = parseCanonicalLocalRuntimeJson(
+      '{"RouterModelId":"QwenAlias","RuntimeProfileId":"qwen3_5","LoadParams":{"model":"QwenAlias"}}'
+    );
+    expect(parsed).toEqual({
+      routerModelId: 'QwenAlias',
+      runtimeProfileId: 'qwen3_5',
+      loadParams: { model: 'QwenAlias' },
+    });
   });
 });

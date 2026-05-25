@@ -53,20 +53,14 @@ function classifyLocalRuntime(model: SettingsModelDto): LocalRuntimeClassificati
   if (!model.runtimeConfigJson || model.runtimeConfigJson.trim().length === 0) {
     return { state: 'missing-json' };
   }
-  try {
-    const raw = JSON.parse(model.runtimeConfigJson) as Record<string, unknown>;
-    const routerModelId = typeof raw.routerModelId === 'string' ? raw.routerModelId : null;
-    const runtimeProfileId = typeof raw.runtimeProfileId === 'string' ? raw.runtimeProfileId : null;
-    if (!routerModelId || !runtimeProfileId) {
-      return {
-        state: 'invalid-json',
-        detail: 'Missing required fields (routerModelId, runtimeProfileId).',
-      };
-    }
-    return { state: 'ok', routerModelId, runtimeProfileId };
-  } catch (err) {
-    return { state: 'invalid-json', detail: err instanceof Error ? err.message : 'JSON parse failed.' };
+  const parsed = parseCanonicalLocalRuntimeJson(model.runtimeConfigJson);
+  if (!parsed) {
+    return {
+      state: 'invalid-json',
+      detail: 'Missing required fields (routerModelId, runtimeProfileId).',
+    };
   }
+  return { state: 'ok', routerModelId: parsed.routerModelId, runtimeProfileId: parsed.runtimeProfileId };
 }
 
 /**
@@ -174,10 +168,8 @@ export function ModelsTab({
     return () => window.clearTimeout(timeoutId);
   }, [focusedModelId, orderedModels]);
 
-  // Phase F (R-6.*): per-row readiness probe. Keyed by modelId so re-renders
-  // don't re-probe unchanged rows. We silently skip failures here because the
-  // per-model endpoint returns 404 for missing catalog rows — that case is
-  // already covered visually by the model just not being in `orderedModels`.
+  // Phase F (R-6.*): batch readiness probe. Using the preflight endpoint
+  // avoids per-model path-segment edge cases for model ids that include `/`.
   useEffect(() => {
     let cancelled = false;
     if (orderedModels.length === 0) {
@@ -186,19 +178,23 @@ export function ModelsTab({
     }
     setReadinessLoading(true);
     (async () => {
-      const next: Record<string, ChatTargetReadinessDto> = {};
-      for (const model of orderedModels) {
+      try {
+        const rows = await api.settings.routing.getChatTargetsPreflight();
         if (cancelled) return;
-        try {
-          const r = await api.settings.routing.getChatTargetReadiness(model.modelId);
-          next[model.modelId] = r;
-        } catch {
-          // endpoint-level failure surfaces as a missing readiness badge in the UI
+        const next: Record<string, ChatTargetReadinessDto> = {};
+        for (const row of rows) {
+          next[row.modelId] = row;
         }
-      }
-      if (!cancelled) {
         setReadinessByModel(next);
-        setReadinessLoading(false);
+      } catch {
+        if (!cancelled) {
+          // Endpoint-level failure surfaces as a missing readiness badge in the UI.
+          setReadinessByModel({});
+        }
+      } finally {
+        if (!cancelled) {
+          setReadinessLoading(false);
+        }
       }
     })();
     return () => {

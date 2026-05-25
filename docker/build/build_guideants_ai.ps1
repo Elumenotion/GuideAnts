@@ -201,7 +201,7 @@ switch ($Backend) {
     }
 }
 
-# Julian date (2-digit year + day-of-year) + time tag: e.g. cuda13-26096.1430
+# Build a unique tag per build, and also maintain a stable backend-specific latest tag.
 $julianDay = "$(Get-Date -Format 'yy')$((Get-Date).DayOfYear.ToString('000'))"
 $timeStamp = Get-Date -Format 'HHmm'
 $imageTag = "guideants-ai:${Backend}-${julianDay}.${timeStamp}"

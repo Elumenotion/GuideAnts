@@ -111,7 +111,7 @@ public sealed class AnthropicChatClient : IChatCompletionClient
             var toolDefinitions = request.Tools?.Count > 0
                 ? request.Tools.Select(MapToolDefinition).ToList()
                 : null;
-            var (temperature, topP) = ResolveAnthropicSampling(request);
+            var (temperature, topP) = ResolveAnthropicSampling(request, thinkingEnabled);
 
             var messageRequest = new MessageCreateParams
             {
@@ -154,7 +154,7 @@ public sealed class AnthropicChatClient : IChatCompletionClient
             return messageRequest;
         }
 
-        private static (double? Temperature, double? TopP) ResolveAnthropicSampling(ChatCompletionRequest request)
+        private static (double? Temperature, double? TopP) ResolveAnthropicSampling(ChatCompletionRequest request, bool thinkingEnabled)
         {
             double? temperature = null;
             double? topP = null;
@@ -168,12 +168,26 @@ public sealed class AnthropicChatClient : IChatCompletionClient
             {
                 if (string.Equals(key, "temperature", StringComparison.Ordinal))
                 {
+                    if (thinkingEnabled)
+                    {
+                        // Anthropic extended thinking rejects non-1 temperature values.
+                        // Preserve historical behavior by omitting temperature when thinking is enabled.
+                        continue;
+                    }
+
                     temperature = value;
                     continue;
                 }
 
                 if (string.Equals(key, "top_p", StringComparison.Ordinal))
                 {
+                    if (thinkingEnabled)
+                    {
+                        // Anthropic extended thinking constrains top_p (>= 0.95 or unset).
+                        // Preserve historical behavior by omitting top_p when thinking is enabled.
+                        continue;
+                    }
+
                     topP = value;
                     continue;
                 }

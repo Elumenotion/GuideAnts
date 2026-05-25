@@ -1,0 +1,12 @@
+{
+  "profileId": "huggingface_chat_standard",
+  "displayName": "Hugging Face Chat Standard",
+  "description": "Standard sampling profile for Hugging Face Inference chat models.",
+  "providers": ["hf-inference-chat"],
+  "combineSystemAndDeveloperMessages": false,
+  "samplingParametersJson": {
+    "temperature": { "key": "temperature", "label": "Temperature", "description": "Controls randomness: lower is focused, higher is creative", "min": 0.0, "max": 2.0, "step": 0.1, "default": 1.0, "displayOrder": 0, "exposedInGuideBuilder": true },
+    "top_p": { "key": "top_p", "label": "Top P", "description": "Nucleus sampling: controls diversity of token selection", "min": 0.0, "max": 1.0, "step": 0.05, "default": 1.0, "displayOrder": 1, "exposedInGuideBuilder": true }
+  },
+  "thinkingControlJson": {}
+}

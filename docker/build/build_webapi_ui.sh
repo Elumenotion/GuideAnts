@@ -147,6 +147,7 @@ esac
 [[ -f "$DOCKERFILE_PATH" ]] || { echo "Dockerfile not found at $DOCKERFILE_PATH" >&2; exit 1; }
 [[ -f "$CLIENT_ROOT/package.json" ]] || { echo "Client package.json not found at $CLIENT_ROOT/package.json" >&2; exit 1; }
 
+# Build a unique tag per build, and also maintain a stable latest tag.
 JULIAN_DAY="$(date +%y%j)"
 TIME_STAMP="$(date +%H%M)"
 IMAGE_TAG="${IMAGE_REPOSITORY}:${JULIAN_DAY}.${TIME_STAMP}"

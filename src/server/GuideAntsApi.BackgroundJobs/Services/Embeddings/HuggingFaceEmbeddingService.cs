@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.BackgroundJobs.Services.Embeddings;
@@ -9,6 +10,8 @@ internal sealed class HuggingFaceEmbeddingService(
     HttpClient client,
     IConfiguration configuration) : IEmbeddingService
 {
+    private sealed record HfProviderRoute(string Provider, string ProviderId);
+
     private readonly HttpClient _client = client;
     private readonly IConfiguration _configuration = configuration;
 
@@ -28,6 +31,8 @@ internal sealed class HuggingFaceEmbeddingService(
         string? requestPresetJson,
         CancellationToken cancellationToken = default)
     {
+        _ = requestPresetJson;
+
         var inputs = texts.ToArray();
         if (inputs.Length == 0)
         {
@@ -45,7 +50,8 @@ internal sealed class HuggingFaceEmbeddingService(
             throw new InvalidOperationException("HuggingFace:Token is required for Hugging Face embeddings.");
         }
 
-        var endpoint = $"https://api-inference.huggingface.co/models/{modelId}";
+        var route = await ResolveHuggingFaceEmbeddingRouteAsync(modelId, token, cancellationToken).ConfigureAwait(false);
+        var endpoint = ResolveHuggingFaceEmbeddingsEndpoint(route);
         var requestDto = new HuggingFaceEmbeddingRequest(inputs.Length == 1 ? inputs[0] : inputs);
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
@@ -62,6 +68,103 @@ internal sealed class HuggingFaceEmbeddingService(
 
         var parsed = JsonSerializer.Deserialize<JsonElement>(body);
         return ParseEmbeddings(parsed);
+    }
+
+    private async Task<HfProviderRoute> ResolveHuggingFaceEmbeddingRouteAsync(
+        string modelId,
+        string token,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"https://huggingface.co/api/models/{modelId}?expand[]=inferenceProviderMapping");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Failed to resolve Hugging Face provider route for '{modelId}': {(int)response.StatusCode} {body}");
+        }
+
+        using var document = JsonDocument.Parse(body);
+        if (!document.RootElement.TryGetProperty("inferenceProviderMapping", out var mapping)
+            || mapping.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException($"Model '{modelId}' has no inference provider mapping.");
+        }
+
+        var candidates = new List<HfProviderRoute>();
+        var seenTasks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var provider in mapping.EnumerateObject())
+        {
+            if (provider.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var status = provider.Value.TryGetProperty("status", out var statusNode)
+                ? statusNode.GetString()
+                : null;
+            var task = provider.Value.TryGetProperty("task", out var taskNode)
+                ? taskNode.GetString()
+                : null;
+            var providerId = provider.Value.TryGetProperty("providerId", out var providerIdNode)
+                ? providerIdNode.GetString()
+                : null;
+
+            if (!string.IsNullOrWhiteSpace(task))
+            {
+                seenTasks.Add(task);
+            }
+
+            if (!string.Equals(status, "live", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(providerId)
+                || !string.Equals(task, "feature-extraction", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            candidates.Add(new HfProviderRoute(provider.Name, providerId));
+        }
+
+        if (candidates.Count == 0)
+        {
+            var tasks = seenTasks.Count > 0 ? string.Join(", ", seenTasks) : "none";
+            throw new InvalidOperationException(
+                $"No live Hugging Face feature-extraction route found for model '{modelId}'. Available tasks: {tasks}.");
+        }
+
+        return candidates.FirstOrDefault(route =>
+            string.Equals(route.Provider, "hf-inference", StringComparison.OrdinalIgnoreCase))
+            ?? candidates[0];
+    }
+
+    private string ResolveHuggingFaceEmbeddingsEndpoint(HfProviderRoute route)
+    {
+        var configuredRouterBase = _configuration["HuggingFace:RouterBaseUrl"];
+        var routerBase = string.IsNullOrWhiteSpace(configuredRouterBase)
+            ? "https://router.huggingface.co/v1"
+            : configuredRouterBase;
+
+        var normalized = routerBase.TrimEnd('/');
+        if (normalized.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[..^3];
+        }
+
+        if (string.Equals(route.Provider, "hf-inference", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{normalized}/hf-inference/models/{route.ProviderId}";
+        }
+
+        if (string.Equals(route.Provider, "replicate", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{normalized}/replicate/v1/models/{route.ProviderId}/predictions";
+        }
+
+        return $"{normalized}/{route.Provider}/{route.ProviderId}";
     }
 
     private static float[][] ParseEmbeddings(JsonElement root)
@@ -87,6 +190,6 @@ internal sealed class HuggingFaceEmbeddingService(
         throw new InvalidOperationException("Hugging Face embeddings response shape was not recognized.");
     }
 
-    private sealed record HuggingFaceEmbeddingRequest(object Inputs);
+    private sealed record HuggingFaceEmbeddingRequest([property: JsonPropertyName("inputs")] object Inputs);
 
 }

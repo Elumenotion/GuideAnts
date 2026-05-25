@@ -1233,6 +1233,13 @@ export const api = {
 
         routing: {
             /**
+             * Batch chat-target readiness snapshot used by Catalog and Overview.
+             * Avoids per-model path-segment issues for ids that include `/`.
+             */
+            getChatTargetsPreflight: () =>
+                callApi<ChatTargetReadinessDto[]>('/settings/routing/chat-targets/preflight'),
+
+            /**
              * Per-model readiness probe used by the Models & Runtime Catalog
              * readiness badge column. Passing `strict: true` flips blocked
              * -> 409 problem+json for callers that need a non-2xx failure

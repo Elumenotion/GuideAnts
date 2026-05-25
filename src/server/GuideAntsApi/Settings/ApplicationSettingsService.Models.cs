@@ -57,21 +57,22 @@ public sealed partial class ApplicationSettingsService
 
     public async Task<SettingsModelDto?> UpdateModelAsync(string modelId, UpdateSettingsModelRequest request, CancellationToken cancellationToken = default)
     {
-        if (!string.Equals(modelId, request.ModelId, StringComparison.Ordinal))
+        var routeModelId = (modelId ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(routeModelId))
         {
-            throw new InvalidOperationException("Route modelId must match payload modelId.");
+            throw new InvalidOperationException("Route modelId is required.");
         }
 
-        var model = await _db.Models.SingleOrDefaultAsync(x => x.ModelId == modelId, cancellationToken);
+        var model = await _db.Models.SingleOrDefaultAsync(x => x.ModelId == routeModelId, cancellationToken);
         if (model == null)
         {
             return null;
         }
 
         var provider = request.Provider.Trim();
-        var normalizedReasoningChoices = NormalizeReasoningChoicesJson(request.ModelId.Trim(), request.ReasoningChoicesJson);
-        var normalizedRuntimeConfigJson = NormalizeRuntimeConfigJson(request.ModelId.Trim(), provider, request.RuntimeConfigJson);
-        ValidateProviderReasoningChoices(request.ModelId.Trim(), provider, normalizedReasoningChoices);
+        var normalizedReasoningChoices = NormalizeReasoningChoicesJson(routeModelId, request.ReasoningChoicesJson);
+        var normalizedRuntimeConfigJson = NormalizeRuntimeConfigJson(routeModelId, provider, request.RuntimeConfigJson);
+        ValidateProviderReasoningChoices(routeModelId, provider, normalizedReasoningChoices);
 
         model.DisplayName = request.DisplayName.Trim();
         model.Provider = provider;
@@ -83,7 +84,7 @@ public sealed partial class ApplicationSettingsService
         model.Updated = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
-        await TrySyncRouterIniAfterLlamaModelPersistAsync(modelId, provider, model.RuntimeConfigJson, cancellationToken)
+        await TrySyncRouterIniAfterLlamaModelPersistAsync(routeModelId, provider, model.RuntimeConfigJson, cancellationToken)
             .ConfigureAwait(false);
         return ToSettingsModelDto(model);
     }
