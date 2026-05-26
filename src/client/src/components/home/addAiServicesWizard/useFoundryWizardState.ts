@@ -444,7 +444,7 @@ export function useFoundryWizardState(): UseFoundryWizardStateResult {
         FOUNDRY_SERVICE_PROVIDER_IDS.DocumentIntelligence,
         {
           ApiVersion: '2024-11-30',
-          MaxRetries: 3,
+          MaxRetries: '3',
         }
       );
       await api.settings.services.updateActiveProvider('DocumentIntelligence', FOUNDRY_SERVICE_PROVIDER_IDS.DocumentIntelligence);
