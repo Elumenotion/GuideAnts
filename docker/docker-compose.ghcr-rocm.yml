@@ -171,6 +171,7 @@ services:
       - LocalServiceHosts__DocumentIntelligenceBaseUrl=http://docling-serve:5001
       - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
       - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox
+      - ServiceRouting__Containers__plantuml__BaseUrl=http://plantuml:80
       - HF_TOKEN=${HF_TOKEN:-}
       - SettingsSecrets__ActiveKeyId=local-dev
       - SettingsSecrets__Keys__local-dev=MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
