@@ -33,6 +33,7 @@ public sealed class StoragePathResolver(
 
     private readonly ConcurrentDictionary<Guid, string> _projectSlugCache = new();
     private readonly ConcurrentDictionary<Guid, (Guid ProjectId, string Slug)> _notebookSlugCache = new();
+    private readonly ConcurrentDictionary<string, object> _notebookMetadataLocks = new(StringComparer.OrdinalIgnoreCase);
 
     public string GetStorageRoot() => _storageRoot;
 
@@ -214,13 +215,92 @@ public sealed class StoragePathResolver(
         }
 
         var metadataPath = Path.Combine(systemFolder, NotebookMetadataFile);
-        var metadata = new NotebookAssociationMetadata
+        var fileLock = _notebookMetadataLocks.GetOrAdd(metadataPath, static _ => new object());
+        lock (fileLock)
         {
-            SchemaVersion = 1,
-            ProjectId = projectId,
-            NotebookId = notebookId
-        };
-        File.WriteAllText(metadataPath, JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
+            if (TryReadNotebookAssociationMetadata(metadataPath, out var existingMetadata)
+                && existingMetadata != null
+                && existingMetadata.SchemaVersion == 1
+                && existingMetadata.ProjectId == projectId
+                && existingMetadata.NotebookId == notebookId)
+            {
+                return;
+            }
+
+            var metadata = new NotebookAssociationMetadata
+            {
+                SchemaVersion = 1,
+                ProjectId = projectId,
+                NotebookId = notebookId
+            };
+
+            var serialized = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
+            WriteFileAtomically(metadataPath, serialized);
+        }
+    }
+
+    private bool TryReadNotebookAssociationMetadata(string metadataPath, out NotebookAssociationMetadata? metadata)
+    {
+        metadata = null;
+        if (!File.Exists(metadataPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            metadata = JsonSerializer.Deserialize<NotebookAssociationMetadata>(File.ReadAllText(metadataPath));
+            return metadata != null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed reading notebook metadata {MetadataPath}", metadataPath);
+            return false;
+        }
+    }
+
+    private static void WriteFileAtomically(string destinationPath, string content)
+    {
+        var tempPath = $"{destinationPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(tempPath, content);
+            if (File.Exists(destinationPath))
+            {
+                try
+                {
+                    File.Replace(tempPath, destinationPath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+                }
+                catch (PlatformNotSupportedException)
+                {
+                    File.Copy(tempPath, destinationPath, overwrite: true);
+                    File.Delete(tempPath);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    File.Copy(tempPath, destinationPath, overwrite: true);
+                    File.Delete(tempPath);
+                }
+            }
+            else
+            {
+                File.Move(tempPath, destinationPath);
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                    // Best-effort cleanup only.
+                }
+            }
+        }
     }
 
     private sealed class NotebookAssociationMetadata

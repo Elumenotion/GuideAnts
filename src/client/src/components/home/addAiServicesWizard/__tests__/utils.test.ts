@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ProviderEditorStateDto, ServiceEditorStateDto } from '../../../../types/settings';
 import {
+  GEMINI_FLASH_RUNTIME_PROFILE_ID,
+  GEMINI_PRO_RUNTIME_PROFILE_ID,
   HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
+  OPENAI_CHAT_RUNTIME_PROFILE_ID,
+  OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
   DOCUMENT_INTELLIGENCE_SECTION,
   EMBEDDINGS_SECTION,
   GEMINI_CORE_SECTION,
@@ -15,6 +19,9 @@ import {
 } from '../constants';
 import {
   deriveEndpointFromResource,
+  buildAddGeminiModelRequest,
+  buildAddModelRequest,
+  buildAddOpenAiModelRequest,
   buildAddHuggingFaceModelRequest,
   hasModelId,
   hasModelTuple,
@@ -270,6 +277,33 @@ describe('addAiServicesWizard utils', () => {
     expect(request.provider).toBe(HUGGINGFACE_CHAT_MODEL_PROVIDER_ID);
     expect(request.providerConfig).toEqual({
       runtimeProfileId: HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it('builds Foundry add-model requests with provider-specific runtime profile ids', () => {
+    expect(buildAddModelRequest('gpt-4o', 'Completions').providerConfig).toEqual({
+      runtimeProfileId: OPENAI_CHAT_RUNTIME_PROFILE_ID,
+    });
+    expect(buildAddModelRequest('gpt-5.2-codex', 'Responses').providerConfig).toEqual({
+      runtimeProfileId: OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it('builds OpenAI add-model requests with provider-specific runtime profile ids', () => {
+    expect(buildAddOpenAiModelRequest('gpt-4.1-mini', 'Completions').providerConfig).toEqual({
+      runtimeProfileId: OPENAI_CHAT_RUNTIME_PROFILE_ID,
+    });
+    expect(buildAddOpenAiModelRequest('gpt-5.2-codex', 'Responses').providerConfig).toEqual({
+      runtimeProfileId: OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it('builds Gemini add-model requests with model-aware runtime profile ids', () => {
+    expect(buildAddGeminiModelRequest('gemini-2.5-flash').providerConfig).toEqual({
+      runtimeProfileId: GEMINI_FLASH_RUNTIME_PROFILE_ID,
+    });
+    expect(buildAddGeminiModelRequest('gemini-2.5-pro').providerConfig).toEqual({
+      runtimeProfileId: GEMINI_PRO_RUNTIME_PROFILE_ID,
     });
   });
 

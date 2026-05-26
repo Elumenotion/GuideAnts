@@ -113,10 +113,14 @@ export const MODEL_PROVIDER_ID_TO_LABEL: Readonly<Record<string, FoundryModelPro
 
 export const GEMINI_MODEL_PROVIDER_ID = 'google-gemini-chat';
 export const GEMINI_DEFAULT_CHAT_MODEL_ID = 'gemini-2.5-flash';
+export const GEMINI_FLASH_RUNTIME_PROFILE_ID = 'google_gemini_25_flash';
+export const GEMINI_PRO_RUNTIME_PROFILE_ID = 'google_gemini_25_pro';
 
 export const OPENAI_CHAT_MODEL_PROVIDER_ID = 'openai-chat';
 export const OPENAI_RESPONSES_MODEL_PROVIDER_ID = 'openai-responses';
 export const OPENAI_DEFAULT_CHAT_MODEL_ID = 'gpt-4.1-nano';
+export const OPENAI_CHAT_RUNTIME_PROFILE_ID = 'openai_chat_standard';
+export const OPENAI_RESPONSES_RUNTIME_PROFILE_ID = 'openai_responses_reasoning';
 export const HUGGINGFACE_CHAT_MODEL_PROVIDER_ID = 'hf-inference-chat';
 export const HUGGINGFACE_DEFAULT_CHAT_MODEL_ID = 'deepseek-ai/DeepSeek-V4-Pro';
 export const HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID = 'huggingface_chat_standard';

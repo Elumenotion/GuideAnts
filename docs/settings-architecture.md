@@ -1,175 +1,532 @@
 # Settings Architecture and Extension Guide
 
-Last updated: 2026-05-18
+Last updated: 2026-05-25
 
-This is the developer-facing architecture source of truth for the Settings experience.
-It describes the current implementation shape and where to extend it safely.
+This document is the architecture reference for the Settings subsystem.
 
-Source-of-truth set for provider/runtime behavior:
-- [setup-guide.md](setup-guide.md)
-- [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)
+It describes the full path from UI surfaces (Settings page and Home onboarding wizard), through HTTP/API and server domain services, into SQL persistence, and back into runtime configuration consumption.
 
-## 1. Settings information architecture
+## 0) Database-first summary (read this first)
 
-Top-level tabs (exact order from `SettingsTabNavigation.tsx`):
+Settings is database-backed and database-primary.
 
-1. `Overview`
-2. `Personalization`
-3. `Connections`
-4. `Models & Runtime`
-5. `Services`
-6. `Infrastructure`
-7. `Telemetry`
+- Every settings write from UI or wizard persists to SQL first.
+- Runtime configuration is projected from SQL-backed rows (not directly from UI memory).
+- Startup loads DB-backed settings into `IConfiguration` via the custom provider.
+
+Primary SQL stores for Settings:
+
+- `ApplicationSettings` table (row-per-section JSON payload; includes `ChatDefaults`, provider sections, `ServiceModes`, telemetry, runtime overrides)
+- `Models` table (chat model catalog)
+- `RuntimeProfiles` table (parameter/thinking profile contracts)
+
+Critical consequence:
+
+- If it is not in SQL, it is not authoritative Settings state.
+
+## 1) What Settings is (and is not)
+
+Settings is a configuration/control plane for GuideAnts.
+
+Settings is responsible for:
+
+- Connection/provider configuration (keys, endpoints, tokens)
+- Chat defaults (default model, global override toggle, default parameter bag)
+- Model catalog registration and lifecycle
+- Runtime profile registration and lifecycle
+- Non-chat service provider/mode selection and provider field editing
+- Runtime dependency visibility and override controls
+- Readiness and usage visibility
+
+Settings is not:
+
+- A separate execution engine
+- A parallel runtime config system for the wizard
+- A place where chat runtime policy should be improvised outside resolved policy contracts
+
+## 2) Top-level architecture
+
+## 2.1 Layers
+
+1. Client surfaces
+- Full Settings UI: `src/client/src/pages/Settings.tsx`
+- Home onboarding wizard: `src/client/src/components/home/AddAiServicesWizard.tsx`
+
+2. Client transport
+- Typed API wrapper: `src/client/src/services/api.ts` (`api.settings.*`)
+
+3. HTTP endpoints
+- Minimal API mapping: `src/server/GuideAntsApi/Endpoints/SettingsEndpoints.cs`
+
+4. Settings domain service
+- Application settings domain logic: `src/server/GuideAntsApi/Settings/ApplicationSettingsService*.cs`
+
+5. Section/schema contract
+- Section/property registry: `src/server/GuideAntsApi/Settings/SettingsSectionRegistry.cs`
+
+6. Persistence
+- Section JSON rows: `src/server/GuideAntsApi.DataModel/Models/ApplicationSetting.cs`
+- Model catalog: `src/server/GuideAntsApi.DataModel/Models/Model.cs`
+- Runtime profiles: `src/server/GuideAntsApi.DataModel/Models/RuntimeProfile.cs`
+- Assistant model refs: `src/server/GuideAntsApi.DataModel/Models/Assistant.cs`
+
+7. Runtime projection
+- DB-backed configuration provider: `src/server/GuideAntsApi/Settings/ApplicationSettingsConfigurationProvider.cs`
+- Startup registration/bootstrap: `src/server/GuideAntsApi/Program.cs`
+
+8. Runtime consumers
+- Chat routing model policy: `src/server/GuideAntsApi/Services/Routing/ChatModelResolver.cs`
+- Conversation runtime path: `src/server/GuideAntsApi/Services/Conversations/ConversationService.cs`
+
+## 2.2 Canonical principle
+
+There is one write plane for settings state: `/api/settings/*`.
+
+Both UI surfaces (Settings page and Home wizard) call the same backend endpoints, writing the same data model.
+
+## 2.3 End-to-end DB-centric flow
+
+```text
+Settings UI / Home Wizard
+  -> /api/settings/* endpoints
+    -> ApplicationSettingsService* domain methods
+      -> SQL write/read (ApplicationSettings, Models, RuntimeProfiles)
+        -> ReloadConfiguration (after successful mutating writes)
+          -> ApplicationSettingsConfigurationProvider projection into IConfiguration
+            -> Runtime consumers (routing, conversation execution, service components)
+```
+
+## 3) UI surface architecture
+
+## 3.1 Full Settings page
+
+Entry: `src/client/src/pages/Settings.tsx`
 
 Responsibilities:
 
-- **Overview**: default chat model controls + readiness summaries + deep links.
-- **Personalization**: user name/email profile fields.
-- **Connections**: provider credential sections, usage chips, section save/reset flows.
-- **Models & Runtime**: model catalog, runtime profiles, local llama runtime inventory/actions.
-- **Services**: non-chat service editors and provider-specific service settings.
-- **Infrastructure**: runtime-owned dependency keys, source metadata, probe execution.
-- **Telemetry**: DB-backed API logging level controls and subsystem presets.
+- Owns tab state and deep-linking (`overview`, `connections`, `models-runtime`, `services`, `infrastructure`, `telemetry`, `personalization`)
+- Owns top-level loading and mutation state for models/profiles/inventory/confirmation flows
+- Composes tab components and passes callbacks/refresh hooks
 
-## 2. Routing model and contracts
+Primary tab components:
 
-### Chat routing
+- Navigation: `src/client/src/pages/settings/components/SettingsTabNavigation.tsx`
+- Overview: `src/client/src/pages/settings/components/OverviewTab.tsx`
+- Connections: `src/client/src/pages/settings/components/ConnectionsTab.tsx`
+- Models & Runtime workspace: `src/client/src/pages/settings/components/ModelsRuntimeWorkspace.tsx`
+- Services: `src/client/src/pages/settings/components/ServicesTab.tsx`
+- Infrastructure: `src/client/src/pages/settings/components/InfrastructureTab.tsx`
+- Telemetry: `src/client/src/pages/settings/components/TelemetryTab.tsx`
 
-Chat uses assistant-selected catalog models plus defaults/overrides:
+Settings page data API is exclusively `api.settings.*` from `src/client/src/services/api.ts`.
 
-- `IChatModelResolver` resolves effective model id.
-- `IChatTargetResolver` resolves `(catalog model, provider section)`.
-- `IChatTargetValidator` validates provider requirements and model/runtime constraints.
+## 3.2 Home Add AI Services wizard
 
-Supported chat provider ids (validated as a closed set, status-qualified):
+Entry: `src/client/src/components/home/AddAiServicesWizard.tsx`
 
-Stable (operator-supported):
+Responsibilities:
 
-- `openai-chat`
-- `openai-responses`
-- `azure-openai-chat`
-- `azure-openai-responses`
-- `anthropic`
-- `llama-cpp`
-- `google-gemini-chat`
+- Provider onboarding orchestration (`foundry`, `openai`, `google-gemini`, `local-ai`)
+- Model-add/install orchestration including local model onboarding and operation polling
+- Optional service configuration paths
 
-Experimental/Hidden (implemented, partial/in-flight, not generally operator-facing):
+Important detail:
 
-- `hf-inference-chat`
-- `openrouter-chat`
+- Wizard writes through the same `/api/settings/*` endpoints as full Settings
+- Local AI flow state is isolated in: `src/client/src/components/home/addAiServicesWizard/useLocalAiWizardState.ts`
 
-Roadmap (not shipped): see roadmap docs only; do not treat as currently available setup providers.
+No wizard-only backend config path exists.
 
-### Default chat model behavior
+## 3.3 Client-to-endpoint mapping (high-value)
 
-- `defaultModelId`: instance default chat catalog model.
-- `overrideAllChatModels`:
-  - `true`: all chat turns route to the default model.
-  - `false`: entity `modelId` is used when set; empty/omitted model uses default.
-- Sampling overrides from chat defaults apply for default and override paths.
+Client wrapper: `src/client/src/services/api.ts`.
 
-Resolver seams:
+Key groups:
 
-- `IChatModelResolver` is the canonical seam for effective chat model resolution.
-- `IChatTargetResolver` and `IChatTargetValidator` handle target resolution and execution validation.
+- Sections/schema/readiness
+  - `/settings/sections`
+  - `/settings/schema`
+  - `/settings/readiness`
 
-Settings/UI surfaces:
+- Chat defaults
+  - `/settings/chat-defaults`
 
-- `GET/PUT /api/settings/chat-defaults`
-- `Settings -> Overview` default chat model controls
-- Guide/assistant editor support for "Use Default Model"
-- `Home -> Add AI Services Wizard` can set the first/added model as default chat model.
+- Models + onboarding
+  - `/settings/models`
+  - `/settings/models:add`
 
-### Non-chat routing
+- Runtime profiles
+  - `/settings/runtime-profiles`
 
-Non-chat capabilities are edited from **Services** and resolved through service-provider contracts and service mode state.
-No silent fallback is allowed for provider/model/runtime selection.
+- Service editor
+  - `/settings/services/{serviceId}`
+  - `/settings/services/{serviceId}/active-provider`
+  - `/settings/services/{serviceId}/providers/{providerId}`
+  - local-model subroutes
 
-## 3. Runtime-owned dependencies (Infrastructure)
+- Routing/readiness probes
+  - `/settings/routing/chat-targets*`
+  - `/settings/routing/preflight`
 
-The runtime dependency catalog currently includes:
+- Connections usage
+  - `/settings/connections/{section}/usage`
 
-- `LlamaCpp:BaseUrl`
-- `LocalServiceHosts:SpeechTranscriptionBaseUrl`
-- `LocalServiceHosts:SpeechSynthesisBaseUrl`
-- `LocalServiceHosts:ImageGenerationBaseUrl`
-- `LocalServiceHosts:EmbeddingsBaseUrl`
-- `LocalServiceHosts:MediaBaseUrl`
-- `LocalServiceHosts:DocumentIntelligenceBaseUrl`
+- Infrastructure
+  - `/settings/infrastructure/dependencies`
+  - `/settings/infrastructure/probes`
 
-These are runtime-owned and surfaced read-only in Settings with source + probe status.
+- Llama runtime
+  - `/settings/llama/runtime/*`
+  - `/settings/llama/downloads/*`
 
-## 4. Local llama ownership model
+## 4) API and endpoint architecture
 
-- API delegates runtime operations to `guideants-ai` admin routes.
-- API does not own host model directories as a primary control path.
-- `LlamaModelManagementOptions` currently exposes `AllowOverwrite`.
-- Hugging Face token is resolved from `HuggingFace:Token` (Connections section), not from llama options.
+Endpoint mapper: `src/server/GuideAntsApi/Endpoints/SettingsEndpoints.cs`.
 
-## 5. Core endpoints used by Settings
+This file defines transport groups:
 
-Primary Settings endpoints live in `SettingsEndpoints.cs`:
+- Core settings group: `/api/settings`
+- Services editor subgroup: `/api/settings/services`
+- Routing subgroup: `/api/settings/routing`
+- Llama subgroup: `/api/settings/llama`
+- Hugging Face utility subgroup: `/api/settings/huggingface`
 
-- `/api/settings/sections*`, `/api/settings/schema`, `/api/settings/readiness`
-- `/api/settings/chat-defaults`
-- `/api/settings/models*`
-- `/api/settings/runtime-profiles*`
-- `/api/settings/services/{serviceId}*`
-- `/api/settings/routing/chat-targets*`
-- `/api/settings/overview`
-- `/api/settings/connections/{section}/usage`
-- `/api/settings/infrastructure/*`
-- `/api/settings/llama/*`
+Endpoint layer responsibilities are deliberately narrow:
 
-## 6. How to extend Settings safely
+- Parse request DTOs
+- Convert transport result codes (200/201/202/400/404/409)
+- Delegate to domain services
+- Keep business rules centralized in domain services
 
-### Add a new chat provider
+## 5) Settings domain service architecture
 
-1. Add provider client/factory wiring in chat runtime and routing factory.
-2. Add provider id support in validator known providers.
-3. Add section mapping/readiness wiring.
-4. Add catalog/provider UI support where provider ids are selected.
-5. Add routing + validator tests for success and fail-fast cases.
+Primary interface and implementation:
 
-### Add or modify a non-chat service provider path
+- Interface/constructor surface: `src/server/GuideAntsApi/Settings/ApplicationSettingsService.cs`
+- Behavior split by concern in partial files:
+  - `ApplicationSettingsService.Sections.cs`
+  - `ApplicationSettingsService.Models.cs`
+  - `ApplicationSettingsService.RuntimeProfiles.cs`
+  - `ApplicationSettingsService.ServiceEditors.cs`
+  - `ApplicationSettingsService.ServiceModes.cs`
+  - `ApplicationSettingsService.Readiness.cs`
+  - `ApplicationSettingsService.RuntimeDependencies.cs`
+  - `ApplicationSettingsService.Contracts.cs`
 
-1. Update server service contract/provider metadata.
-2. Update service editor DTO handling and validation.
-3. Update Services editor UI for provider-specific fields.
-4. Ensure Connections usage chips and readiness reflect the new provider.
-5. Add service editor and endpoint tests.
+## 5.1 Section CRUD pipeline
 
-### Extend Add AI Services Wizard behavior
+Section read/write methods in `ApplicationSettingsService.Sections.cs`:
 
-The wizard currently supports four provider paths: `foundry`, `google-gemini`, `openai`, and `local-ai`.
+- `GetSectionSummariesAsync`
+- `GetSectionAsync`
+- `UpdateSectionAsync`
+- `GetSchemaAsync`
 
-**Cloud provider path (foundry / google-gemini / openai pattern)**:
+Update pipeline (`UpdateSectionAsync`) is architecture-critical:
 
-1. Add types to `addAiServicesWizard/types.ts` and constants to `constants.ts`.
-2. Add a connection step, models step, and optional-services step component.
-3. Add provider-specific branches in `AddAiServicesWizard.tsx` for each wizard step.
-4. Keep first-launch predicate aligned with `CONNECTION_SECTION_NAME_SET` and model count logic.
-5. Reuse existing Settings APIs; avoid parallel config systems.
+1. Resolve section definition via `SettingsSectionRegistry`
+2. Load row by `SectionName` from `ApplicationSettings`
+3. Enforce optimistic concurrency via `RowVersion`
+4. Decrypt current payload
+5. Reject unsupported fields for section contract
+6. Merge update payload with current payload (field-level merge semantics)
+7. Validate:
+- type/default validation from section definition
+- section-specific validation hooks (for example `ChatDefaults` reasoning/model compatibility)
+8. Encrypt secrets in outgoing payload
+9. Persist row + schema version + updated timestamp
+10. Reload runtime configuration
 
-**Local/async provider path (local-ai pattern)**:
+## 5.2 Model catalog domain
 
-The local AI path uses a dedicated hook (`useLocalAiWizardState`) to isolate async state (download polling, inventory, runtime profiles) from the main wizard component. Follow this pattern for any provider that involves long-running async operations or multiple infrastructure dependencies.
+`ApplicationSettingsService.Models.cs`:
 
-1. Extract provider state into a `use{Provider}WizardState` hook.
-2. Add a prerequisites step (instead of a generic connection step) to surface infrastructure readiness.
-3. Use polling to track async operations and surface progress within the wizard.
-4. Persist via existing Settings APIs only; never introduce parallel configuration systems.
+- `GetModelsAsync`, `CreateModelAsync`, `UpdateModelAsync`, `DeleteModelAsync`, `GetChatTargetsAsync`
 
-General rules:
+Important behaviors:
 
-- Add/refresh wizard tests for step persistence and first-launch behavior.
-- Keep step/provider constants in `constants.ts` authoritative.
+- Normalization and validation of `ReasoningChoicesJson`
+- Normalization/validation of `RuntimeConfigJson`
+- Provider-aware reasoning choice validation
+- Post-persist llama router sync when applicable
 
-Wizard deep dive: [add-ai-services-wizard.md](add-ai-services-wizard.md)
+## 5.3 Runtime profile domain
 
-## 7. Related docs
+`ApplicationSettingsService.RuntimeProfiles.cs`:
 
-- Requirements baseline: [settings-and-llama-completion-requirements.md](settings-and-llama-completion-requirements.md)
-- Llama lifecycle and runtime ops: [llama-model-download-and-runtime-management.md](llama-model-download-and-runtime-management.md)
-- Operator setup: [setup-guide.md](setup-guide.md)
+- CRUD for runtime profiles
+- JSON validation for `SamplingParametersJson` and `ThinkingControlJson`
+- Provider filtering metadata (`Providers` list)
 
+## 5.4 Service editor and service mode domain
+
+`ApplicationSettingsService.ServiceEditors.cs` + `ApplicationSettingsService.ServiceModes.cs` + `ApplicationSettingsService.Contracts.cs`:
+
+- Service contracts define providers, required section fields, and required runtime keys
+- Service editor state is composed from:
+  - active/default mode state
+  - provider section readiness
+  - runtime dependency readiness
+  - provider field metadata and values
+- Active provider and provider fields flow through validated updates
+
+## 5.5 Readiness and usage composition
+
+`ApplicationSettingsService.Readiness.cs`:
+
+- Global/readiness rollups
+- Provider section readiness (`GetProviderSectionReadinessAsync`)
+- Connection usage projection (`GetConnectionUsageAsync`)
+
+This powers:
+
+- Overview readiness cards
+- Connections "used by" chips
+- Preflight and chat-target readiness endpoints
+
+## 5.6 Runtime dependency domain
+
+`ApplicationSettingsService.RuntimeDependencies.cs`:
+
+- Runtime dependency catalog (key list + read-only flags + provider usage)
+- Dependency classification (`url`, `path`, `other`)
+- Safe override updates with URL validation rules
+- Config reload on writes
+
+## 6) Section registry and schema contract
+
+Registry: `src/server/GuideAntsApi/Settings/SettingsSectionRegistry.cs`.
+
+The registry is the contract authority for:
+
+- Which sections exist
+- Which fields exist in each section
+- Canonical configuration key mapping
+- Field types (`string`, `int`, `bool`)
+- Secret designation
+- default values
+
+Notable sections:
+
+- `ChatDefaults`
+  - `DefaultModelId`
+  - `OverrideAllChatModels`
+  - `Temperature`
+  - `TopP`
+  - `ReasoningEffort`
+  - `SamplingParametersJson`
+
+- `ServiceModes`
+- Provider connection sections (`OpenAI`, `AzureOpenAI`, `GoogleGeminiApi`, etc.)
+- Runtime host sections (`LlamaCpp`, `LocalServiceHosts`)
+- Telemetry
+
+## 7) Persistence architecture
+
+## 7.1 `ApplicationSettings` table (section JSON)
+
+Entity: `ApplicationSetting`.
+
+Columns:
+
+- `SectionName` (PK)
+- `JsonValue` (section payload JSON)
+- `SchemaVersion`
+- `CreatedUtc`
+- `UpdatedUtc`
+- `RowVersion` (concurrency token)
+
+Use cases:
+
+- Settings sections and runtime overrides are stored as row-per-section JSON payloads
+- Section schema evolution managed through `SchemaVersion` and bootstrap merge behavior
+
+This table is the core Settings persistence layer. Most Settings UI edits end up here.
+
+## 7.2 `Models` catalog table
+
+Entity: `Model`.
+
+Stores chat target catalog rows and metadata:
+
+- `ModelId` PK
+- `Provider`, `DisplayName`, `Description`
+- `RuntimeConfigJson`
+- `ReasoningChoicesJson`
+- `IsActive`, `DisplayOrder`
+
+This table is the authoritative source for selectable chat models in Settings and routing.
+
+## 7.3 `RuntimeProfiles` table
+
+Entity: `RuntimeProfile`.
+
+Stores model-family request shaping contract and UI exposure metadata:
+
+- `SamplingParametersJson`
+- `ThinkingControlJson`
+- `ProvidersJson`
+- message normalization fields
+
+This table is the authoritative source for model parameter/thinking profile definitions.
+
+## 7.4 Assistant model reference fields
+
+Entity: `Assistant`.
+
+- `ModelId` references model catalog row or null ("Use default")
+- Legacy typed fields remain on entity (`Temperature`, `TopP`, `ReasoningEffort`)
+- Structured bag field `SamplingParametersJson` exists
+
+## 8) Runtime projection architecture
+
+## 8.1 DB-backed configuration provider
+
+`ApplicationSettingsConfigurationProvider` is registered in `Program.cs` and becomes part of `IConfiguration`.
+
+Behavior:
+
+- Reads all rows from `ApplicationSettings`
+- Decrypts secret fields using registry metadata
+- Flattens section JSON into canonical `Section:Field` keys
+- Rejects unknown sections (prevents unregistered DB rows from silently changing runtime config)
+- Throws startup-fatal errors on load/decrypt failures
+
+This is the bridge that makes SQL-backed Settings values become live runtime config.
+
+## 8.2 Bootstrap and reload lifecycle
+
+In `Program.cs`:
+
+1. Add DB-backed settings source to configuration builder
+2. Build app
+3. Call `IApplicationSettingsService.BootstrapAsync(...)`
+4. Call `ReloadConfiguration()` to activate DB-primary values
+5. Run seeders (required guides/assistants, runtime profiles, local service auto-selector)
+
+Every successful settings write path that changes config calls reload.
+
+## 9) Chat runtime integration from Settings
+
+## 9.1 Resolver contract
+
+`ChatModelResolver` reads from `IConfiguration` (including DB-backed `ChatDefaults`) and returns:
+
+- `ModelId`
+- `ReferenceKind` (`Direct`, `DefaultedTo`, `OverriddenToDefault`)
+- `ResolvedExecutionPolicy` (`Authority`, resolved parameter bag, provider)
+
+Authority is binary:
+
+- `GlobalOverride`
+- `AssistantDefinition`
+
+Parameter bag source:
+
+- `GlobalOverride`: `ChatDefaults` bag
+- `AssistantDefinition` + explicit model: model-defined path
+- `AssistantDefinition` + "Use default": default-model bag from `ChatDefaults`
+
+`ReferenceKind` is provenance metadata; runtime policy authority comes from `ExecutionPolicy`.
+
+## 9.2 Conversation path
+
+`ConversationService` resolves model/policy via `IChatModelResolver` and passes `ExecutionPolicy` to runtime execution path.
+
+This is where settings decisions become runtime behavior.
+
+## 10) Detailed write/read sequences
+
+## 10.1 Section update sequence
+
+```text
+Settings UI/Wizard
+  -> PUT /api/settings/sections/{section}
+     -> SettingsEndpoints
+        -> ApplicationSettingsService.UpdateSectionAsync
+           -> SettingsSectionRegistry (contract)
+           -> ApplicationSettings row load + rowVersion check
+           -> decrypt current payload
+           -> merge + validate + section-specific validation
+           -> encrypt secrets + save row
+           -> ReloadConfiguration
+        <- updated section DTO
+  <- UI refreshes state
+```
+
+## 10.2 Chat defaults update sequence
+
+```text
+OverviewTab / ChatToolbarPanel
+  -> PUT /api/settings/chat-defaults
+     -> SettingsEndpoints maps typed DTO -> section payload
+        -> ApplicationSettingsService.UpdateSectionAsync("ChatDefaults", ...)
+           -> validation includes reasoning vs default model checks
+           -> persist + reload
+        <- ChatDefaultsDto
+  <- resolver sees updated ChatDefaults on next resolve
+```
+
+## 10.3 Model add/update sequence
+
+```text
+ModelsRuntimeWorkspace / Wizard
+  -> POST /api/settings/models or /api/settings/models:add
+     -> endpoint validation + orchestrator (for local onboarding path)
+     -> ApplicationSettingsService model CRUD
+        -> normalize runtime/reasoning JSON
+        -> persist model row
+        -> optional llama router sync
+  <- model DTO or operation DTO
+```
+
+## 10.4 Service provider edit sequence
+
+```text
+ServicesTab / Wizard optional services
+  -> PUT /api/settings/services/{serviceId}/providers/{providerId}
+     -> ApplicationSettingsService.UpdateServiceProviderFieldsAsync
+        -> service contract lookup
+        -> provider field validation
+        -> underlying section update(s)
+        -> compose refreshed ServiceEditorState
+  <- ServiceEditorStateDto
+```
+
+## 11) Ownership matrix
+
+| Concern | Authority | Source of truth | Primary files |
+|---|---|---|---|
+| Section contract | Settings registry | code (`SettingsSectionRegistry`) | `SettingsSectionRegistry.cs` |
+| Section values | DB row per section | `ApplicationSettings` | `ApplicationSetting.cs`, `ApplicationSettingsService.Sections.cs` |
+| Model list | DB catalog | `Models` table | `Model.cs`, `ApplicationSettingsService.Models.cs` |
+| Runtime profile list | DB catalog | `RuntimeProfiles` table | `RuntimeProfile.cs`, `ApplicationSettingsService.RuntimeProfiles.cs` |
+| Runtime projection | config provider | flattened `IConfiguration` | `ApplicationSettingsConfigurationProvider.cs`, `Program.cs` |
+| Chat model resolution | routing service | `IChatModelResolver` output | `ChatModelResolver.cs` |
+| Chat turn execution | conversation runtime | `ExecutionPolicy` | `ConversationService.cs` (+ downstream chat runtime) |
+
+## 12) Invariants and guardrails
+
+- One write plane: `/api/settings/*`
+- One section contract authority: `SettingsSectionRegistry`
+- RowVersion concurrency on section writes
+- Secrets encrypted at rest in section JSON
+- Runtime config reload after successful mutating writes
+- Unknown DB sections are not projected into runtime config
+- Resolver authority is binary and explicit
+- `ReferenceKind` is provenance, not policy authority
+- Wizard and full Settings must remain behaviorally equivalent for persisted state
+
+## 13) Extension playbook
+
+When adding a new settings capability:
+
+1. Add or update section/provider contract in `SettingsSectionRegistry`
+2. Add validation and write/read logic in `ApplicationSettingsService` partials
+3. Add/adjust endpoint mapping in `SettingsEndpoints`
+4. Update `SettingsDtos` contracts if transport changes
+5. Wire UI surface(s) via `api.settings.*`
+6. Add service + endpoint tests (validation, concurrency, readiness, projection)
+7. Confirm runtime projection and consumer behavior after reload
+
+This sequence preserves architecture integrity: one contract, one persistence model, one runtime projection, one API.

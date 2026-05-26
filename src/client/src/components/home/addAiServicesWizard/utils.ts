@@ -9,6 +9,8 @@ import type {
   SettingsSchemaDto,
 } from '../../../types/settings';
 import {
+  GEMINI_FLASH_RUNTIME_PROFILE_ID,
+  GEMINI_PRO_RUNTIME_PROFILE_ID,
   FOUNDRY_CORE_SECTION,
   FOUNDRY_DOCUMENT_INTELLIGENCE_SECTION,
   FOUNDRY_EMBEDDINGS_SECTION,
@@ -28,9 +30,11 @@ import {
   MODEL_PROVIDER_ID_TO_LABEL,
   MODEL_PROVIDER_LABEL_TO_ID,
   OPENAI_CORE_SECTION,
+  OPENAI_CHAT_RUNTIME_PROFILE_ID,
   OPENAI_MODEL_PROVIDER_ID_TO_LABEL,
   OPENAI_MODEL_PROVIDER_LABEL_TO_ID,
   OPENAI_OPTIONAL_SERVICE_DEFAULTS,
+  OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
   OPENAI_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
 } from './constants';
@@ -205,54 +209,89 @@ export function hasModelId(models: readonly Pick<FoundryModelDraft, 'modelId'>[]
   return models.some((model) => model.modelId.trim().toLowerCase() === normalized);
 }
 
+function inferGeminiRuntimeProfileId(modelId: string): string {
+  const normalized = modelId.trim().toLowerCase();
+  return normalized.includes('pro')
+    ? GEMINI_PRO_RUNTIME_PROFILE_ID
+    : GEMINI_FLASH_RUNTIME_PROFILE_ID;
+}
+
+function inferCloudRuntimeProfileId(providerId: string, modelId: string): string | null {
+  if (providerId === 'azure-openai-chat' || providerId === 'openai-chat') {
+    return OPENAI_CHAT_RUNTIME_PROFILE_ID;
+  }
+  if (providerId === 'azure-openai-responses' || providerId === 'openai-responses') {
+    return OPENAI_RESPONSES_RUNTIME_PROFILE_ID;
+  }
+  if (providerId === GEMINI_MODEL_PROVIDER_ID) {
+    return inferGeminiRuntimeProfileId(modelId);
+  }
+  if (providerId === HUGGINGFACE_CHAT_MODEL_PROVIDER_ID) {
+    return HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID;
+  }
+  return null;
+}
+
+function withRuntimeProfileProviderConfig(providerId: string, modelId: string): Pick<AddModelRequest, 'providerConfig'> {
+  const runtimeProfileId = inferCloudRuntimeProfileId(providerId, modelId);
+  return runtimeProfileId
+    ? { providerConfig: { runtimeProfileId } }
+    : {};
+}
+
 export function buildAddModelRequest(modelId: string, provider: FoundryModelProviderLabel): AddModelRequest {
   const trimmed = modelId.trim();
+  const providerId = mapProviderLabelToModelProviderId(provider);
   return {
-    provider: mapProviderLabelToModelProviderId(provider),
+    provider: providerId,
     catalog: {
       modelId: trimmed,
       displayName: trimmed,
       isActive: true,
     },
+    ...withRuntimeProfileProviderConfig(providerId, trimmed),
   };
 }
 
 export function buildAddGeminiModelRequest(modelId: string): AddModelRequest {
   const trimmed = modelId.trim();
+  const providerId = GEMINI_MODEL_PROVIDER_ID;
   return {
-    provider: GEMINI_MODEL_PROVIDER_ID,
+    provider: providerId,
     catalog: {
       modelId: trimmed,
       displayName: trimmed,
       isActive: true,
     },
+    ...withRuntimeProfileProviderConfig(providerId, trimmed),
   };
 }
 
 export function buildAddOpenAiModelRequest(modelId: string, provider: OpenAiModelProviderLabel): AddModelRequest {
   const trimmed = modelId.trim();
+  const providerId = OPENAI_MODEL_PROVIDER_LABEL_TO_ID[provider];
   return {
-    provider: OPENAI_MODEL_PROVIDER_LABEL_TO_ID[provider],
+    provider: providerId,
     catalog: {
       modelId: trimmed,
       displayName: trimmed,
       isActive: true,
     },
+    ...withRuntimeProfileProviderConfig(providerId, trimmed),
   };
 }
 
 export function buildAddHuggingFaceModelRequest(modelId: string): AddModelRequest {
   const trimmed = modelId.trim();
+  const providerId = HUGGINGFACE_CHAT_MODEL_PROVIDER_ID;
   return {
-    provider: HUGGINGFACE_CHAT_MODEL_PROVIDER_ID,
+    provider: providerId,
     catalog: {
       modelId: trimmed,
       displayName: trimmed,
       isActive: true,
     },
-    providerConfig: {
-      runtimeProfileId: HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
-    },
+    ...withRuntimeProfileProviderConfig(providerId, trimmed),
   };
 }
 
@@ -809,8 +848,11 @@ export async function updateWizardSection(
   if (!section) {
     return currentSectionsByName;
   }
+  // Always re-read the section before update so retries after partial saves
+  // use the latest row version and avoid stale-concurrency conflicts.
+  const latest = await api.settings.getSection(sectionName);
   const updated = await api.settings.updateSection(sectionName, {
-    rowVersion: section.rowVersion,
+    rowVersion: latest.rowVersion,
     payload,
   });
   return {

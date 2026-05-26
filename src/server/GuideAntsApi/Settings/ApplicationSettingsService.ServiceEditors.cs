@@ -55,8 +55,23 @@ public sealed partial class ApplicationSettingsService
         var selectedMode = FindModeForProvider(modes, provider.ProviderSectionKey);
         if (selectedMode == null)
         {
-            throw new InvalidOperationException(
-                $"Provider '{providerId}' cannot be activated because no explicit service mode exists for '{provider.ProviderSectionKey}'.");
+            var missingConnectionFields = BuildProviderConnectionMissingFields(provider).ToList();
+            if (missingConnectionFields.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Provider '{providerId}' cannot be activated: {string.Join("; ", missingConnectionFields.Select(field => $"Missing provider connection value: {field}."))}");
+            }
+
+            await CreateExplicitServiceModeAsync(contract, provider, cancellationToken).ConfigureAwait(false);
+
+            (row, payload) = await LoadOrCreateServiceModesRowAsync(cancellationToken).ConfigureAwait(false);
+            modes = ServiceModesPayload.ReadModesFor(payload, canonicalService).ToList();
+            selectedMode = FindModeForProvider(modes, provider.ProviderSectionKey);
+            if (selectedMode == null)
+            {
+                throw new InvalidOperationException(
+                    $"Provider '{providerId}' cannot be activated because no explicit service mode exists for '{provider.ProviderSectionKey}'.");
+            }
         }
 
         var activationBlockers = BuildActivationBlockers(contract, provider, ToServiceModeDto(contract.ServiceId, selectedMode)).ToList();

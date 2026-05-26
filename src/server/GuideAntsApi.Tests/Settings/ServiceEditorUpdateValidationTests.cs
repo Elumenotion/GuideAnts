@@ -289,22 +289,24 @@ public sealed class ServiceEditorUpdateValidationTests
     }
 
     [TestMethod]
-    public async Task SetServiceActiveProviderAsync_RejectsMissingExplicitMode()
+    public async Task SetServiceActiveProviderAsync_CreatesExplicitMode_WhenConnectionIsReady()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
         var service = CreateService(db, configuration);
 
-        var act = async () => await service.SetServiceActiveProviderAsync(
-            "Embeddings",
-            ServiceProviderIds.EmbeddingsHuggingFaceInference,
+        var state = await service.SetServiceActiveProviderAsync(
+            "SpeechTranscription",
+            ServiceProviderIds.SpeechTranscriptionAzureSpeechBatch,
             CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .Where(e => e.Message.Contains("no explicit service mode", StringComparison.OrdinalIgnoreCase));
+        state.ActiveProviderId.Should().Be(ServiceProviderIds.SpeechTranscriptionAzureSpeechBatch);
 
-        var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
-        modes.Should().NotContain(mode => string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal));
+        var modes = await service.GetServiceModesAsync("SpeechTranscription", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "AzureSpeechService", StringComparison.Ordinal)
+            && mode.Enabled
+            && mode.IsDefault);
     }
 
     [TestMethod]
