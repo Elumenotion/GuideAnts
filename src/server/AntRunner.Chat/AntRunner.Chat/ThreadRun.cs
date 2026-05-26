@@ -6,6 +6,7 @@ using AntRunner.Chat.Abstractions;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace AntRunner.Chat
@@ -157,21 +158,6 @@ namespace AntRunner.Chat
 
             var assistantDef = await AssistantUtility.GetAssistantCreateRequest(options.AssistantName) ?? throw new Exception($"Can't find assistant definition for '{options.AssistantName}'");
 
-            if (options.OverrideTemperature.HasValue)
-            {
-                assistantDef.Temperature = options.OverrideTemperature;
-            }
-
-            if (options.OverrideTopP.HasValue)
-            {
-                assistantDef.TopP = options.OverrideTopP.Value;
-            }
-
-            if (!string.IsNullOrEmpty(options.OverrideReasoningEffort))
-            {
-                assistantDef.ReasoningEffort = options.OverrideReasoningEffort;
-            }
-
             // 256000 is the maximum instruction length allowed by the API
             if (options.Instructions.Length >= 256000)
             {
@@ -179,14 +165,22 @@ namespace AntRunner.Chat
                 options.Instructions = options.Instructions[..255999];
             }
 
-            // Prefer an explicit DeploymentId from the host (already resolved by IChatModelResolver in the API)
-            // over the raw assistant manifest model so global default / override semantics apply consistently.
-            options.DeploymentId = options.DeploymentId ?? assistantDef.Model ?? clientFactory.DefaultDeploymentId;
-            var resolvedModelId = options.DeploymentId ?? assistantDef.Model;
+            if (options.ExecutionPolicy == null)
+            {
+                throw new InvalidOperationException(
+                    "Execution policy is required for deterministic parameter resolution.");
+            }
+
+            // Deterministic request shaping is policy-driven: model id comes from the resolved policy only.
+            options.DeploymentId = options.ExecutionPolicy.ModelId;
+            var resolvedModelId = options.ExecutionPolicy.ModelId;
+            var resolvedParameterBag = ResolveExecutionParameters(options.ExecutionPolicy);
+            var requestedReasoningEffort = TryGetStringParameter(resolvedParameterBag, "reasoning_effort");
             var reasoningEffortParam = await ResolveReasoningEffortAsync(
                 resolvedModelId,
-                assistantDef.ReasoningEffort,
+                requestedReasoningEffort,
                 token);
+            var samplingParams = BuildSamplingParameters(resolvedParameterBag);
 
             var api = clientFactory.CreateClient(options.DeploymentId, httpClient);
 
@@ -290,7 +284,12 @@ namespace AntRunner.Chat
                 while (continueChat)
                 {
                     token.ThrowIfCancellationRequested();
-                    var chatRequest = new ChatCompletionRequest(messages, tools: tools, model: options.DeploymentId, temperature: assistantDef.Temperature, topP: assistantDef.TopP, reasoningEffort: reasoningEffortParam, samplingParameters: assistantDef.SamplingParameters);
+                    var chatRequest = new ChatCompletionRequest(
+                        messages,
+                        tools: tools,
+                        model: options.DeploymentId,
+                        reasoningEffort: reasoningEffortParam,
+                        samplingParameters: samplingParams);
 
                     ChatCompletionResponse response;
                     if (onStream != null)
@@ -437,9 +436,7 @@ namespace AntRunner.Chat
                                 // Keep evaluator calls on the already-resolved deployment path so
                                 // global chat override/default semantics are applied consistently.
                                 DeploymentId = options.DeploymentId,
-                                OverrideTemperature = options.OverrideTemperature,
-                                OverrideTopP = options.OverrideTopP,
-                                OverrideReasoningEffort = options.OverrideReasoningEffort
+                                ExecutionPolicy = options.ExecutionPolicy
                             };
 
                             var evaluatorOutput = (await ExecuteAsync(evaluatorOptions, clientFactory, null, httpClient, null, null, ctx, token, isAgentInvocation: false))?.LastMessage ?? "";
@@ -1178,6 +1175,45 @@ namespace AntRunner.Chat
         {
             PropertyNameCaseInsensitive = true
         };
+
+        private static IReadOnlyDictionary<string, JsonElement> ResolveExecutionParameters(
+            ResolvedExecutionPolicy policy)
+        {
+            return policy.Parameters;
+        }
+
+        private static string? TryGetStringParameter(IReadOnlyDictionary<string, JsonElement> parameters, string key)
+        {
+            if (!parameters.TryGetValue(key, out var value))
+            {
+                return null;
+            }
+
+            if (value.ValueKind == JsonValueKind.String)
+            {
+                var raw = value.GetString();
+                return string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+            }
+
+            return null;
+        }
+
+        private static IReadOnlyDictionary<string, double>? BuildSamplingParameters(IReadOnlyDictionary<string, JsonElement> parameters)
+        {
+            Dictionary<string, double>? sampling = null;
+            foreach (var (key, value) in parameters)
+            {
+                if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number))
+                {
+                    continue;
+                }
+
+                sampling ??= new Dictionary<string, double>(StringComparer.Ordinal);
+                sampling[key] = number;
+            }
+
+            return sampling;
+        }
 
         private static async Task<string?> ResolveReasoningEffortAsync(
             string? modelId,

@@ -84,9 +84,11 @@ public class ConversationServiceAssistantSwitchingTests
             .Returns((string? id) => new ResolvedChatModel(
                 string.IsNullOrWhiteSpace(id) ? "gpt-4o-mini" : id!,
                 ChatModelReferenceKind.Direct,
-                null,
-                null,
-                null));
+                new ResolvedExecutionPolicy(
+                    string.IsNullOrWhiteSpace(id) ? "gpt-4o-mini" : id!,
+                    "openai-chat",
+                    ParameterAuthority.AssistantDefinition,
+                    new Dictionary<string, System.Text.Json.JsonElement>())));
 
         _service = new ConversationService(
             _mockHttpClientFactory.Object,

@@ -173,6 +173,23 @@ def _status_is_terminal(status: str | None) -> bool:
     return normalized in {"completed", "failed", "error", "cancelled", "canceled"}
 
 
+def canonical_model_folder_name(model_id: str) -> str:
+    normalized = (model_id or "").strip().strip("/")
+    if not normalized:
+        raise ValueError("model_id is required")
+
+    # Keep local folder naming aligned with GA_EMB_DEFAULT_MODEL_PATH expectations
+    # (leaf repo name, e.g. microsoft/harrier-oss-v1-0.6b -> harrier-oss-v1-0.6b).
+    leaf = normalized.split("/")[-1].strip()
+    if not leaf:
+        raise ValueError("model_id must include a repository name")
+
+    if any(sep in leaf for sep in ("/", "\\", "..")):
+        raise ValueError("model_id resolved to an invalid local folder name")
+
+    return leaf
+
+
 def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
     operation_id = uuid.uuid4().hex
     operation = {
@@ -191,7 +208,7 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
     def _run() -> None:
         model_dir = get_model_dir()
         os.makedirs(model_dir, exist_ok=True)
-        target_name = request.model_id.replace("/", "--")
+        target_name = canonical_model_folder_name(request.model_id)
         target_path = os.path.join(model_dir, target_name)
         with MODEL_OPS_LOCK:
             current = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)

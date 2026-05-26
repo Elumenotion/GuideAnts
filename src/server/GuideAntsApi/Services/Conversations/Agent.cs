@@ -77,9 +77,7 @@ public static class Agent
             AssistantName = assistantName,
             Instructions = augmentedInstructions,
             DeploymentId = resolvedAgent.ModelId,
-            OverrideTemperature = resolvedAgent.OverrideTemperature,
-            OverrideTopP = resolvedAgent.OverrideTopP,
-            OverrideReasoningEffort = resolvedAgent.OverrideReasoningEffort,
+            ExecutionPolicy = resolvedAgent.ExecutionPolicy,
             oAuthUserAccessToken = context.OAuthUserAccessToken,
             Evaluator = string.IsNullOrWhiteSpace(assistant.InvocationEvaluator)
                 ? null

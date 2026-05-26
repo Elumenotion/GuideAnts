@@ -80,9 +80,9 @@ public sealed class AnthropicChatClient : IChatCompletionClient
 
             _logger.LogInformation(
                 "Anthropic request. Model={Model}, Stream={Stream}, Messages={MessageCount}, Tools={ToolCount}, "
-                + "Temperature={Temperature}, TopP={TopP}, ReasoningEffort={ReasoningEffort}, SamplingOverrides={SamplingOverrides}",
+                + "ReasoningEffort={ReasoningEffort}, SamplingOverrides={SamplingOverrides}",
                 request.Model ?? _defaultModel, stream, request.Messages.Count, request.Tools?.Count ?? 0,
-                request.Temperature, request.TopP, request.ReasoningEffort, sampling);
+                request.ReasoningEffort, sampling);
         }
     }
 
@@ -111,14 +111,15 @@ public sealed class AnthropicChatClient : IChatCompletionClient
             var toolDefinitions = request.Tools?.Count > 0
                 ? request.Tools.Select(MapToolDefinition).ToList()
                 : null;
+            var (temperature, topP) = ResolveAnthropicSampling(request, thinkingEnabled);
 
             var messageRequest = new MessageCreateParams
             {
                 Model = model,
                 MaxTokens = defaultMaxTokens,
                 Messages = messageParams,
-                Temperature = request.Temperature,
-                TopP = request.TopP,
+                Temperature = temperature,
+                TopP = topP,
                 System = systemMessages.Count > 0 ? new MessageCreateParamsSystem(systemMessages) : null,
                 Tools = toolDefinitions
             };
@@ -151,6 +152,57 @@ public sealed class AnthropicChatClient : IChatCompletionClient
             }
 
             return messageRequest;
+        }
+
+        private static (double? Temperature, double? TopP) ResolveAnthropicSampling(ChatCompletionRequest request, bool thinkingEnabled)
+        {
+            double? temperature = null;
+            double? topP = null;
+            if (request.SamplingParameters == null)
+            {
+                return (temperature, topP);
+            }
+
+            List<string>? unprojectedKeys = null;
+            foreach (var (key, value) in request.SamplingParameters)
+            {
+                if (string.Equals(key, "temperature", StringComparison.Ordinal))
+                {
+                    if (thinkingEnabled)
+                    {
+                        // Anthropic extended thinking rejects non-1 temperature values.
+                        // Preserve historical behavior by omitting temperature when thinking is enabled.
+                        continue;
+                    }
+
+                    temperature = value;
+                    continue;
+                }
+
+                if (string.Equals(key, "top_p", StringComparison.Ordinal))
+                {
+                    if (thinkingEnabled)
+                    {
+                        // Anthropic extended thinking constrains top_p (>= 0.95 or unset).
+                        // Preserve historical behavior by omitting top_p when thinking is enabled.
+                        continue;
+                    }
+
+                    topP = value;
+                    continue;
+                }
+
+                unprojectedKeys ??= [];
+                unprojectedKeys.Add(key);
+            }
+
+            if (unprojectedKeys is { Count: > 0 })
+            {
+                throw new InvalidOperationException(
+                    $"Unable to project sampling parameter(s) [{string.Join(", ", unprojectedKeys)}] to Anthropic request fields.");
+            }
+
+            return (temperature, topP);
         }
 
         public static ChatCompletionResponse FromMessage(Message message)

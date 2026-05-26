@@ -469,9 +469,7 @@ public class PublishedConversationService : IPublishedConversationService
                     AssistantName = assistantName,
                     Instructions = string.Empty,
                     DeploymentId = resolvedResume.ModelId,
-                    OverrideTemperature = resolvedResume.OverrideTemperature,
-                    OverrideTopP = resolvedResume.OverrideTopP,
-                    OverrideReasoningEffort = resolvedResume.OverrideReasoningEffort
+                    ExecutionPolicy = resolvedResume.ExecutionPolicy
                 },
                 _chatClientFactory,
                 previousMessages,
@@ -766,27 +764,9 @@ public class PublishedConversationService : IPublishedConversationService
 
 			if (string.IsNullOrWhiteSpace(modelDeploymentId))
 			{
-				try
-				{
-					var assistantDef = await AssistantUtility.GetAssistantCreateRequest(assistantName);
-					if (assistantDef != null)
-					{
-						modelDeploymentId = assistantDef.Model;
-					}
-				}
-				catch (Exception ex)
-				{
-					_logger.LogWarning(ex, "Failed to get assistant definition for {AssistantName}, will use template default", assistantName);
-				}
-
-				if (string.IsNullOrWhiteSpace(modelDeploymentId))
-				{
-					var guideId = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
-					if (guideId.HasValue)
-					{
-						modelDeploymentId = await GetTemplateDefaultModelAsync(guideId.Value, cancellationToken);
-					}
-				}
+				var assistantDef = await AssistantUtility.GetAssistantCreateRequest(assistantName)
+					?? throw new InvalidOperationException($"Assistant definition not found for {assistantName}.");
+				modelDeploymentId = assistantDef.Model;
 			}
 
 			var resolvedPublished = _chatModelResolver.Resolve(modelDeploymentId);
@@ -855,9 +835,7 @@ public class PublishedConversationService : IPublishedConversationService
 				DeploymentId = modelDeploymentId,
 				Instructions = request.Instructions,
 				ExternalAuthTokens = request.ExternalAuthTokens,
-				OverrideTemperature = resolvedPublished.OverrideTemperature,
-				OverrideTopP = resolvedPublished.OverrideTopP,
-				OverrideReasoningEffort = resolvedPublished.OverrideReasoningEffort
+				ExecutionPolicy = resolvedPublished.ExecutionPolicy
 			};
 
 			// Handlers

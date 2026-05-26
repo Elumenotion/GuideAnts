@@ -61,10 +61,10 @@ public static class LocalServiceAdminRouting
     public static string? AdminPrefix(string serviceId) =>
         serviceId switch
         {
-            "ImageGeneration" => "/sd",
-            "SpeechTranscription" => "/asr",
-            "SpeechSynthesis" => "/tts",
-            "Embeddings" => "/emb",
+            "ImageGeneration" => ServiceRoutingContracts.ImageGenerationAdminPath,
+            "SpeechTranscription" => ServiceRoutingContracts.SpeechTranscriptionAdminPath,
+            "SpeechSynthesis" => ServiceRoutingContracts.SpeechSynthesisAdminPath,
+            "Embeddings" => ServiceRoutingContracts.EmbeddingsAdminPath,
             _ => null
         };
 

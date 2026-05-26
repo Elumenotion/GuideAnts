@@ -41,9 +41,7 @@ public class ConversationManager : IConversationManager
         {
             AssistantName = assistantName,
             DeploymentId = resolved.ModelId,
-            OverrideTemperature = resolved.OverrideTemperature,
-            OverrideTopP = resolved.OverrideTopP,
-            OverrideReasoningEffort = resolved.OverrideReasoningEffort
+            ExecutionPolicy = resolved.ExecutionPolicy
         };
 
         var conversation = await AntRunner.Chat.Conversation.Create(chatOptions);
@@ -75,9 +73,7 @@ public class ConversationManager : IConversationManager
         {
             AssistantName = assistantName,
             DeploymentId = resolved.ModelId,
-            OverrideTemperature = resolved.OverrideTemperature,
-            OverrideTopP = resolved.OverrideTopP,
-            OverrideReasoningEffort = resolved.OverrideReasoningEffort
+            ExecutionPolicy = resolved.ExecutionPolicy
         };
 
         var conversation = await AntRunner.Chat.Conversation.Create(chatOptions);

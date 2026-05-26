@@ -523,13 +523,6 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
                 body[key] = value;
             }
         }
-        else
-        {
-            if (request.Temperature.HasValue)
-                body["temperature"] = request.Temperature.Value;
-            if (request.TopP.HasValue)
-                body["top_p"] = request.TopP.Value;
-        }
     }
 
     private static void ApplyThinkingControl(

@@ -12,8 +12,6 @@ public sealed partial class ApplicationSettingsService
 {
     public async Task<IReadOnlyList<SettingsSectionSummaryDto>> GetSectionSummariesAsync(CancellationToken cancellationToken = default)
     {
-        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
-
         var rowsBySection = await _db.ApplicationSettings
             .AsNoTracking()
             .ToDictionaryAsync(x => x.SectionName, x => x, StringComparer.OrdinalIgnoreCase, cancellationToken);
@@ -54,8 +52,6 @@ public sealed partial class ApplicationSettingsService
             return null;
         }
 
-        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
-
         var row = await _db.ApplicationSettings
             .AsNoTracking()
             .SingleOrDefaultAsync(
@@ -79,8 +75,6 @@ public sealed partial class ApplicationSettingsService
         {
             return (null, [$"Unsupported section '{sectionName}'."], false);
         }
-
-        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
 
         var row = await _db.ApplicationSettings
             .SingleOrDefaultAsync(
@@ -253,8 +247,6 @@ public sealed partial class ApplicationSettingsService
 
     public async Task<SettingsSchemaDto> GetSchemaAsync(CancellationToken cancellationToken = default)
     {
-        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
-
         var rowsBySection = await _db.ApplicationSettings
             .AsNoTracking()
             .ToDictionaryAsync(x => x.SectionName, x => x, StringComparer.OrdinalIgnoreCase, cancellationToken);

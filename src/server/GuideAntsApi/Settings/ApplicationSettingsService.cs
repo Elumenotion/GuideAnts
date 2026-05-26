@@ -87,8 +87,6 @@ public sealed partial class ApplicationSettingsService(
     IServiceEditorMetadataProvider? metadataProvider = null,
     ILlamaRouterIniSyncService? llamaRouterIniSync = null) : IApplicationSettingsService
 {
-    private static readonly SemaphoreSlim BootstrapEnsureGate = new(1, 1);
-
     private readonly ApplicationDbContext _db = db;
     private readonly ISettingsSectionRegistry _registry = registry;
     private readonly IWebHostEnvironment _environment = environment;
@@ -208,26 +206,6 @@ public sealed partial class ApplicationSettingsService(
         if (_configuration is IConfigurationRoot root)
         {
             root.Reload();
-        }
-    }
-
-    private async Task EnsureRowsExistFromCurrentConfigAsync(CancellationToken cancellationToken)
-    {
-        await BootstrapEnsureGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await BootstrapAsync(_configuration, cancellationToken).ConfigureAwait(false);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            // Another concurrent request (or instance) likely won the bootstrap write race.
-            // Clear tracked state and run one more pass to verify rows now exist.
-            _db.ChangeTracker.Clear();
-            await BootstrapAsync(_configuration, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            BootstrapEnsureGate.Release();
         }
     }
 

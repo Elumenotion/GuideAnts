@@ -295,6 +295,21 @@ def list_model_entries() -> list[dict[str, Any]]:
     return items
 
 
+def canonical_model_folder_name(model_id: str) -> str:
+    normalized = (model_id or "").strip().strip("/")
+    if not normalized:
+        raise ValueError("model_id is required")
+
+    leaf = normalized.split("/")[-1].strip()
+    if not leaf:
+        raise ValueError("model_id must include a repository name")
+
+    if any(sep in leaf for sep in ("/", "\\", "..")):
+        raise ValueError("model_id resolved to an invalid local folder name")
+
+    return leaf
+
+
 def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
     operation_id = uuid.uuid4().hex
     operation = {
@@ -316,7 +331,7 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
             MODEL_DOWNLOAD_OPERATIONS[operation_id]["status"] = "running"
         model_dir = get_model_dir()
         os.makedirs(model_dir, exist_ok=True)
-        model_target_name = request.model_id.replace("/", "--")
+        model_target_name = canonical_model_folder_name(request.model_id)
         model_target_path = os.path.join(model_dir, model_target_name)
         tokenizer_target_name = None
         try:
@@ -332,7 +347,7 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
                 token=hf_token,
             )
             if request.tokenizer_id:
-                tokenizer_target_name = request.tokenizer_id.replace("/", "--")
+                tokenizer_target_name = canonical_model_folder_name(request.tokenizer_id)
                 tokenizer_target_path = os.path.join(model_dir, tokenizer_target_name)
                 snapshot_download(
                     repo_id=request.tokenizer_id,

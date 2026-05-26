@@ -219,7 +219,13 @@ namespace AntRunner.ToolCalling.Functions
 
             var stdOutBuffer = new StringBuilder();
             var formattedFilesList = new StringBuilder();
-            var hostUrl = Environment.GetEnvironmentVariable("ANTRUNNER_SERVICES_HOST_URL") ?? "https://localhost";
+            var hostUrl = Environment.GetEnvironmentVariable("ANTRUNNER_SERVICES_HOST_URL");
+            if (string.IsNullOrWhiteSpace(hostUrl))
+            {
+                throw new InvalidOperationException("ANTRUNNER_SERVICES_HOST_URL is required.");
+            }
+
+            hostUrl = hostUrl.Trim();
             var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
             try

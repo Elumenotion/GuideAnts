@@ -1,4 +1,5 @@
 using GuideAntsApi.BackgroundJobs.Options;
+using GuideAntsApi.Configuration;
 using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Services.Bootstrap;
@@ -57,8 +58,15 @@ public sealed class LocalServiceAutoSelector : ILocalServiceAutoSelector
             return;
         }
 
-        var doclingBaseUrl = _configuration["LocalServiceHosts:DocumentIntelligenceBaseUrl"]
-            ?? "http://localhost:5001";
+        var doclingBaseUrl = _configuration["LocalServiceHosts:DocumentIntelligenceBaseUrl"];
+        if (!RuntimeConfigurationPlaceholders.HasUsableUrl(doclingBaseUrl))
+        {
+            _logger.LogInformation(
+                "LocalServiceHosts:DocumentIntelligenceBaseUrl is not configured with a usable URL; skipping local Docling auto-select");
+            return;
+        }
+
+        doclingBaseUrl = doclingBaseUrl!.Trim();
 
         if (!await IsReachableAsync(doclingBaseUrl, cancellationToken).ConfigureAwait(false))
         {

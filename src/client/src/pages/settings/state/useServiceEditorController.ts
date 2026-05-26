@@ -18,6 +18,20 @@ function shouldHideProvider(p: ProviderEditorStateDto): boolean {
   return false;
 }
 
+function pickEditableProviderId(
+  providers: ProviderEditorStateDto[],
+  preferredProviderId?: string | null
+): string {
+  const visibleProviders = providers.filter((provider) => !shouldHideProvider(provider));
+  const visibleById = new Map(visibleProviders.map((provider) => [provider.providerId, provider]));
+
+  if (preferredProviderId && visibleById.has(preferredProviderId)) {
+    return preferredProviderId;
+  }
+
+  return visibleProviders[0]?.providerId ?? providers[0]?.providerId ?? 'none';
+}
+
 export interface UseServiceEditorControllerResult {
   state: ServiceEditorStateDto | null;
   loading: boolean;
@@ -61,7 +75,10 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
     return new Map(state.providers.map((p) => [p.providerId, p]));
   }, [state]);
 
-  const selectedProvider = providersById.get(draft.activeProviderId) ?? state?.providers[0];
+  const selectedProviderId = state
+    ? pickEditableProviderId(state.providers, draft.activeProviderId || state.activeProviderId)
+    : 'none';
+  const selectedProvider = providersById.get(selectedProviderId) ?? state?.providers[0];
   const persistedActiveProvider = state ? providersById.get(state.activeProviderId) : undefined;
   const persistedActiveLabel = persistedActiveProvider
     ? getServiceProviderDisplayName(persistedActiveProvider.providerId)
@@ -96,7 +113,7 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
   const applyLoadedState = (next: ServiceEditorStateDto): void => {
     setState(next);
     const d = draftRef.current;
-    d.switchProvider(next.activeProviderId || next.providers[0]?.providerId || 'none');
+    d.switchProvider(pickEditableProviderId(next.providers, next.activeProviderId));
     for (const provider of next.providers) {
       const seedDraft = Object.fromEntries(
         Object.entries(provider.fields)

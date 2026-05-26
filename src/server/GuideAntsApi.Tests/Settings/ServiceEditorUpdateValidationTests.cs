@@ -85,7 +85,7 @@ public sealed class ServiceEditorUpdateValidationTests
             ServiceProviderIds.EmbeddingsHuggingFaceInference,
             new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
-                    ["ModelId"] = "sentence-transformers/all-MiniLM-L6-v2"
+                    ["ModelId"] = "microsoft/harrier-oss-v1-0.6b"
                 })),
             CancellationToken.None);
 
@@ -97,11 +97,11 @@ public sealed class ServiceEditorUpdateValidationTests
         var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
         modes.Should().Contain(mode =>
             string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal)
-            && string.Equals(mode.ModelId, "sentence-transformers/all-MiniLM-L6-v2", StringComparison.Ordinal));
+            && string.Equals(mode.ModelId, "microsoft/harrier-oss-v1-0.6b", StringComparison.Ordinal));
 
         var state = await service.GetServiceEditorStateAsync("Embeddings", CancellationToken.None);
         var provider = state.Providers.Single(p => p.ProviderId == ServiceProviderIds.EmbeddingsHuggingFaceInference);
-        provider.Fields["ModelId"].Value.Should().Be("sentence-transformers/all-MiniLM-L6-v2");
+        provider.Fields["ModelId"].Value.Should().Be("microsoft/harrier-oss-v1-0.6b");
         provider.Fields["ModelId"].HasValue.Should().BeTrue();
     }
 
@@ -179,6 +179,43 @@ public sealed class ServiceEditorUpdateValidationTests
     }
 
     [TestMethod]
+    public async Task UpdateServiceProviderFieldsAsync_PersistsTextAndImageModelIds_ForHuggingFaceImageGeneration()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+        SeedServiceModes(db, "ImageGeneration",
+        [
+            new ServiceMode("hf-image", "HuggingFace", null, null, true, true)
+        ]);
+
+        await service.UpdateServiceProviderFieldsAsync(
+            "ImageGeneration",
+            ServiceProviderIds.ImageGenerationHuggingFaceInference,
+            new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
+                {
+                    ["TextToImageModelId"] = "Tongyi-MAI/Z-Image-Turbo",
+                    ["ImageToImageModelId"] = "black-forest-labs/FLUX.2-dev"
+                })),
+            CancellationToken.None);
+
+        await service.SetServiceActiveProviderAsync(
+            "ImageGeneration",
+            ServiceProviderIds.ImageGenerationHuggingFaceInference,
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("ImageGeneration", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "Tongyi-MAI/Z-Image-Turbo", StringComparison.Ordinal));
+
+        var state = await service.GetServiceEditorStateAsync("ImageGeneration", CancellationToken.None);
+        var provider = state.Providers.Single(p => p.ProviderId == ServiceProviderIds.ImageGenerationHuggingFaceInference);
+        provider.Fields["TextToImageModelId"].Value.Should().Be("Tongyi-MAI/Z-Image-Turbo");
+        provider.Fields["ImageToImageModelId"].Value.Should().Be("black-forest-labs/FLUX.2-dev");
+    }
+
+    [TestMethod]
     public async Task SetServiceActiveProviderAsync_PreservesInactiveCloudModes_WhenSwitchingProviders()
     {
         await using var db = CreateDbContext();
@@ -252,22 +289,42 @@ public sealed class ServiceEditorUpdateValidationTests
     }
 
     [TestMethod]
-    public async Task SetServiceActiveProviderAsync_RejectsMissingExplicitMode()
+    public async Task SetServiceActiveProviderAsync_CreatesExplicitMode_WhenConnectionIsReady()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
         var service = CreateService(db, configuration);
 
-        var act = async () => await service.SetServiceActiveProviderAsync(
-            "Embeddings",
-            ServiceProviderIds.EmbeddingsHuggingFaceInference,
+        var state = await service.SetServiceActiveProviderAsync(
+            "SpeechTranscription",
+            ServiceProviderIds.SpeechTranscriptionAzureSpeechBatch,
             CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .Where(e => e.Message.Contains("no explicit service mode", StringComparison.OrdinalIgnoreCase));
+        state.ActiveProviderId.Should().Be(ServiceProviderIds.SpeechTranscriptionAzureSpeechBatch);
 
-        var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
-        modes.Should().NotContain(mode => string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal));
+        var modes = await service.GetServiceModesAsync("SpeechTranscription", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "AzureSpeechService", StringComparison.Ordinal)
+            && mode.Enabled
+            && mode.IsDefault);
+    }
+
+    [TestMethod]
+    public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForHuggingFaceSpeechSynthesis()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+
+        await service.EnsureServiceModeExistsAsync(
+            "SpeechSynthesis",
+            ServiceProviderIds.SpeechSynthesisHuggingFaceInference,
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("SpeechSynthesis", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "ResembleAI/chatterbox", StringComparison.Ordinal));
     }
 
     private static ApplicationDbContext CreateDbContext()

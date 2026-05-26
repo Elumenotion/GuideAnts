@@ -258,7 +258,7 @@ public static class SettingsEndpoints
         .Produces<AddModelResponse>(StatusCodes.Status200OK)
         .Produces<AddModelErrorDto>(StatusCodes.Status400BadRequest);
 
-        group.MapPut("/models/{modelId}", async (
+        group.MapPut("/models/{**modelId}", async (
             string modelId,
             [FromBody] UpdateSettingsModelRequest request,
             IApplicationSettingsService settingsService,
@@ -266,7 +266,8 @@ public static class SettingsEndpoints
         {
             try
             {
-                var updated = await settingsService.UpdateModelAsync(modelId, request, cancellationToken);
+                var normalizedModelId = NormalizeRouteModelId(modelId);
+                var updated = await settingsService.UpdateModelAsync(normalizedModelId, request, cancellationToken);
                 return updated == null ? Results.NotFound() : Results.Ok(updated);
             }
             catch (InvalidOperationException ex)
@@ -279,7 +280,7 @@ public static class SettingsEndpoints
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound);
 
-        group.MapDelete("/models/{modelId}", async (
+        group.MapDelete("/models/{**modelId}", async (
             string modelId,
             ILlamaRuntimeInventoryService inventoryService,
             ILlamaServerRuntimeClient llamaClient,
@@ -290,8 +291,9 @@ public static class SettingsEndpoints
         {
             try
             {
+                var normalizedModelId = NormalizeRouteModelId(modelId);
                 var models = await settingsService.GetModelsAsync(cancellationToken).ConfigureAwait(false);
-                var model = models.FirstOrDefault(m => string.Equals(m.ModelId, modelId, StringComparison.Ordinal));
+                var model = models.FirstOrDefault(m => string.Equals(m.ModelId, normalizedModelId, StringComparison.Ordinal));
                 if (model is null)
                 {
                     return Results.NotFound();
@@ -309,7 +311,7 @@ public static class SettingsEndpoints
                         cancellationToken).ConfigureAwait(false);
                 }
 
-                var deleted = await settingsService.DeleteModelAsync(modelId, cancellationToken);
+                var deleted = await settingsService.DeleteModelAsync(normalizedModelId, cancellationToken);
                 return deleted ? Results.NoContent() : Results.NotFound();
             }
             catch (DbUpdateException ex)
@@ -1776,8 +1778,21 @@ public static class SettingsEndpoints
             return null;
         }
 
-        return await DeriveLlamaReasoningChoicesJsonAsync(runtimeProfileResolver, runtimeProfileId, cancellationToken)
+        var profile = await runtimeProfileResolver.ResolveAsync(runtimeProfileId.Trim(), cancellationToken)
             .ConfigureAwait(false);
+
+        if (profile.ThinkingControl?.ChoiceActions is null)
+        {
+            return null;
+        }
+
+        var choices = profile.ThinkingControl.ChoiceActions.Keys
+            .Where(choice => !string.IsNullOrWhiteSpace(choice))
+            .Select(choice => choice.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return choices.Count == 0 ? null : JsonSerializer.Serialize(choices);
     }
 
     private static bool GetProviderConfigBoolean(JsonObject? providerConfig, string propertyName)
@@ -1812,6 +1827,24 @@ public static class SettingsEndpoints
         }
 
         return null;
+    }
+
+    private static string NormalizeRouteModelId(string modelId)
+    {
+        var raw = (modelId ?? string.Empty).Trim();
+        if (raw.Length == 0)
+        {
+            return raw;
+        }
+
+        try
+        {
+            return Uri.UnescapeDataString(raw).Trim();
+        }
+        catch (FormatException)
+        {
+            return raw;
+        }
     }
 
     private static AddModelErrorDto MapAddModelRoutingError(RoutingException exception)

@@ -51,9 +51,11 @@ public class ConversationManagerTests
             .Returns((string? id) => new ResolvedChatModel(
                 string.IsNullOrWhiteSpace(id) ? "gpt-4o-mini" : id!,
                 ChatModelReferenceKind.Direct,
-                null,
-                null,
-                null));
+                new AntRunner.Chat.Abstractions.ResolvedExecutionPolicy(
+                    string.IsNullOrWhiteSpace(id) ? "gpt-4o-mini" : id!,
+                    "openai-chat",
+                    AntRunner.Chat.Abstractions.ParameterAuthority.AssistantDefinition,
+                    new Dictionary<string, System.Text.Json.JsonElement>())));
         _manager = new ConversationManager(scopeFactory, _cache, _loggerMock.Object, chatModelResolverMock.Object);
 
         // Seed test data

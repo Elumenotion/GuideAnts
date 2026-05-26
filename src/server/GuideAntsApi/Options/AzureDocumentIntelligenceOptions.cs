@@ -39,12 +39,12 @@ namespace GuideAntsApi.Options
     {
         public const string SectionName = "LocalServiceHosts";
 
-        public string SpeechTranscriptionBaseUrl { get; set; } = "http://localhost:8110";
-        public string SpeechSynthesisBaseUrl { get; set; } = "http://localhost:8110";
-        public string ImageGenerationBaseUrl { get; set; } = "http://localhost:8110";
-        public string EmbeddingsBaseUrl { get; set; } = "http://localhost:8110";
-        public string MediaBaseUrl { get; set; } = "http://localhost:8110";
-        public string DocumentIntelligenceBaseUrl { get; set; } = "http://localhost:5001";
+        public string SpeechTranscriptionBaseUrl { get; set; } = string.Empty;
+        public string SpeechSynthesisBaseUrl { get; set; } = string.Empty;
+        public string ImageGenerationBaseUrl { get; set; } = string.Empty;
+        public string EmbeddingsBaseUrl { get; set; } = string.Empty;
+        public string MediaBaseUrl { get; set; } = string.Empty;
+        public string DocumentIntelligenceBaseUrl { get; set; } = string.Empty;
     }
 
     public class AzureDocumentIntelligenceOptions

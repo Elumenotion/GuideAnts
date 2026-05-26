@@ -149,8 +149,6 @@ public sealed partial class ApplicationSettingsService
             throw new InvalidOperationException($"Settings section '{sectionName}' is not supported.");
         }
 
-        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken).ConfigureAwait(false);
-
         var row = await _db.ApplicationSettings
             .SingleOrDefaultAsync(x => x.SectionName == sectionName, cancellationToken)
             .ConfigureAwait(false);
@@ -237,14 +235,14 @@ public sealed partial class ApplicationSettingsService
             throw new InvalidOperationException($"Runtime dependency '{contract.Key}' must include a host.");
         }
 
-        if (string.Equals(contract.Key, "LlamaCpp:BaseUrl", StringComparison.Ordinal))
+        if (string.Equals(contract.Key, ServiceRoutingContracts.LlamaBaseUrlKey, StringComparison.Ordinal))
         {
             var normalizedPath = uri.AbsolutePath.TrimEnd('/');
             normalizedPath = string.IsNullOrWhiteSpace(normalizedPath) ? "/" : normalizedPath;
-            if (!string.Equals(normalizedPath, "/llama-cpp", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(normalizedPath, ServiceRoutingContracts.LlamaCppPath, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
-                    "Runtime dependency 'LlamaCpp:BaseUrl' must include the '/llama-cpp' path.");
+                    $"Runtime dependency '{ServiceRoutingContracts.LlamaBaseUrlKey}' must include the '{ServiceRoutingContracts.LlamaCppPath}' path.");
             }
         }
     }
@@ -252,7 +250,7 @@ public sealed partial class ApplicationSettingsService
     private static readonly IReadOnlyList<RuntimeDependencyContract> RuntimeDependencyCatalog =
     [
         new(
-            Key: "LlamaCpp:BaseUrl",
+            Key: ServiceRoutingContracts.LlamaBaseUrlKey,
             UsedByProviderIds: [],
             ReadOnly: false),
         new(

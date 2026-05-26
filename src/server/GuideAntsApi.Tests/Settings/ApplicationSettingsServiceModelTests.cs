@@ -53,6 +53,39 @@ public sealed class ApplicationSettingsServiceModelTests
             ]);
     }
 
+    [TestMethod]
+    public async Task UpdateModelAsync_UsesRouteModelId_AsOpaqueIdentifier_IncludingSlash()
+    {
+        await using var db = CreateDbContext();
+        var service = CreateService(db, BuildConfiguration());
+
+        var created = await service.CreateModelAsync(new CreateSettingsModelRequest(
+            ModelId: "deepseek-ai/DeepSeek-V4-Pro",
+            DisplayName: "DeepSeek",
+            Provider: "hf-inference-chat",
+            Description: null,
+            ReasoningChoicesJson: null,
+            RuntimeConfigJson: "{\"runtimeProfileId\":\"huggingface_chat_standard\"}",
+            IsActive: true,
+            DisplayOrder: null));
+
+        var updated = await service.UpdateModelAsync(
+            "deepseek-ai/DeepSeek-V4-Pro",
+            new UpdateSettingsModelRequest(
+                ModelId: "some-other-id",
+                DisplayName: "DeepSeek Updated",
+                Provider: created.Provider,
+                Description: created.Description,
+                ReasoningChoicesJson: created.ReasoningChoicesJson,
+                RuntimeConfigJson: created.RuntimeConfigJson,
+                IsActive: created.IsActive,
+                DisplayOrder: created.DisplayOrder));
+
+        updated.Should().NotBeNull();
+        updated!.ModelId.Should().Be("deepseek-ai/DeepSeek-V4-Pro");
+        updated.DisplayName.Should().Be("DeepSeek Updated");
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

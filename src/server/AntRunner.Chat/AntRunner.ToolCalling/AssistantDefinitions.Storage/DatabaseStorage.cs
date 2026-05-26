@@ -228,17 +228,12 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
         /// </summary>
         private static AssistantStorageMetadata MaterializeAssistant(Assistant assistant)
         {
-            var modelParameters = NormalizeAssistantModelParameters(assistant);
-
             // Build the manifest JSON
             var manifest = new
             {
                 name = assistant.Name,
                 description = assistant.Description,
                 model = assistant.ModelId ?? assistant.Model?.ModelId,
-                temperature = modelParameters.Temperature,
-                top_p = modelParameters.TopP,
-                reasoning_effort = modelParameters.ReasoningEffort,
                 invocation_evaluator = assistant.InvocationEvaluator,
                 tools = BuildToolsArray(assistant),
                 tool_resources = BuildToolResources(assistant),
@@ -293,28 +288,8 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                 VectorStoreFiles: BuildVectorStoreFiles(assistant),
                 Id: assistant.Id,
                 DomainAuth: BuildDomainAuth(assistant),
-                SamplingParametersJson: modelParameters.SamplingParametersJson
+                SamplingParametersJson: assistant.SamplingParametersJson
             );
-        }
-
-        private static AssistantModelParameters NormalizeAssistantModelParameters(Assistant assistant)
-        {
-            if (AssistantUsesLocalRuntime(assistant))
-            {
-                return new AssistantModelParameters(
-                    assistant.Temperature,
-                    assistant.TopP,
-                    assistant.ReasoningEffort,
-                    assistant.SamplingParametersJson);
-            }
-
-            return new AssistantModelParameters(null, null, assistant.ReasoningEffort, null);
-        }
-
-        private static bool AssistantUsesLocalRuntime(Assistant assistant)
-        {
-            return string.Equals(assistant.Model?.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-                || !string.IsNullOrWhiteSpace(assistant.Model?.RuntimeConfigJson);
         }
 
         private static DomainAuth? BuildDomainAuth(Assistant assistant)
@@ -523,11 +498,5 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
         DomainAuth? DomainAuth = null,
         string? SamplingParametersJson = null
     );
-
-    internal sealed record AssistantModelParameters(
-        float? Temperature,
-        double? TopP,
-        string? ReasoningEffort,
-        string? SamplingParametersJson);
 }
 

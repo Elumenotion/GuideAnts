@@ -11,10 +11,10 @@ public sealed record AnthropicConfig
 }
 
 public sealed record AnthropicThinkingBudgets(
-    int? Minimal = null,
-    int? Low = null,
-    int? Medium = null,
-    int? High = null)
+    int? Minimal = 1024,
+    int? Low = 2048,
+    int? Medium = 4096,
+    int? High = 8192)
 {
     public int? ForEffort(string? effort)
     {

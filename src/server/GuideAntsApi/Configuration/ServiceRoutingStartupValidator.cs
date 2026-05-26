@@ -26,9 +26,10 @@ public static class ServiceRoutingStartupValidator
         ValidateNoEncryptedSecrets(configuration, errors);
         ValidateUiRootPath(configuration, errors);
 
-        var llamaBaseUrl = configuration["LlamaCpp:BaseUrl"];
+        var llamaBaseUrl = configuration[ServiceRoutingContracts.LlamaBaseUrlKey];
         ValidateLlamaBaseUrl(llamaBaseUrl, errors);
-        ValidateGuideantsAiBaseUrl(configuration, errors);
+        var requireExplicitServiceRouting = ShouldRequireExplicitServiceRouting(configuration);
+        ValidateGuideantsAiBaseUrl(configuration, errors, requireExplicitServiceRouting);
 
         foreach (var containerSection in configuration.GetSection("ServiceRouting:Containers").GetChildren())
         {
@@ -45,13 +46,13 @@ public static class ServiceRoutingStartupValidator
                 continue;
             }
 
-            if (string.Equals(containerName, "guideants-ai", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(containerName, ServiceRoutingContracts.GuideantsAiContainerName, StringComparison.OrdinalIgnoreCase))
             {
                 var normalizedPath = NormalizePath(uri);
-                if (!string.Equals(normalizedPath, "/sandbox", StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(normalizedPath, ServiceRoutingContracts.SandboxPath, StringComparison.OrdinalIgnoreCase))
                 {
                     errors.Add(
-                        "ServiceRouting:Containers:guideants-ai:BaseUrl must include the '/sandbox' prefix for hard cutover routing.");
+                        $"ServiceRouting:Containers:{ServiceRoutingContracts.GuideantsAiContainerName}:BaseUrl must include the '{ServiceRoutingContracts.SandboxPath}' prefix for hard cutover routing.");
                 }
             }
         }
@@ -121,27 +122,45 @@ public static class ServiceRoutingStartupValidator
         }
     }
 
-    private static void ValidateGuideantsAiBaseUrl(IConfiguration configuration, List<string> errors)
+    private static bool ShouldRequireExplicitServiceRouting(IConfiguration configuration)
     {
-        var baseUrl = configuration["ServiceRouting:Containers:guideants-ai:BaseUrl"];
+        var runtimeContext = configuration["API_RUNTIME_CONTEXT"];
+        if (string.Equals(runtimeContext, "compose", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var envSuffix = configuration["CONTAINER_APP_ENV_DNS_SUFFIX"];
+        return !string.IsNullOrWhiteSpace(envSuffix);
+    }
+
+    private static void ValidateGuideantsAiBaseUrl(
+        IConfiguration configuration,
+        List<string> errors,
+        bool requireExplicitServiceRouting)
+    {
+        var baseUrl = configuration[ServiceRoutingContracts.GuideantsAiBaseUrlKey];
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            errors.Add(
-                "ServiceRouting:Containers:guideants-ai:BaseUrl is required and must include the '/sandbox' prefix for hard cutover routing.");
+            if (requireExplicitServiceRouting)
+            {
+                errors.Add(
+                    $"{ServiceRoutingContracts.GuideantsAiBaseUrlKey} is required and must include the '{ServiceRoutingContracts.SandboxPath}' prefix for hard cutover routing.");
+            }
             return;
         }
 
         if (!TryParseHttpUri(baseUrl, out var uri, out var parseError))
         {
-            errors.Add($"ServiceRouting:Containers:guideants-ai:BaseUrl {parseError}");
+            errors.Add($"{ServiceRoutingContracts.GuideantsAiBaseUrlKey} {parseError}");
             return;
         }
 
         var normalizedPath = NormalizePath(uri);
-        if (!string.Equals(normalizedPath, "/sandbox", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(normalizedPath, ServiceRoutingContracts.SandboxPath, StringComparison.OrdinalIgnoreCase))
         {
             errors.Add(
-                "ServiceRouting:Containers:guideants-ai:BaseUrl must include the '/sandbox' prefix for hard cutover routing.");
+                $"{ServiceRoutingContracts.GuideantsAiBaseUrlKey} must include the '{ServiceRoutingContracts.SandboxPath}' prefix for hard cutover routing.");
         }
     }
 
@@ -149,21 +168,21 @@ public static class ServiceRoutingStartupValidator
     {
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            errors.Add("LlamaCpp:BaseUrl is required and must include the '/llama-cpp' prefix for hard cutover routing.");
+            errors.Add($"{ServiceRoutingContracts.LlamaBaseUrlKey} is required and must include the '{ServiceRoutingContracts.LlamaCppPath}' prefix for hard cutover routing.");
             return;
         }
 
         if (!TryParseHttpUri(baseUrl, out var uri, out var parseError))
         {
-            errors.Add($"LlamaCpp:BaseUrl {parseError}");
+            errors.Add($"{ServiceRoutingContracts.LlamaBaseUrlKey} {parseError}");
             return;
         }
 
         var normalizedPath = NormalizePath(uri);
-        if (!string.Equals(normalizedPath, "/llama-cpp", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(normalizedPath, ServiceRoutingContracts.LlamaCppPath, StringComparison.OrdinalIgnoreCase))
         {
             errors.Add(
-                "LlamaCpp:BaseUrl must include the '/llama-cpp' prefix for hard cutover routing.");
+                $"{ServiceRoutingContracts.LlamaBaseUrlKey} must include the '{ServiceRoutingContracts.LlamaCppPath}' prefix for hard cutover routing.");
         }
     }
 

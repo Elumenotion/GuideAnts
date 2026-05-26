@@ -9,10 +9,8 @@ namespace GuideAntsApi.Settings;
 
 public sealed partial class ApplicationSettingsService
 {
-    public async Task<SettingsReadinessDto> GetReadinessAsync(CancellationToken cancellationToken = default)
+    public Task<SettingsReadinessDto> GetReadinessAsync(CancellationToken cancellationToken = default)
     {
-        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken);
-
         var errors = ServiceRoutingStartupValidator.Evaluate(_configuration).ToList();
         var allServiceBlockers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -40,10 +38,10 @@ public sealed partial class ApplicationSettingsService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return new SettingsReadinessDto(
+        return Task.FromResult(new SettingsReadinessDto(
             GeneratedUtc: DateTime.UtcNow,
             Services: services,
-            GlobalBlockers: globalBlockers);
+            GlobalBlockers: globalBlockers));
     }
 
     public async Task<ConnectionUsageDto> GetConnectionUsageAsync(string sectionName, CancellationToken cancellationToken = default)

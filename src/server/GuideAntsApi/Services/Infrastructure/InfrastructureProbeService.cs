@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using GuideAntsApi.Configuration;
 using GuideAntsApi.Models.Settings;
 
 namespace GuideAntsApi.Services.Infrastructure;
@@ -117,7 +118,7 @@ public sealed class InfrastructureProbeService : IInfrastructureProbeService
             return UrlResult(item, null, null, "value is not a valid http(s) URL", reachable: false);
         }
 
-        if (string.Equals(item.Id, "LlamaCpp:BaseUrl", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(item.Id, ServiceRoutingContracts.LlamaBaseUrlKey, StringComparison.OrdinalIgnoreCase))
         {
             uri = ToLlamaCppHealthProbeUri(uri);
         }
@@ -189,7 +190,7 @@ public sealed class InfrastructureProbeService : IInfrastructureProbeService
         var path = builder.Path;
         if (string.IsNullOrEmpty(path) || path == "/")
         {
-            builder.Path = "/llama-cpp/health";
+            builder.Path = ServiceRoutingContracts.LlamaHealthPath;
             return builder.Uri;
         }
 

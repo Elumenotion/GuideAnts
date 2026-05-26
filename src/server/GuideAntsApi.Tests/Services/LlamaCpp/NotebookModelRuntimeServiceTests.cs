@@ -6,6 +6,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
+using AntRunner.Chat.Abstractions;
 
 namespace GuideAntsApi.Tests.Services.LlamaCpp;
 
@@ -32,7 +33,14 @@ public class NotebookModelRuntimeServiceTests
         // override/default-chat-model behavior.
         _mockChatModelResolver
             .Setup(r => r.Resolve(It.IsAny<string?>()))
-            .Returns<string?>(id => new ResolvedChatModel(id ?? string.Empty, ChatModelReferenceKind.Direct, null, null, null));
+            .Returns<string?>(id => new ResolvedChatModel(
+                id ?? string.Empty,
+                ChatModelReferenceKind.Direct,
+                new ResolvedExecutionPolicy(
+                    id ?? string.Empty,
+                    "openai-chat",
+                    ParameterAuthority.AssistantDefinition,
+                    new Dictionary<string, System.Text.Json.JsonElement>())));
         _mockLogger = new Mock<ILogger<NotebookModelRuntimeService>>();
         _cache = new MemoryCache(new MemoryCacheOptions());
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { FaRedo, FaSave, FaSpinner } from 'react-icons/fa';
+import { ConfirmationDialog } from '../../../../components/common/ConfirmationDialog';
 import { api } from '../../../../services/api';
 import type { ProviderEditorStateDto } from '../../../../types/settings';
 import { TextActionButton } from '../../components/shared/ActionButtons';
@@ -9,6 +10,17 @@ import { ProviderSelector } from '../../components/shared/ProviderSelector';
 import { ServiceEditorShell } from '../../components/shared/ServiceEditorShell';
 import { useServiceEditorController } from '../../state/useServiceEditorController';
 import { EmbRuntimeManager } from './EmbRuntimeManager';
+
+const REINDEX_TRIGGER_FIELDS = ['ModelId', 'Deployment', 'Dimensions'] as const;
+
+function normalizeFieldValue(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
+}
 
 export function EmbeddingsEditor() {
   const {
@@ -27,6 +39,9 @@ export function EmbeddingsEditor() {
   } = useServiceEditorController('Embeddings');
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildMessage, setRebuildMessage] = useState<string | null>(null);
+  const [manualRebuildDialogOpen, setManualRebuildDialogOpen] = useState(false);
+  const [saveRebuildDialogOpen, setSaveRebuildDialogOpen] = useState(false);
+  const [saveRebuildDialogMode, setSaveRebuildDialogMode] = useState<'saveThenQueue' | 'queueOnly'>('saveThenQueue');
 
   if (loading) {
     return <div className="text-sm text-gray-600">Loading Embeddings settings…</div>;
@@ -38,14 +53,26 @@ export function EmbeddingsEditor() {
 
   const isLocal = selectedProvider.providerKind !== 'Cloud';
 
-  const triggerRebuild = async (): Promise<void> => {
-    const confirmed = window.confirm(
-      'Delete and regenerate vectors from markdown shadows? This can take time and cannot be undone.'
-    );
-    if (!confirmed) {
-      return;
+  const shouldPromptRebuildAfterSave = (): boolean => {
+    if (!state) {
+      return false;
     }
 
+    if (draft.activeProviderId !== state.activeProviderId) {
+      return true;
+    }
+
+    return REINDEX_TRIGGER_FIELDS.some((fieldName) => {
+      const previous = normalizeFieldValue(selectedProvider.fields[fieldName]?.value);
+      const hasDraftOverride = Object.prototype.hasOwnProperty.call(draft.activeDraft, fieldName);
+      const next = hasDraftOverride
+        ? normalizeFieldValue(draft.activeDraft[fieldName])
+        : previous;
+      return previous !== next;
+    });
+  };
+
+  const queueRebuild = async (): Promise<void> => {
     setRebuilding(true);
     setRebuildMessage(null);
     try {
@@ -66,7 +93,31 @@ export function EmbeddingsEditor() {
     }
   };
 
+  const saveWithRebuildPrompt = async (): Promise<void> => {
+    const shouldPrompt = shouldPromptRebuildAfterSave();
+    if (!shouldPrompt) {
+      await save();
+      return;
+    }
+
+    setSaveRebuildDialogMode('saveThenQueue');
+    setSaveRebuildDialogOpen(true);
+  };
+
+  const handleModelAutoLoaded = async (modelRef: string): Promise<void> => {
+    const saved = await save();
+    if (!saved) {
+      setRebuildMessage(`Model "${modelRef}" loaded, but settings could not be auto-saved.`);
+      return;
+    }
+
+    setRebuildMessage(`Model "${modelRef}" loaded and settings saved.`);
+    setSaveRebuildDialogMode('queueOnly');
+    setSaveRebuildDialogOpen(true);
+  };
+
   return (
+    <>
     <ServiceEditorShell
       serviceName="Embeddings"
       activeProviderLabel={persistedActiveLabel}
@@ -87,7 +138,7 @@ export function EmbeddingsEditor() {
       }
       providerSettings={(
         <div className="space-y-6">
-          {isLocal ? <EmbRuntimeManager enabled={isLocal} /> : null}
+          {isLocal ? <EmbRuntimeManager enabled={isLocal} onModelAutoLoaded={(modelRef) => void handleModelAutoLoaded(modelRef)} /> : null}
 
           <ProviderFieldsSection
             provider={selectedProvider}
@@ -142,7 +193,7 @@ export function EmbeddingsEditor() {
             tone="danger"
             icon={rebuilding ? <FaSpinner className="animate-spin" /> : <FaRedo />}
             disabled={rebuilding}
-            onClick={() => void triggerRebuild()}
+            onClick={() => setManualRebuildDialogOpen(true)}
             title="Delete and regenerate vectors from markdown shadows."
           >
             Rebuild vectors
@@ -152,7 +203,7 @@ export function EmbeddingsEditor() {
             tone="primary"
             icon={saving ? <FaSpinner className="animate-spin" /> : <FaSave />}
             disabled={saving || !selectedProvider.connectionConfigured}
-            onClick={() => void save()}
+            onClick={() => void saveWithRebuildPrompt()}
             title={
               !selectedProvider.connectionConfigured
                   ? 'Configure the provider connection first.'
@@ -166,6 +217,54 @@ export function EmbeddingsEditor() {
         </div>
       )}
     />
+    <ConfirmationDialog
+      isOpen={manualRebuildDialogOpen}
+      onClose={() => setManualRebuildDialogOpen(false)}
+      onConfirm={() => {
+        setManualRebuildDialogOpen(false);
+        void queueRebuild();
+      }}
+      title="Rebuild Embeddings"
+      message="Delete and regenerate vectors from markdown shadows? This can take time and cannot be undone."
+      confirmText="Queue rebuild"
+      cancelText="Cancel"
+      confirmButtonClass="bg-red-600 hover:bg-red-700 text-white"
+      isLoading={rebuilding}
+    />
+    <ConfirmationDialog
+      isOpen={saveRebuildDialogOpen}
+      onClose={() => {
+        setSaveRebuildDialogOpen(false);
+        setRebuildMessage(
+          saveRebuildDialogMode === 'queueOnly'
+            ? 'Model loaded and settings saved. Rebuild vectors when you are ready to reindex content.'
+            : 'Save cancelled. Embeddings settings were not changed.'
+        );
+      }}
+      onConfirm={() => {
+        setSaveRebuildDialogOpen(false);
+        void (async () => {
+          if (saveRebuildDialogMode === 'saveThenQueue') {
+            const saved = await save();
+            if (!saved) {
+              return;
+            }
+          }
+          await queueRebuild();
+        })();
+      }}
+      title={saveRebuildDialogMode === 'queueOnly' ? 'Reindex Recommended' : 'Reindex Required'}
+      message={
+        saveRebuildDialogMode === 'queueOnly'
+          ? 'The embeddings model is now loaded and settings were saved. Queue reindex now for searchable content?'
+          : 'Saving these embeddings changes will trigger reindexing for searchable content. Continue with save and queue rebuild?'
+      }
+      confirmText={saveRebuildDialogMode === 'queueOnly' ? 'Queue rebuild' : 'Save and rebuild'}
+      cancelText="Cancel"
+      confirmButtonClass="bg-blue-600 hover:bg-blue-700 text-white"
+      isLoading={saving || rebuilding}
+    />
+    </>
   );
 }
 

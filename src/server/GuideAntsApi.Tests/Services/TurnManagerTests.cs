@@ -9,6 +9,7 @@ using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using AntRunner.Chat;
+using AntRunner.Chat.Abstractions;
 using System.Text.Json;
 using GuideAntsApi.Tests.TestUtils;
 
@@ -54,9 +55,11 @@ public class TurnManagerTests
             .Returns(new ResolvedChatModel(
                 ModelId: "gpt-4.1",
                 ReferenceKind: ChatModelReferenceKind.Direct,
-                OverrideTemperature: null,
-                OverrideTopP: null,
-                OverrideReasoningEffort: null));
+                ExecutionPolicy: new ResolvedExecutionPolicy(
+                    "gpt-4.1",
+                    "openai-chat",
+                    ParameterAuthority.AssistantDefinition,
+                    new Dictionary<string, System.Text.Json.JsonElement>())));
         var scopeFactory = new TestServiceScopeFactory(_context);
         _manager = new TurnManager(
             scopeFactory,

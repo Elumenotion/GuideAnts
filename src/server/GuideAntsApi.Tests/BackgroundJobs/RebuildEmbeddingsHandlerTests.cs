@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Services.Embeddings;
 using GuideAntsApi.DataModel;
@@ -32,6 +33,7 @@ public sealed class RebuildEmbeddingsHandlerTests
                 IndexName = "idx",
                 Content = "chunk-one",
                 ChunkIndex = 0,
+                AssistantFileId = assistantCompletedId,
                 Embedding = [0.1f]
             });
             seed.DocumentChunks.Add(new DocumentChunk
@@ -87,10 +89,12 @@ public sealed class RebuildEmbeddingsHandlerTests
 
         var factory = new TestDbContextFactory(options);
         var embeddings = new FakeEmbeddingService();
+        var queue = new CapturingJobQueueService();
         var handler = new RebuildEmbeddingsHandler(
             NullLogger<RebuildEmbeddingsHandler>.Instance,
             factory,
-            embeddings);
+            embeddings,
+            queue);
 
         var success = await handler.HandleAsync(new RebuildEmbeddingsJob(), CancellationToken.None);
         success.Should().BeTrue();
@@ -125,6 +129,7 @@ public sealed class RebuildEmbeddingsHandlerTests
         var assistantCompleted = await verify.AssistantFileMarkdownShadows
             .SingleAsync(x => x.OriginalAssistantFileId == assistantCompletedId);
         assistantCompleted.IsIndexed.Should().BeTrue();
+        queue.Enqueued.Should().BeEmpty();
     }
 
     [TestMethod]
@@ -137,30 +142,88 @@ public sealed class RebuildEmbeddingsHandlerTests
 
         await using (var seed = new ApplicationDbContext(options))
         {
+            var assistantFileId = Guid.NewGuid();
             seed.DocumentChunks.Add(new DocumentChunk
             {
                 IndexName = "idx",
                 Content = "chunk-one",
                 ChunkIndex = 0,
+                AssistantFileId = assistantFileId,
                 Embedding = [42f, 42f]
+            });
+            seed.AssistantFileMarkdownShadows.Add(new AssistantFileMarkdownShadow
+            {
+                OriginalAssistantFileId = assistantFileId,
+                ContentHash = "assistant",
+                StoragePath = "assistant.md",
+                FileSize = 1,
+                Status = MarkdownExtractionStatus.Completed,
+                IsIndexed = true
             });
             await seed.SaveChangesAsync();
         }
 
         var factory = new TestDbContextFactory(options);
         var embeddings = new ThrowingEmbeddingService();
+        var queue = new CapturingJobQueueService();
         var handler = new RebuildEmbeddingsHandler(
             NullLogger<RebuildEmbeddingsHandler>.Instance,
             factory,
-            embeddings);
+            embeddings,
+            queue);
 
-        await Assert.ThrowsExceptionAsync<InvalidOperationException>(
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => handler.HandleAsync(new RebuildEmbeddingsJob(), CancellationToken.None));
 
         await using var verify = new ApplicationDbContext(options);
         var chunk = await verify.DocumentChunks.SingleAsync();
         chunk.Embedding.Length.Should().Be(1536);
         chunk.Embedding.Should().OnlyContain(x => x == 0f);
+        queue.Enqueued.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_QueuesAssistantReindex_WhenCompletedShadowHasNoChunks()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"rebuild-handler-assistant-backfill-{Guid.NewGuid():N}")
+            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+
+        var assistantFileId = Guid.NewGuid();
+
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            seed.AssistantFileMarkdownShadows.Add(new AssistantFileMarkdownShadow
+            {
+                OriginalAssistantFileId = assistantFileId,
+                ContentHash = "assistant",
+                StoragePath = "assistant.md",
+                FileSize = 1,
+                Status = MarkdownExtractionStatus.Completed,
+                IsIndexed = false
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var factory = new TestDbContextFactory(options);
+        var embeddings = new FakeEmbeddingService();
+        var queue = new CapturingJobQueueService();
+        var handler = new RebuildEmbeddingsHandler(
+            NullLogger<RebuildEmbeddingsHandler>.Instance,
+            factory,
+            embeddings,
+            queue);
+
+        var success = await handler.HandleAsync(new RebuildEmbeddingsJob(), CancellationToken.None);
+
+        success.Should().BeTrue();
+        embeddings.CallCount.Should().Be(0, "no chunks exist yet, so only backfill queueing should happen");
+        queue.Enqueued.Should().ContainSingle();
+        queue.Enqueued[0].JobType.Should().Be(nameof(IndexAssistantFileMarkdownShadowJob).Replace("Job", string.Empty));
+        queue.Enqueued[0].Payload.Should().BeOfType<IndexAssistantFileMarkdownShadowJob>();
+        var payload = (IndexAssistantFileMarkdownShadowJob)queue.Enqueued[0].Payload;
+        payload.AssistantFileId.Should().Be(assistantFileId);
     }
 
     private sealed class FakeEmbeddingService : IEmbeddingService
@@ -198,5 +261,41 @@ public sealed class RebuildEmbeddingsHandlerTests
             _ = purpose;
             throw new InvalidOperationException("intentional test failure");
         }
+    }
+
+    private sealed class CapturingJobQueueService : IJobQueueService
+    {
+        public List<(string JobType, object Payload)> Enqueued { get; } = [];
+
+        public Task<Guid> EnqueueAsync(
+            string jobType,
+            object payload,
+            int priority = 0,
+            DateTime? availableAt = null,
+            Guid? correlationId = null,
+            int? maxAttempts = null,
+            CancellationToken ct = default)
+        {
+            Enqueued.Add((jobType, payload));
+            return Task.FromResult(Guid.NewGuid());
+        }
+
+        public Task<JobQueue?> TryClaimAsync(string? jobType, int leaseSeconds, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task<bool> CompleteAsync(Guid id, Guid claimToken, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task<bool> FailAsync(Guid id, Guid claimToken, string error, int baseDelaySeconds = 10, CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task<int> RequeueExpiredAsync(CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task<int> RequeueAllProcessingAsync(CancellationToken ct = default)
+            => throw new NotImplementedException();
+
+        public Task<bool> RenewLeaseAsync(Guid id, Guid claimToken, int additionalSeconds, CancellationToken ct = default)
+            => throw new NotImplementedException();
     }
 }

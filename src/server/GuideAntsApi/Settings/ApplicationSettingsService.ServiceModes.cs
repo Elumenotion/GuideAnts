@@ -18,7 +18,6 @@ public sealed partial class ApplicationSettingsService
 
     private async Task<JsonObject> LoadServiceModesPayloadAsync(CancellationToken cancellationToken)
     {
-        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken).ConfigureAwait(false);
         var row = await _db.ApplicationSettings
             .AsNoTracking()
             .SingleOrDefaultAsync(x => x.SectionName == ServiceModeResolver.SectionName, cancellationToken)
@@ -31,7 +30,6 @@ public sealed partial class ApplicationSettingsService
 
     private async Task<(ApplicationSetting? Row, JsonObject Payload)> LoadOrCreateServiceModesRowAsync(CancellationToken cancellationToken)
     {
-        await EnsureRowsExistFromCurrentConfigAsync(cancellationToken).ConfigureAwait(false);
         var row = await _db.ApplicationSettings
             .SingleOrDefaultAsync(x => x.SectionName == ServiceModeResolver.SectionName, cancellationToken)
             .ConfigureAwait(false);

@@ -1,22 +1,36 @@
 import { describe, expect, it } from 'vitest';
 import type { ProviderEditorStateDto, ServiceEditorStateDto } from '../../../../types/settings';
 import {
+  GEMINI_FLASH_RUNTIME_PROFILE_ID,
+  GEMINI_PRO_RUNTIME_PROFILE_ID,
+  HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
+  OPENAI_CHAT_RUNTIME_PROFILE_ID,
+  OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
   DOCUMENT_INTELLIGENCE_SECTION,
   EMBEDDINGS_SECTION,
   GEMINI_CORE_SECTION,
   GEMINI_SERVICE_PROVIDER_IDS,
+  HUGGINGFACE_CHAT_MODEL_PROVIDER_ID,
+  HUGGINGFACE_SECTION,
+  HUGGINGFACE_SERVICE_PROVIDER_IDS,
   IMAGES_SECTION,
   SERVICE_PROVIDER_IDS,
   SPEECH_SECTION,
 } from '../constants';
 import {
   deriveEndpointFromResource,
+  buildAddGeminiModelRequest,
+  buildAddModelRequest,
+  buildAddOpenAiModelRequest,
+  buildAddHuggingFaceModelRequest,
   hasModelId,
   hasModelTuple,
   mapModelProviderIdToLabel,
   mapProviderLabelToModelProviderId,
   summarizeGeminiOptionalServiceWarnings,
+  summarizeHuggingFaceOptionalServiceWarnings,
   summarizeOptionalServiceWarnings,
+  toExistingHuggingFaceModels,
   toExistingGeminiModels,
   toExistingFoundryModels,
 } from '../utils';
@@ -234,5 +248,87 @@ describe('addAiServicesWizard utils', () => {
     });
 
     expect(summarizeGeminiOptionalServiceWarnings(snapshot)).toEqual([]);
+  });
+
+  it('filters to hf chat models', () => {
+    const models = toExistingHuggingFaceModels([
+      {
+        modelId: 'deepseek-ai/DeepSeek-V4-Pro',
+        displayName: 'deepseek-ai/DeepSeek-V4-Pro',
+        provider: HUGGINGFACE_CHAT_MODEL_PROVIDER_ID,
+        isActive: true,
+        created: '2026-04-29T00:00:00Z',
+      },
+      {
+        modelId: 'gpt-4.1',
+        displayName: 'gpt-4.1',
+        provider: 'openai-chat',
+        isActive: true,
+        created: '2026-04-29T00:00:00Z',
+      },
+    ]);
+
+    expect(models).toHaveLength(1);
+    expect(models[0]?.modelId).toBe('deepseek-ai/DeepSeek-V4-Pro');
+  });
+
+  it('builds hf add-model request with runtime profile id', () => {
+    const request = buildAddHuggingFaceModelRequest('deepseek-ai/DeepSeek-V4-Pro');
+    expect(request.provider).toBe(HUGGINGFACE_CHAT_MODEL_PROVIDER_ID);
+    expect(request.providerConfig).toEqual({
+      runtimeProfileId: HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it('builds Foundry add-model requests with provider-specific runtime profile ids', () => {
+    expect(buildAddModelRequest('gpt-4o', 'Completions').providerConfig).toEqual({
+      runtimeProfileId: OPENAI_CHAT_RUNTIME_PROFILE_ID,
+    });
+    expect(buildAddModelRequest('gpt-5.2-codex', 'Responses').providerConfig).toEqual({
+      runtimeProfileId: OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it('builds OpenAI add-model requests with provider-specific runtime profile ids', () => {
+    expect(buildAddOpenAiModelRequest('gpt-4.1-mini', 'Completions').providerConfig).toEqual({
+      runtimeProfileId: OPENAI_CHAT_RUNTIME_PROFILE_ID,
+    });
+    expect(buildAddOpenAiModelRequest('gpt-5.2-codex', 'Responses').providerConfig).toEqual({
+      runtimeProfileId: OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it('builds Gemini add-model requests with model-aware runtime profile ids', () => {
+    expect(buildAddGeminiModelRequest('gemini-2.5-flash').providerConfig).toEqual({
+      runtimeProfileId: GEMINI_FLASH_RUNTIME_PROFILE_ID,
+    });
+    expect(buildAddGeminiModelRequest('gemini-2.5-pro').providerConfig).toEqual({
+      runtimeProfileId: GEMINI_PRO_RUNTIME_PROFILE_ID,
+    });
+  });
+
+  it('returns no hf optional warnings when hf providers are active and configured', () => {
+    const snapshot = createSnapshot({
+      sectionSummaries: [
+        ...createSnapshot().sectionSummaries,
+        {
+          sectionName: HUGGINGFACE_SECTION,
+          displayName: 'Hugging Face',
+          displayOrder: 10,
+          hasSecrets: true,
+          readinessStatus: 'configured',
+          missingFields: [],
+        },
+      ],
+      serviceStates: {
+        Embeddings: createServiceState('Embeddings', HUGGINGFACE_SERVICE_PROVIDER_IDS.Embeddings),
+        ImageGeneration: createServiceState('ImageGeneration', HUGGINGFACE_SERVICE_PROVIDER_IDS.ImageGeneration),
+        SpeechTranscription: createServiceState('SpeechTranscription', HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechTranscription),
+        SpeechSynthesis: createServiceState('SpeechSynthesis', HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechSynthesis),
+        DocumentIntelligence: createServiceState('DocumentIntelligence', SERVICE_PROVIDER_IDS.DocumentIntelligence),
+      },
+    });
+
+    expect(summarizeHuggingFaceOptionalServiceWarnings(snapshot)).toEqual([]);
   });
 });

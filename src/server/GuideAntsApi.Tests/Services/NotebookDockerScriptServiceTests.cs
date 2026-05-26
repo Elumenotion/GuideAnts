@@ -23,4 +23,28 @@ public sealed class NotebookDockerScriptServiceTests
             .Throw<InvalidOperationException>()
             .WithMessage("*must use http or https*");
     }
+
+    [TestMethod]
+    public void ResolveScriptExecutionBaseUrl_UsesConfiguredContainerUrl()
+    {
+        var resolved = NotebookDockerScriptService.ResolveScriptExecutionBaseUrl(
+            containerName: "guideants-ai",
+            configuredContainerUrl: " http://guideants-ai:80/sandbox ",
+            envSuffix: null);
+
+        resolved.Should().Be("http://guideants-ai:80/sandbox");
+    }
+
+    [TestMethod]
+    public void ResolveScriptExecutionBaseUrl_ThrowsWhenConfiguredContainerUrlMissing()
+    {
+        Action act = () => NotebookDockerScriptService.ResolveScriptExecutionBaseUrl(
+            containerName: "guideants-ai",
+            configuredContainerUrl: null,
+            envSuffix: null);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage("*ServiceRouting:Containers:guideants-ai:BaseUrl is required*");
+    }
 }

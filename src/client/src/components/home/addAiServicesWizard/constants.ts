@@ -41,6 +41,11 @@ export const WIZARD_PROVIDER_OPTIONS: readonly {
     description: 'Configure OpenAI API key, chat models, and optional services (STT, TTS, images, embeddings).',
   },
   {
+    id: 'huggingface',
+    label: 'Hugging Face',
+    description: 'Configure Hugging Face token, HF chat models, and optional HF service modes (embeddings, image, STT, TTS).',
+  },
+  {
     id: 'local-ai',
     label: 'Local AI',
     description: 'Install local llama chat models and configure local non-chat services (embeddings, images, STT, TTS, document intelligence).',
@@ -86,6 +91,16 @@ export const OPENAI_SERVICE_PROVIDER_IDS: Readonly<Record<
   SpeechSynthesis: 'SpeechSynthesis.OpenAI.Tts',
 } as const;
 
+export const HUGGINGFACE_SERVICE_PROVIDER_IDS: Readonly<Record<
+  'Embeddings' | 'ImageGeneration' | 'SpeechTranscription' | 'SpeechSynthesis',
+  string
+>> = {
+  Embeddings: 'Embeddings.HuggingFace.Inference',
+  ImageGeneration: 'ImageGeneration.HuggingFace.Inference',
+  SpeechTranscription: 'SpeechTranscription.HuggingFace.Inference',
+  SpeechSynthesis: 'SpeechSynthesis.HuggingFace.Inference',
+} as const;
+
 export const MODEL_PROVIDER_LABEL_TO_ID: Readonly<Record<FoundryModelProviderLabel, string>> = {
   Completions: 'azure-openai-chat',
   Responses: 'azure-openai-responses',
@@ -98,10 +113,17 @@ export const MODEL_PROVIDER_ID_TO_LABEL: Readonly<Record<string, FoundryModelPro
 
 export const GEMINI_MODEL_PROVIDER_ID = 'google-gemini-chat';
 export const GEMINI_DEFAULT_CHAT_MODEL_ID = 'gemini-2.5-flash';
+export const GEMINI_FLASH_RUNTIME_PROFILE_ID = 'google_gemini_25_flash';
+export const GEMINI_PRO_RUNTIME_PROFILE_ID = 'google_gemini_25_pro';
 
 export const OPENAI_CHAT_MODEL_PROVIDER_ID = 'openai-chat';
 export const OPENAI_RESPONSES_MODEL_PROVIDER_ID = 'openai-responses';
 export const OPENAI_DEFAULT_CHAT_MODEL_ID = 'gpt-4.1-nano';
+export const OPENAI_CHAT_RUNTIME_PROFILE_ID = 'openai_chat_standard';
+export const OPENAI_RESPONSES_RUNTIME_PROFILE_ID = 'openai_responses_reasoning';
+export const HUGGINGFACE_CHAT_MODEL_PROVIDER_ID = 'hf-inference-chat';
+export const HUGGINGFACE_DEFAULT_CHAT_MODEL_ID = 'deepseek-ai/DeepSeek-V4-Pro';
+export const HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID = 'huggingface_chat_standard';
 
 export const OPENAI_MODEL_PROVIDER_LABEL_TO_ID: Readonly<Record<OpenAiModelProviderLabel, string>> = {
   Completions: 'openai-chat',
@@ -166,6 +188,19 @@ export const OPENAI_OPTIONAL_SERVICE_DEFAULTS = {
   embeddingsModelId: 'text-embedding-3-small',
   embeddingsDimensions: '',
   embeddingsTimeoutSeconds: '300',
+} as const;
+
+export const HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS = {
+  embeddingsModelId: 'microsoft/harrier-oss-v1-0.6b',
+  embeddingsTimeoutSeconds: '300',
+  imagesTextToImageModelId: 'Tongyi-MAI/Z-Image-Turbo',
+  imagesImageToImageModelId: 'black-forest-labs/FLUX.2-dev',
+  imagesTimeoutSeconds: '600',
+  speechTranscriptionModelId: 'openai/whisper-large-v3',
+  speechTranscriptionTimeoutSeconds: '300',
+  speechSynthesisModelId: 'ResembleAI/chatterbox',
+  speechSynthesisTimeoutSeconds: '300',
+  routerBaseUrl: 'https://router.huggingface.co/v1',
 } as const;
 
 export const SECRET_MASK = '********';

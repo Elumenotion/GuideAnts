@@ -182,14 +182,50 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
         {
             var messages = request.Messages.Select(ToMessage).ToList();
             var tools = request.Tools?.Select(ToTool).ToList();
+            var (temperature, topP, extensions) = ResolveSampling(request);
             return new OpenRouterChatRequest(
                 Model: model,
                 Messages: messages,
                 Tools: tools,
-                Temperature: request.Temperature,
-                TopP: request.TopP,
+                Temperature: temperature,
+                TopP: topP,
                 ReasoningEffort: request.ReasoningEffort,
-                Stream: stream);
+                Stream: stream)
+            {
+                Extensions = extensions
+            };
+        }
+
+        private static (double? Temperature, double? TopP, Dictionary<string, JsonElement>? Extensions)
+            ResolveSampling(ChatCompletionRequest request)
+        {
+            double? temperature = null;
+            double? topP = null;
+            Dictionary<string, JsonElement>? extensions = null;
+            if (request.SamplingParameters == null)
+            {
+                return (temperature, topP, extensions);
+            }
+
+            foreach (var (key, value) in request.SamplingParameters)
+            {
+                if (string.Equals(key, "temperature", StringComparison.Ordinal))
+                {
+                    temperature = value;
+                    continue;
+                }
+
+                if (string.Equals(key, "top_p", StringComparison.Ordinal))
+                {
+                    topP = value;
+                    continue;
+                }
+
+                extensions ??= new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+                extensions[key] = JsonSerializer.SerializeToElement(value);
+            }
+
+            return (temperature, topP, extensions);
         }
 
         private static OpenRouterChatMessage ToMessage(ChatMessage message)
@@ -610,7 +646,11 @@ internal sealed record OpenRouterChatRequest(
     double? Temperature,
     [property: JsonPropertyName("top_p")] double? TopP,
     [property: JsonPropertyName("reasoning_effort")] string? ReasoningEffort,
-    bool Stream);
+    bool Stream)
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extensions { get; init; }
+}
 
 internal sealed class OpenRouterChatMessage
 {

@@ -129,7 +129,7 @@ public class AssistantDefinitionsTests
     }
 
     [TestMethod]
-    public void DatabaseMaterialization_CloudModelUsesCatalogParameterSurface()
+    public void DatabaseMaterialization_UsesSamplingBagOnly_ForCloudModel()
     {
         var assistant = new Assistant
         {
@@ -140,6 +140,7 @@ public class AssistantDefinitionsTests
             Temperature = 1.0f,
             TopP = 1.0,
             ReasoningEffort = "medium",
+            SamplingParametersJson = """{"temperature":0.35,"top_p":0.75,"min_p":0.05}""",
             Model = new Model
             {
                 ModelId = "claude-haiku-4-5-20251001",
@@ -156,6 +157,71 @@ public class AssistantDefinitionsTests
         manifest.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
         manifest.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
         manifest.RootElement.GetProperty("reasoning_effort").GetString().Should().Be("medium");
+        storageMetadata.SamplingParametersJson.Should().NotBeNullOrWhiteSpace();
+        using var sampling = JsonDocument.Parse(storageMetadata.SamplingParametersJson!);
+        sampling.RootElement.GetProperty("temperature").GetDouble().Should().BeApproximately(0.35, 0.001);
+        sampling.RootElement.GetProperty("top_p").GetDouble().Should().BeApproximately(0.75, 0.001);
+        sampling.RootElement.GetProperty("min_p").GetDouble().Should().BeApproximately(0.05, 0.001);
+    }
+
+    [TestMethod]
+    public void DatabaseMaterialization_CloudRuntimeConfig_DoesNotBackfillTypedKnobsIntoSamplingBag()
+    {
+        var assistant = new Assistant
+        {
+            Name = "Cloud Runtime Profile Assistant",
+            Kind = AssistantKind.Assistant,
+            IsActive = true,
+            ModelId = "gpt-5",
+            Temperature = 0.25f,
+            TopP = 0.85,
+            ReasoningEffort = "high",
+            SamplingParametersJson = """{"min_p":0.1}""",
+            Model = new Model
+            {
+                ModelId = "gpt-5",
+                DisplayName = "GPT-5",
+                Provider = "openai-responses",
+                RuntimeConfigJson = """{"runtimeProfileId":"openai_reasoning_v1"}""",
+                IsActive = true
+            }
+        };
+
+        var storageMetadata = Materialize(assistant);
+
+        using var manifest = JsonDocument.Parse(storageMetadata.ManifestJson);
+        manifest.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
+        manifest.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+        manifest.RootElement.GetProperty("reasoning_effort").GetString().Should().Be("high");
+        storageMetadata.SamplingParametersJson.Should().NotBeNullOrWhiteSpace();
+        using var sampling = JsonDocument.Parse(storageMetadata.SamplingParametersJson!);
+        sampling.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
+        sampling.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+        sampling.RootElement.GetProperty("min_p").GetDouble().Should().BeApproximately(0.1, 0.001);
+    }
+
+    [TestMethod]
+    public void DatabaseMaterialization_TypedSamplingKnobsAreNotProjected_WhenSamplingBagMissing()
+    {
+        var assistant = new Assistant
+        {
+            Name = "Bag First Assistant",
+            Kind = AssistantKind.Assistant,
+            IsActive = true,
+            ModelId = "openrouter-model",
+            Temperature = 0.9f,
+            TopP = 0.9,
+            Model = new Model
+            {
+                ModelId = "openrouter-model",
+                DisplayName = "OpenRouter Model",
+                Provider = "openrouter",
+                IsActive = true
+            }
+        };
+
+        var storageMetadata = Materialize(assistant);
+        storageMetadata.SamplingParametersJson.Should().BeNull();
     }
 
     private static AssistantStorageMetadata Materialize(Assistant assistant)

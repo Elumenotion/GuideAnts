@@ -218,6 +218,97 @@ public sealed class ProviderNativeChatClientTests
     }
 
     [TestMethod]
+    public async Task HuggingFace_GetCompletionAsync_WithAssistantToolCallsAndEmptyContentPart_SendsRequest()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(
+            """
+            {
+              "choices": [
+                {
+                  "message": { "content": "done", "role": "assistant" },
+                  "finish_reason": "stop"
+                }
+              ],
+              "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+            }
+            """));
+        using var httpClient = new HttpClient(handler);
+        var client = new HuggingFaceChatClient(
+            httpClient,
+            new HuggingFaceChatConfig
+            {
+                Token = "hf-token",
+                RouterBaseUrl = "https://router.huggingface.co/v1"
+            },
+            "deepseek-ai/DeepSeek-V4-Pro");
+
+        var toolCall = new ChatToolCall
+        {
+            Id = "call_1",
+            Type = "function",
+            Function = new ChatToolCallFunction
+            {
+                Name = "Media_Creator",
+                Arguments = JsonSerializer.SerializeToElement("""{"instructions":"test"}""")
+            }
+        };
+
+        var request = new ChatCompletionRequest(
+            messages:
+            [
+                new ChatMessage(ChatRole.System, "You are helpful."),
+                new ChatMessage(ChatRole.User, "Recolour the rose."),
+                new ChatMessage(ChatRole.Assistant, [new ChatContent("")], [toolCall]),
+                new ChatMessage("call_1", "Media_Creator", [new ChatContent("ERROR: tool failed")])
+            ],
+            model: null);
+
+        var response = await client.GetCompletionAsync(request);
+
+        handler.LastRequestUri.Should().NotBeNull();
+        using var requestJson = JsonDocument.Parse(handler.LastRequestBody);
+        var assistantMessage = requestJson.RootElement
+            .GetProperty("messages")[2];
+        assistantMessage.GetProperty("role").GetString().Should().Be("assistant");
+        assistantMessage.TryGetProperty("tool_calls", out _).Should().BeTrue();
+        if (assistantMessage.TryGetProperty("content", out var contentElement))
+        {
+            (contentElement.ValueKind == JsonValueKind.Null
+                || (contentElement.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(contentElement.GetString())))
+                .Should().BeTrue();
+        }
+        response.FirstChoice!.Message.GetText().Should().Be("done");
+    }
+
+    [TestMethod]
+    public async Task HuggingFace_GetCompletionAsync_WithUnsupportedContent_ThrowsDescriptiveErrorBeforeSend()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse("""{"choices":[]}"""));
+        using var httpClient = new HttpClient(handler);
+        var client = new HuggingFaceChatClient(
+            httpClient,
+            new HuggingFaceChatConfig
+            {
+                Token = "hf-token",
+                RouterBaseUrl = "https://router.huggingface.co/v1"
+            },
+            "meta-llama/llama-4-scout");
+
+        var request = new ChatCompletionRequest(
+            messages:
+            [
+                new ChatMessage(ChatRole.User, [new ChatContent()])
+            ],
+            model: null);
+
+        Func<Task> act = () => client.GetCompletionAsync(request);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("A message content part could not be mapped for the Hugging Face chat provider*");
+        handler.LastRequestUri.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task GoogleGemini_GetCompletionAsync_UsesGenerateContentEndpointAndMapsTools()
     {
         var handler = new CapturingHandler(_ => JsonResponse(
@@ -387,7 +478,11 @@ public sealed class ProviderNativeChatClientTests
             BaseUrl = "https://api.anthropic.com",
             DefaultModel = "claude-haiku-4-5-20251001",
             DefaultMaxTokens = 4096,
-            ThinkingBudgets = new AnthropicThinkingBudgets()
+            ThinkingBudgets = new AnthropicThinkingBudgets(
+                Minimal: null,
+                Low: null,
+                Medium: null,
+                High: null)
         };
         var client = new AnthropicChatClientFactory(new StaticHttpClientFactory(httpClient), config)
             .CreateClient(null, httpClient);
@@ -402,6 +497,62 @@ public sealed class ProviderNativeChatClientTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Thinking budget not configured for low.");
+    }
+
+    [TestMethod]
+    public async Task Anthropic_GetCompletionAsync_WithThinking_OmitsSamplingTemperatureAndTopP()
+    {
+        var handler = new CapturingHandler(_ => JsonResponse(
+            """
+            {
+              "id": "msg_123",
+              "type": "message",
+              "role": "assistant",
+              "model": "claude-haiku-4-5-20251001",
+              "content": [
+                { "type": "text", "text": "hello from claude" }
+              ],
+              "stop_reason": "end_turn",
+              "stop_sequence": null,
+              "usage": {
+                "input_tokens": 5,
+                "output_tokens": 3
+              }
+            }
+            """));
+
+        using var httpClient = new HttpClient(handler);
+        var config = new AnthropicConfig
+        {
+            ApiKey = "ant-key",
+            BaseUrl = "https://api.anthropic.com",
+            DefaultModel = "claude-haiku-4-5-20251001",
+            DefaultMaxTokens = 4096,
+            ThinkingBudgets = new AnthropicThinkingBudgets(Low: 2048)
+        };
+        var client = new AnthropicChatClientFactory(new StaticHttpClientFactory(httpClient), config)
+            .CreateClient(null, httpClient);
+
+        var response = await client.GetCompletionAsync(new ChatCompletionRequest(
+            messages:
+            [
+                new ChatMessage(ChatRole.User, "Hello")
+            ],
+            model: null,
+            reasoningEffort: "low",
+            samplingParameters: new Dictionary<string, double>
+            {
+                ["temperature"] = 0.7,
+                ["top_p"] = 0.8
+            }));
+
+        handler.LastRequestUri!.ToString().Should().Be("https://api.anthropic.com/v1/messages");
+        using var requestJson = JsonDocument.Parse(handler.LastRequestBody);
+        requestJson.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
+        requestJson.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+        requestJson.RootElement.GetProperty("thinking").GetProperty("type").GetString().Should().Be("enabled");
+        requestJson.RootElement.GetProperty("thinking").GetProperty("budget_tokens").GetInt32().Should().Be(2048);
+        response.FirstChoice!.Message.GetText().Should().Be("hello from claude");
     }
 
     [TestMethod]
@@ -465,8 +616,11 @@ public sealed class ProviderNativeChatClientTests
                         JsonNode.Parse("""{"type":"object","properties":{"city":{"type":"string"}}}""")))
             ],
             model: null,
-            temperature: 0.2,
-            topP: 0.9,
+            samplingParameters: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                ["temperature"] = 0.2,
+                ["top_p"] = 0.9
+            },
             reasoningEffort: reasoningEffort);
 
     private static HttpResponseMessage JsonResponse(string json) =>

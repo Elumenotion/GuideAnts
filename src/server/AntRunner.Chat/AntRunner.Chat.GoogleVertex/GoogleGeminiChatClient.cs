@@ -199,16 +199,53 @@ public sealed class GoogleGeminiChatClient : IChatCompletionClient
             IReadOnlyList<GoogleGeminiTool>? tools = request.Tools?.Count > 0
                 ? new List<GoogleGeminiTool> { new(request.Tools.Select(ToFunctionDeclaration).ToList()) }
                 : null;
+            var (temperature, topP, additionalGenerationConfig) = ResolveGeminiSampling(request);
+            var generationConfig = new GoogleGeminiGenerationConfig(
+                Temperature: temperature,
+                TopP: topP,
+                ThinkingConfig: ToThinkingConfig(request.ReasoningEffort, model))
+            {
+                AdditionalProperties = additionalGenerationConfig
+            };
 
             return new GoogleGeminiGenerateContentRequest(
                 Model: model,
                 Contents: contents,
                 Tools: tools,
                 SystemInstruction: systemParts.Count > 0 ? new GoogleGeminiContent(null, systemParts) : null,
-                GenerationConfig: new GoogleGeminiGenerationConfig(
-                    Temperature: request.Temperature,
-                    TopP: request.TopP,
-                    ThinkingConfig: ToThinkingConfig(request.ReasoningEffort, model)));
+                GenerationConfig: generationConfig);
+        }
+
+        private static (double? Temperature, double? TopP, Dictionary<string, JsonElement>? AdditionalGenerationConfig)
+            ResolveGeminiSampling(ChatCompletionRequest request)
+        {
+            double? temperature = null;
+            double? topP = null;
+            Dictionary<string, JsonElement>? additional = null;
+            if (request.SamplingParameters == null)
+            {
+                return (temperature, topP, additional);
+            }
+
+            foreach (var (key, value) in request.SamplingParameters)
+            {
+                if (string.Equals(key, "temperature", StringComparison.Ordinal))
+                {
+                    temperature = value;
+                    continue;
+                }
+
+                if (string.Equals(key, "top_p", StringComparison.Ordinal) || string.Equals(key, "topP", StringComparison.Ordinal))
+                {
+                    topP = value;
+                    continue;
+                }
+
+                additional ??= new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+                additional[key] = JsonSerializer.SerializeToElement(value);
+            }
+
+            return (temperature, topP, additional);
         }
 
         // Gemini 2.5 series uses thinkingBudget (integer token count).
@@ -652,7 +689,11 @@ internal sealed record GoogleGeminiGenerateContentRequest(
 internal sealed record GoogleGeminiGenerationConfig(
     double? Temperature,
     [property: JsonPropertyName("topP")] double? TopP,
-    GoogleGeminiThinkingConfig? ThinkingConfig);
+    GoogleGeminiThinkingConfig? ThinkingConfig)
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalProperties { get; init; }
+}
 
 internal sealed record GoogleGeminiThinkingConfig(
     int? ThinkingBudget,

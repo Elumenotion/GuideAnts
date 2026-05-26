@@ -68,7 +68,7 @@ public class AssistantDefinition
 
     /// <summary>
     /// Data-driven sampling parameter overrides as a JSON dictionary (e.g., {"temperature": 0.6, "top_k": 30}).
-    /// When present, these take precedence over Temperature/TopP typed properties in the llama.cpp client.
+    /// These values are projected into execution via the resolved policy parameter bag.
     /// </summary>
     [JsonIgnore]
     public Dictionary<string, double>? SamplingParameters { get; set; }
