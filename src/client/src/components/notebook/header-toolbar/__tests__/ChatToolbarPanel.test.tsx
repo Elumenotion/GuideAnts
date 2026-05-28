@@ -109,6 +109,123 @@ describe('ChatToolbarPanel', () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
+  it('normalizes the full default parameter payload when changing models', async () => {
+    vi.mocked(api.settings.chatDefaults.get).mockResolvedValueOnce({
+      rowVersion: 'rv-stale',
+      defaultModelId: 'qwen3.6-27b',
+      overrideAllChatModels: true,
+      temperature: 0.7,
+      topP: 0.8,
+      reasoningEffort: null,
+      samplingParametersJson: '{"temperature":0.7,"top_p":0.8,"mirostat":2}',
+    });
+    vi.mocked(api.guides.catalogs.models).mockResolvedValue([
+      {
+        modelId: 'qwen3.6-27b',
+        displayName: 'Qwen 3.6 27B',
+        provider: 'llama-cpp',
+        isActive: true,
+        samplingParameterPolicy: [
+          {
+            key: 'temperature',
+            label: 'Temperature',
+            description: 'Controls randomness',
+            min: 0,
+            max: 2,
+            step: 0.1,
+            recommendedDefault: 0.7,
+            displayOrder: 0,
+          },
+          {
+            key: 'top_p',
+            label: 'Top P',
+            description: 'Controls nucleus sampling',
+            min: 0,
+            max: 1,
+            step: 0.05,
+            recommendedDefault: 0.8,
+            displayOrder: 1,
+          },
+          {
+            key: 'mirostat',
+            label: 'Mirostat',
+            description: 'Controls adaptive sampling',
+            min: 0,
+            max: 2,
+            step: 1,
+            recommendedDefault: 0,
+            displayOrder: 2,
+          },
+        ],
+      },
+      {
+        modelId: 'gpt-5.2-codex',
+        displayName: 'gpt-5.2-codex',
+        provider: 'azure-openai-responses',
+        isActive: true,
+        reasoningChoices: ['minimal', 'low', 'medium', 'high'],
+        defaultReasoningChoice: 'medium',
+        samplingParameterPolicy: [],
+      },
+    ]);
+    vi.mocked(api.settings.chatDefaults.update).mockImplementationOnce(async (request: any) => ({
+      rowVersion: 'rv-normalized',
+      defaultModelId: request.defaultModelId,
+      overrideAllChatModels: request.overrideAllChatModels,
+      temperature: request.temperature,
+      topP: request.topP,
+      reasoningEffort: request.reasoningEffort,
+      samplingParametersJson: request.samplingParametersJson,
+    }));
+
+    const user = userEvent.setup();
+    const onRefresh = vi.fn(async () => {});
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'ready',
+          summary: 'Chat ready',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'qwen3.6-27b',
+          effectiveModelDisplayName: 'Qwen 3.6 27B',
+          effectiveProvider: 'llama-cpp',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'qwen3.6-27b', displayName: 'Qwen 3.6 27B', provider: 'llama-cpp', isActive: true },
+            { modelId: 'gpt-5.2-codex', displayName: 'gpt-5.2-codex', provider: 'azure-openai-responses', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={onRefresh}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('option', { name: /gpt-5\.2-codex/i }));
+
+    expect(api.settings.chatDefaults.update).toHaveBeenCalledWith({
+      rowVersion: 'rv-stale',
+      defaultModelId: 'gpt-5.2-codex',
+      overrideAllChatModels: true,
+      temperature: null,
+      topP: null,
+      reasoningEffort: 'medium',
+      samplingParametersJson: null,
+    });
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
   it('shows a load action without unload when selected local model is not loaded', async () => {
     render(
       <ChatToolbarPanel

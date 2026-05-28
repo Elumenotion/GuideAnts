@@ -52,6 +52,7 @@ function NotebookDetailsContent() {
         error: notebookError,
         filesError,
         conversations,
+        isLoadingConversations,
         assistants,
         setHomePageFile,
         clearHomePage
@@ -383,24 +384,22 @@ function NotebookDetailsContent() {
 
     // Restore selectedItem when conversation ID is loaded from URL (e.g., after iOS resume)
     useEffect(() => {
-        // If we have an activeConversationId from URL but selectedItem doesn't match, sync it
-        if (activeConversationId && conversations && conversations.length > 0) {
-            const conversationExists = conversations.some(c => c.id === activeConversationId);
-            if (!conversationExists) {
-                // Only clear if there isn't already a user-selected item
-                if (!selectedItem) {
-                    setActiveConversationId(null);
-                    setSelectedItem(null);
-                }
-                return;
-            }
+        if (!activeConversationId || isLoadingConversations) return;
 
-            // Only update if selectedItem doesn't already match
-            if (!selectedItem || selectedItem.type !== 'conversations' || selectedItem.id !== activeConversationId) {
-                setSelectedItem({ type: 'conversations', id: activeConversationId });
+        const conversationExists = conversations.some(c => c.id === activeConversationId);
+        if (!conversationExists) {
+            setActiveConversationId(null);
+            if (selectedItem?.type === 'conversations' && selectedItem.id === activeConversationId) {
+                setSelectedItem(null);
             }
+            return;
         }
-    }, [activeConversationId, conversations, selectedItem, setActiveConversationId]);
+
+        // Only update if selectedItem doesn't already match
+        if (!selectedItem || selectedItem.type !== 'conversations' || selectedItem.id !== activeConversationId) {
+            setSelectedItem({ type: 'conversations', id: activeConversationId });
+        }
+    }, [activeConversationId, conversations, isLoadingConversations, selectedItem, setActiveConversationId]);
 
     // Handle conversation ID from navigation state (consume once without overriding user selection)
     useEffect(() => {
@@ -509,6 +508,25 @@ function NotebookDetailsContent() {
         
         // If the deleted conversation was selected in the sidebar (but not necessarily active), clear the selection
         if (selectedItem?.type === 'conversations' && selectedItem.id === deletedConversationId) {
+            setSelectedItem(null);
+        }
+    }, [activeConversationId, selectedItem, conversations]);
+
+    const handleConversationsDeleted = useCallback((deletedConversationIds: string[]) => {
+        const deletedIdSet = new Set(deletedConversationIds);
+
+        if (activeConversationId && deletedIdSet.has(activeConversationId)) {
+            const remainingConversation = (conversations || []).find(c => !deletedIdSet.has(c.id));
+            if (remainingConversation) {
+                setActiveConversationId(remainingConversation.id);
+                setSelectedItem({ type: 'conversations', id: remainingConversation.id });
+            } else {
+                setActiveConversationId(null);
+                setSelectedItem(null);
+            }
+        }
+
+        if (selectedItem?.type === 'conversations' && deletedIdSet.has(selectedItem.id)) {
             setSelectedItem(null);
         }
     }, [activeConversationId, selectedItem, conversations]);
@@ -1198,6 +1216,7 @@ function NotebookDetailsContent() {
                         onPreviewFile={handlePreviewFile}
                         
                         onConversationDeleted={handleConversationDeleted}
+                        onConversationsDeleted={handleConversationsDeleted}
                         canEdit={canEdit()}
                         homePageFileId={notebook?.homePageFileId}
                         onSetHomePage={handleSetHomePage}
@@ -1206,7 +1225,7 @@ function NotebookDetailsContent() {
             }
             content={
                 <>
-                    {activeConversationId ? (
+                    {activeConversationId && !isLoadingConversations ? (
                         <ConversationProvider
                           key={activeConversationId}
                           projectId={projectId!}

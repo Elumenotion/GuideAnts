@@ -4,14 +4,12 @@ import { ModelDto } from '../../types/guides';
 import { ModelSelector } from '../guides/editor/ModelSelector';
 import { ConfigParams } from '../guides/editor/ConfigParams';
 import { normalizeReasoningEffortForModel, normalizeSamplingValueForModel } from './reasoning';
+import {
+  ChatModelConfigValue,
+  normalizeChatModelConfigForModel,
+} from './chatDefaults';
 
-export interface ChatModelConfigValue {
-  modelId: string;
-  temperature?: number | null;
-  topP?: number | null;
-  reasoningEffort?: string;
-  samplingOverrides?: Record<string, number>;
-}
+export type { ChatModelConfigValue } from './chatDefaults';
 
 export interface ChatModelConfiguratorProps {
   mode: 'entity' | 'default';
@@ -88,13 +86,13 @@ export function ChatModelConfigurator({
       ? partial.topP
       : topP;
 
-    onChange({
+    onChange(normalizeChatModelConfigForModel({
       modelId: partial.modelId ?? modelId ?? '',
-      temperature: normalizeSamplingValueForModel(modelForNext, 'temperature', nextTemperature),
-      topP: normalizeSamplingValueForModel(modelForNext, 'top_p', nextTopP),
+      temperature: nextTemperature,
+      topP: nextTopP,
       reasoningEffort: nextReasoningEffort,
       samplingOverrides: partial.samplingOverrides ?? overrides,
-    });
+    }, modelForNext));
   };
 
   useEffect(() => {

@@ -118,6 +118,7 @@ public static class Agent
         var childContext = context with
         {
             CurrentInvocationId = invocationId,
+            NotebookConversationMessageId = null,
             InvocationDepth = context.InvocationDepth + 1,
             TriggeringToolCallId = null, // Will be set by ThreadRun for nested calls
             AssistantId = assistant.Id   // The invoked assistant's ID for usage attribution

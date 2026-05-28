@@ -2,17 +2,40 @@ using GuideAntsApi.DataModel.Models;
 
 namespace GuideAntsApi.Services.Conversations;
 
+public enum LockAcquisitionStatus
+{
+    Acquired,
+    AlreadyLocked,
+    ConversationNotFound,
+    RaceCondition
+}
+
+public sealed class LockAcquisitionResult
+{
+    public required LockAcquisitionStatus Status { get; init; }
+    public ConversationLock? Lock { get; init; }
+    public string? LockedByUserName { get; init; }
+
+    public static LockAcquisitionResult Acquired(ConversationLock lockEntity) =>
+        new() { Status = LockAcquisitionStatus.Acquired, Lock = lockEntity };
+
+    public static LockAcquisitionResult AlreadyLocked(string lockedByUserName) =>
+        new() { Status = LockAcquisitionStatus.AlreadyLocked, LockedByUserName = lockedByUserName };
+
+    public static LockAcquisitionResult NotFound() =>
+        new() { Status = LockAcquisitionStatus.ConversationNotFound };
+
+    public static LockAcquisitionResult Race() =>
+        new() { Status = LockAcquisitionStatus.RaceCondition };
+}
+
 /// <summary>
 /// Service for managing distributed locks on conversations across multiple server instances.
 /// Ensures only one user can stream to a conversation at a time.
 /// </summary>
 public interface IDistributedConversationLock
 {
-    /// <summary>
-    /// Attempts to acquire a lock on a conversation.
-    /// </summary>
-    /// <returns>The lock if acquired, null if the conversation is already locked by another user</returns>
-    Task<ConversationLock?> TryAcquireLockAsync(
+    Task<LockAcquisitionResult> TryAcquireLockAsync(
         Guid conversationId, 
         string userName,
         CancellationToken cancellationToken = default);

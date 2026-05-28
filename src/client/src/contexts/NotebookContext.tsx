@@ -64,7 +64,7 @@ const initialState: NotebookState = {
     isLoadingFiles: false,
     filesError: null,
     conversations: [],
-    isLoadingConversations: false,
+    isLoadingConversations: true,
     conversationsError: null,
     assistants: [],
     isLoadingAssistants: false,

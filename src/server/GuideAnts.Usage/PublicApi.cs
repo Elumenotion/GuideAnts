@@ -217,11 +217,12 @@ public static class UsageRecorderExtensions
         Guid? agentInvocationId = null,
         CancellationToken ct = default,
         string service = "AzureSpeech",
-        string operation = "TTS")
+        string operation = "TTS",
+        Guid? notebookConversationMessageId = null)
         => recorder.RecordAsync(projectId, notebookId, UsageCategory.SpeechSynthesis,
             service, operation,
             new UsageMetrics(ValueOther: characterCount), costUsd, conversationId, null, notebookFileId,
-            null, metadataJson, assistantId, agentInvocationId, null, ct);
+            null, metadataJson, assistantId, agentInvocationId, notebookConversationMessageId, ct);
 
     /// <summary>
     /// Records a document extraction event.

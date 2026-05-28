@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 
@@ -21,7 +22,7 @@ public class DistributedConversationLockService : IDistributedConversationLock
         _logger = logger;
     }
 
-    public async Task<ConversationLock?> TryAcquireLockAsync(
+    public async Task<LockAcquisitionResult> TryAcquireLockAsync(
         Guid conversationId, 
         string userName,
         CancellationToken cancellationToken = default)
@@ -48,10 +49,9 @@ public class DistributedConversationLockService : IDistributedConversationLock
                 }
                 else
                 {
-                    // Lock still active
                     _logger.LogInformation("Conversation {ConversationId} is locked by {LockedByUserName}", 
                         conversationId, existingLock.LockedByUserName);
-                    return null;
+                    return LockAcquisitionResult.AlreadyLocked(existingLock.LockedByUserName);
                 }
             }
             
@@ -70,13 +70,20 @@ public class DistributedConversationLockService : IDistributedConversationLock
             _logger.LogInformation("Acquired lock for conversation {ConversationId} by user {UserName}", 
                 conversationId, userName);
             
-            return newLock;
+            return LockAcquisitionResult.Acquired(newLock);
         }
         catch (DbUpdateException ex)
         {
-            // Race condition - another instance acquired lock simultaneously
+            if (ex.InnerException is SqlException sqlEx &&
+                sqlEx.Number == 547 &&
+                sqlEx.Message.Contains("FK_ConversationLocks_NotebookConversations_ConversationId", StringComparison.Ordinal))
+            {
+                _logger.LogWarning("Conversation {ConversationId} does not exist — cannot acquire lock", conversationId);
+                return LockAcquisitionResult.NotFound();
+            }
+
             _logger.LogWarning(ex, "Race condition acquiring lock for conversation {ConversationId}", conversationId);
-            return null;
+            return LockAcquisitionResult.Race();
         }
         catch (Exception ex)
         {

@@ -692,7 +692,8 @@ namespace GuideAntsApi.Services
                         bytes
                     }),
                     assistantId: context.AssistantId,
-                    agentInvocationId: context.CurrentInvocationId);
+                    agentInvocationId: context.CurrentInvocationId,
+                    notebookConversationMessageId: context.NotebookConversationMessageIdForUsage);
             }
             catch (Exception ex)
             {

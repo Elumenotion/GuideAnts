@@ -591,14 +591,21 @@ public class ConversationService : IConversationService
         }
 
         // Try to acquire distributed lock (cross-container coordination)
-        var lockAcquired = await _distributedLock.TryAcquireLockAsync(conversationId, userName, cancellationToken);
+        var lockResult = await _distributedLock.TryAcquireLockAsync(conversationId, userName, cancellationToken);
 
-        if (lockAcquired == null)
+        switch (lockResult.Status)
         {
-            // Another user has the lock
-            var activeLock = await _distributedLock.GetActiveLockAsync(conversationId, cancellationToken);
-            var lockedByName = activeLock?.LockedByUserName ?? "another user";
-            throw new InvalidOperationException($"Conversation is locked by {lockedByName}");
+            case LockAcquisitionStatus.ConversationNotFound:
+                throw new KeyNotFoundException($"Conversation {conversationId} not found");
+
+            case LockAcquisitionStatus.AlreadyLocked:
+                throw new InvalidOperationException($"Conversation is locked by {lockResult.LockedByUserName}");
+
+            case LockAcquisitionStatus.RaceCondition:
+                throw new InvalidOperationException("Conversation is locked by another user");
+
+            case LockAcquisitionStatus.Acquired:
+                break;
         }
 
         // Get local semaphore for in-process concurrency
@@ -2264,6 +2271,7 @@ public class ConversationService : IConversationService
                     conversationId: ctx.Conversation.Id.ToString(),
                     turnIndex: ctx.TurnIndex,
                     assistantId: ctx.AssistantId,
+                    notebookConversationMessageId: ctx.UserMessage?.Id,
                     cancellationToken: externalCt);
 
                 // Finalize any remaining streaming message (messageAddedHandler handles complete messages)
@@ -2302,46 +2310,7 @@ public class ConversationService : IConversationService
                     EmitThinkingMessages(output, assistantMessageIds, infra.Writer);
                 }
 
-                // Record tool call usage for all tool messages in this turn (finalized data)
-                try
-                {
-                    using var scopeUsage = _scopeFactory.CreateScope();
-                    var dbUsage = scopeUsage.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-                    // Get all tool messages for this turn
-                    var toolMessages = await dbUsage.NotebookConversationMessages
-                        .Where(m => m.NotebookConversationId == ctx.Conversation.Id
-                                 && m.TurnIndex == ctx.TurnIndex
-                                 && m.Role == DataModelChatRole.Tool
-                                 && m.FunctionName != null)
-                        .Select(m => new { m.Id, m.FunctionName, m.ToolCallId, ContentLength = m.Content.Length })
-                        .ToListAsync(noneCt);
-
-                    foreach (var toolMsg in toolMessages)
-                    {
-                        // Skip crew bridge invocations - they record their own usage
-                        if (toolMsg.FunctionName == "InvokeAgent") continue;
-
-                        // Record tool call usage
-                        await _usageRecorder.RecordToolCallAsync(
-                            projectId: ctx.Conversation.Notebook.ProjectId,
-                            notebookId: ctx.Conversation.NotebookId,
-                            conversationId: ctx.Conversation.Id,
-                            functionName: toolMsg.FunctionName!,
-                            metadataJson: JsonSerializer.Serialize(new
-                            {
-                                toolCallId = toolMsg.ToolCallId,
-                                functionName = toolMsg.FunctionName,
-                                contentLength = toolMsg.ContentLength
-                            }),
-                            assistantId: ctx.AssistantId,
-                            notebookConversationMessageId: toolMsg.Id);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to record tool call usage for turn {TurnIndex}", ctx.TurnIndex);
-                }
+                await RecordToolCallUsageForTurnAsync(ctx, noneCt);
 
                 // Update turn with completion details
                 if (output != null)
@@ -2452,6 +2421,14 @@ public class ConversationService : IConversationService
                     _logger.LogWarning(pruneEx, "Failed to prune incomplete tool calls for conversation {ConversationId} turn {TurnIndex}", ctx.Conversation.Id, ctx.TurnIndex);
                 }
 
+                // Persist usage even for cancelled turns so guide usage/invocation reports remain complete.
+                await RecordToolCallUsageForTurnAsync(ctx, noneCt);
+                await RecordCancelledTurnMarkerUsageAsync(
+                    ctx,
+                    currentAssistantMessageId,
+                    assistantMessageIds,
+                    noneCt);
+
                 var cancelPayload = new { message = "Stream was cancelled by user", type = "Cancellation", timestamp = DateTime.UtcNow, turnIndex = ctx.TurnIndex };
                 infra.Writer.TryWrite(new StreamingEvent("cancelled", JsonSerializer.Serialize(cancelPayload, _jsonOptions)));
             }
@@ -2491,6 +2468,153 @@ public class ConversationService : IConversationService
                 infra.Writer.Complete();
             }
         }, externalCt);
+    }
+
+    private async Task RecordToolCallUsageForTurnAsync(StreamSendContext ctx, CancellationToken ct)
+    {
+        try
+        {
+            using var scopeUsage = _scopeFactory.CreateScope();
+            var dbUsage = scopeUsage.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            // Get all tool messages for this turn.
+            var toolMessages = await dbUsage.NotebookConversationMessages
+                .Where(m => m.NotebookConversationId == ctx.Conversation.Id
+                         && m.TurnIndex == ctx.TurnIndex
+                         && m.Role == DataModelChatRole.Tool
+                         && m.FunctionName != null)
+                .Select(m => new { m.Id, m.FunctionName, m.ToolCallId, ContentLength = m.Content != null ? m.Content.Length : 0 })
+                .ToListAsync(ct);
+
+            if (toolMessages.Count == 0)
+            {
+                return;
+            }
+
+            // Prevent duplicate usage rows if this is called multiple times (e.g., cancellation + retries).
+            var toolMessageIds = toolMessages.Select(m => m.Id).ToList();
+            var alreadyRecordedIds = await dbUsage.UsageEvents
+                .Where(u => u.NotebookConversationMessageId != null
+                         && toolMessageIds.Contains(u.NotebookConversationMessageId.Value)
+                         && u.Category == GuideAntsApi.DataModel.Models.UsageCategory.ToolCall)
+                .Select(u => u.NotebookConversationMessageId!.Value)
+                .ToListAsync(ct);
+            var alreadyRecordedSet = new HashSet<Guid>(alreadyRecordedIds);
+
+            foreach (var toolMsg in toolMessages)
+            {
+                // Skip crew bridge invocations - they record their own usage.
+                if (string.Equals(toolMsg.FunctionName, "InvokeAgent", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (alreadyRecordedSet.Contains(toolMsg.Id))
+                {
+                    continue;
+                }
+
+                await _usageRecorder.RecordToolCallAsync(
+                    projectId: ctx.Conversation.Notebook.ProjectId,
+                    notebookId: ctx.Conversation.NotebookId,
+                    conversationId: ctx.Conversation.Id,
+                    functionName: toolMsg.FunctionName!,
+                    metadataJson: JsonSerializer.Serialize(new
+                    {
+                        toolCallId = toolMsg.ToolCallId,
+                        functionName = toolMsg.FunctionName,
+                        contentLength = toolMsg.ContentLength
+                    }),
+                    assistantId: ctx.AssistantId,
+                    notebookConversationMessageId: toolMsg.Id,
+                    ct: ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to record tool call usage for turn {TurnIndex}", ctx.TurnIndex);
+        }
+    }
+
+    private async Task RecordCancelledTurnMarkerUsageAsync(
+        StreamSendContext ctx,
+        Guid? currentAssistantMessageId,
+        IReadOnlyList<Guid> assistantMessageIds,
+        CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            var turnMessageIds = await db.NotebookConversationMessages
+                .Where(m => m.NotebookConversationId == ctx.Conversation.Id
+                         && m.TurnIndex == ctx.TurnIndex)
+                .Select(m => m.Id)
+                .ToListAsync(ct);
+
+            if (turnMessageIds.Count == 0)
+            {
+                return;
+            }
+
+            // If any usage already exists for this turn, we don't need a synthetic marker.
+            var hasUsageForTurn = await db.UsageEvents
+                .Where(u => u.NotebookConversationMessageId != null
+                         && turnMessageIds.Contains(u.NotebookConversationMessageId.Value))
+                .AnyAsync(ct);
+
+            if (hasUsageForTurn)
+            {
+                return;
+            }
+
+            Guid? messageIdForUsage = currentAssistantMessageId
+                ?? (assistantMessageIds.Count > 0 ? assistantMessageIds[^1] : null);
+
+            if (messageIdForUsage == null)
+            {
+                messageIdForUsage = await db.NotebookConversationMessages
+                    .Where(m => m.NotebookConversationId == ctx.Conversation.Id
+                             && m.TurnIndex == ctx.TurnIndex
+                             && m.Role == DataModelChatRole.Assistant)
+                    .OrderByDescending(m => m.Created)
+                    .Select(m => (Guid?)m.Id)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            if (messageIdForUsage == null)
+            {
+                return;
+            }
+
+            var usageService = LlmProviderResolver.ResolveUsageServiceName(ctx.ModelDeploymentId, _scopeFactory);
+            var markerMetadata = JsonSerializer.Serialize(new
+            {
+                cancellationType = "user_cancelled",
+                turnIndex = ctx.TurnIndex
+            });
+
+            await _usageRecorder.RecordChatAsync(
+                projectId: ctx.Conversation.Notebook.ProjectId,
+                notebookId: ctx.Conversation.NotebookId,
+                service: usageService,
+                modelDeploymentId: ctx.ModelDeploymentId ?? string.Empty,
+                metrics: new UsageMetrics(ValueInput: 0, ValueCachedInput: 0, ValueReasoning: 0, ValueOutput: 0),
+                conversationId: ctx.Conversation.Id,
+                metadataJson: markerMetadata,
+                assistantId: ctx.AssistantId,
+                notebookConversationMessageId: messageIdForUsage,
+                ct: ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to record cancelled-turn usage marker for conversation {ConversationId} turn {TurnIndex}",
+                ctx.Conversation.Id,
+                ctx.TurnIndex);
+        }
     }
 
     #endregion

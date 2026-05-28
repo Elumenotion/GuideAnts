@@ -295,6 +295,7 @@ public class PublishedConversationService : IPublishedConversationService
 
         NotebookConversation? dbConversation = null;
         ConversationTurn? dbTurn = null;
+        Guid? notebookConversationMessageId = null;
         var currentMessageSequence = 2; // user is 1
         var assistantMessageIds = new List<Guid>();
         var thinkingEmittedInStream = false;
@@ -330,6 +331,10 @@ public class PublishedConversationService : IPublishedConversationService
                                     && m.TurnIndex == dbTurn.TurnIndex)
                         .MaxAsync(m => (int?)m.MessageSequence, cancellationToken) ?? 1;
                     currentMessageSequence = maxExistingSequence + 1;
+                    notebookConversationMessageId = await ResolveTurnUsageMessageIdAsync(
+                        dbConversation.Id,
+                        dbTurn.TurnIndex,
+                        cancellationToken);
                 }
             }
 
@@ -446,6 +451,17 @@ public class PublishedConversationService : IPublishedConversationService
             if (lastToolCalls.Count > 0)
             {
                 var httpClient = _httpClientFactory.CreateClient();
+                var invocationAssistantId = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
+                var resumeToolContext = new AntRunner.ToolCalling.InvocationContext(
+                    ProjectId: dbConversation.Notebook.ProjectId,
+                    NotebookId: dbConversation.NotebookId,
+                    ConversationId: dbConversation.Id,
+                    OAuthUserAccessToken: null)
+                {
+                    AssistantId = invocationAssistantId,
+                    NotebookConversationMessageId = notebookConversationMessageId
+                };
+
                 await AntRunner.Chat.ThreadRun.DoToolCalls(
                     assistantDefForResume,
                     lastToolCalls,
@@ -453,14 +469,20 @@ public class PublishedConversationService : IPublishedConversationService
                     oAuthUserAccessToken: null,
                     httpClient: httpClient,
                     messageAdded: onMessageAdded,
-                    ctx: new AntRunner.ToolCalling.InvocationContext(
-                        ProjectId: dbConversation.Notebook.ProjectId,
-                        NotebookId: dbConversation.NotebookId,
-                        ConversationId: dbConversation.Id,
-                        OAuthUserAccessToken: null));
+                    ctx: resumeToolContext);
             }
 
             var resolvedResume = _chatModelResolver.Resolve(assistantDefForResume.Model);
+            var resumeAssistantId = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
+            var resumeContext = new AntRunner.ToolCalling.InvocationContext(
+                ProjectId: dbConversation.Notebook.ProjectId,
+                NotebookId: dbConversation.NotebookId,
+                ConversationId: dbConversation.Id,
+                OAuthUserAccessToken: null)
+            {
+                AssistantId = resumeAssistantId,
+                NotebookConversationMessageId = notebookConversationMessageId
+            };
 
             // Continue LLM run without adding a new user message
             var continueTask = AntRunner.Chat.ThreadRun.ExecuteAsync(
@@ -489,11 +511,7 @@ public class PublishedConversationService : IPublishedConversationService
                     }
                 },
                 resumeWithoutNewUserMessage: true,
-                ctx: new AntRunner.ToolCalling.InvocationContext(
-                    ProjectId: dbConversation.Notebook.ProjectId,
-                    NotebookId: dbConversation.NotebookId,
-                    ConversationId: dbConversation.Id,
-                    OAuthUserAccessToken: null),
+                ctx: resumeContext,
                 token: cancellationToken,
                 isAgentInvocation: false);
 
@@ -594,63 +612,62 @@ public class PublishedConversationService : IPublishedConversationService
                         catch { /* best-effort */ }
                     }
 
-                    // Record tool call usage for all tool messages in this turn (query DB like ConversationService)
-                    // Skip any already recorded (handles multiple resume cycles within a single turn)
-                    try
-                    {
-                        using var scopeTools = _scopeFactory.CreateScope();
-                        var dbTools = scopeTools.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-                        var toolMessages = await dbTools.NotebookConversationMessages
-                            .Where(m => m.NotebookConversationId == dbConversation!.Id
-                                     && m.TurnIndex == dbTurn!.TurnIndex
-                                     && m.Role == DataModelChatRole.Tool
-                                     && m.FunctionName != null)
-                            .Select(m => new { m.Id, m.FunctionName, m.ToolCallId, ContentLength = m.Content != null ? m.Content.Length : 0 })
-                            .ToListAsync(CancellationToken.None);
-
-                        // Get IDs of tool messages that already have usage events recorded
-                        var toolMessageIds = toolMessages.Select(m => m.Id).ToList();
-                        var alreadyRecordedIds = await dbTools.UsageEvents
-                            .Where(u => u.NotebookConversationMessageId != null
-                                     && toolMessageIds.Contains(u.NotebookConversationMessageId.Value)
-                                     && u.Category == GuideAntsApi.DataModel.Models.UsageCategory.ToolCall)
-                            .Select(u => u.NotebookConversationMessageId!.Value)
-                            .ToListAsync(CancellationToken.None);
-                        var alreadyRecordedSet = new HashSet<Guid>(alreadyRecordedIds);
-
-                        foreach (var toolMsg in toolMessages)
-                        {
-                            // Skip crew bridge invocations - they record their own usage
-                            if (string.Equals(toolMsg.FunctionName, "InvokeAgent", StringComparison.OrdinalIgnoreCase))
-                                continue;
-
-                            // Skip if already recorded (from a previous resume cycle)
-                            if (alreadyRecordedSet.Contains(toolMsg.Id))
-                                continue;
-
-                            await _usageRecorder.RecordToolCallAsync(
-                                projectId: dbConversation!.Notebook.ProjectId,
-                                notebookId: dbConversation.NotebookId,
-                                conversationId: dbConversation.Id,
-                                functionName: toolMsg.FunctionName!,
-                                metadataJson: JsonSerializer.Serialize(new
-                                {
-                                    toolCallId = toolMsg.ToolCallId,
-                                    functionName = toolMsg.FunctionName,
-                                    contentLength = toolMsg.ContentLength
-                                }),
-                                assistantId: assistantId,
-                                notebookConversationMessageId: toolMsg.Id,
-                                ct: CancellationToken.None);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to record tool call usage in ResumeAfterExternalToolResultsStreamAsync");
-                    }
+                    await RecordPublishedToolCallUsageForTurnAsync(
+                        projectId: dbConversation.Notebook.ProjectId,
+                        notebookId: dbConversation.NotebookId,
+                        conversationId: dbConversation.Id,
+                        turnIndex: dbTurn!.TurnIndex,
+                        assistantId: assistantId,
+                        ct: CancellationToken.None,
+                        contextLabel: "ResumeAfterExternalToolResultsStreamAsync");
 
                     writer.TryWrite(new StreamingEvent(StreamingEventTypes.Complete, "{}"));
+                }
+                catch (OperationCanceledException)
+                {
+                    if (dbConversation != null && dbTurn != null)
+                    {
+                        try
+                        {
+                            using var scope = _scopeFactory.CreateScope();
+                            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                            var turn = await db.ConversationTurns.FirstOrDefaultAsync(t => t.Id == dbTurn.Id, CancellationToken.None);
+                            if (turn != null)
+                            {
+                                turn.Status = "cancelled";
+                                turn.LastUpdated = DateTime.UtcNow;
+                                await db.SaveChangesAsync(CancellationToken.None);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to mark published resume turn as cancelled");
+                        }
+
+                        var assistantId = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
+                        await RecordPublishedToolCallUsageForTurnAsync(
+                            projectId: dbConversation.Notebook.ProjectId,
+                            notebookId: dbConversation.NotebookId,
+                            conversationId: dbConversation.Id,
+                            turnIndex: dbTurn.TurnIndex,
+                            assistantId: assistantId,
+                            ct: CancellationToken.None,
+                            contextLabel: "ResumeAfterExternalToolResultsStreamAsync(cancelled)");
+
+                        await RecordPublishedCancelledTurnMarkerUsageAsync(
+                            projectId: dbConversation.Notebook.ProjectId,
+                            notebookId: dbConversation.NotebookId,
+                            conversationId: dbConversation.Id,
+                            turnIndex: dbTurn.TurnIndex,
+                            modelDeploymentId: dbTurn.ModelDeploymentId,
+                            assistantId: assistantId,
+                            preferredMessageId: assistantMessageIds.Count > 0 ? assistantMessageIds[^1] : null,
+                            ct: CancellationToken.None,
+                            contextLabel: "ResumeAfterExternalToolResultsStreamAsync(cancelled)");
+                    }
+
+                    var cancelPayload = new { message = "Stream was cancelled by user", type = "Cancellation", timestamp = DateTime.UtcNow };
+                    writer.TryWrite(new StreamingEvent("cancelled", JsonSerializer.Serialize(cancelPayload, _json)));
                 }
                 catch (Exception ex)
                 {
@@ -693,6 +710,7 @@ public class PublishedConversationService : IPublishedConversationService
 
 		NotebookConversation? dbConversation = null;
 		ConversationTurn? dbTurn = null;
+		Guid? userMessageId = null;
 		Guid? currentAssistantMessageId = null;
 		var assistantMessageIds = new List<Guid>();
 		var thinkingEmittedInStream = false;
@@ -814,6 +832,7 @@ public class PublishedConversationService : IPublishedConversationService
 				};
 				db.NotebookConversationMessages.Add(userMessage);
 				await db.SaveChangesAsync(cancellationToken);
+				userMessageId = userMessage.Id;
 
 				if (request.Attachments != null && request.Attachments.Count > 0)
 				{
@@ -1117,11 +1136,16 @@ public class PublishedConversationService : IPublishedConversationService
 			};
 
 			// Build invocation context explicitly for published runs.
+			var publishedAssistantId = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
 			var ctx = new AntRunner.ToolCalling.InvocationContext(
 				ProjectId: dbConversation.Notebook.ProjectId,
 				NotebookId: dbConversation.NotebookId,
 				ConversationId: dbConversation.Id,
-				OAuthUserAccessToken: chatOptions.oAuthUserAccessToken);
+				OAuthUserAccessToken: chatOptions.oAuthUserAccessToken)
+			{
+				AssistantId = publishedAssistantId,
+				NotebookConversationMessageId = userMessageId
+			};
 
 			// Kick off the run (inline streaming): start the run task first
 			var httpClient = _httpClientFactory.CreateClient();
@@ -1248,64 +1272,16 @@ public class PublishedConversationService : IPublishedConversationService
 						catch { /* best-effort */ }
 					}
 
-					// Record tool call usage for all tool messages in this turn (query DB like ConversationService)
-					// Skip any already recorded (handles edge cases with multiple resume cycles)
-					try
-					{
-						using var scopeTools = _scopeFactory.CreateScope();
-						var dbTools = scopeTools.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-						// Attribute usage to the underlying guide/assistant for parity with regular conversations.
-						Guid? assistantIdForTools = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
-
-						var toolMessages = await dbTools.NotebookConversationMessages
-							.Where(m => m.NotebookConversationId == dbConversation.Id
-									 && m.TurnIndex == dbTurn!.TurnIndex
-									 && m.Role == DataModelChatRole.Tool
-									 && m.FunctionName != null)
-							.Select(m => new { m.Id, m.FunctionName, m.ToolCallId, ContentLength = m.Content != null ? m.Content.Length : 0 })
-							.ToListAsync(CancellationToken.None);
-
-						// Get IDs of tool messages that already have usage events recorded
-						var toolMessageIds = toolMessages.Select(m => m.Id).ToList();
-						var alreadyRecordedIds = await dbTools.UsageEvents
-							.Where(u => u.NotebookConversationMessageId != null
-									 && toolMessageIds.Contains(u.NotebookConversationMessageId.Value)
-									 && u.Category == GuideAntsApi.DataModel.Models.UsageCategory.ToolCall)
-							.Select(u => u.NotebookConversationMessageId!.Value)
-							.ToListAsync(CancellationToken.None);
-						var alreadyRecordedSet = new HashSet<Guid>(alreadyRecordedIds);
-
-						foreach (var toolMsg in toolMessages)
-						{
-							// Skip crew bridge invocations - they record their own usage
-							if (string.Equals(toolMsg.FunctionName, "InvokeAgent", StringComparison.OrdinalIgnoreCase))
-								continue;
-
-							// Skip if already recorded
-							if (alreadyRecordedSet.Contains(toolMsg.Id))
-								continue;
-
-							await _usageRecorder.RecordToolCallAsync(
-								projectId: dbConversation.Notebook.ProjectId,
-								notebookId: dbConversation.NotebookId,
-								conversationId: dbConversation.Id,
-								functionName: toolMsg.FunctionName!,
-								metadataJson: JsonSerializer.Serialize(new
-								{
-									toolCallId = toolMsg.ToolCallId,
-									functionName = toolMsg.FunctionName,
-									contentLength = toolMsg.ContentLength
-								}),
-								assistantId: assistantIdForTools,
-								notebookConversationMessageId: toolMsg.Id,
-								ct: CancellationToken.None);
-						}
-					}
-					catch (Exception ex)
-					{
-						_logger.LogWarning(ex, "Failed to record tool call usage for turn {TurnIndex}", dbTurn!.TurnIndex);
-					}
+					// Attribute usage to the underlying guide/assistant for parity with regular conversations.
+					Guid? assistantIdForTools = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
+					await RecordPublishedToolCallUsageForTurnAsync(
+						projectId: dbConversation.Notebook.ProjectId,
+						notebookId: dbConversation.NotebookId,
+						conversationId: dbConversation.Id,
+						turnIndex: dbTurn!.TurnIndex,
+						assistantId: assistantIdForTools,
+						ct: CancellationToken.None,
+						contextLabel: "SendMessageStreamAsync");
 
 					var turnReportedFileChanges =
 						(output?.NewFiles?.Count > 0) ||
@@ -1318,6 +1294,52 @@ public class PublishedConversationService : IPublishedConversationService
 					}
 
 					writer.TryWrite(new StreamingEvent(StreamingEventTypes.Complete, "{}"));
+				}
+				catch (OperationCanceledException)
+				{
+					if (dbConversation != null && dbTurn != null)
+					{
+						try
+						{
+							using var scope = _scopeFactory.CreateScope();
+							var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+							var turn = await db.ConversationTurns.FirstOrDefaultAsync(t => t.Id == dbTurn.Id, CancellationToken.None);
+							if (turn != null)
+							{
+								turn.Status = "cancelled";
+								turn.LastUpdated = DateTime.UtcNow;
+								await db.SaveChangesAsync(CancellationToken.None);
+							}
+						}
+						catch (Exception ex)
+						{
+							_logger.LogWarning(ex, "Failed to mark published turn as cancelled");
+						}
+
+						Guid? assistantId = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
+						await RecordPublishedToolCallUsageForTurnAsync(
+							projectId: dbConversation.Notebook.ProjectId,
+							notebookId: dbConversation.NotebookId,
+							conversationId: dbConversation.Id,
+							turnIndex: dbTurn.TurnIndex,
+							assistantId: assistantId,
+							ct: CancellationToken.None,
+							contextLabel: "SendMessageStreamAsync(cancelled)");
+
+						await RecordPublishedCancelledTurnMarkerUsageAsync(
+							projectId: dbConversation.Notebook.ProjectId,
+							notebookId: dbConversation.NotebookId,
+							conversationId: dbConversation.Id,
+							turnIndex: dbTurn.TurnIndex,
+							modelDeploymentId: modelDeploymentId,
+							assistantId: assistantId,
+							preferredMessageId: currentAssistantMessageId ?? (assistantMessageIds.Count > 0 ? assistantMessageIds[^1] : null),
+							ct: CancellationToken.None,
+							contextLabel: "SendMessageStreamAsync(cancelled)");
+					}
+
+					var cancelPayload = new { message = "Stream was cancelled by user", type = "Cancellation", timestamp = DateTime.UtcNow };
+					writer.TryWrite(new StreamingEvent("cancelled", JsonSerializer.Serialize(cancelPayload, _json)));
 				}
 				catch (Exception ex)
 				{
@@ -1341,6 +1363,188 @@ public class PublishedConversationService : IPublishedConversationService
 		await foreach (var ev in channel.Reader.ReadAllAsync(cancellationToken))
 		{
 			yield return ev;
+		}
+	}
+
+	private async Task RecordPublishedToolCallUsageForTurnAsync(
+		Guid projectId,
+		Guid notebookId,
+		Guid conversationId,
+		int turnIndex,
+		Guid? assistantId,
+		CancellationToken ct,
+		string contextLabel)
+	{
+		try
+		{
+			using var scopeTools = _scopeFactory.CreateScope();
+			var dbTools = scopeTools.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+			var toolMessages = await dbTools.NotebookConversationMessages
+				.Where(m => m.NotebookConversationId == conversationId
+						 && m.TurnIndex == turnIndex
+						 && m.Role == DataModelChatRole.Tool
+						 && m.FunctionName != null)
+				.Select(m => new { m.Id, m.FunctionName, m.ToolCallId, ContentLength = m.Content != null ? m.Content.Length : 0 })
+				.ToListAsync(ct);
+
+			if (toolMessages.Count == 0)
+			{
+				return;
+			}
+
+			// Get IDs of tool messages that already have usage events recorded.
+			var toolMessageIds = toolMessages.Select(m => m.Id).ToList();
+			var alreadyRecordedIds = await dbTools.UsageEvents
+				.Where(u => u.NotebookConversationMessageId != null
+						 && toolMessageIds.Contains(u.NotebookConversationMessageId.Value)
+						 && u.Category == GuideAntsApi.DataModel.Models.UsageCategory.ToolCall)
+				.Select(u => u.NotebookConversationMessageId!.Value)
+				.ToListAsync(ct);
+			var alreadyRecordedSet = new HashSet<Guid>(alreadyRecordedIds);
+
+			foreach (var toolMsg in toolMessages)
+			{
+				// Skip crew bridge invocations - they record their own usage.
+				if (string.Equals(toolMsg.FunctionName, "InvokeAgent", StringComparison.OrdinalIgnoreCase))
+				{
+					continue;
+				}
+
+				if (alreadyRecordedSet.Contains(toolMsg.Id))
+				{
+					continue;
+				}
+
+				await _usageRecorder.RecordToolCallAsync(
+					projectId: projectId,
+					notebookId: notebookId,
+					conversationId: conversationId,
+					functionName: toolMsg.FunctionName!,
+					metadataJson: JsonSerializer.Serialize(new
+					{
+						toolCallId = toolMsg.ToolCallId,
+						functionName = toolMsg.FunctionName,
+						contentLength = toolMsg.ContentLength
+					}),
+					assistantId: assistantId,
+					notebookConversationMessageId: toolMsg.Id,
+					ct: ct);
+			}
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "Failed to record published tool usage in {ContextLabel} for conversation {ConversationId} turn {TurnIndex}", contextLabel, conversationId, turnIndex);
+		}
+	}
+
+	private async Task<Guid?> ResolveTurnUsageMessageIdAsync(
+		Guid conversationId,
+		int turnIndex,
+		CancellationToken ct)
+	{
+		using var scope = _scopeFactory.CreateScope();
+		var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+		var userMessageId = await db.NotebookConversationMessages
+			.AsNoTracking()
+			.Where(m => m.NotebookConversationId == conversationId
+					 && m.TurnIndex == turnIndex
+					 && m.Role == DataModelChatRole.User)
+			.OrderBy(m => m.MessageSequence)
+			.Select(m => (Guid?)m.Id)
+			.FirstOrDefaultAsync(ct);
+
+		if (userMessageId.HasValue)
+		{
+			return userMessageId;
+		}
+
+		return await db.NotebookConversationMessages
+			.AsNoTracking()
+			.Where(m => m.NotebookConversationId == conversationId
+					 && m.TurnIndex == turnIndex)
+			.OrderBy(m => m.MessageSequence)
+			.Select(m => (Guid?)m.Id)
+			.FirstOrDefaultAsync(ct);
+	}
+
+	private async Task RecordPublishedCancelledTurnMarkerUsageAsync(
+		Guid projectId,
+		Guid notebookId,
+		Guid conversationId,
+		int turnIndex,
+		string? modelDeploymentId,
+		Guid? assistantId,
+		Guid? preferredMessageId,
+		CancellationToken ct,
+		string contextLabel)
+	{
+		try
+		{
+			using var scope = _scopeFactory.CreateScope();
+			var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+			var turnMessageIds = await db.NotebookConversationMessages
+				.Where(m => m.NotebookConversationId == conversationId
+						 && m.TurnIndex == turnIndex)
+				.Select(m => m.Id)
+				.ToListAsync(ct);
+
+			if (turnMessageIds.Count == 0)
+			{
+				return;
+			}
+
+			// If any usage already exists for this turn, no marker is needed.
+			var hasUsageForTurn = await db.UsageEvents
+				.Where(u => u.NotebookConversationMessageId != null
+						 && turnMessageIds.Contains(u.NotebookConversationMessageId.Value))
+				.AnyAsync(ct);
+			if (hasUsageForTurn)
+			{
+				return;
+			}
+
+			var messageIdForUsage = preferredMessageId;
+			if (messageIdForUsage == null)
+			{
+				messageIdForUsage = await db.NotebookConversationMessages
+					.Where(m => m.NotebookConversationId == conversationId
+							 && m.TurnIndex == turnIndex
+							 && m.Role == DataModelChatRole.Assistant)
+					.OrderByDescending(m => m.Created)
+					.Select(m => (Guid?)m.Id)
+					.FirstOrDefaultAsync(ct);
+			}
+
+			if (messageIdForUsage == null)
+			{
+				return;
+			}
+
+			var usageService = LlmProviderResolver.ResolveUsageServiceName(modelDeploymentId, _scopeFactory);
+			var markerMetadata = JsonSerializer.Serialize(new
+			{
+				cancellationType = "user_cancelled",
+				turnIndex = turnIndex
+			});
+
+			await _usageRecorder.RecordChatAsync(
+				projectId: projectId,
+				notebookId: notebookId,
+				service: usageService,
+				modelDeploymentId: modelDeploymentId ?? string.Empty,
+				metrics: new UsageMetrics(ValueInput: 0, ValueCachedInput: 0, ValueReasoning: 0, ValueOutput: 0),
+				conversationId: conversationId,
+				metadataJson: markerMetadata,
+				assistantId: assistantId,
+				notebookConversationMessageId: messageIdForUsage,
+				ct: ct);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "Failed to record cancelled turn marker in {ContextLabel} for conversation {ConversationId} turn {TurnIndex}", contextLabel, conversationId, turnIndex);
 		}
 	}
 

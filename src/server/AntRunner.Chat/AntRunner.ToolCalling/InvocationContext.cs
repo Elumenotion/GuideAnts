@@ -28,6 +28,19 @@ public sealed record InvocationContext(
     public Guid? CurrentInvocationId { get; set; }
 
     /// <summary>
+    /// The notebook conversation message used to attribute top-level tool/service usage.
+    /// Null for usage recorded inside agent invocations.
+    /// </summary>
+    public Guid? NotebookConversationMessageId { get; set; }
+
+    /// <summary>
+    /// Returns the conversation message attribution only when this context is not
+    /// already attributed to an agent invocation.
+    /// </summary>
+    public Guid? NotebookConversationMessageIdForUsage =>
+        CurrentInvocationId.HasValue ? null : NotebookConversationMessageId;
+
+    /// <summary>
     /// Depth in the invocation hierarchy. 0 = called from main conversation.
     /// </summary>
     public int InvocationDepth { get; set; } = 0;

@@ -37,7 +37,7 @@ public static class MemoryTools
         [Parameter(Description = "Semantic query terms")] string query,
         [Parameter(Description = "Invocation context", Hidden = true)] InvocationContext? context = null)
         => await HybridSearchAsync(query, context?.ProjectId.ToString() ?? "", notebookId: null,
-            conversationId: context?.ConversationId.ToString());
+            context: context);
 
     // ---------------------------- NOTEBOOK ----------------------------
 
@@ -51,7 +51,7 @@ public static class MemoryTools
         [Parameter(Description = "Search query")] string query,
         [Parameter(Description = "Invocation context", Hidden = true)] InvocationContext? context = null)
         => await HybridSearchAsync(query, context?.ProjectId.ToString() ?? "", context?.NotebookId,
-            conversationId: context?.ConversationId.ToString());
+            context: context);
 
     [Tool(
         OperationId = "WebSearch",
@@ -105,7 +105,8 @@ public static class MemoryTools
                         resultsCount = response.Web.Results.Count
                     }),
                     assistantId: context.AssistantId,
-                    agentInvocationId: context.CurrentInvocationId);
+                    agentInvocationId: context.CurrentInvocationId,
+                    notebookConversationMessageId: context.NotebookConversationMessageIdForUsage);
             }
         }
         catch
@@ -178,7 +179,8 @@ public static class MemoryTools
                     conversationId: context.ConversationId,
                     metadataJson: JsonSerializer.Serialize(new { query, indexName, resultsCount = consolidatedResults.Count }),
                     assistantId: context.AssistantId,
-                    agentInvocationId: context.CurrentInvocationId);
+                    agentInvocationId: context.CurrentInvocationId,
+                    notebookConversationMessageId: context.NotebookConversationMessageIdForUsage);
             }
         }
         catch { /* best-effort */ }
@@ -191,7 +193,7 @@ public static class MemoryTools
     private static async Task<string> HybridSearchAsync(string query,
                                                         string projectId,
                                                         Guid? notebookId = null,
-                                                        string? conversationId = null)
+                                                        InvocationContext? context = null)
     {
         if (string.IsNullOrWhiteSpace(query))
             return Json("Query cannot be empty.");
@@ -229,8 +231,11 @@ public static class MemoryTools
                     service: "HybridSearch",
                     operation: notebookId.HasValue ? "SearchNotebook" : "SearchProject",
                     metrics: new GuideAnts.Usage.UsageMetrics(ValueOther: 1),
-                    conversationId: Guid.TryParse(conversationId, out var cId) ? cId : null,
-                    metadataJson: JsonSerializer.Serialize(new { query, notebookOnly = notebookId.HasValue, resultsCount = consolidatedResults.Count }));
+                    conversationId: context?.ConversationId,
+                    metadataJson: JsonSerializer.Serialize(new { query, notebookOnly = notebookId.HasValue, resultsCount = consolidatedResults.Count }),
+                    assistantId: context?.AssistantId,
+                    agentInvocationId: context?.CurrentInvocationId,
+                    notebookConversationMessageId: context?.NotebookConversationMessageIdForUsage);
             }
         }
         catch { /* best-effort */ }

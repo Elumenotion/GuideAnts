@@ -16,6 +16,10 @@ import {
   ChatModelConfigurator,
   ChatModelConfigValue,
 } from '../../../components/chat-model/ChatModelConfigurator';
+import {
+  buildChatDefaultsUpdateRequest,
+  chatDefaultsToConfig,
+} from '../../../components/chat-model/chatDefaults';
 import { TextActionButton } from './shared/ActionButtons';
 
 /**
@@ -118,48 +122,6 @@ function buildChatProviderRows(overview: SettingsOverviewDto): ChatProviderRow[]
   return rows;
 }
 
-function parseSamplingOverrides(json?: string | null): Record<string, number> {
-  if (!json) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(json) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return {};
-    }
-    const out: Record<string, number> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      if (typeof v === 'number' && !Number.isNaN(v)) {
-        out[k] = v;
-      }
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function buildChatDefaultsPayload(
-  base: ChatDefaultsDto,
-  config: ChatModelConfigValue,
-  overrideAllChatModels: boolean
-) {
-  const samplingParametersJson =
-    config.samplingOverrides && Object.keys(config.samplingOverrides).length > 0
-      ? JSON.stringify(config.samplingOverrides)
-      : null;
-
-  return {
-    rowVersion: base.rowVersion,
-    defaultModelId: config.modelId ? config.modelId : null,
-    overrideAllChatModels,
-    temperature: config.temperature,
-    topP: config.topP,
-    reasoningEffort: config.reasoningEffort ?? null,
-    samplingParametersJson,
-  };
-}
-
 export function OverviewTab({
   onOpenConnections,
   onOpenServices,
@@ -209,13 +171,7 @@ export function OverviewTab({
       const data = await api.settings.chatDefaults.get();
       setChatDefaults(data);
       setOverrideAllChatModels(data.overrideAllChatModels);
-      setConfigValue({
-        modelId: data.defaultModelId ?? '',
-        temperature: data.temperature ?? null,
-        topP: data.topP ?? null,
-        reasoningEffort: data.reasoningEffort ?? undefined,
-        samplingOverrides: parseSamplingOverrides(data.samplingParametersJson),
-      });
+      setConfigValue(chatDefaultsToConfig(data));
     } catch (err) {
       setChatDefaultsError(err instanceof Error ? err.message : 'Failed to load default chat settings.');
       setChatDefaults(null);
@@ -271,17 +227,11 @@ export function OverviewTab({
     setChatDefaultsSaving(true);
     setShowOverrideSavedBanner(false);
     try {
-      const payload = buildChatDefaultsPayload(chatDefaults, configValue, overrideAllChatModels);
+      const payload = buildChatDefaultsUpdateRequest(chatDefaults, configValue, overrideAllChatModels);
       const updated = await api.settings.chatDefaults.update(payload);
       setChatDefaults(updated);
       setOverrideAllChatModels(updated.overrideAllChatModels);
-      setConfigValue({
-        modelId: updated.defaultModelId ?? '',
-        temperature: updated.temperature ?? 1,
-        topP: updated.topP ?? 1,
-        reasoningEffort: updated.reasoningEffort ?? undefined,
-        samplingOverrides: parseSamplingOverrides(updated.samplingParametersJson),
-      });
+      setConfigValue(chatDefaultsToConfig(updated));
       showToast({ type: 'success', title: 'Default chat model saved' });
       if (updated.overrideAllChatModels) {
         setShowOverrideSavedBanner(true);

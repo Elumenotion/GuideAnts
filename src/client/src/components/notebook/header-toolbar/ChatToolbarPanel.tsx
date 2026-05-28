@@ -4,12 +4,14 @@ import { api } from '../../../services/api';
 import { textButtonClassName } from '../../../pages/settings/components/shared/ActionButtons';
 import type { ChatPanelProps } from './types';
 import { WORKSPACE_CONTROLS_COPY, statusToneClass } from './toolbarFormatters';
-import type { ChatDefaultsDto } from '../../../types/settings';
+import type { ChatDefaultsDto, UpdateChatDefaultsRequest } from '../../../types/settings';
 import type { ModelDto } from '../../../types/guides';
 import {
-  normalizeReasoningEffortForModel,
-  normalizeSamplingValueForModel,
-} from '../../chat-model/reasoning';
+  buildChatDefaultsModelChangeRequest,
+  buildChatDefaultsUpdateRequest,
+  chatDefaultsToConfig,
+  normalizeChatModelConfigForModel,
+} from '../../chat-model/chatDefaults';
 
 const OP_POLL_MS = 2_000;
 
@@ -68,46 +70,21 @@ export function ChatToolbarPanel({
     [catalogModels]
   );
 
-  const normalizeChatDefaults = useCallback((next: ChatDefaultsDto): ChatDefaultsDto => {
-    const normalizedModelId = next.defaultModelId ?? null;
-    const selectedModel = normalizedModelId ? catalogModelById.get(normalizedModelId) : undefined;
-    const modelChanged = normalizedModelId !== (chatDefaults?.defaultModelId ?? null);
+  const resolveCatalogModel = async (modelId: string): Promise<ModelDto | undefined> => {
+    const existing = catalogModelById.get(modelId);
+    if (existing) {
+      return existing;
+    }
 
-    return {
-      ...next,
-      defaultModelId: normalizedModelId,
-      reasoningEffort:
-        selectedModel
-          ? (normalizeReasoningEffortForModel(selectedModel, next.reasoningEffort) ?? null)
-          : modelChanged
-            ? null
-            : (next.reasoningEffort ?? null),
-      temperature: selectedModel
-        ? normalizeSamplingValueForModel(selectedModel, 'temperature', next.temperature)
-        : modelChanged
-          ? null
-          : (next.temperature ?? null),
-      topP: selectedModel
-        ? normalizeSamplingValueForModel(selectedModel, 'top_p', next.topP)
-        : modelChanged
-          ? null
-          : (next.topP ?? null),
-    };
-  }, [catalogModelById, chatDefaults?.defaultModelId]);
+    const models = await api.guides.catalogs.models();
+    setCatalogModels(models);
+    return models.find((model) => model.modelId === modelId);
+  };
 
-  const updateChatDefaults = async (next: ChatDefaultsDto) => {
+  const updateChatDefaultsFromRequest = async (request: UpdateChatDefaultsRequest) => {
     setInFlight(true);
     try {
-      const normalized = normalizeChatDefaults(next);
-      const updated = await api.settings.chatDefaults.update({
-        rowVersion: normalized.rowVersion,
-        defaultModelId: normalized.defaultModelId ?? null,
-        overrideAllChatModels: normalized.overrideAllChatModels,
-        temperature: normalized.temperature ?? null,
-        topP: normalized.topP ?? null,
-        reasoningEffort: normalized.reasoningEffort ?? null,
-        samplingParametersJson: normalized.samplingParametersJson ?? null,
-      });
+      const updated = await api.settings.chatDefaults.update(request);
       setChatDefaults(updated);
       setChatDefaultsError(null);
       await onRefresh();
@@ -116,6 +93,14 @@ export function ChatToolbarPanel({
     } finally {
       setInFlight(false);
     }
+  };
+
+  const updateChatDefaults = async (next: ChatDefaultsDto) => {
+    const selectedModel = next.defaultModelId ? await resolveCatalogModel(next.defaultModelId) : undefined;
+    const normalizedConfig = normalizeChatModelConfigForModel(chatDefaultsToConfig(next), selectedModel);
+    await updateChatDefaultsFromRequest(
+      buildChatDefaultsUpdateRequest(next, normalizedConfig, next.overrideAllChatModels)
+    );
   };
 
   const toggleOverrideAllChatModels = async () => {
@@ -129,11 +114,13 @@ export function ChatToolbarPanel({
   const setGlobalModel = async (modelId: string) => {
     if (!overrideAllChatModels) return;
     const current = chatDefaults ?? await api.settings.chatDefaults.get();
-    await updateChatDefaults({
-      ...current,
-      defaultModelId: modelId,
-      overrideAllChatModels: true,
-    });
+    const selectedModel = await resolveCatalogModel(modelId);
+    await updateChatDefaultsFromRequest(buildChatDefaultsModelChangeRequest(
+      current,
+      modelId,
+      selectedModel,
+      true
+    ));
   };
 
   const powerOn = async () => {

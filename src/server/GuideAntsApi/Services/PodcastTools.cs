@@ -172,7 +172,8 @@ public class NotebookPodcastService : INotebookPodcastService
                                 conversationId: context.ConversationId,
                                 metadataJson: null,
                                 assistantId: context.AssistantId,
-                                agentInvocationId: context.CurrentInvocationId);
+                                agentInvocationId: context.CurrentInvocationId,
+                                notebookConversationMessageId: context.NotebookConversationMessageIdForUsage);
 
                             var fileInfo = new FileInfo(filePath);
                             await recorder.RecordAsync(
