@@ -481,6 +481,13 @@ Required pre-test sequence for embeddings:
 
 Startup loading behavior is configurable per service through environment variables.
 
+- `CUDA_VISIBLE_DEVICES` (optional; sourced from active env)
+  - global GPU ordering for processes in the container when set (example `1,0` maps `host GPU 1 -> cuda:0`, `host GPU 0 -> cuda:1`)
+- Optional per-service CUDA pinning (comma-separated physical GPU ids; empty value means inherit global ordering):
+  - `GA_LLAMA_CUDA_VISIBLE_DEVICES`
+  - `GA_ASR_CUDA_VISIBLE_DEVICES`
+  - `GA_TTS_CUDA_VISIBLE_DEVICES`
+  - `GA_EMB_CUDA_VISIBLE_DEVICES`
 - `GA_ASR_AUTO_LOAD_ON_STARTUP` (`1`/`0`)
   - `1`: autoload ASR model on ASR service startup
   - `0`: do not autoload ASR model
@@ -544,9 +551,44 @@ Startup loading behavior is configurable per service through environment variabl
   - `1`: run an SD readiness monitor (`/sd/health`) in background during startup
   - `0`: skip SD readiness monitoring on startup
 - `GA_SD_READY_TIMEOUT_SECONDS` (default `1800`)
-- `GA_SD_CUDA_VISIBLE_DEVICES` (optional explicit SD GPU pinning; current deployment uses `1`)
+- `GA_SD_CUDA_VISIBLE_DEVICES` (optional explicit SD physical GPU pinning; empty value means inherit global ordering)
+- `GA_EMB_TARGET_DEVICES` (default `cuda:0,cuda:1`; logical indices interpreted after CUDA remapping)
 
 Default compose behavior starts gateway-backed services in parallel. Optional readiness checks are non-blocking monitors so one service startup does not block others.
+
+## CUDA Visibility Verification Matrix
+
+Use this checklist after changing GPU routing vars. The expected behavior is:
+
+- global `CUDA_VISIBLE_DEVICES` controls container-wide logical GPU order
+- `GA_*_CUDA_VISIBLE_DEVICES` (when set) overrides only that service process
+- empty `GA_*_CUDA_VISIBLE_DEVICES` inherits global ordering
+
+| Path | Setup | Verify commands | Expected pass criteria |
+| --- | --- | --- | --- |
+| Compose (local CUDA) | `docker compose -f docker/docker-compose.cuda.yml up -d` | `docker logs guideants-ai` and `docker logs docling-serve` | `guideants-ai` sees expected global ordering; service-specific pins only apply where configured |
+| Compose (GHCR CUDA) | `docker compose -f docker/docker-compose.ghcr-cuda13.yml up -d` | `docker logs guideants-ai` and runtime API smoke calls | Same behavior as local CUDA stack |
+| Standalone PS1 | `pwsh .\\docker\\llama\\run\\start-llama-server.ps1` | `docker logs guideants-ai` | No hardcoded SD pin; values come from params/env only |
+
+### Runtime Checks
+
+1. **llama**
+   - look for `device_info` lines and confirm `CUDA0/CUDA1` mapping matches expected logical order.
+2. **SD**
+   - look for `ggml_cuda_init` and confirm visible devices match either global order (inherit) or `GA_SD_CUDA_VISIBLE_DEVICES` (override).
+3. **ASR/TTS**
+   - confirm startup logs show CUDA availability and successful model load on intended device ordering.
+4. **Embeddings**
+   - if `GA_EMB_DEVICE=cuda-multi`, verify `GA_EMB_TARGET_DEVICES` is interpreted as logical indices after remap.
+
+### Suggested Smoke Matrix
+
+| Case | `CUDA_VISIBLE_DEVICES` | Service override | Expected result |
+| --- | --- | --- | --- |
+| A (inherit all) | `1,0` | all `GA_*_CUDA_VISIBLE_DEVICES` empty | all services follow remapped order |
+| B (SD pin only) | `1,0` | `GA_SD_CUDA_VISIBLE_DEVICES=0` | SD pinned to physical GPU 0, others inherit |
+| C (llama pin only) | `1,0` | `GA_LLAMA_CUDA_VISIBLE_DEVICES=1` | llama pinned to physical GPU 1, others inherit |
+| D (no global remap) | empty | targeted `GA_*_CUDA_VISIBLE_DEVICES` set | only explicitly pinned services are constrained |
 
 ## Extending the Image
 

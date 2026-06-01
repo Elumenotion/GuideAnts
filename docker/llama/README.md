@@ -63,6 +63,13 @@ pwsh .\run\test-openai-chat.ps1
 - Server startup always includes `--jinja` (required for current local model families).
 - Runtime model loading is explicit through `/models/load`; no autoload fallback is assumed.
 - Startup load controls (ASR + SD + TTS + Embeddings) are environment-driven:
+  - `CUDA_VISIBLE_DEVICES=<gpu-id-list>` (optional; sourced from active env)
+    - Global ordering for all services in the container when set (example `1,0` maps `host GPU 1 -> cuda:0`, `host GPU 0 -> cuda:1`)
+  - Optional per-service overrides (comma-separated physical GPU ids; empty means inherit global ordering):
+    - `GA_LLAMA_CUDA_VISIBLE_DEVICES`
+    - `GA_ASR_CUDA_VISIBLE_DEVICES`
+    - `GA_TTS_CUDA_VISIBLE_DEVICES`
+    - `GA_EMB_CUDA_VISIBLE_DEVICES`
   - `GA_ASR_AUTO_LOAD_ON_STARTUP=1|0`
   - `GA_ASR_DEVICE_MAP=auto` (default)
   - `GA_TTS_AUTO_LOAD_ON_STARTUP=1|0`
@@ -72,7 +79,7 @@ pwsh .\run\test-openai-chat.ps1
   - `GA_EMB_WAIT_FOR_READY_ON_STARTUP=1|0`
   - `GA_EMB_READY_TIMEOUT_SECONDS`
   - `GA_SD_AUTO_LOAD_ON_STARTUP=1|0`
-  - `GA_SD_CUDA_VISIBLE_DEVICES=<gpu-id-list>` (set `1` for current deployment)
+  - `GA_SD_CUDA_VISIBLE_DEVICES=<gpu-id-list>` (optional SD-only physical GPU pinning; empty inherits global ordering)
   - `GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS`
   - `GA_SD_WARMUP_PROMPT`, `GA_SD_WARMUP_SIZE`, `GA_SD_WARMUP_STEPS`, `GA_SD_WARMUP_OUTPUT_FORMAT`
   - `GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS`

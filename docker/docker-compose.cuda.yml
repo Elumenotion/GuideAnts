@@ -43,12 +43,15 @@ services:
       # GA_*_MODEL_DIR env var below. Populated by
       # docker/scripts/migrate-local-models-to-single-volume.ps1 before
       # the stack is started for the first time on this host.
-      - ai_local_models_setup_tests:/models-local
+      - ai_local_models:/models-local
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
     environment:
       - FILE_STORAGE_ROOT=/app/ContentFiles
+      # Optional global GPU ordering for all guideants-ai workloads.
+      # Value is sourced from active environment only.
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
       # Optional: host .env HF_TOKEN for docker exec / scripted hf downloads (download-*.ps1). Not used by llama inference.
       - HF_TOKEN=${HF_TOKEN:-}
       # Router aliases live on the named volume (with GGUF trees), not a host bind.
@@ -67,6 +70,7 @@ services:
       - GA_LLAMA_JINJA=1
       - GA_LLAMA_CONT_BATCH=1
       - GA_LLAMA_NO_MMAP=0
+      - GA_LLAMA_CUDA_VISIBLE_DEVICES=${GA_LLAMA_CUDA_VISIBLE_DEVICES:-}
       - GA_ASR_HOST=127.0.0.1
       - GA_ASR_PORT=8082
       - GA_ASR_MODEL_DIR=/models-local/asr
@@ -77,6 +81,7 @@ services:
       - GA_ASR_READY_TIMEOUT_SECONDS=${GA_ASR_READY_TIMEOUT_SECONDS:-1800}
       - GA_ASR_DEVICE_MAP=auto
       - GA_ASR_DTYPE=bfloat16
+      - GA_ASR_CUDA_VISIBLE_DEVICES=${GA_ASR_CUDA_VISIBLE_DEVICES:-}
       - GA_ASR_MAX_INFERENCE_BATCH_SIZE=8
       - GA_ASR_MAX_NEW_TOKENS=512
       - GA_ASR_WARMUP_ON_LOAD=${GA_ASR_WARMUP_ON_LOAD:-1}
@@ -94,6 +99,7 @@ services:
       - GA_TTS_READY_TIMEOUT_SECONDS=${GA_TTS_READY_TIMEOUT_SECONDS:-1800}
       - GA_TTS_DEVICE_MAP=auto
       - GA_TTS_DTYPE=bfloat16
+      - GA_TTS_CUDA_VISIBLE_DEVICES=${GA_TTS_CUDA_VISIBLE_DEVICES:-}
       - GA_TTS_TIMEOUT_SECONDS=300
       - GA_TTS_MAX_NEW_TOKENS=512
       - GA_TTS_SAMPLE_RATE=24000
@@ -104,6 +110,7 @@ services:
       - GA_EMB_DEFAULT_MODEL_PATH=${GA_EMB_DEFAULT_MODEL_PATH}
       - GA_EMB_DEVICE=${GA_EMB_DEVICE:-cuda}
       - GA_EMB_TARGET_DEVICES=${GA_EMB_TARGET_DEVICES:-cuda:0,cuda:1}
+      - GA_EMB_CUDA_VISIBLE_DEVICES=${GA_EMB_CUDA_VISIBLE_DEVICES:-}
       - GA_EMB_FIX_MISTRAL_REGEX=${GA_EMB_FIX_MISTRAL_REGEX:-1}
       - GA_EMB_AUTO_LOAD_ON_STARTUP=${GA_EMB_AUTO_LOAD_ON_STARTUP}
       - GA_EMB_WARMUP_ON_LOAD=${GA_EMB_WARMUP_ON_LOAD}
@@ -136,7 +143,9 @@ services:
       - GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP=${GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP:-1}
       - GA_SD_WAIT_FOR_READY_ON_STARTUP=${GA_SD_WAIT_FOR_READY_ON_STARTUP:-0}
       - GA_SD_READY_TIMEOUT_SECONDS=${GA_SD_READY_TIMEOUT_SECONDS:-1800}
-      - GA_SD_CUDA_VISIBLE_DEVICES=${GA_SD_CUDA_VISIBLE_DEVICES:-0}
+      # Optional SD-only physical GPU pinning. Empty => inherit global
+      # CUDA_VISIBLE_DEVICES ordering from this container.
+      - GA_SD_CUDA_VISIBLE_DEVICES=${GA_SD_CUDA_VISIBLE_DEVICES:-}
     networks:
       - guideants-network
     restart: unless-stopped
@@ -147,6 +156,8 @@ services:
     container_name: docling-serve
     environment:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
+      # Keep document intelligence on the same GPU visibility/order seam.
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
     deploy:
       resources:
         reservations:
@@ -250,7 +261,7 @@ volumes:
   mssql_data:
   mssql_ftdata:
   mssql_log:
-  ai_local_models_setup_tests:
+  ai_local_models:
 
 networks:
   guideants-network:

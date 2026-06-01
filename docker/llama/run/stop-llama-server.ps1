@@ -1,5 +1,5 @@
 param(
-    [string]$ContainerName = 'llama-router-server',
+    [string]$ContainerName = 'guideants-ai',
     [switch]$Remove
 )
 

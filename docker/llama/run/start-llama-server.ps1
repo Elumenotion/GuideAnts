@@ -14,6 +14,14 @@ param(
     [int]$CacheRamMiB = 8192,
     [int]$GpuLayers = 999,
     [int]$ModelsMax = 1,
+    [string]$CudaVisibleDevices,
+    [string]$LlamaCudaVisibleDevices,
+    [string]$AsrCudaVisibleDevices,
+    [string]$TtsCudaVisibleDevices,
+    [string]$EmbCudaVisibleDevices,
+    [string]$SdCudaVisibleDevices,
+    [string]$EmbDevice,
+    [string]$EmbTargetDevices,
     [switch]$NoContBatching,
     [switch]$UseMmap
 )
@@ -23,11 +31,33 @@ $ErrorActionPreference = 'Stop'
 $dockerRoot     = Split-Path -Parent $PSScriptRoot
 $repoDockerRoot = Split-Path -Parent $dockerRoot
 
-# Resolve image tag: explicit param > .env.generated > error
+function Resolve-OptionalValue {
+    param(
+        [string]$ProvidedValue,
+        [string]$EnvName,
+        [string]$DefaultValue = ''
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ProvidedValue)) {
+        return $ProvidedValue.Trim()
+    }
+
+    $envValue = [Environment]::GetEnvironmentVariable($EnvName)
+    if (-not [string]::IsNullOrWhiteSpace($envValue)) {
+        return $envValue.Trim()
+    }
+
+    return $DefaultValue
+}
+
+# Resolve image tag: explicit param > docker/.env > error
 if ([string]::IsNullOrWhiteSpace($Image)) {
     $envPath = Join-Path $repoDockerRoot '.env'
     if (Test-Path $envPath) {
-        $envLine = Get-Content $envPath | Where-Object { $_ -match '^GA_AI_IMAGE=' }
+        $envLine = Get-Content $envPath | Where-Object { $_ -match '^GA_AI_CUDA_IMAGE=' }
+        if (-not $envLine) {
+            $envLine = Get-Content $envPath | Where-Object { $_ -match '^GA_AI_IMAGE=' }
+        }
         if ($envLine) { $Image = ($envLine -split '=', 2)[1].Trim() }
     }
 }
@@ -35,6 +65,15 @@ if ([string]::IsNullOrWhiteSpace($Image)) {
     Write-Error "No image specified. Pass -Image or run build_guideants_ai.ps1 first to generate docker/.env."
     exit 1
 }
+
+$CudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $CudaVisibleDevices -EnvName 'CUDA_VISIBLE_DEVICES'
+$LlamaCudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $LlamaCudaVisibleDevices -EnvName 'GA_LLAMA_CUDA_VISIBLE_DEVICES'
+$AsrCudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $AsrCudaVisibleDevices -EnvName 'GA_ASR_CUDA_VISIBLE_DEVICES'
+$TtsCudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $TtsCudaVisibleDevices -EnvName 'GA_TTS_CUDA_VISIBLE_DEVICES'
+$EmbCudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $EmbCudaVisibleDevices -EnvName 'GA_EMB_CUDA_VISIBLE_DEVICES'
+$SdCudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $SdCudaVisibleDevices -EnvName 'GA_SD_CUDA_VISIBLE_DEVICES'
+$EmbDevice = Resolve-OptionalValue -ProvidedValue $EmbDevice -EnvName 'GA_EMB_DEVICE' -DefaultValue 'cuda'
+$EmbTargetDevices = Resolve-OptionalValue -ProvidedValue $EmbTargetDevices -EnvName 'GA_EMB_TARGET_DEVICES' -DefaultValue 'cuda:0,cuda:1'
 
 $defaultContentDir = Join-Path $repoDockerRoot 'volumes\content-files'
 $contentDir = if ([string]::IsNullOrWhiteSpace($ContentFilesDir)) { $defaultContentDir } else { $ContentFilesDir }
@@ -74,6 +113,7 @@ $dockerArgs = @(
     '-e', "GA_LLAMA_GPU_LAYERS=$GpuLayers",
     '-e', 'GA_LLAMA_KV_UNIFIED=1',
     '-e', 'GA_LLAMA_JINJA=1',
+    '-e', "GA_LLAMA_CUDA_VISIBLE_DEVICES=$LlamaCudaVisibleDevices",
     '-e', 'GA_ASR_HOST=127.0.0.1',
     '-e', 'GA_ASR_PORT=8082',
     '-e', 'GA_ASR_MODEL_DIR=/models-local/asr',
@@ -81,6 +121,7 @@ $dockerArgs = @(
     '-e', 'GA_ASR_DEFAULT_MODEL_ID=Qwen/Qwen3-ASR-0.6B',
     '-e', 'GA_ASR_AUTO_LOAD_ON_STARTUP=1',
     '-e', 'GA_ASR_DEVICE_MAP=auto',
+    '-e', "GA_ASR_CUDA_VISIBLE_DEVICES=$AsrCudaVisibleDevices",
     '-e', 'GA_ASR_DTYPE=bfloat16',
     '-e', 'GA_ASR_MAX_INFERENCE_BATCH_SIZE=8',
     '-e', 'GA_ASR_MAX_NEW_TOKENS=512',
@@ -93,6 +134,7 @@ $dockerArgs = @(
     '-e', 'GA_TTS_TOKENIZER_ID=Qwen/Qwen2.5-1.5B',
     '-e', 'GA_TTS_AUTO_LOAD_ON_STARTUP=0',
     '-e', 'GA_TTS_DEVICE_MAP=auto',
+    '-e', "GA_TTS_CUDA_VISIBLE_DEVICES=$TtsCudaVisibleDevices",
     '-e', 'GA_TTS_DTYPE=bfloat16',
     '-e', 'GA_TTS_TIMEOUT_SECONDS=300',
     '-e', 'GA_TTS_MAX_NEW_TOKENS=512',
@@ -102,6 +144,9 @@ $dockerArgs = @(
     '-e', 'GA_EMB_PORT=8085',
     '-e', 'GA_EMB_MODEL_DIR=/models-local/emb',
     '-e', 'GA_EMB_DEFAULT_MODEL_PATH=',
+    '-e', "GA_EMB_DEVICE=$EmbDevice",
+    '-e', "GA_EMB_TARGET_DEVICES=$EmbTargetDevices",
+    '-e', "GA_EMB_CUDA_VISIBLE_DEVICES=$EmbCudaVisibleDevices",
     '-e', 'GA_EMB_AUTO_LOAD_ON_STARTUP=0',
     '-e', 'GA_EMB_WARMUP_ON_LOAD=1',
     '-e', 'GA_EMB_WAIT_FOR_READY_ON_STARTUP=0',
@@ -129,8 +174,12 @@ $dockerArgs = @(
     '-e', 'GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP=1',
     '-e', 'GA_SD_WAIT_FOR_READY_ON_STARTUP=0',
     '-e', 'GA_SD_READY_TIMEOUT_SECONDS=1800',
-    '-e', 'GA_SD_CUDA_VISIBLE_DEVICES=1'
+    '-e', "GA_SD_CUDA_VISIBLE_DEVICES=$SdCudaVisibleDevices"
 )
+
+if (-not [string]::IsNullOrWhiteSpace($CudaVisibleDevices)) {
+    $dockerArgs += @('-e', "CUDA_VISIBLE_DEVICES=$CudaVisibleDevices")
+}
 
 if (-not $NoContBatching) {
     $dockerArgs += @('-e', 'GA_LLAMA_CONT_BATCH=1')
