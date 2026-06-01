@@ -137,5 +137,13 @@
     "providers": ["google-gemini-chat"],
     "description": "Fast and cost-efficient Gemini model for high-throughput workloads.",
     "runtimeProfileId": ""
+  },
+  {
+    "modelId": "minimax/minimax-m3",
+    "displayName": "MiniMax M3",
+    "providers": ["openrouter-chat"],
+    "description": "OpenRouter chat model recommendation for new operators.",
+    "runtimeProfileId": "openai_chat_standard",
+    "reasoningEffortEnabled": false
   }
 ]

@@ -12,6 +12,7 @@ import {
   HUGGINGFACE_SECTION,
   LOCAL_AI_WIZARD_STEPS,
   OPENAI_CORE_SECTION,
+  OPENROUTER_SECTION,
   WIZARD_STEPS,
 } from './addAiServicesWizard/constants';
 import { CoreConnectionStep } from './addAiServicesWizard/steps/CoreConnectionStep';
@@ -34,6 +35,9 @@ import { ModelsStep } from './addAiServicesWizard/steps/ModelsStep';
 import { OpenAiConnectionStep } from './addAiServicesWizard/steps/OpenAiConnectionStep';
 import { OpenAiModelsStep } from './addAiServicesWizard/steps/OpenAiModelsStep';
 import { OpenAiOptionalServicesStep } from './addAiServicesWizard/steps/OpenAiOptionalServicesStep';
+import { OpenRouterConnectionStep } from './addAiServicesWizard/steps/OpenRouterConnectionStep';
+import { OpenRouterModelsStep } from './addAiServicesWizard/steps/OpenRouterModelsStep';
+import { OpenRouterOptionalServicesStep } from './addAiServicesWizard/steps/OpenRouterOptionalServicesStep';
 import { OptionalServicesStep } from './addAiServicesWizard/steps/OptionalServicesStep';
 import { ProviderStep } from './addAiServicesWizard/steps/ProviderStep';
 import type { LocalDownloadOperationState } from '../../pages/settings/editors/common/localOperationPolling';
@@ -49,11 +53,13 @@ import {
   summarizeGeminiOptionalServiceWarnings,
   summarizeHuggingFaceOptionalServiceWarnings,
   summarizeLocalAiOptionalServiceWarnings,
+  summarizeOpenRouterOptionalServiceWarnings,
   summarizeOpenAiOptionalServiceWarnings,
   toExistingFoundryModels,
   toExistingGeminiModels,
   toExistingHuggingFaceModels,
   toExistingLocalModels,
+  toExistingOpenRouterModels,
   toExistingOpenAiModels,
 } from './addAiServicesWizard/utils';
 import { useFoundryWizardState } from './addAiServicesWizard/useFoundryWizardState';
@@ -61,6 +67,7 @@ import { useGeminiWizardState } from './addAiServicesWizard/useGeminiWizardState
 import { useHuggingFaceWizardState } from './addAiServicesWizard/useHuggingFaceWizardState';
 import { useLocalAiWizardState } from './addAiServicesWizard/useLocalAiWizardState';
 import { useOpenAiWizardState } from './addAiServicesWizard/useOpenAiWizardState';
+import { useOpenRouterWizardState } from './addAiServicesWizard/useOpenRouterWizardState';
 
 interface AddAiServicesWizardProps {
   isOpen: boolean;
@@ -73,6 +80,7 @@ const STEP_SEQUENCE_BY_PROVIDER: Readonly<Record<AddAiServicesWizardProvider, re
   'google-gemini': ['provider', 'connection', 'models', 'optionalServices', 'finish'],
   openai: ['provider', 'connection', 'models', 'optionalServices', 'finish'],
   huggingface: ['provider', 'connection', 'models', 'optionalServices', 'finish'],
+  openrouter: ['provider', 'connection', 'models', 'optionalServices', 'finish'],
   'local-ai': [
     'provider',
     'connection',
@@ -91,6 +99,7 @@ const STEP_TABS_BY_PROVIDER: Readonly<Record<AddAiServicesWizardProvider, readon
   'google-gemini': WIZARD_STEPS,
   openai: WIZARD_STEPS,
   huggingface: WIZARD_STEPS,
+  openrouter: WIZARD_STEPS,
   'local-ai': LOCAL_AI_WIZARD_STEPS,
 } as const;
 
@@ -154,6 +163,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
   const gemini = useGeminiWizardState();
   const openai = useOpenAiWizardState();
   const huggingFace = useHuggingFaceWizardState();
+  const openRouter = useOpenRouterWizardState();
   const localAi = useLocalAiWizardState();
 
   // ---------------------------------------------------------------------------
@@ -174,6 +184,10 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
   );
   const existingHuggingFaceModels = useMemo(
     () => (snapshot ? toExistingHuggingFaceModels(snapshot.models) : []),
+    [snapshot]
+  );
+  const existingOpenRouterModels = useMemo(
+    () => (snapshot ? toExistingOpenRouterModels(snapshot.models) : []),
     [snapshot]
   );
   const existingLocalModels = useMemo(
@@ -199,6 +213,10 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     () => Boolean(snapshot?.sectionSummaries.some((s) => s.sectionName === HUGGINGFACE_SECTION && s.readinessStatus === 'configured')),
     [snapshot]
   );
+  const openRouterConnectionConfigured = useMemo(
+    () => Boolean(snapshot?.sectionSummaries.some((s) => s.sectionName === OPENROUTER_SECTION && s.readinessStatus === 'configured')),
+    [snapshot]
+  );
 
   // ---------------------------------------------------------------------------
   // Cross-provider derived values
@@ -209,7 +227,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     && foundry.draftModels.length === 0
     && gemini.draftModels.length === 0
     && openai.draftModels.length === 0
-    && huggingFace.draftModels.length === 0;
+    && huggingFace.draftModels.length === 0
+    && openRouter.draftModels.length === 0;
   const effectiveSetFoundryDraftAsGlobalDefault = lockFoundryDraftAsGlobalDefault ? true : foundry.draftAsGlobalDefault;
 
   const lockGeminiDraftAsGlobalDefault =
@@ -217,7 +236,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     && gemini.draftModels.length === 0
     && foundry.draftModels.length === 0
     && openai.draftModels.length === 0
-    && huggingFace.draftModels.length === 0;
+    && huggingFace.draftModels.length === 0
+    && openRouter.draftModels.length === 0;
   const effectiveSetGeminiDraftAsGlobalDefault = lockGeminiDraftAsGlobalDefault ? true : gemini.draftAsGlobalDefault;
 
   const lockOpenAiDraftAsGlobalDefault =
@@ -225,7 +245,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     && openai.draftModels.length === 0
     && foundry.draftModels.length === 0
     && gemini.draftModels.length === 0
-    && huggingFace.draftModels.length === 0;
+    && huggingFace.draftModels.length === 0
+    && openRouter.draftModels.length === 0;
   const effectiveSetOpenAiDraftAsGlobalDefault = lockOpenAiDraftAsGlobalDefault ? true : openai.draftAsGlobalDefault;
 
   const lockHuggingFaceDraftAsGlobalDefault =
@@ -233,19 +254,31 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     && huggingFace.draftModels.length === 0
     && foundry.draftModels.length === 0
     && gemini.draftModels.length === 0
-    && openai.draftModels.length === 0;
+    && openai.draftModels.length === 0
+    && openRouter.draftModels.length === 0;
   const effectiveSetHuggingFaceDraftAsGlobalDefault = lockHuggingFaceDraftAsGlobalDefault ? true : huggingFace.draftAsGlobalDefault;
+
+  const lockOpenRouterDraftAsGlobalDefault =
+    existingCatalogModelCount === 0
+    && openRouter.draftModels.length === 0
+    && foundry.draftModels.length === 0
+    && gemini.draftModels.length === 0
+    && openai.draftModels.length === 0
+    && huggingFace.draftModels.length === 0;
+  const effectiveSetOpenRouterDraftAsGlobalDefault = lockOpenRouterDraftAsGlobalDefault ? true : openRouter.draftAsGlobalDefault;
 
   const foundryTotalModelCount = existingFoundryModels.length + foundry.draftModels.length;
   const geminiTotalModelCount = existingGeminiModels.length + gemini.draftModels.length;
   const openAiTotalModelCount = existingOpenAiModels.length + openai.draftModels.length;
   const huggingFaceTotalModelCount = existingHuggingFaceModels.length + huggingFace.draftModels.length;
+  const openRouterTotalModelCount = existingOpenRouterModels.length + openRouter.draftModels.length;
   const localAiTotalModelCount = existingLocalModels.length + localAi.draftModels.filter((d) => d.asyncStatus === 'completed').length;
 
   const readyForBasicChat = useMemo(() => {
     if (provider === 'foundry') return foundryConnectionConfigured && existingFoundryModels.length > 0;
     if (provider === 'google-gemini') return geminiConnectionConfigured && existingGeminiModels.length > 0;
     if (provider === 'huggingface') return huggingFaceConnectionConfigured && existingHuggingFaceModels.length > 0;
+    if (provider === 'openrouter') return openRouterConnectionConfigured && existingOpenRouterModels.length > 0;
     if (provider === 'local-ai') return localAiTotalModelCount > 0;
     return openAiConnectionConfigured && existingOpenAiModels.length > 0;
   }, [
@@ -253,10 +286,12 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     foundryConnectionConfigured,
     geminiConnectionConfigured,
     huggingFaceConnectionConfigured,
+    openRouterConnectionConfigured,
     openAiConnectionConfigured,
     existingFoundryModels.length,
     existingGeminiModels.length,
     existingHuggingFaceModels.length,
+    existingOpenRouterModels.length,
     existingOpenAiModels.length,
     localAiTotalModelCount,
   ]);
@@ -266,6 +301,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (provider === 'foundry') return summarizeFoundryOptionalServiceWarnings(snapshot);
     if (provider === 'google-gemini') return summarizeGeminiOptionalServiceWarnings(snapshot);
     if (provider === 'huggingface') return summarizeHuggingFaceOptionalServiceWarnings(snapshot);
+    if (provider === 'openrouter') return summarizeOpenRouterOptionalServiceWarnings(snapshot);
     if (provider === 'local-ai') return summarizeLocalAiOptionalServiceWarnings(snapshot);
     return summarizeOpenAiOptionalServiceWarnings(snapshot);
   }, [provider, snapshot]);
@@ -274,6 +310,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     provider === 'foundry' ? 'Microsoft Foundry'
     : provider === 'google-gemini' ? 'Google Gemini'
     : provider === 'huggingface' ? 'Hugging Face'
+    : provider === 'openrouter' ? 'OpenRouter'
     : provider === 'local-ai' ? 'Local AI'
     : 'OpenAI';
 
@@ -299,6 +336,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       GEMINI_CORE_SECTION,
       OPENAI_CORE_SECTION,
       HUGGINGFACE_SECTION,
+      OPENROUTER_SECTION,
     ];
 
     const [sectionSummaries, schema, models, ...sections] = await Promise.all([
@@ -340,8 +378,9 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     gemini.resetWithSnapshot(nextSnapshot);
     openai.resetWithSnapshot(nextSnapshot);
     huggingFace.resetWithSnapshot(nextSnapshot);
+    openRouter.resetWithSnapshot(nextSnapshot);
     localAi.resetWithSnapshot(nextSnapshot);
-  }, [foundry.resetWithSnapshot, gemini.resetWithSnapshot, openai.resetWithSnapshot, huggingFace.resetWithSnapshot, localAi.resetWithSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [foundry.resetWithSnapshot, gemini.resetWithSnapshot, openai.resetWithSnapshot, huggingFace.resetWithSnapshot, openRouter.resetWithSnapshot, localAi.resetWithSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!isOpen) {
@@ -415,6 +454,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         await gemini.persistConnection(snapshot, loadSnapshot, setSnapshot);
       } else if (provider === 'huggingface') {
         await huggingFace.persistConnection(snapshot, loadSnapshot, setSnapshot);
+      } else if (provider === 'openrouter') {
+        await openRouter.persistConnection(snapshot, loadSnapshot, setSnapshot);
       } else if (provider === 'local-ai') {
         await localAi.persistLocalAiPrereqs(snapshot, loadSnapshot, setSnapshot);
       } else {
@@ -430,6 +471,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         await gemini.persistModels(snapshot, loadSnapshot, setSnapshot, setGlobalError);
       } else if (provider === 'huggingface') {
         await huggingFace.persistModels(snapshot, loadSnapshot, setSnapshot, setGlobalError);
+      } else if (provider === 'openrouter') {
+        await openRouter.persistModels(snapshot, loadSnapshot, setSnapshot, setGlobalError);
       } else if (provider === 'local-ai') {
         await localAi.persistLocalAiModels(snapshot, loadSnapshot, setSnapshot);
       } else {
@@ -455,6 +498,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         await gemini.persistOptionalServices(snapshot, loadSnapshot, setSnapshot);
       } else if (provider === 'huggingface') {
         await huggingFace.persistOptionalServices(snapshot, loadSnapshot, setSnapshot);
+      } else if (provider === 'openrouter') {
+        await openRouter.persistOptionalServices(snapshot, loadSnapshot, setSnapshot);
       } else if (provider === 'local-ai') {
         await localAi.persistLocalAiOptionalServices(loadSnapshot, setSnapshot);
       } else {
@@ -468,6 +513,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     foundry,
     gemini,
     huggingFace,
+    openRouter,
     openai,
     localAi,
     loadSnapshot,
@@ -536,6 +582,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         if (hasPendingDrafts) {
           await huggingFace.persistModels(snapshot, loadSnapshot, setSnapshot, setGlobalError);
         }
+      } else if (provider === 'openrouter') {
+        const hasPendingDrafts = openRouter.draftModels.some((m) => !m.persisted);
+        if (hasPendingDrafts) {
+          await openRouter.persistModels(snapshot, loadSnapshot, setSnapshot, setGlobalError);
+        }
       } else if (provider === 'local-ai') {
         await localAi.persistLocalAiModels(snapshot, loadSnapshot, setSnapshot);
       } else {
@@ -557,6 +608,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     foundry,
     gemini,
     huggingFace,
+    openRouter,
     openai,
     localAi,
     persistCurrentStep,
@@ -602,6 +654,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
       if (provider === 'foundry') return foundryTotalModelCount === 0;
       if (provider === 'google-gemini') return geminiTotalModelCount === 0;
       if (provider === 'huggingface') return huggingFaceTotalModelCount === 0;
+      if (provider === 'openrouter') return openRouterTotalModelCount === 0;
       if (provider === 'local-ai') {
         const hasNoModels = localAi.draftModels.length === 0 && existingLocalModels.length === 0;
         return hasNoModels || localAiHasActiveDownloads;
@@ -614,6 +667,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     foundryTotalModelCount,
     geminiTotalModelCount,
     huggingFaceTotalModelCount,
+    openRouterTotalModelCount,
     openAiTotalModelCount,
     localAi.draftModels.length,
     existingLocalModels.length,
@@ -631,6 +685,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     if (provider === 'foundry') return foundryTotalModelCount === 0;
     if (provider === 'google-gemini') return geminiTotalModelCount === 0;
     if (provider === 'huggingface') return huggingFaceTotalModelCount === 0;
+    if (provider === 'openrouter') return openRouterTotalModelCount === 0;
     if (provider === 'local-ai') {
       const hasNoModels = localAi.draftModels.length === 0 && existingLocalModels.length === 0;
       return hasNoModels || localAiHasActiveDownloads;
@@ -640,6 +695,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     foundryTotalModelCount,
     geminiTotalModelCount,
     huggingFaceTotalModelCount,
+    openRouterTotalModelCount,
     openAiTotalModelCount,
     localAi.draftModels.length,
     existingLocalModels.length,
@@ -661,10 +717,11 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
   // Per-provider other-draft counts (for addDraftModel cross-provider logic)
   // ---------------------------------------------------------------------------
 
-  const nonFoundryDraftCount = gemini.draftModels.length + openai.draftModels.length + huggingFace.draftModels.length;
-  const nonGeminiDraftCount = foundry.draftModels.length + openai.draftModels.length + huggingFace.draftModels.length;
-  const nonOpenAiDraftCount = foundry.draftModels.length + gemini.draftModels.length + huggingFace.draftModels.length;
-  const nonHuggingFaceDraftCount = foundry.draftModels.length + gemini.draftModels.length + openai.draftModels.length;
+  const nonFoundryDraftCount = gemini.draftModels.length + openai.draftModels.length + huggingFace.draftModels.length + openRouter.draftModels.length;
+  const nonGeminiDraftCount = foundry.draftModels.length + openai.draftModels.length + huggingFace.draftModels.length + openRouter.draftModels.length;
+  const nonOpenAiDraftCount = foundry.draftModels.length + gemini.draftModels.length + huggingFace.draftModels.length + openRouter.draftModels.length;
+  const nonHuggingFaceDraftCount = foundry.draftModels.length + gemini.draftModels.length + openai.draftModels.length + openRouter.draftModels.length;
+  const nonOpenRouterDraftCount = foundry.draftModels.length + gemini.draftModels.length + openai.draftModels.length + huggingFace.draftModels.length;
 
   return (
     <SettingsModal
@@ -804,6 +861,16 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               errors={huggingFace.coreErrors}
               onChange={huggingFace.setCoreForm}
             />
+          ) : provider === 'openrouter' ? (
+            <OpenRouterConnectionStep
+              apiKey={openRouter.coreForm.apiKey}
+              baseUrl={openRouter.coreForm.baseUrl}
+              httpReferer={openRouter.coreForm.httpReferer}
+              appTitle={openRouter.coreForm.appTitle}
+              apiKeyHasStoredValue={openRouter.coreForm.apiKeyHasStoredValue}
+              errors={openRouter.coreErrors}
+              onChange={openRouter.setCoreForm}
+            />
           ) : provider === 'local-ai' ? (
             <LocalAiPrerequisitesStep
               value={localAi.prereqsForm}
@@ -866,6 +933,20 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               onSetDraftAsGlobalDefaultChange={huggingFace.setDraftAsGlobalDefault}
               onAddModel={() => snapshot && huggingFace.addDraftModel(snapshot, existingCatalogModelCount, nonHuggingFaceDraftCount)}
               onRemoveDraftModel={huggingFace.removeDraftModel}
+            />
+          ) : provider === 'openrouter' ? (
+            <OpenRouterModelsStep
+              existingModels={existingOpenRouterModels}
+              draftModels={openRouter.draftModels}
+              draftModelId={openRouter.draftModelId}
+              setDraftAsGlobalDefault={effectiveSetOpenRouterDraftAsGlobalDefault}
+              lockDraftAsGlobalDefault={lockOpenRouterDraftAsGlobalDefault}
+              addError={openRouter.modelAddError}
+              validationError={openRouter.modelStepError}
+              onDraftModelIdChange={openRouter.setDraftModelId}
+              onSetDraftAsGlobalDefaultChange={openRouter.setDraftAsGlobalDefault}
+              onAddModel={() => snapshot && openRouter.addDraftModel(snapshot, existingCatalogModelCount, nonOpenRouterDraftCount)}
+              onRemoveDraftModel={openRouter.removeDraftModel}
             />
           ) : provider === 'local-ai' ? (
             <LocalAiModelsStep
@@ -951,6 +1032,12 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               errors={huggingFace.optionalErrors}
               onChange={huggingFace.setOptionalForm}
             />
+          ) : provider === 'openrouter' ? (
+            <OpenRouterOptionalServicesStep
+              value={openRouter.optionalForm}
+              errors={openRouter.optionalErrors}
+              onChange={openRouter.setOptionalForm}
+            />
           ) : (
             <OpenAiOptionalServicesStep
               value={openai.optionalForm}
@@ -985,6 +1072,8 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
                   ? existingGeminiModels.length
                   : provider === 'huggingface'
                     ? existingHuggingFaceModels.length
+                    : provider === 'openrouter'
+                      ? existingOpenRouterModels.length
                     : provider === 'local-ai'
                       ? localAiTotalModelCount
                       : existingOpenAiModels.length

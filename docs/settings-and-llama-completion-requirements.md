@@ -77,7 +77,7 @@ Source-of-truth set:
 | R-6.2 | Catalog create flow MUST remain provider-driven wizard UX. |
 | R-6.3 | Catalog edit MUST remain provider-scoped and safe for existing rows. |
 | R-6.4 | Catalog rows MUST surface readiness/routability signals. |
-| R-6.5 | Provider coverage MUST be status-qualified: Stable (operator-supported) includes `openai-chat`, `openai-responses`, `azure-openai-chat`, `azure-openai-responses`, `anthropic`, `llama-cpp`, `google-gemini-chat`; Experimental/Hidden includes `hf-inference-chat`, `openrouter-chat`; roadmap providers are documented separately and are not shipped. |
+| R-6.5 | Provider coverage MUST be status-qualified: Stable (operator-supported) includes `openai-chat`, `openai-responses`, `azure-openai-chat`, `azure-openai-responses`, `anthropic`, `llama-cpp`, `google-gemini-chat`, `openrouter-chat`; Experimental/Hidden includes `hf-inference-chat`; roadmap providers are documented separately and are not shipped. |
 | R-6.6 | Runtime profiles MUST expose usage-aware lifecycle (including delete guard when referenced). |
 | R-6.7 | Runtime profile templates (`qwen3_5`, `qwen3_6`, `gemma4`) MUST remain available. |
 | R-6.8 | Local Llama Runtime surface MUST remain runtime-operations focused. |

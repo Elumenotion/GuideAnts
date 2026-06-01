@@ -155,8 +155,8 @@ function renderCloudSynthesisBehavior(providerId: string) {
             Hugging Face TTS strips SSML to plain text and posts it to the selected <span className="font-mono">TTS Model ID</span>.
           </li>
           <li>
-            The shared <span className="font-mono">HuggingFace:Token</span> is required, and{' '}
-            <span className="font-mono">Allowed Models</span> on this service mode can be used to limit allowed models.
+            The shared <span className="font-mono">HuggingFace:Token</span> is required, and the selected model id is used as the
+            direct route target.
           </li>
         </ul>
       );

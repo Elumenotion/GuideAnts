@@ -254,8 +254,8 @@ Open **Models & Runtime**:
 
 - **Catalog**: add chat models (`llama-cpp`, OpenAI/Azure/Gemini/etc.).
 - Provider status for operator setup:
-  - Stable (operator-supported): `openai-chat`, `openai-responses`, `azure-openai-chat`, `azure-openai-responses`, `anthropic`, `llama-cpp`, `google-gemini-chat`
-  - Experimental/Hidden: `hf-inference-chat`, `openrouter-chat` (implemented but not generally operator-facing guidance)
+  - Stable (operator-supported): `openai-chat`, `openai-responses`, `azure-openai-chat`, `azure-openai-responses`, `anthropic`, `llama-cpp`, `google-gemini-chat`, `openrouter-chat`
+  - Experimental/Hidden: `hf-inference-chat`
 - **Runtime Profiles**: manage `qwen3_5`, `qwen3_6`, `gemma4` templates or custom profiles.
 - **Local Llama Runtime**: view inventory and run load/unload/delete alias actions.
 

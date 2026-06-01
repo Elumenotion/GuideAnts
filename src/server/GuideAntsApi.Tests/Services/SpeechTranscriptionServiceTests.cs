@@ -299,7 +299,6 @@ public sealed class SpeechTranscriptionServiceTests
             configurationValues: new Dictionary<string, string?>
             {
                 ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:AsrAllowedModels"] = "hf-asr-model"
             },
             modelId: "hf-asr-model");
 
@@ -332,7 +331,6 @@ public sealed class SpeechTranscriptionServiceTests
             configurationValues: new Dictionary<string, string?>
             {
                 ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:AsrAllowedModels"] = "hf-asr-model"
             },
             modelId: "hf-asr-model",
             requestPresetJson: "{\"ReturnTimestamps\":true}");
@@ -348,13 +346,13 @@ public sealed class SpeechTranscriptionServiceTests
     }
 
     [TestMethod]
-    public async Task TranscribeAudioWithDurationAsync_UsesOpenRouterProviderWithChatCompletionsAudioPayload()
+    public async Task TranscribeAudioWithDurationAsync_UsesOpenRouterProviderWithAudioTranscriptionsPayload()
     {
         var handler = new CapturingHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    "{\"choices\":[{\"message\":{\"content\":\"hello openrouter\"}}]}",
+                    "{\"text\":\"hello openrouter\"}",
                     Encoding.UTF8,
                     "application/json")
             });
@@ -378,8 +376,9 @@ public sealed class SpeechTranscriptionServiceTests
 
         result.Text.Should().Be("hello openrouter");
         handler.LastRequestUri.Should().NotBeNull();
-        handler.LastRequestUri!.ToString().Should().Be("https://openrouter.ai/api/v1/chat/completions");
+        handler.LastRequestUri!.ToString().Should().Be("https://openrouter.ai/api/v1/audio/transcriptions");
         handler.LastRequestBody.Should().Contain("\"input_audio\"");
+        handler.LastRequestBody.Should().Contain("\"model\":\"openai/whisper-1\"");
     }
 
     private static SpeechTranscriptionService CreateService(

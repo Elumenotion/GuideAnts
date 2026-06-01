@@ -35,7 +35,6 @@ namespace GuideAntsApi.Services
                     providerSection: OpenRouterProviderSection);
             }
             var model = modelId;
-            ValidateOpenRouterImageModel(model, requestPresetJson);
             var endpoint = $"{baseUrl.TrimEnd('/')}/chat/completions";
             var requestBody = new OpenRouterImageChatRequest(
                 Model: model,
@@ -57,6 +56,7 @@ namespace GuideAntsApi.Services
                 Content = new StringContent(JsonSerializer.Serialize(requestBody, ProviderPayloadJson), Encoding.UTF8, "application/json")
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            AddOpenRouterAttributionHeaders(request);
 
             using var response = await client.SendAsync(request);
             var responseBody = await response.Content.ReadAsStringAsync();
@@ -84,7 +84,6 @@ namespace GuideAntsApi.Services
                 OpenRouterProviderSection,
                 modelId,
                 "Set ServiceModes.ImageGeneration model id for OpenRouter.");
-            ValidateOpenRouterImageModel(model, requestPresetJson);
             var apiKey = _configuration["OpenRouter:ApiKey"];
             var baseUrl = _configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
             if (string.IsNullOrWhiteSpace(apiKey))
@@ -123,6 +122,7 @@ namespace GuideAntsApi.Services
                 Content = new StringContent(JsonSerializer.Serialize(requestBody, ProviderPayloadJson), Encoding.UTF8, "application/json")
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            AddOpenRouterAttributionHeaders(request);
 
             using var response = await client.SendAsync(request);
             var result = await response.Content.ReadAsStringAsync();
@@ -151,5 +151,20 @@ namespace GuideAntsApi.Services
             [property: JsonPropertyName("image_url")] OpenRouterImageUrl? ImageUrl);
 
         private sealed record OpenRouterImageUrl(string Url);
+
+        private void AddOpenRouterAttributionHeaders(HttpRequestMessage request)
+        {
+            var httpReferer = _configuration["OpenRouter:HttpReferer"]?.Trim();
+            if (!string.IsNullOrWhiteSpace(httpReferer))
+            {
+                request.Headers.TryAddWithoutValidation("HTTP-Referer", httpReferer);
+            }
+
+            var appTitle = _configuration["OpenRouter:AppTitle"]?.Trim();
+            if (!string.IsNullOrWhiteSpace(appTitle))
+            {
+                request.Headers.TryAddWithoutValidation("X-Title", appTitle);
+            }
+        }
     }
 }

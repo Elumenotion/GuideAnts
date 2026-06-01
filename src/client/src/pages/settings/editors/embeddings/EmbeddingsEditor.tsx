@@ -297,10 +297,7 @@ function renderCloudEmbeddingsBehavior(provider: ProviderEditorStateDto) {
             Hugging Face embeddings call the selected <span className="font-mono">Embedding Model ID</span> with the shared{' '}
             <span className="font-mono">HuggingFace:Token</span>.
           </li>
-          <li>
-            Use <span className="font-mono">Allowed Models</span> on this service mode when you want to pin the route to an
-            approved model set.
-          </li>
+          <li>Set the route directly by choosing the exact embedding model id for this provider.</li>
         </ul>
       );
     case 'Embeddings.OpenRouter.Embeddings':
@@ -310,10 +307,7 @@ function renderCloudEmbeddingsBehavior(provider: ProviderEditorStateDto) {
             OpenRouter embeddings use the shared connection settings plus the selected{' '}
             <span className="font-mono">Embedding Model ID</span>.
           </li>
-          <li>
-            Use <span className="font-mono">Allowed Models</span> to constrain which embedding models are
-            allowed for this route.
-          </li>
+          <li>Use the selected model id as the explicit route target for this OpenRouter path.</li>
         </ul>
       );
     case 'Embeddings.OpenAI.Embedding':
