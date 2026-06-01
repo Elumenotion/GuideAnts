@@ -219,7 +219,6 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new("NotebookImageService", "Logging:LogLevel:GuideAntsApi.Services.NotebookImageService", DefaultValue: "Information"),
         new("SearXngWebSearchService", "Logging:LogLevel:GuideAntsApi.Services.SearXngWebSearchService", DefaultValue: "Information"),
         new("SearXngBrowserRenderingClient", "Logging:LogLevel:GuideAntsApi.Services.SearXngBrowserRenderingClient", DefaultValue: "Warning"),
-        new("WebScrapingService", "Logging:LogLevel:GuideAntsApi.Services.WebScrapingService", DefaultValue: "Information"),
         new("StoragePathResolver", "Logging:LogLevel:GuideAntsApi.Services.StoragePathResolver", DefaultValue: "Warning"),
         new("NotebookFileService", "Logging:LogLevel:GuideAntsApi.Services.Components.NotebookFileService", DefaultValue: "Warning"),
         new("NotebookFileSyncService", "Logging:LogLevel:GuideAntsApi.Services.Components.NotebookFileSyncService", DefaultValue: "Warning"),

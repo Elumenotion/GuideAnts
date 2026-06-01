@@ -41,7 +41,7 @@ public static class StartupConfiguration
     {
         ConfigureDatabase(services, configuration);
         ConfigureCors(services, configuration);
-        ConfigureWebScrapingService(services);
+        ConfigureMemoryCache(services);
         ConfigureOptions(services, configuration);
         RegisterServices(services, configuration);
     }
@@ -126,7 +126,6 @@ public static class StartupConfiguration
         services.AddScoped<INotebookFileService, NotebookFileService>();
         services.AddScoped<IFileLineageService, FileLineageService>();
         services.AddScoped<IExcludedHostService, ExcludedHostService>();
-        services.AddScoped<IWebScrapingService, WebScrapingService>();
         services.AddHttpClient<IBrowserRenderingClient, SearXngBrowserRenderingClient>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetRequiredService<IOptions<BrowserRenderingOptions>>().Value;
@@ -502,7 +501,7 @@ public static class StartupConfiguration
         });
     }
 
-    private static void ConfigureWebScrapingService(IServiceCollection services)
+    private static void ConfigureMemoryCache(IServiceCollection services)
     {
         services.AddMemoryCache(options =>
         {

@@ -140,31 +140,6 @@ public static class ProjectContentFileMarkdownEndpoints
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
 
-        // Get markdown extraction status for latest version
-        group.MapGet("/{fileId}/markdown/status", async (Guid projectId, Guid fileId, IContentFileService contentFileService, IMarkdownExtractionService markdownService) =>
-        {
-            // Get the file first to determine the latest version
-            var file = await contentFileService.GetAsync(projectId, fileId);
-            if (file == null)
-                return Results.NotFound();
-
-            // Get the latest version to find its version record
-            var versions = await contentFileService.GetVersionsAsync(projectId, fileId);
-            var latestVersion = versions.FirstOrDefault();
-            if (latestVersion == null)
-                return Results.NotFound();
-
-            var status = await markdownService.GetExtractionStatusAsync(latestVersion.Id);
-            if (status == null)
-                return Results.Ok(new { Status = "NotRequested", Message = "No markdown extraction has been requested for this file" });
-
-            return Results.Ok(new { Status = status.ToString() });
-        })
-        .WithName("GetProjectContentFileMarkdownStatus")
-        .Produces<object>(StatusCodes.Status200OK)
-        .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
-
         // Retry failed markdown extraction for latest version
         group.MapPost("/{fileId}/markdown/retry", async (Guid projectId, Guid fileId, IContentFileService contentFileService, IMarkdownExtractionService markdownService) =>
         {

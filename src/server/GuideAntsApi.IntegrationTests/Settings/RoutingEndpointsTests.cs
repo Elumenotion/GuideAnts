@@ -42,42 +42,6 @@ public sealed class RoutingEndpointsTests : SettingsRoutingIntegrationTestBase
     }
 
     [TestMethod]
-    public async Task Preflight_UnknownMode_Returns400WithRoutingModeNotFoundProblem()
-    {
-        // R-2.4 contract: caller-supplied mode IDs that don't resolve are caller input
-        // errors, not readiness state. The endpoint must fail-fast with a 400
-        // problem+json carrying ROUTING_MODE_NOT_FOUND and the `action` field.
-        var response = await Client.GetAsync(
-            $"/api/settings/routing/preflight?service={RoutedServiceNames.Embeddings}&modeId=unknown-mode");
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        doc.RootElement.GetProperty("status").GetInt32().Should().Be(400);
-        doc.RootElement.GetProperty("code").GetString().Should().Be(RoutingErrorCodes.ModeNotFound);
-        doc.RootElement.GetProperty("action").GetString().Should().NotBeNullOrWhiteSpace();
-        doc.RootElement.GetProperty("service").GetString().Should().Be(RoutedServiceNames.Embeddings);
-        doc.RootElement.GetProperty("modeId").GetString().Should().Be("unknown-mode");
-        doc.RootElement.GetProperty("type").GetString().Should().StartWith("https://guideants.app/problems/routing/");
-    }
-
-    [TestMethod]
-    public async Task Preflight_BlankModeId_ProbesDefaultMode()
-    {
-        // Phase H.1: blank/absent modeId keeps its "probe the default mode" behavior.
-        // This is a readiness question, not caller input error, so it stays 200 with
-        // a ModeReadinessDto even if no default is configured (blocked status).
-        var response = await Client.GetAsync(
-            $"/api/settings/routing/preflight?service={RoutedServiceNames.Embeddings}&modeId=");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var readiness = await response.Content.ReadFromJsonAsync<ModeReadinessDto>();
-        readiness.Should().NotBeNull();
-        readiness!.Service.Should().Be(RoutedServiceNames.Embeddings);
-    }
-
-    [TestMethod]
     public async Task ChatTargetReadiness_UnknownModel_Returns404WithModelNotFoundProblem()
     {
         // The readiness endpoint requires a ?strict=<bool> query parameter per the

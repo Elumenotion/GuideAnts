@@ -250,9 +250,6 @@ public class Program
         app.MapProjectFolderEndpoints();
         app.MapLinkEndpoints();
         app.MapUserEndpoints();
-        app.MapWebScrapingEndpoints();
-        app.MapChatEndpoints();
-        app.MapSandboxEndpoints();
         app.MapNotebookConversationsEndpoints();
         app.MapNotebookHeaderToolbarEndpoints();
         app.MapNotebookLlamaRuntimeEndpoints();

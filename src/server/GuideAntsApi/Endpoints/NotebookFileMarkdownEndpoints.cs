@@ -107,25 +107,6 @@ public static class NotebookFileMarkdownEndpoints
         .WithName("RetryNotebookFileMarkdownExtraction")
         .WithSummary("Retry markdown extraction for a notebook file");
 
-        // Get markdown extraction status for a notebook file
-        group.MapGet("/{fileId}/markdown/status", async (Guid projectId, Guid notebookId, Guid fileId, INotebookFileService notebookFileService, IMarkdownExtractionService markdownService) =>
-        {
-            // Verify access
-
-// Verify file exists in this notebook
-            var file = await ((NotebookFileService)notebookFileService).GetNotebookFile(fileId, notebookId);
-            if (file == null)
-                return Results.NotFound("Notebook file not found");
-
-            var status = await markdownService.GetNotebookExtractionStatusAsync(fileId);
-            if (status == null)
-                return Results.NotFound("No markdown extraction found for this file");
-
-            return Results.Ok(new { Status = status.ToString() });
-        })
-        .WithName("GetNotebookFileMarkdownStatus")
-        .WithSummary("Get the markdown extraction status for a notebook file");
-
         // Create markdown shadow for a notebook file (manual trigger)
         group.MapPost("/{fileId}/markdown", async (Guid projectId, Guid notebookId, Guid fileId, INotebookFileService notebookFileService, IMarkdownExtractionService markdownService) =>
         {
