@@ -524,22 +524,12 @@ namespace GuideAntsApi.Services.Components
                 throw new InvalidOperationException(
                     $"OpenRouter transcription payload exceeds configured limit ({audioBytes.LongLength} > {maxBytes} bytes).");
             }
-            var endpoint = $"{baseUrl.TrimEnd('/')}/chat/completions";
+            var endpoint = $"{baseUrl.TrimEnd('/')}/audio/transcriptions";
             var format = ResolveOpenRouterAudioFormat(fileName, contentType);
             var requestBody = new OpenRouterTranscriptionRequest(
                 Model: mode.ModelId!,
-                Messages:
-                [
-                    new OpenRouterTranscriptionMessage(
-                        Role: "user",
-                        Content:
-                        [
-                            new OpenRouterTranscriptionContentText("text", "Transcribe this audio."),
-                            new OpenRouterTranscriptionContentAudio(
-                                "input_audio",
-                                new OpenRouterInputAudio(Convert.ToBase64String(audioBytes), format))
-                        ])
-                ]);
+                InputAudio: new OpenRouterInputAudio(Convert.ToBase64String(audioBytes), format),
+                Language: ReadServiceModePresetField(mode.RequestPresetJson, "language"));
 
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
             {
@@ -547,6 +537,7 @@ namespace GuideAntsApi.Services.Components
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
             request.Headers.Add("x-request-id", requestId);
+            AddOpenRouterAttributionHeaders(request);
 
             var startedAt = DateTime.UtcNow;
             using var response = await _httpClient.SendAsync(request, cancellationToken);
@@ -561,7 +552,7 @@ namespace GuideAntsApi.Services.Components
             {
                 PropertyNameCaseInsensitive = true
             });
-            var text = parsed?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+            var text = parsed?.Text ?? string.Empty;
             _logger.LogWarning(
                 "asr_api_request_success provider={Provider} requestId={RequestId} latencyMs={LatencyMs} payloadSizeBytes={PayloadSizeBytes} payloadSizeBucket={PayloadSizeBucket} durationSeconds={DurationSeconds} textLength={TextLength}",
                 OpenRouterProviderSection,
@@ -680,6 +671,21 @@ namespace GuideAntsApi.Services.Components
 
         private static bool IsOpenRouterAudioFormatSupported(string format) =>
             format is "wav" or "mp3" or "ogg" or "webm" or "flac" or "m4a";
+
+        private void AddOpenRouterAttributionHeaders(HttpRequestMessage request)
+        {
+            var httpReferer = _configurationForSection(OpenRouterProviderSection, "HttpReferer")?.Trim();
+            if (!string.IsNullOrWhiteSpace(httpReferer))
+            {
+                request.Headers.TryAddWithoutValidation("HTTP-Referer", httpReferer);
+            }
+
+            var appTitle = _configurationForSection(OpenRouterProviderSection, "AppTitle")?.Trim();
+            if (!string.IsNullOrWhiteSpace(appTitle))
+            {
+                request.Headers.TryAddWithoutValidation("X-Title", appTitle);
+            }
+        }
 
         private long ResolveOpenRouterAudioMaxBytes(string? requestPresetJson)
         {
@@ -1161,30 +1167,14 @@ namespace GuideAntsApi.Services.Components
 
     public sealed record OpenRouterTranscriptionRequest(
         string Model,
-        IReadOnlyList<OpenRouterTranscriptionMessage> Messages);
-
-    public sealed record OpenRouterTranscriptionMessage(
-        string Role,
-        IReadOnlyList<object> Content);
-
-    public sealed record OpenRouterTranscriptionContentText(
-        string Type,
-        string Text);
-
-    public sealed record OpenRouterTranscriptionContentAudio(
-        string Type,
-        [property: JsonPropertyName("input_audio")] OpenRouterInputAudio InputAudio);
+        [property: JsonPropertyName("input_audio")] OpenRouterInputAudio InputAudio,
+        string? Language = null);
 
     public sealed record OpenRouterInputAudio(
         string Data,
         string Format);
 
-    public sealed record OpenRouterTranscriptionResponse(
-        IReadOnlyList<OpenRouterTranscriptionChoice>? Choices);
-
-    public sealed record OpenRouterTranscriptionChoice(OpenRouterTranscriptionMessageOut? Message);
-
-    public sealed record OpenRouterTranscriptionMessageOut(string? Content);
+    public sealed record OpenRouterTranscriptionResponse(string? Text);
 
     public sealed record OpenAiTranscriptionResponse(string? Text);
 }

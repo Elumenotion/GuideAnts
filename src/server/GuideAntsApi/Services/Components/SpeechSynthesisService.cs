@@ -449,12 +449,14 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
             return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, "OpenRouter:ApiKey is required.");
         }
 
-        var endpoint = $"{baseUrl.TrimEnd('/')}/tts";
+        var endpoint = $"{baseUrl.TrimEnd('/')}/audio/speech";
+        var voiceName = ResolveOpenRouterVoiceName(mode);
         var payload = JsonSerializer.Serialize(
             new OpenRouterTtsRequest(
                 StripSsmlMarkup(ssml),
                 mode.ModelId,
-                "alloy"),
+                voiceName,
+                ResponseFormat: "pcm"),
             ProviderPayloadJson);
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
@@ -462,16 +464,47 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         request.Headers.Add("x-request-id", requestId);
+        AddOpenRouterAttributionHeaders(request);
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            return new ISpeechSynthesisService.SpeechSynthesisResult(false, 0, $"OpenRouter TTS failed: {(int)response.StatusCode} {errorBody}");
+            return new ISpeechSynthesisService.SpeechSynthesisResult(
+                false,
+                0,
+                $"OpenRouter TTS failed (model={mode.ModelId}, voice={voiceName}): {(int)response.StatusCode} {errorBody}");
         }
 
         var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-        await File.WriteAllBytesAsync(outputPath, bytes, cancellationToken);
+        if (bytes.Length == 0)
+        {
+            return new ISpeechSynthesisService.SpeechSynthesisResult(
+                false,
+                0,
+                "OpenRouter TTS returned an empty audio payload.");
+        }
+
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            var errorBody = Encoding.UTF8.GetString(bytes);
+            return new ISpeechSynthesisService.SpeechSynthesisResult(
+                false,
+                0,
+                $"OpenRouter TTS returned JSON instead of audio: {errorBody}");
+        }
+
+        if (string.Equals(mediaType, "audio/mpeg", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ISpeechSynthesisService.SpeechSynthesisResult(
+                false,
+                0,
+                "OpenRouter TTS returned MP3 audio. Configure response_format=pcm for WAV output.");
+        }
+
+        var outputBytes = ResolveOpenRouterSpeechOutputBytes(bytes, mediaType);
+        await File.WriteAllBytesAsync(outputPath, outputBytes, cancellationToken);
         return new ISpeechSynthesisService.SpeechSynthesisResult(true, 0);
     }
 
@@ -786,6 +819,39 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         return null;
     }
 
+    private static string ResolveOpenRouterVoiceName(ServiceMode mode)
+    {
+        var explicitVoice = ResolveGoogleGeminiVoiceName(mode);
+        if (!string.IsNullOrWhiteSpace(explicitVoice))
+        {
+            return explicitVoice;
+        }
+
+        if (!string.IsNullOrWhiteSpace(mode.ModelId)
+            && mode.ModelId.Contains("kokoro", StringComparison.OrdinalIgnoreCase))
+        {
+            // Kokoro voices are prefixed voice ids; af_alloy is the closest default to generic "alloy".
+            return "af_alloy";
+        }
+
+        return "alloy";
+    }
+
+    private void AddOpenRouterAttributionHeaders(HttpRequestMessage request)
+    {
+        var httpReferer = _configuration["OpenRouter:HttpReferer"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(httpReferer))
+        {
+            request.Headers.TryAddWithoutValidation("HTTP-Referer", httpReferer);
+        }
+
+        var appTitle = _configuration["OpenRouter:AppTitle"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(appTitle))
+        {
+            request.Headers.TryAddWithoutValidation("X-Title", appTitle);
+        }
+    }
+
     private static string NormalizeGoogleGeminiModelName(string modelId)
     {
         var trimmed = modelId.Trim();
@@ -815,6 +881,24 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         string.Equals(mimeType, "audio/wav", StringComparison.OrdinalIgnoreCase)
         || string.Equals(mimeType, "audio/x-wav", StringComparison.OrdinalIgnoreCase)
         || string.Equals(mimeType, "audio/wave", StringComparison.OrdinalIgnoreCase);
+
+    private static bool StartsWithRiffHeader(ReadOnlySpan<byte> bytes) =>
+        bytes.Length >= 4
+        && bytes[0] == (byte)'R'
+        && bytes[1] == (byte)'I'
+        && bytes[2] == (byte)'F'
+        && bytes[3] == (byte)'F';
+
+    private static byte[] ResolveOpenRouterSpeechOutputBytes(byte[] bytes, string? mediaType)
+    {
+        if (IsWaveMimeType(mediaType) || StartsWithRiffHeader(bytes))
+        {
+            return bytes;
+        }
+
+        // OpenRouter defaults to raw 16-bit mono PCM at 24 kHz (Kokoro and compatible models).
+        return WrapPcm16Mono24KhzAsWav(bytes);
+    }
 
     private static bool IsHuggingFaceAudioMediaType(string? mediaType)
     {
@@ -888,7 +972,8 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
     private sealed record OpenRouterTtsRequest(
         string Input,
         string Model,
-        string Voice);
+        string Voice,
+        [property: JsonPropertyName("response_format")] string ResponseFormat);
 
     private sealed record OpenAiTtsRequest(
         string Model,

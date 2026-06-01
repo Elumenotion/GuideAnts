@@ -217,7 +217,6 @@ public sealed class SpeechSynthesisServiceTests
             configurationValues: new Dictionary<string, string?>
             {
                 ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:TtsAllowedModels"] = "hf-tts-model"
             },
             modelId: "hf-tts-model");
 
@@ -265,7 +264,6 @@ public sealed class SpeechSynthesisServiceTests
             configurationValues: new Dictionary<string, string?>
             {
                 ["HuggingFace:Token"] = "hf-token",
-                ["HuggingFace:TtsAllowedModels"] = "hf-tts-model"
             },
             modelId: "hf-tts-model");
 
@@ -335,7 +333,6 @@ public sealed class SpeechSynthesisServiceTests
             {
                 ["HuggingFace:Token"] = "hf-token",
                 ["HuggingFace:RouterBaseUrl"] = "https://router.huggingface.co/v1",
-                ["HuggingFace:TtsAllowedModels"] = "ResembleAI/chatterbox"
             },
             modelId: "ResembleAI/chatterbox");
 
@@ -370,14 +367,14 @@ public sealed class SpeechSynthesisServiceTests
     [TestMethod]
     public async Task SynthesizeToWavAsync_UsesOpenRouterProviderWithTypedPayload()
     {
-        var wavBytes = Encoding.UTF8.GetBytes("fake-openrouter-wav");
+        var pcmBytes = new byte[] { 0x01, 0x00, 0x02, 0x00, 0x03, 0x00 };
         var handler = new CapturingHandler(_ =>
         {
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new ByteArrayContent(wavBytes)
+                Content = new ByteArrayContent(pcmBytes)
             };
-            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/wav");
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("audio/pcm");
             return response;
         });
 
@@ -392,7 +389,7 @@ public sealed class SpeechSynthesisServiceTests
                 ["OpenRouter:ApiKey"] = "or-key",
                 ["OpenRouter:BaseUrl"] = "https://openrouter.ai/api/v1",
             },
-            modelId: "or-tts-model");
+            modelId: "hexgrad/kokoro-82m");
 
         var outputPath = Path.Combine(Path.GetTempPath(), $"tts-or-{Guid.NewGuid():N}.wav");
         try
@@ -401,9 +398,16 @@ public sealed class SpeechSynthesisServiceTests
 
             result.Success.Should().BeTrue();
             handler.LastRequestUri.Should().NotBeNull();
-            handler.LastRequestUri!.ToString().Should().Be("https://openrouter.ai/api/v1/tts");
-            handler.LastRequestBody.Should().Contain("\"model\":\"or-tts-model\"");
-            handler.LastRequestBody.Should().Contain("\"voice\":\"alloy\"");
+            handler.LastRequestUri!.ToString().Should().Be("https://openrouter.ai/api/v1/audio/speech");
+            handler.LastRequestBody.Should().Contain("\"model\":\"hexgrad/kokoro-82m\"");
+            handler.LastRequestBody.Should().Contain("\"voice\":\"af_alloy\"");
+            handler.LastRequestBody.Should().Contain("\"response_format\":\"pcm\"");
+
+            var outputBytes = await File.ReadAllBytesAsync(outputPath);
+            outputBytes.Length.Should().BeGreaterThan(pcmBytes.Length);
+            Encoding.ASCII.GetString(outputBytes, 0, 4).Should().Be("RIFF");
+            Encoding.ASCII.GetString(outputBytes, 8, 4).Should().Be("WAVE");
+            outputBytes[^pcmBytes.Length..].Should().Equal(pcmBytes);
         }
         finally
         {

@@ -12,7 +12,7 @@ export type AddAiServicesWizardStep =
   | 'optionalServices'
   | 'finish';
 
-export type AddAiServicesWizardProvider = 'foundry' | 'google-gemini' | 'openai' | 'huggingface' | 'local-ai';
+export type AddAiServicesWizardProvider = 'foundry' | 'google-gemini' | 'openai' | 'huggingface' | 'openrouter' | 'local-ai';
 
 export type FoundryModelProviderLabel = 'Completions' | 'Responses';
 
@@ -48,6 +48,13 @@ export interface HuggingFaceModelDraft {
   persisted: boolean;
 }
 
+export interface OpenRouterModelDraft {
+  localId: string;
+  modelId: string;
+  setAsGlobalDefault: boolean;
+  persisted: boolean;
+}
+
 export interface ExistingFoundryModel {
   modelId: string;
   provider: FoundryModelProviderLabel;
@@ -66,6 +73,11 @@ export interface ExistingOpenAiModel {
 }
 
 export interface ExistingHuggingFaceModel {
+  modelId: string;
+  raw: SettingsModelDto;
+}
+
+export interface ExistingOpenRouterModel {
   modelId: string;
   raw: SettingsModelDto;
 }
@@ -94,6 +106,14 @@ export interface HuggingFaceCoreConnectionFormState {
   token: string;
   routerBaseUrl: string;
   tokenHasStoredValue: boolean;
+}
+
+export interface OpenRouterCoreConnectionFormState {
+  apiKey: string;
+  baseUrl: string;
+  httpReferer: string;
+  appTitle: string;
+  apiKeyHasStoredValue: boolean;
 }
 
 export interface FoundryOptionalServicesFormState {
@@ -174,6 +194,24 @@ export interface HuggingFaceOptionalServicesFormState {
   enableImages: boolean;
   imagesTextToImageModelId: string;
   imagesImageToImageModelId: string;
+  imagesTimeoutSeconds: string;
+
+  enableSpeechTranscription: boolean;
+  speechTranscriptionModelId: string;
+  speechTranscriptionTimeoutSeconds: string;
+
+  enableSpeechSynthesis: boolean;
+  speechSynthesisModelId: string;
+  speechSynthesisTimeoutSeconds: string;
+}
+
+export interface OpenRouterOptionalServicesFormState {
+  enableEmbeddings: boolean;
+  embeddingsModelId: string;
+  embeddingsTimeoutSeconds: string;
+
+  enableImages: boolean;
+  imagesModelId: string;
   imagesTimeoutSeconds: string;
 
   enableSpeechTranscription: boolean;

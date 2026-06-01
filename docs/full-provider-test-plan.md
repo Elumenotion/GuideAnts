@@ -74,7 +74,7 @@ Complete this checklist before each full rerun:
 3. Reset/rotate log files for current rerun label.
 4. Close all Playwright browser sessions (`playwright-cli close-all`, `playwright-cli kill-all`).
 5. Open fresh browser session and navigate to Home.
-6. Confirm wizard provider options show Foundry, Google Gemini, OpenAI, Hugging Face.
+6. Confirm wizard provider options show Foundry, Google Gemini, OpenAI, Hugging Face, OpenRouter.
 7. Use the same notebook target for chat/header phase to keep artifacts comparable.
 
 ## 6. Provider Scope Clarification (From Thread)
@@ -85,6 +85,7 @@ In-scope providers for this phase:
 2. Google Gemini
 3. OpenAI
 4. Hugging Face
+5. OpenRouter
 
 Out of scope for this phase:
 
@@ -115,6 +116,10 @@ Clarification: `gpt-5.2-codex` is Responses; the other Foundry models in this pa
 ### 7.4 Hugging Face
 
 1. `deepseek-ai/DeepSeek-V4-Pro`
+
+### 7.5 OpenRouter
+
+1. `minimax/minimax-m3`
 
 ## 8. Non-Chat Service Targets and Deterministic Values
 
@@ -217,6 +222,29 @@ Any in-scope required service showing `blocked` (including `MODEL_NOT_FOUND`) is
 - ModelId: `ResembleAI/chatterbox`
 - Expected: `ready`
 
+### 8.5 OpenRouter
+
+1. Embeddings
+- Provider: `Embeddings.OpenRouter.Embeddings`
+- ModelId: `nvidia/llama-nemotron-embed-vl-1b-v2:free`
+- Expected: `ready`
+
+2. Image Generation
+- Provider: `ImageGeneration.OpenRouter.Image`
+- ModelId: `recraft/recraft-v4`
+- Expected: `ready`
+- Note: OpenRouter uses a single image `ModelId` for both text-to-image and image edit. Unlike HF, no TextToImageModelId/ImageToImageModelId split.
+
+3. Speech Transcription
+- Provider: `SpeechTranscription.OpenRouter.Audio`
+- ModelId: `nvidia/parakeet-tdt-0.6b-v3`
+- Expected: `ready`
+
+4. Speech Synthesis
+- Provider: `SpeechSynthesis.OpenRouter.Tts`
+- ModelId: `hexgrad/kokoro-82m`
+- Expected: `ready`
+
 ## 9. Wizard Procedure (Detailed)
 
 Run order:
@@ -225,6 +253,7 @@ Run order:
 2. Google Gemini
 3. OpenAI
 4. Hugging Face
+5. OpenRouter
 
 For each provider:
 
@@ -348,10 +377,11 @@ Required minimum artifacts:
 3. `output/playwright/full-provider-03-gemini-finish.png`
 4. `output/playwright/full-provider-04-openai-finish.png`
 5. `output/playwright/full-provider-05-huggingface-finish.png`
-6. `output/playwright/full-provider-06-chat-toolbar-chat.png`
-7. `output/playwright/full-provider-07-chat-toolbar-image.png`
-8. `output/playwright/full-provider-08-chat-toolbar-tts.png`
-9. `output/playwright/full-provider-09-chat-toolbar-asr.png`
+6. `output/playwright/full-provider-06-openrouter-finish.png`
+7. `output/playwright/full-provider-07-chat-toolbar-chat.png`
+8. `output/playwright/full-provider-08-chat-toolbar-image.png`
+9. `output/playwright/full-provider-09-chat-toolbar-tts.png`
+10. `output/playwright/full-provider-10-chat-toolbar-asr.png`
 10. `output/playwright/full-provider-chat-<modelId>.png` per model
 11. Defect evidence screenshots + relevant API log references
 

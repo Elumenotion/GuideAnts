@@ -21,54 +21,6 @@ namespace GuideAntsApi.Services
                 providerSection: providerSection);
         }
 
-        private void ValidateOpenRouterImageModel(string modelId, string? requestPresetJson)
-        {
-            var configured = ReadServiceModePresetField(requestPresetJson, "AllowedModels");
-            if (!string.IsNullOrWhiteSpace(configured))
-            {
-                if (IsModelAllowed(modelId, configured))
-                {
-                    return;
-                }
-
-                throw new InvalidOperationException(
-                    $"OpenRouter image model '{modelId}' is not in the ImageGeneration service-mode AllowedModels preset.");
-            }
-
-            if (modelId.Contains("image", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("imagen", StringComparison.OrdinalIgnoreCase)
-                || modelId.Contains("flux", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            throw new InvalidOperationException(
-                $"OpenRouter model '{modelId}' is not recognized as image-capable/output_modalities=image capable. " +
-                "Set ImageGeneration service-mode AllowedModels to explicitly allow it.");
-        }
-
-        private static bool IsModelAllowed(string modelId, string allowlistCsv)
-        {
-            var entries = allowlistCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            foreach (var entry in entries)
-            {
-                if (entry.EndsWith('*'))
-                {
-                    var prefix = entry[..^1];
-                    if (modelId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-                else if (string.Equals(modelId, entry, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private static string? ReadServiceModePresetField(string? requestPresetJson, string fieldName)
         {
             if (string.IsNullOrWhiteSpace(requestPresetJson))

@@ -153,10 +153,7 @@ function renderCloudTranscriptionBehavior(providerId: string) {
             Hugging Face ASR posts the uploaded audio to the selected <span className="font-mono">ASR Model ID</span> using
             the shared <span className="font-mono">HuggingFace:Token</span>.
           </li>
-          <li>
-            Use <span className="font-mono">Allowed Models</span> when you want to lock the route to an approved
-            model set.
-          </li>
+          <li>The selected ASR model id is used directly for this route.</li>
         </ul>
       );
     case 'SpeechTranscription.OpenRouter.Audio':

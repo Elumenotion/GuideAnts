@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.BackgroundJobs.Services.Embeddings;
@@ -46,12 +47,13 @@ internal sealed class OpenRouterEmbeddingService(
         }
 
         var endpoint = $"{baseUrl}/embeddings";
-        var requestDto = new OpenRouterEmbeddingRequest(modelId, inputs.Length == 1 ? inputs[0] : inputs);
+        var requestBody = BuildRequestBody(modelId, inputs, requestPresetJson);
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = new StringContent(JsonSerializer.Serialize(requestDto), Encoding.UTF8, "application/json")
+            Content = new StringContent(requestBody, Encoding.UTF8, "application/json")
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        AddOpenRouterAttributionHeaders(request);
 
         using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -70,7 +72,73 @@ internal sealed class OpenRouterEmbeddingService(
         return parsed.Data.Select(d => d.Embedding).ToArray();
     }
 
-    private sealed record OpenRouterEmbeddingRequest(string Model, object Input);
+    private string BuildRequestBody(string modelId, string[] inputs, string? requestPresetJson)
+    {
+        var body = new JsonObject
+        {
+            ["model"] = modelId,
+            ["input"] = inputs.Length == 1 ? inputs[0] : JsonSerializer.SerializeToNode(inputs)
+        };
+
+        if (TryReadPositiveInt(requestPresetJson, "Dimensions", out var dimensions))
+        {
+            body["dimensions"] = dimensions;
+        }
+
+        return body.ToJsonString();
+    }
+
+    private void AddOpenRouterAttributionHeaders(HttpRequestMessage request)
+    {
+        var httpReferer = _configuration["OpenRouter:HttpReferer"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(httpReferer))
+        {
+            request.Headers.TryAddWithoutValidation("HTTP-Referer", httpReferer);
+        }
+
+        var appTitle = _configuration["OpenRouter:AppTitle"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(appTitle))
+        {
+            request.Headers.TryAddWithoutValidation("X-Title", appTitle);
+        }
+    }
+
+    private static bool TryReadPositiveInt(string? requestPresetJson, string fieldName, out int value)
+    {
+        value = 0;
+        if (string.IsNullOrWhiteSpace(requestPresetJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(requestPresetJson);
+            if (!document.RootElement.TryGetProperty(fieldName, out var node))
+            {
+                return false;
+            }
+
+            if (node.ValueKind == JsonValueKind.Number && node.TryGetInt32(out value) && value > 0)
+            {
+                return true;
+            }
+
+            if (node.ValueKind == JsonValueKind.String
+                && int.TryParse(node.GetString(), out value)
+                && value > 0)
+            {
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
     private sealed record OpenRouterEmbeddingResponse(IReadOnlyList<OpenRouterEmbeddingData> Data);
     private sealed record OpenRouterEmbeddingData(float[] Embedding);
     private static class Serializer
