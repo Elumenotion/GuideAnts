@@ -6,6 +6,10 @@ import {
   HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,
   OPENAI_CHAT_RUNTIME_PROFILE_ID,
   OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
+  OPENROUTER_CHAT_MODEL_PROVIDER_ID,
+  OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID,
+  OPENROUTER_SECTION,
+  OPENROUTER_SERVICE_PROVIDER_IDS,
   DOCUMENT_INTELLIGENCE_SECTION,
   EMBEDDINGS_SECTION,
   GEMINI_CORE_SECTION,
@@ -23,6 +27,7 @@ import {
   buildAddModelRequest,
   buildAddOpenAiModelRequest,
   buildAddHuggingFaceModelRequest,
+  buildAddOpenRouterModelRequest,
   hasModelId,
   hasModelTuple,
   mapModelProviderIdToLabel,
@@ -30,7 +35,9 @@ import {
   summarizeGeminiOptionalServiceWarnings,
   summarizeHuggingFaceOptionalServiceWarnings,
   summarizeOptionalServiceWarnings,
+  summarizeOpenRouterOptionalServiceWarnings,
   toExistingHuggingFaceModels,
+  toExistingOpenRouterModels,
   toExistingGeminiModels,
   toExistingFoundryModels,
 } from '../utils';
@@ -280,6 +287,36 @@ describe('addAiServicesWizard utils', () => {
     });
   });
 
+  it('filters to openrouter chat models', () => {
+    const models = toExistingOpenRouterModels([
+      {
+        modelId: 'minimax/minimax-m3',
+        displayName: 'minimax/minimax-m3',
+        provider: OPENROUTER_CHAT_MODEL_PROVIDER_ID,
+        isActive: true,
+        created: '2026-04-29T00:00:00Z',
+      },
+      {
+        modelId: 'gpt-4.1',
+        displayName: 'gpt-4.1',
+        provider: 'openai-chat',
+        isActive: true,
+        created: '2026-04-29T00:00:00Z',
+      },
+    ]);
+
+    expect(models).toHaveLength(1);
+    expect(models[0]?.modelId).toBe('minimax/minimax-m3');
+  });
+
+  it('builds openrouter add-model request with runtime profile id', () => {
+    const request = buildAddOpenRouterModelRequest('minimax/minimax-m3');
+    expect(request.provider).toBe(OPENROUTER_CHAT_MODEL_PROVIDER_ID);
+    expect(request.providerConfig).toEqual({
+      runtimeProfileId: OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID,
+    });
+  });
+
   it('builds Foundry add-model requests with provider-specific runtime profile ids', () => {
     expect(buildAddModelRequest('gpt-4o', 'Completions').providerConfig).toEqual({
       runtimeProfileId: OPENAI_CHAT_RUNTIME_PROFILE_ID,
@@ -330,5 +367,30 @@ describe('addAiServicesWizard utils', () => {
     });
 
     expect(summarizeHuggingFaceOptionalServiceWarnings(snapshot)).toEqual([]);
+  });
+
+  it('returns no openrouter optional warnings when openrouter providers are active and configured', () => {
+    const snapshot = createSnapshot({
+      sectionSummaries: [
+        ...createSnapshot().sectionSummaries,
+        {
+          sectionName: OPENROUTER_SECTION,
+          displayName: 'OpenRouter',
+          displayOrder: 11,
+          hasSecrets: true,
+          readinessStatus: 'configured',
+          missingFields: [],
+        },
+      ],
+      serviceStates: {
+        Embeddings: createServiceState('Embeddings', OPENROUTER_SERVICE_PROVIDER_IDS.Embeddings),
+        ImageGeneration: createServiceState('ImageGeneration', OPENROUTER_SERVICE_PROVIDER_IDS.ImageGeneration),
+        SpeechTranscription: createServiceState('SpeechTranscription', OPENROUTER_SERVICE_PROVIDER_IDS.SpeechTranscription),
+        SpeechSynthesis: createServiceState('SpeechSynthesis', OPENROUTER_SERVICE_PROVIDER_IDS.SpeechSynthesis),
+        DocumentIntelligence: createServiceState('DocumentIntelligence', SERVICE_PROVIDER_IDS.DocumentIntelligence),
+      },
+    });
+
+    expect(summarizeOpenRouterOptionalServiceWarnings(snapshot)).toEqual([]);
   });
 });

@@ -46,7 +46,7 @@ Status legend:
   - `SpeechSynthesis.HuggingFace.Inference`
   - `ImageGeneration.HuggingFace.Inference`
   - `Embeddings.HuggingFace.Inference`
-- Provider field metadata exists (ModelId, AllowedModels, TimeoutSeconds where applicable).
+- Provider field metadata exists (ModelId, TimeoutSeconds where applicable).
 - Readiness/model-capability blockers exist in `RoutingReadinessService` (allowlist + heuristic fallback).
 - Service implementations are wired and functional.
 - Endpoint behavior split:

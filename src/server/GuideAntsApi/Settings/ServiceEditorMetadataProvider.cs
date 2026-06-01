@@ -173,6 +173,7 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [ServiceProviderIds.SpeechSynthesisOpenRouterTts] =
                 [
                     Field("ModelId", "text", true, operative: true),
+                    Field("VoiceName", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
                 [ServiceProviderIds.SpeechSynthesisOpenAiTts] =

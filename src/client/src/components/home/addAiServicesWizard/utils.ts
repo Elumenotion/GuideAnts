@@ -36,6 +36,11 @@ import {
   OPENAI_OPTIONAL_SERVICE_DEFAULTS,
   OPENAI_RESPONSES_RUNTIME_PROFILE_ID,
   OPENAI_SERVICE_PROVIDER_IDS,
+  OPENROUTER_CHAT_MODEL_PROVIDER_ID,
+  OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID,
+  OPENROUTER_OPTIONAL_SERVICE_DEFAULTS,
+  OPENROUTER_SECTION,
+  OPENROUTER_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
 } from './constants';
 import type {
@@ -43,6 +48,7 @@ import type {
   ExistingHuggingFaceModel,
   ExistingFoundryModel,
   ExistingOpenAiModel,
+  ExistingOpenRouterModel,
   FoundryCoreConnectionFormState,
   FoundryModelDraft,
   FoundryModelProviderLabel,
@@ -61,6 +67,9 @@ import type {
   OpenAiModelProviderLabel,
   OpenAiOptionalServiceKey,
   OpenAiOptionalServicesFormState,
+  OpenRouterCoreConnectionFormState,
+  OpenRouterModelDraft,
+  OpenRouterOptionalServicesFormState,
   OptionalServiceKey,
   WizardLoadSnapshot,
 } from './types';
@@ -137,6 +146,16 @@ export function toExistingHuggingFaceModels(models: SettingsModelDto[]): Existin
     .sort((left, right) => left.modelId.localeCompare(right.modelId));
 }
 
+export function toExistingOpenRouterModels(models: SettingsModelDto[]): ExistingOpenRouterModel[] {
+  return models
+    .filter((model) => model.provider === OPENROUTER_CHAT_MODEL_PROVIDER_ID)
+    .map((model) => ({
+      modelId: model.modelId,
+      raw: model,
+    }))
+    .sort((left, right) => left.modelId.localeCompare(right.modelId));
+}
+
 export function makeDraftModel(
   localId: string,
   modelId: string,
@@ -193,6 +212,19 @@ export function makeHuggingFaceDraftModel(
   };
 }
 
+export function makeOpenRouterDraftModel(
+  localId: string,
+  modelId: string,
+  setAsGlobalDefault: boolean
+): OpenRouterModelDraft {
+  return {
+    localId,
+    modelId: modelId.trim(),
+    setAsGlobalDefault,
+    persisted: false,
+  };
+}
+
 export function hasModelTuple(
   models: readonly Pick<FoundryModelDraft, 'modelId' | 'provider'>[],
   candidate: Pick<FoundryModelDraft, 'modelId' | 'provider'>
@@ -228,6 +260,9 @@ function inferCloudRuntimeProfileId(providerId: string, modelId: string): string
   }
   if (providerId === HUGGINGFACE_CHAT_MODEL_PROVIDER_ID) {
     return HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID;
+  }
+  if (providerId === OPENROUTER_CHAT_MODEL_PROVIDER_ID) {
+    return OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID;
   }
   return null;
 }
@@ -284,6 +319,20 @@ export function buildAddOpenAiModelRequest(modelId: string, provider: OpenAiMode
 export function buildAddHuggingFaceModelRequest(modelId: string): AddModelRequest {
   const trimmed = modelId.trim();
   const providerId = HUGGINGFACE_CHAT_MODEL_PROVIDER_ID;
+  return {
+    provider: providerId,
+    catalog: {
+      modelId: trimmed,
+      displayName: trimmed,
+      isActive: true,
+    },
+    ...withRuntimeProfileProviderConfig(providerId, trimmed),
+  };
+}
+
+export function buildAddOpenRouterModelRequest(modelId: string): AddModelRequest {
+  const trimmed = modelId.trim();
+  const providerId = OPENROUTER_CHAT_MODEL_PROVIDER_ID;
   return {
     provider: providerId,
     catalog: {
@@ -678,6 +727,92 @@ export function summarizeHuggingFaceOptionalServiceWarnings(snapshot: WizardLoad
   return warnings;
 }
 
+function openRouterOptionalServiceStatus(
+  serviceKey: OpenAiOptionalServiceKey,
+  snapshot: WizardLoadSnapshot
+): { complete: boolean; message: string } {
+  const openRouterConnection = findSectionSummary(snapshot.sectionSummaries, OPENROUTER_SECTION);
+  if (!openRouterConnection || openRouterConnection.readinessStatus !== 'configured') {
+    if (serviceKey === 'Embeddings') {
+      return { complete: false, message: 'OpenRouter connection is not configured for Embeddings.' };
+    }
+    if (serviceKey === 'ImageGeneration') {
+      return { complete: false, message: 'OpenRouter connection is not configured for Image Generation.' };
+    }
+    if (serviceKey === 'SpeechTranscription') {
+      return { complete: false, message: 'OpenRouter connection is not configured for Speech Transcription.' };
+    }
+    return { complete: false, message: 'OpenRouter connection is not configured for Speech Synthesis.' };
+  }
+
+  if (serviceKey === 'Embeddings') {
+    const state = snapshot.serviceStates.Embeddings;
+    const providerId = OPENROUTER_SERVICE_PROVIDER_IDS.Embeddings;
+    const provider = getProviderState(state, providerId);
+    if (!state || !provider || state.activeProviderId !== providerId) {
+      return { complete: false, message: 'Embeddings service is not set to OpenRouter.' };
+    }
+    if (!provider.canActivate) {
+      return { complete: false, message: 'Embeddings service has unresolved activation blockers.' };
+    }
+    return { complete: true, message: 'Embeddings is ready.' };
+  }
+
+  if (serviceKey === 'ImageGeneration') {
+    const state = snapshot.serviceStates.ImageGeneration;
+    const providerId = OPENROUTER_SERVICE_PROVIDER_IDS.ImageGeneration;
+    const provider = getProviderState(state, providerId);
+    if (!state || !provider || state.activeProviderId !== providerId) {
+      return { complete: false, message: 'Image Generation service is not set to OpenRouter.' };
+    }
+    if (!provider.canActivate) {
+      return { complete: false, message: 'Image Generation service has unresolved activation blockers.' };
+    }
+    return { complete: true, message: 'Image Generation is ready.' };
+  }
+
+  if (serviceKey === 'SpeechTranscription') {
+    const state = snapshot.serviceStates.SpeechTranscription;
+    const providerId = OPENROUTER_SERVICE_PROVIDER_IDS.SpeechTranscription;
+    const provider = getProviderState(state, providerId);
+    if (!state || !provider || state.activeProviderId !== providerId) {
+      return { complete: false, message: 'Speech Transcription service is not set to OpenRouter.' };
+    }
+    if (!provider.canActivate) {
+      return { complete: false, message: 'Speech Transcription service has unresolved activation blockers.' };
+    }
+    return { complete: true, message: 'Speech Transcription is ready.' };
+  }
+
+  const state = snapshot.serviceStates.SpeechSynthesis;
+  const providerId = OPENROUTER_SERVICE_PROVIDER_IDS.SpeechSynthesis;
+  const provider = getProviderState(state, providerId);
+  if (!state || !provider || state.activeProviderId !== providerId) {
+    return { complete: false, message: 'Speech Synthesis service is not set to OpenRouter.' };
+  }
+  if (!provider.canActivate) {
+    return { complete: false, message: 'Speech Synthesis service has unresolved activation blockers.' };
+  }
+  return { complete: true, message: 'Speech Synthesis is ready.' };
+}
+
+export function summarizeOpenRouterOptionalServiceWarnings(snapshot: WizardLoadSnapshot): string[] {
+  const keys: OpenAiOptionalServiceKey[] = [
+    'Embeddings',
+    'ImageGeneration',
+    'SpeechTranscription',
+    'SpeechSynthesis',
+  ];
+  const warnings: string[] = [];
+  for (const key of keys) {
+    const result = openRouterOptionalServiceStatus(key, snapshot);
+    if (!result.complete) {
+      warnings.push(result.message);
+    }
+  }
+  return warnings;
+}
+
 export function summarizeOptionalServiceWarnings(snapshot: WizardLoadSnapshot): string[] {
   return summarizeFoundryOptionalServiceWarnings(snapshot);
 }
@@ -901,6 +1036,17 @@ export function buildHuggingFaceCoreForm(snapshot: WizardLoadSnapshot): HuggingF
   };
 }
 
+export function buildOpenRouterCoreForm(snapshot: WizardLoadSnapshot): OpenRouterCoreConnectionFormState {
+  const section = snapshot.sectionsByName[OPENROUTER_SECTION];
+  return {
+    apiKey: String(section?.payload.ApiKey ?? ''),
+    baseUrl: String(section?.payload.BaseUrl ?? 'https://openrouter.ai/api/v1'),
+    httpReferer: String(section?.payload.HttpReferer ?? ''),
+    appTitle: String(section?.payload.AppTitle ?? ''),
+    apiKeyHasStoredValue: Boolean(section?.secretHasValue?.ApiKey),
+  };
+}
+
 export function buildFoundryOptionalServicesForm(snapshot: WizardLoadSnapshot): FoundryOptionalServicesFormState {
   const coreResource = getSectionStringValue(snapshot.sectionsByName[FOUNDRY_CORE_SECTION], 'Resource');
   const derivedEndpoint = deriveEndpointFromResource(coreResource);
@@ -1083,5 +1229,41 @@ export function buildHuggingFaceOptionalServicesForm(snapshot: WizardLoadSnapsho
     speechSynthesisTimeoutSeconds:
       getServiceProviderFieldValue(snapshot.serviceStates.SpeechSynthesis, HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechSynthesis, 'TimeoutSeconds') ||
       HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisTimeoutSeconds,
+  };
+}
+
+export function buildOpenRouterOptionalServicesForm(snapshot: WizardLoadSnapshot): OpenRouterOptionalServicesFormState {
+  return {
+    enableEmbeddings: true,
+    embeddingsModelId:
+      getServiceProviderFieldValue(snapshot.serviceStates.Embeddings, OPENROUTER_SERVICE_PROVIDER_IDS.Embeddings, 'ModelId') ||
+      OPENROUTER_OPTIONAL_SERVICE_DEFAULTS.embeddingsModelId,
+    embeddingsTimeoutSeconds:
+      getServiceProviderFieldValue(snapshot.serviceStates.Embeddings, OPENROUTER_SERVICE_PROVIDER_IDS.Embeddings, 'TimeoutSeconds') ||
+      OPENROUTER_OPTIONAL_SERVICE_DEFAULTS.embeddingsTimeoutSeconds,
+
+    enableImages: true,
+    imagesModelId:
+      getServiceProviderFieldValue(snapshot.serviceStates.ImageGeneration, OPENROUTER_SERVICE_PROVIDER_IDS.ImageGeneration, 'ModelId') ||
+      OPENROUTER_OPTIONAL_SERVICE_DEFAULTS.imagesModelId,
+    imagesTimeoutSeconds:
+      getServiceProviderFieldValue(snapshot.serviceStates.ImageGeneration, OPENROUTER_SERVICE_PROVIDER_IDS.ImageGeneration, 'TimeoutSeconds') ||
+      OPENROUTER_OPTIONAL_SERVICE_DEFAULTS.imagesTimeoutSeconds,
+
+    enableSpeechTranscription: true,
+    speechTranscriptionModelId:
+      getServiceProviderFieldValue(snapshot.serviceStates.SpeechTranscription, OPENROUTER_SERVICE_PROVIDER_IDS.SpeechTranscription, 'ModelId') ||
+      OPENROUTER_OPTIONAL_SERVICE_DEFAULTS.speechTranscriptionModelId,
+    speechTranscriptionTimeoutSeconds:
+      getServiceProviderFieldValue(snapshot.serviceStates.SpeechTranscription, OPENROUTER_SERVICE_PROVIDER_IDS.SpeechTranscription, 'TimeoutSeconds') ||
+      OPENROUTER_OPTIONAL_SERVICE_DEFAULTS.speechTranscriptionTimeoutSeconds,
+
+    enableSpeechSynthesis: true,
+    speechSynthesisModelId:
+      getServiceProviderFieldValue(snapshot.serviceStates.SpeechSynthesis, OPENROUTER_SERVICE_PROVIDER_IDS.SpeechSynthesis, 'ModelId') ||
+      OPENROUTER_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisModelId,
+    speechSynthesisTimeoutSeconds:
+      getServiceProviderFieldValue(snapshot.serviceStates.SpeechSynthesis, OPENROUTER_SERVICE_PROVIDER_IDS.SpeechSynthesis, 'TimeoutSeconds') ||
+      OPENROUTER_OPTIONAL_SERVICE_DEFAULTS.speechSynthesisTimeoutSeconds,
   };
 }

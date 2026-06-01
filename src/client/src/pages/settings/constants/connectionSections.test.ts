@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { HUGGINGFACE_CHAT_MODEL_PROVIDER_ID, HUGGINGFACE_SECTION } from '../../../components/home/addAiServicesWizard/constants';
+import {
+  HUGGINGFACE_CHAT_MODEL_PROVIDER_ID,
+  HUGGINGFACE_SECTION,
+  OPENROUTER_CHAT_MODEL_PROVIDER_ID,
+  OPENROUTER_SECTION,
+} from '../../../components/home/addAiServicesWizard/constants';
 import { mapChatProviderToSection } from '../utils';
 import { HIDDEN_CHAT_MODEL_PROVIDERS, HIDDEN_CLOUD_PROVIDER_SECTIONS } from './connectionSections';
 
@@ -14,5 +19,19 @@ describe('Hugging Face visibility and mapping parity', () => {
 
   it('keeps chat provider section mapping synchronized for hf provider', () => {
     expect(mapChatProviderToSection(HUGGINGFACE_CHAT_MODEL_PROVIDER_ID)).toBe(HUGGINGFACE_SECTION);
+  });
+});
+
+describe('OpenRouter visibility and mapping parity', () => {
+  it('does not hide openrouter chat provider option', () => {
+    expect(HIDDEN_CHAT_MODEL_PROVIDERS.has(OPENROUTER_CHAT_MODEL_PROVIDER_ID)).toBe(false);
+  });
+
+  it('does not hide OpenRouter connection section', () => {
+    expect(HIDDEN_CLOUD_PROVIDER_SECTIONS.has(OPENROUTER_SECTION)).toBe(false);
+  });
+
+  it('keeps chat provider section mapping synchronized for openrouter provider', () => {
+    expect(mapChatProviderToSection(OPENROUTER_CHAT_MODEL_PROVIDER_ID)).toBe(OPENROUTER_SECTION);
   });
 });

@@ -46,6 +46,11 @@ export const WIZARD_PROVIDER_OPTIONS: readonly {
     description: 'Configure Hugging Face token, HF chat models, and optional HF service modes (embeddings, image, STT, TTS).',
   },
   {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    description: 'Configure OpenRouter API key, chat model routing, and optional OpenRouter service modes.',
+  },
+  {
     id: 'local-ai',
     label: 'Local AI',
     description: 'Install local llama chat models and configure local non-chat services (embeddings, images, STT, TTS, document intelligence).',
@@ -56,6 +61,7 @@ export const FOUNDRY_CORE_SECTION = 'AzureOpenAI';
 export const GEMINI_CORE_SECTION = 'GoogleGeminiApi';
 export const OPENAI_CORE_SECTION = 'OpenAI';
 export const HUGGINGFACE_SECTION = 'HuggingFace';
+export const OPENROUTER_SECTION = 'OpenRouter';
 export const LLAMA_CPP_SECTION = 'LlamaCpp';
 
 export const FOUNDRY_EMBEDDINGS_SECTION = 'AzureOpenAiEmbedding';
@@ -101,6 +107,16 @@ export const HUGGINGFACE_SERVICE_PROVIDER_IDS: Readonly<Record<
   SpeechSynthesis: 'SpeechSynthesis.HuggingFace.Inference',
 } as const;
 
+export const OPENROUTER_SERVICE_PROVIDER_IDS: Readonly<Record<
+  'Embeddings' | 'ImageGeneration' | 'SpeechTranscription' | 'SpeechSynthesis',
+  string
+>> = {
+  Embeddings: 'Embeddings.OpenRouter.Embeddings',
+  ImageGeneration: 'ImageGeneration.OpenRouter.Image',
+  SpeechTranscription: 'SpeechTranscription.OpenRouter.Audio',
+  SpeechSynthesis: 'SpeechSynthesis.OpenRouter.Tts',
+} as const;
+
 export const MODEL_PROVIDER_LABEL_TO_ID: Readonly<Record<FoundryModelProviderLabel, string>> = {
   Completions: 'azure-openai-chat',
   Responses: 'azure-openai-responses',
@@ -124,6 +140,9 @@ export const OPENAI_RESPONSES_RUNTIME_PROFILE_ID = 'openai_responses_reasoning';
 export const HUGGINGFACE_CHAT_MODEL_PROVIDER_ID = 'hf-inference-chat';
 export const HUGGINGFACE_DEFAULT_CHAT_MODEL_ID = 'deepseek-ai/DeepSeek-V4-Pro';
 export const HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID = 'huggingface_chat_standard';
+export const OPENROUTER_CHAT_MODEL_PROVIDER_ID = 'openrouter-chat';
+export const OPENROUTER_DEFAULT_CHAT_MODEL_ID = 'minimax/minimax-m3';
+export const OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID = 'openai_chat_standard';
 
 export const OPENAI_MODEL_PROVIDER_LABEL_TO_ID: Readonly<Record<OpenAiModelProviderLabel, string>> = {
   Completions: 'openai-chat',
@@ -201,6 +220,17 @@ export const HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS = {
   speechSynthesisModelId: 'ResembleAI/chatterbox',
   speechSynthesisTimeoutSeconds: '300',
   routerBaseUrl: 'https://router.huggingface.co/v1',
+} as const;
+
+export const OPENROUTER_OPTIONAL_SERVICE_DEFAULTS = {
+  embeddingsModelId: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
+  embeddingsTimeoutSeconds: '300',
+  imagesModelId: 'recraft/recraft-v4',
+  imagesTimeoutSeconds: '600',
+  speechTranscriptionModelId: 'nvidia/parakeet-tdt-0.6b-v3',
+  speechTranscriptionTimeoutSeconds: '300',
+  speechSynthesisModelId: 'hexgrad/kokoro-82m',
+  speechSynthesisTimeoutSeconds: '300',
 } as const;
 
 export const SECRET_MASK = '********';

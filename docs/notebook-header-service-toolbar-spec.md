@@ -639,7 +639,7 @@ problem-details blobs, or upstream proxy envelopes.
    Settings. **Met** (image, TTS, ASR; chat is provider-agnostic in the list).
 4. The toolbar does not allow adding configurations, editing credentials,
    downloading models, or creating runtime profiles. **Met** for those—**note**
-   chat does edit `ChatDefaults` (allowed models / override), which is
+   chat does edit `ChatDefaults` (model selection / override), which is
    settings-backed but not a “download or credential” flow.
 5. Chat appears first and supports quick switching among existing catalog
    choices without exposing setup flows. **Partially met:** quick switch only when

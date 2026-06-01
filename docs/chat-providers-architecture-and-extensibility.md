@@ -160,9 +160,12 @@ Experimental/Hidden (implemented, partial/in-flight, not operator-facing setup g
 | Catalog `Provider` | Backend |
 |--------------------|--------|
 | `hf-inference-chat` | **`HuggingFaceChatClientFactory`** |
-| `openrouter-chat` | **`OpenRouterChatClientFactory`** |
 
-These hidden providers may appear in routing/readiness code paths, but should not be treated as fully shipped operator-facing setup.
+Stable/operator-facing additions:
+
+| Catalog `Provider` | Backend |
+|--------------------|--------|
+| `openrouter-chat` | **`OpenRouterChatClientFactory`** |
 
 ### 5.3 Keyed DI for OpenAI factories
 
