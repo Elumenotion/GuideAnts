@@ -55,7 +55,8 @@ RUN pip install --no-cache-dir \
         Werkzeug==3.1.8 \
         whitenoise==6.12.0 \
         playwright==1.56.0 \
-        fastapi==0.115.12 \
+        fastapi==0.136.3 \
+        starlette==1.2.1 \
         uvicorn==0.34.2 && \
     python -m playwright install --with-deps chromium
 

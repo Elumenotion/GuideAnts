@@ -79,14 +79,54 @@ function Get-RunningComposeFileArgs {
     return $args
 }
 
+function Set-DotEnvValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Key,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+
+    $envLine = "$Key=$Value"
+    $lines = @()
+    if (Test-Path $Path) {
+        $lines = @(Get-Content -Path $Path)
+    }
+
+    $replaced = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^\s*$([regex]::Escape($Key))=") {
+            $lines[$i] = $envLine
+            $replaced = $true
+            break
+        }
+    }
+
+    if (-not $replaced) {
+        $lines += $envLine
+    }
+
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        Set-Content -Path $Path -Value $lines -Encoding utf8NoBOM
+    }
+    else {
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllLines($Path, [string[]]$lines, $utf8NoBom)
+    }
+}
+
 switch ($Flavor) {
     'Slim' {
         $dockerTarget = 'runtime-slim'
         $imageRepository = 'guideants-webapi-ui-slim'
         $imageEnvKey = 'GA_WEBAPI_UI_SLIM_IMAGE'
-        $composeFileName = 'docker-compose.slim.yml'
+        $composeFileName = $null
         $serviceName = 'guideants-webapi-ui-slim'
-        $useComposeFile = $true
+        $useComposeFile = $false
     }
     'Mssql' {
         $dockerTarget = 'runtime-mssql'
@@ -196,29 +236,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $envFile = Join-Path $dockerRoot '.env'
 $envLine = "${imageEnvKey}=$latestImageTag"
-
-if (Test-Path $envFile) {
-    $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.AddRange([string[]](Get-Content -Path $envFile))
-    $replaced = $false
-
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match "^\s*$([regex]::Escape($imageEnvKey))=") {
-            $lines[$i] = $envLine
-            $replaced = $true
-            break
-        }
-    }
-
-    if (-not $replaced) {
-        $lines.Add($envLine)
-    }
-
-    Set-Content -Path $envFile -Value $lines -Encoding UTF8
-}
-else {
-    Set-Content -Path $envFile -Value $envLine -Encoding UTF8
-}
+Set-DotEnvValue -Path $envFile -Key $imageEnvKey -Value $latestImageTag
 
 $envRawAfterWrite = Get-Content -Path $envFile -Raw
 $envEntriesAfterWrite = @{}
@@ -241,7 +259,7 @@ Write-Host ""
 
 $composeFile = if ($composeFileName) { Join-Path $dockerRoot $composeFileName } else { $null }
 
-if (-not $NoRecreate -and ($useRunningComposeStack -or (Test-Path $composeFile))) {
+if (-not $NoRecreate -and ($useRunningComposeStack -or ($composeFile -and (Test-Path $composeFile)))) {
     Write-Host "Recreating $serviceName to apply the new image tag..." -ForegroundColor Cyan
     Push-Location $dockerRoot
     try {
@@ -282,5 +300,5 @@ elseif ($NoRecreate) {
     }
 }
 else {
-    Write-Host "$composeFileName not found at $composeFile; image was built but not applied to a running service." -ForegroundColor Yellow
+    Write-Host "Image was built but not applied to a compose service. The standalone guideants-webapi-ui-slim image is orthogonal to docker-compose.slim.yml." -ForegroundColor Yellow
 }

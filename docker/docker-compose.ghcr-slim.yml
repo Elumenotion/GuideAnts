@@ -2,7 +2,8 @@ name: guideants
 
 services:
   guideants-ai:
-    image: ${GA_AI_SLIM_IMAGE:-guideants-ai:slim-latest}
+    image: ${GA_AI_SLIM_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-slim:main}
+    pull_policy: always
     container_name: guideants-ai
     ports:
       - "8110:80"
@@ -20,6 +21,7 @@ services:
 
   docling-serve:
     image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.16.1}
+    pull_policy: always
     container_name: docling-serve
     environment:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
@@ -51,7 +53,8 @@ services:
     restart: unless-stopped
 
   guideants-webapi-ui:
-    image: ${GA_WEBAPI_UI_MSSQL_IMAGE:-guideants-webapi-ui-mssql:latest}
+    image: ${GA_WEBAPI_UI_MSSQL_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-webapi-ui-mssql:main}
+    pull_policy: always
     container_name: guideants-webapi-ui
     depends_on:
       guideants-ai:
@@ -70,7 +73,7 @@ services:
       - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
       - MSSQL_DB_NAME=${GA_DB_NAME:-guideants-dev}
       - ASPNETCORE_ENVIRONMENT=Development
-      - API_RUNTIME_CONTEXT=compose-slim
+      - API_RUNTIME_CONTEXT=compose-ghcr-slim
       - ALLOWED_ORIGINS=*
       - FileStorage__Path=/app/ContentFiles
       - Ui__RootPath=/app/ui
@@ -104,7 +107,8 @@ services:
     restart: unless-stopped
 
   plantuml:
-    image: plantuml-1.2025.2
+    image: ${GA_PLANTUML_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}
+    pull_policy: always
     container_name: plantuml
     environment:
       - FILE_STORAGE_ROOT=/app/ContentFiles
@@ -119,7 +123,8 @@ services:
     restart: unless-stopped
 
   searxng:
-    image: ${GA_SEARXNG_IMAGE:-guideants-searxng:latest}
+    image: ${GA_SEARXNG_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}
+    pull_policy: always
     container_name: readweb-searxng
     restart: unless-stopped
     ports:

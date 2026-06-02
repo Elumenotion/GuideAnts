@@ -38,7 +38,7 @@ etuples==0.3.9
 exchange-calendars==3.4
 faker==8.13.2
 fastapi-cli==0.0.5
-fastapi==0.111.0
+fastapi==0.136.3
 fastprogress==1.0.3
 ffmpeg-python==0.2.0
 ffmpy==0.5.0
@@ -170,7 +170,7 @@ shapely==2.0.7
 slicer==0.0.7
 #snowflake-connector-python==2.7.12
 snuggs==1.4.7
-starlette==0.37.2
+starlette==1.2.1
 statsmodels==0.13.5
 svglib==1.1.0
 svgwrite==1.4.1

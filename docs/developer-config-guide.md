@@ -259,7 +259,7 @@ Already covered above: Docker, Compose plugin, optional GPU runtime, ~60 GB disk
 | Image | Build tool | Extra pre-requisites |
 |---|---|---|
 | `guideants-webapi-ui` (`docker/build/webapi-ui/Dockerfile`) | `build_webapi_ui.ps1` / `.sh` | Requires the client UI to be built first via `npm run browser:build:docker` (produces `src/client/dist-browser/`). Multi-stage uses `mcr.microsoft.com/dotnet/sdk:8.0`. |
-| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage), BuildKit (`DOCKER_BUILDKIT=1`), and the chosen backend's CUDA/ROCm base images. CUDA build pins NVIDIA CUDA 13. For cache export (`--cache-to`), use `desktop-linux` context and enable Docker Desktop containerd image store. |
+| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm,slim}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage) and BuildKit (`DOCKER_BUILDKIT=1`). CPU/CUDA/ROCm are full local AI variants; `slim` is the sandbox-oriented AI image for Python script execution without starting local model runtime services. For cache export (`--cache-to`), use `desktop-linux` context and enable Docker Desktop containerd image store. |
 | `mssql2025-express-fts` (`docker/build/mssql-fts/Dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `plantuml-1.2025.2` (`docker/build/Sandboxes/PlantUml/dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `guideants-searxng` | `docker compose build searxng` | Repo-root build context. |
@@ -292,7 +292,7 @@ If SearXNG still appears stale, remove and rebuild:
 - `docker rmi guideants-searxng:latest`
 - rerun the SearXNG build.
 
-The AI build is heavy: it compiles `stable-diffusion.cpp` with CUDA archs `75;80;86;89;90` and pulls a Python 3.11.11 venv plus `llama.cpp` runtime base. BuildKit cache is mandatory for sane iteration (the script tags `guideants-ai-deps:<backend>-cache` for layer reuse).
+The full AI builds are heavy: they compile local model runtime pieces such as `stable-diffusion.cpp` and include the full local AI service set. The `guideants-ai slim` build is intentionally for sandbox use: it starts `ScriptExecutionAgent` and the non-model media service, and it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. BuildKit cache is mandatory for sane iteration (the script tags `guideants-ai-deps:<backend>-cache` for layer reuse).
 
 ### Required env values for compose
 
@@ -327,7 +327,7 @@ For local debugging with API on the host and services in Docker, use `docker/.en
 |---|---|
 | `5107` | `guideants-webapi-ui` (UI + API) |
 | `1434` | `mssql-express` (host) → `1433` (container) |
-| `8110` | `guideants-ai` (llama-cpp, ASR, TTS, SD, EMB, media via nginx) |
+| `8110` | `guideants-ai` (full variants: llama-cpp, ASR, TTS, SD, EMB, media, sandbox via nginx; slim variant: sandbox/media only) |
 | `5001` | `docling-serve` |
 | `8082` | `onlyoffice-documentserver` (loopback-only) |
 | `8111` | `plantuml` |
@@ -349,7 +349,7 @@ The launcher auto-picks `cuda13`, `rocm`, or `cpu` and pulls GHCR images. No SDK
 
 ### 5b) Client-only dev (UI work against dockerized API)
 
-1. Docker stack running per 5a (or run only `guideants-webapi-ui` + `mssql-express` from a slim compose).
+1. Docker stack running per 5a. For a smaller dependency set during UI work, run a split stack service subset such as `guideants-webapi-ui` plus `mssql-express` from `docker/docker-compose.cpu.yml`.
 2. Node 20+ and `npm install` in `src/client`.
 3. `npm run browser:dev` — connects to `http://localhost:5106/api` per `.env.development`. (Update that file or your stack to align ports if you map differently.)
 
@@ -372,7 +372,7 @@ The launcher auto-picks `cuda13`, `rocm`, or `cpu` and pulls GHCR images. No SDK
 1. Everything in 5c.
 2. BuildKit enabled (`DOCKER_BUILDKIT=1` — the build scripts set this).
 3. For CUDA AI image builds: NVIDIA container runtime + enough disk for multi-stage CUDA 13 images.
-4. PowerShell scripts at `docker/build/build_guideants_ai.ps1` (`-All` builds AI + MSSQL FTS + PlantUML + WebAPI/UI).
+4. PowerShell scripts at `docker/build/build_guideants_ai.ps1` for AI backends and `docker/build/build_support_images.ps1` for MSSQL FTS, PlantUML, SearXNG, and WebAPI/UI.
 
 ---
 
@@ -386,7 +386,7 @@ A few items worth confirming explicitly before onboarding a new dev:
 - **`docker/.env` ships with stale-style local image tags** (`guideants-ai:cuda13-26132.1047` etc.) — irrelevant if you use the GHCR compose files but will fail `docker compose up` on the `local` compose files unless you build them first.
 - **CUDA 13 needs NVIDIA R580+ drivers** — the Windows launcher enforces this; manual `docker compose` does not.
 - **HF token must be set in UI** (`Settings → Connections → HuggingFace`); the API does *not* accept per-request token overrides per the setup guide.
-- **Python**: there is no required host Python install. `src/python/pptx` runs inside the `ScriptExecutionAgent`/sandbox containers; Python 3.11 is baked into the `guideants-ai` image. Only install Python on the host if you specifically want to iterate on `src/python/pptx` outside Docker.
+- **Python**: there is no required host Python install. `src/python/pptx` runs inside the `ScriptExecutionAgent`/sandbox containers; Python 3.11 is baked into the `guideants-ai` images, including the sandbox-oriented `slim` AI variant. Only install Python on the host if you specifically want to iterate on `src/python/pptx` outside Docker.
 
 ---
 
