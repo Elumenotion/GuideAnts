@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '../../../../test/test-utils';
 import { FileContents } from '../FileContents';
 import { api } from '../../../../services/api';
-import { getOnlyOfficeCapabilities, isOnlyOfficeSupportedByContentType } from '../../../../services/onlyOffice';
+import { getOnlyOfficeCapabilities, isOnlyOfficeSupportedByContentType, looksLikeOnlyOfficeFile } from '../../../../services/onlyOffice';
 
 vi.mock('../../../../services/api', () => ({
   api: {
@@ -16,6 +16,8 @@ vi.mock('../../../../services/api', () => ({
 vi.mock('../../../../services/onlyOffice', () => ({
   getOnlyOfficeCapabilities: vi.fn(),
   isOnlyOfficeSupportedByContentType: vi.fn(),
+  isOnlyOfficeSupportedByExtension: vi.fn(),
+  looksLikeOnlyOfficeFile: vi.fn(() => false),
 }));
 
 vi.mock('../../../common/OnlyOfficeEditor', () => ({
@@ -26,18 +28,14 @@ describe('FileContents ONLYOFFICE gating', () => {
   const getContentFileContentMock = vi.mocked(api.projects.getContentFileContent);
   const getOnlyOfficeCapabilitiesMock = vi.mocked(getOnlyOfficeCapabilities);
   const isOnlyOfficeSupportedByContentTypeMock = vi.mocked(isOnlyOfficeSupportedByContentType);
+  const looksLikeOnlyOfficeFileMock = vi.mocked(looksLikeOnlyOfficeFile);
 
   beforeEach(() => {
     vi.clearAllMocks();
+    looksLikeOnlyOfficeFileMock.mockReturnValue(false);
   });
 
-  it('keeps unsupported preview message when ONLYOFFICE is disabled', async () => {
-    getOnlyOfficeCapabilitiesMock.mockResolvedValue({
-      enabled: false,
-      publicUrl: '',
-      supportedExtensions: [],
-      supportedContentTypes: [],
-    });
+  it('does not request ONLYOFFICE capabilities for non-office content', async () => {
     isOnlyOfficeSupportedByContentTypeMock.mockReturnValue(false);
     getContentFileContentMock.mockResolvedValue({
       blob: new Blob(['binary'], { type: 'application/octet-stream' }),
@@ -54,9 +52,11 @@ describe('FileContents ONLYOFFICE gating', () => {
     );
 
     expect(await screen.findByText(/Preview not available for this file type/i)).toBeInTheDocument();
+    expect(getOnlyOfficeCapabilitiesMock).not.toHaveBeenCalled();
   });
 
   it('renders ONLYOFFICE editor when enabled and supported', async () => {
+    looksLikeOnlyOfficeFileMock.mockReturnValue(true);
     getOnlyOfficeCapabilitiesMock.mockResolvedValue({
       enabled: true,
       publicUrl: 'http://localhost:8082',

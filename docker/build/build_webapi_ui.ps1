@@ -198,34 +198,26 @@ $envFile = Join-Path $dockerRoot '.env'
 $envLine = "${imageEnvKey}=$latestImageTag"
 
 if (Test-Path $envFile) {
-    $raw = Get-Content -Path $envFile -Raw
-    $entries = [ordered]@{}
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.AddRange([string[]](Get-Content -Path $envFile))
+    $replaced = $false
 
-    foreach ($line in ($raw -split "`r?`n")) {
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        if ($line -match '^\s*#') { continue }
-        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
-            $entries[$matches[1]] = $matches[2]
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^\s*$([regex]::Escape($imageEnvKey))=") {
+            $lines[$i] = $envLine
+            $replaced = $true
+            break
         }
     }
 
-    # Recover malformed concatenated GA_* entries (e.g. GA_AI_IMAGE=...GA_WEBAPI_UI_IMAGE=...).
-    $compactRaw = $raw -replace '\s', ''
-    $gaMatches = [regex]::Matches($compactRaw, '(?<key>GA_[A-Z0-9_]*)=(?<value>.*?)(?=(?:GA_[A-Z0-9_]*=)|$)')
-    foreach ($match in $gaMatches) {
-        $key = $match.Groups['key'].Value
-        $value = $match.Groups['value'].Value
-        if ($key) {
-            $entries[$key] = $value
-        }
+    if (-not $replaced) {
+        $lines.Add($envLine)
     }
 
-    $entries[$imageEnvKey] = $latestImageTag
-    $lines = @($entries.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
-    Set-Content -Path $envFile -Value (($lines -join "`r`n") + "`r`n") -Encoding UTF8
+    Set-Content -Path $envFile -Value $lines -Encoding UTF8
 }
 else {
-    Set-Content -Path $envFile -Value ($envLine + "`r`n") -Encoding UTF8
+    Set-Content -Path $envFile -Value $envLine -Encoding UTF8
 }
 
 $envRawAfterWrite = Get-Content -Path $envFile -Raw
