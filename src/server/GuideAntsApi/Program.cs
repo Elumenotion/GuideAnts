@@ -250,9 +250,6 @@ public class Program
         app.MapProjectFolderEndpoints();
         app.MapLinkEndpoints();
         app.MapUserEndpoints();
-        app.MapWebScrapingEndpoints();
-        app.MapChatEndpoints();
-        app.MapSandboxEndpoints();
         app.MapNotebookConversationsEndpoints();
         app.MapNotebookHeaderToolbarEndpoints();
         app.MapNotebookLlamaRuntimeEndpoints();
@@ -268,6 +265,7 @@ public class Program
         app.MapUsageEndpoints();
         app.MapGuideUsageEndpoints();
         app.MapSettingsEndpoints();
+        app.MapOnlyOfficeEndpoints();
         app.UseGuideAntsUiPipeline(builder.Configuration);
 
         app.Run();

@@ -11,6 +11,7 @@ import MarkdownViewer from '../../common/MarkdownViewer';
 import { isMarkdownExtractionSupported } from '../../../utils/markdownUtils';
 import FullScreenEditor from '../../notebook/conversations/FullScreenEditor';
 import { FaRegEdit, FaDownload } from 'react-icons/fa';
+import { getOnlyOfficeCapabilities, looksLikeOnlyOfficeFile } from '../../../services/onlyOffice';
 
 interface ContentFileContentProps {
     hideHeader?: boolean;
@@ -51,6 +52,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
     const [isLoadingMarkdown, setIsLoadingMarkdown] = useState(false);
     const [markdownError, setMarkdownError] = useState<string | null>(null);
     const [hasAutoSwitched, setHasAutoSwitched] = useState(false);
+    const [onlyOfficeEnabled, setOnlyOfficeEnabled] = useState<boolean | null>(null);
 
     // Markdown edit state (full-screen editor)
     const [isEditingMd, setIsEditingMd] = useState(false);
@@ -118,6 +120,25 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
 
         fetchMarkdownShadow();
     }, [file, projectId, fileId, supportsMarkdownExtraction]);
+
+    useEffect(() => {
+        let isDisposed = false;
+        getOnlyOfficeCapabilities(true)
+            .then((capabilities) => {
+                if (!isDisposed) {
+                    setOnlyOfficeEnabled(capabilities.enabled);
+                }
+            })
+            .catch(() => {
+                if (!isDisposed) {
+                    setOnlyOfficeEnabled(null);
+                }
+            });
+
+        return () => {
+            isDisposed = true;
+        };
+    }, [fileId]);
 
     // Poll for status updates when extraction is in progress
     useEffect(() => {
@@ -203,13 +224,16 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
             file.contentType === 'text/markdown' ||
             file.contentType === 'text/x-markdown' ||
             (file.fileName && file.fileName.toLowerCase().endsWith('.md'));
+        const onlyOfficeCandidate = looksLikeOnlyOfficeFile(file.fileName, file.contentType);
+        const onlyOfficeKeepsOriginalTab = onlyOfficeCandidate && onlyOfficeEnabled !== false;
+        const shouldTreatAsPreviewable = isPreviewable || onlyOfficeKeepsOriginalTab;
 
         // If original content isn't previewable but markdown is ready, switch to markdown tab (only once)
-        if (!isPreviewable && activeTab === 'original') {
+        if (!shouldTreatAsPreviewable && activeTab === 'original') {
             setActiveTab('markdown');
             setHasAutoSwitched(true);
         }
-    }, [file, markdownShadow, activeTab, hasAutoSwitched]);
+    }, [file, markdownShadow, activeTab, hasAutoSwitched, onlyOfficeEnabled]);
 
     // Fetch markdown content when switching to markdown tab
     useEffect(() => {
@@ -347,46 +371,12 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
         );
     }
 
+    const isOnlyOfficeCandidate = looksLikeOnlyOfficeFile(file.fileName, file.contentType);
     // Minimal home-page view without header
     if (hideHeader) {
         const isHtml = file.contentType === 'text/html' || file.contentType === 'application/xhtml+xml';
-        const isPreviewable = file.contentType.startsWith('text/') ||
-            file.contentType === 'application/json' ||
-            file.contentType.startsWith('image/') ||
-            file.contentType.startsWith('application/pdf') ||
-            file.contentType.startsWith('audio/') ||
-            file.contentType.startsWith('video/');
-
-        if (isPreviewable) {
-            // HTML files get full-bleed rendering without padding
-            if (isHtml) {
-                return (
-                    <div className="h-full w-full overflow-hidden flex flex-col">
-                        <FileContents
-                            inlineMode
-                            projectId={projectId}
-                            fileId={fileId}
-                            contentType={file.contentType}
-                            version={file.latestVersion}
-                            resolveProjectFilePath={resolveProjectFilePath}
-                        />
-                    </div>
-                );
-            }
-            return (
-                <div className="h-full w-full overflow-auto flex flex-col p-8">
-                    <FileContents
-                        inlineMode
-                        projectId={projectId}
-                        fileId={fileId}
-                        contentType={file.contentType}
-                        version={file.latestVersion}
-                                resolveProjectFilePath={resolveProjectFilePath}
-                                onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
-                    />
-                </div>
-            );
-        }
+        // Keep full-bleed for HTML and ONLYOFFICE so embedded viewers can use the entire canvas.
+        const isFullBleed = isHtml || isOnlyOfficeCandidate;
 
         if (supportsMarkdownExtraction && markdownShadow?.status === MarkdownExtractionStatus.Completed && markdownContent) {
             return (
@@ -397,15 +387,17 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
         }
 
         return (
-            <div className="h-full w-full flex items-center justify-center">
-                <div className="text-center p-4">
-                    <p className="text-gray-600">
-                        Preview not available for this file type ({file.contentType})
-                    </p>
-                    <p className="text-sm text-gray-500 mt-2">
-                        You can download the file to view its contents
-                    </p>
-                </div>
+            <div className={`h-full w-full flex flex-col ${isFullBleed ? 'overflow-hidden' : 'overflow-auto p-8'}`}>
+                <FileContents
+                    inlineMode
+                    projectId={projectId}
+                    fileId={fileId}
+                    contentType={file.contentType}
+                    version={file.latestVersion}
+                    canEdit={canEdit}
+                    resolveProjectFilePath={resolveProjectFilePath}
+                    onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
+                />
             </div>
         );
     }
@@ -457,17 +449,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
             </div>
             )}
             {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
-            {!hideHeader && (
-            <div className="flex-none mb-4">
-                <div className="space-y-2">
-                    <p className="text-gray-600">Path: {file.relativePath}</p>
-                    <p className="text-gray-600">Type: {file.contentType}</p>
-                    <p className="text-gray-600">Size: {Math.round(file.fileSize / 1024)} KB</p>
-                    <p className="text-gray-600">Created: {new Date(file.created).toLocaleString()}</p>
-                </div>
-            </div>
-            )}
-            <div className="flex-1 min-h-0 border rounded p-4 flex flex-col">
+            <div className="flex-1 min-h-0 flex flex-col">
                 {supportsMarkdownExtraction ? (
                     <>
                         {/* Tab Header */}
@@ -509,13 +491,14 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                         </div>
 
                         {/* Tab Content */}
-                        <div className="flex-1 min-h-0 bg-gray-50 rounded flex">
+                        <div className="flex-1 min-h-0 flex">
                             {activeTab === 'original' ? (
                                 <FileContents
                                     projectId={projectId}
                                     fileId={fileId}
                                     contentType={file.contentType}
                                     version={file.latestVersion}
+                                    canEdit={canEdit}
                                     resolveProjectFilePath={resolveProjectFilePath}
                                     onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
                                 />
@@ -577,13 +560,13 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                     </>
                 ) : (
                     <>
-                        <h3 className="font-medium mb-2 flex-none">File Contents</h3>
-                        <div className="flex-1 min-h-0 bg-gray-50 rounded flex">
+                        <div className="flex-1 min-h-0 flex">
                             <FileContents
                                 projectId={projectId}
                                 fileId={fileId}
                                 contentType={file.contentType}
                                 version={file.latestVersion}
+                                canEdit={canEdit}
                                 resolveProjectFilePath={resolveProjectFilePath}
                                 onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
                             />

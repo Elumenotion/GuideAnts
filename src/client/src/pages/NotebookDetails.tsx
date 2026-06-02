@@ -1271,6 +1271,7 @@ function NotebookDetailsContent() {
                         file={homePageFile}
                         projectId={projectId!}
                         notebookId={notebookId!}
+                        canEdit={canEdit()}
                         onClose={() => {}}
                         isEmbedded={true}
                         onNavigate={handlePreviewNavigate}
@@ -1347,6 +1348,7 @@ function NotebookDetailsContent() {
                 file={fileToPreview}
                 projectId={projectId!}
                 notebookId={notebookId!}
+                canEdit={canEdit()}
                 onClose={() => setFileToPreview(null)}
                 onNavigate={handlePreviewNavigate}
                 fileExists={fileExistsInTree}

@@ -1,4 +1,23 @@
 services:
+  onlyoffice-documentserver:
+    image: ${GA_ONLYOFFICE_IMAGE:-onlyoffice/documentserver:latest}
+    container_name: onlyoffice-documentserver
+    environment:
+      JWT_ENABLED: "${GA_ONLYOFFICE_JWT_ENABLED:-false}"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+      JWT_HEADER: "${GA_ONLYOFFICE_JWT_HEADER:-Authorization}"
+      JWT_IN_BODY: "${GA_ONLYOFFICE_JWT_IN_BODY:-false}"
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+    ports:
+      - "127.0.0.1:${GA_ONLYOFFICE_PORT:-8082}:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/info/info.json"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+      timeout: 10s
+    restart: unless-stopped
+
   guideants-webapi-ui-mssql:
     image: ${GA_WEBAPI_UI_MSSQL_IMAGE:-guideants-webapi-ui-mssql:latest}
     container_name: guideants-webapi-ui-mssql
@@ -16,6 +35,14 @@ services:
       ALLOWED_ORIGINS: "*"
       FileStorage__Path: /app/ContentFiles
       Ui__RootPath: /app/ui
+      OnlyOffice__Enabled: ${GA_ONLYOFFICE_ENABLED:-false}
+      OnlyOffice__PublicUrl: ${GA_ONLYOFFICE_PUBLIC_URL:-http://localhost:${GA_ONLYOFFICE_PORT:-8082}}
+      OnlyOffice__InternalUrl: http://onlyoffice-documentserver
+      OnlyOffice__ApiBaseUrl: http://guideants-webapi-ui-mssql:8080
+      OnlyOffice__JwtEnabled: "${GA_ONLYOFFICE_JWT_ENABLED:-false}"
+      OnlyOffice__JwtSecret: ${ONLYOFFICE_JWT_SECRET:-}
+      OnlyOffice__JwtHeader: "${GA_ONLYOFFICE_JWT_HEADER:-Authorization}"
+      OnlyOffice__JwtInBody: "${GA_ONLYOFFICE_JWT_IN_BODY:-false}"
       SettingsSecrets__ActiveKeyId: local-dev
       "SettingsSecrets__Keys__local-dev": MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
       LlamaCpp__BaseUrl: http://127.0.0.1:9/llama-cpp
