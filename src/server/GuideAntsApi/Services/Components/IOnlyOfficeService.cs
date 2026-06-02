@@ -18,6 +18,7 @@ public interface IOnlyOfficeService
         Guid? projectId,
         Guid? fileId,
         Guid? notebookId,
+        int? versionNumber,
         CancellationToken cancellationToken);
 
     Task HandleCallbackAsync(

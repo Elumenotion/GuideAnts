@@ -46,17 +46,21 @@ public class NotebookFileServiceTests
         return scopeFactoryMock.Object;
     }
 
-    private static NotebookFileService CreateService(ApplicationDbContext ctx, string storagePath)
+    private static NotebookFileService CreateService(
+        ApplicationDbContext ctx,
+        string storagePath,
+        IMarkdownExtractionService? markdownExtractionService = null)
     {
         var scopeFactory = CreateScopeFactory(ctx);
         var config = CreateConfig(storagePath);
+        markdownExtractionService ??= Mock.Of<IMarkdownExtractionService>();
 
         var sync = new NotebookFileSyncService(
             scopeFactory,
             config,
             NullLogger<NotebookFileSyncService>.Instance,
             CreateLineageMock(),
-            Mock.Of<IMarkdownExtractionService>(),
+            markdownExtractionService,
             Mock.Of<IUsageRecorder>(),
             Mock.Of<INotebookLockService>());
 
@@ -67,7 +71,7 @@ public class NotebookFileServiceTests
             NullLogger<NotebookFileService>.Instance,
             CreateLineageMock(),
             CreateContentFileServiceMock(),
-            Mock.Of<IMarkdownExtractionService>());
+            markdownExtractionService);
     }
 
     [TestMethod]
@@ -174,6 +178,69 @@ public class NotebookFileServiceTests
             Assert.IsTrue(ok);
             Assert.IsFalse(File.Exists(filePath));
             Assert.AreEqual(0, ctx.NotebookFiles.Count());
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task UploadFilesAsync_WhenExistingFileContentChanges_RequeuesMarkdownExtraction()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+            await ctx.SaveChangesAsync();
+
+            var markdown = new Mock<IMarkdownExtractionService>();
+            markdown
+                .Setup(m => m.CreateNotebookMarkdownShadowAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid notebookFileId, CancellationToken _) => new NotebookFileMarkdownShadow
+                {
+                    Id = Guid.NewGuid(),
+                    OriginalNotebookFileId = notebookFileId,
+                    Status = MarkdownExtractionStatus.Pending
+                });
+            markdown
+                .Setup(m => m.RetryNotebookExtractionAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid notebookFileId, CancellationToken _) => new NotebookFileMarkdownShadow
+                {
+                    Id = Guid.NewGuid(),
+                    OriginalNotebookFileId = notebookFileId,
+                    Status = MarkdownExtractionStatus.Pending
+                });
+
+            var svc = CreateService(ctx, tmpDir, markdown.Object);
+
+            var firstBytes = System.Text.Encoding.UTF8.GetBytes("first");
+            var firstFile = new FormFile(new MemoryStream(firstBytes), 0, firstBytes.Length, "file", "deck.pptx")
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            };
+
+            await svc.UploadFilesAsync(project.Id, notebook.Id, new FormFileCollection { firstFile }, "");
+
+            var notebookFileId = ctx.NotebookFiles.Single().Id;
+            var secondBytes = System.Text.Encoding.UTF8.GetBytes("second");
+            var secondFile = new FormFile(new MemoryStream(secondBytes), 0, secondBytes.Length, "file", "deck.pptx")
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            };
+
+            await svc.UploadFilesAsync(project.Id, notebook.Id, new FormFileCollection { secondFile }, "");
+
+            markdown.Verify(m => m.CreateNotebookMarkdownShadowAsync(notebookFileId, It.IsAny<CancellationToken>()), Times.Once);
+            markdown.Verify(m => m.RetryNotebookExtractionAsync(notebookFileId, It.IsAny<CancellationToken>()), Times.Once);
         }
         finally
         {

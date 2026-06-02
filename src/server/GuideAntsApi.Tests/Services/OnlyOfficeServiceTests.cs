@@ -67,6 +67,11 @@ public sealed class OnlyOfficeServiceTests
 
         result.DocumentServerUrl.Should().Be("http://localhost:8082");
         result.Config.Should().NotBeNull();
+        var config = (Dictionary<string, object?>)result.Config;
+        var editorConfig = (Dictionary<string, object?>)config["editorConfig"]!;
+        var customization = (Dictionary<string, object?>)editorConfig["customization"]!;
+        customization["forcesave"].Should().Be(true);
+        customization["autosave"].Should().Be(true);
     }
 
     [TestMethod]
@@ -116,7 +121,7 @@ public sealed class OnlyOfficeServiceTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(details: null), enabled: true);
 
-        var action = async () => await service.GetDownloadAsync("invalid-token", null, null, null, null, CancellationToken.None);
+        var action = async () => await service.GetDownloadAsync("invalid-token", null, null, null, null, null, CancellationToken.None);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*token payload is invalid*");
@@ -174,11 +179,12 @@ public sealed class OnlyOfficeServiceTests
         var downloadUrl = document["url"]!.ToString()!;
         var token = ExtractToken(downloadUrl);
 
-        var result = await service.GetDownloadAsync(token, null, null, null, null, CancellationToken.None);
+        var result = await service.GetDownloadAsync(token, null, null, null, null, null, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.FileName.Should().Be("proposal.docx");
         result.ContentType.Should().Be("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        contentService.LastRequestedVersionNumber.Should().Be(2);
         await using var stream = result.Stream;
         using var memory = new MemoryStream();
         await stream.CopyToAsync(memory);
@@ -310,6 +316,129 @@ public sealed class OnlyOfficeServiceTests
         contentService.LastUploadedBytes.Should().Equal(callbackBytes);
     }
 
+    [TestMethod]
+    public async Task HandleCallbackAsync_SaveStatus_RewritesPublicDocumentServerUrlToInternalUrl()
+    {
+        await using var db = CreateDbContext();
+        var projectId = Guid.NewGuid();
+        var fileId = Guid.NewGuid();
+        var contentService = new StubContentFileService(
+            details: new ContentFileDetailsDto(
+                Id: fileId,
+                FileName: "proposal.docx",
+                Path: string.Empty,
+                RelativePath: "proposal.docx",
+                ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                Index: false,
+                DocumentId: "doc-1",
+                Created: DateTime.UtcNow,
+                FileSize: 42,
+                FolderId: null,
+                FolderPath: null,
+                LatestVersion: 1,
+                IsSnapshot: false,
+                HasMarkdownShadow: false,
+                MarkdownStatus: null,
+                MarkdownProcessedAt: null));
+        var httpClientFactory = new StubHttpClientFactory(Encoding.UTF8.GetBytes("updated-content"));
+        var service = CreateService(
+            db,
+            contentService,
+            enabled: true,
+            httpClientFactory: httpClientFactory,
+            internalUrl: "http://onlyoffice-documentserver");
+
+        var tokenResult = await service.BuildEditorConfigAsync(
+            CreateHttpContext(),
+            new OnlyOfficeEditorConfigRequest(
+                Scope: "project",
+                ProjectId: projectId,
+                FileId: fileId,
+                NotebookId: null,
+                CanEdit: true,
+                UserId: "user-1",
+                UserName: "Test User"),
+            CancellationToken.None);
+
+        var config = (Dictionary<string, object?>)tokenResult.Config;
+        var editorConfig = (Dictionary<string, object?>)config["editorConfig"]!;
+        var callbackUrl = editorConfig["callbackUrl"]!.ToString()!;
+        var token = ExtractToken(callbackUrl);
+
+        await service.HandleCallbackAsync(
+            token,
+            null,
+            null,
+            null,
+            null,
+            new OnlyOfficeCallbackPayload(Status: 2, Url: "http://localhost:8082/cache/files/edited.docx?token=abc"),
+            CancellationToken.None);
+
+        httpClientFactory.LastRequestUri.Should().Be(new Uri("http://onlyoffice-documentserver/cache/files/edited.docx?token=abc"));
+        contentService.UploadCalls.Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task HandleCallbackAsync_ForceSaveStatus_UploadsUpdatedNotebookFile()
+    {
+        await using var db = CreateDbContext();
+        var projectId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var fileId = Guid.NewGuid();
+        db.NotebookFiles.Add(new GuideAntsApi.DataModel.Models.NotebookFile
+        {
+            Id = fileId,
+            NotebookId = notebookId,
+            RelativePath = "docs/dsa.docx",
+            FileSize = 10,
+            LastModifiedUtc = DateTime.UtcNow,
+            FileHash = "old-hash"
+        });
+        await db.SaveChangesAsync();
+
+        var callbackBytes = Encoding.UTF8.GetBytes("updated-notebook-content");
+        var notebookFileService = new StubNotebookFileService();
+        var service = CreateService(
+            db,
+            new StubContentFileService(details: null),
+            enabled: true,
+            httpClientFactory: new StubHttpClientFactory(callbackBytes),
+            notebookFileService: notebookFileService);
+
+        var tokenResult = await service.BuildEditorConfigAsync(
+            CreateHttpContext(),
+            new OnlyOfficeEditorConfigRequest(
+                Scope: "notebook",
+                ProjectId: projectId,
+                FileId: fileId,
+                NotebookId: notebookId,
+                CanEdit: true,
+                UserId: "user-1",
+                UserName: "Test User"),
+            CancellationToken.None);
+
+        var config = (Dictionary<string, object?>)tokenResult.Config;
+        var editorConfig = (Dictionary<string, object?>)config["editorConfig"]!;
+        var callbackUrl = editorConfig["callbackUrl"]!.ToString()!;
+        var token = ExtractToken(callbackUrl);
+
+        await service.HandleCallbackAsync(
+            token,
+            null,
+            null,
+            null,
+            null,
+            new OnlyOfficeCallbackPayload(Status: 6, Url: "http://callback.local/file.docx"),
+            CancellationToken.None);
+
+        notebookFileService.UploadCalls.Should().Be(1);
+        notebookFileService.LastProjectId.Should().Be(projectId);
+        notebookFileService.LastNotebookId.Should().Be(notebookId);
+        notebookFileService.LastTargetRelativePath.Should().Be("docs");
+        notebookFileService.LastUploadedFileName.Should().Be("dsa.docx");
+        notebookFileService.LastUploadedBytes.Should().Equal(callbackBytes);
+    }
+
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -323,7 +452,8 @@ public sealed class OnlyOfficeServiceTests
         IContentFileService contentFileService,
         bool enabled,
         IHttpClientFactory? httpClientFactory = null,
-        INotebookFileService? notebookFileService = null)
+        INotebookFileService? notebookFileService = null,
+        string internalUrl = "http://onlyoffice-documentserver")
     {
         return new OnlyOfficeService(
             db,
@@ -333,6 +463,7 @@ public sealed class OnlyOfficeServiceTests
             {
                 Enabled = enabled,
                 PublicUrl = "http://localhost:8082",
+                InternalUrl = internalUrl,
                 ApiBaseUrl = "http://host.docker.internal:5106",
                 JwtEnabled = true,
                 JwtSecret = "onlyoffice-tests-secret"
@@ -344,6 +475,7 @@ public sealed class OnlyOfficeServiceTests
     private sealed class StubHttpClientFactory : IHttpClientFactory
     {
         private readonly byte[]? _responseBytes;
+        public Uri? LastRequestUri { get; private set; }
 
         public StubHttpClientFactory(byte[]? responseBytes = null)
         {
@@ -357,21 +489,24 @@ public sealed class OnlyOfficeServiceTests
                 return new HttpClient();
             }
 
-            return new HttpClient(new FixedResponseMessageHandler(_responseBytes));
+            return new HttpClient(new FixedResponseMessageHandler(_responseBytes, requestUri => LastRequestUri = requestUri));
         }
     }
 
     private sealed class FixedResponseMessageHandler : HttpMessageHandler
     {
         private readonly byte[] _responseBytes;
+        private readonly Action<Uri?> _captureRequestUri;
 
-        public FixedResponseMessageHandler(byte[] responseBytes)
+        public FixedResponseMessageHandler(byte[] responseBytes, Action<Uri?> captureRequestUri)
         {
             _responseBytes = responseBytes;
+            _captureRequestUri = captureRequestUri;
         }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            _captureRequestUri(request.RequestUri);
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(_responseBytes)
@@ -388,6 +523,7 @@ public sealed class OnlyOfficeServiceTests
         public int UploadCalls { get; private set; }
         public byte[] LastUploadedBytes { get; private set; } = [];
         public string? LastUploadedFileName { get; private set; }
+        public int? LastRequestedVersionNumber { get; private set; }
 
         public StubContentFileService(ContentFileDetailsDto? details, ContentFileContentDto? versionContent = null)
         {
@@ -414,20 +550,44 @@ public sealed class OnlyOfficeServiceTests
         public Task<ContentFileDetailsDto?> UpdateAsync(Guid projectId, Guid fileId, UpdateContentFileDto updates) => Task.FromResult<ContentFileDetailsDto?>(null);
         public Task<ContentFileContentDto?> GetContentAsync(Guid projectId, Guid fileId) => Task.FromResult<ContentFileContentDto?>(null);
         public Task<IEnumerable<ContentFileVersionDto>> GetVersionsAsync(Guid projectId, Guid fileId) => Task.FromResult<IEnumerable<ContentFileVersionDto>>([]);
-        public Task<ContentFileContentDto?> GetVersionContentAsync(Guid projectId, Guid fileId, int versionNumber) => Task.FromResult(_versionContent);
+        public Task<ContentFileContentDto?> GetVersionContentAsync(Guid projectId, Guid fileId, int versionNumber)
+        {
+            LastRequestedVersionNumber = versionNumber;
+            return Task.FromResult(_versionContent);
+        }
         public Task<ContentFileDetailsDto> CreateFileFromPathAsync(Guid projectId, string sourcePath, string fileName, string contentType, Guid? folderId, Guid originNotebookFileId, bool index = false) => Task.FromResult(_details!);
         public Task<ContentFileDetailsDto> CreateVersionFromPathAsync(Guid projectId, Guid contentFileId, string sourcePath, Guid originNotebookFileId, bool index = false) => Task.FromResult(_details!);
     }
 
     private sealed class StubNotebookFileService : INotebookFileService
     {
+        public int UploadCalls { get; private set; }
+        public Guid? LastProjectId { get; private set; }
+        public Guid? LastNotebookId { get; private set; }
+        public string? LastTargetRelativePath { get; private set; }
+        public string? LastUploadedFileName { get; private set; }
+        public byte[] LastUploadedBytes { get; private set; } = [];
+
         public Task<IEnumerable<NotebookFileDto>> ListFilesAsync(Guid projectId, Guid notebookId) => Task.FromResult<IEnumerable<NotebookFileDto>>([]);
         public Task<NotebookFolderTreeDto?> GetFolderTreeAsync(Guid projectId, Guid notebookId) => Task.FromResult<NotebookFolderTreeDto?>(null);
         public Task<(Stream Stream, string ContentType, string FileName)?> GetFileAsync(Guid projectId, Guid notebookId, string relativePath) => Task.FromResult< (Stream, string, string)?>(null);
         public Task<(Stream stream, string contentType)> GetFileContentStreamAsync(Guid projectId, Guid notebookId, string relativePath) => throw new NotImplementedException();
         public Task<(Stream Stream, string ContentType, string FileName)?> GetFileContentStreamAsync(Guid notebookFileId, CancellationToken cancellationToken = default) => Task.FromResult<(Stream, string, string)?>(null);
         public Task<NotebookFileDto?> CopyFromProjectAsync(Guid projectId, Guid notebookId, Guid contentFileId, int? versionNumber, string? targetRelativePath) => Task.FromResult<NotebookFileDto?>(null);
-        public Task<IEnumerable<NotebookFileDto>> UploadFilesAsync(Guid projectId, Guid notebookId, IFormFileCollection files, string targetRelativePath, bool index = false) => Task.FromResult<IEnumerable<NotebookFileDto>>([]);
+        public async Task<IEnumerable<NotebookFileDto>> UploadFilesAsync(Guid projectId, Guid notebookId, IFormFileCollection files, string targetRelativePath, bool index = false, bool forceMarkdownExtraction = false)
+        {
+            UploadCalls++;
+            LastProjectId = projectId;
+            LastNotebookId = notebookId;
+            LastTargetRelativePath = targetRelativePath;
+            var file = files.Single();
+            LastUploadedFileName = file.FileName;
+            await using var stream = file.OpenReadStream();
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            LastUploadedBytes = memory.ToArray();
+            return [];
+        }
         public Task<NotebookFolderTreeDto?> CreateFolderAsync(Guid projectId, Guid notebookId, string newFolderPath) => Task.FromResult<NotebookFolderTreeDto?>(null);
         public Task<bool> DeleteAsync(Guid projectId, Guid notebookId, string relativePath) => Task.FromResult(false);
         public Task<bool> RenameAsync(Guid projectId, Guid notebookId, string sourceRelativePath, string newName) => Task.FromResult(false);

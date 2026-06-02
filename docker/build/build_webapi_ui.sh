@@ -198,34 +198,23 @@ DOCKER_ARGS+=(
 docker "${DOCKER_ARGS[@]}"
 
 ENV_FILE="$DOCKER_ROOT/.env"
-declare -A ENV_MAP=()
-declare -a ENV_ORDER=()
+ENV_LINE="$IMAGE_ENV_KEY=$LATEST_IMAGE_TAG"
 
 if [[ -f "$ENV_FILE" ]]; then
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ -z "${line//[[:space:]]/}" ]] && continue
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-      key="${BASH_REMATCH[1]}"
-      value="${BASH_REMATCH[2]}"
-      if [[ -z "${ENV_MAP[$key]+x}" ]]; then
-        ENV_ORDER+=("$key")
-      fi
-      ENV_MAP["$key"]="$value"
-    fi
-  done < "$ENV_FILE"
+  if grep -qE "^[[:space:]]*${IMAGE_ENV_KEY}=" "$ENV_FILE"; then
+    awk -v key="$IMAGE_ENV_KEY" -v line="$ENV_LINE" '
+      BEGIN { replaced = 0 }
+      $0 ~ "^[[:space:]]*" key "=" && replaced == 0 { print line; replaced = 1; next }
+      { print }
+      END { if (replaced == 0) print line }
+    ' "$ENV_FILE" > "${ENV_FILE}.tmp"
+    mv "${ENV_FILE}.tmp" "$ENV_FILE"
+  else
+    printf "%s\n" "$ENV_LINE" >> "$ENV_FILE"
+  fi
+else
+  printf "%s\n" "$ENV_LINE" > "$ENV_FILE"
 fi
-
-if [[ -z "${ENV_MAP[$IMAGE_ENV_KEY]+x}" ]]; then
-  ENV_ORDER+=("$IMAGE_ENV_KEY")
-fi
-ENV_MAP["$IMAGE_ENV_KEY"]="$LATEST_IMAGE_TAG"
-
-{
-  for key in "${ENV_ORDER[@]}"; do
-    printf "%s=%s\n" "$key" "${ENV_MAP[$key]}"
-  done
-} > "$ENV_FILE"
 
 if ! grep -q "^${IMAGE_ENV_KEY}=${LATEST_IMAGE_TAG}\$" "$ENV_FILE"; then
   echo "Failed to persist ${IMAGE_ENV_KEY}=$LATEST_IMAGE_TAG to $ENV_FILE" >&2

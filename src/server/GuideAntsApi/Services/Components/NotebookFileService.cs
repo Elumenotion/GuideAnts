@@ -601,7 +601,7 @@ using var scope = CreateDbScope();
         return await _contentFileService.CreateFileFromPathAsync(projectId, sourcePath, fileName, contentType, destinationFolderId, notebookFile.Id, index);
     }
 
-    public async Task<IEnumerable<NotebookFileDto>> UploadFilesAsync(Guid projectId, Guid notebookId, IFormFileCollection files, string targetRelativePath, bool index = false)
+    public async Task<IEnumerable<NotebookFileDto>> UploadFilesAsync(Guid projectId, Guid notebookId, IFormFileCollection files, string targetRelativePath, bool index = false, bool forceMarkdownExtraction = false)
     {
 
 using var scope = CreateDbScope();
@@ -618,6 +618,7 @@ using var scope = CreateDbScope();
         Directory.CreateDirectory(targetDirectory);
         
         var processedFiles = new List<NotebookFile>();
+        var changedExistingFileIds = new HashSet<Guid>();
 
         foreach (var file in files)
         {
@@ -625,8 +626,12 @@ using var scope = CreateDbScope();
 
             var physicalPath = Path.Combine(targetDirectory, file.FileName);
             var relativePath = Path.GetRelativePath(notebookRoot, physicalPath).Replace("\\", "/");
+            var existingFile = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == relativePath);
+            var previousHash = existingFile?.FileHash;
+            var previousSize = existingFile?.FileSize;
 
-            // Overwrite the file on disk first
+            // Capture the prior DB hash before touching disk. The notebook sync worker can
+            // observe disk writes and update FileHash, so comparing after overwrite can race.
             await using (var stream = new FileStream(physicalPath, FileMode.Create))
             {
                 await file.CopyToAsync(stream);
@@ -635,17 +640,33 @@ using var scope = CreateDbScope();
             var fileInfo = new FileInfo(physicalPath);
             var fileHash = ComputeSha256(physicalPath);
 
-            var existingFile = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == relativePath);
-
             if (existingFile != null)
             {
                 // Update existing file record
-                _logger.LogInformation("Updating existing file {RelativePath} in notebook {NotebookId}", relativePath, notebookId);
+                var contentChanged = !string.Equals(previousHash, fileHash, StringComparison.OrdinalIgnoreCase);
+                var shouldExtract = contentChanged || forceMarkdownExtraction;
+                _logger.LogInformation(
+                    "Updating existing notebook file. projectId={ProjectId} notebookId={NotebookId} fileId={NotebookFileId} relativePath={RelativePath} oldHash={OldHash} newHash={NewHash} oldSize={OldSize} newSize={NewSize} contentChanged={ContentChanged} forceMarkdownExtraction={ForceMarkdownExtraction} shouldExtract={ShouldExtract}",
+                    projectId,
+                    notebookId,
+                    existingFile.Id,
+                    relativePath,
+                    previousHash,
+                    fileHash,
+                    previousSize,
+                    fileInfo.Length,
+                    contentChanged,
+                    forceMarkdownExtraction,
+                    shouldExtract);
                 existingFile.FileSize = fileInfo.Length;
                 existingFile.LastModifiedUtc = fileInfo.LastWriteTimeUtc;
                 existingFile.FileHash = fileHash;
                 // Preserve existing Index and OriginContentFileVersionId values
                 processedFiles.Add(existingFile);
+                if (shouldExtract)
+                {
+                    changedExistingFileIds.Add(existingFile.Id);
+                }
             }
             else
             {
@@ -663,6 +684,13 @@ using var scope = CreateDbScope();
                 newFile.GenerateDocumentId(notebookId);
                 context.NotebookFiles.Add(newFile);
                 processedFiles.Add(newFile);
+                _logger.LogInformation(
+                    "Created new notebook file record. projectId={ProjectId} notebookId={NotebookId} relativePath={RelativePath} hash={Hash} size={Size}",
+                    projectId,
+                    notebookId,
+                    relativePath,
+                    fileHash,
+                    fileInfo.Length);
             }
         }
 
@@ -709,8 +737,26 @@ using var scope = CreateDbScope();
         {
             try
             {
-                await _markdownExtractionService.CreateNotebookMarkdownShadowAsync(nf.Id);
-                _logger.LogInformation("Created markdown shadow for uploaded NotebookFile {NotebookFileId} ({RelativePath})", nf.Id, nf.RelativePath);
+                if (changedExistingFileIds.Contains(nf.Id))
+                {
+                    await _markdownExtractionService.RetryNotebookExtractionAsync(nf.Id);
+                    _logger.LogInformation(
+                        "Requeued markdown extraction for updated NotebookFile. projectId={ProjectId} notebookId={NotebookId} notebookFileId={NotebookFileId} relativePath={RelativePath}",
+                        projectId,
+                        notebookId,
+                        nf.Id,
+                        nf.RelativePath);
+                }
+                else
+                {
+                    await _markdownExtractionService.CreateNotebookMarkdownShadowAsync(nf.Id);
+                    _logger.LogInformation(
+                        "Ensured markdown shadow for uploaded NotebookFile. projectId={ProjectId} notebookId={NotebookId} notebookFileId={NotebookFileId} relativePath={RelativePath}",
+                        projectId,
+                        notebookId,
+                        nf.Id,
+                        nf.RelativePath);
+                }
             }
             catch (Exception ex)
             {
