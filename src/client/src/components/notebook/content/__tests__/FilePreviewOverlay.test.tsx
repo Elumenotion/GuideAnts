@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
 import { FilePreviewOverlay } from '../FilePreviewOverlay';
 import { NotebookFileDto } from '../../../../types/notebook';
 import { notebookFilesApi } from '../../../../services/notebookFiles';
-import { getOnlyOfficeCapabilities, isOnlyOfficeSupportedByExtension } from '../../../../services/onlyOffice';
+import { getOnlyOfficeCapabilities, isOnlyOfficeSupportedByExtension, looksLikeOnlyOfficeFile } from '../../../../services/onlyOffice';
 
 // Mock the services
 vi.mock('../../../../services/notebookFiles', () => ({
@@ -18,6 +18,7 @@ vi.mock('../../../../services/notebookFiles', () => ({
 vi.mock('../../../../services/onlyOffice', () => ({
   getOnlyOfficeCapabilities: vi.fn(),
   isOnlyOfficeSupportedByExtension: vi.fn(),
+  looksLikeOnlyOfficeFile: vi.fn(() => false),
 }));
 
 vi.mock('../../../common/OnlyOfficeEditor', () => ({
@@ -125,6 +126,7 @@ describe('FilePreviewOverlay', () => {
       supportedContentTypes: [],
     });
     (isOnlyOfficeSupportedByExtension as Mock).mockReturnValue(false);
+    (looksLikeOnlyOfficeFile as Mock).mockReturnValue(false);
   });
 
   describe('Component Rendering', () => {
@@ -623,7 +625,20 @@ describe('FilePreviewOverlay', () => {
   });
 
   describe('ONLYOFFICE Integration', () => {
+    it('does not request ONLYOFFICE capabilities for image previews', async () => {
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockImageBlob);
+      const imageFile = { ...mockFile, fileName: 'image.png' };
+
+      render(<FilePreviewOverlay {...defaultProps} file={imageFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('image-viewer')).toBeInTheDocument();
+      });
+      expect(getOnlyOfficeCapabilities).not.toHaveBeenCalled();
+    });
+
     it('renders ONLYOFFICE viewer for supported file types when enabled', async () => {
+      (looksLikeOnlyOfficeFile as Mock).mockReturnValue(true);
       (getOnlyOfficeCapabilities as Mock).mockResolvedValue({
         enabled: true,
         publicUrl: 'http://localhost:8082',

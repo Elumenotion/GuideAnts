@@ -68,7 +68,18 @@ function FileContentsComponent({ projectId, fileId, contentType, version, inline
         });
     }, []);
 
+    const onlyOfficeActive =
+        isOnlyOfficeSupportedByContentType(contentType, onlyOfficeCapabilities) ||
+        isOnlyOfficeSupportedByExtension(content?.fileName ?? '', onlyOfficeCapabilities);
+    const onlyOfficeCandidate = looksLikeOnlyOfficeFile(content?.fileName ?? '', contentType);
+
     useEffect(() => {
+        if (!onlyOfficeCandidate) {
+            setOnlyOfficeCapabilities(null);
+            setOnlyOfficeCapabilitiesError(null);
+            return;
+        }
+
         let isDisposed = false;
         console.info('[ONLYOFFICE] FileContents capabilities fetch start', {
             projectId,
@@ -103,12 +114,7 @@ function FileContentsComponent({ projectId, fileId, contentType, version, inline
         return () => {
             isDisposed = true;
         };
-    }, []);
-
-    const onlyOfficeActive =
-        isOnlyOfficeSupportedByContentType(contentType, onlyOfficeCapabilities) ||
-        isOnlyOfficeSupportedByExtension(content?.fileName ?? '', onlyOfficeCapabilities);
-    const onlyOfficeCandidate = looksLikeOnlyOfficeFile(content?.fileName ?? '', contentType);
+    }, [onlyOfficeCandidate, projectId, fileId, contentType]);
     useEffect(() => {
         console.info('[ONLYOFFICE] FileContents routing decision', {
             projectId,
@@ -330,6 +336,7 @@ function FileContentsComponent({ projectId, fileId, contentType, version, inline
         if (inlineMode) {
             return (
                 <OnlyOfficeEditor
+                    key={`project-onlyoffice-${projectId}-${fileId}-${version ?? 'latest'}`}
                     scope="project"
                     projectId={projectId}
                     fileId={fileId}
@@ -341,6 +348,7 @@ function FileContentsComponent({ projectId, fileId, contentType, version, inline
         return (
             <PreviewContainer contentClassName="h-full w-full overflow-hidden">
                 <OnlyOfficeEditor
+                    key={`project-onlyoffice-${projectId}-${fileId}-${version ?? 'latest'}`}
                     scope="project"
                     projectId={projectId}
                     fileId={fileId}

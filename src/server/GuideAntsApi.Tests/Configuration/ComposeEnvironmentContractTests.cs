@@ -100,6 +100,77 @@ public sealed class ComposeEnvironmentContractTests
         }
     }
 
+    [TestMethod]
+    public void DockerEnv_OnlyOfficeBooleanValues_AreParseable()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var envPath = Path.Combine(repoRoot, "docker", ".env");
+        File.Exists(envPath).Should().BeTrue($"docker env file should exist at {envPath}");
+
+        var values = ReadEnvValues(envPath);
+
+        foreach (var key in new[] { "GA_ONLYOFFICE_ENABLED", "GA_ONLYOFFICE_JWT_ENABLED", "GA_ONLYOFFICE_JWT_IN_BODY" })
+        {
+            values.Should().ContainKey(key, $"docker/.env must define {key}");
+            bool.TryParse(values[key], out _).Should().BeTrue($"{key} must be a plain boolean without inline comment text");
+        }
+    }
+
+    [TestMethod]
+    public void DockerEnv_DoesNotUseInlineCommentsInValues()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var envPath = Path.Combine(repoRoot, "docker", ".env");
+        File.Exists(envPath).Should().BeTrue($"docker env file should exist at {envPath}");
+
+        var offenders = File.ReadAllLines(envPath)
+            .Select((rawLine, index) => new { LineNumber = index + 1, Line = rawLine.Trim() })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Line))
+            .Where(item => !item.Line.StartsWith('#'))
+            .Where(item => item.Line.Contains('=') && item.Line.Contains('#'))
+            .Select(item => $"{item.LineNumber}: {item.Line}")
+            .ToList();
+
+        offenders.Should().BeEmpty(
+            "docker/.env values are passed literally by Docker Compose; put comments on their own lines. Offenders: {0}",
+            string.Join(Environment.NewLine, offenders));
+    }
+
+    [TestMethod]
+    public void DockerBuildScripts_DoNotReconstructEnvByStrippingWhitespace()
+    {
+        var repoRoot = FindRepositoryRoot();
+        var buildScripts = Directory
+            .EnumerateFiles(Path.Combine(repoRoot, "docker", "build"), "build_*", SearchOption.TopDirectoryOnly)
+            .Where(path => path.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".sh", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        buildScripts.Should().NotBeEmpty("docker build scripts should exist");
+
+        var forbiddenPatterns = new[]
+        {
+            "compactRaw",
+            "-replace '\\s'",
+            "-replace \"\\s\"",
+            "declare -A ENV_MAP",
+            "ENV_ORDER"
+        };
+
+        var offenders = buildScripts
+            .SelectMany(path =>
+            {
+                var text = File.ReadAllText(path);
+                return forbiddenPatterns
+                    .Where(pattern => text.Contains(pattern, StringComparison.Ordinal))
+                    .Select(pattern => $"{Path.GetRelativePath(repoRoot, path)} contains {pattern}");
+            })
+            .ToList();
+
+        offenders.Should().BeEmpty(
+            "build scripts must update docker/.env line-by-line; reconstructing it can collapse comments/newlines into values. Offenders: {0}",
+            string.Join(Environment.NewLine, offenders));
+    }
+
     private static string FindRepositoryRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
@@ -220,6 +291,31 @@ public sealed class ComposeEnvironmentContractTests
     {
         using var document = JsonDocument.Parse(File.ReadAllText(appsettingsPath));
         FlattenJson(document.RootElement, string.Empty, keys);
+    }
+
+    private static Dictionary<string, string> ReadEnvValues(string envPath)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rawLine in File.ReadAllLines(envPath))
+        {
+            var line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            var separatorIndex = line.IndexOf('=');
+            if (separatorIndex <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..separatorIndex].Trim();
+            var value = line[(separatorIndex + 1)..].Trim();
+            values[key] = value;
+        }
+
+        return values;
     }
 
     private static void FlattenJson(JsonElement element, string prefix, HashSet<string> keys)

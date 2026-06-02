@@ -21,8 +21,8 @@ public static class OnlyOfficeEndpoints
             IOnlyOfficeService service,
             ILoggerFactory loggerFactory) =>
         {
-            var onlyOfficeOptions = options.Value;
             var logger = loggerFactory.CreateLogger("OnlyOfficeEndpoints");
+            var onlyOfficeOptions = options.Value;
             logger.LogInformation(
                 "ONLYOFFICE capabilities requested. enabled={Enabled} publicUrl={PublicUrl}",
                 onlyOfficeOptions.Enabled,
@@ -87,6 +87,7 @@ public static class OnlyOfficeEndpoints
             [FromQuery] Guid? projectId,
             [FromQuery] Guid? fileId,
             [FromQuery] Guid? notebookId,
+            [FromQuery] int? versionNumber,
             HttpContext httpContext,
             IOnlyOfficeService service,
             ILoggerFactory loggerFactory,
@@ -94,15 +95,16 @@ public static class OnlyOfficeEndpoints
         {
             var logger = loggerFactory.CreateLogger("OnlyOfficeEndpoints");
             logger.LogInformation(
-                "ONLYOFFICE download requested. tokenLength={TokenLength} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
+                "ONLYOFFICE download requested. tokenLength={TokenLength} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} versionNumber={VersionNumber}",
                 token?.Length ?? 0,
                 scope,
                 projectId,
                 fileId,
-                notebookId);
+                notebookId,
+                versionNumber);
             try
             {
-                var result = await service.GetDownloadAsync(token, scope, projectId, fileId, notebookId, cancellationToken);
+                var result = await service.GetDownloadAsync(token, scope, projectId, fileId, notebookId, versionNumber, cancellationToken);
                 if (result == null)
                 {
                     logger.LogWarning("ONLYOFFICE download target not found.");

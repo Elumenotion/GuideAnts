@@ -33,9 +33,10 @@ export default function OnlyOfficeEditor({
     canEdit,
     className,
 }: OnlyOfficeEditorProps) {
+    const instanceIdRef = useRef(Math.random().toString(36).slice(2));
     const containerId = useMemo(
-        () => `onlyoffice-${scope}-${projectId}-${fileId}`.replace(/[^a-zA-Z0-9-_]/g, '-'),
-        [scope, projectId, fileId]
+        () => `onlyoffice-${scope}-${projectId}-${notebookId ?? 'project'}-${fileId}-${instanceIdRef.current}`.replace(/[^a-zA-Z0-9-_]/g, '-'),
+        [scope, projectId, notebookId, fileId]
     );
     const editorRef = useRef<{ destroyEditor?: () => void } | null>(null);
     const readyTimeoutRef = useRef<number | null>(null);
@@ -46,6 +47,24 @@ export default function OnlyOfficeEditor({
         let isDisposed = false;
         setIsLoading(true);
         setError(null);
+
+        const clearContainer = () => {
+            const container = document.getElementById(containerId);
+            if (container) {
+                container.replaceChildren();
+            }
+        };
+
+        const destroyEditor = () => {
+            try {
+                editorRef.current?.destroyEditor?.();
+            } catch (err) {
+                console.warn('[ONLYOFFICE] destroyEditor failed', { scope, fileId, err });
+            } finally {
+                editorRef.current = null;
+                clearContainer();
+            }
+        };
 
         const setupEditor = async () => {
             const request: OnlyOfficeEditorConfigRequest = {
@@ -123,7 +142,7 @@ export default function OnlyOfficeEditor({
                 },
             };
 
-            editorRef.current?.destroyEditor?.();
+            destroyEditor();
             editorRef.current = new window.DocsAPI.DocEditor(containerId, runtimeConfig);
             console.info('[ONLYOFFICE] DocEditor created', { containerId, fileId, scope });
             // Keep the container mounted and visible immediately; some documents do not
@@ -154,13 +173,12 @@ export default function OnlyOfficeEditor({
                 window.clearTimeout(readyTimeoutRef.current);
                 readyTimeoutRef.current = null;
             }
-            editorRef.current?.destroyEditor?.();
-            editorRef.current = null;
+            destroyEditor();
         };
     }, [scope, projectId, fileId, notebookId, canEdit, containerId]);
 
     return (
-        <div className={className ?? 'h-full w-full relative'}>
+        <div className={className ?? 'h-full w-full relative'} style={{ overflow: 'hidden', isolation: 'isolate' }}>
             <div id={containerId} className="h-full w-full" />
             {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-white/70">

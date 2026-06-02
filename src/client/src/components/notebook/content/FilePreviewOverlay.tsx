@@ -123,6 +123,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
   // Refs for scroll containers
   const originalScrollRef = useRef<HTMLDivElement>(null);
   const markdownScrollRef = useRef<HTMLDivElement>(null);
+  const markdownShadowRef = useRef<NotebookFileMarkdownShadowDto | null>(null);
 
   const contentType = getContentTypeFromFileName(file.fileName);
   const onlyOfficeActive = isOnlyOfficeSupportedByExtension(file.fileName, onlyOfficeCapabilities);
@@ -133,6 +134,37 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     isMarkdownExtractionSupported(file.fileName, contentType), 
     [file.fileName, contentType]
   );
+
+  useEffect(() => {
+    markdownShadowRef.current = markdownShadow;
+  }, [markdownShadow]);
+
+  const refreshMarkdownShadow = useCallback(async () => {
+    if (!supportsMarkdownExtraction) {
+      setMarkdownShadow(null);
+      setMarkdownContent(null);
+      return;
+    }
+
+    try {
+      const previousShadow = markdownShadowRef.current;
+      const shadow = await notebookFilesApi.getNotebookFileMarkdownShadow(projectId, notebookId, file.id);
+      markdownShadowRef.current = shadow;
+      setMarkdownShadow(shadow);
+
+      if (
+        shadow.status !== MarkdownExtractionStatus.Completed ||
+        previousShadow?.contentHash !== shadow.contentHash
+      ) {
+        setMarkdownContent(null);
+        setMarkdownError(null);
+      }
+    } catch (error) {
+      console.error('Failed to fetch markdown shadow:', error);
+      markdownShadowRef.current = null;
+      setMarkdownShadow(null);
+    }
+  }, [file.id, projectId, notebookId, supportsMarkdownExtraction]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -238,6 +270,12 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
   }, [file.id]);
 
   useEffect(() => {
+    if (!onlyOfficeCandidate) {
+      setOnlyOfficeCapabilities(null);
+      setOnlyOfficeCapabilitiesError(null);
+      return;
+    }
+
     let isDisposed = false;
     console.info('[ONLYOFFICE] FilePreviewOverlay capabilities fetch start', {
       projectId,
@@ -276,7 +314,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     return () => {
       isDisposed = true;
     };
-  }, []);
+  }, [onlyOfficeCandidate, projectId, notebookId, file.id, file.fileName, contentType]);
 
   useEffect(() => {
     console.info('[ONLYOFFICE] FilePreviewOverlay routing decision', {
@@ -330,23 +368,8 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
 
   // Fetch markdown shadow info
   useEffect(() => {
-    const fetchMarkdownShadow = async () => {
-      if (!supportsMarkdownExtraction) {
-        setMarkdownShadow(null);
-        return;
-      }
-
-      try {
-        const shadow = await notebookFilesApi.getNotebookFileMarkdownShadow(projectId, notebookId, file.id);
-        setMarkdownShadow(shadow);
-      } catch (error) {
-        console.error('Failed to fetch markdown shadow:', error);
-        setMarkdownShadow(null);
-      }
-    };
-
-    fetchMarkdownShadow();
-  }, [file.id, projectId, notebookId, supportsMarkdownExtraction]);
+    refreshMarkdownShadow();
+  }, [refreshMarkdownShadow]);
 
   // Poll for status updates when extraction is in progress
   useEffect(() => {
@@ -357,12 +380,12 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
 
     const pollInterval = setInterval(async () => {
       try {
-        const shadow = await notebookFilesApi.getNotebookFileMarkdownShadow(projectId, notebookId, file.id);
-        setMarkdownShadow(shadow);
+        await refreshMarkdownShadow();
+        const shadow = markdownShadowRef.current;
 
-        if (shadow.status === MarkdownExtractionStatus.Completed || 
+        if (shadow && (shadow.status === MarkdownExtractionStatus.Completed || 
             shadow.status === MarkdownExtractionStatus.Failed || 
-            shadow.status === MarkdownExtractionStatus.Skipped) {
+            shadow.status === MarkdownExtractionStatus.Skipped)) {
           clearInterval(pollInterval);
         }
       } catch (error) {
@@ -371,7 +394,16 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     }, 3000);
 
     return () => clearInterval(pollInterval);
-  }, [markdownShadow?.status, file.id, projectId, notebookId, supportsMarkdownExtraction]);
+  }, [markdownShadow?.status, supportsMarkdownExtraction, refreshMarkdownShadow]);
+
+  // ONLYOFFICE saves happen out-of-band via callback, so the preview file prop may
+  // not change while the extracted markdown shadow is being reset and rebuilt.
+  useEffect(() => {
+    if (!onlyOfficeActive || !supportsMarkdownExtraction) return;
+
+    const pollInterval = setInterval(refreshMarkdownShadow, 5000);
+    return () => clearInterval(pollInterval);
+  }, [onlyOfficeActive, supportsMarkdownExtraction, refreshMarkdownShadow]);
 
   // Separate effect for loading text content (matching project view)
   useEffect(() => {
@@ -551,15 +583,13 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
         // If markdown extraction is supported, re-fetch shadow to trigger new extraction
         if (supportsMarkdownExtraction) {
           setMarkdownContent(null);
-          notebookFilesApi.getNotebookFileMarkdownShadow(projectId, notebookId, file.id)
-            .then(shadow => setMarkdownShadow(shadow))
-            .catch(err => console.error('Failed to refresh markdown shadow:', err));
+          refreshMarkdownShadow();
         }
       }
     } catch (err: any) {
       console.error('Failed to refresh original content:', err);
     }
-  }, [projectId, notebookId, file.relativePath, file.fileHash, file.id, content, isTextBasedContent, supportsMarkdownExtraction]);
+  }, [projectId, notebookId, file.relativePath, file.fileHash, content, isTextBasedContent, supportsMarkdownExtraction, refreshMarkdownShadow]);
 
   // When file.fileHash changes (original file was modified), re-fetch markdown shadow
   // This triggers new extraction if needed - no separate polling required
@@ -569,12 +599,10 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
       setMarkdownContent(null);
       setMarkdownError(null);
       
-      notebookFilesApi.getNotebookFileMarkdownShadow(projectId, notebookId, file.id)
-        .then(shadow => setMarkdownShadow(shadow))
-        .catch(err => console.error('Failed to refresh markdown shadow:', err));
+      refreshMarkdownShadow();
     }
     prevFileHashRef.current = file.fileHash;
-  }, [file.fileHash, file.id, projectId, notebookId, supportsMarkdownExtraction]);
+  }, [file.fileHash, supportsMarkdownExtraction, refreshMarkdownShadow]);
 
   // Auto-refresh content - check for file changes every 5 seconds
   useEffect(() => {
@@ -638,6 +666,14 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     }
     return null;
   }, [content, contentType]);
+
+  useEffect(() => {
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [objectUrl]);
 
   // HTML content for rendering HTML files with resolved resource paths
   const [htmlContent, setHtmlContent] = useState<string | null>(null);
@@ -816,6 +852,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     if (onlyOfficeActive) {
       return (
         <OnlyOfficeEditor
+          key={`notebook-onlyoffice-${notebookId}-${file.id}-${file.fileHash ?? file.lastModifiedUtc ?? file.relativePath}`}
           scope="notebook"
           projectId={projectId}
           notebookId={notebookId}
@@ -962,7 +999,10 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
       );
     }
 
-    if (markdownShadow.status === MarkdownExtractionStatus.Processing) {
+    if (
+      markdownShadow.status === MarkdownExtractionStatus.Pending ||
+      markdownShadow.status === MarkdownExtractionStatus.Processing
+    ) {
       return (
         <div className="flex items-center justify-center h-full">
           <div className="text-center">
