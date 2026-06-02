@@ -100,8 +100,16 @@ The current operator/developer setup is centered on Docker Compose. The stack de
 - `mssql-express` for the application database
 - `guideants-ai` as a consolidated local AI gateway
 - `docling-serve` for local document intelligence / markdown extraction
+- `onlyoffice-documentserver` for Office document viewing/editing in project and notebook file previews
 - `searxng` for search support
 - `plantuml` for diagram rendering
+
+For local host-API debugging (API at `http://localhost:5106`, services in Docker), use `docker/.env.api-local-debug.example` as the reference env and set `OnlyOffice:ApiBaseUrl` in `src/server/GuideAntsApi/appsettings.Development.json` to `http://host.docker.internal:5106`.
+
+To enable ONLYOFFICE JWT, set:
+
+- Docker env: `GA_ONLYOFFICE_JWT_ENABLED=true` and `ONLYOFFICE_JWT_SECRET=<secret>`
+- API config: `OnlyOffice:JwtEnabled=true` and `OnlyOffice:JwtSecret=<same secret>`
 
 The `guideants-ai` container is especially important: it is the local runtime surface behind llama.cpp, embeddings, speech transcription, speech synthesis, image generation, media extraction, and script execution. The Settings UI and API route each AI capability to the correct local or cloud backend rather than treating “the model” as one global switch.
 
@@ -123,6 +131,7 @@ GuideAnts is built on top of excellent open source work. Huge thanks to the team
 - [Docling](https://github.com/docling-project/docling) for document intelligence and markdown extraction (`docling-serve`).
 - [SearXNG](https://github.com/searxng/searxng) for metasearch and web retrieval.
 - [PlantUML](https://github.com/plantuml/plantuml) and [Graphviz](https://gitlab.com/graphviz/graphviz) for diagram rendering.
+- [ONLYOFFICE Docs](https://github.com/ONLYOFFICE/DocumentServer) for Office document viewing/editing capabilities via Document Server.
 
 ## Repository Tour
 

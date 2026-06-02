@@ -156,6 +156,7 @@ namespace GuideAntsApi.Services.Components
             shadow.Status = MarkdownExtractionStatus.Pending;
             shadow.ErrorMessage = null;
             shadow.ProcessedAt = null;
+            shadow.IsIndexed = false;
 
             await context.SaveChangesAsync(cancellationToken);
 
@@ -264,19 +265,22 @@ namespace GuideAntsApi.Services.Components
 
         public async Task<NotebookFileMarkdownShadow> RetryNotebookExtractionAsync(Guid notebookFileId, CancellationToken cancellationToken = default)
         {
-            var shadow = await GetNotebookMarkdownShadowAsync(notebookFileId, cancellationToken);
-            if (shadow == null)
-            {
-                return await CreateNotebookMarkdownShadowAsync(notebookFileId, cancellationToken);
-            }
-
             using var scope = CreateDbScope();
             var context = GetDbContext(scope);
+
+            var shadow = await context.NotebookFileMarkdownShadows
+                .FirstOrDefaultAsync(s => s.OriginalNotebookFileId == notebookFileId, cancellationToken);
+            if (shadow == null)
+            {
+                _logger.LogInformation("No markdown shadow exists for NotebookFile {NotebookFileId}; creating one for extraction retry", notebookFileId);
+                return await CreateNotebookMarkdownShadowAsync(notebookFileId, cancellationToken);
+            }
 
             // Reset status to pending
             shadow.Status = MarkdownExtractionStatus.Pending;
             shadow.ErrorMessage = null;
             shadow.ProcessedAt = null;
+            shadow.IsIndexed = false;
 
             await context.SaveChangesAsync(cancellationToken);
 
@@ -285,6 +289,10 @@ namespace GuideAntsApi.Services.Components
                 jobType: nameof(ExtractNotebookFileMarkdownJob).Replace("Job", string.Empty),
                 payload: new ExtractNotebookFileMarkdownJob(notebookFileId),
                 ct: cancellationToken);
+            _logger.LogInformation(
+                "Reset notebook markdown shadow {ShadowId} to pending and re-enqueued extraction for NotebookFile {NotebookFileId}",
+                shadow.Id,
+                notebookFileId);
             return shadow;
         }
 

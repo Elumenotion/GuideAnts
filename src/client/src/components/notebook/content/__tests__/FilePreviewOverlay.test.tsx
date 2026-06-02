@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
 import { FilePreviewOverlay } from '../FilePreviewOverlay';
 import { NotebookFileDto } from '../../../../types/notebook';
 import { notebookFilesApi } from '../../../../services/notebookFiles';
+import { getOnlyOfficeCapabilities, isOnlyOfficeSupportedByExtension, looksLikeOnlyOfficeFile } from '../../../../services/onlyOffice';
 
 // Mock the services
 vi.mock('../../../../services/notebookFiles', () => ({
@@ -12,6 +13,16 @@ vi.mock('../../../../services/notebookFiles', () => ({
     getNotebookFileMarkdownShadow: vi.fn().mockResolvedValue({ status: 'Skipped' }),
     getNotebookFileMarkdownContent: vi.fn().mockResolvedValue({ blob: new Blob([''], { type: 'text/markdown' }) }),
   },
+}));
+
+vi.mock('../../../../services/onlyOffice', () => ({
+  getOnlyOfficeCapabilities: vi.fn(),
+  isOnlyOfficeSupportedByExtension: vi.fn(),
+  looksLikeOnlyOfficeFile: vi.fn(() => false),
+}));
+
+vi.mock('../../../common/OnlyOfficeEditor', () => ({
+  default: () => <div data-testid="onlyoffice-editor">ONLYOFFICE</div>,
 }));
 
 // Mock the viewer components
@@ -108,6 +119,14 @@ describe('FilePreviewOverlay', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateObjectURL.mockReturnValue('mock-object-url');
+    (getOnlyOfficeCapabilities as Mock).mockResolvedValue({
+      enabled: false,
+      publicUrl: '',
+      supportedExtensions: [],
+      supportedContentTypes: [],
+    });
+    (isOnlyOfficeSupportedByExtension as Mock).mockReturnValue(false);
+    (looksLikeOnlyOfficeFile as Mock).mockReturnValue(false);
   });
 
   describe('Component Rendering', () => {
@@ -602,6 +621,38 @@ describe('FilePreviewOverlay', () => {
       // Should still show second content
       expect(screen.getByText('second content')).toBeInTheDocument();
       expect(screen.queryByText('first content')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('ONLYOFFICE Integration', () => {
+    it('does not request ONLYOFFICE capabilities for image previews', async () => {
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockImageBlob);
+      const imageFile = { ...mockFile, fileName: 'image.png' };
+
+      render(<FilePreviewOverlay {...defaultProps} file={imageFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('image-viewer')).toBeInTheDocument();
+      });
+      expect(getOnlyOfficeCapabilities).not.toHaveBeenCalled();
+    });
+
+    it('renders ONLYOFFICE viewer for supported file types when enabled', async () => {
+      (looksLikeOnlyOfficeFile as Mock).mockReturnValue(true);
+      (getOnlyOfficeCapabilities as Mock).mockResolvedValue({
+        enabled: true,
+        publicUrl: 'http://localhost:8082',
+        supportedExtensions: ['docx'],
+        supportedContentTypes: [],
+      });
+      (isOnlyOfficeSupportedByExtension as Mock).mockReturnValue(true);
+      const docxFile = { ...mockFile, fileName: 'proposal.docx', relativePath: 'proposal.docx' };
+
+      render(<FilePreviewOverlay {...defaultProps} file={docxFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('onlyoffice-editor')).toBeInTheDocument();
+      });
     });
   });
 }); 

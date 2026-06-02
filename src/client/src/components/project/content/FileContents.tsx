@@ -11,6 +11,14 @@ import AudioPlayer from '@/components/common/AudioPlayer';
 import VideoPlayer from '@/components/common/VideoPlayer';
 import { FileLoadingErrorBoundary } from '@/components/common/FileLoadingErrorBoundary';
 import { resolveHtmlResources, cleanupBlobUrls } from '@/utils/htmlResourceResolver';
+import OnlyOfficeEditor from '@/components/common/OnlyOfficeEditor';
+import {
+    getOnlyOfficeCapabilities,
+    isOnlyOfficeSupportedByContentType,
+    isOnlyOfficeSupportedByExtension,
+    looksLikeOnlyOfficeFile,
+    OnlyOfficeCapabilities,
+} from '@/services/onlyOffice';
 
 interface FileContentsProps {
     inlineMode?: boolean;
@@ -20,13 +28,16 @@ interface FileContentsProps {
     version?: number;
     resolveProjectFilePath?: (relativePath: string) => string | undefined;
     onEditMarkdown?: () => void; // delegate to parent for identical behavior
+    canEdit?: boolean;
 }
 
-function FileContentsComponent({ projectId, fileId, contentType, version, inlineMode = false, resolveProjectFilePath, onEditMarkdown }: FileContentsProps) {
+function FileContentsComponent({ projectId, fileId, contentType, version, inlineMode = false, resolveProjectFilePath, onEditMarkdown, canEdit = false }: FileContentsProps) {
     const [content, setContent] = useState<{ blob: Blob; contentType: string; fileName: string } | null>(null);
     const [textContent, setTextContent] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [onlyOfficeCapabilities, setOnlyOfficeCapabilities] = useState<OnlyOfficeCapabilities | null>(null);
+    const [onlyOfficeCapabilitiesError, setOnlyOfficeCapabilitiesError] = useState<string | null>(null);
     
     // HTML resource resolution state
     const [htmlContent, setHtmlContent] = useState<string | null>(null);
@@ -57,8 +68,85 @@ function FileContentsComponent({ projectId, fileId, contentType, version, inline
         });
     }, []);
 
+    const onlyOfficeActive =
+        isOnlyOfficeSupportedByContentType(contentType, onlyOfficeCapabilities) ||
+        isOnlyOfficeSupportedByExtension(content?.fileName ?? '', onlyOfficeCapabilities);
+    const onlyOfficeCandidate = looksLikeOnlyOfficeFile(content?.fileName ?? '', contentType);
+
+    useEffect(() => {
+        if (!onlyOfficeCandidate) {
+            setOnlyOfficeCapabilities(null);
+            setOnlyOfficeCapabilitiesError(null);
+            return;
+        }
+
+        let isDisposed = false;
+        console.info('[ONLYOFFICE] FileContents capabilities fetch start', {
+            projectId,
+            fileId,
+            contentType,
+        });
+        getOnlyOfficeCapabilities(true)
+            .then((capabilities) => {
+                if (!isDisposed) {
+                    console.info('[ONLYOFFICE] FileContents capabilities fetch success', {
+                        projectId,
+                        fileId,
+                        enabled: capabilities.enabled,
+                        publicUrl: capabilities.publicUrl,
+                    });
+                    setOnlyOfficeCapabilities(capabilities);
+                    setOnlyOfficeCapabilitiesError(null);
+                }
+            })
+            .catch((err) => {
+                if (!isDisposed) {
+                    console.error('[ONLYOFFICE] FileContents capabilities fetch failed', {
+                        projectId,
+                        fileId,
+                        message: err instanceof Error ? err.message : String(err),
+                    });
+                    setOnlyOfficeCapabilities(null);
+                    setOnlyOfficeCapabilitiesError('ONLYOFFICE capabilities request failed. Check ONLYOFFICE API configuration.');
+                }
+            });
+
+        return () => {
+            isDisposed = true;
+        };
+    }, [onlyOfficeCandidate, projectId, fileId, contentType]);
+    useEffect(() => {
+        console.info('[ONLYOFFICE] FileContents routing decision', {
+            projectId,
+            fileId,
+            contentType,
+            fileName: content?.fileName ?? null,
+            onlyOfficeCandidate,
+            onlyOfficeActive,
+            capabilitiesEnabled: onlyOfficeCapabilities?.enabled ?? null,
+            capabilitiesError: onlyOfficeCapabilitiesError,
+        });
+    }, [
+        projectId,
+        fileId,
+        contentType,
+        content?.fileName,
+        onlyOfficeCandidate,
+        onlyOfficeActive,
+        onlyOfficeCapabilities?.enabled,
+        onlyOfficeCapabilitiesError,
+    ]);
+
     useEffect(() => {
         const fetchContent = async () => {
+            if (onlyOfficeActive) {
+                setContent(null);
+                setTextContent(null);
+                setError(null);
+                setIsLoading(false);
+                return;
+            }
+
             const startTime = Date.now();
             const fileIdKey = `${projectId}:${fileId}:${version || 'latest'}`;
             
@@ -124,7 +212,7 @@ function FileContentsComponent({ projectId, fileId, contentType, version, inline
         };
 
         fetchContent();
-    }, [projectId, fileId, version]);
+    }, [projectId, fileId, version, contentType, onlyOfficeActive]);
 
     useEffect(() => {
         const loadTextContent = async () => {
@@ -240,6 +328,44 @@ function FileContentsComponent({ projectId, fileId, contentType, version, inline
         return (
             <div className="h-full w-full flex items-center justify-center">
                 <LoadingSpinner message="Loading file content..." />
+            </div>
+        );
+    }
+
+    if (onlyOfficeActive) {
+        if (inlineMode) {
+            return (
+                <OnlyOfficeEditor
+                    key={`project-onlyoffice-${projectId}-${fileId}-${version ?? 'latest'}`}
+                    scope="project"
+                    projectId={projectId}
+                    fileId={fileId}
+                    canEdit={canEdit}
+                    className="h-full w-full"
+                />
+            );
+        }
+        return (
+            <PreviewContainer contentClassName="h-full w-full overflow-hidden">
+                <OnlyOfficeEditor
+                    key={`project-onlyoffice-${projectId}-${fileId}-${version ?? 'latest'}`}
+                    scope="project"
+                    projectId={projectId}
+                    fileId={fileId}
+                    canEdit={canEdit}
+                    className="h-full w-full"
+                />
+            </PreviewContainer>
+        );
+    }
+
+    if (onlyOfficeCandidate && onlyOfficeCapabilitiesError) {
+        return (
+            <div className="h-full w-full flex items-center justify-center">
+                <div className="text-center p-4 text-red-600">
+                    <p className="font-semibold">ONLYOFFICE configuration error</p>
+                    <p className="text-sm mt-2">{onlyOfficeCapabilitiesError}</p>
+                </div>
             </div>
         );
     }

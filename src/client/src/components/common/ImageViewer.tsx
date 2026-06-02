@@ -13,7 +13,9 @@ export const ImageViewer = ({ src, alt, inlineMode = false, className = '' }: Im
         <img 
             src={src} 
             alt={alt}
-            className="max-w-full max-h-full object-contain"
+            className="w-full h-full object-contain"
+            style={{ imageOrientation: 'from-image' }}
+            decoding="async"
         />
     );
 

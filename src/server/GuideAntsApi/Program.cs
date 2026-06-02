@@ -265,6 +265,7 @@ public class Program
         app.MapUsageEndpoints();
         app.MapGuideUsageEndpoints();
         app.MapSettingsEndpoints();
+        app.MapOnlyOfficeEndpoints();
         app.UseGuideAntsUiPipeline(builder.Configuration);
 
         app.Run();
