@@ -910,76 +910,6 @@ public static class SettingsEndpoints
         .WithName("GetRoutingChatTargets")
         .Produces<IReadOnlyList<ChatTargetDto>>(StatusCodes.Status200OK);
 
-        // Phase B (R-5.2 / R-7.1 / R-9.2) readiness preflight, with the Phase H.1
-        // contract fix applied for R-2.4.
-        //
-        // Behavior matrix:
-        //   - modeId blank/absent: probe the service's default mode ("what's the
-        //     readiness of what a caller would get if they didn't specify a mode?").
-        //     200 + ModeReadinessDto; if no default mode exists the probe surfaces
-        //     it as a blocked readiness row, not a 4xx, because that's a
-        //     configuration-state question rather than caller input.
-        //   - modeId provided and resolves: 200 + ModeReadinessDto (blockers if any).
-        //   - modeId provided and unknown: 400 application/problem+json with
-        //     ROUTING_MODE_NOT_FOUND (fail-fast per R-2.4 — unknown modeIds are
-        //     caller-input errors, never 500 and never a silent blocked DTO).
-        routingGroup.MapGet("/preflight", async (
-            [FromQuery] string service,
-            [FromQuery] string? modeId,
-            IApplicationSettingsService settingsService,
-            IRoutingReadinessService readiness,
-            CancellationToken cancellationToken) =>
-        {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(modeId))
-                {
-                    var modes = await settingsService.GetServiceModesAsync(service, cancellationToken);
-                    var defaultMode = modes.FirstOrDefault(m => m.IsDefault) ?? modes.FirstOrDefault();
-                    if (defaultMode == null)
-                    {
-                        return Results.Ok(new ModeReadinessDto(
-                            Service: service,
-                            ModeId: "(default)",
-                            Status: "blocked",
-                            Blockers: new[]
-                            {
-                                $"{RoutingErrorCodes.ModeNotFound}: service '{service}' has no default mode configured."
-                            },
-                            ProviderSection: null,
-                            ModelId: null,
-                            RuntimeState: null));
-                    }
-
-                    var result = await readiness.ProbeModeAsync(service, defaultMode.ModeId, cancellationToken);
-                    return Results.Ok(result);
-                }
-
-                var knownModes = await settingsService.GetServiceModesAsync(service, cancellationToken);
-                var requested = knownModes.FirstOrDefault(m =>
-                    string.Equals(m.ModeId, modeId, StringComparison.Ordinal));
-                if (requested == null)
-                {
-                    throw RoutingException.ModeNotFound(service, modeId!);
-                }
-
-                var probe = await readiness.ProbeModeAsync(service, requested.ModeId, cancellationToken);
-                return Results.Ok(probe);
-            }
-            catch (ArgumentException ex)
-            {
-                return Results.BadRequest(new { error = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Results.BadRequest(new { error = ex.Message });
-            }
-        })
-        .WithName("GetRoutingModePreflight")
-        .Produces<ModeReadinessDto>(StatusCodes.Status200OK)
-        .Produces(StatusCodes.Status400BadRequest)
-        .ProducesProblem(StatusCodes.Status400BadRequest);
-
         routingGroup.MapGet("/chat-targets/preflight", async (
             ApplicationDbContext db,
             IRoutingReadinessService readiness,
@@ -1004,7 +934,7 @@ public static class SettingsEndpoints
         .Produces<IReadOnlyList<ChatTargetReadinessDto>>(StatusCodes.Status200OK);
 
         // Phase F (R-4.* / R-6.*): per-model readiness probe used by the Models
-        // tab to render a row-level badge without fanning out to /preflight.
+        // tab to render a row-level badge for each catalog model.
         // Response shape:
         //   - 200 ChatTargetReadinessDto when the catalog row exists and is ready
         //     (status == "ready"). The same DTO is also returned when the row

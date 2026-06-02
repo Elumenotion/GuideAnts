@@ -120,24 +120,6 @@ public static class NotebookLlamaRuntimeEndpoints
         .Produces<LlamaAdminRestartResultDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status502BadGateway)
         .Produces(StatusCodes.Status504GatewayTimeout);
-
-        // Admin read-only snapshot
-        app.MapGet("/api/admin/llama/runtime", async (
-            [FromServices] ILlamaServerRuntimeClient llamaClient,
-            CancellationToken cancellationToken) =>
-        {
-            try
-            {
-                var models = await llamaClient.ListModelsAsync(cancellationToken);
-                return Results.Ok(models);
-            }
-            catch (Exception ex)
-            {
-                return Results.Problem(ex.Message);
-            }
-        })
-        .WithTags("Admin")
-        .Produces<LlamaModelsResponse>(StatusCodes.Status200OK);
     }
 
     public record LoadRuntimeRequest(Guid? AssistantId);
