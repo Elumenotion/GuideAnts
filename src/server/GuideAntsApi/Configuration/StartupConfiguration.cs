@@ -41,7 +41,7 @@ public static class StartupConfiguration
     {
         ConfigureDatabase(services, configuration);
         ConfigureCors(services, configuration);
-        ConfigureWebScrapingService(services);
+        ConfigureMemoryCache(services);
         ConfigureOptions(services, configuration);
         RegisterServices(services, configuration);
     }
@@ -124,9 +124,9 @@ public static class StartupConfiguration
         services.AddScoped<INotebookFileSyncService, NotebookFileSyncService>();
         services.AddSingleton<INotebookLockService, InMemoryNotebookLockService>();
         services.AddScoped<INotebookFileService, NotebookFileService>();
+        services.AddScoped<IOnlyOfficeService, OnlyOfficeService>();
         services.AddScoped<IFileLineageService, FileLineageService>();
         services.AddScoped<IExcludedHostService, ExcludedHostService>();
-        services.AddScoped<IWebScrapingService, WebScrapingService>();
         services.AddHttpClient<IBrowserRenderingClient, SearXngBrowserRenderingClient>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetRequiredService<IOptions<BrowserRenderingOptions>>().Value;
@@ -502,7 +502,7 @@ public static class StartupConfiguration
         });
     }
 
-    private static void ConfigureWebScrapingService(IServiceCollection services)
+    private static void ConfigureMemoryCache(IServiceCollection services)
     {
         services.AddMemoryCache(options =>
         {
@@ -529,6 +529,7 @@ public static class StartupConfiguration
         services.Configure<OpenRouterOptions>(configuration.GetSection(OpenRouterOptions.SectionName));
         services.Configure<SettingsSecretsOptions>(configuration.GetSection(SettingsSecretsOptions.SectionName));
         services.Configure<LlamaModelManagementOptions>(configuration.GetSection(LlamaModelManagementOptions.SectionName));
+        services.Configure<OnlyOfficeOptions>(configuration.GetSection(OnlyOfficeOptions.SectionName));
     }
 
     private static Uri DeriveLlamaAdminBaseUri(string llamaBaseUrl)

@@ -1,0 +1,27 @@
+# GuideAnts API endpoints not matched in client source scan
+# Generated: 2026-06-01
+# Source: node scripts/find-unused-api-endpoints.mjs
+# Client roots: src\client\src, ..\GuideAntsChat\client\src
+#
+# How to edit:
+#   - Delete a line (or comment with #) if it is a false positive — the client
+#     uses it indirectly (avatar URLs, public pages, server-side, etc.)
+#   - Add notes after # on each line
+#   - Lines left uncommented are your confirmed-unused list
+#
+# Format:
+#   METHOD PATH # tag [(operationId)] [notes]
+
+GET /api/admin/llama/runtime # Admin
+GET /api/assistants/avatar/{assistantName} # GuideAntsApi (GetAssistantAvatarByName)
+GET /api/projects/{projectId}/files/{fileId}/markdown/status # Project Content File Markdown (GetProjectContentFileMarkdownStatus)
+POST /api/projects/{projectId}/initialize-template # Projects (InitializeProjectFromTemplate)
+GET /api/projects/{projectId}/notebooks/{notebookId}/files/{fileId}/markdown/status # Notebook File Markdown (GetNotebookFileMarkdownStatus)
+DELETE /api/published/projects/{projectId}/notebooks/{notebookId}/conversations/{convoId}/messages/last # PublishedNotebookConversations
+POST /api/published/projects/{projectId}/notebooks/{notebookId}/conversations/{convoId}/tool-calls/results # PublishedNotebookConversations
+POST /api/published/projects/{projectId}/notebooks/{notebookId}/conversations/files # PublishedNotebookConversations
+POST /api/published/speech/transcribe # PublishedSpeech
+GET /api/settings/routing/preflight # SettingsRouting (GetRoutingModePreflight)
+GET /api/web-scraping/content # Web Scraping (GetContent)
+POST /chat/run/{assistantName} # ChatRunThread
+POST /sandbox/run/{containerName}/{scriptType}/{id} # GenericSandbox

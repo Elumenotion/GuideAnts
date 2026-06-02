@@ -15,6 +15,13 @@ import AudioPlayer from '../../common/AudioPlayer';
 import LoadingSpinner from '../../LoadingSpinner';
 import FullScreenEditor from '../conversations/FullScreenEditor';
 import { FaRegEdit, FaExpandAlt, FaCompress, FaDownload } from 'react-icons/fa';
+import OnlyOfficeEditor from '../../common/OnlyOfficeEditor';
+import {
+  getOnlyOfficeCapabilities,
+  isOnlyOfficeSupportedByExtension,
+  looksLikeOnlyOfficeFile,
+  OnlyOfficeCapabilities,
+} from '../../../services/onlyOffice';
 // CsvViewer and CodeViewer will be added back if found.
 
 interface FilePreviewOverlayProps {
@@ -29,6 +36,7 @@ interface FilePreviewOverlayProps {
   onNavigate?: (path: string) => void;
   /** Function to check if a file exists at a given path (for resolving root-relative URLs in HTML) */
   fileExists?: (path: string) => boolean;
+  canEdit?: boolean;
 }
 
 
@@ -72,11 +80,13 @@ const getContentTypeFromFileName = (fileName: string): string => {
     }
 };
 
-export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, projectId, notebookId, onClose, isStandalone, isEmbedded, onNavigate, fileExists }) => {
+export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, projectId, notebookId, onClose, isStandalone, isEmbedded, onNavigate, fileExists, canEdit = false }) => {
   const [content, setContent] = useState<Blob | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingText, setIsLoadingText] = useState(false);
+  const [onlyOfficeCapabilities, setOnlyOfficeCapabilities] = useState<OnlyOfficeCapabilities | null>(null);
+  const [onlyOfficeCapabilitiesError, setOnlyOfficeCapabilitiesError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   
   // Tab and markdown state
@@ -115,6 +125,8 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
   const markdownScrollRef = useRef<HTMLDivElement>(null);
 
   const contentType = getContentTypeFromFileName(file.fileName);
+  const onlyOfficeActive = isOnlyOfficeSupportedByExtension(file.fileName, onlyOfficeCapabilities);
+  const onlyOfficeCandidate = looksLikeOnlyOfficeFile(file.fileName, contentType);
   
   // Check if file supports markdown extraction
   const supportsMarkdownExtraction = useMemo(() => 
@@ -226,7 +238,79 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
   }, [file.id]);
 
   useEffect(() => {
+    let isDisposed = false;
+    console.info('[ONLYOFFICE] FilePreviewOverlay capabilities fetch start', {
+      projectId,
+      notebookId,
+      fileId: file.id,
+      fileName: file.fileName,
+      contentType,
+    });
+    getOnlyOfficeCapabilities(true)
+      .then((capabilities) => {
+        if (!isDisposed) {
+          console.info('[ONLYOFFICE] FilePreviewOverlay capabilities fetch success', {
+            projectId,
+            notebookId,
+            fileId: file.id,
+            enabled: capabilities.enabled,
+            publicUrl: capabilities.publicUrl,
+          });
+          setOnlyOfficeCapabilities(capabilities);
+          setOnlyOfficeCapabilitiesError(null);
+        }
+      })
+      .catch((err) => {
+        if (!isDisposed) {
+          console.error('[ONLYOFFICE] FilePreviewOverlay capabilities fetch failed', {
+            projectId,
+            notebookId,
+            fileId: file.id,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          setOnlyOfficeCapabilities(null);
+          setOnlyOfficeCapabilitiesError('ONLYOFFICE capabilities request failed. Check ONLYOFFICE API configuration.');
+        }
+      });
+
+    return () => {
+      isDisposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    console.info('[ONLYOFFICE] FilePreviewOverlay routing decision', {
+      projectId,
+      notebookId,
+      fileId: file.id,
+      fileName: file.fileName,
+      contentType,
+      onlyOfficeCandidate,
+      onlyOfficeActive,
+      capabilitiesEnabled: onlyOfficeCapabilities?.enabled ?? null,
+      capabilitiesError: onlyOfficeCapabilitiesError,
+    });
+  }, [
+    projectId,
+    notebookId,
+    file.id,
+    file.fileName,
+    contentType,
+    onlyOfficeCandidate,
+    onlyOfficeActive,
+    onlyOfficeCapabilities?.enabled,
+    onlyOfficeCapabilitiesError,
+  ]);
+
+  useEffect(() => {
     const fetchContent = async () => {
+      if (onlyOfficeActive) {
+        setContent(null);
+        setIsLoading(false);
+        setError(null);
+        return;
+      }
+
       try {
         setIsLoading(true);
         setError(null);
@@ -242,7 +326,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     };
 
     fetchContent();
-  }, [file, projectId, notebookId]);
+  }, [file, projectId, notebookId, onlyOfficeActive]);
 
   // Fetch markdown shadow info
   useEffect(() => {
@@ -386,12 +470,14 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
       contentType.startsWith('audio/') ||
       contentType.startsWith('video/') ||
       isMarkdown;
+    const onlyOfficeKeepsOriginalTab = onlyOfficeCandidate && (onlyOfficeCapabilities?.enabled !== false);
+    const shouldTreatAsPreviewable = isPreviewable || onlyOfficeKeepsOriginalTab;
 
-    if (!isPreviewable && activeTab === 'original') {
+    if (!shouldTreatAsPreviewable && activeTab === 'original') {
       setActiveTab('markdown');
       setHasAutoSwitched(true);
     }
-  }, [markdownShadow, activeTab, hasAutoSwitched, contentType, isMarkdown]);
+  }, [markdownShadow, activeTab, hasAutoSwitched, contentType, isMarkdown, onlyOfficeCandidate, onlyOfficeCapabilities?.enabled]);
 
   // Fetch markdown content when switching to markdown tab
   const fetchMarkdownContent = useCallback(async () => {
@@ -716,8 +802,42 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     if (error) {
       return <div className="flex items-center justify-center h-full"><p className="text-red-500">{error}</p></div>;
     }
+    if (onlyOfficeCandidate && onlyOfficeCapabilitiesError) {
+      return (
+        <div className="flex items-center justify-center h-full text-red-600">
+          <div className="text-center">
+            <p className="font-semibold">ONLYOFFICE configuration error</p>
+            <p className="text-sm mt-2">{onlyOfficeCapabilitiesError}</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (onlyOfficeActive) {
+      return (
+        <OnlyOfficeEditor
+          scope="notebook"
+          projectId={projectId}
+          notebookId={notebookId}
+          fileId={file.id}
+          canEdit={canEdit}
+          className="h-full w-full"
+        />
+      );
+    }
+
     if (!content) {
-      return null;
+      if (onlyOfficeCandidate && !onlyOfficeCapabilities && !onlyOfficeCapabilitiesError) {
+        return (
+          <div className="flex items-center justify-center h-full text-gray-600">
+            <div className="text-center">
+              <p className="font-semibold">Waiting for ONLYOFFICE capabilities</p>
+              <p className="text-sm mt-2">If this does not resolve, a configuration error will be shown.</p>
+            </div>
+          </div>
+        );
+      }
+      return <div className="flex items-center justify-center h-full text-red-600">No preview content was loaded.</div>;
     }
 
     // When in tabbed mode, use inline mode to avoid nested containers

@@ -141,12 +141,6 @@ const CATEGORIES: TelemetryCategory[] = [
     defaultLevel: 'Warning',
   },
   {
-    key: 'WebScrapingService',
-    label: 'Web scraping',
-    category: 'GuideAntsApi.Services.WebScrapingService',
-    defaultLevel: 'Information',
-  },
-  {
     key: 'StoragePathResolver',
     label: 'Storage path resolver',
     category: 'GuideAntsApi.Services.StoragePathResolver',
@@ -265,8 +259,8 @@ const SUBSYSTEMS: TelemetrySubsystem[] = [
     id: 'search',
     label: 'Search and browser rendering',
     summary: 'SearXNG queries, browser render failures, and markdown fetch errors.',
-    categoryKeys: ['SearXngWebSearchService', 'SearXngBrowserRenderingClient', 'WebScrapingService'],
-    presets: levelsFor(['SearXngWebSearchService', 'SearXngBrowserRenderingClient', 'WebScrapingService'], 'Error', 'Information', 'Debug', 'Trace'),
+    categoryKeys: ['SearXngWebSearchService', 'SearXngBrowserRenderingClient'],
+    presets: levelsFor(['SearXngWebSearchService', 'SearXngBrowserRenderingClient'], 'Error', 'Information', 'Debug', 'Trace'),
   },
   {
     id: 'infrastructure',

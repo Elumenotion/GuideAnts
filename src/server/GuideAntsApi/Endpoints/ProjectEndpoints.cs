@@ -137,19 +137,5 @@ public static class ProjectEndpoints
         .Produces<ProjectDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
-
-        // Initialize project from template (admin/system use)
-        group.MapPost("/{projectId}/initialize-template", async (Guid projectId, Guid targetUserId, IProjectService projectService) =>
-        {
-            var project = await projectService.CopyProjectAsync(projectId);
-            if (project == null)
-                return Results.NotFound();
-
-            return Results.Created($"/api/projects/{project.Id}", project);
-        })
-        .WithName("InitializeProjectFromTemplate")
-        .Produces<ProjectDto>(StatusCodes.Status201Created)
-        .Produces(StatusCodes.Status404NotFound)
-        .Produces(StatusCodes.Status401Unauthorized);
     }
 } 

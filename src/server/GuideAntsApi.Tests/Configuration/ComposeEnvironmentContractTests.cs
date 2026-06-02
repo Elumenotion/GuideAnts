@@ -6,12 +6,37 @@ namespace GuideAntsApi.Tests.Configuration;
 [TestClass]
 public sealed class ComposeEnvironmentContractTests
 {
-    private static readonly string[] ComposeStackFiles =
+    private static readonly (string FileName, string ApiServiceName)[] ComposeStacks =
     [
-        "docker-compose.cpu.yml",
-        "docker-compose.cuda.yml",
-        "docker-compose.ghcr-cpu.yml",
-        "docker-compose.ghcr-cuda13.yml"
+        ("docker-compose.cpu.yml", "guideants-webapi-ui"),
+        ("docker-compose.cuda.yml", "guideants-webapi-ui"),
+        ("docker-compose.rocm.yml", "guideants-webapi-ui"),
+        ("docker-compose.slim.yml", "guideants-webapi-ui-slim"),
+        ("docker-compose.ghcr-cpu.yml", "guideants-webapi-ui"),
+        ("docker-compose.ghcr-cuda13.yml", "guideants-webapi-ui"),
+        ("docker-compose.ghcr-rocm.yml", "guideants-webapi-ui"),
+        ("docker-compose.mssql.yml", "guideants-webapi-ui-mssql")
+    ];
+
+    private static readonly string[] RequiredOnlyOfficeApiKeys =
+    [
+        "OnlyOffice__Enabled",
+        "OnlyOffice__PublicUrl",
+        "OnlyOffice__InternalUrl",
+        "OnlyOffice__ApiBaseUrl",
+        "OnlyOffice__JwtEnabled",
+        "OnlyOffice__JwtSecret",
+        "OnlyOffice__JwtHeader",
+        "OnlyOffice__JwtInBody"
+    ];
+
+    private static readonly string[] RequiredOnlyOfficeDocumentServerKeys =
+    [
+        "JWT_ENABLED",
+        "JWT_SECRET",
+        "JWT_HEADER",
+        "JWT_IN_BODY",
+        "ALLOW_PRIVATE_IP_ADDRESS"
     ];
 
     [TestMethod]
@@ -28,13 +53,13 @@ public sealed class ComposeEnvironmentContractTests
         CollectAppsettingsKeys(appsettingsPath, appsettingsKeys);
         CollectAppsettingsKeys(appsettingsDevelopmentPath, appsettingsKeys);
 
-        foreach (var composeFile in ComposeStackFiles)
+        foreach (var (composeFile, apiServiceName) in ComposeStacks)
         {
             var composePath = Path.Combine(repoRoot, "docker", composeFile);
             File.Exists(composePath).Should().BeTrue($"compose file should exist at {composePath}");
 
-            var composeEnvironmentKeys = ReadComposeEnvironmentKeys(composePath, "guideants-webapi-ui");
-            composeEnvironmentKeys.Should().NotBeEmpty($"service guideants-webapi-ui should define environment keys in {composeFile}");
+            var composeEnvironmentKeys = ReadComposeEnvironmentKeys(composePath, apiServiceName);
+            composeEnvironmentKeys.Should().NotBeEmpty($"service {apiServiceName} should define environment keys in {composeFile}");
 
             var unknownKeys = composeEnvironmentKeys
                 .Where(key => !IsAllowedRuntimeKey(key))
@@ -47,7 +72,31 @@ public sealed class ComposeEnvironmentContractTests
                 .ToList();
 
             unknownKeys.Should().BeEmpty(
-                $"all compose keys for guideants-webapi-ui in {composeFile} must map to appsettings-backed keys. Unknown keys: {string.Join(", ", unknownKeys)}");
+                $"all compose keys for {apiServiceName} in {composeFile} must map to appsettings-backed keys. Unknown keys: {string.Join(", ", unknownKeys)}");
+        }
+    }
+
+    [TestMethod]
+    public void OnlyOffice_EnvContract_IsPresentAcrossAllComposeStacks()
+    {
+        var repoRoot = FindRepositoryRoot();
+
+        foreach (var (composeFile, apiServiceName) in ComposeStacks)
+        {
+            var composePath = Path.Combine(repoRoot, "docker", composeFile);
+            File.Exists(composePath).Should().BeTrue($"compose file should exist at {composePath}");
+
+            var apiKeys = ReadComposeEnvironmentKeys(composePath, apiServiceName);
+            foreach (var key in RequiredOnlyOfficeApiKeys)
+            {
+                apiKeys.Should().Contain(key, $"{composeFile} must include {key} for ONLYOFFICE API wiring");
+            }
+
+            var documentServerKeys = ReadComposeEnvironmentKeys(composePath, "onlyoffice-documentserver");
+            foreach (var key in RequiredOnlyOfficeDocumentServerKeys)
+            {
+                documentServerKeys.Should().Contain(key, $"{composeFile} must include {key} for ONLYOFFICE document server wiring");
+            }
         }
     }
 
@@ -57,7 +106,7 @@ public sealed class ComposeEnvironmentContractTests
         while (current != null)
         {
             var dockerDirectory = Path.Combine(current.FullName, "docker");
-            var hasAnyKnownComposeFile = ComposeStackFiles.Any(name => File.Exists(Path.Combine(dockerDirectory, name)));
+            var hasAnyKnownComposeFile = ComposeStacks.Any(stack => File.Exists(Path.Combine(dockerDirectory, stack.FileName)));
             if (hasAnyKnownComposeFile)
             {
                 return current.FullName;
@@ -70,7 +119,7 @@ public sealed class ComposeEnvironmentContractTests
         while (processDirectory != null)
         {
             var dockerDirectory = Path.Combine(processDirectory.FullName, "docker");
-            var hasAnyKnownComposeFile = ComposeStackFiles.Any(name => File.Exists(Path.Combine(dockerDirectory, name)));
+            var hasAnyKnownComposeFile = ComposeStacks.Any(stack => File.Exists(Path.Combine(dockerDirectory, stack.FileName)));
             if (hasAnyKnownComposeFile)
             {
                 return processDirectory.FullName;
@@ -133,22 +182,34 @@ public sealed class ComposeEnvironmentContractTests
                 continue;
             }
 
-            if (!trimmed.StartsWith("-", StringComparison.Ordinal))
+            if (trimmed.StartsWith("-", StringComparison.Ordinal))
+            {
+                var entry = trimmed[1..].Trim();
+                var separatorIndex = entry.IndexOf('=');
+                if (separatorIndex <= 0)
+                {
+                    continue;
+                }
+
+                var key = entry[..separatorIndex].Trim();
+                if (!string.IsNullOrWhiteSpace(key))
+                {
+                    keys.Add(key);
+                }
+
+                continue;
+            }
+
+            var mapSeparatorIndex = trimmed.IndexOf(':');
+            if (mapSeparatorIndex <= 0)
             {
                 continue;
             }
 
-            var entry = trimmed[1..].Trim();
-            var separatorIndex = entry.IndexOf('=');
-            if (separatorIndex <= 0)
+            var mapKey = trimmed[..mapSeparatorIndex].Trim().Trim('"');
+            if (!string.IsNullOrWhiteSpace(mapKey))
             {
-                continue;
-            }
-
-            var key = entry[..separatorIndex].Trim();
-            if (!string.IsNullOrWhiteSpace(key))
-            {
-                keys.Add(key);
+                keys.Add(mapKey);
             }
         }
 
@@ -200,6 +261,13 @@ public sealed class ComposeEnvironmentContractTests
         }
 
         if (key.Equals("API_RUNTIME_CONTEXT", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (key.Equals("ACCEPT_EULA", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("MSSQL_DB_NAME", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("MSSQL_SA_PASSWORD", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

@@ -1,0 +1,644 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using GuideAntsApi.Configuration;
+using GuideAntsApi.DataModel;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace GuideAntsApi.Services.Components;
+
+public sealed class OnlyOfficeService : IOnlyOfficeService
+{
+    private static readonly IReadOnlyCollection<string> SupportedFileExtensions = new[]
+    {
+        "csv", "doc", "docm", "docx", "dot", "dotm", "dotx", "epub", "fb2", "htm", "html",
+        "odp", "ods", "odt", "pdf", "pot", "potm", "potx", "pps", "ppsm", "ppsx", "ppt",
+        "pptm", "pptx", "rtf", "txt", "xls", "xlsb", "xlsm", "xlsx", "xlt", "xltm", "xltx"
+    };
+
+    private static readonly IReadOnlyCollection<string> SupportedMimeTypes = new[]
+    {
+        "application/epub+zip",
+        "application/msword",
+        "application/pdf",
+        "application/rtf",
+        "application/vnd.ms-excel",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.oasis.opendocument.presentation",
+        "application/vnd.oasis.opendocument.spreadsheet",
+        "application/vnd.oasis.opendocument.text",
+        "text/csv",
+        "text/html",
+        "text/plain"
+    };
+
+    private readonly ApplicationDbContext _dbContext;
+    private readonly IContentFileService _contentFileService;
+    private readonly INotebookFileService _notebookFileService;
+    private readonly IOptions<OnlyOfficeOptions> _options;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<OnlyOfficeService> _logger;
+
+    public OnlyOfficeService(
+        ApplicationDbContext dbContext,
+        IContentFileService contentFileService,
+        INotebookFileService notebookFileService,
+        IOptions<OnlyOfficeOptions> options,
+        IHttpClientFactory httpClientFactory,
+        ILogger<OnlyOfficeService> logger)
+    {
+        _dbContext = dbContext;
+        _contentFileService = contentFileService;
+        _notebookFileService = notebookFileService;
+        _options = options;
+        _httpClientFactory = httpClientFactory;
+        _logger = logger;
+    }
+
+    public IReadOnlyCollection<string> SupportedExtensions => SupportedFileExtensions;
+    public IReadOnlyCollection<string> SupportedContentTypes => SupportedMimeTypes;
+
+    public bool IsSupported(string fileName, string contentType)
+    {
+        var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            return false;
+        }
+
+        if (!SupportedFileExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return SupportedMimeTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase)
+            || string.Equals(contentType, "application/octet-stream", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public async Task<OnlyOfficeEditorConfigResult> BuildEditorConfigAsync(
+        HttpContext httpContext,
+        OnlyOfficeEditorConfigRequest request,
+        CancellationToken cancellationToken)
+    {
+        var options = _options.Value;
+        if (!options.Enabled)
+        {
+            throw new InvalidOperationException("ONLYOFFICE is disabled.");
+        }
+        if (string.IsNullOrWhiteSpace(options.PublicUrl))
+        {
+            throw new InvalidOperationException("OnlyOffice:PublicUrl must be configured when ONLYOFFICE is enabled.");
+        }
+        if (!Uri.TryCreate(options.PublicUrl, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException("OnlyOffice:PublicUrl must be an absolute URL.");
+        }
+
+        var context = await ResolveFileContextAsync(request, cancellationToken);
+        if (!IsSupported(context.FileName, context.ContentType))
+        {
+            throw new InvalidOperationException($"File type is not supported: {context.FileName}");
+        }
+
+        var apiBaseUrl = ResolveOnlyOfficeApiBaseUrl();
+        string downloadUrl;
+        string callbackUrl;
+        if (options.JwtEnabled)
+        {
+            var downloadToken = ProtectPayload(
+                new DownloadTokenPayload(
+                Scope: request.Scope,
+                ProjectId: request.ProjectId,
+                FileId: request.FileId,
+                NotebookId: request.NotebookId),
+                "download",
+                TimeSpan.FromMinutes(10));
+            var callbackToken = ProtectPayload(
+                new CallbackTokenPayload(
+                Scope: request.Scope,
+                ProjectId: request.ProjectId,
+                FileId: request.FileId,
+                NotebookId: request.NotebookId),
+                "callback",
+                TimeSpan.FromHours(1));
+
+            downloadUrl = $"{apiBaseUrl}/api/onlyoffice/download?token={Uri.EscapeDataString(downloadToken)}";
+            callbackUrl = $"{apiBaseUrl}/api/onlyoffice/callback?token={Uri.EscapeDataString(callbackToken)}";
+        }
+        else
+        {
+            var queryScope = Uri.EscapeDataString(request.Scope);
+            var queryProjectId = Uri.EscapeDataString(request.ProjectId.ToString("D"));
+            var queryFileId = Uri.EscapeDataString(request.FileId.ToString("D"));
+            var notebookSegment = request.NotebookId.HasValue
+                ? $"&notebookId={Uri.EscapeDataString(request.NotebookId.Value.ToString("D"))}"
+                : string.Empty;
+            downloadUrl = $"{apiBaseUrl}/api/onlyoffice/download?scope={queryScope}&projectId={queryProjectId}&fileId={queryFileId}{notebookSegment}";
+            callbackUrl = $"{apiBaseUrl}/api/onlyoffice/callback?scope={queryScope}&projectId={queryProjectId}&fileId={queryFileId}{notebookSegment}";
+        }
+        var documentType = GetDocumentType(context.FileName);
+        var key = BuildDocumentKey(context);
+        var extension = Path.GetExtension(context.FileName).TrimStart('.').ToLowerInvariant();
+        var mode = request.CanEdit ? "edit" : "view";
+        var userName = string.IsNullOrWhiteSpace(request.UserName) ? "GuideAnts User" : request.UserName;
+        var userId = string.IsNullOrWhiteSpace(request.UserId) ? "guideants-user" : request.UserId;
+        _logger.LogInformation(
+            "ONLYOFFICE editor-config built. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} fileName={FileName} documentType={DocumentType} key={DocumentKey} apiBaseUrl={ApiBaseUrl} downloadUrl={DownloadUrl} callbackUrl={CallbackUrl}",
+            request.Scope,
+            request.ProjectId,
+            request.FileId,
+            request.NotebookId,
+            context.FileName,
+            documentType,
+            key,
+            apiBaseUrl,
+            downloadUrl,
+            callbackUrl);
+
+        var config = new Dictionary<string, object?>
+        {
+            ["documentType"] = documentType,
+            ["type"] = "desktop",
+            ["document"] = new Dictionary<string, object?>
+            {
+                ["title"] = context.FileName,
+                ["fileType"] = extension,
+                ["key"] = key,
+                ["url"] = downloadUrl,
+                ["permissions"] = new Dictionary<string, object?>
+                {
+                    ["edit"] = request.CanEdit
+                }
+            },
+            ["editorConfig"] = new Dictionary<string, object?>
+            {
+                ["callbackUrl"] = callbackUrl,
+                ["mode"] = mode,
+                ["user"] = new Dictionary<string, object?>
+                {
+                    ["id"] = userId,
+                    ["name"] = userName
+                }
+            }
+        };
+
+        if (options.JwtEnabled)
+        {
+            var token = SignJwtPayload(config);
+            config["token"] = token;
+        }
+
+        return new OnlyOfficeEditorConfigResult(
+            DocumentServerUrl: options.PublicUrl.TrimEnd('/'),
+            Config: config);
+    }
+
+    public async Task<OnlyOfficeDownloadResult?> GetDownloadAsync(
+        string? token,
+        string? scope,
+        Guid? projectId,
+        Guid? fileId,
+        Guid? notebookId,
+        CancellationToken cancellationToken)
+    {
+        if (!_options.Value.Enabled)
+        {
+            throw new InvalidOperationException("ONLYOFFICE is disabled.");
+        }
+        var payload = ResolveRequestContext(token, scope, projectId, fileId, notebookId, "download");
+
+        if (payload.Scope.Equals("project", StringComparison.OrdinalIgnoreCase))
+        {
+            var details = await _contentFileService.GetAsync(payload.ProjectId, payload.FileId);
+            if (details == null)
+            {
+                _logger.LogWarning("ONLYOFFICE download target project file was not found. projectId={ProjectId} fileId={FileId}",
+                    payload.ProjectId, payload.FileId);
+                return null;
+            }
+
+            var content = await _contentFileService.GetVersionContentAsync(payload.ProjectId, payload.FileId, details.LatestVersion);
+            if (content == null)
+            {
+                _logger.LogWarning(
+                    "ONLYOFFICE download content missing for project file. projectId={ProjectId} fileId={FileId} latestVersion={LatestVersion}",
+                    payload.ProjectId,
+                    payload.FileId,
+                    details.LatestVersion);
+                return null;
+            }
+
+            return new OnlyOfficeDownloadResult(
+                Stream: new MemoryStream(content.Content),
+                ContentType: content.ContentType,
+                FileName: content.FileName);
+        }
+
+        if (!payload.Scope.Equals("notebook", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unsupported ONLYOFFICE scope in download token: {payload.Scope}");
+        }
+
+        if (!payload.NotebookId.HasValue)
+        {
+            throw new InvalidOperationException("Notebook download token is missing notebook identity.");
+        }
+
+        var notebookContent = await _notebookFileService.GetFileContentStreamAsync(payload.FileId, cancellationToken);
+        if (notebookContent == null)
+        {
+            _logger.LogWarning(
+                "ONLYOFFICE download target notebook file was not found. notebookId={NotebookId} fileId={FileId}",
+                payload.NotebookId,
+                payload.FileId);
+            return null;
+        }
+
+        return new OnlyOfficeDownloadResult(
+            Stream: notebookContent.Value.Stream,
+            ContentType: notebookContent.Value.ContentType,
+            FileName: notebookContent.Value.FileName);
+    }
+
+    public async Task HandleCallbackAsync(
+        string? token,
+        string? scope,
+        Guid? projectId,
+        Guid? fileId,
+        Guid? notebookId,
+        OnlyOfficeCallbackPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (!_options.Value.Enabled)
+        {
+            throw new InvalidOperationException("ONLYOFFICE is disabled.");
+        }
+
+        var callbackContext = ResolveRequestContext(token, scope, projectId, fileId, notebookId, "callback");
+        if ((payload.Status != 2 && payload.Status != 6) || string.IsNullOrWhiteSpace(payload.Url))
+        {
+            _logger.LogInformation(
+                "ONLYOFFICE callback ignored due to non-save status/url. status={Status} hasUrl={HasUrl} scope={Scope} projectId={ProjectId} fileId={FileId}",
+                payload.Status,
+                !string.IsNullOrWhiteSpace(payload.Url),
+                callbackContext.Scope,
+                callbackContext.ProjectId,
+                callbackContext.FileId);
+            return;
+        }
+
+        _logger.LogInformation(
+            "ONLYOFFICE callback save received. status={Status} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
+            payload.Status,
+            callbackContext.Scope,
+            callbackContext.ProjectId,
+            callbackContext.FileId,
+            callbackContext.NotebookId);
+
+        var client = _httpClientFactory.CreateClient();
+        await using var editedStream = await client.GetStreamAsync(payload.Url, cancellationToken);
+        await using var memory = new MemoryStream();
+        await editedStream.CopyToAsync(memory, cancellationToken);
+        memory.Position = 0;
+
+        if (callbackContext.Scope.Equals("project", StringComparison.OrdinalIgnoreCase))
+        {
+            var file = await _contentFileService.GetAsync(callbackContext.ProjectId, callbackContext.FileId);
+            if (file == null)
+            {
+                throw new InvalidOperationException("Project file not found for callback.");
+            }
+
+            var contentType = file.ContentType;
+            var formFile = new FormFile(memory, 0, memory.Length, "file", file.FileName)
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = contentType
+            };
+
+            await _contentFileService.UploadFileAsync(callbackContext.ProjectId, formFile, false, file.FolderId);
+            return;
+        }
+
+        if (!callbackContext.Scope.Equals("notebook", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unsupported ONLYOFFICE scope in callback token: {callbackContext.Scope}");
+        }
+
+        if (!callbackContext.NotebookId.HasValue)
+        {
+            throw new InvalidOperationException("Notebook callback is missing notebook identity.");
+        }
+
+        var notebookFile = await _dbContext.NotebookFiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                nf => nf.Id == callbackContext.FileId && nf.NotebookId == callbackContext.NotebookId.Value,
+                cancellationToken);
+        if (notebookFile == null)
+        {
+            throw new InvalidOperationException("Notebook file not found for callback.");
+        }
+
+        var targetPath = notebookFile.RelativePath;
+        var targetFolder = Path.GetDirectoryName(targetPath.Replace('\\', '/'))?.Replace('\\', '/') ?? string.Empty;
+        var fileName = Path.GetFileName(targetPath);
+        var formFileNotebook = new FormFile(memory, 0, memory.Length, "files", fileName)
+        {
+            Headers = new HeaderDictionary(),
+            ContentType = InferContentType(fileName)
+        };
+
+        var files = new FormFileCollection { formFileNotebook };
+        await _notebookFileService.UploadFilesAsync(
+            callbackContext.ProjectId,
+            callbackContext.NotebookId.Value,
+            files,
+            targetFolder,
+            false);
+    }
+
+    private async Task<OnlyOfficeFileContext> ResolveFileContextAsync(
+        OnlyOfficeEditorConfigRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.Scope.Equals("project", StringComparison.OrdinalIgnoreCase))
+        {
+            var file = await _contentFileService.GetAsync(request.ProjectId, request.FileId);
+            if (file == null)
+            {
+                throw new InvalidOperationException("Project file was not found.");
+            }
+
+            return new OnlyOfficeFileContext(
+                Scope: request.Scope,
+                ProjectId: request.ProjectId,
+                FileId: request.FileId,
+                NotebookId: null,
+                FileName: file.FileName,
+                ContentType: file.ContentType,
+                KeyMaterial: $"{file.Id:N}:{file.LatestVersion.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        if (!request.Scope.Equals("notebook", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unsupported ONLYOFFICE scope: {request.Scope}");
+        }
+
+        if (!request.NotebookId.HasValue)
+        {
+            throw new InvalidOperationException("Notebook scope requires notebookId.");
+        }
+
+        var notebookFile = await _dbContext.NotebookFiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                nf => nf.Id == request.FileId && nf.NotebookId == request.NotebookId.Value,
+                cancellationToken);
+        if (notebookFile == null)
+        {
+            throw new InvalidOperationException("Notebook file was not found.");
+        }
+
+        var fileName = Path.GetFileName(notebookFile.RelativePath);
+        var contentType = InferContentType(fileName);
+        var hash = string.IsNullOrWhiteSpace(notebookFile.FileHash)
+            ? notebookFile.LastModifiedUtc.Ticks.ToString(CultureInfo.InvariantCulture)
+            : notebookFile.FileHash;
+
+        return new OnlyOfficeFileContext(
+            Scope: request.Scope,
+            ProjectId: request.ProjectId,
+            FileId: request.FileId,
+            NotebookId: request.NotebookId,
+            FileName: fileName,
+            ContentType: contentType,
+            KeyMaterial: $"{notebookFile.Id:N}:{hash}");
+    }
+
+    private string BuildDocumentKey(OnlyOfficeFileContext context)
+    {
+        var raw = $"{context.Scope}:{context.ProjectId:N}:{context.KeyMaterial}";
+        using var sha256 = SHA256.Create();
+        var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(raw));
+        return Convert.ToHexString(bytes).ToLowerInvariant()[..40];
+    }
+
+    private static string GetDocumentType(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
+        return extension switch
+        {
+            "xls" or "xlsx" or "xlsb" or "xlsm" or "xlt" or "xltm" or "xltx" or "ods" or "csv" => "cell",
+            "ppt" or "pptx" or "pptm" or "pps" or "ppsx" or "ppsm" or "pot" or "potx" or "potm" or "odp" => "slide",
+            _ => "word"
+        };
+    }
+
+    private string ResolveOnlyOfficeApiBaseUrl()
+    {
+        var configured = _options.Value.ApiBaseUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            throw new InvalidOperationException("OnlyOffice:ApiBaseUrl must be configured.");
+        }
+
+        if (!Uri.TryCreate(configured, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException("OnlyOffice:ApiBaseUrl must be an absolute URL.");
+        }
+
+        return configured.TrimEnd('/');
+    }
+
+    private string InferContentType(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
+        return extension switch
+        {
+            "csv" => "text/csv",
+            "doc" => "application/msword",
+            "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "htm" or "html" => "text/html",
+            "odt" => "application/vnd.oasis.opendocument.text",
+            "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+            "odp" => "application/vnd.oasis.opendocument.presentation",
+            "pdf" => "application/pdf",
+            "ppt" => "application/vnd.ms-powerpoint",
+            "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "rtf" => "application/rtf",
+            "txt" => "text/plain",
+            "xls" => "application/vnd.ms-excel",
+            "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            _ => "application/octet-stream"
+        };
+    }
+
+    private string ProtectPayload<T>(T payload, string purpose, TimeSpan lifetime)
+    {
+        var envelope = new TokenEnvelope<T>(
+            Payload: payload,
+            ExpiresUnix: DateTimeOffset.UtcNow.Add(lifetime).ToUnixTimeSeconds(),
+            Purpose: purpose);
+        return Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(envelope));
+    }
+
+    private string SignJwtPayload<T>(T payload)
+    {
+        var options = _options.Value;
+        if (string.IsNullOrWhiteSpace(options.JwtSecret))
+        {
+            throw new InvalidOperationException("OnlyOffice:JwtSecret must be configured when OnlyOffice:JwtEnabled is true.");
+        }
+
+        var header = Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object?>
+        {
+            ["alg"] = "HS256",
+            ["typ"] = "JWT"
+        }));
+        var body = Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(payload));
+        var unsignedToken = $"{header}.{body}";
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(options.JwtSecret));
+        var signature = Base64UrlEncode(hmac.ComputeHash(Encoding.UTF8.GetBytes(unsignedToken)));
+        return $"{unsignedToken}.{signature}";
+    }
+
+    private T ValidateTokenOrThrow<T>(string token, string purpose) where T : class
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new InvalidOperationException($"ONLYOFFICE {purpose} token is missing.");
+        }
+
+        TokenEnvelope<T>? envelope;
+        try
+        {
+            var payloadBytes = Base64UrlDecode(token);
+            envelope = JsonSerializer.Deserialize<TokenEnvelope<T>>(payloadBytes);
+        }
+        catch (Exception ex) when (ex is FormatException || ex is JsonException)
+        {
+            throw new InvalidOperationException($"ONLYOFFICE {purpose} token payload is invalid.", ex);
+        }
+
+        if (envelope?.Payload == null)
+        {
+            throw new InvalidOperationException($"ONLYOFFICE {purpose} token payload was empty.");
+        }
+
+        if (!string.Equals(envelope.Purpose, purpose, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"ONLYOFFICE {purpose} token purpose is invalid.");
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (envelope.ExpiresUnix < now)
+        {
+            throw new InvalidOperationException($"ONLYOFFICE {purpose} token has expired.");
+        }
+
+        return envelope.Payload;
+    }
+
+    private RequestContext ResolveRequestContext(
+        string? token,
+        string? scope,
+        Guid? projectId,
+        Guid? fileId,
+        Guid? notebookId,
+        string purpose)
+    {
+        if (_options.Value.JwtEnabled)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException($"ONLYOFFICE {purpose} token is missing.");
+            }
+
+            if (purpose.Equals("download", StringComparison.OrdinalIgnoreCase))
+            {
+                var download = ValidateTokenOrThrow<DownloadTokenPayload>(token, purpose);
+                return new RequestContext(download.Scope, download.ProjectId, download.FileId, download.NotebookId);
+            }
+
+            var callback = ValidateTokenOrThrow<CallbackTokenPayload>(token, purpose);
+            return new RequestContext(callback.Scope, callback.ProjectId, callback.FileId, callback.NotebookId);
+        }
+
+        if (string.IsNullOrWhiteSpace(scope))
+        {
+            throw new InvalidOperationException($"ONLYOFFICE {purpose} scope is missing.");
+        }
+
+        if (!projectId.HasValue || !fileId.HasValue)
+        {
+            throw new InvalidOperationException($"ONLYOFFICE {purpose} identity is missing.");
+        }
+
+        return new RequestContext(
+            Scope: scope,
+            ProjectId: projectId.Value,
+            FileId: fileId.Value,
+            NotebookId: notebookId);
+    }
+
+    private static string Base64UrlEncode(byte[] bytes)
+    {
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    private static byte[] Base64UrlDecode(string encoded)
+    {
+        var padded = encoded
+            .Replace('-', '+')
+            .Replace('_', '/');
+        var remainder = padded.Length % 4;
+        if (remainder > 0)
+        {
+            padded = padded.PadRight(padded.Length + (4 - remainder), '=');
+        }
+
+        return Convert.FromBase64String(padded);
+    }
+
+    private sealed record OnlyOfficeFileContext(
+        string Scope,
+        Guid ProjectId,
+        Guid FileId,
+        Guid? NotebookId,
+        string FileName,
+        string ContentType,
+        string KeyMaterial);
+
+    private sealed record DownloadTokenPayload(
+        string Scope,
+        Guid ProjectId,
+        Guid FileId,
+        Guid? NotebookId);
+
+    private sealed record CallbackTokenPayload(
+        string Scope,
+        Guid ProjectId,
+        Guid FileId,
+        Guid? NotebookId);
+
+    private sealed record TokenEnvelope<T>(
+        T Payload,
+        long ExpiresUnix,
+        string Purpose);
+
+    private sealed record RequestContext(
+        string Scope,
+        Guid ProjectId,
+        Guid FileId,
+        Guid? NotebookId);
+}

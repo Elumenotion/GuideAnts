@@ -1,6 +1,6 @@
 # GuideAnts Setup Guide
 
-Last updated: 2026-05-18
+Last updated: 2026-06-01
 
 This is the setup-first operator guide for GuideAnts.
 Use it to get a working environment from zero to usable chat/services, then use linked docs for deeper architecture details.
@@ -36,13 +36,14 @@ If the launcher gets you to `http://localhost:5107/`, skip to section 5.
 
 ## 2. What you are setting up
 
-GuideAnts runs as a Docker Compose stack on a single host. The runtime stack includes six services:
+GuideAnts runs as a Docker Compose stack on a single host. The runtime stack includes seven services:
 
 | Service | Image/source | Role |
 |---------|---------------|------|
 | `mssql-express` | `mssql2025-express-fts` | SQL Server database. |
 | `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13,rocm}:latest` (or local tag) | Consolidated local AI gateway: llama.cpp, ASR, TTS, image generation, embeddings, media, script execution. |
 | `docling-serve` | `quay.io/docling-project/docling-serve-{cpu,cu130}` | Local document intelligence / markdown extraction. |
+| `onlyoffice-documentserver` | `onlyoffice/documentserver:latest` (or `${GA_ONLYOFFICE_IMAGE}`) | Office document server used by project/notebook file preview and editor flows. |
 | `guideants-webapi-ui` | `${GA_WEBAPI_UI_IMAGE}` | Main API plus bundled browser UI at `http://localhost:5107`. |
 | `plantuml` | `plantuml-1.2025.2` | Diagram rendering. |
 | `searxng` | `${GA_SEARXNG_IMAGE:-guideants-searxng:latest}` | Search backend used by agent/web features. |
@@ -152,7 +153,75 @@ GA_CONTENT_FILES_HOST_PATH=./volumes/content-files
 GA_SEARXNG_CONFIG_HOST_PATH=./volumes/searxng/config
 GA_SEARXNG_DATA_HOST_PATH=./volumes/searxng/data
 GA_DB_NAME=guideants-dev
+GA_ONLYOFFICE_ENABLED=true
+GA_ONLYOFFICE_PUBLIC_URL=http://localhost:8082
+GA_ONLYOFFICE_JWT_ENABLED=false
 # HF_TOKEN=hf_xxxxx
+```
+
+### ONLYOFFICE / Document Server config
+
+Required rules:
+
+1. `GA_ONLYOFFICE_PUBLIC_URL` must point to the browser-reachable document server URL (default local mapping is `http://localhost:8082`).
+2. `OnlyOffice:ApiBaseUrl` is dedicated to ONLYOFFICE callback/download URLs; do not use `ANTRUNNER_SERVICES_HOST_URL` for this.
+3. JWT for ONLYOFFICE is optional and disabled by default (`GA_ONLYOFFICE_JWT_ENABLED=false`, `OnlyOffice:JwtEnabled=false`).
+
+Topology-specific values:
+
+- API containerized in compose:
+  - `OnlyOffice:ApiBaseUrl = http://guideants-webapi-ui:8080` (already wired in compose)
+- API on host (`http://localhost:5106`) with services in Docker:
+  - `OnlyOffice:ApiBaseUrl = http://host.docker.internal:5106`
+  - `OnlyOffice:PublicUrl = http://localhost:8082`
+  - Optional JWT mode:
+    - `GA_ONLYOFFICE_JWT_ENABLED=true`
+    - `OnlyOffice:JwtEnabled=true`
+    - configure shared `ONLYOFFICE_JWT_SECRET` / `OnlyOffice:JwtSecret`
+
+### Enable ONLYOFFICE JWT (explicit recipe)
+
+If you want JWT enabled, set the same secret in both Docker env and API config.
+
+1. Set Docker env values (`docker/.env` or your `--env-file`):
+
+```dotenv
+GA_ONLYOFFICE_JWT_ENABLED=true
+ONLYOFFICE_JWT_SECRET=<your-strong-shared-secret>
+GA_ONLYOFFICE_JWT_HEADER=Authorization
+GA_ONLYOFFICE_JWT_IN_BODY=false
+```
+
+2. Set matching API values:
+
+- API in Docker: compose already maps `OnlyOffice__Jwt*` from those env vars.
+- API on host (`localhost:5106`): set in `src/server/GuideAntsApi/appsettings.Development.json`:
+
+```json
+"OnlyOffice": {
+  "Enabled": true,
+  "PublicUrl": "http://localhost:8082",
+  "InternalUrl": "http://localhost:8082",
+  "ApiBaseUrl": "http://host.docker.internal:5106",
+  "JwtEnabled": true,
+  "JwtSecret": "<same-value-as-ONLYOFFICE_JWT_SECRET>",
+  "JwtHeader": "Authorization",
+  "JwtInBody": false
+}
+```
+
+3. Restart services after changes:
+
+```powershell
+docker compose -f docker/docker-compose.cuda.yml up -d --build
+```
+
+If the API runs on host, restart the API process after editing `appsettings.Development.json`.
+
+For host-API debugging with compose services, use:
+
+```powershell
+docker compose --env-file docker/.env.api-local-debug.example -f docker/docker-compose.cuda.yml up -d --build
 ```
 
 ### Verify startup
@@ -388,6 +457,7 @@ curl.exe -s -o NUL -w "HTTP=%{http_code}" http://localhost:8110/llama-cpp/health
 curl.exe -s -o NUL -w "HTTP=%{http_code}" http://localhost:8110/llama-admin/health
 curl.exe -s -o NUL -w "HTTP=%{http_code}" http://localhost:8110/emb/health
 curl.exe -s -o NUL -w "HTTP=%{http_code}" http://localhost:5001/health
+curl.exe -s -o NUL -w "HTTP=%{http_code}" http://localhost:8082/web-apps/apps/api/documents/api.js
 ```
 
 Expected: HTTP 200 for each reachable local runtime.

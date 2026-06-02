@@ -144,6 +144,27 @@ services:
           - docling-serve
     restart: unless-stopped
 
+  onlyoffice-documentserver:
+    image: ${GA_ONLYOFFICE_IMAGE:-onlyoffice/documentserver:latest}
+    container_name: onlyoffice-documentserver
+    environment:
+      - JWT_ENABLED=${GA_ONLYOFFICE_JWT_ENABLED:-false}
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-}
+      - JWT_HEADER=${GA_ONLYOFFICE_JWT_HEADER:-Authorization}
+      - JWT_IN_BODY=${GA_ONLYOFFICE_JWT_IN_BODY:-false}
+      - ALLOW_PRIVATE_IP_ADDRESS=true
+    ports:
+      - "127.0.0.1:${GA_ONLYOFFICE_PORT:-8082}:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/info/info.json"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+      timeout: 10s
+    networks:
+      - guideants-network
+    restart: unless-stopped
+
 
   # Unified API + browser UI service (single image for web app entrypoint)
   guideants-webapi-ui:
@@ -178,6 +199,14 @@ services:
       - LocalServiceHosts__EmbeddingsBaseUrl=http://guideants-ai:80
       - LocalServiceHosts__MediaBaseUrl=http://guideants-ai:80
       - LocalServiceHosts__DocumentIntelligenceBaseUrl=http://docling-serve:5001
+      - OnlyOffice__Enabled=${GA_ONLYOFFICE_ENABLED:-false}
+      - OnlyOffice__PublicUrl=${GA_ONLYOFFICE_PUBLIC_URL:-http://localhost:${GA_ONLYOFFICE_PORT:-8082}}
+      - OnlyOffice__InternalUrl=http://onlyoffice-documentserver
+      - OnlyOffice__ApiBaseUrl=http://guideants-webapi-ui:8080
+      - OnlyOffice__JwtEnabled=${GA_ONLYOFFICE_JWT_ENABLED:-false}
+      - OnlyOffice__JwtSecret=${ONLYOFFICE_JWT_SECRET:-}
+      - OnlyOffice__JwtHeader=${GA_ONLYOFFICE_JWT_HEADER:-Authorization}
+      - OnlyOffice__JwtInBody=${GA_ONLYOFFICE_JWT_IN_BODY:-false}
       - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
       - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox
       - ServiceRouting__Containers__plantuml__BaseUrl=http://plantuml:80
