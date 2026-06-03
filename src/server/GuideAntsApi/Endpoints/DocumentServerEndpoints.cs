@@ -7,48 +7,48 @@ using System.Net.Http;
 
 namespace GuideAntsApi.Endpoints;
 
-public static class OnlyOfficeEndpoints
+public static class DocumentServerEndpoints
 {
-    public static void MapOnlyOfficeEndpoints(this WebApplication app)
+    public static void MapDocumentServerEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/api/onlyoffice")
-            .WithTags("OnlyOffice")
+        var group = app.MapGroup("/api/documentserver")
+            .WithTags("DocumentServer")
             .WithOpenApi();
 
         group.MapGet("/capabilities", (
             HttpContext httpContext,
-            IOptions<OnlyOfficeOptions> options,
-            IOnlyOfficeService service,
+            IOptions<DocumentServerOptions> options,
+            IDocumentServerService service,
             ILoggerFactory loggerFactory) =>
         {
-            var logger = loggerFactory.CreateLogger("OnlyOfficeEndpoints");
-            var onlyOfficeOptions = options.Value;
+            var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
+            var documentServerOptions = options.Value;
             logger.LogInformation(
-                "ONLYOFFICE capabilities requested. enabled={Enabled} publicUrl={PublicUrl}",
-                onlyOfficeOptions.Enabled,
-                onlyOfficeOptions.PublicUrl);
+                "DocumentServer capabilities requested. enabled={Enabled} publicUrl={PublicUrl}",
+                documentServerOptions.Enabled,
+                documentServerOptions.PublicUrl);
             return Results.Ok(new
             {
-                enabled = onlyOfficeOptions.Enabled,
-                publicUrl = onlyOfficeOptions.PublicUrl,
+                enabled = documentServerOptions.Enabled,
+                publicUrl = documentServerOptions.PublicUrl,
                 supportedExtensions = service.SupportedExtensions,
                 supportedContentTypes = service.SupportedContentTypes
             });
         })
-        .WithName("GetOnlyOfficeCapabilities")
+        .WithName("GetDocumentServerCapabilities")
         .Produces(StatusCodes.Status200OK);
 
         group.MapPost("/editor-config", async (
-            [FromBody] OnlyOfficeEditorConfigRequest request,
+            [FromBody] DocumentServerEditorConfigRequest request,
             HttpContext httpContext,
-            IOptions<OnlyOfficeOptions> options,
-            IOnlyOfficeService service,
+            IOptions<DocumentServerOptions> options,
+            IDocumentServerService service,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
-            var logger = loggerFactory.CreateLogger("OnlyOfficeEndpoints");
+            var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             logger.LogInformation(
-                "ONLYOFFICE editor-config requested. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} canEdit={CanEdit}",
+                "DocumentServer editor-config requested. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} canEdit={CanEdit}",
                 request.Scope,
                 request.ProjectId,
                 request.FileId,
@@ -56,8 +56,8 @@ public static class OnlyOfficeEndpoints
                 request.CanEdit);
             if (!options.Value.Enabled)
             {
-                logger.LogWarning("ONLYOFFICE editor-config rejected because ONLYOFFICE is disabled.");
-                return Results.NotFound(new { message = "ONLYOFFICE is disabled." });
+                logger.LogWarning("DocumentServer editor-config rejected because DocumentServer is disabled.");
+                return Results.NotFound(new { message = "DocumentServer is disabled." });
             }
 
             try
@@ -71,12 +71,12 @@ public static class OnlyOfficeEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                logger.LogWarning(ex, "ONLYOFFICE editor-config request failed. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
+                logger.LogWarning(ex, "DocumentServer editor-config request failed. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
                     request.Scope, request.ProjectId, request.FileId, request.NotebookId);
                 return Results.BadRequest(new { message = ex.Message });
             }
         })
-        .WithName("CreateOnlyOfficeEditorConfig")
+        .WithName("CreateDocumentServerEditorConfig")
         .Produces(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound);
@@ -89,13 +89,13 @@ public static class OnlyOfficeEndpoints
             [FromQuery] Guid? notebookId,
             [FromQuery] int? versionNumber,
             HttpContext httpContext,
-            IOnlyOfficeService service,
+            IDocumentServerService service,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
-            var logger = loggerFactory.CreateLogger("OnlyOfficeEndpoints");
+            var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             logger.LogInformation(
-                "ONLYOFFICE download requested. tokenLength={TokenLength} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} versionNumber={VersionNumber}",
+                "DocumentServer download requested. tokenLength={TokenLength} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} versionNumber={VersionNumber}",
                 token?.Length ?? 0,
                 scope,
                 projectId,
@@ -107,19 +107,19 @@ public static class OnlyOfficeEndpoints
                 var result = await service.GetDownloadAsync(token, scope, projectId, fileId, notebookId, versionNumber, cancellationToken);
                 if (result == null)
                 {
-                    logger.LogWarning("ONLYOFFICE download target not found.");
-                    return Results.NotFound(new { message = "ONLYOFFICE download target was not found." });
+                    logger.LogWarning("DocumentServer download target not found.");
+                    return Results.NotFound(new { message = "DocumentServer download target was not found." });
                 }
 
                 return Results.File(result.Stream, result.ContentType, result.FileName);
             }
             catch (InvalidOperationException ex)
             {
-                logger.LogWarning(ex, "ONLYOFFICE download request failed.");
+                logger.LogWarning(ex, "DocumentServer download request failed.");
                 return Results.BadRequest(new { message = ex.Message });
             }
         })
-        .WithName("OnlyOfficeDownload")
+        .WithName("DocumentServerDownload")
         .Produces(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound);
@@ -130,15 +130,15 @@ public static class OnlyOfficeEndpoints
             [FromQuery] Guid? projectId,
             [FromQuery] Guid? fileId,
             [FromQuery] Guid? notebookId,
-            [FromBody] OnlyOfficeCallbackPayload payload,
+            [FromBody] DocumentServerCallbackPayload payload,
             HttpContext httpContext,
-            IOnlyOfficeService service,
+            IDocumentServerService service,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
-            var logger = loggerFactory.CreateLogger("OnlyOfficeEndpoints");
+            var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             logger.LogInformation(
-                "ONLYOFFICE callback requested. status={Status} hasUrl={HasUrl} tokenLength={TokenLength}",
+                "DocumentServer callback requested. status={Status} hasUrl={HasUrl} tokenLength={TokenLength}",
                 payload.Status,
                 !string.IsNullOrWhiteSpace(payload.Url),
                 token?.Length ?? 0);
@@ -149,29 +149,29 @@ public static class OnlyOfficeEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                logger.LogWarning(ex, "ONLYOFFICE callback rejected. status={Status}", payload.Status);
+                logger.LogWarning(ex, "DocumentServer callback rejected. status={Status}", payload.Status);
                 return Results.Ok(new { error = 1, message = ex.Message });
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "ONLYOFFICE callback failed unexpectedly. status={Status}", payload.Status);
-                return Results.Ok(new { error = 1, message = "ONLYOFFICE callback failed unexpectedly." });
+                logger.LogError(ex, "DocumentServer callback failed unexpectedly. status={Status}", payload.Status);
+                return Results.Ok(new { error = 1, message = "DocumentServer callback failed unexpectedly." });
             }
         })
-        .WithName("OnlyOfficeCallback")
+        .WithName("DocumentServerCallback")
         .Produces(StatusCodes.Status200OK);
 
         group.MapPost("/diagnostics/probe", async (
-            [FromBody] OnlyOfficeEditorConfigRequest request,
+            [FromBody] DocumentServerEditorConfigRequest request,
             HttpContext httpContext,
-            IOptions<OnlyOfficeOptions> options,
-            IOnlyOfficeService service,
+            IOptions<DocumentServerOptions> options,
+            IDocumentServerService service,
             IHttpClientFactory httpClientFactory,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
-            var logger = loggerFactory.CreateLogger("OnlyOfficeEndpoints");
-            var onlyOffice = options.Value;
+            var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
+            var documentServer = options.Value;
 
             string? documentUrl = null;
             string? callbackUrl = null;
@@ -196,7 +196,7 @@ public static class OnlyOfficeEndpoints
             }
 
             // /info/info.json is blocked in some deployments; use the editor API script instead.
-            var internalInfoUrl = $"{onlyOffice.InternalUrl.TrimEnd('/')}/web-apps/apps/api/documents/api.js";
+            var internalInfoUrl = $"{documentServer.InternalUrl.TrimEnd('/')}/web-apps/apps/api/documents/api.js";
             var documentServerReachable = false;
             int? documentServerStatusCode = null;
             string? documentServerError = null;
@@ -209,7 +209,7 @@ public static class OnlyOfficeEndpoints
                 documentServerReachable = response.IsSuccessStatusCode;
                 if (!response.IsSuccessStatusCode)
                 {
-                    documentServerError = $"Document server healthcheck returned HTTP {(int)response.StatusCode}.";
+                    documentServerError = $"DocumentServer healthcheck returned HTTP {(int)response.StatusCode}.";
                 }
             }
             catch (Exception ex)
@@ -218,13 +218,13 @@ public static class OnlyOfficeEndpoints
             }
 
             logger.LogInformation(
-                "ONLYOFFICE diagnostics probe. enabled={Enabled} apiBaseUrl={ApiBaseUrl} internalUrl={InternalUrl} publicUrl={PublicUrl} tokenProtection={TokenProtection} jwtEnabled={JwtEnabled} dsReachable={DocumentServerReachable} dsStatus={DocumentServerStatusCode} documentUrl={DocumentUrl} callbackUrl={CallbackUrl} editorConfigError={EditorConfigError}",
-                onlyOffice.Enabled,
-                onlyOffice.ApiBaseUrl,
-                onlyOffice.InternalUrl,
-                onlyOffice.PublicUrl,
+                "DocumentServer diagnostics probe. enabled={Enabled} apiBaseUrl={ApiBaseUrl} internalUrl={InternalUrl} publicUrl={PublicUrl} tokenProtection={TokenProtection} jwtEnabled={JwtEnabled} dsReachable={DocumentServerReachable} dsStatus={DocumentServerStatusCode} documentUrl={DocumentUrl} callbackUrl={CallbackUrl} editorConfigError={EditorConfigError}",
+                documentServer.Enabled,
+                documentServer.ApiBaseUrl,
+                documentServer.InternalUrl,
+                documentServer.PublicUrl,
                 "aspnet-data-protection",
-                onlyOffice.JwtEnabled,
+                documentServer.JwtEnabled,
                 documentServerReachable,
                 documentServerStatusCode,
                 documentUrl,
@@ -233,12 +233,12 @@ public static class OnlyOfficeEndpoints
 
             return Results.Ok(new
             {
-                enabled = onlyOffice.Enabled,
-                apiBaseUrl = onlyOffice.ApiBaseUrl,
-                internalUrl = onlyOffice.InternalUrl,
-                publicUrl = onlyOffice.PublicUrl,
+                enabled = documentServer.Enabled,
+                apiBaseUrl = documentServer.ApiBaseUrl,
+                internalUrl = documentServer.InternalUrl,
+                publicUrl = documentServer.PublicUrl,
                 tokenProtection = "aspnet-data-protection",
-                jwtEnabled = onlyOffice.JwtEnabled,
+                jwtEnabled = documentServer.JwtEnabled,
                 documentServer = new
                 {
                     probeUrl = internalInfoUrl,
@@ -254,7 +254,7 @@ public static class OnlyOfficeEndpoints
                 }
             });
         })
-        .WithName("OnlyOfficeDiagnosticsProbe")
+        .WithName("DocumentServerDiagnosticsProbe")
         .Produces(StatusCodes.Status200OK);
     }
 

@@ -55,7 +55,7 @@ The services you see depend on that stack:
 | `mssql-express` | `mssql2025-express-fts` | SQL Server database for split-stack `cpu`, `cuda13`, and `rocm` deployments. Not present in the slim stack because SQL Server is bundled into `guideants-webapi-ui-mssql`. |
 | `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13,rocm}:latest` (or local tag); `guideants-ai-slim` for the slim stack | Full variants are the local AI gateway: llama.cpp, ASR, TTS, image generation, embeddings, media, script execution. The slim AI variant is for Python sandbox/script execution without starting local model runtime services. |
 | `docling-serve` | `quay.io/docling-project/docling-serve-cpu:v1.16.1` by default | Local document intelligence / markdown extraction. The `cpu` in this image tag is Docling's CPU image variant, not the GuideAnts backend selection. |
-| `onlyoffice-documentserver` | `onlyoffice/documentserver:latest` (or `${GA_ONLYOFFICE_IMAGE}`) | Office document server used by project/notebook file preview and editor flows. |
+| `documentserver` | `${GA_DOCUMENTSERVER_IMAGE}` from `docker/.env` | DocumentServer used by project/notebook file preview and editor flows. |
 | `guideants-webapi-ui` / `guideants-webapi-ui-slim` / `guideants-webapi-ui-mssql` | Stack-specific API/UI image | Main API plus bundled browser UI at `http://localhost:5107`. `guideants-webapi-ui-slim` is API/UI-only for split stacks; it is not the slim AI stack. |
 | `plantuml` | `plantuml-1.2025.2` | ScriptExecutionAgent-backed PlantUML sandbox with PlantUML and Graphviz installed. |
 | `searxng` | `${GA_SEARXNG_IMAGE:-guideants-searxng:latest}` | Search backend used by agent/web features. |
@@ -96,7 +96,7 @@ Settings top-level tab order (current):
 You can run in either mode:
 
 - `ghcr` mode (default in launcher): pulls prebuilt images via `docker/docker-compose.ghcr-*.yml`.
-- `local` mode: uses `docker/docker-compose.{cpu,cuda,rocm,slim}.yml`; build GuideAnts local images first when needed. Third-party images such as Docling or ONLYOFFICE may still be pulled if the exact tag is not already present locally.
+- `local` mode: uses `docker/docker-compose.{cpu,cuda,rocm,slim}.yml`; build GuideAnts local images first when needed. Third-party images such as Docling or DocumentServer may still be pulled if the exact tag is not already present locally.
 
 The slim stack is selected with `--backend slim` and uses `docker/docker-compose.slim.yml` locally or `docker/docker-compose.ghcr-slim.yml` in GHCR mode. It uses the combined Web/API/SQL image (`guideants-webapi-ui-mssql`) plus the sandbox-oriented AI image (`guideants-ai slim`). It does not use `guideants-webapi-ui-slim`; that image is orthogonal and remains the API/UI image for split-stack deployments.
 
@@ -175,58 +175,60 @@ GA_CONTENT_FILES_HOST_PATH=./volumes/content-files
 GA_SEARXNG_CONFIG_HOST_PATH=./volumes/searxng/config
 GA_SEARXNG_DATA_HOST_PATH=./volumes/searxng/data
 GA_DB_NAME=guideants-dev
-GA_ONLYOFFICE_ENABLED=true
-GA_ONLYOFFICE_PUBLIC_URL=http://localhost:8082
-GA_ONLYOFFICE_JWT_ENABLED=false
+GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest
+GA_DOCUMENTSERVER_ENABLED=true
+GA_DOCUMENTSERVER_PUBLIC_URL=http://localhost:8082
+GA_DOCUMENTSERVER_JWT_ENABLED=false
 # HF_TOKEN=hf_xxxxx
 ```
 
-### ONLYOFFICE / Document Server config
+### DocumentServer config
 
 Required rules:
 
-1. `GA_ONLYOFFICE_PUBLIC_URL` must point to the browser-reachable document server URL (default local mapping is `http://localhost:8082`).
-2. `OnlyOffice:ApiBaseUrl` is dedicated to ONLYOFFICE callback/download URLs; do not use `ANTRUNNER_SERVICES_HOST_URL` for this.
-3. JWT for ONLYOFFICE is optional and disabled by default (`GA_ONLYOFFICE_JWT_ENABLED=false`, `OnlyOffice:JwtEnabled=false`).
+1. `GA_DOCUMENTSERVER_IMAGE` selects any compatible DocumentServer image. The checked-in `docker/.env` currently sets this to `ghcr.io/euro-office/documentserver:latest`; override this value in your env file to use another compatible image.
+1. `GA_DOCUMENTSERVER_PUBLIC_URL` must point to the browser-reachable DocumentServer URL (default local mapping is `http://localhost:8082`).
+2. `DocumentServer:ApiBaseUrl` is dedicated to DocumentServer callback/download URLs; do not use `ANTRUNNER_SERVICES_HOST_URL` for this.
+3. JWT for DocumentServer is optional and disabled by default (`GA_DOCUMENTSERVER_JWT_ENABLED=false`, `DocumentServer:JwtEnabled=false`).
 
 Topology-specific values:
 
 - API containerized in compose:
-  - `OnlyOffice:ApiBaseUrl = http://guideants-webapi-ui:8080` (already wired in compose)
+  - `DocumentServer:ApiBaseUrl = http://guideants-webapi-ui:8080` (already wired in compose)
 - API on host (`http://localhost:5106`) with services in Docker:
-  - `OnlyOffice:ApiBaseUrl = http://host.docker.internal:5106`
-  - `OnlyOffice:PublicUrl = http://localhost:8082`
+  - `DocumentServer:ApiBaseUrl = http://host.docker.internal:5106`
+  - `DocumentServer:PublicUrl = http://localhost:8082`
   - Optional JWT mode:
-    - `GA_ONLYOFFICE_JWT_ENABLED=true`
-    - `OnlyOffice:JwtEnabled=true`
-    - configure shared `ONLYOFFICE_JWT_SECRET` / `OnlyOffice:JwtSecret`
+    - `GA_DOCUMENTSERVER_JWT_ENABLED=true`
+    - `DocumentServer:JwtEnabled=true`
+    - configure shared `DOCUMENTSERVER_JWT_SECRET` / `DocumentServer:JwtSecret`
 
-### Enable ONLYOFFICE JWT (explicit recipe)
+### Enable DocumentServer JWT (explicit recipe)
 
 If you want JWT enabled, set the same secret in both Docker env and API config.
 
 1. Set Docker env values (`docker/.env` or your `--env-file`):
 
 ```dotenv
-GA_ONLYOFFICE_JWT_ENABLED=true
-ONLYOFFICE_JWT_SECRET=<your-strong-shared-secret>
-GA_ONLYOFFICE_JWT_HEADER=Authorization
-GA_ONLYOFFICE_JWT_IN_BODY=false
+GA_DOCUMENTSERVER_JWT_ENABLED=true
+DOCUMENTSERVER_JWT_SECRET=<your-strong-shared-secret>
+GA_DOCUMENTSERVER_JWT_HEADER=Authorization
+GA_DOCUMENTSERVER_JWT_IN_BODY=false
 ```
 
 2. Set matching API values:
 
-- API in Docker: compose already maps `OnlyOffice__Jwt*` from those env vars.
+- API in Docker: compose already maps `DocumentServer__Jwt*` from those env vars.
 - API on host (`localhost:5106`): set in `src/server/GuideAntsApi/appsettings.Development.json`:
 
 ```json
-"OnlyOffice": {
+"DocumentServer": {
   "Enabled": true,
   "PublicUrl": "http://localhost:8082",
   "InternalUrl": "http://localhost:8082",
   "ApiBaseUrl": "http://host.docker.internal:5106",
   "JwtEnabled": true,
-  "JwtSecret": "<same-value-as-ONLYOFFICE_JWT_SECRET>",
+  "JwtSecret": "<same-value-as-DOCUMENTSERVER_JWT_SECRET>",
   "JwtHeader": "Authorization",
   "JwtInBody": false
 }

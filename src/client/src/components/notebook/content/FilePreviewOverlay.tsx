@@ -15,13 +15,14 @@ import AudioPlayer from '../../common/AudioPlayer';
 import LoadingSpinner from '../../LoadingSpinner';
 import FullScreenEditor from '../conversations/FullScreenEditor';
 import { FaRegEdit, FaExpandAlt, FaCompress, FaDownload } from 'react-icons/fa';
-import OnlyOfficeEditor from '../../common/OnlyOfficeEditor';
+import { ConfirmationDialog } from '../../common/ConfirmationDialog';
+import DocumentServerEditor from '../../common/DocumentServerEditor';
 import {
-  getOnlyOfficeCapabilities,
-  isOnlyOfficeSupportedByExtension,
-  looksLikeOnlyOfficeFile,
-  OnlyOfficeCapabilities,
-} from '../../../services/onlyOffice';
+  getDocumentServerCapabilities,
+  isDocumentServerSupportedByExtension,
+  looksLikeDocumentServerFile,
+  DocumentServerCapabilities,
+} from '../../../services/documentServer';
 // CsvViewer and CodeViewer will be added back if found.
 
 interface FilePreviewOverlayProps {
@@ -85,9 +86,11 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
   const [textContent, setTextContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingText, setIsLoadingText] = useState(false);
-  const [onlyOfficeCapabilities, setOnlyOfficeCapabilities] = useState<OnlyOfficeCapabilities | null>(null);
-  const [onlyOfficeCapabilitiesError, setOnlyOfficeCapabilitiesError] = useState<string | null>(null);
+  const [documentServerCapabilities, setDocumentServerCapabilities] = useState<DocumentServerCapabilities | null>(null);
+  const [documentServerCapabilitiesError, setDocumentServerCapabilitiesError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [originalContentError, setOriginalContentError] = useState<string | null>(null);
+  const [showOriginalContentErrorDialog, setShowOriginalContentErrorDialog] = useState(false);
   
   // Tab and markdown state
   const [activeTab, setActiveTab] = useState<'original' | 'markdown'>('original');
@@ -124,10 +127,12 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
   const originalScrollRef = useRef<HTMLDivElement>(null);
   const markdownScrollRef = useRef<HTMLDivElement>(null);
   const markdownShadowRef = useRef<NotebookFileMarkdownShadowDto | null>(null);
+  const contentRequestSeqRef = useRef(0);
+  const lastDialogErrorRef = useRef<string | null>(null);
 
   const contentType = getContentTypeFromFileName(file.fileName);
-  const onlyOfficeActive = isOnlyOfficeSupportedByExtension(file.fileName, onlyOfficeCapabilities);
-  const onlyOfficeCandidate = looksLikeOnlyOfficeFile(file.fileName, contentType);
+  const documentServerActive = isDocumentServerSupportedByExtension(file.fileName, documentServerCapabilities);
+  const documentServerCandidate = looksLikeDocumentServerFile(file.fileName, contentType);
   
   // Check if file supports markdown extraction
   const supportsMarkdownExtraction = useMemo(() => 
@@ -266,67 +271,78 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     setMarkdownContent(null);
     setIsLoadingMarkdown(false);
     setMarkdownError(null);
+    setOriginalContentError(null);
+    setShowOriginalContentErrorDialog(false);
+    lastDialogErrorRef.current = null;
     setHasAutoSwitched(false);
   }, [file.id]);
 
+  const showOriginalPreviewError = useCallback((message: string) => {
+    setOriginalContentError(message);
+    if (lastDialogErrorRef.current !== message) {
+      lastDialogErrorRef.current = message;
+      setShowOriginalContentErrorDialog(true);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!onlyOfficeCandidate) {
-      setOnlyOfficeCapabilities(null);
-      setOnlyOfficeCapabilitiesError(null);
+    if (!documentServerCandidate) {
+      setDocumentServerCapabilities(null);
+      setDocumentServerCapabilitiesError(null);
       return;
     }
 
     let isDisposed = false;
-    console.info('[ONLYOFFICE] FilePreviewOverlay capabilities fetch start', {
+    console.info('[DocumentServer] FilePreviewOverlay capabilities fetch start', {
       projectId,
       notebookId,
       fileId: file.id,
       fileName: file.fileName,
       contentType,
     });
-    getOnlyOfficeCapabilities(true)
+    getDocumentServerCapabilities(true)
       .then((capabilities) => {
         if (!isDisposed) {
-          console.info('[ONLYOFFICE] FilePreviewOverlay capabilities fetch success', {
+          console.info('[DocumentServer] FilePreviewOverlay capabilities fetch success', {
             projectId,
             notebookId,
             fileId: file.id,
             enabled: capabilities.enabled,
             publicUrl: capabilities.publicUrl,
           });
-          setOnlyOfficeCapabilities(capabilities);
-          setOnlyOfficeCapabilitiesError(null);
+          setDocumentServerCapabilities(capabilities);
+          setDocumentServerCapabilitiesError(null);
         }
       })
       .catch((err) => {
         if (!isDisposed) {
-          console.error('[ONLYOFFICE] FilePreviewOverlay capabilities fetch failed', {
+          console.error('[DocumentServer] FilePreviewOverlay capabilities fetch failed', {
             projectId,
             notebookId,
             fileId: file.id,
             message: err instanceof Error ? err.message : String(err),
           });
-          setOnlyOfficeCapabilities(null);
-          setOnlyOfficeCapabilitiesError('ONLYOFFICE capabilities request failed. Check ONLYOFFICE API configuration.');
+          setDocumentServerCapabilities(null);
+          setDocumentServerCapabilitiesError('DocumentServer capabilities request failed. Check DocumentServer API configuration.');
         }
       });
 
     return () => {
       isDisposed = true;
     };
-  }, [onlyOfficeCandidate, projectId, notebookId, file.id, file.fileName, contentType]);
+  }, [documentServerCandidate, projectId, notebookId, file.id, file.fileName, contentType]);
 
   useEffect(() => {
-    console.info('[ONLYOFFICE] FilePreviewOverlay routing decision', {
+    console.info('[DocumentServer] FilePreviewOverlay routing decision', {
       projectId,
       notebookId,
       fileId: file.id,
       fileName: file.fileName,
       contentType,
-      onlyOfficeCandidate,
-      onlyOfficeActive,
-      capabilitiesEnabled: onlyOfficeCapabilities?.enabled ?? null,
-      capabilitiesError: onlyOfficeCapabilitiesError,
+      documentServerCandidate,
+      documentServerActive,
+      capabilitiesEnabled: documentServerCapabilities?.enabled ?? null,
+      capabilitiesError: documentServerCapabilitiesError,
     });
   }, [
     projectId,
@@ -334,37 +350,45 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     file.id,
     file.fileName,
     contentType,
-    onlyOfficeCandidate,
-    onlyOfficeActive,
-    onlyOfficeCapabilities?.enabled,
-    onlyOfficeCapabilitiesError,
+    documentServerCandidate,
+    documentServerActive,
+    documentServerCapabilities?.enabled,
+    documentServerCapabilitiesError,
   ]);
 
   useEffect(() => {
-    const fetchContent = async () => {
-      if (onlyOfficeActive) {
-        setContent(null);
-        setIsLoading(false);
-        setError(null);
-        return;
-      }
+    let isDisposed = false;
+    const requestSeq = ++contentRequestSeqRef.current;
 
+    const fetchContent = async () => {
       try {
-        setIsLoading(true);
+        setIsLoading(!documentServerActive);
         setError(null);
+        setOriginalContentError(null);
         setTextContent(null);
         setHtmlContent(null);
         const blob = await notebookFilesApi.getNotebookFileContent(projectId, notebookId, file.relativePath, file.fileHash);
+        if (isDisposed || requestSeq !== contentRequestSeqRef.current) {
+          return;
+        }
         setContent(blob);
       } catch (err: any) {
-        setError(err.message || 'Failed to load file content.');
+        if (isDisposed || requestSeq !== contentRequestSeqRef.current) {
+          return;
+        }
+        showOriginalPreviewError(err.message || 'Failed to load file content.');
       } finally {
-        setIsLoading(false);
+        if (!isDisposed && requestSeq === contentRequestSeqRef.current) {
+          setIsLoading(false);
+        }
       }
     };
 
     fetchContent();
-  }, [file, projectId, notebookId, onlyOfficeActive]);
+    return () => {
+      isDisposed = true;
+    };
+  }, [file, projectId, notebookId, documentServerActive, showOriginalPreviewError]);
 
   // Fetch markdown shadow info
   useEffect(() => {
@@ -396,14 +420,14 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     return () => clearInterval(pollInterval);
   }, [markdownShadow?.status, supportsMarkdownExtraction, refreshMarkdownShadow]);
 
-  // ONLYOFFICE saves happen out-of-band via callback, so the preview file prop may
+  // DocumentServer saves happen out-of-band via callback, so the preview file prop may
   // not change while the extracted markdown shadow is being reset and rebuilt.
   useEffect(() => {
-    if (!onlyOfficeActive || !supportsMarkdownExtraction) return;
+    if (!documentServerActive || !supportsMarkdownExtraction) return;
 
     const pollInterval = setInterval(refreshMarkdownShadow, 5000);
     return () => clearInterval(pollInterval);
-  }, [onlyOfficeActive, supportsMarkdownExtraction, refreshMarkdownShadow]);
+  }, [documentServerActive, supportsMarkdownExtraction, refreshMarkdownShadow]);
 
   // Separate effect for loading text content (matching project view)
   useEffect(() => {
@@ -415,7 +439,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
           setTextContent(text);
         } catch (error) {
           console.error('Failed to read text content:', error);
-          setError('Failed to read text content. Please try again.');
+          showOriginalPreviewError('Failed to read text content. Please try again.');
         } finally {
           setIsLoadingText(false);
         }
@@ -423,7 +447,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     };
 
     loadTextContent();
-  }, [content, contentType]);
+  }, [content, contentType, showOriginalPreviewError]);
 
   // Markdown detection (matching project view)
   const isMarkdown = 
@@ -502,14 +526,14 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
       contentType.startsWith('audio/') ||
       contentType.startsWith('video/') ||
       isMarkdown;
-    const onlyOfficeKeepsOriginalTab = onlyOfficeCandidate && (onlyOfficeCapabilities?.enabled !== false);
-    const shouldTreatAsPreviewable = isPreviewable || onlyOfficeKeepsOriginalTab;
+    const documentServerKeepsOriginalTab = documentServerCandidate && (documentServerCapabilities?.enabled !== false);
+    const shouldTreatAsPreviewable = isPreviewable || documentServerKeepsOriginalTab;
 
     if (!shouldTreatAsPreviewable && activeTab === 'original') {
       setActiveTab('markdown');
       setHasAutoSwitched(true);
     }
-  }, [markdownShadow, activeTab, hasAutoSwitched, contentType, isMarkdown, onlyOfficeCandidate, onlyOfficeCapabilities?.enabled]);
+  }, [markdownShadow, activeTab, hasAutoSwitched, contentType, isMarkdown, documentServerCandidate, documentServerCapabilities?.enabled]);
 
   // Fetch markdown content when switching to markdown tab
   const fetchMarkdownContent = useCallback(async () => {
@@ -548,6 +572,10 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
 
   // Refresh function for ORIGINAL content - forces network call to detect server-side changes
   const refreshOriginalContent = useCallback(async () => {
+    if (documentServerActive) {
+      return;
+    }
+
     try {
       // Force network call to check for changes (bypass cache)
       const newBlob = await notebookFilesApi.getNotebookFileContent(
@@ -589,7 +617,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     } catch (err: any) {
       console.error('Failed to refresh original content:', err);
     }
-  }, [projectId, notebookId, file.relativePath, file.fileHash, content, isTextBasedContent, supportsMarkdownExtraction, refreshMarkdownShadow]);
+  }, [documentServerActive, projectId, notebookId, file.relativePath, file.fileHash, content, isTextBasedContent, supportsMarkdownExtraction, refreshMarkdownShadow]);
 
   // When file.fileHash changes (original file was modified), re-fetch markdown shadow
   // This triggers new extraction if needed - no separate polling required
@@ -767,10 +795,10 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
 
   // Determine if this file type needs a large modal
   const needsLargeModal = () => {
-    if (isLoading || error || !content) return false;
-    
     // Always use large modal if tabs are shown
     if (supportsMarkdownExtraction) return true;
+
+    if (isLoading || error || originalContentError || !content) return false;
     
     // HTML files need large modal for best viewing
     if (contentType === 'text/html' || contentType === 'application/xhtml+xml') return true;
@@ -835,40 +863,52 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     if (isLoading) {
       return <div className="flex items-center justify-center h-full"><p>Loading file content...</p></div>;
     }
+    if (originalContentError) {
+      return (
+        <div className="flex items-center justify-center h-full p-4 text-red-600">
+          <div className="text-center">
+            <p className="font-semibold">Document preview unavailable</p>
+            <p className="text-sm mt-2">{originalContentError}</p>
+          </div>
+        </div>
+      );
+    }
     if (error) {
       return <div className="flex items-center justify-center h-full"><p className="text-red-500">{error}</p></div>;
     }
-    if (onlyOfficeCandidate && onlyOfficeCapabilitiesError) {
+    if (documentServerCandidate && documentServerCapabilitiesError) {
       return (
         <div className="flex items-center justify-center h-full text-red-600">
           <div className="text-center">
-            <p className="font-semibold">ONLYOFFICE configuration error</p>
-            <p className="text-sm mt-2">{onlyOfficeCapabilitiesError}</p>
+            <p className="font-semibold">DocumentServer configuration error</p>
+            <p className="text-sm mt-2">{documentServerCapabilitiesError}</p>
           </div>
         </div>
       );
     }
 
-    if (onlyOfficeActive) {
+    if (documentServerActive) {
       return (
-        <OnlyOfficeEditor
-          key={`notebook-onlyoffice-${notebookId}-${file.id}-${file.fileHash ?? file.lastModifiedUtc ?? file.relativePath}`}
+        <DocumentServerEditor
+          key={`notebook-documentserver-${notebookId}-${file.id}-${file.fileHash ?? file.lastModifiedUtc ?? file.relativePath}`}
           scope="notebook"
           projectId={projectId}
           notebookId={notebookId}
           fileId={file.id}
           canEdit={canEdit}
           className="h-full w-full"
+          showErrorDialogOnError={false}
+          onError={showOriginalPreviewError}
         />
       );
     }
 
     if (!content) {
-      if (onlyOfficeCandidate && !onlyOfficeCapabilities && !onlyOfficeCapabilitiesError) {
+      if (documentServerCandidate && !documentServerCapabilities && !documentServerCapabilitiesError) {
         return (
           <div className="flex items-center justify-center h-full text-gray-600">
             <div className="text-center">
-              <p className="font-semibold">Waiting for ONLYOFFICE capabilities</p>
+              <p className="font-semibold">Waiting for DocumentServer capabilities</p>
               <p className="text-sm mt-2">If this does not resolve, a configuration error will be shown.</p>
             </div>
           </div>
@@ -1080,7 +1120,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
             ? "fixed inset-0 z-50" 
             : "fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4"
         }
-        onClick={isEmbedded || isFullScreen || isEditingMd ? undefined : onClose}
+        onClick={isEmbedded || isFullScreen || isEditingMd || showOriginalContentErrorDialog ? undefined : onClose}
     >
       <div 
         className={getModalClasses()}
@@ -1190,6 +1230,16 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
           {renderViewer()}
         </main>
       </div>
+      <ConfirmationDialog
+        isOpen={showOriginalContentErrorDialog}
+        onClose={() => setShowOriginalContentErrorDialog(false)}
+        onConfirm={() => setShowOriginalContentErrorDialog(false)}
+        title="Document preview unavailable"
+        message={originalContentError ?? 'Failed to load document preview.'}
+        confirmText="OK"
+        cancelText="Close"
+        confirmButtonClass="bg-blue-600 hover:bg-blue-700 text-white"
+      />
       {/* Markdown Full Screen Editor Portal */}
       {isEditingMd && (
         <FullScreenEditor

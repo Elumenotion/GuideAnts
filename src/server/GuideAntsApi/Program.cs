@@ -265,7 +265,7 @@ public class Program
         app.MapUsageEndpoints();
         app.MapGuideUsageEndpoints();
         app.MapSettingsEndpoints();
-        app.MapOnlyOfficeEndpoints();
+        app.MapDocumentServerEndpoints();
         app.UseGuideAntsUiPipeline(builder.Configuration);
 
         app.Run();

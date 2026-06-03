@@ -22,15 +22,15 @@ vi.mock('../../../../services/api', () => {
     };
 });
 
-vi.mock('../../../../services/onlyOffice', () => ({
-    getOnlyOfficeCapabilities: vi.fn(),
-    isOnlyOfficeSupportedByContentType: vi.fn(() => false),
-    isOnlyOfficeSupportedByExtension: vi.fn(() => false),
-    looksLikeOnlyOfficeFile: vi.fn(() => false),
+vi.mock('../../../../services/documentServer', () => ({
+    getDocumentServerCapabilities: vi.fn(),
+    isDocumentServerSupportedByContentType: vi.fn(() => false),
+    isDocumentServerSupportedByExtension: vi.fn(() => false),
+    looksLikeDocumentServerFile: vi.fn(() => false),
 }));
 
-vi.mock('../../../common/OnlyOfficeEditor', () => ({
-    default: () => <div data-testid="onlyoffice-editor">ONLYOFFICE</div>,
+vi.mock('../../../common/DocumentServerEditor', () => ({
+    default: () => <div data-testid="documentserver-editor">DocumentServer</div>,
 }));
   
 // Helper to access the shared mock

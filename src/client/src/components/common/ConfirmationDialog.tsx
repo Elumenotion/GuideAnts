@@ -72,7 +72,10 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   }
 
   const dialogMarkup = (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={(event) => event.stopPropagation()}
+    >
       <div 
         className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4"
         tabIndex={-1}

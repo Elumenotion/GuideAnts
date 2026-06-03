@@ -11,7 +11,7 @@ import MarkdownViewer from '../../common/MarkdownViewer';
 import { isMarkdownExtractionSupported } from '../../../utils/markdownUtils';
 import FullScreenEditor from '../../notebook/conversations/FullScreenEditor';
 import { FaRegEdit, FaDownload } from 'react-icons/fa';
-import { getOnlyOfficeCapabilities, looksLikeOnlyOfficeFile } from '../../../services/onlyOffice';
+import { getDocumentServerCapabilities, looksLikeDocumentServerFile } from '../../../services/documentServer';
 
 interface ContentFileContentProps {
     hideHeader?: boolean;
@@ -52,7 +52,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
     const [isLoadingMarkdown, setIsLoadingMarkdown] = useState(false);
     const [markdownError, setMarkdownError] = useState<string | null>(null);
     const [hasAutoSwitched, setHasAutoSwitched] = useState(false);
-    const [onlyOfficeEnabled, setOnlyOfficeEnabled] = useState<boolean | null>(null);
+    const [documentServerEnabled, setDocumentServerEnabled] = useState<boolean | null>(null);
 
     // Markdown edit state (full-screen editor)
     const [isEditingMd, setIsEditingMd] = useState(false);
@@ -123,15 +123,15 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
 
     useEffect(() => {
         let isDisposed = false;
-        getOnlyOfficeCapabilities(true)
+        getDocumentServerCapabilities(true)
             .then((capabilities) => {
                 if (!isDisposed) {
-                    setOnlyOfficeEnabled(capabilities.enabled);
+                    setDocumentServerEnabled(capabilities.enabled);
                 }
             })
             .catch(() => {
                 if (!isDisposed) {
-                    setOnlyOfficeEnabled(null);
+                    setDocumentServerEnabled(null);
                 }
             });
 
@@ -224,16 +224,16 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
             file.contentType === 'text/markdown' ||
             file.contentType === 'text/x-markdown' ||
             (file.fileName && file.fileName.toLowerCase().endsWith('.md'));
-        const onlyOfficeCandidate = looksLikeOnlyOfficeFile(file.fileName, file.contentType);
-        const onlyOfficeKeepsOriginalTab = onlyOfficeCandidate && onlyOfficeEnabled !== false;
-        const shouldTreatAsPreviewable = isPreviewable || onlyOfficeKeepsOriginalTab;
+        const documentServerCandidate = looksLikeDocumentServerFile(file.fileName, file.contentType);
+        const documentServerKeepsOriginalTab = documentServerCandidate && documentServerEnabled !== false;
+        const shouldTreatAsPreviewable = isPreviewable || documentServerKeepsOriginalTab;
 
         // If original content isn't previewable but markdown is ready, switch to markdown tab (only once)
         if (!shouldTreatAsPreviewable && activeTab === 'original') {
             setActiveTab('markdown');
             setHasAutoSwitched(true);
         }
-    }, [file, markdownShadow, activeTab, hasAutoSwitched, onlyOfficeEnabled]);
+    }, [file, markdownShadow, activeTab, hasAutoSwitched, documentServerEnabled]);
 
     // Fetch markdown content when switching to markdown tab
     useEffect(() => {
@@ -371,12 +371,12 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
         );
     }
 
-    const isOnlyOfficeCandidate = looksLikeOnlyOfficeFile(file.fileName, file.contentType);
+    const isDocumentServerCandidate = looksLikeDocumentServerFile(file.fileName, file.contentType);
     // Minimal home-page view without header
     if (hideHeader) {
         const isHtml = file.contentType === 'text/html' || file.contentType === 'application/xhtml+xml';
-        // Keep full-bleed for HTML and ONLYOFFICE so embedded viewers can use the entire canvas.
-        const isFullBleed = isHtml || isOnlyOfficeCandidate;
+        // Keep full-bleed for HTML and DocumentServer so embedded viewers can use the entire canvas.
+        const isFullBleed = isHtml || isDocumentServerCandidate;
 
         if (supportsMarkdownExtraction && markdownShadow?.status === MarkdownExtractionStatus.Completed && markdownContent) {
             return (
@@ -392,6 +392,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                     inlineMode
                     projectId={projectId}
                     fileId={fileId}
+                    fileName={file.fileName}
                     contentType={file.contentType}
                     version={file.latestVersion}
                     canEdit={canEdit}
@@ -496,6 +497,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                                 <FileContents
                                     projectId={projectId}
                                     fileId={fileId}
+                                    fileName={file.fileName}
                                     contentType={file.contentType}
                                     version={file.latestVersion}
                                     canEdit={canEdit}
@@ -564,6 +566,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                             <FileContents
                                 projectId={projectId}
                                 fileId={fileId}
+                                fileName={file.fileName}
                                 contentType={file.contentType}
                                 version={file.latestVersion}
                                 canEdit={canEdit}
@@ -627,4 +630,4 @@ export const ContentFileContent = React.memo(ContentFileContentComponent, (prevP
         prevProps.canEdit === nextProps.canEdit
         // onDelete callback identity is ignored since it's stable now
     );
-}); 
+});

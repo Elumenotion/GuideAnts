@@ -16,7 +16,7 @@ using System.Text;
 namespace GuideAntsApi.Tests.Services;
 
 [TestClass]
-public sealed class OnlyOfficeServiceTests
+public sealed class DocumentServerServiceTests
 {
     [TestMethod]
     public async Task BuildEditorConfigAsync_WhenEnabled_ReturnsConfigPayload()
@@ -55,7 +55,7 @@ public sealed class OnlyOfficeServiceTests
 
         var result = await service.BuildEditorConfigAsync(
             httpContext,
-            new OnlyOfficeEditorConfigRequest(
+            new DocumentServerEditorConfigRequest(
                 Scope: "project",
                 ProjectId: Guid.NewGuid(),
                 FileId: Guid.Parse("64af2fec-1306-4d8b-bf97-41ab6f83d184"),
@@ -109,7 +109,7 @@ public sealed class OnlyOfficeServiceTests
 
         var action = async () => await service.BuildEditorConfigAsync(
             httpContext,
-            new OnlyOfficeEditorConfigRequest("project", Guid.NewGuid(), Guid.NewGuid(), null, false, null, null),
+            new DocumentServerEditorConfigRequest("project", Guid.NewGuid(), Guid.NewGuid(), null, false, null, null),
             CancellationToken.None);
 
         await action.Should().ThrowAsync<InvalidOperationException>();
@@ -164,7 +164,7 @@ public sealed class OnlyOfficeServiceTests
 
         var tokenResult = await service.BuildEditorConfigAsync(
             httpContext,
-            new OnlyOfficeEditorConfigRequest(
+            new DocumentServerEditorConfigRequest(
                 Scope: "project",
                 ProjectId: projectId,
                 FileId: fileId,
@@ -227,7 +227,7 @@ public sealed class OnlyOfficeServiceTests
 
         var tokenResult = await service.BuildEditorConfigAsync(
             httpContext,
-            new OnlyOfficeEditorConfigRequest(
+            new DocumentServerEditorConfigRequest(
                 Scope: "project",
                 ProjectId: Guid.NewGuid(),
                 FileId: fileId,
@@ -248,7 +248,7 @@ public sealed class OnlyOfficeServiceTests
             null,
             null,
             null,
-            new OnlyOfficeCallbackPayload(Status: 1, Url: null),
+            new DocumentServerCallbackPayload(Status: 1, Url: null),
             CancellationToken.None);
 
         await action.Should().NotThrowAsync();
@@ -287,7 +287,7 @@ public sealed class OnlyOfficeServiceTests
 
         var tokenResult = await service.BuildEditorConfigAsync(
             CreateHttpContext(),
-            new OnlyOfficeEditorConfigRequest(
+            new DocumentServerEditorConfigRequest(
                 Scope: "project",
                 ProjectId: projectId,
                 FileId: fileId,
@@ -308,7 +308,7 @@ public sealed class OnlyOfficeServiceTests
             null,
             null,
             null,
-            new OnlyOfficeCallbackPayload(Status: 2, Url: "http://callback.local/file.docx"),
+            new DocumentServerCallbackPayload(Status: 2, Url: "http://callback.local/file.docx"),
             CancellationToken.None);
 
         contentService.UploadCalls.Should().Be(1);
@@ -346,11 +346,11 @@ public sealed class OnlyOfficeServiceTests
             contentService,
             enabled: true,
             httpClientFactory: httpClientFactory,
-            internalUrl: "http://onlyoffice-documentserver");
+            internalUrl: "http://documentserver");
 
         var tokenResult = await service.BuildEditorConfigAsync(
             CreateHttpContext(),
-            new OnlyOfficeEditorConfigRequest(
+            new DocumentServerEditorConfigRequest(
                 Scope: "project",
                 ProjectId: projectId,
                 FileId: fileId,
@@ -371,10 +371,10 @@ public sealed class OnlyOfficeServiceTests
             null,
             null,
             null,
-            new OnlyOfficeCallbackPayload(Status: 2, Url: "http://localhost:8082/cache/files/edited.docx?token=abc"),
+            new DocumentServerCallbackPayload(Status: 2, Url: "http://localhost:8082/cache/files/edited.docx?token=abc"),
             CancellationToken.None);
 
-        httpClientFactory.LastRequestUri.Should().Be(new Uri("http://onlyoffice-documentserver/cache/files/edited.docx?token=abc"));
+        httpClientFactory.LastRequestUri.Should().Be(new Uri("http://documentserver/cache/files/edited.docx?token=abc"));
         contentService.UploadCalls.Should().Be(1);
     }
 
@@ -407,7 +407,7 @@ public sealed class OnlyOfficeServiceTests
 
         var tokenResult = await service.BuildEditorConfigAsync(
             CreateHttpContext(),
-            new OnlyOfficeEditorConfigRequest(
+            new DocumentServerEditorConfigRequest(
                 Scope: "notebook",
                 ProjectId: projectId,
                 FileId: fileId,
@@ -428,7 +428,7 @@ public sealed class OnlyOfficeServiceTests
             null,
             null,
             null,
-            new OnlyOfficeCallbackPayload(Status: 6, Url: "http://callback.local/file.docx"),
+            new DocumentServerCallbackPayload(Status: 6, Url: "http://callback.local/file.docx"),
             CancellationToken.None);
 
         notebookFileService.UploadCalls.Should().Be(1);
@@ -442,34 +442,34 @@ public sealed class OnlyOfficeServiceTests
     private static ApplicationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseInMemoryDatabase($"onlyoffice-tests-{Guid.NewGuid():N}")
+            .UseInMemoryDatabase($"documentserver-tests-{Guid.NewGuid():N}")
             .Options;
         return new ApplicationDbContext(options);
     }
 
-    private static OnlyOfficeService CreateService(
+    private static DocumentServerService CreateService(
         ApplicationDbContext db,
         IContentFileService contentFileService,
         bool enabled,
         IHttpClientFactory? httpClientFactory = null,
         INotebookFileService? notebookFileService = null,
-        string internalUrl = "http://onlyoffice-documentserver")
+        string internalUrl = "http://documentserver")
     {
-        return new OnlyOfficeService(
+        return new DocumentServerService(
             db,
             contentFileService,
             notebookFileService ?? new StubNotebookFileService(),
-            Microsoft.Extensions.Options.Options.Create(new OnlyOfficeOptions
+            Microsoft.Extensions.Options.Options.Create(new DocumentServerOptions
             {
                 Enabled = enabled,
                 PublicUrl = "http://localhost:8082",
                 InternalUrl = internalUrl,
                 ApiBaseUrl = "http://host.docker.internal:5106",
                 JwtEnabled = true,
-                JwtSecret = "onlyoffice-tests-secret"
+                JwtSecret = "documentserver-tests-secret"
             }),
             httpClientFactory ?? new StubHttpClientFactory(),
-            NullLogger<OnlyOfficeService>.Instance);
+            NullLogger<DocumentServerService>.Instance);
     }
 
     private sealed class StubHttpClientFactory : IHttpClientFactory

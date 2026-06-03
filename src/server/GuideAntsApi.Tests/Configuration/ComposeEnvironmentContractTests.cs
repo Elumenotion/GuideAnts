@@ -11,26 +11,27 @@ public sealed class ComposeEnvironmentContractTests
         ("docker-compose.cpu.yml", "guideants-webapi-ui"),
         ("docker-compose.cuda.yml", "guideants-webapi-ui"),
         ("docker-compose.rocm.yml", "guideants-webapi-ui"),
-        ("docker-compose.slim.yml", "guideants-webapi-ui-slim"),
+        ("docker-compose.slim.yml", "guideants-webapi-ui"),
         ("docker-compose.ghcr-cpu.yml", "guideants-webapi-ui"),
         ("docker-compose.ghcr-cuda13.yml", "guideants-webapi-ui"),
         ("docker-compose.ghcr-rocm.yml", "guideants-webapi-ui"),
+        ("docker-compose.ghcr-slim.yml", "guideants-webapi-ui"),
         ("docker-compose.mssql.yml", "guideants-webapi-ui-mssql")
     ];
 
-    private static readonly string[] RequiredOnlyOfficeApiKeys =
+    private static readonly string[] RequiredDocumentServerApiKeys =
     [
-        "OnlyOffice__Enabled",
-        "OnlyOffice__PublicUrl",
-        "OnlyOffice__InternalUrl",
-        "OnlyOffice__ApiBaseUrl",
-        "OnlyOffice__JwtEnabled",
-        "OnlyOffice__JwtSecret",
-        "OnlyOffice__JwtHeader",
-        "OnlyOffice__JwtInBody"
+        "DocumentServer__Enabled",
+        "DocumentServer__PublicUrl",
+        "DocumentServer__InternalUrl",
+        "DocumentServer__ApiBaseUrl",
+        "DocumentServer__JwtEnabled",
+        "DocumentServer__JwtSecret",
+        "DocumentServer__JwtHeader",
+        "DocumentServer__JwtInBody"
     ];
 
-    private static readonly string[] RequiredOnlyOfficeDocumentServerKeys =
+    private static readonly string[] RequiredDocumentServerContainerKeys =
     [
         "JWT_ENABLED",
         "JWT_SECRET",
@@ -77,7 +78,7 @@ public sealed class ComposeEnvironmentContractTests
     }
 
     [TestMethod]
-    public void OnlyOffice_EnvContract_IsPresentAcrossAllComposeStacks()
+    public void DocumentServer_EnvContract_IsPresentAcrossAllComposeStacks()
     {
         var repoRoot = FindRepositoryRoot();
 
@@ -87,21 +88,21 @@ public sealed class ComposeEnvironmentContractTests
             File.Exists(composePath).Should().BeTrue($"compose file should exist at {composePath}");
 
             var apiKeys = ReadComposeEnvironmentKeys(composePath, apiServiceName);
-            foreach (var key in RequiredOnlyOfficeApiKeys)
+            foreach (var key in RequiredDocumentServerApiKeys)
             {
-                apiKeys.Should().Contain(key, $"{composeFile} must include {key} for ONLYOFFICE API wiring");
+                apiKeys.Should().Contain(key, $"{composeFile} must include {key} for DocumentServer API wiring");
             }
 
-            var documentServerKeys = ReadComposeEnvironmentKeys(composePath, "onlyoffice-documentserver");
-            foreach (var key in RequiredOnlyOfficeDocumentServerKeys)
+            var documentServerKeys = ReadComposeEnvironmentKeys(composePath, "documentserver");
+            foreach (var key in RequiredDocumentServerContainerKeys)
             {
-                documentServerKeys.Should().Contain(key, $"{composeFile} must include {key} for ONLYOFFICE document server wiring");
+                documentServerKeys.Should().Contain(key, $"{composeFile} must include {key} for DocumentServer container wiring");
             }
         }
     }
 
     [TestMethod]
-    public void DockerEnv_OnlyOfficeBooleanValues_AreParseable()
+    public void DockerEnv_DocumentServerBooleanValues_AreParseable()
     {
         var repoRoot = FindRepositoryRoot();
         var envPath = Path.Combine(repoRoot, "docker", ".env");
@@ -109,7 +110,7 @@ public sealed class ComposeEnvironmentContractTests
 
         var values = ReadEnvValues(envPath);
 
-        foreach (var key in new[] { "GA_ONLYOFFICE_ENABLED", "GA_ONLYOFFICE_JWT_ENABLED", "GA_ONLYOFFICE_JWT_IN_BODY" })
+        foreach (var key in new[] { "GA_DOCUMENTSERVER_ENABLED", "GA_DOCUMENTSERVER_JWT_ENABLED", "GA_DOCUMENTSERVER_JWT_IN_BODY" })
         {
             values.Should().ContainKey(key, $"docker/.env must define {key}");
             bool.TryParse(values[key], out _).Should().BeTrue($"{key} must be a plain boolean without inline comment text");

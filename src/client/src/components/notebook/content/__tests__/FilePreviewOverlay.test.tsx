@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
 import { FilePreviewOverlay } from '../FilePreviewOverlay';
 import { NotebookFileDto } from '../../../../types/notebook';
 import { notebookFilesApi } from '../../../../services/notebookFiles';
-import { getOnlyOfficeCapabilities, isOnlyOfficeSupportedByExtension, looksLikeOnlyOfficeFile } from '../../../../services/onlyOffice';
+import { getDocumentServerCapabilities, isDocumentServerSupportedByExtension, looksLikeDocumentServerFile } from '../../../../services/documentServer';
 
 // Mock the services
 vi.mock('../../../../services/notebookFiles', () => ({
@@ -15,14 +15,21 @@ vi.mock('../../../../services/notebookFiles', () => ({
   },
 }));
 
-vi.mock('../../../../services/onlyOffice', () => ({
-  getOnlyOfficeCapabilities: vi.fn(),
-  isOnlyOfficeSupportedByExtension: vi.fn(),
-  looksLikeOnlyOfficeFile: vi.fn(() => false),
+vi.mock('../../../../services/documentServer', () => ({
+  getDocumentServerCapabilities: vi.fn(),
+  isDocumentServerSupportedByExtension: vi.fn(),
+  looksLikeDocumentServerFile: vi.fn(() => false),
 }));
 
-vi.mock('../../../common/OnlyOfficeEditor', () => ({
-  default: () => <div data-testid="onlyoffice-editor">ONLYOFFICE</div>,
+vi.mock('../../../common/DocumentServerEditor', () => ({
+  default: ({ showErrorDialogOnError }: { showErrorDialogOnError?: boolean }) => (
+    <div
+      data-testid="documentserver-editor"
+      data-show-error-dialog-on-error={String(showErrorDialogOnError)}
+    >
+      DocumentServer
+    </div>
+  ),
 }));
 
 // Mock the viewer components
@@ -119,14 +126,14 @@ describe('FilePreviewOverlay', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateObjectURL.mockReturnValue('mock-object-url');
-    (getOnlyOfficeCapabilities as Mock).mockResolvedValue({
+    (getDocumentServerCapabilities as Mock).mockResolvedValue({
       enabled: false,
       publicUrl: '',
       supportedExtensions: [],
       supportedContentTypes: [],
     });
-    (isOnlyOfficeSupportedByExtension as Mock).mockReturnValue(false);
-    (looksLikeOnlyOfficeFile as Mock).mockReturnValue(false);
+    (isDocumentServerSupportedByExtension as Mock).mockReturnValue(false);
+    (looksLikeDocumentServerFile as Mock).mockReturnValue(false);
   });
 
   describe('Component Rendering', () => {
@@ -624,8 +631,8 @@ describe('FilePreviewOverlay', () => {
     });
   });
 
-  describe('ONLYOFFICE Integration', () => {
-    it('does not request ONLYOFFICE capabilities for image previews', async () => {
+  describe('DocumentServer Integration', () => {
+    it('does not request DocumentServer capabilities for image previews', async () => {
       (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockImageBlob);
       const imageFile = { ...mockFile, fileName: 'image.png' };
 
@@ -634,25 +641,26 @@ describe('FilePreviewOverlay', () => {
       await waitFor(() => {
         expect(screen.getByTestId('image-viewer')).toBeInTheDocument();
       });
-      expect(getOnlyOfficeCapabilities).not.toHaveBeenCalled();
+      expect(getDocumentServerCapabilities).not.toHaveBeenCalled();
     });
 
-    it('renders ONLYOFFICE viewer for supported file types when enabled', async () => {
-      (looksLikeOnlyOfficeFile as Mock).mockReturnValue(true);
-      (getOnlyOfficeCapabilities as Mock).mockResolvedValue({
+    it('renders DocumentServer viewer for supported file types when enabled', async () => {
+      (looksLikeDocumentServerFile as Mock).mockReturnValue(true);
+      (getDocumentServerCapabilities as Mock).mockResolvedValue({
         enabled: true,
         publicUrl: 'http://localhost:8082',
         supportedExtensions: ['docx'],
         supportedContentTypes: [],
       });
-      (isOnlyOfficeSupportedByExtension as Mock).mockReturnValue(true);
+      (isDocumentServerSupportedByExtension as Mock).mockReturnValue(true);
       const docxFile = { ...mockFile, fileName: 'proposal.docx', relativePath: 'proposal.docx' };
 
       render(<FilePreviewOverlay {...defaultProps} file={docxFile} />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('onlyoffice-editor')).toBeInTheDocument();
+        expect(screen.getByTestId('documentserver-editor')).toBeInTheDocument();
       });
+      expect(screen.getByTestId('documentserver-editor')).toHaveAttribute('data-show-error-dialog-on-error', 'false');
     });
   });
 }); 

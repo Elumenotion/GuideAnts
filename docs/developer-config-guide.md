@@ -209,18 +209,18 @@ Minimum config keys needed for local dev:
 - `LlamaCpp:BaseUrl` — `http://localhost:8110/llama-cpp` for direct host runs.
 - `Ui:RootPath` — where the built browser UI lives (`./ui` in container, blank in dev when Vite serves it).
 - `FileStorage:Path` — host or container path for project/notebook content files. Dev launchSettings uses `../../../docker/volumes/content-files`.
-- `OnlyOffice:*` — for document server integration:
-  - `OnlyOffice:Enabled` (true/false)
-  - `OnlyOffice:PublicUrl` (for local compose default: `http://localhost:8082`)
-  - `OnlyOffice:ApiBaseUrl` (host-API dev: `http://host.docker.internal:5106`)
-  - `OnlyOffice:JwtEnabled` (optional, default false)
-  - `OnlyOffice:JwtSecret` (required only when `OnlyOffice:JwtEnabled=true`)
-  - `OnlyOffice:JwtHeader` / `OnlyOffice:JwtInBody` (optional advanced settings)
+- `DocumentServer:*` — for DocumentServer integration:
+  - `DocumentServer:Enabled` (true/false)
+  - `DocumentServer:PublicUrl` (for local compose default: `http://localhost:8082`)
+  - `DocumentServer:ApiBaseUrl` (host-API dev: `http://host.docker.internal:5106`)
+  - `DocumentServer:JwtEnabled` (optional, default false)
+  - `DocumentServer:JwtSecret` (required only when `DocumentServer:JwtEnabled=true`)
+  - `DocumentServer:JwtHeader` / `DocumentServer:JwtInBody` (optional advanced settings)
 
 JWT enablement rule (must match exactly):
 
-- `GA_ONLYOFFICE_JWT_ENABLED=true` and `ONLYOFFICE_JWT_SECRET=<secret>` in Docker env
-- `OnlyOffice:JwtEnabled=true` and `OnlyOffice:JwtSecret=<same secret>` in API config
+- `GA_DOCUMENTSERVER_JWT_ENABLED=true` and `DOCUMENTSERVER_JWT_SECRET=<secret>` in Docker env
+- `DocumentServer:JwtEnabled=true` and `DocumentServer:JwtSecret=<same secret>` in API config
 
 ### Launch profiles
 
@@ -311,9 +311,9 @@ GA_EMB_DEFAULT_MODEL_PATH=harrier-oss-v1-0.6b
 GA_EMB_AUTO_LOAD_ON_STARTUP=1
 GA_EMB_WARMUP_ON_LOAD=1
 GA_DB_NAME=guideants-dev-major-refactor-20260415
-GA_ONLYOFFICE_ENABLED=true
-GA_ONLYOFFICE_PUBLIC_URL=http://localhost:8082
-GA_ONLYOFFICE_JWT_ENABLED=false
+GA_DOCUMENTSERVER_ENABLED=true
+GA_DOCUMENTSERVER_PUBLIC_URL=http://localhost:8082
+GA_DOCUMENTSERVER_JWT_ENABLED=false
 ```
 
 These tags must exist locally for the `local` compose files. For `ghcr` compose files (the launcher default), the images are pulled from `ghcr.io/elumenotion/*` and these `GA_AI_*` tags are not strictly required.
@@ -329,7 +329,7 @@ For local debugging with API on the host and services in Docker, use `docker/.en
 | `1434` | `mssql-express` (host) → `1433` (container) |
 | `8110` | `guideants-ai` (full variants: llama-cpp, ASR, TTS, SD, EMB, media, sandbox via nginx; slim variant: sandbox/media only) |
 | `5001` | `docling-serve` |
-| `8082` | `onlyoffice-documentserver` (loopback-only) |
+| `8082` | `documentserver` (loopback-only) |
 | `8111` | `plantuml` |
 | `8091` | `searxng` (loopback-only) |
 
@@ -360,10 +360,10 @@ The launcher auto-picks `cuda13`, `rocm`, or `cpu` and pulls GHCR images. No SDK
 3. Start dependencies only: `docker compose -f docker/docker-compose.mssql.yml up -d` (DB) and the AI services compose for whichever backend you need.
 4. Create `appsettings.Development.json` from the example.
    - Ensure:
-     - `OnlyOffice:PublicUrl = http://localhost:8082`
-     - `OnlyOffice:ApiBaseUrl = http://host.docker.internal:5106`
-     - `OnlyOffice:JwtEnabled = false` (or true if explicitly enabling ONLYOFFICE JWT mode)
-     - if enabling JWT: `OnlyOffice:JwtSecret` matches `ONLYOFFICE_JWT_SECRET`
+     - `DocumentServer:PublicUrl = http://localhost:8082`
+     - `DocumentServer:ApiBaseUrl = http://host.docker.internal:5106`
+     - `DocumentServer:JwtEnabled = false` (or true if explicitly enabling DocumentServer JWT mode)
+     - if enabling JWT: `DocumentServer:JwtSecret` matches `DOCUMENTSERVER_JWT_SECRET`
 5. `dotnet run --project src/server/GuideAntsApi` (or run from VS via `http` profile → `http://localhost:5106`).
 6. Run client in `browser:dev` mode pointing at `:5106`.
 

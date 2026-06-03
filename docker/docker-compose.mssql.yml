@@ -1,15 +1,15 @@
 services:
-  onlyoffice-documentserver:
-    image: ${GA_ONLYOFFICE_IMAGE:-onlyoffice/documentserver:latest}
-    container_name: onlyoffice-documentserver
+  documentserver:
+    image: ${GA_DOCUMENTSERVER_IMAGE:-documentserver:latest}
+    container_name: documentserver
     environment:
-      JWT_ENABLED: "${GA_ONLYOFFICE_JWT_ENABLED:-false}"
-      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
-      JWT_HEADER: "${GA_ONLYOFFICE_JWT_HEADER:-Authorization}"
-      JWT_IN_BODY: "${GA_ONLYOFFICE_JWT_IN_BODY:-false}"
+      JWT_ENABLED: "${GA_DOCUMENTSERVER_JWT_ENABLED:-false}"
+      JWT_SECRET: ${DOCUMENTSERVER_JWT_SECRET:-}
+      JWT_HEADER: "${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}"
+      JWT_IN_BODY: "${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}"
       ALLOW_PRIVATE_IP_ADDRESS: "true"
     ports:
-      - "127.0.0.1:${GA_ONLYOFFICE_PORT:-8082}:80"
+      - "127.0.0.1:${GA_DOCUMENTSERVER_PORT:-8082}:80"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/info/info.json"]
       interval: 30s
@@ -35,14 +35,14 @@ services:
       ALLOWED_ORIGINS: "*"
       FileStorage__Path: /app/ContentFiles
       Ui__RootPath: /app/ui
-      OnlyOffice__Enabled: ${GA_ONLYOFFICE_ENABLED:-false}
-      OnlyOffice__PublicUrl: ${GA_ONLYOFFICE_PUBLIC_URL:-http://localhost:${GA_ONLYOFFICE_PORT:-8082}}
-      OnlyOffice__InternalUrl: http://onlyoffice-documentserver
-      OnlyOffice__ApiBaseUrl: http://guideants-webapi-ui-mssql:8080
-      OnlyOffice__JwtEnabled: "${GA_ONLYOFFICE_JWT_ENABLED:-false}"
-      OnlyOffice__JwtSecret: ${ONLYOFFICE_JWT_SECRET:-}
-      OnlyOffice__JwtHeader: "${GA_ONLYOFFICE_JWT_HEADER:-Authorization}"
-      OnlyOffice__JwtInBody: "${GA_ONLYOFFICE_JWT_IN_BODY:-false}"
+      DocumentServer__Enabled: ${GA_DOCUMENTSERVER_ENABLED:-false}
+      DocumentServer__PublicUrl: ${GA_DOCUMENTSERVER_PUBLIC_URL:-http://localhost:${GA_DOCUMENTSERVER_PORT:-8082}}
+      DocumentServer__InternalUrl: http://documentserver
+      DocumentServer__ApiBaseUrl: http://guideants-webapi-ui-mssql:8080
+      DocumentServer__JwtEnabled: "${GA_DOCUMENTSERVER_JWT_ENABLED:-false}"
+      DocumentServer__JwtSecret: ${DOCUMENTSERVER_JWT_SECRET:-}
+      DocumentServer__JwtHeader: "${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}"
+      DocumentServer__JwtInBody: "${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}"
       SettingsSecrets__ActiveKeyId: local-dev
       "SettingsSecrets__Keys__local-dev": MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
       LlamaCpp__BaseUrl: http://127.0.0.1:9/llama-cpp

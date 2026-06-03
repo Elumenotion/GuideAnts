@@ -48,7 +48,7 @@ Useful options:
 The launcher makes two independent choices:
 
 - **Backend** chooses the AI/runtime shape: `cpu`, `cuda13`, `rocm`, or `slim`.
-- **Compose mode** chooses where GuideAnts images come from: `ghcr` pulls prebuilt images; `local` uses GuideAnts images you built on this machine. Third-party services such as Docling and ONLYOFFICE may still pull their exact image tags the first time you start a local stack.
+- **Compose mode** chooses where GuideAnts images come from: `ghcr` pulls prebuilt images; `local` uses GuideAnts images you built on this machine. Third-party services such as Docling and DocumentServer may still pull their exact image tags the first time you start a local stack.
 
 Default startup is `--compose ghcr` with auto-detected `cuda13`, `rocm`, or `cpu`. The `slim` backend is never auto-detected; choose it explicitly.
 
@@ -64,7 +64,7 @@ Terminology that matters:
 | Name | Meaning | Do not confuse it with |
 |------|---------|------------------------|
 | `guideants-ai slim` | The sandbox-oriented AI image used by the `slim` backend. It starts `/sandbox` and `/media`; it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. | `guideants-webapi-ui-slim`. |
-| `docker-compose.slim.yml` | The local full slim stack: combined Web/API/SQL, slim AI, Docling, ONLYOFFICE, PlantUML, and SearXNG. | A standalone web/API slim compose file. |
+| `docker-compose.slim.yml` | The local full slim stack: combined Web/API/SQL, slim AI, Docling, DocumentServer, PlantUML, and SearXNG. | A standalone web/API slim compose file. |
 | `guideants-webapi-ui-slim` | The API/UI-only image used by split-stack deployments, especially GHCR CPU/CUDA/ROCm stacks. It does not bundle SQL Server. | The slim backend or slim AI stack. |
 | `guideants-webapi-ui-mssql` | The combined Web/API/SQL image used by the slim stack and the MSSQL all-in-one path. | Split-stack API/UI images. |
 
@@ -128,16 +128,18 @@ The current operator/developer setup is centered on Docker Compose. The stack de
 - `mssql-express` for the application database in split stacks, or bundled SQL Server inside `guideants-webapi-ui-mssql` in combined stacks.
 - `guideants-ai` as a consolidated local AI gateway, or as the sandbox-oriented AI runtime in the slim stack.
 - `docling-serve` for local document intelligence / markdown extraction
-- `onlyoffice-documentserver` for Office document viewing/editing in project and notebook file previews
+- `documentserver` for Office document viewing/editing in project and notebook file previews
 - `searxng` for search support
 - `plantuml` as a ScriptExecutionAgent-backed diagram sandbox with PlantUML and Graphviz installed
 
-For local host-API debugging (API at `http://localhost:5106`, services in Docker), use `docker/.env.api-local-debug.example` as the reference env and set `OnlyOffice:ApiBaseUrl` in `src/server/GuideAntsApi/appsettings.Development.json` to `http://host.docker.internal:5106`.
+Set `GA_DOCUMENTSERVER_IMAGE` to whichever compatible DocumentServer image you want the compose stacks to run. The checked-in `docker/.env` sets `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest`; override that value with any compatible image when needed.
 
-To enable ONLYOFFICE JWT, set:
+For local host-API debugging (API at `http://localhost:5106`, services in Docker), use `docker/.env.api-local-debug.example` as the reference env and set `DocumentServer:ApiBaseUrl` in `src/server/GuideAntsApi/appsettings.Development.json` to `http://host.docker.internal:5106`.
 
-- Docker env: `GA_ONLYOFFICE_JWT_ENABLED=true` and `ONLYOFFICE_JWT_SECRET=<secret>`
-- API config: `OnlyOffice:JwtEnabled=true` and `OnlyOffice:JwtSecret=<same secret>`
+To enable DocumentServer JWT, set:
+
+- Docker env: `GA_DOCUMENTSERVER_JWT_ENABLED=true` and `DOCUMENTSERVER_JWT_SECRET=<secret>`
+- API config: `DocumentServer:JwtEnabled=true` and `DocumentServer:JwtSecret=<same secret>`
 
 The `guideants-ai` container is especially important. Full local AI variants are the runtime surface behind llama.cpp, embeddings, speech transcription, speech synthesis, image generation, media extraction, and script execution. The `guideants-ai slim` variant is different: it is the sandbox-oriented AI image for Python script execution when model calls are routed to cloud/provider services. This is separate from `guideants-webapi-ui-slim`, which remains the API/UI image used by split-stack deployments. The Settings UI and API route each AI capability to the correct local or cloud backend rather than treating “the model” as one global switch.
 
@@ -159,7 +161,7 @@ GuideAnts is built on top of excellent open source work. Huge thanks to the team
 - [Docling](https://github.com/docling-project/docling) for document intelligence and markdown extraction (`docling-serve`).
 - [SearXNG](https://github.com/searxng/searxng) for metasearch and web retrieval.
 - [PlantUML](https://github.com/plantuml/plantuml) and [Graphviz](https://gitlab.com/graphviz/graphviz) for diagram rendering.
-- [ONLYOFFICE Docs](https://github.com/ONLYOFFICE/DocumentServer) for Office document viewing/editing capabilities via Document Server.
+- Compatible DocumentServer images for Office document viewing/editing capabilities.
 
 ## Repository Tour
 
