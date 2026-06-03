@@ -1,18 +1,18 @@
 namespace GuideAntsApi.Services.Components;
 
-public interface IOnlyOfficeService
+public interface IDocumentServerService
 {
     IReadOnlyCollection<string> SupportedExtensions { get; }
     IReadOnlyCollection<string> SupportedContentTypes { get; }
 
     bool IsSupported(string fileName, string contentType);
 
-    Task<OnlyOfficeEditorConfigResult> BuildEditorConfigAsync(
+    Task<DocumentServerEditorConfigResult> BuildEditorConfigAsync(
         HttpContext httpContext,
-        OnlyOfficeEditorConfigRequest request,
+        DocumentServerEditorConfigRequest request,
         CancellationToken cancellationToken);
 
-    Task<OnlyOfficeDownloadResult?> GetDownloadAsync(
+    Task<DocumentServerDownloadResult?> GetDownloadAsync(
         string? token,
         string? scope,
         Guid? projectId,
@@ -27,11 +27,11 @@ public interface IOnlyOfficeService
         Guid? projectId,
         Guid? fileId,
         Guid? notebookId,
-        OnlyOfficeCallbackPayload payload,
+        DocumentServerCallbackPayload payload,
         CancellationToken cancellationToken);
 }
 
-public sealed record OnlyOfficeEditorConfigRequest(
+public sealed record DocumentServerEditorConfigRequest(
     string Scope,
     Guid ProjectId,
     Guid FileId,
@@ -40,15 +40,15 @@ public sealed record OnlyOfficeEditorConfigRequest(
     string? UserId,
     string? UserName);
 
-public sealed record OnlyOfficeEditorConfigResult(
+public sealed record DocumentServerEditorConfigResult(
     string DocumentServerUrl,
     object Config);
 
-public sealed record OnlyOfficeDownloadResult(
+public sealed record DocumentServerDownloadResult(
     Stream Stream,
     string ContentType,
     string FileName);
 
-public sealed record OnlyOfficeCallbackPayload(
+public sealed record DocumentServerCallbackPayload(
     int Status,
     string? Url);

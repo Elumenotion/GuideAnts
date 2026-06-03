@@ -13,6 +13,7 @@ interface ConfirmationDialogProps {
   confirmButtonClass?: string;
   icon?: React.ComponentType<{ className?: string }>;
   isLoading?: boolean;
+  showCancelButton?: boolean;
 }
 
 export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
@@ -25,7 +26,8 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   cancelText = 'Cancel',
   confirmButtonClass = 'bg-red-600 hover:bg-red-700 text-white',
   icon: Icon = FiAlertTriangle,
-  isLoading = false
+  isLoading = false,
+  showCancelButton = true
 }) => {
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -72,7 +74,10 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   }
 
   const dialogMarkup = (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={(event) => event.stopPropagation()}
+    >
       <div 
         className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4"
         tabIndex={-1}
@@ -91,13 +96,15 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
         </div>
 
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
-          <button
-            onClick={onClose}
-            disabled={isLoading}
-            className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-          >
-            {cancelText}
-          </button>
+          {showCancelButton && (
+            <button
+              onClick={onClose}
+              disabled={isLoading}
+              className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+            >
+              {cancelText}
+            </button>
+          )}
           <button
             ref={confirmButtonRef}
             onClick={handleConfirm}

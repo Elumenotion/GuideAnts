@@ -154,20 +154,20 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
         // Enqueue processing for newly created files
         foreach (var newFile in newFiles)
         {
-            await EnqueueIndexingJobForFile(newFile, cancellationToken);
+            await EnqueueIndexingJobForFile(context, newFile, cancellationToken);
         }
 
         // Enqueue re-indexing for updated files
         foreach (var updatedFile in updatedFiles)
         {
             Logger.LogInformation("Re-indexing updated notebook file: {RelativePath}", updatedFile.RelativePath);
-            await EnqueueIndexingJobForFile(updatedFile, cancellationToken);
+            await EnqueueIndexingJobForFile(context, updatedFile, cancellationToken);
         }
 
         return true;
     }
 
-    private async Task EnqueueIndexingJobForFile(NotebookFile file, CancellationToken cancellationToken)
+    private async Task EnqueueIndexingJobForFile(ApplicationDbContext context, NotebookFile file, CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(file.RelativePath);
         var isDirectIndexable = IsDirectIndexable(extension);
@@ -182,11 +182,52 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
         }
         else
         {
+            await EnsureNotebookMarkdownShadowExistsAsync(context, file.Id, cancellationToken);
+
             // Files that need markdown extraction
             await _jobQueueService.EnqueueAsync(
                 jobType: nameof(ExtractNotebookFileMarkdownJob).Replace("Job", string.Empty),
                 payload: new ExtractNotebookFileMarkdownJob(file.Id),
                 ct: cancellationToken);
+        }
+    }
+
+    private async Task EnsureNotebookMarkdownShadowExistsAsync(ApplicationDbContext context, Guid notebookFileId, CancellationToken cancellationToken)
+    {
+        var exists = await context.NotebookFileMarkdownShadows
+            .AnyAsync(s => s.OriginalNotebookFileId == notebookFileId, cancellationToken);
+
+        if (exists)
+        {
+            return;
+        }
+
+        context.NotebookFileMarkdownShadows.Add(new NotebookFileMarkdownShadow
+        {
+            OriginalNotebookFileId = notebookFileId,
+            ContentHash = string.Empty,
+            StoragePath = string.Empty,
+            FileSize = 0,
+            Status = MarkdownExtractionStatus.Pending
+        });
+
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            Logger.LogInformation("Created missing notebook markdown shadow for NotebookFile {NotebookFileId} during sync", notebookFileId);
+        }
+        catch (DbUpdateException ex)
+        {
+            // Another worker may have created the shadow concurrently between the existence check and insert.
+            Logger.LogDebug(ex, "Concurrent notebook markdown shadow creation detected for NotebookFile {NotebookFileId}", notebookFileId);
+            context.ChangeTracker.Clear();
+
+            var existsAfterConflict = await context.NotebookFileMarkdownShadows
+                .AnyAsync(s => s.OriginalNotebookFileId == notebookFileId, cancellationToken);
+            if (!existsAfterConflict)
+            {
+                throw;
+            }
         }
     }
 

@@ -191,6 +191,7 @@ public class Program
 
         app.UseHttpsRedirection();
         app.UseCors("RestrictedOrigins");
+        app.UseWebSockets();
         
         app.UseExceptionHandler(errorApp =>
         {
@@ -265,7 +266,7 @@ public class Program
         app.MapUsageEndpoints();
         app.MapGuideUsageEndpoints();
         app.MapSettingsEndpoints();
-        app.MapOnlyOfficeEndpoints();
+        app.MapDocumentServerEndpoints();
         app.UseGuideAntsUiPipeline(builder.Configuration);
 
         app.Run();

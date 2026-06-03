@@ -52,6 +52,7 @@ public static class StartupConfiguration
         services.AddHttpClient(Microsoft.Extensions.Options.Options.DefaultName).ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(300));
         // HttpClient factory is already registered via AddHttpClient<ISpeechTranscriptionService>
         // Individual services now use IHttpClientFactory.CreateClient() for proper connection management
+        services.AddReverseProxy();
 
         // EF Core logging interceptor for enhanced query debugging
         services.AddSingleton<EfQueryWarningInterceptor>();
@@ -124,7 +125,7 @@ public static class StartupConfiguration
         services.AddScoped<INotebookFileSyncService, NotebookFileSyncService>();
         services.AddSingleton<INotebookLockService, InMemoryNotebookLockService>();
         services.AddScoped<INotebookFileService, NotebookFileService>();
-        services.AddScoped<IOnlyOfficeService, OnlyOfficeService>();
+        services.AddScoped<IDocumentServerService, DocumentServerService>();
         services.AddScoped<IFileLineageService, FileLineageService>();
         services.AddScoped<IExcludedHostService, ExcludedHostService>();
         services.AddHttpClient<IBrowserRenderingClient, SearXngBrowserRenderingClient>((serviceProvider, client) =>
@@ -529,7 +530,7 @@ public static class StartupConfiguration
         services.Configure<OpenRouterOptions>(configuration.GetSection(OpenRouterOptions.SectionName));
         services.Configure<SettingsSecretsOptions>(configuration.GetSection(SettingsSecretsOptions.SectionName));
         services.Configure<LlamaModelManagementOptions>(configuration.GetSection(LlamaModelManagementOptions.SectionName));
-        services.Configure<OnlyOfficeOptions>(configuration.GetSection(OnlyOfficeOptions.SectionName));
+        services.Configure<DocumentServerOptions>(configuration.GetSection(DocumentServerOptions.SectionName));
     }
 
     private static Uri DeriveLlamaAdminBaseUri(string llamaBaseUrl)
