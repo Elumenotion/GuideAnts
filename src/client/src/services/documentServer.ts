@@ -1,16 +1,16 @@
 import { API_BASE_URL } from '../config/apiConfig';
 
-export type OnlyOfficeScope = 'project' | 'notebook';
+export type DocumentServerScope = 'project' | 'notebook';
 
-export interface OnlyOfficeCapabilities {
+export interface DocumentServerCapabilities {
     enabled: boolean;
     publicUrl: string;
     supportedExtensions: string[];
     supportedContentTypes: string[];
 }
 
-export interface OnlyOfficeEditorConfigRequest {
-    scope: OnlyOfficeScope;
+export interface DocumentServerEditorConfigRequest {
+    scope: DocumentServerScope;
     projectId: string;
     fileId: string;
     notebookId?: string;
@@ -19,7 +19,7 @@ export interface OnlyOfficeEditorConfigRequest {
     userName?: string;
 }
 
-export interface OnlyOfficeEditorConfigResponse {
+export interface DocumentServerEditorConfigResponse {
     documentServerUrl: string;
     config: Record<string, unknown>;
 }
@@ -37,41 +37,41 @@ const OFFICE_CONTENT_TYPE_MARKERS = [
     'application/msword',
     'application/vnd.oasis.opendocument',
 ];
-const EXCLUDED_ONLYOFFICE_EXTENSIONS = new Set(['pdf']);
-const EXCLUDED_ONLYOFFICE_CONTENT_TYPES = ['application/pdf'];
+const EXCLUDED_DOCUMENT_SERVER_EXTENSIONS = new Set(['pdf']);
+const EXCLUDED_DOCUMENT_SERVER_CONTENT_TYPES = ['application/pdf'];
 
-let cachedCapabilities: OnlyOfficeCapabilities | null = null;
-const ONLYOFFICE_REQUEST_TIMEOUT_MS = 10000;
+let cachedCapabilities: DocumentServerCapabilities | null = null;
+const DOCUMENT_SERVER_REQUEST_TIMEOUT_MS = 10000;
 
-export async function getOnlyOfficeCapabilities(forceRefresh = false): Promise<OnlyOfficeCapabilities> {
+export async function getDocumentServerCapabilities(forceRefresh = false): Promise<DocumentServerCapabilities> {
     if (!forceRefresh && cachedCapabilities) {
-        console.info('[ONLYOFFICE] capabilities cache hit', {
+        console.info('[DocumentServer] capabilities cache hit', {
             enabled: cachedCapabilities.enabled,
             publicUrl: cachedCapabilities.publicUrl,
         });
         return cachedCapabilities;
     }
 
-    console.info('[ONLYOFFICE] capabilities request start', {
-        url: `${API_BASE_URL}/onlyoffice/capabilities`,
+    console.info('[DocumentServer] capabilities request start', {
+        url: `${API_BASE_URL}/documentserver/capabilities`,
         forceRefresh,
     });
     const response = await fetchWithTimeout(
-        `${API_BASE_URL}/onlyoffice/capabilities`,
+        `${API_BASE_URL}/documentserver/capabilities`,
         {},
-        ONLYOFFICE_REQUEST_TIMEOUT_MS
+        DOCUMENT_SERVER_REQUEST_TIMEOUT_MS
     );
     if (!response.ok) {
-        const message = await readOnlyOfficeError(response, 'Failed to load ONLYOFFICE capabilities.');
-        console.error('[ONLYOFFICE] capabilities request failed', {
+        const message = await readDocumentServerError(response, 'Failed to load DocumentServer capabilities.');
+        console.error('[DocumentServer] capabilities request failed', {
             status: response.status,
             message,
         });
         throw new Error(message);
     }
 
-    cachedCapabilities = await response.json() as OnlyOfficeCapabilities;
-    console.info('[ONLYOFFICE] capabilities request success', {
+    cachedCapabilities = await response.json() as DocumentServerCapabilities;
+    console.info('[DocumentServer] capabilities request success', {
         enabled: cachedCapabilities.enabled,
         publicUrl: cachedCapabilities.publicUrl,
         supportedExtensionsCount: cachedCapabilities.supportedExtensions?.length ?? 0,
@@ -80,10 +80,10 @@ export async function getOnlyOfficeCapabilities(forceRefresh = false): Promise<O
     return cachedCapabilities;
 }
 
-export async function createOnlyOfficeEditorConfig(
-    request: OnlyOfficeEditorConfigRequest
-): Promise<OnlyOfficeEditorConfigResponse> {
-    console.info('[ONLYOFFICE] editor-config request start', {
+export async function createDocumentServerEditorConfig(
+    request: DocumentServerEditorConfigRequest
+): Promise<DocumentServerEditorConfigResponse> {
+    console.info('[DocumentServer] editor-config request start', {
         scope: request.scope,
         projectId: request.projectId,
         notebookId: request.notebookId,
@@ -91,7 +91,7 @@ export async function createOnlyOfficeEditorConfig(
         canEdit: request.canEdit,
     });
     const response = await fetchWithTimeout(
-        `${API_BASE_URL}/onlyoffice/editor-config`,
+        `${API_BASE_URL}/documentserver/editor-config`,
         {
             method: 'POST',
             headers: {
@@ -99,12 +99,12 @@ export async function createOnlyOfficeEditorConfig(
             },
             body: JSON.stringify(request),
         },
-        ONLYOFFICE_REQUEST_TIMEOUT_MS
+        DOCUMENT_SERVER_REQUEST_TIMEOUT_MS
     );
 
     if (!response.ok) {
-        const message = await readOnlyOfficeError(response, 'Failed to create ONLYOFFICE editor config.');
-        console.error('[ONLYOFFICE] editor-config request failed', {
+        const message = await readDocumentServerError(response, 'Failed to create DocumentServer editor config.');
+        console.error('[DocumentServer] editor-config request failed', {
             status: response.status,
             message,
             scope: request.scope,
@@ -113,8 +113,8 @@ export async function createOnlyOfficeEditorConfig(
         throw new Error(message);
     }
 
-    const payload = await response.json() as OnlyOfficeEditorConfigResponse;
-    console.info('[ONLYOFFICE] editor-config request success', {
+    const payload = await response.json() as DocumentServerEditorConfigResponse;
+    console.info('[DocumentServer] editor-config request success', {
         scope: request.scope,
         fileId: request.fileId,
         documentServerUrl: payload.documentServerUrl,
@@ -122,7 +122,7 @@ export async function createOnlyOfficeEditorConfig(
     return payload;
 }
 
-export function isOnlyOfficeSupportedByExtension(fileName: string, capabilities: OnlyOfficeCapabilities | null): boolean {
+export function isDocumentServerSupportedByExtension(fileName: string, capabilities: DocumentServerCapabilities | null): boolean {
     if (!capabilities?.enabled) {
         return false;
     }
@@ -131,14 +131,14 @@ export function isOnlyOfficeSupportedByExtension(fileName: string, capabilities:
     if (!extension) {
         return false;
     }
-    if (EXCLUDED_ONLYOFFICE_EXTENSIONS.has(extension)) {
+    if (EXCLUDED_DOCUMENT_SERVER_EXTENSIONS.has(extension)) {
         return false;
     }
 
     return capabilities.supportedExtensions.some((value) => value.toLowerCase() === extension);
 }
 
-export function isOnlyOfficeSupportedByContentType(contentType: string, capabilities: OnlyOfficeCapabilities | null): boolean {
+export function isDocumentServerSupportedByContentType(contentType: string, capabilities: DocumentServerCapabilities | null): boolean {
     if (!capabilities?.enabled) {
         return false;
     }
@@ -148,16 +148,16 @@ export function isOnlyOfficeSupportedByContentType(contentType: string, capabili
     }
 
     const normalizedContentType = contentType.toLowerCase();
-    if (EXCLUDED_ONLYOFFICE_CONTENT_TYPES.some((value) => normalizedContentType.startsWith(value))) {
+    if (EXCLUDED_DOCUMENT_SERVER_CONTENT_TYPES.some((value) => normalizedContentType.startsWith(value))) {
         return false;
     }
 
     return capabilities.supportedContentTypes.some((value) => value.toLowerCase() === normalizedContentType);
 }
 
-export function looksLikeOnlyOfficeFile(fileName: string, contentType?: string | null): boolean {
+export function looksLikeDocumentServerFile(fileName: string, contentType?: string | null): boolean {
     const extension = fileName.split('.').pop()?.toLowerCase();
-    if (extension && EXCLUDED_ONLYOFFICE_EXTENSIONS.has(extension)) {
+    if (extension && EXCLUDED_DOCUMENT_SERVER_EXTENSIONS.has(extension)) {
         return false;
     }
     if (extension && OFFICE_EXTENSIONS.has(extension)) {
@@ -169,13 +169,13 @@ export function looksLikeOnlyOfficeFile(fileName: string, contentType?: string |
     }
 
     const lowerContentType = contentType.toLowerCase();
-    if (EXCLUDED_ONLYOFFICE_CONTENT_TYPES.some((value) => lowerContentType.startsWith(value))) {
+    if (EXCLUDED_DOCUMENT_SERVER_CONTENT_TYPES.some((value) => lowerContentType.startsWith(value))) {
         return false;
     }
     return OFFICE_CONTENT_TYPE_MARKERS.some((marker) => lowerContentType.includes(marker));
 }
 
-async function readOnlyOfficeError(response: Response, defaultMessage: string): Promise<string> {
+async function readDocumentServerError(response: Response, defaultMessage: string): Promise<string> {
     const statusPrefix = `HTTP ${response.status}`;
     const raw = await response.text();
     if (!raw) {
@@ -205,7 +205,7 @@ async function fetchWithTimeout(
         return await fetch(input, { ...init, signal: controller.signal });
     } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
-            throw new Error(`ONLYOFFICE request timed out after ${timeoutMs}ms.`);
+            throw new Error(`DocumentServer request timed out after ${timeoutMs}ms.`);
         }
         throw error;
     } finally {

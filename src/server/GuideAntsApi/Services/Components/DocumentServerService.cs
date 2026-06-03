@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Services.Components;
 
-public sealed class OnlyOfficeService : IOnlyOfficeService
+public sealed class DocumentServerService : IDocumentServerService
 {
     private static readonly IReadOnlyCollection<string> SupportedFileExtensions = new[]
     {
@@ -41,17 +41,17 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
     private readonly ApplicationDbContext _dbContext;
     private readonly IContentFileService _contentFileService;
     private readonly INotebookFileService _notebookFileService;
-    private readonly IOptions<OnlyOfficeOptions> _options;
+    private readonly IOptions<DocumentServerOptions> _options;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<OnlyOfficeService> _logger;
+    private readonly ILogger<DocumentServerService> _logger;
 
-    public OnlyOfficeService(
+    public DocumentServerService(
         ApplicationDbContext dbContext,
         IContentFileService contentFileService,
         INotebookFileService notebookFileService,
-        IOptions<OnlyOfficeOptions> options,
+        IOptions<DocumentServerOptions> options,
         IHttpClientFactory httpClientFactory,
-        ILogger<OnlyOfficeService> logger)
+        ILogger<DocumentServerService> logger)
     {
         _dbContext = dbContext;
         _contentFileService = contentFileService;
@@ -81,23 +81,23 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             || string.Equals(contentType, "application/octet-stream", StringComparison.OrdinalIgnoreCase);
     }
 
-    public async Task<OnlyOfficeEditorConfigResult> BuildEditorConfigAsync(
+    public async Task<DocumentServerEditorConfigResult> BuildEditorConfigAsync(
         HttpContext httpContext,
-        OnlyOfficeEditorConfigRequest request,
+        DocumentServerEditorConfigRequest request,
         CancellationToken cancellationToken)
     {
         var options = _options.Value;
         if (!options.Enabled)
         {
-            throw new InvalidOperationException("ONLYOFFICE is disabled.");
+            throw new InvalidOperationException("DocumentServer is disabled.");
         }
         if (string.IsNullOrWhiteSpace(options.PublicUrl))
         {
-            throw new InvalidOperationException("OnlyOffice:PublicUrl must be configured when ONLYOFFICE is enabled.");
+            throw new InvalidOperationException("DocumentServer:PublicUrl must be configured when DocumentServer is enabled.");
         }
         if (!Uri.TryCreate(options.PublicUrl, UriKind.Absolute, out _))
         {
-            throw new InvalidOperationException("OnlyOffice:PublicUrl must be an absolute URL.");
+            throw new InvalidOperationException("DocumentServer:PublicUrl must be an absolute URL.");
         }
 
         var context = await ResolveFileContextAsync(request, cancellationToken);
@@ -106,7 +106,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             throw new InvalidOperationException($"File type is not supported: {context.FileName}");
         }
 
-        var apiBaseUrl = ResolveOnlyOfficeApiBaseUrl();
+        var apiBaseUrl = ResolveDocumentServerApiBaseUrl();
         string downloadUrl;
         string callbackUrl;
         if (options.JwtEnabled)
@@ -129,8 +129,8 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
                 "callback",
                 TimeSpan.FromHours(1));
 
-            downloadUrl = $"{apiBaseUrl}/api/onlyoffice/download?token={Uri.EscapeDataString(downloadToken)}";
-            callbackUrl = $"{apiBaseUrl}/api/onlyoffice/callback?token={Uri.EscapeDataString(callbackToken)}";
+            downloadUrl = $"{apiBaseUrl}/api/documentserver/download?token={Uri.EscapeDataString(downloadToken)}";
+            callbackUrl = $"{apiBaseUrl}/api/documentserver/callback?token={Uri.EscapeDataString(callbackToken)}";
         }
         else
         {
@@ -143,8 +143,8 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             var versionSegment = context.VersionNumber.HasValue
                 ? $"&versionNumber={context.VersionNumber.Value.ToString(CultureInfo.InvariantCulture)}"
                 : string.Empty;
-            downloadUrl = $"{apiBaseUrl}/api/onlyoffice/download?scope={queryScope}&projectId={queryProjectId}&fileId={queryFileId}{notebookSegment}{versionSegment}";
-            callbackUrl = $"{apiBaseUrl}/api/onlyoffice/callback?scope={queryScope}&projectId={queryProjectId}&fileId={queryFileId}{notebookSegment}";
+            downloadUrl = $"{apiBaseUrl}/api/documentserver/download?scope={queryScope}&projectId={queryProjectId}&fileId={queryFileId}{notebookSegment}{versionSegment}";
+            callbackUrl = $"{apiBaseUrl}/api/documentserver/callback?scope={queryScope}&projectId={queryProjectId}&fileId={queryFileId}{notebookSegment}";
         }
         var documentType = GetDocumentType(context.FileName);
         var key = BuildDocumentKey(context);
@@ -153,7 +153,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         var userName = string.IsNullOrWhiteSpace(request.UserName) ? "GuideAnts User" : request.UserName;
         var userId = string.IsNullOrWhiteSpace(request.UserId) ? "guideants-user" : request.UserId;
         _logger.LogInformation(
-            "ONLYOFFICE editor-config built. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} fileName={FileName} documentType={DocumentType} key={DocumentKey} apiBaseUrl={ApiBaseUrl} downloadUrl={DownloadUrl} callbackUrl={CallbackUrl}",
+            "DocumentServer editor-config built. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} fileName={FileName} documentType={DocumentType} key={DocumentKey} apiBaseUrl={ApiBaseUrl} downloadUrl={DownloadUrl} callbackUrl={CallbackUrl}",
             request.Scope,
             request.ProjectId,
             request.FileId,
@@ -203,12 +203,12 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             config["token"] = token;
         }
 
-        return new OnlyOfficeEditorConfigResult(
+        return new DocumentServerEditorConfigResult(
             DocumentServerUrl: options.PublicUrl.TrimEnd('/'),
             Config: config);
     }
 
-    public async Task<OnlyOfficeDownloadResult?> GetDownloadAsync(
+    public async Task<DocumentServerDownloadResult?> GetDownloadAsync(
         string? token,
         string? scope,
         Guid? projectId,
@@ -219,7 +219,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
     {
         if (!_options.Value.Enabled)
         {
-            throw new InvalidOperationException("ONLYOFFICE is disabled.");
+            throw new InvalidOperationException("DocumentServer is disabled.");
         }
         var payload = ResolveRequestContext(token, scope, projectId, fileId, notebookId, versionNumber, "download");
 
@@ -228,7 +228,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             var details = await _contentFileService.GetAsync(payload.ProjectId, payload.FileId);
             if (details == null)
             {
-                _logger.LogWarning("ONLYOFFICE download target project file was not found. projectId={ProjectId} fileId={FileId}",
+                _logger.LogWarning("DocumentServer download target project file was not found. projectId={ProjectId} fileId={FileId}",
                     payload.ProjectId, payload.FileId);
                 return null;
             }
@@ -238,14 +238,14 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             if (content == null)
             {
                 _logger.LogWarning(
-                    "ONLYOFFICE download content missing for project file. projectId={ProjectId} fileId={FileId} versionNumber={VersionNumber}",
+                    "DocumentServer download content missing for project file. projectId={ProjectId} fileId={FileId} versionNumber={VersionNumber}",
                     payload.ProjectId,
                     payload.FileId,
                     requestedVersion);
                 return null;
             }
 
-            return new OnlyOfficeDownloadResult(
+            return new DocumentServerDownloadResult(
                 Stream: new MemoryStream(content.Content),
                 ContentType: content.ContentType,
                 FileName: content.FileName);
@@ -253,7 +253,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
 
         if (!payload.Scope.Equals("notebook", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Unsupported ONLYOFFICE scope in download token: {payload.Scope}");
+            throw new InvalidOperationException($"Unsupported DocumentServer scope in download token: {payload.Scope}");
         }
 
         if (!payload.NotebookId.HasValue)
@@ -265,13 +265,13 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         if (notebookContent == null)
         {
             _logger.LogWarning(
-                "ONLYOFFICE download target notebook file was not found. notebookId={NotebookId} fileId={FileId}",
+                "DocumentServer download target notebook file was not found. notebookId={NotebookId} fileId={FileId}",
                 payload.NotebookId,
                 payload.FileId);
             return null;
         }
 
-        return new OnlyOfficeDownloadResult(
+        return new DocumentServerDownloadResult(
             Stream: notebookContent.Value.Stream,
             ContentType: notebookContent.Value.ContentType,
             FileName: notebookContent.Value.FileName);
@@ -283,12 +283,12 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         Guid? projectId,
         Guid? fileId,
         Guid? notebookId,
-        OnlyOfficeCallbackPayload payload,
+        DocumentServerCallbackPayload payload,
         CancellationToken cancellationToken)
     {
         if (!_options.Value.Enabled)
         {
-            throw new InvalidOperationException("ONLYOFFICE is disabled.");
+            throw new InvalidOperationException("DocumentServer is disabled.");
         }
 
         var callbackContext = ResolveRequestContext(token, scope, projectId, fileId, notebookId, null, "callback");
@@ -296,7 +296,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         if (!isSaveCallback || string.IsNullOrWhiteSpace(payload.Url))
         {
             _logger.LogInformation(
-                "ONLYOFFICE callback ignored due to non-save status/url. status={Status} hasUrl={HasUrl} scope={Scope} projectId={ProjectId} fileId={FileId}",
+                "DocumentServer callback ignored due to non-save status/url. status={Status} hasUrl={HasUrl} scope={Scope} projectId={ProjectId} fileId={FileId}",
                 payload.Status,
                 !string.IsNullOrWhiteSpace(payload.Url),
                 callbackContext.Scope,
@@ -306,7 +306,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         }
 
         _logger.LogInformation(
-            "ONLYOFFICE callback save received. status={Status} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
+            "DocumentServer callback save received. status={Status} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
             payload.Status,
             callbackContext.Scope,
             callbackContext.ProjectId,
@@ -320,7 +320,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         await editedStream.CopyToAsync(memory, cancellationToken);
         memory.Position = 0;
         _logger.LogInformation(
-            "ONLYOFFICE callback downloaded edited document. status={Status} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} byteLength={ByteLength}",
+            "DocumentServer callback downloaded edited document. status={Status} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} byteLength={ByteLength}",
             payload.Status,
             callbackContext.Scope,
             callbackContext.ProjectId,
@@ -345,7 +345,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
 
             await _contentFileService.UploadFileAsync(callbackContext.ProjectId, formFile, false, file.FolderId);
             _logger.LogInformation(
-                "ONLYOFFICE callback uploaded project file version. projectId={ProjectId} fileId={FileId} fileName={FileName} byteLength={ByteLength}",
+                "DocumentServer callback uploaded project file version. projectId={ProjectId} fileId={FileId} fileName={FileName} byteLength={ByteLength}",
                 callbackContext.ProjectId,
                 callbackContext.FileId,
                 file.FileName,
@@ -355,7 +355,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
 
         if (!callbackContext.Scope.Equals("notebook", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Unsupported ONLYOFFICE scope in callback token: {callbackContext.Scope}");
+            throw new InvalidOperationException($"Unsupported DocumentServer scope in callback token: {callbackContext.Scope}");
         }
 
         if (!callbackContext.NotebookId.HasValue)
@@ -383,7 +383,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         };
 
         _logger.LogInformation(
-            "ONLYOFFICE callback uploading notebook file. projectId={ProjectId} notebookId={NotebookId} fileId={FileId} relativePath={RelativePath} targetFolder={TargetFolder} fileName={FileName} byteLength={ByteLength}",
+            "DocumentServer callback uploading notebook file. projectId={ProjectId} notebookId={NotebookId} fileId={FileId} relativePath={RelativePath} targetFolder={TargetFolder} fileName={FileName} byteLength={ByteLength}",
             callbackContext.ProjectId,
             callbackContext.NotebookId.Value,
             callbackContext.FileId,
@@ -401,8 +401,8 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             forceMarkdownExtraction: true);
     }
 
-    private async Task<OnlyOfficeFileContext> ResolveFileContextAsync(
-        OnlyOfficeEditorConfigRequest request,
+    private async Task<DocumentServerFileContext> ResolveFileContextAsync(
+        DocumentServerEditorConfigRequest request,
         CancellationToken cancellationToken)
     {
         if (request.Scope.Equals("project", StringComparison.OrdinalIgnoreCase))
@@ -413,7 +413,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
                 throw new InvalidOperationException("Project file was not found.");
             }
 
-            return new OnlyOfficeFileContext(
+            return new DocumentServerFileContext(
                 Scope: request.Scope,
                 ProjectId: request.ProjectId,
                 FileId: request.FileId,
@@ -426,7 +426,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
 
         if (!request.Scope.Equals("notebook", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Unsupported ONLYOFFICE scope: {request.Scope}");
+            throw new InvalidOperationException($"Unsupported DocumentServer scope: {request.Scope}");
         }
 
         if (!request.NotebookId.HasValue)
@@ -450,7 +450,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             ? notebookFile.LastModifiedUtc.Ticks.ToString(CultureInfo.InvariantCulture)
             : notebookFile.FileHash;
 
-        return new OnlyOfficeFileContext(
+        return new DocumentServerFileContext(
             Scope: request.Scope,
             ProjectId: request.ProjectId,
             FileId: request.FileId,
@@ -461,7 +461,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             KeyMaterial: $"{notebookFile.Id:N}:{hash}");
     }
 
-    private string BuildDocumentKey(OnlyOfficeFileContext context)
+    private string BuildDocumentKey(DocumentServerFileContext context)
     {
         var raw = $"{context.Scope}:{context.ProjectId:N}:{context.KeyMaterial}";
         using var sha256 = SHA256.Create();
@@ -480,17 +480,17 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         };
     }
 
-    private string ResolveOnlyOfficeApiBaseUrl()
+    private string ResolveDocumentServerApiBaseUrl()
     {
         var configured = _options.Value.ApiBaseUrl?.Trim();
         if (string.IsNullOrWhiteSpace(configured))
         {
-            throw new InvalidOperationException("OnlyOffice:ApiBaseUrl must be configured.");
+            throw new InvalidOperationException("DocumentServer:ApiBaseUrl must be configured.");
         }
 
         if (!Uri.TryCreate(configured, UriKind.Absolute, out _))
         {
-            throw new InvalidOperationException("OnlyOffice:ApiBaseUrl must be an absolute URL.");
+            throw new InvalidOperationException("DocumentServer:ApiBaseUrl must be an absolute URL.");
         }
 
         return configured.TrimEnd('/');
@@ -500,7 +500,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
     {
         if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var sourceUri))
         {
-            throw new InvalidOperationException("ONLYOFFICE callback URL must be an absolute URL.");
+            throw new InvalidOperationException("DocumentServer callback URL must be an absolute URL.");
         }
 
         var options = _options.Value;
@@ -516,7 +516,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
 
         if (!Uri.TryCreate(options.InternalUrl?.Trim(), UriKind.Absolute, out var internalUri))
         {
-            throw new InvalidOperationException("OnlyOffice:InternalUrl must be an absolute URL.");
+            throw new InvalidOperationException("DocumentServer:InternalUrl must be an absolute URL.");
         }
 
         var builder = new UriBuilder(sourceUri)
@@ -526,15 +526,33 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
             Port = internalUri.IsDefaultPort ? -1 : internalUri.Port
         };
 
+        var rewrittenPath = sourceUri.AbsolutePath;
+        var publicPath = publicUri.AbsolutePath.TrimEnd('/');
+        if (!string.IsNullOrWhiteSpace(publicPath) && !string.Equals(publicPath, "/", StringComparison.Ordinal))
+        {
+            if (string.Equals(rewrittenPath, publicPath, StringComparison.OrdinalIgnoreCase))
+            {
+                rewrittenPath = "/";
+            }
+            else if (rewrittenPath.StartsWith(publicPath + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                rewrittenPath = rewrittenPath[publicPath.Length..];
+            }
+        }
+
         var internalPath = internalUri.AbsolutePath.TrimEnd('/');
         if (!string.IsNullOrWhiteSpace(internalPath))
         {
-            builder.Path = $"{internalPath}/{sourceUri.AbsolutePath.TrimStart('/')}";
+            builder.Path = $"{internalPath}/{rewrittenPath.TrimStart('/')}";
+        }
+        else
+        {
+            builder.Path = rewrittenPath;
         }
 
         var rewrittenUrl = builder.Uri.ToString();
         _logger.LogInformation(
-            "ONLYOFFICE callback download URL rewritten from public origin to internal origin. sourceHost={SourceHost} internalHost={InternalHost}",
+            "DocumentServer callback download URL rewritten from public origin to internal origin. sourceHost={SourceHost} internalHost={InternalHost}",
             sourceUri.Authority,
             internalUri.Authority);
 
@@ -585,7 +603,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         var options = _options.Value;
         if (string.IsNullOrWhiteSpace(options.JwtSecret))
         {
-            throw new InvalidOperationException("OnlyOffice:JwtSecret must be configured when OnlyOffice:JwtEnabled is true.");
+            throw new InvalidOperationException("DocumentServer:JwtSecret must be configured when DocumentServer:JwtEnabled is true.");
         }
 
         var header = Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object?>
@@ -604,7 +622,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
     {
         if (string.IsNullOrWhiteSpace(token))
         {
-            throw new InvalidOperationException($"ONLYOFFICE {purpose} token is missing.");
+            throw new InvalidOperationException($"DocumentServer {purpose} token is missing.");
         }
 
         TokenEnvelope<T>? envelope;
@@ -615,23 +633,23 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         }
         catch (Exception ex) when (ex is FormatException || ex is JsonException)
         {
-            throw new InvalidOperationException($"ONLYOFFICE {purpose} token payload is invalid.", ex);
+            throw new InvalidOperationException($"DocumentServer {purpose} token payload is invalid.", ex);
         }
 
         if (envelope?.Payload == null)
         {
-            throw new InvalidOperationException($"ONLYOFFICE {purpose} token payload was empty.");
+            throw new InvalidOperationException($"DocumentServer {purpose} token payload was empty.");
         }
 
         if (!string.Equals(envelope.Purpose, purpose, StringComparison.Ordinal))
         {
-            throw new InvalidOperationException($"ONLYOFFICE {purpose} token purpose is invalid.");
+            throw new InvalidOperationException($"DocumentServer {purpose} token purpose is invalid.");
         }
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         if (envelope.ExpiresUnix < now)
         {
-            throw new InvalidOperationException($"ONLYOFFICE {purpose} token has expired.");
+            throw new InvalidOperationException($"DocumentServer {purpose} token has expired.");
         }
 
         return envelope.Payload;
@@ -650,7 +668,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         {
             if (string.IsNullOrWhiteSpace(token))
             {
-                throw new InvalidOperationException($"ONLYOFFICE {purpose} token is missing.");
+                throw new InvalidOperationException($"DocumentServer {purpose} token is missing.");
             }
 
             if (purpose.Equals("download", StringComparison.OrdinalIgnoreCase))
@@ -665,12 +683,12 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
 
         if (string.IsNullOrWhiteSpace(scope))
         {
-            throw new InvalidOperationException($"ONLYOFFICE {purpose} scope is missing.");
+            throw new InvalidOperationException($"DocumentServer {purpose} scope is missing.");
         }
 
         if (!projectId.HasValue || !fileId.HasValue)
         {
-            throw new InvalidOperationException($"ONLYOFFICE {purpose} identity is missing.");
+            throw new InvalidOperationException($"DocumentServer {purpose} identity is missing.");
         }
 
         return new RequestContext(
@@ -703,7 +721,7 @@ public sealed class OnlyOfficeService : IOnlyOfficeService
         return Convert.FromBase64String(padded);
     }
 
-    private sealed record OnlyOfficeFileContext(
+    private sealed record DocumentServerFileContext(
         string Scope,
         Guid ProjectId,
         Guid FileId,

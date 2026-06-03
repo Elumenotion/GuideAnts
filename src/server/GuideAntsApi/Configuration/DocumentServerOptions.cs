@@ -1,14 +1,14 @@
 namespace GuideAntsApi.Configuration;
 
-public sealed class OnlyOfficeOptions
+public sealed class DocumentServerOptions
 {
-    public const string SectionName = "OnlyOffice";
+    public const string SectionName = "DocumentServer";
 
     public bool Enabled { get; set; } = false;
 
     public string PublicUrl { get; set; } = string.Empty;
 
-    public string InternalUrl { get; set; } = "http://onlyoffice-documentserver";
+    public string InternalUrl { get; set; } = "http://documentserver";
 
     public string ApiBaseUrl { get; set; } = string.Empty;
 

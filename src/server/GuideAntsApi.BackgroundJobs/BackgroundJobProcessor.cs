@@ -212,16 +212,26 @@ public class BackgroundJobProcessor : BackgroundService
             else
             {
                 var failed = await jobQueueService.FailAsync(claimedJob.Id, claimedJob.ClaimToken, "Job handler returned false", ct: ct);
+                var attemptNumber = claimedJob.Attempts + 1;
                 if (failed)
                 {
-                    _logger.LogWarning("Job handler failed for job {JobId} of type {JobType}", claimedJob.Id, claimedJob.JobType);
+                    _logger.LogError(
+                        "Job handler returned false for job {JobId} of type {JobType} on attempt {Attempt}/{MaxAttempts}. Payload: {PayloadJson}",
+                        claimedJob.Id,
+                        claimedJob.JobType,
+                        attemptNumber,
+                        claimedJob.MaxAttempts,
+                        claimedJob.PayloadJson);
                 }
                 else
                 {
-                    _logger.LogWarning(
-                        "Job handler failed for {JobId} ({JobType}) but fail update was not applied (likely lease/token mismatch).",
+                    _logger.LogError(
+                        "Job handler returned false for {JobId} ({JobType}) on attempt {Attempt}/{MaxAttempts}, and fail update was not applied (likely lease/token mismatch). Payload: {PayloadJson}",
                         claimedJob.Id,
-                        claimedJob.JobType);
+                        claimedJob.JobType,
+                        attemptNumber,
+                        claimedJob.MaxAttempts,
+                        claimedJob.PayloadJson);
                 }
             }
         }

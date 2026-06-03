@@ -45,8 +45,56 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
 
         if (shadow == null)
         {
-            Logger.LogWarning("Notebook shadow not found for {Id}", payload.NotebookFileId);
-            return false;
+            Logger.LogError(
+                "Notebook markdown shadow missing for NotebookFile {NotebookFileId}. Attempting recovery by creating a pending shadow.",
+                payload.NotebookFileId);
+
+            var originalFileForRecovery = await context.NotebookFiles
+                .Include(f => f.Notebook)
+                .FirstOrDefaultAsync(f => f.Id == payload.NotebookFileId, cancellationToken);
+            if (originalFileForRecovery == null)
+            {
+                Logger.LogError(
+                    "Cannot recover markdown extraction for NotebookFile {NotebookFileId} because the original NotebookFile record does not exist.",
+                    payload.NotebookFileId);
+                return false;
+            }
+
+            context.NotebookFileMarkdownShadows.Add(new NotebookFileMarkdownShadow
+            {
+                OriginalNotebookFileId = payload.NotebookFileId,
+                ContentHash = string.Empty,
+                StoragePath = string.Empty,
+                FileSize = 0,
+                Status = MarkdownExtractionStatus.Pending
+            });
+
+            try
+            {
+                await context.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException ex)
+            {
+                // Another process may have created the missing shadow concurrently.
+                Logger.LogWarning(
+                    ex,
+                    "Concurrent shadow recovery conflict for NotebookFile {NotebookFileId}; reloading shadow.",
+                    payload.NotebookFileId);
+                context.ChangeTracker.Clear();
+            }
+
+            shadow = await context.NotebookFileMarkdownShadows
+                .Include(s => s.OriginalFile)
+                .ThenInclude(f => f.Notebook)
+                .FirstOrDefaultAsync(s => s.OriginalNotebookFileId == payload.NotebookFileId, cancellationToken);
+
+            if (shadow == null)
+            {
+                Logger.LogError(
+                    "Failed to recover missing markdown shadow for NotebookFile {NotebookFileId}; extraction cannot proceed.",
+                    payload.NotebookFileId);
+                return false;
+            }
         }
 
         if (shadow.Status == MarkdownExtractionStatus.Completed)
@@ -57,6 +105,10 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
         var originalFile = shadow.OriginalFile;
         if (originalFile == null)
         {
+            Logger.LogError(
+                "Notebook markdown shadow {ShadowId} references missing NotebookFile {NotebookFileId}.",
+                shadow.Id,
+                payload.NotebookFileId);
             shadow.Status = MarkdownExtractionStatus.Failed;
             shadow.ErrorMessage = "Original file missing";
             shadow.ProcessedAt = DateTime.UtcNow;
@@ -75,8 +127,9 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
             : originalFile.Notebook.Slug;
 
         var notebookRoot = Path.Combine(basePath, projectSlug, notebookSlug);
-        var physicalPath = Path.Combine(notebookRoot, originalFile.RelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
-        if (!File.Exists(physicalPath))
+        var namedPhysicalPath = Path.Combine(notebookRoot, originalFile.RelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        var physicalPath = namedPhysicalPath;
+        if (!File.Exists(namedPhysicalPath))
         {
             // Legacy fallback during migration.
             notebookRoot = Path.Combine(basePath, originalFile.Notebook.ProjectId.ToString(), "notebooks", originalFile.NotebookId.ToString());
@@ -85,6 +138,11 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
 
         if (!File.Exists(physicalPath))
         {
+            Logger.LogError(
+                "Notebook source file not found for NotebookFile {NotebookFileId}. Checked named path '{NamedPath}' and legacy path '{LegacyPath}'.",
+                payload.NotebookFileId,
+                namedPhysicalPath,
+                physicalPath);
             shadow.Status = MarkdownExtractionStatus.Failed;
             shadow.ErrorMessage = "Notebook file not found";
             shadow.ProcessedAt = DateTime.UtcNow;
