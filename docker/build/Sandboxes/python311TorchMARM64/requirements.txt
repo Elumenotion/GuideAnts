@@ -25,7 +25,7 @@ cligj==0.7.2
 cmudict==1.0.32
 cons==0.4.6
 countryinfo==0.1.2
-cryptography==46.0.6
+cryptography==46.0.7
 cssselect2==0.8.0
 databricks-sql-connector==0.9.1
 dlib>=19.24
