@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FiAlertTriangle } from 'react-icons/fi';
 import LoadingSpinner from '../LoadingSpinner';
 import {
@@ -7,6 +6,7 @@ import {
     DocumentServerEditorConfigRequest,
     DocumentServerScope,
 } from '../../services/documentServer';
+import { ConfirmationDialog } from './ConfirmationDialog';
 
 declare global {
     interface Window {
@@ -46,16 +46,28 @@ export default function DocumentServerEditor({
     );
     const editorRef = useRef<{ destroyEditor?: () => void } | null>(null);
     const readyTimeoutRef = useRef<number | null>(null);
+    const lastReportedErrorRef = useRef<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
+
+    const reportEditorError = useCallback((message: string) => {
+        setError(message);
+        onError?.(message);
+
+        if (showErrorDialogOnError && lastReportedErrorRef.current !== message) {
+            lastReportedErrorRef.current = message;
+            setIsErrorDialogOpen(true);
+        }
+    }, [onError, showErrorDialogOnError]);
 
     useEffect(() => {
         let isDisposed = false;
         setIsLoading(true);
         setError(null);
         setIsErrorDialogOpen(false);
+        lastReportedErrorRef.current = null;
 
         const clearContainer = () => {
             const container = document.getElementById(containerId);
@@ -114,9 +126,7 @@ export default function DocumentServerEditor({
                 }
                 console.error('[DocumentServer] document ready timeout', { scope, fileId, timeoutMs: 20000 });
                 const message = 'DocumentServer editor did not become ready within 20 seconds.';
-                setError(message);
-                onError?.(message);
-                setIsErrorDialogOpen(showErrorDialogOnError);
+                reportEditorError(message);
                 setIsLoading(false);
             }, 20000);
 
@@ -146,9 +156,7 @@ export default function DocumentServerEditor({
                             readyTimeoutRef.current = null;
                         }
                         const message = `DocumentServer runtime error${errorCode ? ` (${errorCode})` : ''}${errorDescription ? `: ${errorDescription}` : '.'}`;
-                        setError(message);
-                        onError?.(message);
-                        setIsErrorDialogOpen(showErrorDialogOnError);
+                        reportEditorError(message);
                         setIsLoading(false);
                     },
                     onWarning: (event: unknown) => {
@@ -178,9 +186,7 @@ export default function DocumentServerEditor({
                 fileId,
                 message,
             });
-            setError(message);
-            onError?.(message);
-            setIsErrorDialogOpen(showErrorDialogOnError);
+            reportEditorError(message);
             setIsLoading(false);
         });
 
@@ -192,10 +198,10 @@ export default function DocumentServerEditor({
             }
             destroyEditor();
         };
-    }, [scope, projectId, fileId, notebookId, canEdit, containerId, reloadKey, showErrorDialogOnError, onError]);
+    }, [scope, projectId, fileId, notebookId, canEdit, containerId, reloadKey, reportEditorError]);
 
     return (
-        <div className={className ?? 'h-full w-full relative'} style={{ overflow: 'hidden', isolation: 'isolate' }}>
+        <div className={className ? `${className} relative` : 'h-full w-full relative'} style={{ position: 'relative', overflow: 'hidden', isolation: 'isolate' }}>
             <div id={containerId} className="h-full w-full" />
             {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-white/70">
@@ -214,87 +220,30 @@ export default function DocumentServerEditor({
                                 onClick={() => {
                                     setError(null);
                                     setIsErrorDialogOpen(false);
+                                    lastReportedErrorRef.current = null;
                                     setReloadKey((current) => current + 1);
                                 }}
                                 className="px-4 py-2 text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
                             >
                                 Retry
                             </button>
-                            <button
-                                type="button"
-                                onClick={() => setIsErrorDialogOpen(true)}
-                                className="px-4 py-2 text-sm rounded-md border border-gray-300 hover:bg-gray-50 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
-                            >
-                                Details
-                            </button>
                         </div>
                     </div>
                 </div>
             )}
-            {error && isErrorDialogOpen && (
-                <DocumentServerErrorDialog
-                    message={error}
-                    onClose={() => setIsErrorDialogOpen(false)}
-                />
-            )}
+            <ConfirmationDialog
+                isOpen={Boolean(error && isErrorDialogOpen)}
+                onClose={() => setIsErrorDialogOpen(false)}
+                onConfirm={() => setIsErrorDialogOpen(false)}
+                title="Document preview unavailable"
+                message={error ?? 'Failed to load document preview.'}
+                confirmText="OK"
+                confirmButtonClass="bg-blue-600 hover:bg-blue-700 text-white"
+                showCancelButton={false}
+                icon={FiAlertTriangle}
+            />
         </div>
     );
-}
-
-function DocumentServerErrorDialog({
-    message,
-    onClose,
-}: {
-    message: string;
-    onClose: () => void;
-}) {
-    useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                onClose();
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [onClose]);
-
-    const dialogMarkup = (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10010]" data-testid="documentserver-error-dialog-backdrop">
-            <div
-                className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="documentserver-error-title"
-            >
-                <div className="flex items-center justify-start p-6 pb-4">
-                    <div className="flex items-center space-x-3">
-                        <FiAlertTriangle className="w-6 h-6 text-amber-600" />
-                        <h2 id="documentserver-error-title" className="text-lg font-semibold text-gray-900">
-                            Document preview unavailable
-                        </h2>
-                    </div>
-                </div>
-
-                <div className="px-6 pb-6">
-                    <p className="text-sm text-gray-600 leading-relaxed">{message}</p>
-                </div>
-
-                <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="px-4 py-2 text-sm rounded-md bg-blue-600 hover:bg-blue-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
-                    >
-                        OK
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-
-    return createPortal(dialogMarkup, document.body);
 }
 
 async function ensureScriptLoaded(scriptUrl: string): Promise<void> {

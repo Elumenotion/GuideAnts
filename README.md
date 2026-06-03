@@ -13,6 +13,19 @@ Guides + Assistants = GuideAnts (pronounced "guidance")
 
 GuideAnts is a large, full-stack AI workspace system that combines notebook-style workspaces, reusable guides and assistants, file and lineage management with document intelligence and RAG, provider-routed multimodal AI services, with a modular architecture that works locally and scales to any cloud.
 
+## New: Pluggable DocumentServer Runtime
+
+GuideAnts now supports a pluggable DocumentServer runtime across compose stacks. You can run either Euro-Office DocumentServer or ONLYOFFICE DocumentServer by changing a single env value, without renaming services or changing app config keys.
+This powers in-app Office document display and full editing for project and notebook files.
+
+- Compose and app naming stay neutral: `documentserver` service and `DocumentServer:*` settings.
+- Switch implementation with one variable: `GA_DOCUMENTSERVER_IMAGE`.
+- Example values:
+  - `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest`
+  - `GA_DOCUMENTSERVER_IMAGE=onlyoffice/documentserver:latest`
+
+This makes it straightforward to choose the implementation that best fits your environment while keeping the same GuideAnts runtime wiring. See [DocumentServer image switching](#documentserver-image-switching) for operational details.
+
 ## Quickstart
 
 Use the root one-step launcher for your OS:
@@ -42,6 +55,46 @@ Useful options:
 - `--fix` attempts limited remediation where possible.
 - `--backend cpu|cuda13|rocm|slim` forces the AI/runtime stack. Use `slim` when you need the Python sandbox but plan to use cloud/provider AI instead of local model runtimes.
 - `--compose ghcr|local` chooses prebuilt GHCR stack or local-image stack.
+
+## Pre-release Security And Exposure (June 2026)
+
+GuideAnts is currently in an active hardening phase ahead of release. Authentication, user management, and additional cross-network security controls are being implemented now.
+
+Current guidance:
+
+- Treat current stacks as trusted-network/dev deployments unless explicitly hardened for external exposure.
+- Avoid exposing internal service containers directly to public networks.
+- Prefer API-mediated browser traffic (including proxied integrations) over direct container host ports.
+
+## Run Modes: Fast Local Dev Vs Deployment-intent
+
+Use the mode that matches your goal.
+
+### A) Fast local API/UI debugging (host-run API + UI)
+
+Use this for rapid iteration when you do not want to rebuild the API image after each change:
+
+- Run API/UI directly on host (`http://localhost:5106` API, Vite/browser dev as needed).
+- Keep supporting dependencies in Docker.
+- Use `docker/.env.api-local-debug.example` as your baseline env.
+
+Example (CUDA dependency services only):
+
+```powershell
+docker compose --env-file docker/.env.api-local-debug.example -f docker/docker-compose.cuda.yml up -d mssql-express guideants-ai docling-serve documentserver plantuml searxng
+```
+
+Then run API/UI from source on host (see [`docs/developer-config-guide.md`](docs/developer-config-guide.md)).
+
+### B) Deployment-intent compose runs (private internals)
+
+Use this for full-stack validation with private internals:
+
+- Non-GHCR compose stacks and `docker/docker-compose.cuda.api-only-local-build.yml` are deployment-intent variants.
+- Internal services are intended to remain private on `guideants-network`.
+- The API/UI entrypoint is the only service that should require host-port exposure.
+
+For end-to-end startup examples, see [`docs/setup-guide.md`](docs/setup-guide.md).
 
 ## Choose A Runtime Stack
 
@@ -128,11 +181,29 @@ The current operator/developer setup is centered on Docker Compose. The stack de
 - `mssql-express` for the application database in split stacks, or bundled SQL Server inside `guideants-webapi-ui-mssql` in combined stacks.
 - `guideants-ai` as a consolidated local AI gateway, or as the sandbox-oriented AI runtime in the slim stack.
 - `docling-serve` for local document intelligence / markdown extraction
-- `documentserver` for Office document viewing/editing in project and notebook file previews
+- `documentserver` for in-app Office document display and full editing in project and notebook file flows
 - `searxng` for search support
 - `plantuml` as a ScriptExecutionAgent-backed diagram sandbox with PlantUML and Graphviz installed
 
+### Network Exposure Policy
+
+- In deployment-intent stacks, only the API/UI entrypoint should have a host `ports` mapping.
+- SQL, AI runtime, Docling, DocumentServer, PlantUML, and SearXNG should remain internal to `guideants-network`.
+- Client/browser traffic should route through API endpoints and proxy routes instead of direct host access to supporting containers.
+
+### Auth And User Management Status
+
+Auth and user management are in active development as part of release hardening. Additional guidance and defaults for safe cross-network and web deployments will be added as those features land.
+
 Set `GA_DOCUMENTSERVER_IMAGE` to whichever compatible DocumentServer image you want the compose stacks to run. The checked-in `docker/.env` sets `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest`; override that value with any compatible image when needed.
+
+### DocumentServer Image Switching
+
+- Keep the compose service/config naming neutral (`documentserver`, `DocumentServer:*`) and switch implementations only by changing `GA_DOCUMENTSERVER_IMAGE`.
+- Example values:
+  - `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest`
+  - `GA_DOCUMENTSERVER_IMAGE=onlyoffice/documentserver:latest`
+- After changing the image value, restart the container with your selected compose file so Docker Compose pulls/runs the requested image for `documentserver`.
 
 For local host-API debugging (API at `http://localhost:5106`, services in Docker), use `docker/.env.api-local-debug.example` as the reference env and set `DocumentServer:ApiBaseUrl` in `src/server/GuideAntsApi/appsettings.Development.json` to `http://host.docker.internal:5106`.
 
@@ -161,7 +232,7 @@ GuideAnts is built on top of excellent open source work. Huge thanks to the team
 - [Docling](https://github.com/docling-project/docling) for document intelligence and markdown extraction (`docling-serve`).
 - [SearXNG](https://github.com/searxng/searxng) for metasearch and web retrieval.
 - [PlantUML](https://github.com/plantuml/plantuml) and [Graphviz](https://gitlab.com/graphviz/graphviz) for diagram rendering.
-- Compatible DocumentServer images for Office document viewing/editing capabilities.
+- [Euro-Office DocumentServer](https://github.com/Euro-Office/DocumentServer) and [ONLYOFFICE DocumentServer](https://github.com/ONLYOFFICE/DocumentServer) as compatible `GA_DOCUMENTSERVER_IMAGE` targets for full in-app Office document display and editing capabilities.
 
 ## Repository Tour
 

@@ -1,6 +1,6 @@
 # GuideAnts Setup Guide
 
-Last updated: 2026-06-02
+Last updated: 2026-06-03
 
 This is the setup-first operator guide for GuideAnts.
 Use it to get a working environment from zero to usable chat/services, then use linked docs for deeper architecture details.
@@ -55,7 +55,7 @@ The services you see depend on that stack:
 | `mssql-express` | `mssql2025-express-fts` | SQL Server database for split-stack `cpu`, `cuda13`, and `rocm` deployments. Not present in the slim stack because SQL Server is bundled into `guideants-webapi-ui-mssql`. |
 | `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13,rocm}:latest` (or local tag); `guideants-ai-slim` for the slim stack | Full variants are the local AI gateway: llama.cpp, ASR, TTS, image generation, embeddings, media, script execution. The slim AI variant is for Python sandbox/script execution without starting local model runtime services. |
 | `docling-serve` | `quay.io/docling-project/docling-serve-cpu:v1.16.1` by default | Local document intelligence / markdown extraction. The `cpu` in this image tag is Docling's CPU image variant, not the GuideAnts backend selection. |
-| `documentserver` | `${GA_DOCUMENTSERVER_IMAGE}` from `docker/.env` | DocumentServer used by project/notebook file preview and editor flows. |
+| `documentserver` | `${GA_DOCUMENTSERVER_IMAGE}` from `docker/.env` | DocumentServer used for in-app Office document display and full editing in project/notebook file flows. |
 | `guideants-webapi-ui` / `guideants-webapi-ui-slim` / `guideants-webapi-ui-mssql` | Stack-specific API/UI image | Main API plus bundled browser UI at `http://localhost:5107`. `guideants-webapi-ui-slim` is API/UI-only for split stacks; it is not the slim AI stack. |
 | `plantuml` | `plantuml-1.2025.2` | ScriptExecutionAgent-backed PlantUML sandbox with PlantUML and Graphviz installed. |
 | `searxng` | `${GA_SEARXNG_IMAGE:-guideants-searxng:latest}` | Search backend used by agent/web features. |
@@ -187,6 +187,11 @@ GA_DOCUMENTSERVER_JWT_ENABLED=false
 Required rules:
 
 1. `GA_DOCUMENTSERVER_IMAGE` selects any compatible DocumentServer image. The checked-in `docker/.env` currently sets this to `ghcr.io/euro-office/documentserver:latest`; override this value in your env file to use another compatible image.
+1. Keep naming neutral in compose and config (`documentserver`, `DocumentServer:*`) regardless of which compatible image you select.
+1. Example image values:
+   - `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest`
+   - `GA_DOCUMENTSERVER_IMAGE=onlyoffice/documentserver:latest`
+1. After changing `GA_DOCUMENTSERVER_IMAGE`, restart the `documentserver` service with your selected compose file so Docker Compose pulls/runs that specific image.
 1. `GA_DOCUMENTSERVER_PUBLIC_URL` must point to the browser-reachable DocumentServer URL (default local mapping is `http://localhost:8082`).
 2. `DocumentServer:ApiBaseUrl` is dedicated to DocumentServer callback/download URLs; do not use `ANTRUNNER_SERVICES_HOST_URL` for this.
 3. JWT for DocumentServer is optional and disabled by default (`GA_DOCUMENTSERVER_JWT_ENABLED=false`, `DocumentServer:JwtEnabled=false`).

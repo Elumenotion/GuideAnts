@@ -14,8 +14,6 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
-    ports:
-      - "1434:1433"
     cpus: "4.0"
     volumes:
       - mssql_runtime_state:/var/opt/mssql
@@ -34,8 +32,6 @@ services:
     devices:
       - /dev/kfd
       - /dev/dri
-    ports:
-      - "8110:80"
     shm_size: "8gb"
     volumes:
       - ai_local_models-new:/models-local
@@ -130,8 +126,6 @@ services:
     container_name: docling-serve
     environment:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
-    ports:
-      - "5001:5001"
     networks:
       - guideants-network
     restart: unless-stopped
@@ -145,8 +139,6 @@ services:
       - JWT_HEADER=${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}
       - JWT_IN_BODY=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}
       - ALLOW_PRIVATE_IP_ADDRESS=true
-    ports:
-      - "127.0.0.1:${GA_DOCUMENTSERVER_PORT:-8082}:80"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/info/info.json"]
       interval: 30s
@@ -217,8 +209,6 @@ services:
     container_name: plantuml
     environment:
       - FILE_STORAGE_ROOT=/app/ContentFiles
-    ports:
-      - "8111:80"
     volumes:
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
@@ -232,8 +222,6 @@ services:
     pull_policy: always
     container_name: readweb-searxng
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8091:8080"
     volumes:
       - type: bind
         source: ${GA_SEARXNG_CONFIG_HOST_PATH:-./volumes/searxng/config}

@@ -265,7 +265,7 @@ public sealed class NotebookImageServiceTests
             {
                 ["HuggingFace:Token"] = "hf-token"
             },
-            modelId: "stabilityai/stable-diffusion-xl-base-1.0");
+            modelId: "stabilityai/stable-diffusion-xl-base-1.0-rate-limit");
 
         var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var result = await service.GenerateImageAsync("a test image", "hf-provider.png", context: context);

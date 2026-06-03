@@ -3,14 +3,88 @@ using GuideAntsApi.Services.Components;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Net;
 using System.Net.Http;
+using Yarp.ReverseProxy.Forwarder;
 
 namespace GuideAntsApi.Endpoints;
 
 public static class DocumentServerEndpoints
 {
+    private const string DocumentServerProxyPathItemKey = "__DocumentServerProxyPath";
+    private const string DocumentServerProxyPublicPrefix = "/api/documentserver/ds";
+
+    private static readonly HttpMessageInvoker DocumentServerProxyHttpClient = new(new SocketsHttpHandler
+    {
+        UseProxy = false,
+        AllowAutoRedirect = false,
+        AutomaticDecompression = DecompressionMethods.None,
+        UseCookies = false,
+        EnableMultipleHttp2Connections = true,
+        ActivityHeadersPropagator = null
+    });
+
+    private static readonly ForwarderRequestConfig DocumentServerProxyRequestConfig = new()
+    {
+        ActivityTimeout = TimeSpan.FromMinutes(30)
+    };
+
+    private static readonly HttpTransformer DocumentServerProxyTransformer = new DocumentServerProxyHttpTransformer();
+
     public static void MapDocumentServerEndpoints(this WebApplication app)
     {
+        app.MapMethods("/api/documentserver/ds/{**path}", [HttpMethods.Get, HttpMethods.Post, HttpMethods.Put, HttpMethods.Patch, HttpMethods.Delete, HttpMethods.Head, HttpMethods.Options], async (
+            HttpContext httpContext,
+            string? path,
+            IOptions<DocumentServerOptions> options,
+            IHttpForwarder forwarder,
+            ILoggerFactory loggerFactory) =>
+        {
+            var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
+            var documentServerOptions = options.Value;
+            if (!documentServerOptions.Enabled)
+            {
+                return Results.NotFound(new { message = "DocumentServer is disabled." });
+            }
+
+            if (!Uri.TryCreate(documentServerOptions.InternalUrl?.Trim(), UriKind.Absolute, out var internalUri))
+            {
+                logger.LogWarning("DocumentServer proxy rejected due to invalid internal URL configuration. internalUrl={InternalUrl}", documentServerOptions.InternalUrl);
+                return Results.BadRequest(new { message = "DocumentServer:InternalUrl must be configured as an absolute URL." });
+            }
+
+            httpContext.Items[DocumentServerProxyPathItemKey] = NormalizeProxyPath(path);
+            var destinationPrefix = BuildDestinationPrefix(internalUri);
+            var proxyError = await forwarder.SendAsync(
+                httpContext,
+                destinationPrefix,
+                DocumentServerProxyHttpClient,
+                DocumentServerProxyRequestConfig,
+                DocumentServerProxyTransformer);
+
+            if (proxyError == ForwarderError.None)
+            {
+                return Results.Empty;
+            }
+
+            var errorFeature = httpContext.GetForwarderErrorFeature();
+            logger.LogWarning(
+                errorFeature?.Exception,
+                "DocumentServer proxy failed. error={Error} destinationPrefix={DestinationPrefix} path={Path}",
+                proxyError,
+                destinationPrefix,
+                path);
+            if (!httpContext.Response.HasStarted)
+            {
+                httpContext.Response.StatusCode = StatusCodes.Status502BadGateway;
+                await httpContext.Response.WriteAsJsonAsync(new { message = "DocumentServer proxy request failed." });
+            }
+
+            return Results.Empty;
+        })
+        .WithName("DocumentServerProxy")
+        .ExcludeFromDescription();
+
         var group = app.MapGroup("/api/documentserver")
             .WithTags("DocumentServer")
             .WithOpenApi();
@@ -284,5 +358,74 @@ public static class DocumentServerEndpoints
 
         value = raw;
         return true;
+    }
+
+    private static string NormalizeProxyPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "/";
+        }
+
+        return "/" + path.TrimStart('/');
+    }
+
+    private static string BuildDestinationPrefix(Uri internalUri)
+    {
+        var basePath = internalUri.AbsolutePath.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(basePath) || string.Equals(basePath, "/", StringComparison.Ordinal))
+        {
+            return $"{internalUri.Scheme}://{internalUri.Authority}";
+        }
+
+        return $"{internalUri.Scheme}://{internalUri.Authority}{basePath}";
+    }
+
+    private sealed class DocumentServerProxyHttpTransformer : HttpTransformer
+    {
+        public override async ValueTask TransformRequestAsync(
+            HttpContext httpContext,
+            HttpRequestMessage proxyRequest,
+            string destinationPrefix,
+            CancellationToken cancellationToken)
+        {
+            await base.TransformRequestAsync(httpContext, proxyRequest, destinationPrefix, cancellationToken);
+
+            var proxyPath = httpContext.Items.TryGetValue(DocumentServerProxyPathItemKey, out var pathObj)
+                ? pathObj as string
+                : null;
+            var normalizedPath = string.IsNullOrWhiteSpace(proxyPath)
+                ? "/"
+                : proxyPath;
+            if (!normalizedPath.StartsWith('/'))
+            {
+                normalizedPath = "/" + normalizedPath;
+            }
+
+            var queryString = httpContext.Request.QueryString.HasValue
+                ? httpContext.Request.QueryString.Value
+                : string.Empty;
+            proxyRequest.RequestUri = new Uri($"{destinationPrefix.TrimEnd('/')}{normalizedPath}{queryString}", UriKind.Absolute);
+
+            if (httpContext.Request.Host.HasValue)
+            {
+                proxyRequest.Headers.Host = httpContext.Request.Host.Value;
+            }
+
+            if (httpContext.Request.Host.HasValue)
+            {
+                proxyRequest.Headers.Remove("X-Forwarded-Host");
+                proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-Host", httpContext.Request.Host.Value);
+            }
+
+            proxyRequest.Headers.Remove("X-Forwarded-Proto");
+            proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-Proto", httpContext.Request.Scheme);
+
+            proxyRequest.Headers.Remove("X-Forwarded-Prefix");
+            proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", DocumentServerProxyPublicPrefix);
+
+            proxyRequest.Headers.Remove("X-Forwarded-PathBase");
+            proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-PathBase", DocumentServerProxyPublicPrefix);
+        }
     }
 }

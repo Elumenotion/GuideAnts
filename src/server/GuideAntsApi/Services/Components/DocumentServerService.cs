@@ -526,10 +526,28 @@ public sealed class DocumentServerService : IDocumentServerService
             Port = internalUri.IsDefaultPort ? -1 : internalUri.Port
         };
 
+        var rewrittenPath = sourceUri.AbsolutePath;
+        var publicPath = publicUri.AbsolutePath.TrimEnd('/');
+        if (!string.IsNullOrWhiteSpace(publicPath) && !string.Equals(publicPath, "/", StringComparison.Ordinal))
+        {
+            if (string.Equals(rewrittenPath, publicPath, StringComparison.OrdinalIgnoreCase))
+            {
+                rewrittenPath = "/";
+            }
+            else if (rewrittenPath.StartsWith(publicPath + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                rewrittenPath = rewrittenPath[publicPath.Length..];
+            }
+        }
+
         var internalPath = internalUri.AbsolutePath.TrimEnd('/');
         if (!string.IsNullOrWhiteSpace(internalPath))
         {
-            builder.Path = $"{internalPath}/{sourceUri.AbsolutePath.TrimStart('/')}";
+            builder.Path = $"{internalPath}/{rewrittenPath.TrimStart('/')}";
+        }
+        else
+        {
+            builder.Path = rewrittenPath;
         }
 
         var rewrittenUrl = builder.Uri.ToString();

@@ -15,8 +15,8 @@ import AudioPlayer from '../../common/AudioPlayer';
 import LoadingSpinner from '../../LoadingSpinner';
 import FullScreenEditor from '../conversations/FullScreenEditor';
 import { FaRegEdit, FaExpandAlt, FaCompress, FaDownload } from 'react-icons/fa';
-import { ConfirmationDialog } from '../../common/ConfirmationDialog';
 import DocumentServerEditor from '../../common/DocumentServerEditor';
+import { ConfirmationDialog } from '../../common/ConfirmationDialog';
 import {
   getDocumentServerCapabilities,
   isDocumentServerSupportedByExtension,
@@ -798,6 +798,10 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     // Always use large modal if tabs are shown
     if (supportsMarkdownExtraction) return true;
 
+    // DocumentServer editors need a real preview canvas even when there is no
+    // extracted-text tab. Legacy Office formats like .ppt hit this notebook-only path.
+    if (documentServerCandidate && documentServerCapabilities?.enabled !== false) return true;
+
     if (isLoading || error || originalContentError || !content) return false;
     
     // HTML files need large modal for best viewing
@@ -824,6 +828,10 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     if (needsLargeModal()) {
       // HTML files benefit from larger modal for better viewing
       const isHtml = contentType === 'text/html' || contentType === 'application/xhtml+xml';
+      const isDocumentServerLayout = documentServerCandidate && documentServerCapabilities?.enabled !== false;
+      if (isDocumentServerLayout) {
+        return "bg-white rounded-lg shadow-xl w-full max-w-6xl h-full max-h-[95vh] flex flex-col";
+      }
       if (isHtml) {
         return "bg-white rounded-lg shadow-xl w-full max-w-6xl h-full max-h-[95vh] flex flex-col";
       }
@@ -1226,7 +1234,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
             </div>
           )}
         </header>
-        <main className={`flex-1 min-h-0 ${needsLargeModal() ? 'flex' : 'flex flex-col justify-center'} ${supportsMarkdownExtraction ? '' : 'p-4 overflow-auto'}`} data-tour-id="file-preview.content">
+        <main className={`flex-1 min-h-0 ${needsLargeModal() ? 'flex' : 'flex flex-col justify-center'} ${(supportsMarkdownExtraction || (documentServerCandidate && documentServerCapabilities?.enabled !== false)) ? '' : 'p-4 overflow-auto'}`} data-tour-id="file-preview.content">
           {renderViewer()}
         </main>
       </div>
@@ -1237,8 +1245,8 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
         title="Document preview unavailable"
         message={originalContentError ?? 'Failed to load document preview.'}
         confirmText="OK"
-        cancelText="Close"
         confirmButtonClass="bg-blue-600 hover:bg-blue-700 text-white"
+        showCancelButton={false}
       />
       {/* Markdown Full Screen Editor Portal */}
       {isEditingMd && (

@@ -191,6 +191,7 @@ public class Program
 
         app.UseHttpsRedirection();
         app.UseCors("RestrictedOrigins");
+        app.UseWebSockets();
         
         app.UseExceptionHandler(errorApp =>
         {

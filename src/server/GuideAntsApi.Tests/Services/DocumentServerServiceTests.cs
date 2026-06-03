@@ -65,7 +65,7 @@ public sealed class DocumentServerServiceTests
                 UserName: "Test User"),
             CancellationToken.None);
 
-        result.DocumentServerUrl.Should().Be("http://localhost:8082");
+        result.DocumentServerUrl.Should().Be("http://localhost:5107/api/documentserver/ds");
         result.Config.Should().NotBeNull();
         var config = (Dictionary<string, object?>)result.Config;
         var editorConfig = (Dictionary<string, object?>)config["editorConfig"]!;
@@ -371,11 +371,69 @@ public sealed class DocumentServerServiceTests
             null,
             null,
             null,
-            new DocumentServerCallbackPayload(Status: 2, Url: "http://localhost:8082/cache/files/edited.docx?token=abc"),
+            new DocumentServerCallbackPayload(Status: 2, Url: "http://localhost:5107/api/documentserver/ds/cache/files/edited.docx?token=abc"),
             CancellationToken.None);
 
         httpClientFactory.LastRequestUri.Should().Be(new Uri("http://documentserver/cache/files/edited.docx?token=abc"));
         contentService.UploadCalls.Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task HandleCallbackAsync_SaveStatus_WithInvalidCallbackUrl_Throws()
+    {
+        await using var db = CreateDbContext();
+        var projectId = Guid.NewGuid();
+        var fileId = Guid.NewGuid();
+        var service = CreateService(
+            db,
+            new StubContentFileService(
+                details: new ContentFileDetailsDto(
+                    Id: fileId,
+                    FileName: "proposal.docx",
+                    Path: string.Empty,
+                    RelativePath: "proposal.docx",
+                    ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    Index: false,
+                    DocumentId: "doc-1",
+                    Created: DateTime.UtcNow,
+                    FileSize: 42,
+                    FolderId: null,
+                    FolderPath: null,
+                    LatestVersion: 1,
+                    IsSnapshot: false,
+                    HasMarkdownShadow: false,
+                    MarkdownStatus: null,
+                    MarkdownProcessedAt: null)),
+            enabled: true);
+
+        var tokenResult = await service.BuildEditorConfigAsync(
+            CreateHttpContext(),
+            new DocumentServerEditorConfigRequest(
+                Scope: "project",
+                ProjectId: projectId,
+                FileId: fileId,
+                NotebookId: null,
+                CanEdit: true,
+                UserId: "user-1",
+                UserName: "Test User"),
+            CancellationToken.None);
+
+        var config = (Dictionary<string, object?>)tokenResult.Config;
+        var editorConfig = (Dictionary<string, object?>)config["editorConfig"]!;
+        var callbackUrl = editorConfig["callbackUrl"]!.ToString()!;
+        var token = ExtractToken(callbackUrl);
+
+        var action = async () => await service.HandleCallbackAsync(
+            token,
+            null,
+            null,
+            null,
+            null,
+            new DocumentServerCallbackPayload(Status: 2, Url: "/cache/files/edited.docx?token=abc"),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must be an absolute URL*");
     }
 
     [TestMethod]
@@ -462,7 +520,7 @@ public sealed class DocumentServerServiceTests
             Microsoft.Extensions.Options.Options.Create(new DocumentServerOptions
             {
                 Enabled = enabled,
-                PublicUrl = "http://localhost:8082",
+                PublicUrl = "http://localhost:5107/api/documentserver/ds",
                 InternalUrl = internalUrl,
                 ApiBaseUrl = "http://host.docker.internal:5106",
                 JwtEnabled = true,

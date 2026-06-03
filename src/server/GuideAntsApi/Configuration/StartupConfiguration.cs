@@ -52,6 +52,7 @@ public static class StartupConfiguration
         services.AddHttpClient(Microsoft.Extensions.Options.Options.DefaultName).ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(300));
         // HttpClient factory is already registered via AddHttpClient<ISpeechTranscriptionService>
         // Individual services now use IHttpClientFactory.CreateClient() for proper connection management
+        services.AddReverseProxy();
 
         // EF Core logging interceptor for enhanced query debugging
         services.AddSingleton<EfQueryWarningInterceptor>();
