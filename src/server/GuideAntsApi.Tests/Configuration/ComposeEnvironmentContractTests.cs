@@ -11,7 +11,7 @@ public sealed class ComposeEnvironmentContractTests
         ("docker-compose.cpu.yml", "guideants-webapi-ui"),
         ("docker-compose.cuda.yml", "guideants-webapi-ui"),
         ("docker-compose.rocm.yml", "guideants-webapi-ui"),
-        ("docker-compose.slim.yml", "guideants-webapi-ui-slim"),
+        ("docker-compose.slim.yml", "guideants-webapi-ui"),
         ("docker-compose.ghcr-cpu.yml", "guideants-webapi-ui"),
         ("docker-compose.ghcr-cuda13.yml", "guideants-webapi-ui"),
         ("docker-compose.ghcr-rocm.yml", "guideants-webapi-ui"),

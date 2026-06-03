@@ -32,6 +32,7 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
         await db.SaveChangesAsync();
 
         var service = CreateService(db, BuildConfiguration());
+        await service.BootstrapAsync(BuildConfiguration());
         var section = await service.GetSectionAsync("ChatDefaults");
 
         section.Should().NotBeNull();
@@ -72,6 +73,7 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
         await db.SaveChangesAsync();
 
         var service = CreateService(db, BuildConfiguration());
+        await service.BootstrapAsync(BuildConfiguration());
         var section = await service.GetSectionAsync("ChatDefaults");
 
         section.Should().NotBeNull();
