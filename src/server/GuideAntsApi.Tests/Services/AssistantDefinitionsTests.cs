@@ -156,7 +156,7 @@ public class AssistantDefinitionsTests
         using var manifest = JsonDocument.Parse(storageMetadata.ManifestJson);
         manifest.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
         manifest.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
-        manifest.RootElement.GetProperty("reasoning_effort").GetString().Should().Be("medium");
+        manifest.RootElement.TryGetProperty("reasoning_effort", out _).Should().BeFalse();
         storageMetadata.SamplingParametersJson.Should().NotBeNullOrWhiteSpace();
         using var sampling = JsonDocument.Parse(storageMetadata.SamplingParametersJson!);
         sampling.RootElement.GetProperty("temperature").GetDouble().Should().BeApproximately(0.35, 0.001);
@@ -192,11 +192,12 @@ public class AssistantDefinitionsTests
         using var manifest = JsonDocument.Parse(storageMetadata.ManifestJson);
         manifest.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
         manifest.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
-        manifest.RootElement.GetProperty("reasoning_effort").GetString().Should().Be("high");
+        manifest.RootElement.TryGetProperty("reasoning_effort", out _).Should().BeFalse();
         storageMetadata.SamplingParametersJson.Should().NotBeNullOrWhiteSpace();
         using var sampling = JsonDocument.Parse(storageMetadata.SamplingParametersJson!);
         sampling.RootElement.TryGetProperty("temperature", out _).Should().BeFalse();
         sampling.RootElement.TryGetProperty("top_p", out _).Should().BeFalse();
+        sampling.RootElement.TryGetProperty("reasoning_effort", out _).Should().BeFalse();
         sampling.RootElement.GetProperty("min_p").GetDouble().Should().BeApproximately(0.1, 0.001);
     }
 
@@ -222,6 +223,33 @@ public class AssistantDefinitionsTests
 
         var storageMetadata = Materialize(assistant);
         storageMetadata.SamplingParametersJson.Should().BeNull();
+    }
+
+    [TestMethod]
+    public void DatabaseMaterialization_PreservesSamplingBagPayloadVerbatim()
+    {
+        const string rawSamplingBag = """{"temperature":0.45,"custom_knob":"aggressive","nested":{"top_k":42}}""";
+        var assistant = new Assistant
+        {
+            Name = "Raw Bag Assistant",
+            Kind = AssistantKind.Assistant,
+            IsActive = true,
+            ModelId = "gpt-5-mini",
+            Temperature = 0.9f,
+            TopP = 0.2,
+            ReasoningEffort = "high",
+            SamplingParametersJson = rawSamplingBag,
+            Model = new Model
+            {
+                ModelId = "gpt-5-mini",
+                DisplayName = "GPT-5 mini",
+                Provider = "openai-chat",
+                IsActive = true
+            }
+        };
+
+        var storageMetadata = Materialize(assistant);
+        storageMetadata.SamplingParametersJson.Should().Be(rawSamplingBag);
     }
 
     private static AssistantStorageMetadata Materialize(Assistant assistant)

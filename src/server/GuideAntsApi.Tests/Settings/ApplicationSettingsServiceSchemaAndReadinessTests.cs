@@ -126,6 +126,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration(new Dictionary<string, string?>());
         var service = CreateService(db, configuration);
+        await service.BootstrapAsync(configuration);
 
         var section = await service.GetSectionAsync(SettingsSectionRegistry.TelemetrySectionName);
         section.Should().NotBeNull();
@@ -152,6 +153,7 @@ public sealed class ApplicationSettingsServiceSchemaAndReadinessTests
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration(new Dictionary<string, string?>());
         var service = CreateService(db, configuration);
+        await service.BootstrapAsync(configuration);
 
         await service.GetSectionAsync(SettingsSectionRegistry.TelemetrySectionName);
 
