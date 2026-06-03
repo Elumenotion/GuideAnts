@@ -8,6 +8,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $env:DOCKER_BUILDKIT = '1'
 
+if ($All) {
+    Write-Error "The -All support-image build was split out. Run build_support_images.ps1 separately after backend builds."
+    exit 1
+}
+
 function Get-CombinedHash {
     param(
         [Parameter(Mandatory = $true)]
@@ -78,6 +83,46 @@ function Get-FilePathsRecursive {
             Sort-Object FullName |
             Select-Object -ExpandProperty FullName
     )
+}
+
+function Set-DotEnvValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Key,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+
+    $envLine = "$Key=$Value"
+    $lines = @()
+    if (Test-Path $Path) {
+        $lines = @(Get-Content -Path $Path)
+    }
+
+    $replaced = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^\s*$([regex]::Escape($Key))=") {
+            $lines[$i] = $envLine
+            $replaced = $true
+            break
+        }
+    }
+
+    if (-not $replaced) {
+        $lines += $envLine
+    }
+
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        Set-Content -Path $Path -Value $lines -Encoding utf8NoBOM
+    }
+    else {
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllLines($Path, [string[]]$lines, $utf8NoBom)
+    }
 }
 
 function Promote-LocalBuildxCache {
@@ -216,7 +261,6 @@ Write-Host "Image tag:     $imageTag"
 Write-Host "Latest alias:  $latestImageTag"
 Write-Host "Deps target:   $depsTarget"
 Write-Host "Rebuild base:  $RebuildBase"
-if ($All) { Write-Host "All images:    Yes" }
 Write-Host ""
 
 if (-not (Test-Path $requirementsSrc)) {
@@ -415,163 +459,8 @@ $imageEnvKey = switch ($Backend) {
     default { 'GA_AI_CPU_IMAGE' }
 }
 $envLine = "$imageEnvKey=$latestImageTag"
-
-if (Test-Path $envFile) {
-    $lines = Get-Content $envFile
-    $replaced = $false
-    $lines = $lines | ForEach-Object {
-        if ($_ -match "^$([regex]::Escape($imageEnvKey))=") { $replaced = $true; $envLine } else { $_ }
-    }
-    if (-not $replaced) { $lines += $envLine }
-    Set-Content -Path $envFile -Value $lines -Encoding UTF8
-}
-else {
-    Set-Content -Path $envFile -Value $envLine -Encoding UTF8
-}
+Set-DotEnvValue -Path $envFile -Key $imageEnvKey -Value $latestImageTag
 Write-Host "Wrote $envLine to $envFile" -ForegroundColor Green
-
-# --- Additional images (only with -All) ---
-if ($All) {
-    $buildStateDir = Join-Path $dockerRoot '.build-state'
-    if (-not (Test-Path $buildStateDir)) {
-        New-Item -ItemType Directory -Path $buildStateDir | Out-Null
-    }
-
-    $scriptAgentPublish = Join-Path $serverPath "ScriptExecutionAgent\publish"
-    $plantumlContainerPath = Join-Path $PSScriptRoot "Sandboxes" "PlantUml"
-    $plantumlScriptAgentPath = Join-Path $plantumlContainerPath "ScriptExecutionAgent"
-    $plantumlDockerfilePath = Join-Path $plantumlContainerPath "dockerfile"
-    $plantumlImageTag = "plantuml-1.2025.2"
-    $plantumlHashFile = Join-Path $buildStateDir "plantuml.hash"
-
-    $plantumlInputFiles = @($plantumlDockerfilePath) + (Get-FilePathsRecursive -Root $scriptAgentPublish)
-    $plantumlHash = Get-CombinedHash -Paths $plantumlInputFiles
-    $plantumlCanReuse =
-        (-not $RebuildBase) -and
-        (Test-DockerImageExists -ImageTag $plantumlImageTag) -and
-        ((Get-HashFromFile -Path $plantumlHashFile) -eq $plantumlHash)
-
-    if ($plantumlCanReuse) {
-        Write-Host "PlantUML unchanged; reusing existing image: $plantumlImageTag" -ForegroundColor Green
-    }
-    else {
-        if ((Test-Path $scriptAgentPublish) -and (Test-Path $plantumlContainerPath)) {
-            if (Test-Path $plantumlScriptAgentPath) {
-                Remove-Item -Path $plantumlScriptAgentPath -Recurse -Force
-            }
-            Copy-Item -Path $scriptAgentPublish -Destination $plantumlScriptAgentPath -Recurse -Force
-            Write-Host "Copied ScriptExecutionAgent to PlantUML container directory" -ForegroundColor Green
-        }
-
-        docker build -t $plantumlImageTag -f Sandboxes/PlantUml/dockerfile Sandboxes/PlantUml
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "PlantUML image build failed with exit code $LASTEXITCODE"
-            exit 1
-        }
-        Set-Content -Path $plantumlHashFile -Value $plantumlHash -Encoding UTF8
-    }
-
-    $mssqlBuildContext = Join-Path $PSScriptRoot "mssql-fts"
-    $mssqlDockerfilePath = Join-Path $mssqlBuildContext "Dockerfile"
-    $mssqlImageTag = "mssql2025-express-fts"
-    $mssqlHashFile = Join-Path $buildStateDir "mssql-fts.hash"
-    if (-not (Test-Path $mssqlDockerfilePath)) {
-        Write-Error "MSSQL Dockerfile not found at $mssqlDockerfilePath"
-        exit 1
-    }
-    $mssqlHash = Get-CombinedHash -Paths (Get-FilePathsRecursive -Root $mssqlBuildContext)
-    $mssqlCanReuse =
-        (-not $RebuildBase) -and
-        (Test-DockerImageExists -ImageTag $mssqlImageTag) -and
-        ((Get-HashFromFile -Path $mssqlHashFile) -eq $mssqlHash)
-    if ($mssqlCanReuse) {
-        Write-Host "MSSQL unchanged; reusing existing image: $mssqlImageTag" -ForegroundColor Green
-    }
-    else {
-        Write-Host "Building mssql image: $mssqlImageTag"
-        docker build -t $mssqlImageTag -f $mssqlDockerfilePath --build-arg MSSQL_PID=Express $mssqlBuildContext
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "MSSQL image build failed with exit code $LASTEXITCODE"
-            exit 1
-        }
-        Set-Content -Path $mssqlHashFile -Value $mssqlHash -Encoding UTF8
-    }
-
-    $searxngDockerfilePath = Join-Path $PSScriptRoot "searxng\Dockerfile"
-    # Build context is the repo root; avoid Join-Path with a missing child argument.
-    $searxngBuildContext = $repoRoot
-    $searxngImageTag = "guideants-searxng:latest"
-    $searxngHashFile = Join-Path $buildStateDir "searxng.hash"
-    if (-not (Test-Path $searxngDockerfilePath)) {
-        Write-Error "SearXNG Dockerfile not found at $searxngDockerfilePath"
-        exit 1
-    }
-    $searxngInputFiles = @($searxngDockerfilePath) + (Get-FilePathsRecursive -Root (Join-Path $PSScriptRoot "searxng"))
-    $searxngHash = Get-CombinedHash -Paths $searxngInputFiles
-    $searxngCanReuse =
-        (-not $RebuildBase) -and
-        (Test-DockerImageExists -ImageTag $searxngImageTag) -and
-        ((Get-HashFromFile -Path $searxngHashFile) -eq $searxngHash)
-    if ($searxngCanReuse) {
-        Write-Host "SearXNG unchanged; reusing existing image: $searxngImageTag" -ForegroundColor Green
-    }
-    else {
-        Write-Host "Building searxng image: $searxngImageTag"
-        docker build -t $searxngImageTag -f $searxngDockerfilePath $searxngBuildContext
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "SearXNG image build failed with exit code $LASTEXITCODE"
-            exit 1
-        }
-        Set-Content -Path $searxngHashFile -Value $searxngHash -Encoding UTF8
-    }
-
-    $webApiUiBuildScript = Join-Path $PSScriptRoot "build_webapi_ui.ps1"
-    $webApiUiHashFile = Join-Path $buildStateDir "webapi-ui.hash"
-    $envFile = Join-Path $dockerRoot '.env'
-    if (-not (Test-Path $webApiUiBuildScript)) {
-        Write-Error "WebAPI+UI build script not found at $webApiUiBuildScript"
-        exit 1
-    }
-
-    $webApiUiInputs = @(
-        $webApiUiBuildScript,
-        (Join-Path $PSScriptRoot "webapi-ui\Dockerfile")
-    ) + (Get-FilePathsRecursive -Root (Join-Path $repoRoot "src\client")) + (Get-FilePathsRecursive -Root (Join-Path $repoRoot "src\server"))
-    $webApiUiHash = Get-CombinedHash -Paths $webApiUiInputs
-
-    $existingWebApiUiImage = $null
-    if (Test-Path $envFile) {
-        $line = Get-Content -Path $envFile | Where-Object { $_ -match '^GA_WEBAPI_UI_IMAGE=' } | Select-Object -First 1
-        if ($line) {
-            $existingWebApiUiImage = ($line -split '=', 2)[1].Trim()
-        }
-    }
-    $webApiUiCanReuse =
-        (-not $RebuildBase) -and
-        (-not [string]::IsNullOrWhiteSpace($existingWebApiUiImage)) -and
-        (Test-DockerImageExists -ImageTag $existingWebApiUiImage) -and
-        ((Get-HashFromFile -Path $webApiUiHashFile) -eq $webApiUiHash)
-
-    if ($webApiUiCanReuse) {
-        Write-Host "WebAPI+UI unchanged; reusing existing image: $existingWebApiUiImage" -ForegroundColor Green
-    }
-    else {
-        Write-Host "Building WebAPI+UI image via build_webapi_ui.ps1" -ForegroundColor Cyan
-        if ($RebuildBase) {
-            & $webApiUiBuildScript -NoCache -NoRecreate
-        }
-        else {
-            & $webApiUiBuildScript -NoRecreate
-        }
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "WebAPI+UI image build failed with exit code $LASTEXITCODE"
-            exit 1
-        }
-
-        Set-Content -Path $webApiUiHashFile -Value $webApiUiHash -Encoding UTF8
-    }
-}
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan

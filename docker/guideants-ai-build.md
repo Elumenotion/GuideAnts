@@ -12,6 +12,8 @@ GuideAnts AI consolidates two prior containers into one runtime image:
 - local embeddings service (internal port 8085)
 - `nginx` gateway for single ingress (port 80)
 
+The `cpu`, `cuda13`, and `rocm` variants are full local AI images. The `slim` variant is intentionally sandbox-oriented: it starts the Python `ScriptExecutionAgent` and the non-model media service, but it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. Do not confuse `guideants-ai slim` with `guideants-webapi-ui-slim`; the latter is the existing API/UI image for split-stack deployments.
+
 Gateway route prefixes:
 
 - `/sandbox/*` -> ScriptExecutionAgent
@@ -24,8 +26,8 @@ Gateway route prefixes:
 The build system is optimized for local iterative development:
 
 - one build script
-- backend-specific Dockerfiles (`Dockerfile.cpu`, `Dockerfile.cuda`, `Dockerfile.rocm`)
-- backend selected interactively (CPU, CUDA 13, or ROCm)
+- backend-specific Dockerfiles (`Dockerfile.cpu`, `Dockerfile.cuda`, `Dockerfile.rocm`, `Dockerfile.slim`)
+- backend selected interactively (CPU, CUDA 13, ROCm, or slim)
 - deterministic dependency-image tags derived from dependency file hashes
 
 ## Build Cache Requirements
@@ -55,6 +57,7 @@ GitHub Actions publish the runtime images to GHCR as separate packages:
 - `ghcr.io/<owner>/guideants-ai-cpu`
 - `ghcr.io/<owner>/guideants-ai-cuda13`
 - `ghcr.io/<owner>/guideants-ai-rocm`
+- `ghcr.io/<owner>/guideants-ai-slim`
 
 Workflow:
 
@@ -62,10 +65,11 @@ Workflow:
 
 Manual dispatch options:
 
-- `all` publishes both variants
+- `all` publishes all variants
 - `cpu` publishes only the CPU image
 - `cuda13` publishes only the CUDA 13 image
 - `rocm` publishes only the ROCm image
+- `slim` publishes only the sandbox-oriented AI image
 
 Workflow implementation details:
 
@@ -73,7 +77,7 @@ Workflow implementation details:
 - stages that output into `docker/build/guideants-ai/ScriptExecutionAgent`
 - copies backend-specific sandbox requirements into `docker/build/guideants-ai/requirements.txt`
 - strips `torch`, `torchaudio`, `torchvision`, and `torchtext` so the Dockerfile remains the single owner of backend torch installation
-- builds `final-cpu`, `final-cuda13`, or `final-rocm`
+- builds `final-cpu`, `final-cuda13`, `final-rocm`, or `final-slim`
 - runs by manual GitHub Actions dispatch and pushes branch, `sha-*`, and `latest` tags to GHCR
 - uses GitHub Actions cache scopes per backend instead of publishing `guideants-ai-deps:*` cache images
 
@@ -86,7 +90,6 @@ Workflow implementation details:
 - `sd-cli-cpu-builder` -> builds CPU `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
 - `sd-cli-cuda-builder` -> builds CUDA `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
 - `sd-cli-rocm-builder` -> builds ROCm/HIP `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
-
 - `runtime-cpu-base` -> OS/runtime base on `ghcr.io/ggml-org/llama.cpp:server`
 - `pydeps-cpu-builder` -> Python dependency build stage (includes build toolchain)
 - `deps-cpu` -> runtime dependency image (no compiler toolchain)
@@ -200,15 +203,15 @@ Cache note:
 
 ### Build flow
 
-1. Prompt backend (`CPU`, `CUDA 13`, or `ROCm`)
+1. Prompt backend (`CPU`, `CUDA 13`, `ROCm`, or `slim`)
 2. Build/publish `src/server/ScriptExecutionAgent`
 3. Stage `ScriptExecutionAgent` and filtered `requirements.txt` into Docker build context
 4. Compute dependency hash from backend Dockerfile + requirement inputs
-5. Build/reuse backend-specific dependency image (`deps-cpu`, `deps-cuda13`, or `deps-rocm`)
+5. Build/reuse backend-specific dependency image (`deps-cpu`, `deps-cuda13`, `deps-rocm`, or `deps-slim`)
 6. Tag the deps image with both the hash tag and stable backend cache tag
-7. Build final runtime target (`final-cpu`, `final-cuda13`, or `final-rocm`) using the dependency image
+7. Build final runtime target (`final-cpu`, `final-cuda13`, `final-rocm`, or `final-slim`) using the dependency image
 8. Clean staged artifacts
-9. Write `GA_AI_CUDA_IMAGE=<final-tag>`, `GA_AI_CPU_IMAGE=<final-tag>`, or `GA_AI_ROCM_IMAGE=<final-tag>` to `docker/.env`
+9. Write `GA_AI_CUDA_IMAGE=<final-tag>`, `GA_AI_CPU_IMAGE=<final-tag>`, `GA_AI_ROCM_IMAGE=<final-tag>`, or `GA_AI_SLIM_IMAGE=<final-tag>` to `docker/.env`
 10. Optionally build PlantUML/MSSQL and invoke `build_webapi_ui.ps1` if `-All` was passed
 
 ### Buildx Driver Recommendation
@@ -613,4 +616,3 @@ Update both final stages plus `entrypoint.sh`:
 - Keep stable-diffusion model weights external to image layers and load them through mounted volumes.
 - Keep shell scripts LF-only (`.gitattributes`) for Linux container compatibility.
 - Keep `docker/.env` as the single source for compose runtime image selection.
-

@@ -7,7 +7,7 @@ DOCKER_DIR="$ROOT_DIR/docker"
 
 MODE="install"          # install | doctor
 FIX_MODE="0"            # 0 | 1
-BACKEND_OVERRIDE=""     # cpu | cuda13 | rocm
+BACKEND_OVERRIDE=""     # cpu | cuda13 | rocm | slim
 COMPOSE_MODE="ghcr"     # ghcr | local
 HEALTH_URL="http://localhost:5107/"
 
@@ -18,7 +18,7 @@ Usage: ./start_linux.sh [options]
 Options:
   --doctor               Run checks only, do not change anything.
   --fix                  Attempt limited auto-remediation where possible.
-  --backend cpu|cuda13|rocm   Force backend selection.
+  --backend cpu|cuda13|rocm|slim   Force backend selection. slim is explicit only and is not auto-detected.
   --compose ghcr|local   Use GHCR compose files (default) or local build files.
   --help                 Show this help.
 EOF
@@ -91,12 +91,14 @@ check_prereqs() {
 select_compose_file() {
   if [[ "$COMPOSE_MODE" == "local" ]]; then
     case "$SELECTED_BACKEND" in
+      slim) COMPOSE_FILE="docker-compose.slim.yml" ;;
       cuda13) COMPOSE_FILE="docker-compose.cuda.yml" ;;
       rocm) COMPOSE_FILE="docker-compose.rocm.yml" ;;
       *) COMPOSE_FILE="docker-compose.cpu.yml" ;;
     esac
   else
     case "$SELECTED_BACKEND" in
+      slim) COMPOSE_FILE="docker-compose.ghcr-slim.yml" ;;
       cuda13) COMPOSE_FILE="docker-compose.ghcr-cuda13.yml" ;;
       rocm) COMPOSE_FILE="docker-compose.ghcr-rocm.yml" ;;
       *) COMPOSE_FILE="docker-compose.ghcr-cpu.yml" ;;
@@ -142,7 +144,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$COMPOSE_MODE" == "ghcr" || "$COMPOSE_MODE" == "local" ]] || fail "--compose must be ghcr or local"
-[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" == "cpu" || "$BACKEND_OVERRIDE" == "cuda13" || "$BACKEND_OVERRIDE" == "rocm" ]] || fail "--backend must be cpu, cuda13, or rocm"
+[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" == "cpu" || "$BACKEND_OVERRIDE" == "cuda13" || "$BACKEND_OVERRIDE" == "rocm" || "$BACKEND_OVERRIDE" == "slim" ]] || fail "--backend must be cpu, cuda13, rocm, or slim"
 
 check_prereqs
 detect_backend

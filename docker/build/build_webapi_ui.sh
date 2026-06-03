@@ -124,9 +124,9 @@ case "$FLAVOR" in
     IMAGE_REPOSITORY="guideants-webapi-ui-slim"
     IMAGE_ENV_KEY="GA_WEBAPI_UI_SLIM_IMAGE"
     SERVICE_NAME="guideants-webapi-ui-slim"
-    COMPOSE_FILE_NAME="docker-compose.slim.yml"
+    COMPOSE_FILE_NAME=""
     USE_RUNNING_COMPOSE_STACK=false
-    USE_COMPOSE_FILE=true
+    USE_COMPOSE_FILE=false
     ;;
   Mssql|mssql)
     FLAVOR="Mssql"
@@ -262,5 +262,5 @@ elif [[ "$NO_RECREATE" == "true" ]]; then
     echo "docker compose -f $COMPOSE_FILE_NAME up -d --no-deps --force-recreate $SERVICE_NAME"
   fi
 else
-  echo "$COMPOSE_FILE_NAME not found at $COMPOSE_FILE; image was built but not applied to a running service."
+  echo "Image was built but not applied to a compose service. The standalone guideants-webapi-ui-slim image is orthogonal to docker-compose.slim.yml."
 fi

@@ -11,10 +11,12 @@ This repo now has two published web application container flavors:
 - `mssql`
   API + UI container with embedded SQL Server Express + FTS.
 
+Important terminology: `guideants-webapi-ui-slim` is the existing API/UI image for split-stack deployments. It is orthogonal to `guideants-ai slim`, which is the sandbox-oriented AI image. The full slim stack in `docker/docker-compose.slim.yml` uses `guideants-webapi-ui-mssql` plus `guideants-ai slim`; it does not use or repurpose `guideants-webapi-ui-slim`.
+
 Repo assets:
 
 - Docker targets: `runtime-slim`, `runtime-mssql`
-- Local compose entrypoints: `docker/docker-compose.slim.yml`, `docker/docker-compose.mssql.yml`
+- Local compose entrypoints: `docker/docker-compose.mssql.yml` for the combined Web/API/SQL image. `docker/docker-compose.slim.yml` now names the full sandbox-oriented slim stack and should not be treated as the standalone `guideants-webapi-ui-slim` compose entrypoint.
 - GitHub workflows: `.github/workflows/publish-slim-image.yml`, `.github/workflows/publish-mssql-image.yml`
 - Local Windows build commands:
   `pwsh -File ./docker/build/build_webapi_ui.ps1 -Flavor Slim`
@@ -59,11 +61,7 @@ Build the standalone slim image locally:
 pwsh -File .\docker\build\build_webapi_ui.ps1 -Flavor Slim -NoRecreate
 ```
 
-Start the standalone slim compose stack:
-
-```powershell
-docker compose -f .\docker\docker-compose.slim.yml up -d
-```
+The standalone `guideants-webapi-ui-slim` image is still built by the command above, but `docker/docker-compose.slim.yml` is no longer its compose entrypoint. That compose file is reserved for the full sandbox-oriented slim stack.
 
 Build the bundled-SQL mssql image locally:
 
@@ -84,11 +82,11 @@ docker pull ghcr.io/elumenotion/guideants-webapi-ui-slim:main
 docker pull ghcr.io/elumenotion/guideants-webapi-ui-mssql:main
 ```
 
-Use the published image in standalone slim compose:
+Use the published image by overriding the split-stack Web/API image:
 
 ```powershell
-$env:GA_WEBAPI_UI_SLIM_IMAGE = 'ghcr.io/elumenotion/guideants-webapi-ui-slim:main'
-docker compose -f .\docker\docker-compose.slim.yml up -d
+$env:GA_WEBAPI_UI_SLIM_GHCR_IMAGE = 'ghcr.io/elumenotion/guideants-webapi-ui-slim:main'
+docker compose -f .\docker\docker-compose.ghcr-cpu.yml up -d guideants-webapi-ui
 ```
 
 Use the published image in bundled-SQL mssql compose:
@@ -109,11 +107,11 @@ The image currently seeds placeholder loopback URLs for:
 - `LlamaCpp__BaseUrl`
 - `ServiceRouting__Containers__guideants-ai__BaseUrl`
 
-That keeps startup validation satisfied until the optional-dependency contract work lands. The slim image can boot without `guideants-ai`, but local-runtime features are still expected to return unavailable or connection-failure behavior until Phase 2 code changes are completed.
+That keeps startup validation satisfied until the optional-dependency contract work lands. The `guideants-webapi-ui-slim` image can boot without `guideants-ai`, but local-runtime features are still expected to return unavailable or connection-failure behavior until Phase 2 code changes are completed.
 
 ## Runtime notes
 
-- `slim` no longer bundles SQL Server. Provide `ConnectionStrings__DefaultConnection` or override `GA_SQL_CONNECTION_STRING` in `docker/docker-compose.slim.yml`.
-- `docker/docker-compose.slim.yml` defaults to `host.docker.internal:1434`, which is intended for local Docker Desktop scenarios with an external SQL Server listening on that published port.
+- `guideants-webapi-ui-slim` does not bundle SQL Server. Provide `ConnectionStrings__DefaultConnection` when running it directly, or use one of the split-stack compose files that supplies a separate SQL Server service.
+- Do not use `docker/docker-compose.slim.yml` as a standalone `guideants-webapi-ui-slim` stack. It is the full sandbox-oriented slim stack using `guideants-webapi-ui-mssql` and `guideants-ai slim`.
 - `mssql` expects `MSSQL_SA_PASSWORD` at runtime and persists SQL state in `guideants_mssql_runtime_state`.
-- Content files are persisted in `guideants_slim_content_files` for `slim` and `guideants_mssql_content_files` for `mssql`.
+- Content file persistence for `guideants-webapi-ui-slim` depends on the split-stack compose or direct run command that hosts it. The full sandbox-oriented slim stack uses the shared `GA_CONTENT_FILES_HOST_PATH` bind mount.
