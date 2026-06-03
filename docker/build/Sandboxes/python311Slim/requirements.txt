@@ -12,7 +12,7 @@ camelot-py==0.10.1
 chardet==3.0.4
 cmudict==1.0.32
 countryinfo==0.1.2
-cryptography==46.0.6
+cryptography==46.0.7
 cssselect2==0.8.0
 databricks-sql-connector==0.9.1
 dnspython==2.7.0
