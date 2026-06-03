@@ -8,16 +8,16 @@ This document covers the active Docker build paths under `docker/` and explains 
 |---|---|---|---|
 | `guideants-ai-deps:<backend>-<hash12>` | `docker/build/guideants-ai/Dockerfile.<backend>` | `docker/build/build_guideants_ai.ps1` | cache/reuse layer for final GuideAnts AI image |
 | `guideants-ai-deps:<backend>-cache` | `docker/build/guideants-ai/Dockerfile.<backend>` | `docker/build/build_guideants_ai.ps1` | stable local cache source for future deps rebuilds |
-| `guideants-ai:<backend>-<YYDDD>.<HHmm>` | `docker/build/guideants-ai/Dockerfile.<backend>` | `docker/build/build_guideants_ai.ps1` | `guideants-ai` service (`GA_AI_CUDA_IMAGE` / `GA_AI_CPU_IMAGE` / `GA_AI_ROCM_IMAGE`) |
+| `guideants-ai:<backend>-<YYDDD>.<HHmm>` | `docker/build/guideants-ai/Dockerfile.<backend>` | `docker/build/build_guideants_ai.ps1` | `guideants-ai` service (`GA_AI_CUDA_IMAGE` / `GA_AI_CPU_IMAGE` / `GA_AI_ROCM_IMAGE` / `GA_AI_SLIM_IMAGE`). `slim` is the sandbox-oriented AI image, not the web/API slim image. |
 | `guideants-webapi-ui:<YYDDD>.<HHmm>` | `docker/build/webapi-ui/Dockerfile` | `docker/build/build_webapi_ui.ps1` | `guideants-webapi-ui` profile service (`GA_WEBAPI_UI_IMAGE`) |
-| `mssql2025-express-fts` | `docker/build/mssql-fts/Dockerfile` | `docker/build/build_guideants_ai.ps1 -All` | `mssql-express` service |
-| `plantuml-1.2025.2` | `docker/build/Sandboxes/PlantUml/dockerfile` | `docker/build/build_guideants_ai.ps1 -All` | `plantuml` service |
-| `guideants-searxng:latest` | `docker/build/searxng/Dockerfile` | `docker compose build searxng` | `searxng` service (`GA_SEARXNG_IMAGE`) |
+| `mssql2025-express-fts` | `docker/build/mssql-fts/Dockerfile` | `docker/build/build_support_images.ps1` | `mssql-express` service |
+| `plantuml-1.2025.2` | `docker/build/Sandboxes/PlantUml/dockerfile` | `docker/build/build_support_images.ps1` | `plantuml` service |
+| `guideants-searxng:latest` | `docker/build/searxng/Dockerfile` | `docker/build/build_support_images.ps1` | `searxng` service (`GA_SEARXNG_IMAGE`) |
 
 Notes:
 - `docker/docker-compose.cuda.yml` and `docker/docker-compose.cpu.yml` reference image tags via `docker/.env` (`GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, `GA_WEBAPI_UI_IMAGE`).
 - `guideants-webapi-ui` is optional and only starts when compose profile `webapi-ui` is enabled.
-- GitHub Actions now publish GHCR copies of the AI, PlantUML, SearXNG, webapi slim, and webapi mssql images without changing the local compose image-selection flow.
+- GitHub Actions now publish GHCR copies of the AI, PlantUML, SearXNG, webapi slim, and webapi mssql images without changing the local compose image-selection flow. `guideants-webapi-ui-slim` remains the API/UI image for split-stack deployments; it is orthogonal to `guideants-ai slim`.
 
 ## GuideAnts AI Cache Requirements
 
@@ -40,6 +40,8 @@ The repo publishes the following GHCR packages from GitHub Actions:
 |---|---|---|
 | `ghcr.io/<owner>/guideants-ai-cpu` | `publish-guideants-ai-images.yml` | `final-cpu` target |
 | `ghcr.io/<owner>/guideants-ai-cuda13` | `publish-guideants-ai-images.yml` | `final-cuda13` target |
+| `ghcr.io/<owner>/guideants-ai-rocm` | `publish-guideants-ai-images.yml` | `final-rocm` target |
+| `ghcr.io/<owner>/guideants-ai-slim` | `publish-guideants-ai-images.yml` | `final-slim` target for sandbox-oriented AI |
 | `ghcr.io/<owner>/mssql2025-express-fts` | `publish-mssql-fts-image.yml` | standalone SQL Server 2025 Express + FTS image used by GHCR compose stacks |
 | `ghcr.io/<owner>/guideants-plantuml` | `publish-plantuml-image.yml` | includes staged `ScriptExecutionAgent` publish output |
 | `ghcr.io/<owner>/guideants-searxng` | `publish-searxng-image.yml` | repo-root build context; upstream SearXNG base pinned by digest |
@@ -66,22 +68,20 @@ Optional switches:
 
 ```powershell
 pwsh .\docker\build\build_guideants_ai.ps1 -RebuildBase
-pwsh .\docker\build\build_guideants_ai.ps1 -All
-pwsh .\docker\build\build_guideants_ai.ps1 -RebuildBase -All
 ```
 
 Script flow:
-1. Prompts for backend (`CPU`, `CUDA 13`, or `ROCm`) and maps to Docker target (`final-cpu`, `final-cuda13`, or `final-rocm`).
+1. Prompts for backend (`CPU`, `CUDA 13`, `ROCm`, or `slim`) and maps to Docker target (`final-cpu`, `final-cuda13`, `final-rocm`, or `final-slim`).
 2. Builds `src/server/ScriptExecutionAgent` with `dotnet publish`.
 3. Stages publish output into `docker/build/guideants-ai/ScriptExecutionAgent`.
 4. Copies backend-specific `requirements.txt` from sandbox folder, then strips `torch*` entries so torch stays backend-controlled in Dockerfile.
 5. Computes a deterministic dependency hash from Dockerfile + dependency input files.
-6. Builds or reuses `guideants-ai-deps:<backend>-<hash12>` from `deps-cpu` / `deps-cuda13` / `deps-rocm`.
+6. Builds or reuses `guideants-ai-deps:<backend>-<hash12>` from `deps-cpu` / `deps-cuda13` / `deps-rocm` / `deps-slim`.
 7. Tags the same deps image as `guideants-ai-deps:<backend>-cache`, so future deps rebuilds can reuse unchanged layers from the previous deps image even when the hash changes.
 8. Runs final build with `--target <final-target>`, `--cache-from <deps-image>`, and backend-specific deps image build args.
 9. Cleans staged artifacts (`ScriptExecutionAgent`, staged `requirements.txt`).
-10. Writes `GA_AI_CUDA_IMAGE=<new tag>`, `GA_AI_CPU_IMAGE=<new tag>`, or `GA_AI_ROCM_IMAGE=<new tag>` into `docker/.env`.
-11. If `-All` is set, also builds PlantUML and MSSQL FTS images, then invokes `build_webapi_ui.ps1` to build the compose-used WebAPI+UI image.
+10. Writes `GA_AI_CUDA_IMAGE=<new tag>`, `GA_AI_CPU_IMAGE=<new tag>`, `GA_AI_ROCM_IMAGE=<new tag>`, or `GA_AI_SLIM_IMAGE=<new tag>` into `docker/.env`.
+11. Support images are built separately with `build_support_images.ps1`.
 
 Recommended one-time local setup for maximum cache effectiveness:
 
@@ -151,9 +151,16 @@ Script behavior:
 3. Writes/repairs `GA_WEBAPI_UI_IMAGE` in `docker/.env`.
 4. Recreates `guideants-webapi-ui` container unless `-NoRecreate` is passed.
 
-## 5) Additional Image Builds Triggered By `-All`
+## 5) Support Image Build (`build_support_images.ps1`)
 
-When `build_guideants_ai.ps1 -All` is used:
+Run from repo root:
+
+```powershell
+pwsh .\docker\build\build_support_images.ps1
+pwsh .\docker\build\build_support_images.ps1 -RebuildBase
+```
+
+This builds the shared support images once, independent of the AI backend matrix:
 
 - PlantUML image:
   - Dockerfile: `docker/build/Sandboxes/PlantUml/dockerfile`
@@ -213,11 +220,11 @@ Recovery steps:
    - `docker compose -f docker-compose.cuda.yml up -d --no-deps --force-recreate searxng`
 
 Note on `-RebuildBase`:
-- `build_guideants_ai.ps1 -RebuildBase -All` applies no-cache behavior to GuideAnts AI and WebAPI+UI builds.
-- The SearXNG build in `-All` currently uses a normal `docker build` path (not forced `--no-cache`).
+- `build_guideants_ai.ps1 -RebuildBase` applies no-cache behavior to the selected GuideAnts AI backend.
+- `build_support_images.ps1 -RebuildBase` applies no-cache behavior to the support image builds and passes no-cache to WebAPI+UI.
 - If you suspect a stale cached SearXNG image, remove and rebuild:
   - `docker rmi guideants-searxng:latest`
-  - then rerun your build script.
+  - then rerun `build_support_images.ps1`.
 
 ## 7) SQL Recovery Model On New Installs
 

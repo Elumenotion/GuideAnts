@@ -31,7 +31,7 @@ If your `.sh` launchers are not executable, run:
 What these scripts do:
 
 - Validate Docker and Docker Compose availability.
-- Detect backend (`cuda13` when NVIDIA is available, otherwise `cpu`).
+- Detect backend (`cuda13` when NVIDIA is available, `rocm` when AMD/ROCm is available, otherwise `cpu`; `slim` is explicit only).
 - Choose the matching compose stack (GHCR by default).
 - Start GuideAnts with Docker Compose.
 - Wait for `http://localhost:5107/` and open it in your browser.
@@ -40,14 +40,42 @@ Useful options:
 
 - `--doctor` checks only (no changes).
 - `--fix` attempts limited remediation where possible.
-- `--backend cpu|cuda13|rocm` forces backend choice.
+- `--backend cpu|cuda13|rocm|slim` forces the AI/runtime stack. Use `slim` when you need the Python sandbox but plan to use cloud/provider AI instead of local model runtimes.
 - `--compose ghcr|local` chooses prebuilt GHCR stack or local-image stack.
+
+## Choose A Runtime Stack
+
+The launcher makes two independent choices:
+
+- **Backend** chooses the AI/runtime shape: `cpu`, `cuda13`, `rocm`, or `slim`.
+- **Compose mode** chooses where GuideAnts images come from: `ghcr` pulls prebuilt images; `local` uses GuideAnts images you built on this machine. Third-party services such as Docling and ONLYOFFICE may still pull their exact image tags the first time you start a local stack.
+
+Default startup is `--compose ghcr` with auto-detected `cuda13`, `rocm`, or `cpu`. The `slim` backend is never auto-detected; choose it explicitly.
+
+| Backend | Use this when | Auto-selected? | GHCR compose | Local compose | Web/API/SQL shape | AI image shape |
+|---------|---------------|----------------|--------------|---------------|-------------------|----------------|
+| `cuda13` | You want local model runtimes on NVIDIA GPUs. | Yes, when supported NVIDIA runtime is detected. | `docker/docker-compose.ghcr-cuda13.yml` | `docker/docker-compose.cuda.yml` | Split stack: API/UI plus separate SQL Server. | Full `guideants-ai` with llama.cpp, ASR, TTS, image generation, embeddings, media, and sandbox. |
+| `rocm` | You are testing local model runtimes on AMD/ROCm. | Yes, when ROCm is detected. | `docker/docker-compose.ghcr-rocm.yml` | `docker/docker-compose.rocm.yml` | Split stack: API/UI plus separate SQL Server. | Full `guideants-ai` ROCm variant. |
+| `cpu` | You want local model runtimes without GPU acceleration, or no GPU backend is available. | Yes, fallback when GPU backends are not selected. | `docker/docker-compose.ghcr-cpu.yml` | `docker/docker-compose.cpu.yml` | Split stack: API/UI plus separate SQL Server. | Full `guideants-ai` CPU variant. |
+| `slim` | You need Python sandbox/script execution and supporting services, but model calls will go to cloud/provider AI. | No. Must pass `--backend slim`. | `docker/docker-compose.ghcr-slim.yml` | `docker/docker-compose.slim.yml` | Combined `guideants-webapi-ui-mssql` image. | `guideants-ai slim`: sandbox and non-model media service only. |
+
+Terminology that matters:
+
+| Name | Meaning | Do not confuse it with |
+|------|---------|------------------------|
+| `guideants-ai slim` | The sandbox-oriented AI image used by the `slim` backend. It starts `/sandbox` and `/media`; it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. | `guideants-webapi-ui-slim`. |
+| `docker-compose.slim.yml` | The local full slim stack: combined Web/API/SQL, slim AI, Docling, ONLYOFFICE, PlantUML, and SearXNG. | A standalone web/API slim compose file. |
+| `guideants-webapi-ui-slim` | The API/UI-only image used by split-stack deployments, especially GHCR CPU/CUDA/ROCm stacks. It does not bundle SQL Server. | The slim backend or slim AI stack. |
+| `guideants-webapi-ui-mssql` | The combined Web/API/SQL image used by the slim stack and the MSSQL all-in-one path. | Split-stack API/UI images. |
 
 Experimental support note:
 
 - GuideAnts now includes experimental ROCm support for AMD GPUs (`rocm` backend). Behavior, compatibility, and image size/performance are still being validated.
 
-After startup, follow the [Local AI Setup Guide](docs/local-ai-setup-guide.md) to configure Hugging Face access, download models, and enable local AI services in the Settings wizard.
+After startup:
+
+- For `cpu`, `cuda13`, or `rocm`, follow the [Local AI Setup Guide](docs/local-ai-setup-guide.md) to configure Hugging Face access, download models, and enable local AI services in the Settings wizard.
+- For `slim`, skip local model setup. Configure cloud/provider AI in Settings and use the slim stack for Python sandbox/script execution plus supporting services.
 
 GuideAnts is an AI notebook and workflow platform built around projects, notebooks, reusable guides, and provider-routed AI services. It is designed to give people a place to collect source material, work with assistants in context, run multimodal AI tasks, and turn rough working sessions into reusable or publishable outputs.
 
@@ -96,13 +124,13 @@ This repo contains the full application stack, not just one app.
 
 The current operator/developer setup is centered on Docker Compose. The stack described in the repo currently includes:
 
-- `guideants-webapi-ui` for the API plus bundled browser UI
-- `mssql-express` for the application database
-- `guideants-ai` as a consolidated local AI gateway
+- `guideants-webapi-ui`, `guideants-webapi-ui-slim`, or `guideants-webapi-ui-mssql` for the API plus bundled browser UI, depending on stack.
+- `mssql-express` for the application database in split stacks, or bundled SQL Server inside `guideants-webapi-ui-mssql` in combined stacks.
+- `guideants-ai` as a consolidated local AI gateway, or as the sandbox-oriented AI runtime in the slim stack.
 - `docling-serve` for local document intelligence / markdown extraction
 - `onlyoffice-documentserver` for Office document viewing/editing in project and notebook file previews
 - `searxng` for search support
-- `plantuml` for diagram rendering
+- `plantuml` as a ScriptExecutionAgent-backed diagram sandbox with PlantUML and Graphviz installed
 
 For local host-API debugging (API at `http://localhost:5106`, services in Docker), use `docker/.env.api-local-debug.example` as the reference env and set `OnlyOffice:ApiBaseUrl` in `src/server/GuideAntsApi/appsettings.Development.json` to `http://host.docker.internal:5106`.
 
@@ -111,7 +139,7 @@ To enable ONLYOFFICE JWT, set:
 - Docker env: `GA_ONLYOFFICE_JWT_ENABLED=true` and `ONLYOFFICE_JWT_SECRET=<secret>`
 - API config: `OnlyOffice:JwtEnabled=true` and `OnlyOffice:JwtSecret=<same secret>`
 
-The `guideants-ai` container is especially important: it is the local runtime surface behind llama.cpp, embeddings, speech transcription, speech synthesis, image generation, media extraction, and script execution. The Settings UI and API route each AI capability to the correct local or cloud backend rather than treating “the model” as one global switch.
+The `guideants-ai` container is especially important. Full local AI variants are the runtime surface behind llama.cpp, embeddings, speech transcription, speech synthesis, image generation, media extraction, and script execution. The `guideants-ai slim` variant is different: it is the sandbox-oriented AI image for Python script execution when model calls are routed to cloud/provider services. This is separate from `guideants-webapi-ui-slim`, which remains the API/UI image used by split-stack deployments. The Settings UI and API route each AI capability to the correct local or cloud backend rather than treating “the model” as one global switch.
 
 ## Big Thanks To Upstream Projects
 

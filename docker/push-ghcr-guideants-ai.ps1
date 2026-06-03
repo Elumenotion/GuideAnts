@@ -1,5 +1,5 @@
 param(
-    [string]$Owner,
+    [string]$Owner = 'elumenotion',
     [string]$Registry = 'ghcr.io',
     [string]$ComposeTag = 'main',
     [string]$Username = $env:GHCR_USERNAME,
@@ -21,31 +21,108 @@ function Invoke-DockerCommand {
         return
     }
 
-    & docker @Arguments
-    if ($LASTEXITCODE -ne 0) {
+    $maxAttempts = if ($Arguments.Count -gt 0 -and $Arguments[0] -ieq 'push') { 3 } else { 1 }
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        & docker @Arguments
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+
+        if ($attempt -lt $maxAttempts) {
+            Write-Warning "docker command failed (attempt $attempt of $maxAttempts): docker $($Arguments -join ' '). Retrying in 15 seconds..."
+            Start-Sleep -Seconds 15
+            continue
+        }
+
         throw "docker command failed: docker $($Arguments -join ' ')"
     }
 }
 
-function Get-OwnerFromGitRemote {
-    $remote = git remote get-url origin 2>$null
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remote)) {
+function Get-GitHubLoginFromToken {
+    param(
+        [string]$Token
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Token)) {
         return $null
     }
 
-    $pattern = 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/.]+?)(?:\.git)?$'
-    $match = [regex]::Match($remote.Trim(), $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    if (-not $match.Success) {
+    try {
+        $headers = @{
+            Authorization = "Bearer $Token"
+            Accept        = 'application/vnd.github+json'
+            'User-Agent'  = 'GuideAnts-GHCR-Push'
+        }
+
+        $user = Invoke-RestMethod -Uri 'https://api.github.com/user' -Headers $headers -Method Get
+        if ($null -ne $user -and -not [string]::IsNullOrWhiteSpace($user.login)) {
+            return $user.login
+        }
+    }
+    catch {
         return $null
     }
 
-    return $match.Groups['owner'].Value.ToLowerInvariant()
+    return $null
+}
+
+function Get-GitHubCredential {
+    $inputText = "protocol=https`nhost=github.com`n`n"
+    $output = $inputText | git credential fill 2>$null
+    if ($LASTEXITCODE -ne 0 -or $null -eq $output) {
+        return $null
+    }
+
+    $credential = @{}
+    foreach ($line in $output) {
+        $parts = $line -split '=', 2
+        if ($parts.Count -eq 2) {
+            $credential[$parts[0]] = $parts[1]
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($credential['username']) -and [string]::IsNullOrWhiteSpace($credential['password'])) {
+        return $null
+    }
+
+    return [pscustomobject]@{
+        Username = $credential['username']
+        Password = $credential['password']
+    }
+}
+
+function Get-ConfiguredToken {
+    if (-not [string]::IsNullOrWhiteSpace($env:CR_PAT)) { return $env:CR_PAT }
+    if (-not [string]::IsNullOrWhiteSpace($env:GHCR_PAT)) { return $env:GHCR_PAT }
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) { return $env:GITHUB_TOKEN }
+
+    foreach ($name in @('CR_PAT', 'GHCR_PAT', 'GITHUB_TOKEN')) {
+        $value = [Environment]::GetEnvironmentVariable($name, 'User')
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+
+    return $null
+}
+
+function Get-DefaultGhcrUsername {
+    param(
+        [string]$Token,
+        [object]$GitHubCredential
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($env:GHCR_USERNAME)) { return $env:GHCR_USERNAME }
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_ACTOR)) { return $env:GITHUB_ACTOR }
+    if ($null -ne $GitHubCredential -and -not [string]::IsNullOrWhiteSpace($GitHubCredential.Username)) { return $GitHubCredential.Username }
+
+    return Get-GitHubLoginFromToken -Token $Token
 }
 
 function Get-LatestVariantImage {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('cpu', 'cuda13', 'rocm')]
+        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim')]
         [string]$Variant
     )
 
@@ -53,6 +130,7 @@ function Get-LatestVariantImage {
         'cpu' { '^cpu-(?<build>\d{5}\.\d{4})$' }
         'cuda13' { '^cuda13-(?<build>\d{5}\.\d{4})$' }
         'rocm' { '^rocm-(?<build>\d{5}\.\d{4})$' }
+        'slim' { '^slim-(?<build>\d{5}\.\d{4})$' }
     }
 
     $rows = docker image ls guideants-ai --format "{{.Repository}}|{{.Tag}}"
@@ -119,22 +197,35 @@ function Get-LocalImageRef {
 }
 
 if ([string]::IsNullOrWhiteSpace($Owner)) {
-    $Owner = Get-OwnerFromGitRemote
-}
-
-if ([string]::IsNullOrWhiteSpace($Owner)) {
     throw "Unable to determine GHCR owner. Pass -Owner (for example: -Owner elumenotion)."
 }
 
 $Owner = $Owner.ToLowerInvariant()
 
 if (-not $SkipLogin) {
+    if ([string]::IsNullOrWhiteSpace($Token)) {
+        $Token = Get-ConfiguredToken
+    }
+
+    $gitHubCredential = $null
+    if ([string]::IsNullOrWhiteSpace($Username) -or [string]::IsNullOrWhiteSpace($Token)) {
+        $gitHubCredential = Get-GitHubCredential
+    }
+
     if ([string]::IsNullOrWhiteSpace($Username)) {
-        throw "GHCR username is required. Pass -Username or set GHCR_USERNAME."
+        $Username = Get-DefaultGhcrUsername -Token $Token -GitHubCredential $gitHubCredential
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Token) -and $null -ne $gitHubCredential -and -not [string]::IsNullOrWhiteSpace($gitHubCredential.Password)) {
+        $Token = $gitHubCredential.Password
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Username)) {
+        throw "GHCR username is required. Pass -Username, set GHCR_USERNAME / GITHUB_ACTOR, or sign in through git credential manager."
     }
 
     if ([string]::IsNullOrWhiteSpace($Token)) {
-        throw "GHCR token is required. Pass -Token or set CR_PAT / GHCR_PAT / GITHUB_TOKEN."
+        throw "GHCR token is required. Pass -Token, set CR_PAT / GHCR_PAT / GITHUB_TOKEN, or sign in through git credential manager."
     }
 
     if ($DryRun) {
@@ -159,6 +250,14 @@ catch {
     Write-Warning "No local ROCm image found; skipping ROCm push. Build it first with docker/build/build_guideants_ai.ps1 (backend rocm)."
 }
 
+$slimImage = $null
+try {
+    $slimImage = Get-LatestVariantImage -Variant 'slim'
+}
+catch {
+    Write-Warning "No local slim AI image found; skipping slim push. Build it first with docker/build/build_guideants_ai.ps1 (backend slim)."
+}
+
 $targets = @(
     [pscustomobject]@{
         Variant     = 'cpu'
@@ -180,6 +279,15 @@ if ($null -ne $rocmImage) {
         PackageName = 'guideants-ai-rocm'
         SourceRef   = $rocmImage.SourceRef
         BuildTag    = $rocmImage.BuildTag
+    }
+}
+
+if ($null -ne $slimImage) {
+    $targets += [pscustomobject]@{
+        Variant     = 'slim'
+        PackageName = 'guideants-ai-slim'
+        SourceRef   = $slimImage.SourceRef
+        BuildTag    = $slimImage.BuildTag
     }
 }
 
@@ -207,15 +315,15 @@ foreach ($target in $targets) {
 
 $plantUmlSourceRef = Get-LocalImageRef `
     -Repository 'plantuml-1.2025.2' `
-    -MissingMessage "No local plantuml-1.2025.2:latest image found. Build it first with docker/build/build_guideants_ai.ps1 -All."
+    -MissingMessage "No local plantuml-1.2025.2:latest image found. Build it first with docker/build/build_support_images.ps1."
 
 $mssqlSourceRef = Get-LocalImageRef `
     -Repository 'mssql2025-express-fts' `
-    -MissingMessage "No local mssql2025-express-fts:latest image found. Build it first with docker/build/build_guideants_ai.ps1 -All."
+    -MissingMessage "No local mssql2025-express-fts:latest image found. Build it first with docker/build/build_support_images.ps1."
 
 $searxngSourceRef = Get-LocalImageRef `
     -Repository 'guideants-searxng' `
-    -MissingMessage "No local guideants-searxng:latest image found. Build it first with docker/build/build_guideants_ai.ps1 -All."
+    -MissingMessage "No local guideants-searxng:latest image found. Build it first with docker/build/build_support_images.ps1."
 
 $extraTargets = @(
     [pscustomobject]@{

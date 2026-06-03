@@ -45,7 +45,7 @@ call :fail Unknown option: %~1
 :args_done
 if /I not "%COMPOSE_MODE%"=="ghcr" if /I not "%COMPOSE_MODE%"=="local" call :fail --compose must be ghcr or local
 if not "%BACKEND_OVERRIDE%"=="" (
-  if /I not "%BACKEND_OVERRIDE%"=="cpu" if /I not "%BACKEND_OVERRIDE%"=="cuda13" if /I not "%BACKEND_OVERRIDE%"=="rocm" call :fail --backend must be cpu, cuda13, or rocm
+  if /I not "%BACKEND_OVERRIDE%"=="cpu" if /I not "%BACKEND_OVERRIDE%"=="cuda13" if /I not "%BACKEND_OVERRIDE%"=="rocm" if /I not "%BACKEND_OVERRIDE%"=="slim" call :fail --backend must be cpu, cuda13, rocm, or slim
 )
 
 call :log Running preflight checks...
@@ -180,7 +180,9 @@ exit /b 0
 
 :select_compose_file
 if /I "%COMPOSE_MODE%"=="local" (
-  if /I "%SELECTED_BACKEND%"=="cuda13" (
+  if /I "%SELECTED_BACKEND%"=="slim" (
+    set "COMPOSE_FILE=docker-compose.slim.yml"
+  ) else if /I "%SELECTED_BACKEND%"=="cuda13" (
     set "COMPOSE_FILE=docker-compose.cuda.yml"
   ) else if /I "%SELECTED_BACKEND%"=="rocm" (
     set "COMPOSE_FILE=docker-compose.rocm.yml"
@@ -188,7 +190,9 @@ if /I "%COMPOSE_MODE%"=="local" (
     set "COMPOSE_FILE=docker-compose.cpu.yml"
   )
 ) else (
-  if /I "%SELECTED_BACKEND%"=="cuda13" (
+  if /I "%SELECTED_BACKEND%"=="slim" (
+    set "COMPOSE_FILE=docker-compose.ghcr-slim.yml"
+  ) else if /I "%SELECTED_BACKEND%"=="cuda13" (
     set "COMPOSE_FILE=docker-compose.ghcr-cuda13.yml"
   ) else if /I "%SELECTED_BACKEND%"=="rocm" (
     set "COMPOSE_FILE=docker-compose.ghcr-rocm.yml"
@@ -234,7 +238,7 @@ echo.
 echo Options:
 echo   --doctor               Run checks only, do not change anything.
 echo   --fix                  Attempt limited auto-remediation where possible.
-echo   --backend cpu^|cuda13^|rocm   Force backend selection.
+echo   --backend cpu^|cuda13^|rocm^|slim   Force backend selection. slim is explicit only and is not auto-detected.
 echo   --compose ghcr^|local   Use GHCR compose files ^(default^) or local build files.
 echo   --help                 Show this help.
 exit /b 0
