@@ -84,8 +84,10 @@ COPY requirements.txt /tmp/requirements.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip "setuptools<82" wheel \
-    && pip install -r /tmp/requirements.txt \
-    && rm -f /tmp/requirements.txt
+    && grep -viE '^[[:space:]]*starlette([[:space:]]|=|<|>|!|~|\[|$)' /tmp/requirements.txt > /tmp/requirements.without-starlette.txt \
+    && pip install -r /tmp/requirements.without-starlette.txt \
+    && pip install --no-deps --force-reinstall starlette==1.2.1 \
+    && rm -f /tmp/requirements.txt /tmp/requirements.without-starlette.txt
 
 FROM runtime-cpu-base AS deps-slim
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
