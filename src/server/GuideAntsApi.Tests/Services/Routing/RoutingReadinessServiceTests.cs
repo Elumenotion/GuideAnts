@@ -43,8 +43,7 @@ public sealed class RoutingReadinessServiceTests
             new TestServiceScopeFactory(db, configuration),
             Mock.Of<ILogger<RoutingReadinessService>>());
 
-        // Legacy single "default" cloud rows normalize to mode id "cloud" (+ local sibling).
-        var result = await service.ProbeModeAsync(RoutedServiceNames.Embeddings, "cloud");
+        var result = await service.ProbeModeAsync(RoutedServiceNames.Embeddings, "default");
 
         result.Status.Should().Be("ready");
         result.Blockers.Should().BeEmpty();
@@ -80,7 +79,7 @@ public sealed class RoutingReadinessServiceTests
             new TestServiceScopeFactory(db, configuration),
             Mock.Of<ILogger<RoutingReadinessService>>());
 
-        var result = await service.ProbeModeAsync(RoutedServiceNames.Embeddings, "cloud");
+        var result = await service.ProbeModeAsync(RoutedServiceNames.Embeddings, "default");
 
         result.Status.Should().Be("blocked");
         result.Blockers.Should().ContainSingle(b => b.Contains("AzureOpenAiEmbedding:ApiKey", StringComparison.Ordinal));
@@ -111,7 +110,7 @@ public sealed class RoutingReadinessServiceTests
             new TestServiceScopeFactory(db, configuration),
             Mock.Of<ILogger<RoutingReadinessService>>());
 
-        var result = await service.ProbeModeAsync(RoutedServiceNames.Embeddings, "cloud");
+        var result = await service.ProbeModeAsync(RoutedServiceNames.Embeddings, "default");
 
         result.Status.Should().Be("blocked");
         result.Blockers.Should().Contain(b => b.StartsWith(RoutingReadinessService.BlockerKeys.ModelMissing, StringComparison.Ordinal));
@@ -151,7 +150,7 @@ public sealed class RoutingReadinessServiceTests
             new TestServiceScopeFactory(db, configuration),
             Mock.Of<ILogger<RoutingReadinessService>>());
 
-        var result = await service.ProbeModeAsync(RoutedServiceNames.Embeddings, "cloud");
+        var result = await service.ProbeModeAsync(RoutedServiceNames.Embeddings, "default");
 
         result.Status.Should().Be("blocked");
         result.Blockers.Should().Contain(b => b.StartsWith(RoutingReadinessService.BlockerKeys.ModelInactive, StringComparison.Ordinal));

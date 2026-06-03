@@ -7,6 +7,8 @@ namespace GuideAntsApi.IntegrationTests.Infrastructure;
 
 public class TestContainerManager : IAsyncDisposable
 {
+    private const string DefaultSqlImage = "mssql2025-express-fts:latest";
+    private const string SqlImageEnvVar = "GA_INTEGRATION_TEST_MSSQL_IMAGE";
     private static readonly Lazy<TestContainerManager> _instance = new(() => new TestContainerManager());
     private MsSqlContainer? _container;
     private string? _connectionString;
@@ -29,7 +31,7 @@ public class TestContainerManager : IAsyncDisposable
             if (_initialized) return;
 
             _container = new MsSqlBuilder()
-                .WithImage("mssql2025-dev-fts")
+                .WithImage(Environment.GetEnvironmentVariable(SqlImageEnvVar) ?? DefaultSqlImage)
                 .WithPassword("Your_password123")
                 .Build();
         }
