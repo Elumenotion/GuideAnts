@@ -6,6 +6,7 @@ using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.PublishedGuides;
+using GuideAntsApi.Services;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -269,7 +270,7 @@ public static class PublishedNotebookConversationsEndpoints
             [FromServices] IPublishedGuideAuthService authService,
             [FromServices] IPublishedGuideCostLimitService costLimits,
             [FromServices] GuideAntsApi.DataModel.ApplicationDbContext db,
-            [FromServices] IConfiguration config,
+            [FromServices] IStoragePathResolver pathResolver,
             [FromServices] IMarkdownExtractionService markdownService,
             [FromServices] IServiceScopeFactory scopeFactory,
             Guid projectId,
@@ -323,21 +324,12 @@ public static class PublishedNotebookConversationsEndpoints
 
             try
             {
-                var storagePath = config["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured");
-                var projectSlug = await db.Projects
-                    .Where(p => p.Id == projectId)
-                    .Select(p => p.Slug)
-                    .FirstOrDefaultAsync() ?? projectId.ToString();
-                var notebookSlug = await db.Notebooks
-                    .Where(n => n.Id == notebookId)
-                    .Select(n => n.Slug)
-                    .FirstOrDefaultAsync() ?? notebookId.ToString();
-                var notebookRoot = Path.Combine(storagePath, projectSlug, notebookSlug);
-                if (!Directory.Exists(notebookRoot))
+                var notebookRoot = pathResolver.GetNotebookRootPath(projectId, notebookId);
+                if (!NotebookStoragePath.TryResolveDirectoryUnderRoot(notebookRoot, "uploads", out var targetDirectory))
                 {
-                    notebookRoot = Path.Combine(storagePath, projectId.ToString(), "notebooks", notebookId.ToString());
+                    return Results.BadRequest(new { error = "Invalid upload target path." });
                 }
-                var targetDirectory = Path.Combine(notebookRoot, "uploads");
+
                 Directory.CreateDirectory(targetDirectory);
 
                 var uploadedDtos = new List<object>();
@@ -346,7 +338,17 @@ public static class PublishedNotebookConversationsEndpoints
                 {
                     if (file.Length == 0) continue;
 
-                    var physicalPath = Path.Combine(targetDirectory, file.FileName);
+                    var safeFileName = NotebookStoragePath.SanitizeFileName(file.FileName);
+                    if (safeFileName == null)
+                    {
+                        return Results.BadRequest(new { error = "Invalid file name." });
+                    }
+
+                    if (!NotebookStoragePath.TryResolveUnderRoot(targetDirectory, safeFileName, out var physicalPath))
+                    {
+                        return Results.BadRequest(new { error = "Invalid upload file path." });
+                    }
+
                     var relativePath = Path.GetRelativePath(notebookRoot, physicalPath).Replace("\\", "/");
 
                     await using (var stream = new FileStream(physicalPath, FileMode.Create))
@@ -394,7 +396,7 @@ public static class PublishedNotebookConversationsEndpoints
                     uploadedDtos.Add(new
                     {
                         notebookFileId = notebookFile.Id,
-                        uploadType = DetectUploadType(file.FileName)
+                        uploadType = DetectUploadType(safeFileName)
                     });
 
                     // Fire-and-forget processing

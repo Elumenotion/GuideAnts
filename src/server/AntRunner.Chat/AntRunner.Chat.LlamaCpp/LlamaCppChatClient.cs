@@ -261,7 +261,6 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
             $"RequestBody={LimitForLog(requestJson)}";
 
         _logger.LogError("{Message}", LogValueSanitizer.Sanitize(diagnosticMessage));
-        System.Diagnostics.Trace.TraceError(diagnosticMessage);
 
         var upstreamExcerpt = ExtractUpstreamDetail(responseBody);
 
