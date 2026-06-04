@@ -5,111 +5,157 @@ Repository: `quality-alerts`
 
 ## Goal
 
-Reassess **all CodeQL languages in this repo** locally (C#, Python, JavaScript/TypeScript) without calling GitHub. Results are reproducible for a git commit when you use the same commit, CodeQL version, query suites, and build/extract settings.
+Run the **same CodeQL extraction and query suites as GitHub Code Scanning** locally so you see path-injection, log-forging, and other alerts **before** merging to `main` — not on the GitHub dashboard afterward.
 
-GitHub’s open-alert list is a **snapshot of `main` at scan time**; your branch will differ after fixes. Compare at the same SHA only when validating setup.
+Local `triage.csv` must match GitHub at the current commit. The triage script **fails** if `scan-results.txt` open alerts are not reproduced in local SARIF.
 
-## Canonical command
+## Pre-merge workflow
 
-From repo root:
+From repo root at the commit you intend to merge:
+
+```powershell
+# 1) Snapshot GitHub open alerts at this commit (requires GITHUB_TOKEN or git credential)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-github-code-scanning.ps1
+
+# 2) Full local scan + mandatory parity gate
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-codeql-sln-triage.ps1 -CleanCodeqlOutputs
+```
+
+### One-liner (fetch + full rescan + regen `triage.csv`)
+
+Close `triage.csv` in Excel first if it is open (~10–15 minutes).
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-github-code-scanning.ps1; if ($?) { powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-codeql-sln-triage.ps1 -CleanCodeqlOutputs }
+```
+
+Scan only (skip fetch if `scan-results.txt` is already fresh):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-codeql-sln-triage.ps1 -CleanCodeqlOutputs
 ```
 
-`-Languages all` (default) runs **csharp + python + javascript**. The triage script **rejects** `-Languages csharp` (etc.) unless you pass `-AllowPartialLanguages` — partial runs must not overwrite the merged `triage.csv` by mistake.
+Step 2 **exits with an error** if any open `cs/*`, `py/*`, or `js/*` alert in `scan-results.txt` is missing from the matching local SARIF. If GitHub has not scanned your commit yet, the script falls back to all open alerts in the snapshot (with a warning). Refresh with `fetch-github-code-scanning.ps1` after pushing if you need strict SHA matching.
 
-First C# run also benefits from `-CleanBuildOutputs`.
+Use `-SkipGitHubParityCheck` only for debugging — not before merging to `main`.
+
+## Canonical command
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-codeql-sln-triage.ps1 -CleanCodeqlOutputs
+```
+
+`-Languages all` (default) runs **csharp + python + javascript**. Partial language runs are blocked unless `-AllowPartialLanguages` is set.
+
+## GitHub parity (required)
+
+| Setting | GitHub Code Scanning | Local (default) |
+|---------|----------------------|-----------------|
+| C# extract | `build-mode: none`, repo root | `--build-mode=none --source-root=.` |
+| C# suite | `csharp-code-scanning.qls` | same |
+| Python | build-mode none, repo root | same |
+| JavaScript | build-mode none, `src/client` | same |
+
+**Do not use `dotnet build GuideAntsApi.sln` for pre-merge triage.** That mode hides most `cs/path-injection` findings (GitHub would still report them after merge). Diagnostic rebuild only:
+
+```powershell
+... -CSharpBuildMode sln
+```
 
 ## Outputs
 
 | File | Purpose |
 |------|---------|
-| `.codeql/triage.csv` | Merged triage: every finding from all languages (one row each) |
+| `.codeql/triage.csv` | Merged triage: every local finding (all languages) |
+| `.codeql/parity-github-vs-local.csv` | Per-alert parity vs `scan-results.txt` |
 | `.codeql/results-csharp.sarif` | C# code-scanning results |
 | `.codeql/results-python.sarif` | Python code-scanning results |
 | `.codeql/results-javascript.sarif` | JS/TS code-scanning results |
-| `.codeql/run-manifest.json` | Commit, CodeQL version, per-language counts and coverage |
-| `.codeql/db-csharp`, `db-python`, `db-javascript` | CodeQL databases |
+| `.codeql/run-manifest.json` | Commit, CodeQL version, build mode, counts |
+| `scan-results.txt` | GitHub open-alert baseline (from fetch script) |
 
-## Query suites (match GitHub Code Scanning families)
+## Query suites
 
 | Language | Suite | Extract / build |
 |----------|--------|-----------------|
-| C# | `csharp-code-scanning.qls` | `GuideAntsApi.sln` rebuild, `UseSharedCompilation=false` |
-| Python | `python-code-scanning.qls` | Repo root, build-mode none (`echo build`) |
-| JavaScript | `javascript-code-scanning.qls` | `src/client`, build-mode none |
+| C# | `csharp-code-scanning.qls` | **`build-mode=none`**, `--source-root=.` |
+| Python | `python-code-scanning.qls` | Repo root, `build-mode=none` |
+| JavaScript | `javascript-code-scanning.qls` | `src/client`, `build-mode=none` |
 
-Do **not** use `csharp-security-and-quality.qls` for `triage.csv` — that adds hundreds of non-security quality rules.
+Do **not** use `csharp-security-and-quality.qls` for triage — hundreds of non-security quality rules.
 
-## Expected scale (full `all` run on a healthy tree)
+## Expected scale (parity mode, `main`-like tree)
 
-Rough totals align with GitHub’s code-scanning rule families (not identical line-by-line after local fixes):
+Rough totals when local matches GitHub:
 
-- C#: ~70–90 security results; ~597/598 `.cs` files scanned
-- Python: ~33 results; ~19 project Python files (plus Actions metadata)
-- JavaScript: ~6 results; ~483 JS/TS files under `src/client`
+- C#: ~15–25 code-scanning results (includes `cs/path-injection`, `cs/web/missing-x-frame-options`, occasional `cs/log-forging`); ~599 baseline `.cs` files
+- Python: ~33 results
+- JavaScript: ~6 results
 
-**`triage.csv` rows ≈ sum of the three** (e.g. ~115 on `main` before log-forging fixes; ~42 after fixing ~70 `cs/log-forging` alerts on this branch).
+**`triage.csv` rows ≈ sum of the three.** If C# shows only 3 `web.config` hits, you are in the wrong build mode.
 
 ## Sanity checks
 
 ```powershell
-Get-Content .codeql/run-manifest.json | ConvertFrom-Json | Select-Object git_commit_short, total_results, triage_csv_rows, languages
+Get-Content .codeql/run-manifest.json | ConvertFrom-Json |
+  Select-Object git_commit_short, csharp_build_mode, total_results, triage_csv_rows, parity_passed
 
 Import-Csv .codeql/triage.csv | Group-Object Language, RuleId | Sort-Object Count -Descending
 
-((Import-Csv .codeql/triage.csv).Count)
+Import-Csv .codeql/parity-github-vs-local.csv | Group-Object LocalStatus | Format-Table Count, Name
 ```
 
-## Manual per-language fallback
+Expect `parity_passed: true` and **zero** `missing_in_local_sarif` rows.
+
+## Manual per-language fallback (GitHub-matched C#)
 
 ```powershell
 $codeql = "C:\Users\dougl\tools\codeql\codeql.exe"
 
-# C#
-& $codeql database create .codeql/db-csharp --language=csharp `
-  --command "dotnet build src/server/GuideAntsApi.sln -c Debug -v minimal -t:Rebuild -p:UseSharedCompilation=false"
+# C# (matches GitHub build-mode none)
+& $codeql database create .codeql/db-csharp --language=csharp --build-mode=none --source-root=.
 & $codeql database analyze .codeql/db-csharp codeql/csharp-queries:codeql-suites/csharp-code-scanning.qls `
-  --format=sarifv2.1.0 --output=.codeql/results-csharp.sarif
+  --download --format=sarifv2.1.0 --output=.codeql/results-csharp.sarif
 
-# Python (repo root, no build)
-& $codeql database create .codeql/db-python --language=python --source-root=. --command "cmd /c echo build"
+# Python
+& $codeql database create .codeql/db-python --language=python --build-mode=none --source-root=.
 & $codeql database analyze .codeql/db-python codeql/python-queries:codeql-suites/python-code-scanning.qls `
   --download --format=sarifv2.1.0 --output=.codeql/results-python.sarif
 
-# JavaScript (client tree)
-& $codeql database create .codeql/db-javascript --language=javascript --source-root=src/client --command "cmd /c echo build"
+# JavaScript
+& $codeql database create .codeql/db-javascript --language=javascript --build-mode=none --source-root=src/client
 & $codeql database analyze .codeql/db-javascript codeql/javascript-queries:codeql-suites/javascript-code-scanning.qls `
   --download --format=sarifv2.1.0 --output=.codeql/results-javascript.sarif
 ```
 
-Then merge with `scripts/run-codeql-sln-triage.ps1 -Languages all` after databases exist, or re-run the wrapper.
+Then run parity only:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/compare-codeql-github-parity.ps1 `
+  -ExpectedCommitSha (git rev-parse HEAD) -FailOnMismatch -ExportCsv .codeql/parity-github-vs-local.csv
+```
 
 ## Known failure modes
 
-1. **`codeql` not on PATH** — use `C:\Users\dougl\tools\codeql\codeql.exe` or `-CodeqlPath`.
-2. **C#-only `triage.csv`** — rerun with default `-Languages all`.
-3. **~1000 C# rows** — wrong suite (`csharp-security-and-quality.qls`).
-4. **Low C# coverage** — must build `GuideAntsApi.sln`; check `build-tracer.log`. The triage script **fails** if analyze reports fewer than ~550/590 C# files scanned.
-5. **Do not use CodeQL barrier/model packs** to suppress `cs/log-forging` — that hides alerts; fix log arguments instead.
-
-## Optional: GitHub validation at one commit
-
-```powershell
-git checkout <sha>
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-codeql-sln-triage.ps1 -CleanCodeqlOutputs -CleanBuildOutputs
-
-# optional API snapshot for that era
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-github-code-scanning.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/compare-codeql-github-parity.ps1 -ExportCsv .codeql/parity-github-vs-local.csv
-```
+1. **`codeql` not on PATH** — use `-CodeqlPath` or install under `C:\Users\dougl\tools\codeql\`.
+2. **`scan-results.txt` missing** — run `fetch-github-code-scanning.ps1` before triage.
+3. **Parity fails after fetch** — wrong commit: fetch and scan must both be at `HEAD`.
+4. **C# only 3 results** — you used `-CSharpBuildMode sln` or an old SARIF; rerun with default `none`.
+5. **~1000 C# rows** — wrong suite (`csharp-security-and-quality.qls`).
+6. **Do not use CodeQL barrier/model packs** to suppress alerts — fix code.
 
 ## Log forging (`cs/log-forging`)
 
-Wrap user-controlled log arguments with `LogValueSanitizer.Sanitize(...)` from `GuideAnts.Logging` (uses `ReplaceLineEndings(" ")`). Do **not** use CodeQL barrier/model packs to suppress this rule — fixes must clear on a full scan (~597/598 `.cs` files).
+Wrap user-controlled log arguments with `LogValueSanitizer.Sanitize(...)` from `GuideAnts.Logging`. Verify on a **parity** scan, not sln-rebuild mode.
+
+## Path injection (`cs/path-injection`)
+
+GitHub flags `Path.Combine` / file APIs when paths include user-controlled segments (e.g. `NotebookFileService`, published upload endpoints). Local parity mode must show the same alerts in `triage.csv` before merge. Fix with strict notebook-root containment (see `PathGuard` in `ScriptExecutionAgent`).
 
 ## Policy
 
-- Day-to-day triage: `triage.csv` + `run-manifest.json` only.
-- `scan-results.txt` / `fetch-github-code-scanning.ps1` are optional validators, not inputs to `triage.csv`.
+- **Pre-merge:** refresh `scan-results.txt` at `HEAD`, then `run-codeql-sln-triage.ps1` (parity enforced).
+- The triage script **fails** if `scan-results.txt` has no alerts at the current commit (stale snapshot).
+- Parity is **rule/instance reproduction** at the same SHA: local SARIF must match every GitHub open alert for `cs/*`, `py/*`, `js/*` at that commit (within line tolerance).
+- **Day-to-day triage:** `triage.csv`, `parity-github-vs-local.csv`, `run-manifest.json`.
+- Treat green local scans in **sln** mode as a false negative for C# path rules.

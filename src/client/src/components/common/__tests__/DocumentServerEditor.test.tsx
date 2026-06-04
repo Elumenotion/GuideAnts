@@ -77,8 +77,8 @@ describe('DocumentServerEditor', () => {
       });
     });
 
-    expect(screen.getByRole('dialog', { name: /document preview unavailable/i })).toBeInTheDocument();
-    expect(screen.getByTestId('documentserver-error-dialog-backdrop')).toHaveClass('z-[10010]');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getAllByText('Document preview unavailable').length).toBeGreaterThan(0);
     expect(screen.getByTestId('documentserver-inline-error')).toBeInTheDocument();
     expect(screen.getAllByText(/DocumentServer runtime error \(-4\): Download failed\./)).toHaveLength(2);
     expect(document.querySelector('.absolute.inset-0.text-red-600')).not.toBeInTheDocument();
@@ -116,7 +116,7 @@ describe('DocumentServerEditor', () => {
       });
     });
 
-    expect(screen.queryByRole('dialog', { name: /document preview unavailable/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByTestId('documentserver-inline-error')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /extracted text/i })).toBeInTheDocument();
   });

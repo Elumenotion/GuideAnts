@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '../../../../test/test-utils';
+import { render, screen, fireEvent, waitFor, within } from '../../../../test/test-utils';
 import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
 import { FilePreviewOverlay } from '../FilePreviewOverlay';
 import { NotebookFileDto } from '../../../../types/notebook';
@@ -352,9 +352,9 @@ describe('FilePreviewOverlay', () => {
 
       render(<FilePreviewOverlay {...defaultProps} file={mockFile} />);
 
-      await waitFor(() => {
-        expect(screen.getByText(errorMessage)).toBeInTheDocument();
-      });
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(errorMessage)).toBeInTheDocument();
+      expect(screen.getAllByText(errorMessage).length).toBeGreaterThanOrEqual(2);
     });
 
     it('displays generic error message when error has no message', async () => {
@@ -362,9 +362,10 @@ describe('FilePreviewOverlay', () => {
 
       render(<FilePreviewOverlay {...defaultProps} file={mockFile} />);
 
-      await waitFor(() => {
-        expect(screen.getByText('Failed to load file content.')).toBeInTheDocument();
-      });
+      const message = 'Failed to load file content.';
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(message)).toBeInTheDocument();
+      expect(screen.getAllByText(message).length).toBeGreaterThanOrEqual(2);
     });
 
     it('handles text content reading errors', async () => {
@@ -378,9 +379,10 @@ describe('FilePreviewOverlay', () => {
 
       render(<FilePreviewOverlay {...defaultProps} file={mockFile} />);
 
-      await waitFor(() => {
-        expect(screen.getByText('Failed to read text content. Please try again.')).toBeInTheDocument();
-      });
+      const message = 'Failed to read text content. Please try again.';
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(message)).toBeInTheDocument();
+      expect(screen.getAllByText(message).length).toBeGreaterThanOrEqual(2);
 
       expect(consoleSpy).toHaveBeenCalledWith('Failed to read text content:', expect.any(Error));
       consoleSpy.mockRestore();
@@ -590,9 +592,9 @@ describe('FilePreviewOverlay', () => {
 
       rerender(<FilePreviewOverlay {...defaultProps} file={newFile} />);
 
-      await waitFor(() => {
-        expect(screen.getByText('New file error')).toBeInTheDocument();
-      });
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText('New file error')).toBeInTheDocument();
+      expect(screen.getAllByText('New file error').length).toBeGreaterThanOrEqual(2);
     });
 
     it('handles rapid file changes', async () => {

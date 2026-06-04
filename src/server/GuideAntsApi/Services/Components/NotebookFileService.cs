@@ -5,6 +5,7 @@ using GuideAntsApi.Models;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Extensions;
+using GuideAntsApi.Services;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -212,7 +213,11 @@ using var scope = CreateDbScope();
         var file = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == relativePath);
         if (file == null) return null;
 
-        var physicalPath = Path.Combine(GetNotebookRootPath(projectId, notebookId), relativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!TryResolveNotebookPath(projectId, notebookId, relativePath, out var physicalPath))
+        {
+            return null;
+        }
+
         if (!File.Exists(physicalPath)) return null;
 
         var contentType = _contentTypeProvider.TryGetContentType(file.RelativePath, out var ct) ? ct : "application/octet-stream";
@@ -252,7 +257,11 @@ using var scope = CreateDbScope();
             throw new FileNotFoundException("Database record not found for the specified file.", relativePath);
         }
 
-        var physicalPath = Path.Combine(GetNotebookRootPath(projectId, notebookId), normalizedPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!TryResolveNotebookPath(projectId, notebookId, normalizedPath, out var physicalPath))
+        {
+            throw new FileNotFoundException("File not found on disk.", normalizedPath);
+        }
+
         if (!File.Exists(physicalPath))
         {
             throw new FileNotFoundException("File not found on disk.", physicalPath);
@@ -354,7 +363,11 @@ using var scope = CreateDbScope();
         if (nf == null) return null;
 
         var notebookRoot = GetNotebookRootPath(nf.Notebook.ProjectId, nf.NotebookId);
-        var physicalPath = Path.Combine(notebookRoot, nf.RelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, nf.RelativePath, out var physicalPath))
+        {
+            return null;
+        }
+
         if (!File.Exists(physicalPath)) return null;
 
         var fileName = Path.GetFileName(nf.RelativePath);
@@ -371,6 +384,12 @@ using var scope = CreateDbScope();
     private string GetNotebookRootPath(Guid projectId, Guid notebookId)
     {
         return _pathResolver.GetNotebookRootPath(projectId, notebookId);
+    }
+
+    private bool TryResolveNotebookPath(Guid projectId, Guid notebookId, string? relativePath, out string fullPath)
+    {
+        var notebookRoot = GetNotebookRootPath(projectId, notebookId);
+        return NotebookStoragePath.TryResolveUnderRoot(notebookRoot, relativePath, out fullPath);
     }
 
     public async Task<NotebookFileDto?> CopyFromProjectAsync(Guid projectId, Guid notebookId, Guid contentFileId, int? versionNumber, string? targetRelativePath)
@@ -403,7 +422,11 @@ using var scope = CreateDbScope();
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
         Directory.CreateDirectory(notebookRoot);
         var relativePath = string.IsNullOrWhiteSpace(targetRelativePath) ? version.FileName : targetRelativePath;
-        var destPath = Path.Combine(notebookRoot, relativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, relativePath, out var destPath))
+        {
+            return null;
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
         File.Copy(sourcePath, destPath, overwrite: true);
 
@@ -538,7 +561,7 @@ using var scope = CreateDbScope();
             null,
             FileLineageAction.Created,
             notebookId,
-            Path.Combine(GetNotebookRootPath(projectId, notebookId), nf.RelativePath));
+            destPath);
 
         // Kernel Memory removed - notebook tag updates no longer needed
 
@@ -562,7 +585,11 @@ using var scope = CreateDbScope();
             throw new ArgumentException("Notebook file not found.");
         }
 
-        var sourcePath = Path.Combine(GetNotebookRootPath(projectId, notebookId), notebookFile.RelativePath);
+        if (!TryResolveNotebookPath(projectId, notebookId, notebookFile.RelativePath, out var sourcePath))
+        {
+            throw new FileNotFoundException("The source notebook file was not found on the server.", notebookFile.RelativePath);
+        }
+
         if (!File.Exists(sourcePath))
         {
             throw new FileNotFoundException("The source notebook file was not found on the server.", sourcePath);
@@ -615,7 +642,11 @@ using var scope = CreateDbScope();
         }
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var targetDirectory = Path.Combine(notebookRoot, targetRelativePath?.Replace("/", Path.DirectorySeparatorChar.ToString()) ?? "");
+        if (!NotebookStoragePath.TryResolveDirectoryUnderRoot(notebookRoot, targetRelativePath, out var targetDirectory))
+        {
+            throw new ArgumentException("Invalid target directory path.");
+        }
+
         Directory.CreateDirectory(targetDirectory);
         
         var processedFiles = new List<NotebookFile>();
@@ -625,7 +656,13 @@ using var scope = CreateDbScope();
         {
             if (file.Length == 0) continue;
 
-            var physicalPath = Path.Combine(targetDirectory, file.FileName);
+            var safeFileName = NotebookStoragePath.SanitizeFileName(file.FileName)
+                ?? throw new ArgumentException("Invalid file name.");
+            if (!NotebookStoragePath.TryResolveUnderRoot(targetDirectory, safeFileName, out var physicalPath))
+            {
+                throw new ArgumentException("Invalid file path.");
+            }
+
             var relativePath = Path.GetRelativePath(notebookRoot, physicalPath).Replace("\\", "/");
             var existingFile = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == relativePath);
             var previousHash = existingFile?.FileHash;
@@ -723,6 +760,11 @@ using var scope = CreateDbScope();
         // Record lineage events for each created or updated file
         foreach (var nf in processedFiles)
         {
+            if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, nf.RelativePath, out var lineagePath))
+            {
+                continue;
+            }
+
             await _lineageService.RecordAsync(
             FileKind.Notebook,
                 projectId,
@@ -730,7 +772,7 @@ using var scope = CreateDbScope();
                 null,
                 FileLineageAction.Uploaded, // Using "Uploaded" for both create and update
                 notebookId,
-                Path.Combine(GetNotebookRootPath(projectId, notebookId), nf.RelativePath));
+                lineagePath);
         }
 
         // --- Create markdown shadows for uploaded files ---
@@ -813,15 +855,18 @@ using var scope = CreateDbScope();
         
         // Normalize relative path (ensure forward slashes)
         var normalizedPath = relativePath.Replace("\\", "/");
+
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, normalizedPath, out var physicalPath))
+        {
+            throw new FileNotFoundException("File not found on disk.", normalizedPath);
+        }
         
         // Ensure parent folder exists (e.g., /conversations)
-        var parentFolder = Path.GetDirectoryName(Path.Combine(notebookRoot, normalizedPath.Replace("/", Path.DirectorySeparatorChar.ToString())));
+        var parentFolder = Path.GetDirectoryName(physicalPath);
         if (!string.IsNullOrEmpty(parentFolder))
         {
             Directory.CreateDirectory(parentFolder);
         }
-        
-        var physicalPath = Path.Combine(notebookRoot, normalizedPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
 
         // Write content to file
         await File.WriteAllTextAsync(physicalPath, content, System.Text.Encoding.UTF8);
@@ -1010,7 +1055,10 @@ using var scope = CreateDbScope();
         }
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var physicalPath = Path.Combine(notebookRoot, newFolderPath?.Replace("/", Path.DirectorySeparatorChar.ToString()) ?? "");
+        if (!NotebookStoragePath.TryResolveDirectoryUnderRoot(notebookRoot, newFolderPath, out var physicalPath))
+        {
+            return null;
+        }
 
         if (File.Exists(physicalPath))
         {
@@ -1046,7 +1094,10 @@ using var scope = CreateDbScope();
         var context = GetDbContext(scope);
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var physicalPath = Path.Combine(notebookRoot, relativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, relativePath, out var physicalPath))
+        {
+            return false;
+        }
 
         if (File.Exists(physicalPath))
         {
@@ -1405,8 +1456,27 @@ using var scope = CreateDbScope();
         var context = GetDbContext(scope);
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var sourcePhysicalPath = Path.Combine(notebookRoot, sourceRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
-        var newPhysicalPath = Path.Combine(Path.GetDirectoryName(sourcePhysicalPath)!, newName);
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, sourceRelativePath, out var sourcePhysicalPath))
+        {
+            return false;
+        }
+
+        var safeNewName = NotebookStoragePath.SanitizeFileName(newName);
+        if (safeNewName == null)
+        {
+            return false;
+        }
+
+        var sourceDirectory = Path.GetDirectoryName(sourcePhysicalPath);
+        if (string.IsNullOrEmpty(sourceDirectory))
+        {
+            return false;
+        }
+
+        if (!NotebookStoragePath.TryResolveUnderRoot(sourceDirectory, safeNewName, out var newPhysicalPath))
+        {
+            return false;
+        }
 
         if (newPhysicalPath == sourcePhysicalPath) return true; // No change
         if (File.Exists(newPhysicalPath) || Directory.Exists(newPhysicalPath)) return false; // Conflict
@@ -1466,9 +1536,20 @@ using var scope = CreateDbScope();
         var context = GetDbContext(scope);
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var sourcePhysicalPath = Path.Combine(notebookRoot, sourceRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
-        var destDirectoryPhysicalPath = Path.Combine(notebookRoot, destinationRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
-        var newPhysicalPath = Path.Combine(destDirectoryPhysicalPath, Path.GetFileName(sourcePhysicalPath));
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, sourceRelativePath, out var sourcePhysicalPath))
+        {
+            return false;
+        }
+
+        if (!NotebookStoragePath.TryResolveDirectoryUnderRoot(notebookRoot, destinationRelativePath, out var destDirectoryPhysicalPath))
+        {
+            return false;
+        }
+
+        if (!NotebookStoragePath.TryResolveUnderRoot(destDirectoryPhysicalPath, Path.GetFileName(sourcePhysicalPath), out var newPhysicalPath))
+        {
+            return false;
+        }
 
         if (newPhysicalPath == sourcePhysicalPath) return true;
         if (File.Exists(newPhysicalPath) || Directory.Exists(newPhysicalPath)) return false;
