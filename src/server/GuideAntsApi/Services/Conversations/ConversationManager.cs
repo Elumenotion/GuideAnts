@@ -47,7 +47,7 @@ public class ConversationManager : IConversationManager
         var conversation = await AntRunner.Chat.Conversation.Create(chatOptions);
 
         _logger.LogInformation("Created new conversation {ConversationId} with assistant {AssistantName}", 
-            conversationId, assistantName);
+            conversationId, LogValueSanitizer.Sanitize(assistantName));
 
         return conversation;
     }

@@ -120,8 +120,16 @@ function Build-ScriptExecutionAgent {
 
     Push-Location $scriptAgentProject
     try {
-        dotnet restore
-        dotnet publish -c Release -o ./publish
+        $null = dotnet restore
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet restore failed with exit code $LASTEXITCODE"
+        }
+
+        $null = dotnet publish -c Release -o ./publish
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet publish failed with exit code $LASTEXITCODE"
+        }
+
         Set-Content -Path $scriptAgentHashFile -Value $scriptAgentSourceHash -Encoding UTF8
         Write-Host "ScriptExecutionAgent built successfully." -ForegroundColor Green
     }

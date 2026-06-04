@@ -103,18 +103,18 @@ public sealed class IndexDirectTextFileHandler : JobHandlerBase<IndexDirectTextF
             if (!File.Exists(filePath))
             {
                 _log.LogWarning("NotebookFile physical file not found: {Path}. RelativePath was: {RelativePath}. Storage root: {StorageRoot}. Working directory: {WorkingDir}", 
-                    filePath, notebookFile.RelativePath, storageRoot, Directory.GetCurrentDirectory());
+                    LogValueSanitizer.Sanitize(filePath), LogValueSanitizer.Sanitize(notebookFile.RelativePath), LogValueSanitizer.Sanitize(storageRoot), LogValueSanitizer.Sanitize(Directory.GetCurrentDirectory()));
                 
                 // List what files actually exist in the directory
                 var parentDir = Path.GetDirectoryName(filePath);
                 if (Directory.Exists(parentDir))
                 {
                     var existingFiles = Directory.GetFiles(parentDir, "*", SearchOption.TopDirectoryOnly);
-                    _log.LogInformation("Files in directory {ParentDir}: {Files}", parentDir, string.Join(", ", existingFiles.Select(Path.GetFileName)));
+                    _log.LogInformation("Files in directory {ParentDir}: {Files}", LogValueSanitizer.Sanitize(parentDir), LogValueSanitizer.Sanitize(string.Join(", ", existingFiles.Select(Path.GetFileName))));
                 }
                 else
                 {
-                    _log.LogWarning("Parent directory does not exist: {ParentDir}", parentDir);
+                    _log.LogWarning("Parent directory does not exist: {ParentDir}", LogValueSanitizer.Sanitize(parentDir));
                 }
                 
                 return false;

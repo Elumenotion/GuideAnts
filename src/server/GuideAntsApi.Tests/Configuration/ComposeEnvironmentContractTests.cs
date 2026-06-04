@@ -31,6 +31,18 @@ public sealed class ComposeEnvironmentContractTests
         "DocumentServer__JwtInBody"
     ];
 
+    private static readonly (string FileName, string ApiServiceName)[] ScriptAgentComposeStacks =
+    [
+        ("docker-compose.cpu.yml", "guideants-webapi-ui"),
+        ("docker-compose.cuda.yml", "guideants-webapi-ui"),
+        ("docker-compose.rocm.yml", "guideants-webapi-ui"),
+        ("docker-compose.slim.yml", "guideants-webapi-ui"),
+        ("docker-compose.ghcr-cpu.yml", "guideants-webapi-ui"),
+        ("docker-compose.ghcr-cuda13.yml", "guideants-webapi-ui"),
+        ("docker-compose.ghcr-rocm.yml", "guideants-webapi-ui"),
+        ("docker-compose.ghcr-slim.yml", "guideants-webapi-ui")
+    ];
+
     private static readonly string[] RequiredDocumentServerContainerKeys =
     [
         "JWT_ENABLED",
@@ -170,6 +182,29 @@ public sealed class ComposeEnvironmentContractTests
         offenders.Should().BeEmpty(
             "build scripts must update docker/.env line-by-line; reconstructing it can collapse comments/newlines into values. Offenders: {0}",
             string.Join(Environment.NewLine, offenders));
+    }
+
+    [TestMethod]
+    public void ScriptExecutionAgentTokenContract_IsPresentAcrossSandboxStacks()
+    {
+        var repoRoot = FindRepositoryRoot();
+
+        foreach (var (composeFile, apiServiceName) in ScriptAgentComposeStacks)
+        {
+            var composePath = Path.Combine(repoRoot, "docker", composeFile);
+            File.Exists(composePath).Should().BeTrue($"compose file should exist at {composePath}");
+
+            var apiKeys = ReadComposeEnvironmentKeys(composePath, apiServiceName);
+            apiKeys.Should().Contain("ScriptExecution__AgentToken", $"{composeFile} must provide API->agent shared token");
+
+            var aiKeys = ReadComposeEnvironmentKeys(composePath, "guideants-ai");
+            aiKeys.Should().Contain("SCRIPT_EXECUTION_AGENT_TOKEN", $"{composeFile} must provide script-agent shared token");
+            aiKeys.Should().Contain("SCRIPT_EXECUTION_REQUIRE_TOKEN", $"{composeFile} must enforce script-agent token requirement");
+
+            var plantumlKeys = ReadComposeEnvironmentKeys(composePath, "plantuml");
+            plantumlKeys.Should().Contain("SCRIPT_EXECUTION_AGENT_TOKEN", $"{composeFile} must provide script-agent shared token for plantuml");
+            plantumlKeys.Should().Contain("SCRIPT_EXECUTION_REQUIRE_TOKEN", $"{composeFile} must enforce script-agent token requirement for plantuml");
+        }
     }
 
     private static string FindRepositoryRoot()

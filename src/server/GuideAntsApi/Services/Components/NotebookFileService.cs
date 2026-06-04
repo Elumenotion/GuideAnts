@@ -4,6 +4,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.Models;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Core;
+using GuideAntsApi.Extensions;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -239,7 +240,7 @@ using var scope = CreateDbScope();
                 file = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == altPath);
                 if (file != null)
                 {
-                    _logger.LogInformation("Resolved file path from '{OriginalPath}' to '{ResolvedPath}'", normalizedPath, altPath);
+                    _logger.LogInformation("Resolved file path from '{OriginalPath}' to '{ResolvedPath}'", LogValueSanitizer.Sanitize(normalizedPath), LogValueSanitizer.Sanitize(altPath));
                     normalizedPath = altPath;
                     break;
                 }
@@ -395,7 +396,7 @@ using var scope = CreateDbScope();
         // Ensure the source file exists
         if (!File.Exists(sourcePath))
         {
-            _logger.LogError("Source file not found at path: {SourcePath}", sourcePath);
+            _logger.LogError("Source file not found at path: {SourcePath}", LogValueSanitizer.Sanitize(sourcePath));
             return null;
         }
 
@@ -433,7 +434,7 @@ using var scope = CreateDbScope();
         catch (Exception ex)
         {
             // Log but don't fail the copy operation if markdown shadow preparation fails
-            _logger.LogError(ex, "Failed to prepare markdown shadow for copied file {RelativePath}", relativePath);
+            _logger.LogError(ex, "Failed to prepare markdown shadow for copied file {RelativePath}", LogValueSanitizer.Sanitize(relativePath));
         }
 
         // --- Manually create NotebookFile record instead of relying on sync ---
@@ -515,7 +516,7 @@ using var scope = CreateDbScope();
         catch (Exception ex)
         {
             // Log but don't fail the copy operation if markdown shadow creation fails
-            _logger.LogError(ex, "Failed to create markdown shadow for copied file {RelativePath}", nf.RelativePath);
+            _logger.LogError(ex, "Failed to create markdown shadow for copied file {RelativePath}", LogValueSanitizer.Sanitize(nf.RelativePath));
         }
 
         // Record lineage: project side (CopiedToNotebook)
@@ -650,9 +651,9 @@ using var scope = CreateDbScope();
                     projectId,
                     notebookId,
                     existingFile.Id,
-                    relativePath,
-                    previousHash,
-                    fileHash,
+                    LogValueSanitizer.Sanitize(relativePath),
+                    LogValueSanitizer.Sanitize(previousHash),
+                    LogValueSanitizer.Sanitize(fileHash),
                     previousSize,
                     fileInfo.Length,
                     contentChanged,
@@ -688,8 +689,8 @@ using var scope = CreateDbScope();
                     "Created new notebook file record. projectId={ProjectId} notebookId={NotebookId} relativePath={RelativePath} hash={Hash} size={Size}",
                     projectId,
                     notebookId,
-                    relativePath,
-                    fileHash,
+                    LogValueSanitizer.Sanitize(relativePath),
+                    LogValueSanitizer.Sanitize(fileHash),
                     fileInfo.Length);
             }
         }
@@ -745,7 +746,7 @@ using var scope = CreateDbScope();
                         projectId,
                         notebookId,
                         nf.Id,
-                        nf.RelativePath);
+                        LogValueSanitizer.Sanitize(nf.RelativePath));
                 }
                 else
                 {
@@ -755,13 +756,13 @@ using var scope = CreateDbScope();
                         projectId,
                         notebookId,
                         nf.Id,
-                        nf.RelativePath);
+                        LogValueSanitizer.Sanitize(nf.RelativePath));
                 }
             }
             catch (Exception ex)
             {
                 // Log but don't fail the upload if markdown shadow creation fails
-                _logger.LogError(ex, "Failed to create markdown shadow for uploaded file {RelativePath}", nf.RelativePath);
+                _logger.LogError(ex, "Failed to create markdown shadow for uploaded file {RelativePath}", LogValueSanitizer.Sanitize(nf.RelativePath));
             }
         }
 
@@ -778,12 +779,12 @@ using var scope = CreateDbScope();
                     await jobQueue.EnqueueAsync(
                         jobType: nameof(GuideAntsApi.BackgroundJobs.Jobs.IndexDirectTextFileJob).Replace("Job", string.Empty),
                         payload: new GuideAntsApi.BackgroundJobs.Jobs.IndexDirectTextFileJob(nf.Id, IsContentFile: false));
-                    _logger.LogInformation("Created indexing job for uploaded NotebookFile {NotebookFileId} ({RelativePath})", nf.Id, nf.RelativePath);
+                    _logger.LogInformation("Created indexing job for uploaded NotebookFile {NotebookFileId} ({RelativePath})", nf.Id, LogValueSanitizer.Sanitize(nf.RelativePath));
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to create indexing job for uploaded file {RelativePath}", nf.RelativePath);
+                _logger.LogError(ex, "Failed to create indexing job for uploaded file {RelativePath}", LogValueSanitizer.Sanitize(nf.RelativePath));
             }
         }
 
@@ -892,12 +893,12 @@ using var scope = CreateDbScope();
         {
             await _markdownExtractionService.CreateNotebookMarkdownShadowAsync(notebookFile.Id);
             _logger.LogInformation("Created markdown shadow for saved conversation file {NotebookFileId} ({RelativePath})", 
-                notebookFile.Id, notebookFile.RelativePath);
+                notebookFile.Id, LogValueSanitizer.Sanitize(notebookFile.RelativePath));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create markdown shadow for saved conversation file {RelativePath}", 
-                notebookFile.RelativePath);
+                LogValueSanitizer.Sanitize(notebookFile.RelativePath));
         }
 
         // Create indexing job for markdown file
@@ -909,12 +910,12 @@ using var scope = CreateDbScope();
                 jobType: nameof(GuideAntsApi.BackgroundJobs.Jobs.IndexDirectTextFileJob).Replace("Job", string.Empty),
                 payload: new GuideAntsApi.BackgroundJobs.Jobs.IndexDirectTextFileJob(notebookFile.Id, IsContentFile: false));
             _logger.LogInformation("Created indexing job for saved conversation file {NotebookFileId} ({RelativePath})", 
-                notebookFile.Id, notebookFile.RelativePath);
+                notebookFile.Id, LogValueSanitizer.Sanitize(notebookFile.RelativePath));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create indexing job for saved conversation file {RelativePath}", 
-                notebookFile.RelativePath);
+                LogValueSanitizer.Sanitize(notebookFile.RelativePath));
         }
 
         await QueueNotebookSyncBestEffortAsync(notebookId);
@@ -1013,7 +1014,7 @@ using var scope = CreateDbScope();
 
         if (File.Exists(physicalPath))
         {
-            _logger.LogWarning("Cannot create folder at {Path}; a file exists at this path.", physicalPath);
+            _logger.LogWarning("Cannot create folder at {Path}; a file exists at this path.", LogValueSanitizer.Sanitize(physicalPath));
             return null;
         }
 
@@ -1022,7 +1023,10 @@ using var scope = CreateDbScope();
         {
             Directory.CreateDirectory(physicalPath);
         }
-        _logger.LogInformation("Created folder {FolderPath} in notebook {NotebookId}", newFolderPath, notebookId);
+        _logger.LogInformation(
+            "Created folder {FolderPath} in notebook {NotebookId}",
+            LogValueSanitizer.Sanitize(newFolderPath),
+            LogValueSanitizer.Sanitize(notebookId));
         
         // Return the current folder tree - the new empty folder will be managed client-side
         // until files are added to it
@@ -1070,7 +1074,7 @@ using var scope = CreateDbScope();
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Unexpected error during file removal cleanup {RelativePath}", dbFile.RelativePath);
+                        _logger.LogError(ex, "Unexpected error during file removal cleanup {RelativePath}", LogValueSanitizer.Sanitize(dbFile.RelativePath));
                     }
                 }
                 else
@@ -1116,7 +1120,7 @@ using var scope = CreateDbScope();
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", shadow.StoragePath, ex.Message);
+                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", LogValueSanitizer.Sanitize(shadow.StoragePath), LogValueSanitizer.Sanitize(ex.Message));
                             }
                         }
                     }
@@ -1168,7 +1172,7 @@ using var scope = CreateDbScope();
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Unexpected error during file removal cleanup {RelativePath}", dbFile.RelativePath);
+                        _logger.LogError(ex, "Unexpected error during file removal cleanup {RelativePath}", LogValueSanitizer.Sanitize(dbFile.RelativePath));
                     }
                 }
                 else
@@ -1214,7 +1218,7 @@ using var scope = CreateDbScope();
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", shadow.StoragePath, ex.Message);
+                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", LogValueSanitizer.Sanitize(shadow.StoragePath), LogValueSanitizer.Sanitize(ex.Message));
                             }
                         }
                     }
@@ -1266,7 +1270,7 @@ using var scope = CreateDbScope();
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", shadow.StoragePath, ex.Message);
+                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", LogValueSanitizer.Sanitize(shadow.StoragePath), LogValueSanitizer.Sanitize(ex.Message));
                             }
                         }
                     }
@@ -1282,7 +1286,7 @@ using var scope = CreateDbScope();
                     notebookId,
                     physicalPath);
 
-                _logger.LogInformation("Soft-deleted DB record for missing notebook file {RelativePath}", normalizedRelPath);
+                _logger.LogInformation("Soft-deleted DB record for missing notebook file {RelativePath}", LogValueSanitizer.Sanitize(normalizedRelPath));
             }
             else
             {
@@ -1313,7 +1317,7 @@ using var scope = CreateDbScope();
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "Failed to update notebook tags after removing file {RelativePath}", dbf.RelativePath);
+                                _logger.LogError(ex, "Failed to update notebook tags after removing file {RelativePath}", LogValueSanitizer.Sanitize(dbf.RelativePath));
                             }
                         }
                         else
@@ -1352,7 +1356,7 @@ using var scope = CreateDbScope();
                                     }
                                     catch (Exception ex)
                                     {
-                                        _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", shadow.StoragePath, ex.Message);
+                                        _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", LogValueSanitizer.Sanitize(shadow.StoragePath), LogValueSanitizer.Sanitize(ex.Message));
                                     }
                                 }
                             }
@@ -1369,12 +1373,12 @@ using var scope = CreateDbScope();
                     }
 
                     context.NotebookFiles.RemoveRange(dbFilesMissingFolder);
-                    _logger.LogInformation("Soft-deleted {Count} DB records for missing notebook folder {RelativePath}", dbFilesMissingFolder.Count, normalizedRelPath);
+                    _logger.LogInformation("Soft-deleted {Count} DB records for missing notebook folder {RelativePath}", dbFilesMissingFolder.Count, LogValueSanitizer.Sanitize(normalizedRelPath));
                 }
                 else
                 {
                     // Nothing to do; treat as idempotent success
-                    _logger.LogInformation("Delete requested for {Path} but nothing found on disk or in DB; treating as success.", physicalPath);
+                    _logger.LogInformation("Delete requested for {Path} but nothing found on disk or in DB; treating as success.", LogValueSanitizer.Sanitize(physicalPath));
                 }
             }
 

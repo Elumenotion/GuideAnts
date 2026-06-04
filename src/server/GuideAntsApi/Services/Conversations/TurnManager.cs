@@ -55,7 +55,7 @@ public class TurnManager : ITurnManager
         };
 
         _logger.LogInformation("Created turn {TurnIndex} for conversation {ConversationId} with assistant {AssistantName}", 
-            nextTurnIndex, conversationId, assistantName);
+            nextTurnIndex, conversationId, LogValueSanitizer.Sanitize(assistantName));
 
         return turn;
     }

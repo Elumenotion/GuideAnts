@@ -20,7 +20,9 @@ Executes a script and returns the result.
 {
   "script": "print('Hello, World!')",
   "scriptType": "Python",
-  "workingDirectory": "/app/ContentFiles/project-123/notebooks/notebook-456"
+  "projectId": "11111111-1111-1111-1111-111111111111",
+  "notebookId": "22222222-2222-2222-2222-222222222222",
+  "workingDirectory": "/app/ContentFiles/my-project/notebooks/22222222-2222-2222-2222-222222222222/Output"
 }
 ```
 
@@ -40,7 +42,7 @@ Health check endpoint.
 OK
 ```
 
-### GET /files?directory={path}
+### GET /files?directory={path}&projectId={guid}&notebookId={guid}
 Lists files in a directory.
 
 **Response:**
@@ -101,6 +103,11 @@ services:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ASPNETCORE_URLS` | `http://+:80` | URL to listen on |
+| `FILE_STORAGE_ROOT` | _(required)_ | Root path that bounds all script/listing file operations |
+| `SCRIPT_EXECUTION_AGENT_TOKEN` | _(required when strict token mode is enabled)_ | Shared token expected in `X-Script-Agent-Token` |
+| `SCRIPT_EXECUTION_REQUIRE_TOKEN` | `true` | Require `X-Script-Agent-Token` on `/execute` and `/files` |
+| `SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION` | `true` | Enable Linux notebook identity + `setpriv` execution/listing |
+| `SCRIPT_EXECUTION_ALLOW_OWNERSHIP_FALLBACK` | `false` in production (`true` in Development if not set) | Allow compatibility fallback if Linux ownership hardening fails |
 
 ## Supported Script Types
 
@@ -117,10 +124,13 @@ var request = new
 {
     Script = "print('Hello from Python!')",
     ScriptType = "Python",
-    WorkingDirectory = "/app/ContentFiles/project-123/notebooks/notebook-456"
+    ProjectId = "11111111-1111-1111-1111-111111111111",
+    NotebookId = "22222222-2222-2222-2222-222222222222",
+    WorkingDirectory = "/app/ContentFiles/my-project/notebooks/22222222-2222-2222-2222-222222222222/Output"
 };
 
 using var httpClient = new HttpClient();
+httpClient.DefaultRequestHeaders.Add("X-Script-Agent-Token", "<shared-token>");
 var json = JsonSerializer.Serialize(request);
 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -148,7 +158,8 @@ docker build -t script-execution-agent .
 curl http://localhost/health
 curl -X POST http://localhost/execute \
   -H "Content-Type: application/json" \
-  -d '{"script":"print(\"test\")","scriptType":"Python","workingDirectory":"/tmp"}'
+  -H "X-Script-Agent-Token: your-shared-token" \
+  -d '{"script":"print(\"test\")","scriptType":"Python","projectId":"11111111-1111-1111-1111-111111111111","notebookId":"22222222-2222-2222-2222-222222222222","workingDirectory":"/app/ContentFiles/my-project/notebooks/22222222-2222-2222-2222-222222222222/Output"}'
 ```
 
 ## Azure Container Apps
@@ -162,11 +173,12 @@ For Azure Container Apps deployment:
 
 ## Security Considerations
 
-- The agent runs on internal port 80
-- No external access required
-- Uses container's native interpreters
-- Script execution is isolated to the container
-- No file system access outside working directory
+- The agent runs on internal port 80 and is intended for internal network use.
+- `/execute` and `/files` require `X-Script-Agent-Token` when token enforcement is enabled.
+- `ProjectId` + `NotebookId` are mandatory and validated for every execution/listing request.
+- Paths are canonicalized and rejected if they escape `FILE_STORAGE_ROOT` or notebook scope.
+- Reparse-point (symlink/junction) pivots in the authorized path chain are rejected.
+- On Linux, script/listing operations run under notebook-scoped low-privilege identities via `setpriv`.
 
 ## Troubleshooting
 

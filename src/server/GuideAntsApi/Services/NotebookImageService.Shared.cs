@@ -309,7 +309,7 @@ namespace GuideAntsApi.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError("Failed to parse image generation response: {Message}. Raw response: {Response}", ex.Message, responseJson);
+                _logger.LogError("Failed to parse image generation response: {Message}. Raw response: {Response}", LogValueSanitizer.Sanitize(ex.Message), LogValueSanitizer.Sanitize(responseJson));
                 return Task.FromResult<byte[]?>(null);
             }
         }

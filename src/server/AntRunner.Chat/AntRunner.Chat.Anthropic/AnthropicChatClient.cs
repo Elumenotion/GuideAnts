@@ -81,8 +81,8 @@ public sealed class AnthropicChatClient : IChatCompletionClient
             _logger.LogInformation(
                 "Anthropic request. Model={Model}, Stream={Stream}, Messages={MessageCount}, Tools={ToolCount}, "
                 + "ReasoningEffort={ReasoningEffort}, SamplingOverrides={SamplingOverrides}",
-                request.Model ?? _defaultModel, stream, request.Messages.Count, request.Tools?.Count ?? 0,
-                request.ReasoningEffort, sampling);
+                LogValueSanitizer.Sanitize(request.Model ?? _defaultModel), stream, request.Messages.Count, request.Tools?.Count ?? 0,
+                LogValueSanitizer.Sanitize(request.ReasoningEffort), LogValueSanitizer.Sanitize(sampling));
         }
     }
 

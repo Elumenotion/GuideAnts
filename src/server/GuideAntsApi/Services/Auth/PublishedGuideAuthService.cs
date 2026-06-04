@@ -149,7 +149,7 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
 
             if (string.IsNullOrWhiteSpace(userIdentity))
             {
-                _logger.LogWarning("Webhook returned valid=true but no userIdentity for pubId {PubId}", pubId);
+                _logger.LogWarning("Webhook returned valid=true but no userIdentity for pubId {PubId}", LogValueSanitizer.Sanitize(pubId));
             }
 
             return new AuthValidationResult
@@ -170,7 +170,7 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "HTTP error calling auth webhook for published guide {PubId}", pubId);
+            _logger.LogError(ex, "HTTP error calling auth webhook for published guide {PubId}", LogValueSanitizer.Sanitize(pubId));
             return new AuthValidationResult
             {
                 IsValid = false,
@@ -180,7 +180,7 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error calling auth webhook for published guide {PubId}", pubId);
+            _logger.LogError(ex, "Unexpected error calling auth webhook for published guide {PubId}", LogValueSanitizer.Sanitize(pubId));
             return new AuthValidationResult
             {
                 IsValid = false,

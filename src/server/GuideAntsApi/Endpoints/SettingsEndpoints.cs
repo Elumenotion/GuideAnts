@@ -9,6 +9,7 @@ using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Configuration;
+using GuideAntsApi.Extensions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -199,10 +200,10 @@ public static class SettingsEndpoints
                     var logger = loggerFactory.CreateLogger("LocalModelOnboarding");
                     logger.LogInformation(
                         "Local model onboarding request. ui={OnboardingUi} source={InstallSource} catalogModelId={CatalogModelId} routerModelId={RouterModelId}",
-                        string.IsNullOrWhiteSpace(command.OnboardingUi) ? "unknown" : command.OnboardingUi,
-                        command.InstallSource,
-                        command.CatalogModelId,
-                        command.RouterModelId);
+                        LogValueSanitizer.Sanitize(string.IsNullOrWhiteSpace(command.OnboardingUi) ? "unknown" : command.OnboardingUi),
+                        LogValueSanitizer.Sanitize(command.InstallSource),
+                        LogValueSanitizer.Sanitize(command.CatalogModelId),
+                        LogValueSanitizer.Sanitize(command.RouterModelId));
 
                     await localModelOnboardingValidator.ValidateAsync(request, command, cancellationToken).ConfigureAwait(false);
                     var onboardingResult = await localModelOnboardingOrchestrator
