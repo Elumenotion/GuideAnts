@@ -12,4 +12,12 @@
     <PackageReference Include="CliWrap" Version="3.10.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Using Include="GuideAnts.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GuideAnts.Logging\GuideAnts.Logging.csproj" />
+  </ItemGroup>
+
 </Project> 

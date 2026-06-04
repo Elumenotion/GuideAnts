@@ -27,7 +27,7 @@ public abstract class JobHandlerBase<TPayload> : IJobHandler<TPayload>
             var payload = JsonSerializer.Deserialize<TPayload>(payloadJson);
             if (payload == null)
             {
-                Logger.LogError("Failed to deserialize payload for job type {JobType}: {PayloadJson}", JobType, payloadJson);
+                Logger.LogError("Failed to deserialize payload for job type {JobType}: {PayloadJson}", JobType, LogValueSanitizer.Sanitize(payloadJson));
                 return false;
             }
 
@@ -35,7 +35,7 @@ public abstract class JobHandlerBase<TPayload> : IJobHandler<TPayload>
         }
         catch (JsonException ex)
         {
-            Logger.LogError(ex, "JSON deserialization failed for job type {JobType}: {PayloadJson}", JobType, payloadJson);
+            Logger.LogError(ex, "JSON deserialization failed for job type {JobType}: {PayloadJson}", JobType, LogValueSanitizer.Sanitize(payloadJson));
             return false;
         }
         catch (Exception ex)

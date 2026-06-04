@@ -96,18 +96,18 @@ namespace GuideAntsApi.Services.Components
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "HTTP error during transcription for {FileName}", fileName);
+                _logger.LogError(ex, "HTTP error during transcription for {FileName}", LogValueSanitizer.Sanitize(fileName));
                 throw new InvalidOperationException($"Failed to transcribe audio: {ex.Message}", ex);
             }
             catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
-                _logger.LogError(ex, "Transcription timed out for {FileName}", fileName);
+                _logger.LogError(ex, "Transcription timed out for {FileName}", LogValueSanitizer.Sanitize(fileName));
                 var timeoutSeconds = GetEffectiveTimeoutSeconds(mode.ProviderSection);
                 throw new TimeoutException($"Audio transcription timed out after {timeoutSeconds} seconds", ex);
             }
             catch (JsonException ex)
             {
-                _logger.LogError(ex, "Failed to parse transcription response for {FileName}", fileName);
+                _logger.LogError(ex, "Failed to parse transcription response for {FileName}", LogValueSanitizer.Sanitize(fileName));
                 throw new InvalidOperationException($"Failed to parse transcription response: {ex.Message}", ex);
             }
         }
@@ -153,7 +153,7 @@ namespace GuideAntsApi.Services.Components
 
         private async Task<TranscriptionResult> TranscribeVideoFileWithDurationAsync(Stream videoContent, string fileName, string contentType, bool enableDiarization, ServiceMode mode, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Processing video file {FileName} for audio extraction and transcription", fileName);
+            _logger.LogInformation("Processing video file {FileName} for audio extraction and transcription", LogValueSanitizer.Sanitize(fileName));
 
             if (videoContent.CanSeek)
             {
@@ -165,7 +165,7 @@ namespace GuideAntsApi.Services.Components
                 fileName,
                 cancellationToken);
 
-            _logger.LogInformation("Audio extracted from video {FileName}, now transcribing...", fileName);
+            _logger.LogInformation("Audio extracted from video {FileName}, now transcribing...", LogValueSanitizer.Sanitize(fileName));
 
             await using var audioStream = new FileStream(
                 extractedAudio.AudioFilePath,
@@ -958,7 +958,7 @@ namespace GuideAntsApi.Services.Components
 
             if (transcriptionResult?.Phrases == null || transcriptionResult.Phrases.Length == 0)
             {
-                _logger.LogWarning("No speech recognized in extracted audio from {FileName}", fileName);
+                _logger.LogWarning("No speech recognized in extracted audio from {FileName}", LogValueSanitizer.Sanitize(fileName));
                 return new TranscriptionResult(string.Empty, 0);
             }
 
@@ -968,7 +968,7 @@ namespace GuideAntsApi.Services.Components
 
             if (string.IsNullOrWhiteSpace(transcribedText))
             {
-                _logger.LogWarning("Empty transcription result for extracted audio from {FileName}", fileName);
+                _logger.LogWarning("Empty transcription result for extracted audio from {FileName}", LogValueSanitizer.Sanitize(fileName));
                 return new TranscriptionResult(string.Empty, 0);
             }
 

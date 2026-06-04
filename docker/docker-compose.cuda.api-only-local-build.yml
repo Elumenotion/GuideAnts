@@ -248,6 +248,8 @@ services:
     container_name: plantuml
     environment:
       - FILE_STORAGE_ROOT=/app/ContentFiles
+      - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
     volumes:
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}

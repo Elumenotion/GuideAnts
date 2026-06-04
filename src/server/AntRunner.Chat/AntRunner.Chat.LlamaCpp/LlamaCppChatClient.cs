@@ -110,7 +110,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
             _logger.LogError(
                 ex,
                 "llama.cpp stream ended unexpectedly mid-response. {DiagnosticInfo}",
-                diagnosticInfo);
+                LogValueSanitizer.Sanitize(diagnosticInfo));
             throw new LlamaRuntimeCrashedException(
                 LlamaRuntimeCrashReason.Crashed,
                 "The local model stopped responding mid-stream. The runtime likely crashed and must be restarted.",
@@ -159,7 +159,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
             {
                 _logger.LogWarning(
                     "Skipping unsupported llama output strip pattern '{Pattern}'. Supported format is '<start>[\\s\\S]*?<end>' (or '<start>.*?<end>').",
-                    trimmed);
+                    LogValueSanitizer.Sanitize(trimmed));
                 continue;
             }
 
@@ -227,8 +227,8 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
 
             _logger.LogInformation(
                 "LlamaCpp request. {DiagnosticInfo}. Config={RequestConfig}",
-                diagnosticInfo,
-                config.ToJsonString(RequestJsonOptions));
+                LogValueSanitizer.Sanitize(diagnosticInfo),
+                LogValueSanitizer.Sanitize(config.ToJsonString(RequestJsonOptions)));
         }
     }
 
@@ -260,7 +260,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
             $"ResponseBody={LimitForLog(responseBody)}. " +
             $"RequestBody={LimitForLog(requestJson)}";
 
-        _logger.LogError("{Message}", diagnosticMessage);
+        _logger.LogError("{Message}", LogValueSanitizer.Sanitize(diagnosticMessage));
         System.Diagnostics.Trace.TraceError(diagnosticMessage);
 
         var upstreamExcerpt = ExtractUpstreamDetail(responseBody);
