@@ -9,6 +9,7 @@ using System.Runtime.CompilerServices;
 using GuideAntsApi.Services.Core;
 using System.Text.Json;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Extensions;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
 using Microsoft.Extensions.Options;
@@ -1723,13 +1724,13 @@ public class ConversationService : IConversationService
         modelDeploymentId = resolvedModel.ModelId;
         _logger.LogInformation(
             "Conversation chat model resolved. ConversationId={ConversationId}, AssistantName={AssistantName}, RequestedModelId={RequestedModelId}, ResolvedModelId={ResolvedModelId}, ReferenceKind={ReferenceKind}, Authority={Authority}, ParameterKeys=[{ParameterKeys}]",
-            conversationId,
-            assistantName,
-            string.IsNullOrWhiteSpace(requestedModelDeploymentId) ? "(unset)" : requestedModelDeploymentId,
-            resolvedModel.ModelId,
-            resolvedModel.ReferenceKind,
-            resolvedModel.ExecutionPolicy.Authority,
-            string.Join(", ", resolvedModel.ExecutionPolicy.Parameters.Keys));
+            LogValueSanitizer.Sanitize(conversationId),
+            LogValueSanitizer.Sanitize(assistantName),
+            LogValueSanitizer.Sanitize(string.IsNullOrWhiteSpace(requestedModelDeploymentId) ? "(unset)" : requestedModelDeploymentId),
+            LogValueSanitizer.Sanitize(resolvedModel.ModelId),
+            LogValueSanitizer.Sanitize(resolvedModel.ReferenceKind),
+            LogValueSanitizer.Sanitize(resolvedModel.ExecutionPolicy.Authority),
+            LogValueSanitizer.Sanitize(string.Join(", ", resolvedModel.ExecutionPolicy.Parameters.Keys)));
 
         var previousMessages = await PrepareMessagesForAssistantAsync(conv, assistantName, dbUser.Id, ct);
 

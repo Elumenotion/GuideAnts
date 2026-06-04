@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Collections.Concurrent;
+using GuideAntsApi.Extensions;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Settings;
 
@@ -78,8 +79,8 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
             op = ex.ExistingOperation;
             _logger.LogInformation(
                 "Reusing in-flight local onboarding operation {OperationId} for alias {Alias}.",
-                op.OperationId,
-                command.RouterModelId);
+                LogValueSanitizer.Sanitize(op.OperationId),
+                LogValueSanitizer.Sanitize(command.RouterModelId));
         }
 
         if (!string.IsNullOrWhiteSpace(op.OperationId))

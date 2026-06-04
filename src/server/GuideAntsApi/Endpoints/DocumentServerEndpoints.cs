@@ -1,4 +1,5 @@
 using GuideAntsApi.Configuration;
+using GuideAntsApi.Extensions;
 using GuideAntsApi.Services.Components;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -49,7 +50,7 @@ public static class DocumentServerEndpoints
 
             if (!Uri.TryCreate(documentServerOptions.InternalUrl?.Trim(), UriKind.Absolute, out var internalUri))
             {
-                logger.LogWarning("DocumentServer proxy rejected due to invalid internal URL configuration. internalUrl={InternalUrl}", documentServerOptions.InternalUrl);
+                logger.LogWarning("DocumentServer proxy rejected due to invalid internal URL configuration. internalUrl={InternalUrl}", LogValueSanitizer.Sanitize(documentServerOptions.InternalUrl));
                 return Results.BadRequest(new { message = "DocumentServer:InternalUrl must be configured as an absolute URL." });
             }
 
@@ -123,10 +124,10 @@ public static class DocumentServerEndpoints
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             logger.LogInformation(
                 "DocumentServer editor-config requested. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} canEdit={CanEdit}",
-                request.Scope,
-                request.ProjectId,
-                request.FileId,
-                request.NotebookId,
+                LogValueSanitizer.Sanitize(request.Scope),
+                LogValueSanitizer.Sanitize(request.ProjectId),
+                LogValueSanitizer.Sanitize(request.FileId),
+                LogValueSanitizer.Sanitize(request.NotebookId),
                 request.CanEdit);
             if (!options.Value.Enabled)
             {
@@ -146,7 +147,10 @@ public static class DocumentServerEndpoints
             catch (InvalidOperationException ex)
             {
                 logger.LogWarning(ex, "DocumentServer editor-config request failed. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
-                    request.Scope, request.ProjectId, request.FileId, request.NotebookId);
+                    LogValueSanitizer.Sanitize(request.Scope),
+                    LogValueSanitizer.Sanitize(request.ProjectId),
+                    LogValueSanitizer.Sanitize(request.FileId),
+                    LogValueSanitizer.Sanitize(request.NotebookId));
                 return Results.BadRequest(new { message = ex.Message });
             }
         })
@@ -171,10 +175,10 @@ public static class DocumentServerEndpoints
             logger.LogInformation(
                 "DocumentServer download requested. tokenLength={TokenLength} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} versionNumber={VersionNumber}",
                 token?.Length ?? 0,
-                scope,
-                projectId,
-                fileId,
-                notebookId,
+                LogValueSanitizer.Sanitize(scope),
+                LogValueSanitizer.Sanitize(projectId),
+                LogValueSanitizer.Sanitize(fileId),
+                LogValueSanitizer.Sanitize(notebookId),
                 versionNumber);
             try
             {
@@ -213,7 +217,7 @@ public static class DocumentServerEndpoints
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             logger.LogInformation(
                 "DocumentServer callback requested. status={Status} hasUrl={HasUrl} tokenLength={TokenLength}",
-                payload.Status,
+                LogValueSanitizer.Sanitize(payload.Status),
                 !string.IsNullOrWhiteSpace(payload.Url),
                 token?.Length ?? 0);
             try
@@ -223,12 +227,12 @@ public static class DocumentServerEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                logger.LogWarning(ex, "DocumentServer callback rejected. status={Status}", payload.Status);
+                logger.LogWarning(ex, "DocumentServer callback rejected. status={Status}", LogValueSanitizer.Sanitize(payload.Status));
                 return Results.Ok(new { error = 1, message = ex.Message });
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "DocumentServer callback failed unexpectedly. status={Status}", payload.Status);
+                logger.LogError(ex, "DocumentServer callback failed unexpectedly. status={Status}", LogValueSanitizer.Sanitize(payload.Status));
                 return Results.Ok(new { error = 1, message = "DocumentServer callback failed unexpectedly." });
             }
         })

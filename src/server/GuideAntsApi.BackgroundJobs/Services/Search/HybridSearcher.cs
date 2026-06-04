@@ -130,7 +130,7 @@ internal sealed class HybridSearcher(
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Hybrid search failed for query: {Query}", query);
+            _log.LogError(ex, "Hybrid search failed for query: {Query}", LogValueSanitizer.Sanitize(query));
             return Array.Empty<HybridSearchResult>();
         }
     }

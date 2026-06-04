@@ -50,7 +50,7 @@ namespace GuideAntsApi.Services
             var stdErrBuffer = new StringBuilder();
             Exception? executionException = null;
 
-            _logger.LogInformation("ExecuteDockerScript invoked. ScriptType={ScriptType}, Project={ProjectId}, Notebook={NotebookId}, Container={Container}, Conversation={ConversationId}", scriptType, context?.ProjectId, context?.NotebookId, containerName, context?.ConversationId);
+            _logger.LogInformation("ExecuteDockerScript invoked. ScriptType={ScriptType}, Project={ProjectId}, Notebook={NotebookId}, Container={Container}, Conversation={ConversationId}", scriptType, context?.ProjectId, context?.NotebookId, LogValueSanitizer.Sanitize(containerName), context?.ConversationId);
 
             if (string.IsNullOrWhiteSpace(script))
             {
@@ -65,7 +65,7 @@ namespace GuideAntsApi.Services
             }
 
             // Validate project and notebook IDs
-            if (context?.ProjectId == null || context?.NotebookId == null)
+            if (context is null || context.ProjectId == Guid.Empty || context.NotebookId == Guid.Empty)
             {
                 var errorMsg = "Project ID and Notebook ID are required.";
                 _logger.LogError(errorMsg + " ProjectId='{ProjectId}', NotebookId='{NotebookId}'", context?.ProjectId, context?.NotebookId);
@@ -91,7 +91,7 @@ namespace GuideAntsApi.Services
             }
             var scriptExecutionBaseUrl = ResolveScriptExecutionBaseUrl(containerName);
 
-            _logger.LogInformation("Will execute script via agent. Container={Container}, BaseUrl={BaseUrl}, WorkingDir={Dir}", containerName, scriptExecutionBaseUrl, notebookDirectory);
+            _logger.LogInformation("Will execute script via agent. Container={Container}, BaseUrl={BaseUrl}, WorkingDir={Dir}", LogValueSanitizer.Sanitize(containerName), LogValueSanitizer.Sanitize(scriptExecutionBaseUrl), LogValueSanitizer.Sanitize(notebookDirectory));
 
             // Track detected file changes for ScriptExecutionResult
             List<string>? detectedNewFiles = null;
@@ -100,14 +100,20 @@ namespace GuideAntsApi.Services
             try
             {
                 // Execute script via HTTP
-                var result = await ExecuteScriptViaHttp(script, scriptType, notebookDirectory, scriptExecutionBaseUrl, context.ProjectId.ToString());
+                var result = await ExecuteScriptViaHttp(
+                    script,
+                    scriptType,
+                    notebookDirectory,
+                    scriptExecutionBaseUrl,
+                    context.ProjectId.ToString(),
+                    context.NotebookId.ToString());
 
                 _logger.LogInformation("Script execution via agent returned {HasResult}. StdOutLength={OutLen}, StdErrLength={ErrLen}", result != null, result?.StandardOutput?.Length ?? 0, result?.StandardError?.Length ?? 0);
 
                 if (result != null)
                 {
-                    _logger.LogDebug("Agent STDOUT: {StdOut}", result.StandardOutput);
-                    _logger.LogDebug("Agent STDERR: {StdErr}", result.StandardError);
+                    _logger.LogDebug("Agent STDOUT: {StdOut}", LogValueSanitizer.Sanitize(result.StandardOutput));
+                    _logger.LogDebug("Agent STDERR: {StdErr}", LogValueSanitizer.Sanitize(result.StandardError));
                     stdOutBuffer.Append(result.StandardOutput);
                     stdErrBuffer.Append(result.StandardError);
 
@@ -147,14 +153,14 @@ namespace GuideAntsApi.Services
                 else
                 {
                     stdErrBuffer.AppendLine($"Error: Script execution agent failed to respond or returned an error.");
-                    _logger.LogWarning("Script execution via HTTP failed - no result returned from {ScriptExecutionBaseUrl}", scriptExecutionBaseUrl);
-                    _logger.LogWarning("StdErr so far: {Err}", stdErrBuffer.ToString());
+                    _logger.LogWarning("Script execution via HTTP failed - no result returned from {ScriptExecutionBaseUrl}", LogValueSanitizer.Sanitize(scriptExecutionBaseUrl));
+                    _logger.LogWarning("StdErr so far: {Err}", LogValueSanitizer.Sanitize(stdErrBuffer.ToString()));
                 }
             }
             catch (Exception ex)
             {
                 var errorMsg = $"Error running script via HTTP: {ex.Message}";
-                _logger.LogError(ex, "Script execution failed. Container={Container}, BaseUrl={ScriptExecutionBaseUrl}, WorkingDir={NotebookDirectory}", containerName, scriptExecutionBaseUrl, notebookDirectory);
+                _logger.LogError(ex, "Script execution failed. Container={Container}, BaseUrl={ScriptExecutionBaseUrl}, WorkingDir={NotebookDirectory}", LogValueSanitizer.Sanitize(containerName), LogValueSanitizer.Sanitize(scriptExecutionBaseUrl), LogValueSanitizer.Sanitize(notebookDirectory));
                 stdErrBuffer.AppendLine(errorMsg);
                 executionException = ex;
             }
@@ -190,11 +196,11 @@ namespace GuideAntsApi.Services
             // Emit final buffers to logs (truncated to 4k chars)
             if (!string.IsNullOrWhiteSpace(cleanedOutput))
             {
-                _logger.LogInformation("Final StdOut (truncated): {Out}", cleanedOutput.Length > 4096 ? cleanedOutput.Substring(0, 4096) + "…" : cleanedOutput);
+                _logger.LogInformation("Final StdOut (truncated): {Out}", LogValueSanitizer.Sanitize(cleanedOutput.Length > 4096 ? cleanedOutput.Substring(0, 4096) + "…" : cleanedOutput));
             }
             if (!string.IsNullOrWhiteSpace(cleanedError))
             {
-                _logger.LogWarning("Final StdErr (truncated): {Err}", cleanedError.Length > 4096 ? cleanedError.Substring(0, 4096) + "…" : cleanedError);
+                _logger.LogWarning("Final StdErr (truncated): {Err}", LogValueSanitizer.Sanitize(cleanedError.Length > 4096 ? cleanedError.Substring(0, 4096) + "…" : cleanedError));
             }
 
             // Log the execution result
@@ -225,33 +231,51 @@ namespace GuideAntsApi.Services
         /// <summary>
         /// Executes a script via HTTP communication with the script execution agent
         /// </summary>
-        private async Task<ScriptExecutionResult?> ExecuteScriptViaHttp(string script, ScriptType scriptType, string workingDirectory, string scriptExecutionBaseUrl, string projectId)
+        private async Task<ScriptExecutionResult?> ExecuteScriptViaHttp(
+            string script,
+            ScriptType scriptType,
+            string workingDirectory,
+            string scriptExecutionBaseUrl,
+            string projectId,
+            string? notebookId = null)
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(projectId) || !Guid.TryParse(projectId, out var parsedProjectId) || parsedProjectId == Guid.Empty)
+                {
+                    throw new InvalidOperationException("ProjectId must be a non-empty GUID for script execution.");
+                }
+
+                if (string.IsNullOrWhiteSpace(notebookId) || !Guid.TryParse(notebookId, out var parsedNotebookId) || parsedNotebookId == Guid.Empty)
+                {
+                    throw new InvalidOperationException("NotebookId must be a non-empty GUID for script execution.");
+                }
+
                 var request = new
                 {
                     Script = script,
                     ScriptType = scriptType,
                     WorkingDirectory = workingDirectory,
-                    ProjectId = projectId
+                    ProjectId = projectId,
+                    NotebookId = notebookId
                 };
 
                 using var httpClient = _httpClientFactory.CreateClient();
                 httpClient.Timeout = TimeSpan.FromMinutes(5);
+                AttachAgentAuthHeader(httpClient);
 
                 var json = JsonSerializer.Serialize(request);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                _logger.LogInformation("Executing script via HTTP at base URL {ScriptExecutionBaseUrl}", scriptExecutionBaseUrl);
+                _logger.LogInformation("Executing script via HTTP at base URL {ScriptExecutionBaseUrl}", LogValueSanitizer.Sanitize(scriptExecutionBaseUrl));
 
                 var executeUri = BuildEndpointUri(scriptExecutionBaseUrl, "execute");
 
-                _logger.LogInformation("Sending HTTP POST to {ExecuteUrl} with script length {ScriptLength} and type {ScriptType}", executeUri, script.Length, scriptType);
+                _logger.LogInformation("Sending HTTP POST to {ExecuteUrl} with script length {ScriptLength} and type {ScriptType}", LogValueSanitizer.Sanitize(executeUri.ToString()), script.Length, scriptType);
 
                 var response = await httpClient.PostAsync(executeUri, content);
 
-                _logger.LogInformation("Agent response status {StatusCode} from {ExecuteUrl}", response.StatusCode, executeUri);
+                _logger.LogInformation("Agent response status {StatusCode} from {ExecuteUrl}", response.StatusCode, LogValueSanitizer.Sanitize(executeUri.ToString()));
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -269,7 +293,7 @@ namespace GuideAntsApi.Services
                 }
 
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogError("HTTP script execution failed with status {StatusCode}: {Error}", response.StatusCode, errorContent);
+                _logger.LogError("HTTP script execution failed with status {StatusCode}: {Error}", response.StatusCode, LogValueSanitizer.Sanitize(errorContent));
                 return null;
             }
             catch (Exception ex)
@@ -277,6 +301,23 @@ namespace GuideAntsApi.Services
                 _logger.LogError(ex, "HTTP script execution failed");
                 return null;
             }
+        }
+
+        private void AttachAgentAuthHeader(HttpClient client)
+        {
+            var token = _configuration["ScriptExecution:AgentToken"];
+            ApplyAgentAuthHeader(client, token);
+        }
+
+        internal static void ApplyAgentAuthHeader(HttpClient client, string? token)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                throw new InvalidOperationException("ScriptExecution:AgentToken is required for API -> script-agent authentication.");
+            }
+
+            client.DefaultRequestHeaders.Remove("X-Script-Agent-Token");
+            client.DefaultRequestHeaders.Add("X-Script-Agent-Token", token.Trim());
         }
 
         internal static Uri BuildEndpointUri(string baseUrl, string relativePath)

@@ -74,8 +74,8 @@ public sealed class OpenAiChatClient : IChatCompletionClient
                 "OpenAI request. Model={Model}, Stream={Stream}, Messages={MessageCount}, Tools={ToolCount}, "
                 + "ReasoningEffort={ReasoningEffort}, "
                 + "SamplingOverrides=[{SamplingOverrides}]",
-                request.Model, stream, request.Messages.Count, request.Tools?.Count ?? 0,
-                request.ReasoningEffort, sampling ?? "none");
+                LogValueSanitizer.Sanitize(request.Model), stream, request.Messages.Count, request.Tools?.Count ?? 0,
+                LogValueSanitizer.Sanitize(request.ReasoningEffort), LogValueSanitizer.Sanitize(sampling ?? "none"));
         }
     }
 

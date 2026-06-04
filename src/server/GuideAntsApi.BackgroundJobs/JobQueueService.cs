@@ -159,12 +159,12 @@ public class JobQueueService : IJobQueueService
             if (willRetry)
             {
                 _logger.LogWarning("Job {JobId} failed (attempt {Attempts}/{MaxAttempts}), will retry at {RetryAt}: {Error}", 
-                    id, attemptsNext, meta.MaxAttempts, nextAvailable, error);
+                    id, attemptsNext, meta.MaxAttempts, nextAvailable, LogValueSanitizer.Sanitize(error));
             }
             else
             {
                 _logger.LogError("Job {JobId} permanently failed after {Attempts} attempts: {Error}", 
-                    id, attemptsNext, error);
+                    id, attemptsNext, LogValueSanitizer.Sanitize(error));
             }
         }
 

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -154,16 +155,16 @@ public sealed class DocumentServerService : IDocumentServerService
         var userId = string.IsNullOrWhiteSpace(request.UserId) ? "guideants-user" : request.UserId;
         _logger.LogInformation(
             "DocumentServer editor-config built. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} fileName={FileName} documentType={DocumentType} key={DocumentKey} apiBaseUrl={ApiBaseUrl} downloadUrl={DownloadUrl} callbackUrl={CallbackUrl}",
-            request.Scope,
-            request.ProjectId,
-            request.FileId,
-            request.NotebookId,
-            context.FileName,
-            documentType,
-            key,
-            apiBaseUrl,
-            downloadUrl,
-            callbackUrl);
+            LogValueSanitizer.Sanitize(request.Scope),
+            LogValueSanitizer.Sanitize(request.ProjectId),
+            LogValueSanitizer.Sanitize(request.FileId),
+            LogValueSanitizer.Sanitize(request.NotebookId),
+            LogValueSanitizer.Sanitize(context.FileName),
+            LogValueSanitizer.Sanitize(documentType),
+            LogValueSanitizer.Sanitize(key),
+            LogValueSanitizer.Sanitize(apiBaseUrl),
+            LogValueSanitizer.Sanitize(downloadUrl),
+            LogValueSanitizer.Sanitize(callbackUrl));
 
         var config = new Dictionary<string, object?>
         {
@@ -266,8 +267,8 @@ public sealed class DocumentServerService : IDocumentServerService
         {
             _logger.LogWarning(
                 "DocumentServer download target notebook file was not found. notebookId={NotebookId} fileId={FileId}",
-                payload.NotebookId,
-                payload.FileId);
+                LogValueSanitizer.Sanitize(payload.NotebookId),
+                LogValueSanitizer.Sanitize(payload.FileId));
             return null;
         }
 
@@ -299,19 +300,19 @@ public sealed class DocumentServerService : IDocumentServerService
                 "DocumentServer callback ignored due to non-save status/url. status={Status} hasUrl={HasUrl} scope={Scope} projectId={ProjectId} fileId={FileId}",
                 payload.Status,
                 !string.IsNullOrWhiteSpace(payload.Url),
-                callbackContext.Scope,
-                callbackContext.ProjectId,
-                callbackContext.FileId);
+                LogValueSanitizer.Sanitize(callbackContext.Scope),
+                LogValueSanitizer.Sanitize(callbackContext.ProjectId),
+                LogValueSanitizer.Sanitize(callbackContext.FileId));
             return;
         }
 
         _logger.LogInformation(
             "DocumentServer callback save received. status={Status} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
             payload.Status,
-            callbackContext.Scope,
-            callbackContext.ProjectId,
-            callbackContext.FileId,
-            callbackContext.NotebookId);
+            LogValueSanitizer.Sanitize(callbackContext.Scope),
+            LogValueSanitizer.Sanitize(callbackContext.ProjectId),
+            LogValueSanitizer.Sanitize(callbackContext.FileId),
+            LogValueSanitizer.Sanitize(callbackContext.NotebookId));
 
         var editedFileUrl = ResolveDocumentServerDownloadUrl(payload.Url);
         var client = _httpClientFactory.CreateClient();
@@ -322,10 +323,10 @@ public sealed class DocumentServerService : IDocumentServerService
         _logger.LogInformation(
             "DocumentServer callback downloaded edited document. status={Status} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} byteLength={ByteLength}",
             payload.Status,
-            callbackContext.Scope,
-            callbackContext.ProjectId,
-            callbackContext.FileId,
-            callbackContext.NotebookId,
+            LogValueSanitizer.Sanitize(callbackContext.Scope),
+            LogValueSanitizer.Sanitize(callbackContext.ProjectId),
+            LogValueSanitizer.Sanitize(callbackContext.FileId),
+            LogValueSanitizer.Sanitize(callbackContext.NotebookId),
             memory.Length);
 
         if (callbackContext.Scope.Equals("project", StringComparison.OrdinalIgnoreCase))
@@ -553,8 +554,8 @@ public sealed class DocumentServerService : IDocumentServerService
         var rewrittenUrl = builder.Uri.ToString();
         _logger.LogInformation(
             "DocumentServer callback download URL rewritten from public origin to internal origin. sourceHost={SourceHost} internalHost={InternalHost}",
-            sourceUri.Authority,
-            internalUri.Authority);
+            LogValueSanitizer.Sanitize(sourceUri.Authority),
+            LogValueSanitizer.Sanitize(internalUri.Authority));
 
         return rewrittenUrl;
     }

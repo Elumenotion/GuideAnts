@@ -47,4 +47,27 @@ public sealed class NotebookDockerScriptServiceTests
             .Throw<InvalidOperationException>()
             .WithMessage("*ServiceRouting:Containers:guideants-ai:BaseUrl is required*");
     }
+
+    [TestMethod]
+    public void ApplyAgentAuthHeader_ThrowsWhenTokenMissing()
+    {
+        using var client = new HttpClient();
+
+        Action act = () => NotebookDockerScriptService.ApplyAgentAuthHeader(client, token: null);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage("*ScriptExecution:AgentToken is required*");
+    }
+
+    [TestMethod]
+    public void ApplyAgentAuthHeader_AddsExpectedHeader()
+    {
+        using var client = new HttpClient();
+
+        NotebookDockerScriptService.ApplyAgentAuthHeader(client, " shared-token ");
+
+        client.DefaultRequestHeaders.Contains("X-Script-Agent-Token").Should().BeTrue();
+        client.DefaultRequestHeaders.GetValues("X-Script-Agent-Token").Should().ContainSingle().Which.Should().Be("shared-token");
+    }
 }

@@ -214,6 +214,8 @@ To enable DocumentServer JWT, set:
 
 The `guideants-ai` container is especially important. Full local AI variants are the runtime surface behind llama.cpp, embeddings, speech transcription, speech synthesis, image generation, media extraction, and script execution. The `guideants-ai slim` variant is different: it is the sandbox-oriented AI image for Python script execution when model calls are routed to cloud/provider services. This is separate from `guideants-webapi-ui-slim`, which remains the API/UI image used by split-stack deployments. The Settings UI and API route each AI capability to the correct local or cloud backend rather than treating “the model” as one global switch.
 
+For sandbox hardening, API-to-agent calls now require a shared token (`ScriptExecution__AgentToken` in API, `SCRIPT_EXECUTION_AGENT_TOKEN` in `guideants-ai`) and every script request is notebook-scoped (`ProjectId` + `NotebookId`) with canonical path and reparse-point checks inside the agent.
+
 ## Big Thanks To Upstream Projects
 
 GuideAnts is built on top of excellent open source work. Huge thanks to the teams and contributors behind these projects:

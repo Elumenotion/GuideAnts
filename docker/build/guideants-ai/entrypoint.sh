@@ -142,6 +142,26 @@ PY
 
 sanitize_router_preset "$ROUTER_PRESET"
 
+SCRIPT_EXECUTION_REQUIRE_TOKEN="${SCRIPT_EXECUTION_REQUIRE_TOKEN:-true}"
+SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION="${SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION:-true}"
+
+if [ -z "${FILE_STORAGE_ROOT:-}" ]; then
+    echo "ERROR: FILE_STORAGE_ROOT must be configured for ScriptExecutionAgent." >&2
+    exit 1
+fi
+
+if [ "$SCRIPT_EXECUTION_REQUIRE_TOKEN" = "true" ] && [ -z "${SCRIPT_EXECUTION_AGENT_TOKEN:-}" ]; then
+    echo "ERROR: SCRIPT_EXECUTION_AGENT_TOKEN must be configured when SCRIPT_EXECUTION_REQUIRE_TOKEN=true." >&2
+    exit 1
+fi
+
+if [ "$SCRIPT_EXECUTION_REQUIRE_TOKEN" != "true" ] && [ "$SCRIPT_EXECUTION_REQUIRE_TOKEN" != "false" ]; then
+    echo "ERROR: SCRIPT_EXECUTION_REQUIRE_TOKEN must be 'true' or 'false'." >&2
+    exit 1
+fi
+
+echo "ScriptExecutionAgent hardening config: token_required=${SCRIPT_EXECUTION_REQUIRE_TOKEN} token_configured=$([ -n \"${SCRIPT_EXECUTION_AGENT_TOKEN:-}\" ] && echo true || echo false) identity_isolation=${SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION} storage_root_configured=true"
+
 # llama-server stdout/stderr is tee'd here so the admin service can classify crash reasons
 # (CUDA OOM vs. generic SIGABRT vs. reload SIGTERM). Capped at ~128KB via the tail-truncate
 # below before each respawn so the volume never fills with driver stack traces.

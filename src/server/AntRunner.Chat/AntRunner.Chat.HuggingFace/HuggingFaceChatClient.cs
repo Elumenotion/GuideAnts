@@ -161,10 +161,10 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
             _logger.LogError(
                 ex,
                 "Failed to map Hugging Face request payload. model={Model} stream={Stream} messageCount={MessageCount} messageShapes={MessageShapes}",
-                model,
+                LogValueSanitizer.Sanitize(model),
                 stream,
                 request.Messages.Count,
-                HuggingFaceRequestMapper.DescribeMessageShapes(request.Messages));
+                LogValueSanitizer.Sanitize(HuggingFaceRequestMapper.DescribeMessageShapes(request.Messages)));
             throw;
         }
     }
