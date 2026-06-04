@@ -3,6 +3,7 @@ name: guideants
 services:
   mssql-express:
     image: ${GA_MSSQL_IMAGE:-ghcr.io/elumenotion/mssql2025-express-fts:main}
+    platform: linux/amd64
     pull_policy: always
     container_name: mssql-express
     environment:
@@ -24,6 +25,7 @@ services:
 
   guideants-ai:
     image: ${GA_AI_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-cpu:main}
+    platform: linux/amd64
     pull_policy: always
     container_name: guideants-ai
     shm_size: "8gb"
@@ -116,6 +118,7 @@ services:
 
   docling-serve:
     image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.16.1}
+    platform: linux/amd64
     pull_policy: always
     container_name: docling-serve
     environment:
@@ -126,6 +129,7 @@ services:
 
   documentserver:
     image: ${GA_DOCUMENTSERVER_IMAGE:-documentserver:latest}
+    platform: linux/amd64
     container_name: documentserver
     environment:
       - JWT_ENABLED=${GA_DOCUMENTSERVER_JWT_ENABLED:-false}
@@ -145,6 +149,7 @@ services:
 
   guideants-webapi-ui:
     image: ${GA_WEBAPI_UI_SLIM_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-webapi-ui-slim:main}
+    platform: linux/amd64
     pull_policy: always
     container_name: guideants-webapi-ui
     depends_on:
@@ -199,6 +204,7 @@ services:
 
   plantuml:
     image: ${GA_PLANTUML_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}
+    platform: linux/amd64
     pull_policy: always
     container_name: plantuml
     environment:
@@ -213,6 +219,7 @@ services:
 
   searxng:
     image: ${GA_SEARXNG_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}
+    platform: linux/amd64
     pull_policy: always
     container_name: readweb-searxng
     restart: unless-stopped
