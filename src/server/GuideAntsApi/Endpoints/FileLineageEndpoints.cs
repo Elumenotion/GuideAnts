@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
+using GuideAntsApi.Services;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -27,14 +28,13 @@ var dto = await ToDto(db, ev);
         group.MapGet("/{eventId:guid}/download", async Task<IResult> (
             Guid eventId,
             ApplicationDbContext db,
-            IConfiguration config) =>
+            IStoragePathResolver pathResolver) =>
         {
             var ev = await db.FileLineageEvents.FindAsync(eventId);
             if (ev == null) return Results.NotFound();
 
 
-var storageRoot = config["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured");
-            var resolved = await ResolveFileLocationAsync(db, ev, storageRoot);
+var resolved = await ResolveFileLocationAsync(db, ev, pathResolver);
             if (resolved == null) return Results.NotFound();
 
             var (path, fileName, contentType) = resolved.Value;
@@ -43,7 +43,7 @@ var storageRoot = config["FileStorage:Path"] ?? throw new InvalidOperationExcept
         });
     }
 
-    private static async Task<(string Path, string FileName, string ContentType)?> ResolveFileLocationAsync(ApplicationDbContext db, FileLineageEvent ev, string storageRoot)
+    private static async Task<(string Path, string FileName, string ContentType)?> ResolveFileLocationAsync(ApplicationDbContext db, FileLineageEvent ev, IStoragePathResolver pathResolver)
     {
         if (!string.IsNullOrWhiteSpace(ev.StoragePath) && File.Exists(ev.StoragePath))
         {
@@ -71,23 +71,15 @@ var storageRoot = config["FileStorage:Path"] ?? throw new InvalidOperationExcept
             var nf = await db.NotebookFiles.FindAsync(ev.FileId);
             if (nf != null && ev.NotebookId.HasValue)
             {
-                var rel = nf.RelativePath.Replace("/", Path.DirectorySeparatorChar.ToString());
-                var projectSlug = await db.Projects
-                    .Where(p => p.Id == ev.ProjectId)
-                    .Select(p => p.Slug)
-                    .FirstOrDefaultAsync() ?? ev.ProjectId.ToString();
-                var notebookSlug = await db.Notebooks
-                    .Where(n => n.Id == ev.NotebookId.Value)
-                    .Select(n => n.Slug)
-                    .FirstOrDefaultAsync() ?? ev.NotebookId.Value.ToString();
-                var path = Path.Combine(storageRoot, projectSlug, notebookSlug, rel);
-                if (!File.Exists(path))
+                var notebookRoot = pathResolver.GetNotebookRootPath(ev.ProjectId, ev.NotebookId.Value);
+                if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, nf.RelativePath, out var path))
                 {
-                    path = Path.Combine(storageRoot, ev.ProjectId.ToString(), "notebooks", ev.NotebookId.Value.ToString(), rel);
+                    return null;
                 }
+
                 if (File.Exists(path))
                 {
-                    var fileName = Path.GetFileName(rel);
+                    var fileName = Path.GetFileName(nf.RelativePath);
                     var ct = "application/octet-stream";
                     return (path, fileName, ct);
                 }

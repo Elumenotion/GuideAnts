@@ -10,6 +10,11 @@ param(
     [Parameter()]
     [string]$SolutionPath = "src/server/GuideAntsApi.sln",
 
+    # GitHub Code Scanning uses build-mode none for C#. "sln" is diagnostic only (misses path-injection).
+    [Parameter()]
+    [ValidateSet("none", "sln")]
+    [string]$CSharpBuildMode = "none",
+
     [Parameter()]
     [string]$CsvPath = ".codeql/triage.csv",
 
@@ -24,7 +29,16 @@ param(
 
     # Runbook default is all languages. Partial runs overwrite triage.csv with incomplete data.
     [Parameter()]
-    [switch]$AllowPartialLanguages
+    [switch]$AllowPartialLanguages,
+
+    [Parameter()]
+    [string]$GitHubAlertsPath = "scan-results.txt",
+
+    [Parameter()]
+    [string]$ParityCsvPath = ".codeql/parity-github-vs-local.csv",
+
+    [Parameter()]
+    [switch]$SkipGitHubParityCheck
 )
 
 Set-StrictMode -Version Latest
@@ -120,6 +134,7 @@ function Get-AnalyzeCoverageLine {
 function Assert-CSharpCoverage {
     param(
         [string]$CoverageLine,
+        [string]$BuildMode,
         [int]$MinimumBaselineCSharp = 550
     )
 
@@ -130,8 +145,8 @@ function Assert-CSharpCoverage {
     if ($CoverageLine -match 'CodeQL scanned (\d+) out of (\d+) C# files') {
         $scanned = [int]$Matches[1]
         $total = [int]$Matches[2]
-        if ($scanned -lt $MinimumBaselineCSharp -or $total -lt 590) {
-            throw "C# CodeQL coverage too low ($scanned / $total). Expected ~597/598 after GuideAntsApi.sln rebuild."
+        if ($BuildMode -eq "sln" -and ($scanned -lt $MinimumBaselineCSharp -or $total -lt 590)) {
+            throw "C# CodeQL coverage too low ($scanned / $total). sln rebuild mode only."
         }
         return
     }
@@ -139,7 +154,7 @@ function Assert-CSharpCoverage {
     if ($CoverageLine -match 'Found (\d+) baseline files for csharp') {
         $baseline = [int]$Matches[1]
         if ($baseline -lt $MinimumBaselineCSharp) {
-            throw "C# CodeQL baseline file count too low ($baseline). Expected ~599 after GuideAntsApi.sln rebuild."
+            throw "C# CodeQL baseline file count too low ($baseline). Expected ~599 baseline .cs files."
         }
         return
     }
@@ -177,7 +192,15 @@ function Invoke-CodeqlLanguageRun {
     Write-Host "Database: $($Config.DatabasePath)"
     Write-Host "Query suite: $($Config.QuerySuite)"
 
-    if ($Config.ContainsKey("BuildCommand") -and -not [string]::IsNullOrWhiteSpace($Config.BuildCommand)) {
+    if ($Config.BuildMode -eq "none") {
+        $createArgs = @(
+            "database", "create", $Config.DatabasePath,
+            "--language=$($Config.CodeqlLanguage)",
+            "--build-mode=none",
+            "--source-root", $Config.SourceRoot
+        )
+    }
+    elseif ($Config.ContainsKey("BuildCommand") -and -not [string]::IsNullOrWhiteSpace($Config.BuildCommand)) {
         $createArgs = @(
             "database", "create", $Config.DatabasePath,
             "--language=$($Config.CodeqlLanguage)",
@@ -244,7 +267,12 @@ function Invoke-CodeqlLanguageRun {
 
 $codeqlExe = Resolve-CodeqlPath -Candidate $CodeqlPath
 $repoRoot = (Get-Location).ProviderPath
-$solutionAbs = (Resolve-Path -LiteralPath $SolutionPath).ProviderPath
+$solutionAbs = if ($CSharpBuildMode -eq "sln") {
+    (Resolve-Path -LiteralPath $SolutionPath).ProviderPath
+}
+else {
+    ""
+}
 
 $selected = if ($Languages -eq "all") {
     @("csharp", "python", "javascript")
@@ -260,6 +288,13 @@ Use default -Languages all, or pass -AllowPartialLanguages for a deliberate part
 "@
 }
 
+$csharpBuildCommand = if ($CSharpBuildMode -eq "sln") {
+    "dotnet build `"$solutionAbs`" -c Debug -v minimal -t:Rebuild -p:UseSharedCompilation=false"
+}
+else {
+    ""
+}
+
 $languageConfigs = @{
     csharp = @{
         Language       = "csharp"
@@ -267,8 +302,9 @@ $languageConfigs = @{
         DatabasePath   = ".codeql/db-csharp"
         SarifPath      = ".codeql/results-csharp.sarif"
         QuerySuite     = "codeql/csharp-queries:codeql-suites/csharp-code-scanning.qls"
-        SourceRoot     = ""
-        BuildCommand   = "dotnet build `"$solutionAbs`" -c Debug -v minimal -t:Rebuild -p:UseSharedCompilation=false"
+        SourceRoot     = "."
+        BuildMode      = $CSharpBuildMode
+        BuildCommand   = $csharpBuildCommand
     }
     python = @{
         Language       = "python"
@@ -277,6 +313,7 @@ $languageConfigs = @{
         SarifPath      = ".codeql/results-python.sarif"
         QuerySuite     = "codeql/python-queries:codeql-suites/python-code-scanning.qls"
         SourceRoot     = "."
+        BuildMode      = "none"
         BuildCommand   = ""
     }
     javascript = @{
@@ -286,6 +323,7 @@ $languageConfigs = @{
         SarifPath      = ".codeql/results-javascript.sarif"
         QuerySuite     = "codeql/javascript-queries:codeql-suites/javascript-code-scanning.qls"
         SourceRoot     = "src/client"
+        BuildMode      = "none"
         BuildCommand   = ""
     }
 }
@@ -316,12 +354,13 @@ Write-Host "CodeQL version: $codeqlVersion"
 Write-Host "Git commit: $gitCommitShort ($gitCommit)"
 Write-Host "Git branch: $gitBranch"
 Write-Host "Languages: $($selected -join ', ')"
+Write-Host "C# build mode: $CSharpBuildMode (GitHub Code Scanning uses none)"
 
 $runResults = @()
 foreach ($lang in $selected) {
     $run = Invoke-CodeqlLanguageRun -CodeqlExe $codeqlExe -Config $languageConfigs[$lang]
     if ($lang -eq "csharp") {
-        Assert-CSharpCoverage -CoverageLine $run.CoverageLine
+        Assert-CSharpCoverage -CoverageLine $run.CoverageLine -BuildMode $CSharpBuildMode
     }
     $runResults += $run
 }
@@ -355,8 +394,9 @@ $manifest = [ordered]@{
     git_commit       = $gitCommit
     git_commit_short = $gitCommitShort
     git_branch       = $gitBranch
-    codeql_version   = $codeqlVersion
-    languages        = $selected
+    codeql_version     = $codeqlVersion
+    csharp_build_mode  = $CSharpBuildMode
+    languages          = $selected
     triage_csv_path  = $CsvPath
     total_results    = ($runResults | Measure-Object -Property ResultCount -Sum).Sum
     triage_csv_rows  = $mergedRows.Count
@@ -383,3 +423,81 @@ foreach ($run in $runResults) {
 Write-Host "Total: $($manifest.total_results) results, $($manifest.triage_csv_rows) triage.csv rows"
 Write-Host "triage.csv: $csvResolved"
 Write-Host "Manifest: $manifestResolved"
+
+if (-not $SkipGitHubParityCheck) {
+    $ghResolved = if ([System.IO.Path]::IsPathRooted($GitHubAlertsPath)) {
+        $GitHubAlertsPath
+    }
+    else {
+        Join-Path $repoRoot $GitHubAlertsPath
+    }
+
+    if (-not (Test-Path -LiteralPath $ghResolved)) {
+        throw @"
+GitHub parity baseline missing: $ghResolved
+Run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-github-code-scanning.ps1
+Then re-run this script, or pass -SkipGitHubParityCheck (not recommended before merging to main).
+"@
+    }
+
+    $ghDoc = Get-Content -LiteralPath $ghResolved -Raw | ConvertFrom-Json
+    $ghAlertsAll = if ($null -eq $ghDoc.alerts) { @() } else { @($ghDoc.alerts) }
+    $ghAtHead = @(
+        $ghAlertsAll | Where-Object {
+            $rid = [string]$_.rule.id
+            $rid -like "cs/*" -or $rid -like "py/*" -or $rid -like "js/*"
+        } | Where-Object {
+            $sha = [string]$_.most_recent_instance.commit_sha
+            -not [string]::IsNullOrWhiteSpace($gitCommit) -and (
+                $sha.StartsWith($gitCommit, [StringComparison]::OrdinalIgnoreCase) -or
+                $gitCommit.StartsWith($sha, [StringComparison]::OrdinalIgnoreCase)
+            )
+        }
+    )
+
+    $parityCommitSha = $gitCommit
+    if (@($ghAtHead).Count -eq 0) {
+        Write-Warning @"
+scan-results.txt has no alerts at HEAD ($gitCommitShort). GitHub may not have scanned this commit yet.
+Using all open alerts in scan-results.txt for parity (typically last main scan).
+"@
+        $parityCommitSha = ""
+    }
+    else {
+        Write-Host "GitHub baseline at HEAD: $(@($ghAtHead).Count) open alert(s) in scan-results.txt"
+    }
+
+    Write-Host ""
+    Write-Host "=== GitHub parity check ==="
+    $parityCsv = if ([System.IO.Path]::IsPathRooted($ParityCsvPath)) {
+        $ParityCsvPath
+    }
+    else {
+        Join-Path $repoRoot $ParityCsvPath
+    }
+
+    $parityArgs = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", (Join-Path $repoRoot "scripts/compare-codeql-github-parity.ps1"),
+        "-GitHubAlertsPath", $ghResolved,
+        "-CSharpSarif", (Join-Path $repoRoot ".codeql/results-csharp.sarif"),
+        "-PythonSarif", (Join-Path $repoRoot ".codeql/results-python.sarif"),
+        "-JavascriptSarif", (Join-Path $repoRoot ".codeql/results-javascript.sarif"),
+        "-ExportCsv", $parityCsv,
+        "-FailOnMismatch"
+    )
+    if (-not [string]::IsNullOrWhiteSpace($parityCommitSha)) {
+        $parityArgs += @("-ExpectedCommitSha", $parityCommitSha)
+    }
+
+    & powershell @parityArgs
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "GitHub parity check failed (exit $LASTEXITCODE). Do not merge to main until local SARIF matches scan-results.txt at HEAD."
+    }
+
+    $manifest.parity_csv_path = $ParityCsvPath
+    $manifest.parity_passed = $true
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestResolved -Encoding utf8
+}
