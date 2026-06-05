@@ -225,7 +225,7 @@ function normalizeInlineImageDataUrl(url: string): string {
   }
 
   if (!normalized.includes(',') && /%2c/i.test(normalized)) {
-    normalized = normalized.replace(/%2c/i, ',');
+    normalized = normalized.replace(/%2c/gi, ',');
   }
 
   const commaIndex = normalized.indexOf(',');
