@@ -1,7 +1,6 @@
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace GuideAntsApi.Services.LlamaCpp;
 

@@ -12,7 +12,6 @@ using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 

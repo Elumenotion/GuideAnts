@@ -1,6 +1,5 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.Options;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Settings;
 using Microsoft.AspNetCore.Hosting;

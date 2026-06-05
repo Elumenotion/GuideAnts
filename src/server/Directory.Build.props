@@ -1,9 +1,2 @@
 <Project>
-  <PropertyGroup>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisLevel>latest</AnalysisLevel>
-    <AnalysisMode>Default</AnalysisMode>
-    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
-  </PropertyGroup>
 </Project>

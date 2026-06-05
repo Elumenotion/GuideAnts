@@ -4,7 +4,6 @@ using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Tests.Services;
 

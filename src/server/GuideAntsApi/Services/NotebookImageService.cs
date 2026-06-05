@@ -1,14 +1,11 @@
 using System.Text;
 using System.Text.Json;
-using System.Diagnostics;
-using System.Net.Http.Headers;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Components;
-using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Routing;
 using GuideAnts.Usage;
 using AntRunner.ToolCalling.Functions;

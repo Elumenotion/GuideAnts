@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.HuggingFace;
@@ -9,7 +8,6 @@ using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Configuration;
-using GuideAntsApi.Extensions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 

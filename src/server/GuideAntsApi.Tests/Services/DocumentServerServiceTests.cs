@@ -8,9 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using System.Net;
-using System.Net.Http;
 using System.Text;
 
 namespace GuideAntsApi.Tests.Services;
