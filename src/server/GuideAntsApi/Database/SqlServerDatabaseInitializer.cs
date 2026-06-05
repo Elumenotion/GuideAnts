@@ -1,7 +1,6 @@
 using GuideAntsApi.DataModel;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace GuideAntsApi.Database;
 

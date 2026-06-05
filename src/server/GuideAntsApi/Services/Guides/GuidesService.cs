@@ -4,7 +4,6 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.Components;
-using GuideAntsApi.Extensions;
 using GuideAntsApi.Services.LlamaCpp;
 using AntRunner.ToolCalling.Functions;
 using AntRunner.Chat;

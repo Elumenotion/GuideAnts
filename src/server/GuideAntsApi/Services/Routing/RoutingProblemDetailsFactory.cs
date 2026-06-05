@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
-using GuideAntsApi.Extensions;
 
 namespace GuideAntsApi.Services.Routing;
 

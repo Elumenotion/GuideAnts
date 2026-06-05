@@ -1,5 +1,4 @@
 using GuideAntsApi.Configuration;
-using GuideAntsApi.Extensions;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.HuggingFace;
 using Microsoft.Extensions.Options;

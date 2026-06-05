@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using GuideAntsApi.Extensions;
 
 namespace GuideAntsApi.Services.HuggingFace;
 

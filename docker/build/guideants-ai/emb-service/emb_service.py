@@ -2,6 +2,7 @@ import gc
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -14,6 +15,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
+
+MODEL_PATH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 try:
     import torch
@@ -308,13 +311,17 @@ def resolve_model_target(request: LoadModelRequest) -> str:
     default_model_path = (os.getenv("GA_EMB_DEFAULT_MODEL_PATH") or "").strip()
 
     if request.model_path:
-        candidate = request.model_path.strip()
-        if not os.path.isabs(candidate):
-            candidate = os.path.join(model_dir, candidate)
+        requested = request.model_path.strip()
+        if not MODEL_PATH_RE.fullmatch(requested):
+            raise ValueError("model_path must be a simple local model name (letters, digits, dot, underscore, hyphen).")
+        base_real = os.path.realpath(model_dir)
+        candidate = os.path.realpath(os.path.join(base_real, requested))
+        if not candidate.startswith(base_real + os.sep):
+            raise ValueError("resolved model_path escapes the permitted model directory.")
         if os.path.exists(candidate):
             return candidate
         raise FileNotFoundError(
-            f"Configured model_path '{request.model_path.strip()}' does not exist on disk. "
+            f"Configured model_path '{requested}' does not exist on disk. "
             "Download the model into the embeddings model directory first."
         )
 
@@ -680,8 +687,8 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
             content={
                 "requestId": request_id,
                 "status": "failed",
-                "errorType": type(exc).__name__,
-                "error": str(exc),
+                "error": "invalid_model_request",
+                "message": "Model load request is invalid. Check request parameters.",
             },
         )
     except Exception as exc:
@@ -691,8 +698,8 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
             content={
                 "requestId": request_id,
                 "status": "failed",
-                "errorType": type(exc).__name__,
-                "error": str(exc),
+                "error": "model_load_failed",
+                "message": "Model load failed. Check service logs for details.",
             },
         )
 
@@ -824,13 +831,13 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     try:
         purpose = normalize_purpose(payload.purpose)
-    except ValueError as exc:
+    except ValueError:
         return JSONResponse(
             status_code=400,
             content={
                 "requestId": request_id,
                 "error": "invalid_purpose",
-                "message": str(exc),
+                "message": "Invalid purpose. Use one of: query, document, or default.",
             },
         )
 
@@ -930,8 +937,7 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
             content={
                 "requestId": request_id,
                 "error": "embedding_failed",
-                "errorType": type(exc).__name__,
-                "message": str(exc),
+                "message": "Embedding generation failed. Check service logs for details.",
             },
         )
 
