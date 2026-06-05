@@ -65,17 +65,21 @@ interface ResourceMatch {
  * - Empty URLs
  */
 function needsResolution(url: string): boolean {
-  if (!url || url.trim() === '') return false;
-  
-  return !url.startsWith('http://') &&
-         !url.startsWith('https://') &&
-         !url.startsWith('data:') &&
-         !url.startsWith('//') &&
-         !url.startsWith('#') &&
-         !url.startsWith('blob:') &&
-         !url.startsWith('javascript:') &&
-         !url.startsWith('mailto:') &&
-         !url.startsWith('tel:');
+  const trimmed = url?.trim();
+  if (!trimmed) return false;
+
+  // Allow-list by structure rather than blocklisting individual dangerous
+  // schemes (which is fragile — e.g. it previously missed vbscript:).
+  // Anything carrying an explicit URI scheme (http:, https:, data:, blob:,
+  // javascript:, vbscript:, mailto:, tel:, …) is left untouched.
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) return false;
+
+  // Protocol-relative URLs and in-page anchors are not relative paths.
+  if (trimmed.startsWith('//') || trimmed.startsWith('#')) return false;
+
+  // What remains is a relative ("images/logo.png", "../x.css") or
+  // root-relative ("/images/logo.png") path that needs resolving.
+  return true;
 }
 
 /**
