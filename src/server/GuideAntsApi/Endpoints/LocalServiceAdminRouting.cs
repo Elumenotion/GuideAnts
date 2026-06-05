@@ -1,7 +1,4 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
 using System.Net;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;

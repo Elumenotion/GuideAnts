@@ -4,9 +4,7 @@ using System.Text;
 using System.Text.Json;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.Extensions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Services.Components;

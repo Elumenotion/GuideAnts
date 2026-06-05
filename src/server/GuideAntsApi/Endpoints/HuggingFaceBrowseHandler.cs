@@ -1,4 +1,3 @@
-using GuideAntsApi.Extensions;
 using GuideAntsApi.Services.HuggingFace;
 
 namespace GuideAntsApi.Endpoints;

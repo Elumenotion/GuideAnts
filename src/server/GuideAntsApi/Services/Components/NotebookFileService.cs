@@ -4,8 +4,6 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.Models;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Core;
-using GuideAntsApi.Extensions;
-using GuideAntsApi.Services;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;

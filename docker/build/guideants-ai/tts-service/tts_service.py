@@ -19,6 +19,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+MODEL_PATH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -223,12 +225,18 @@ def resolve_model_target(request: LoadModelRequest) -> str:
     default_model_id = os.getenv("GA_TTS_DEFAULT_MODEL_ID", "microsoft/VibeVoice-1.5B").strip()
 
     if request.model_path:
-        candidate = request.model_path.strip()
-        if not os.path.isabs(candidate):
-            candidate = os.path.join(model_dir, candidate)
+        requested = request.model_path.strip()
+        if not MODEL_PATH_RE.fullmatch(requested):
+            raise ValueError("model_path must be a simple local model name (letters, digits, dot, underscore, hyphen).")
+        base_real = os.path.realpath(model_dir)
+        candidate = os.path.realpath(os.path.join(base_real, requested))
+        if not candidate.startswith(base_real + os.sep):
+            raise ValueError("resolved model_path escapes the permitted model directory.")
         if os.path.exists(candidate):
             return candidate
-        return request.model_path.strip()
+        raise FileNotFoundError(
+            f"Configured model_path '{requested}' does not exist under GA_TTS_MODEL_DIR."
+        )
 
     if request.model_id:
         return request.model_id.strip()
@@ -250,12 +258,17 @@ def resolve_tokenizer_target(request: LoadModelRequest) -> str | None:
 
     tokenizer_path = request.tokenizer_path.strip() if request.tokenizer_path else ""
     if tokenizer_path:
-        candidate = tokenizer_path
-        if not os.path.isabs(candidate):
-            candidate = os.path.join(model_dir, candidate)
+        if not MODEL_PATH_RE.fullmatch(tokenizer_path):
+            raise ValueError("tokenizer_path must be a simple local tokenizer name (letters, digits, dot, underscore, hyphen).")
+        base_real = os.path.realpath(model_dir)
+        candidate = os.path.realpath(os.path.join(base_real, tokenizer_path))
+        if not candidate.startswith(base_real + os.sep):
+            raise ValueError("resolved tokenizer_path escapes the permitted model directory.")
         if os.path.exists(candidate):
             return candidate
-        return tokenizer_path
+        raise FileNotFoundError(
+            f"Configured tokenizer_path '{tokenizer_path}' does not exist under GA_TTS_MODEL_DIR."
+        )
 
     if request.tokenizer_id:
         return request.tokenizer_id.strip()
@@ -628,8 +641,8 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
                 content={
                     "requestId": request_id,
                     "status": "failed",
-                    "errorType": type(exc).__name__,
-                    "error": str(exc),
+                    "error": "model_load_failed",
+                    "message": "Model load failed. Check service logs for details.",
                 },
             )
 
@@ -841,8 +854,7 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
             content={
                 "requestId": request_id,
                 "error": "synthesis_failed",
-                "errorType": type(exc).__name__,
-                "message": str(exc),
+                "message": "Speech synthesis failed. Check service logs for details.",
                 "modelRef": model_ref,
             },
         )

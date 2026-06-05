@@ -93,6 +93,7 @@ class ExtractAudioResponse(BaseModel):
 
 APP = FastAPI(title="GuideAnts Media Service", version="1.0.0")
 DEFAULT_STORAGE_ROOT = Path(os.getenv("FILE_STORAGE_ROOT", "/app/ContentFiles")).resolve()
+FFMPEG_TIMEOUT_SECONDS = int(os.getenv("GA_MEDIA_FFMPEG_TIMEOUT_SECONDS", "600"))
 SUPPORTED_AUDIO_FORMATS = {
     "mp3": {
         "codec": "libmp3lame",
@@ -147,12 +148,25 @@ def resolve_audio_format(audio_format: str) -> dict[str, str]:
     return SUPPORTED_AUDIO_FORMATS[normalized]
 
 
+def resolve_audio_quality(audio_quality: str) -> str:
+    normalized = (audio_quality or "").strip()
+    if not normalized.isdigit():
+        raise MediaServiceError(status_code=400, detail="audioQuality must be an integer between 0 and 9.")
+
+    quality = int(normalized)
+    if quality < 0 or quality > 9:
+        raise MediaServiceError(status_code=400, detail="audioQuality must be an integer between 0 and 9.")
+
+    return str(quality)
+
+
 def run_ffmpeg(
     source_path: Path,
     output_path: Path,
     codec: str,
     audio_quality: str,
     overwrite: bool,
+    timeout_seconds: int,
 ) -> None:
     command = [
         "ffmpeg",
@@ -171,7 +185,14 @@ def run_ffmpeg(
         str(output_path),
     ]
 
-    process = subprocess.run(command, capture_output=True, text=True, check=False)
+    try:
+        process = subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        raise MediaServiceError(
+            status_code=500,
+            detail=f"ffmpeg timed out after {timeout_seconds} seconds.",
+        ) from exc
+
     if process.returncode != 0:
         error_text = (process.stderr or process.stdout or "").strip()
         if not error_text:
@@ -188,6 +209,7 @@ def process_extract_audio_request(
 ) -> ExtractAudioResponse:
     root = (storage_root or DEFAULT_STORAGE_ROOT).resolve()
     format_info = resolve_audio_format(payload.audioFormat)
+    audio_quality = resolve_audio_quality(payload.audioQuality)
     source_path = resolve_storage_path(payload.sourcePath, "sourcePath", root)
     output_path = resolve_storage_path(payload.outputPath, "outputPath", root)
 
@@ -213,8 +235,9 @@ def process_extract_audio_request(
         source_path=source_path,
         output_path=output_path,
         codec=format_info["codec"],
-        audio_quality=payload.audioQuality,
+        audio_quality=audio_quality,
         overwrite=payload.overwrite,
+        timeout_seconds=FFMPEG_TIMEOUT_SECONDS,
     )
 
     if not output_path.exists():

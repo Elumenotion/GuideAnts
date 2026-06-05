@@ -1,8 +1,5 @@
-using System.Net.Http;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Endpoints;
 using GuideAntsApi.Models;

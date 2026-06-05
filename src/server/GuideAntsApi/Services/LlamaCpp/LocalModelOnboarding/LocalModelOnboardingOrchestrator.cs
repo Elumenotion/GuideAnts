@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Collections.Concurrent;
-using GuideAntsApi.Extensions;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Settings;
 

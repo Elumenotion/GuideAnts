@@ -7,8 +7,6 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Settings;
-using GuideAntsApi.Extensions;
-using Microsoft.Extensions.Logging;
 
 public class Program
 {

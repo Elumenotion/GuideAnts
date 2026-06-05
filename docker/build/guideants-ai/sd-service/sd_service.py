@@ -239,6 +239,13 @@ class DownloadBundleRequest(BaseModel):
             raise ValueError("must be a non-empty string")
         return trimmed
 
+    @field_validator("bundle_id")
+    @classmethod
+    def _validate_bundle_id(cls, value: str) -> str:
+        if not BUNDLE_ID_RE.fullmatch(value):
+            raise ValueError("bundle_id must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+        return value
+
     @field_validator("diffusion_file", "vae_file", "text_encoder_file")
     @classmethod
     def _reject_globs(cls, value: str) -> str:
@@ -282,6 +289,7 @@ class SdRuntimeState:
 STATE = SdRuntimeState()
 APP = FastAPI(title="GuideAnts Stable Diffusion Service", version="1.1.0")
 VALID_OUTPUT_FORMATS = {"png", "jpeg", "webp"}
+BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 WARMUP_LOCK = threading.Lock()
 BUNDLE_OPS_LOCK = threading.Lock()
 BUNDLE_OPERATIONS: dict[str, dict[str, Any]] = {}
@@ -435,9 +443,15 @@ def bundle_definition_file(model_dir: str, bundle_id: str) -> str:
 
 
 def write_bundle_definition_payload(model_dir: str, bundle_id: str, payload: dict[str, Any]) -> None:
-    bundle_path = os.path.join(bundle_root_dir(model_dir), bundle_id)
+    candidate_bundle_id = (bundle_id or "").strip()
+    if not BUNDLE_ID_RE.fullmatch(candidate_bundle_id):
+        raise ValueError("invalid bundle_id")
+    root_real = os.path.realpath(bundle_root_dir(model_dir))
+    bundle_path = os.path.realpath(os.path.join(root_real, candidate_bundle_id))
+    if not bundle_path.startswith(root_real + os.sep):
+        raise ValueError("resolved bundle path escapes the permitted bundle directory")
     os.makedirs(bundle_path, exist_ok=True)
-    target = bundle_definition_file(model_dir, bundle_id)
+    target = os.path.join(bundle_path, "bundle-definition.json")
     temp = f"{target}.{uuid.uuid4().hex}.tmp"
     with open(temp, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=True, sort_keys=True)
@@ -951,12 +965,13 @@ def start_engine() -> tuple[bool, str | None]:
     try:
         config = resolve_runtime_config()
     except RuntimeError as exc:
+        config_error = truncate_text(str(exc), 2048)
         STATE.config = None
         STATE.loaded_bundle_id = None
         STATE.loaded_at_utc = None
         STATE.engine_started_at_utc = None
-        STATE.config_error = str(exc)
-        log_event("sd_engine_start_config_error", reason=STATE.config_error)
+        STATE.config_error = "engine_config_invalid"
+        log_event("sd_engine_start_config_error", reason=config_error)
         return False, STATE.config_error
 
     STATE.config = config
@@ -994,13 +1009,13 @@ def start_engine() -> tuple[bool, str | None]:
         STATE.loaded_bundle_id = None
         STATE.loaded_at_utc = None
         STATE.engine_started_at_utc = None
-        STATE.config_error = error_msg
+        STATE.config_error = "engine_start_failed"
         log_event(
             "sd_engine_start_failed",
             errorType=type(exc).__name__,
             error=truncate_text(error_msg, 2048),
         )
-        return False, error_msg
+        return False, STATE.config_error
 
 
 def engine_state_dict() -> dict[str, Any]:
@@ -1376,13 +1391,12 @@ def success_payload(image_bytes: bytes, request_id: str) -> dict[str, Any]:
     }
 
 
-def error_payload(request_id: str, exc: Exception) -> dict[str, Any]:
+def error_payload(request_id: str, _exc: Exception) -> dict[str, Any]:
     return {
         "requestId": request_id,
         "error": {
             "code": "sd_generation_failed",
-            "message": str(exc),
-            "type": type(exc).__name__,
+            "message": "Image generation failed. Check service logs for details.",
         },
     }
 
@@ -1449,21 +1463,21 @@ def run_startup_warmup(
             "requestTimeoutSeconds": config.warmup_request_timeout_seconds,
         }
     except Exception as exc:
-        STATE.startup_warmup_last_error = truncate_text(str(exc), 2048)
+        warmup_error = truncate_text(str(exc), 2048)
+        STATE.startup_warmup_last_error = "startup_warmup_failed"
         latency_ms = int((time.perf_counter() - warmup_started) * 1000)
         log_event(
             "sd_startup_warmup_failed",
             requestId=warmup_request_id,
             latencyMs=latency_ms,
             errorType=type(exc).__name__,
-            error=STATE.startup_warmup_last_error,
+            error=warmup_error,
         )
         return {
             "ok": False,
             "requestId": warmup_request_id,
             "latencyMs": latency_ms,
-            "errorType": type(exc).__name__,
-            "error": STATE.startup_warmup_last_error,
+            "error": "startup_warmup_failed",
             "requestTimeoutSeconds": config.warmup_request_timeout_seconds,
         }
     finally:
@@ -1714,6 +1728,13 @@ def _require_model_dir() -> str:
     return model_dir
 
 
+def require_valid_bundle_id(bundle_id: str) -> str:
+    candidate = (bundle_id or "").strip()
+    if not BUNDLE_ID_RE.fullmatch(candidate):
+        raise HTTPException(status_code=400, detail="invalid bundle_id")
+    return candidate
+
+
 @APP.get("/admin/bundles")
 async def admin_list_bundles() -> JSONResponse:
     model_dir = _require_model_dir()
@@ -1740,6 +1761,7 @@ async def admin_list_bundles() -> JSONResponse:
 @APP.get("/admin/bundles/{bundle_id}")
 async def admin_get_bundle(bundle_id: str) -> JSONResponse:
     model_dir = _require_model_dir()
+    bundle_id = require_valid_bundle_id(bundle_id)
     bundle = next((item for item in list_bundles(model_dir) if item["bundleId"] == bundle_id), None)
     if bundle is None:
         raise HTTPException(status_code=404, detail="bundle not found")
@@ -1769,6 +1791,7 @@ async def admin_bundle_operation(operation_id: str) -> JSONResponse:
 @APP.post("/admin/bundles/{bundle_id}/select-active")
 async def admin_select_active_bundle(bundle_id: str) -> JSONResponse:
     model_dir = _require_model_dir()
+    bundle_id = require_valid_bundle_id(bundle_id)
     bundle = next((item for item in list_bundles(model_dir) if item["bundleId"] == bundle_id), None)
     if bundle is None:
         raise HTTPException(status_code=404, detail="bundle not found")
@@ -1836,7 +1859,7 @@ async def admin_select_active_bundle(bundle_id: str) -> JSONResponse:
                 "ok": False,
                 "action": "hot-swap-failed",
                 "activeBundleId": bundle_id,
-                "error": err,
+                "error": "engine_start_failed",
                 "engine": engine_state_dict(),
             },
         )
@@ -1882,7 +1905,7 @@ async def admin_load() -> JSONResponse:
             content={
                 "ok": False,
                 "action": "load-failed",
-                "error": err,
+                "error": "engine_start_failed",
                 "engine": engine_state_dict(),
             },
         )
@@ -1929,10 +1952,16 @@ async def admin_unload() -> JSONResponse:
 @APP.delete("/admin/bundles/{bundle_id}")
 async def admin_delete_bundle(bundle_id: str) -> JSONResponse:
     model_dir = _require_model_dir()
+    bundle_id = (bundle_id or "").strip()
+    if not BUNDLE_ID_RE.fullmatch(bundle_id):
+        raise HTTPException(status_code=400, detail="invalid bundle_id")
     if read_active_bundle(model_dir) == bundle_id:
         raise HTTPException(status_code=409, detail="cannot remove active bundle")
 
-    target = os.path.join(bundle_root_dir(model_dir), bundle_id)
+    root_real = os.path.realpath(bundle_root_dir(model_dir))
+    target = os.path.realpath(os.path.join(root_real, bundle_id))
+    if not target.startswith(root_real + os.sep):
+        raise HTTPException(status_code=400, detail="invalid bundle_id")
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="bundle not found")
     shutil.rmtree(target)

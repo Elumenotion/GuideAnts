@@ -6,7 +6,6 @@ using GuideAntsApi.Services.Core;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Exceptions;
 using GuideAntsApi.Options;
-using Microsoft.Extensions.Logging;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Formats.Png;

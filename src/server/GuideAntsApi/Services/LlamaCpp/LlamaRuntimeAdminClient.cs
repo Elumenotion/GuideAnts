@@ -1,10 +1,8 @@
 using System.Net;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using GuideAntsApi.Extensions;
 using GuideAntsApi.Models.Settings;
 
 namespace GuideAntsApi.Services.LlamaCpp;
