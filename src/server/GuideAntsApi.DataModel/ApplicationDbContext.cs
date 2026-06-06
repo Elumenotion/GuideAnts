@@ -19,6 +19,7 @@ namespace GuideAntsApi.DataModel
         }
 
         public DbSet<User> Users { get; set; } = null!;
+        public DbSet<UserRole> UserRoles { get; set; } = null!;
         public DbSet<Project> Projects { get; set; } = null!;
         
         public DbSet<NotebookTemplate> NotebookTemplates { get; set; } = null!;
@@ -27,6 +28,8 @@ namespace GuideAntsApi.DataModel
         public DbSet<ProjectFolder> ProjectFolders { get; set; } = null!;
         public DbSet<Link> Links { get; set; } = null!;
         public DbSet<ProjectExternalAuth> ProjectExternalAuths { get; set; } = null!;
+        public DbSet<ExternalOAuthToken> ExternalOAuthTokens { get; set; } = null!;
+        public DbSet<OAuthAuthorizationState> OAuthAuthorizationStates { get; set; } = null!;
         public DbSet<NotebookLink> NotebookLinks { get; set; } = null!;
         public DbSet<SemiStructuredProjectData> SemiStructuredProjectDatas { get; set; } = null!;
         public DbSet<NotebookSemiStructuredData> NotebookSemiStructuredDatas { get; set; } = null!;
@@ -103,6 +106,19 @@ namespace GuideAntsApi.DataModel
                 .IsUnique()
                 .HasFilter("[IdentityIssuer] IS NOT NULL AND [IdentitySubject] IS NOT NULL")
                 .HasDatabaseName("IX_Users_Identity_Unique");
+
+            modelBuilder.Entity<UserRole>()
+                .HasIndex(ur => ur.UserId)
+                .IsUnique()
+                .HasDatabaseName("IX_UserRoles_UserId_Unique");
+
+            modelBuilder.Entity<User>()
+                .Property(u => u.SecurityStamp)
+                .HasDefaultValueSql("NEWID()");
+
+            modelBuilder.Entity<User>()
+                .Property(u => u.MustChangePassword)
+                .HasDefaultValue(false);
 
             modelBuilder.Entity<ProjectFolder>()
                 .HasIndex(pf => new { pf.RelativePath, pf.ProjectId })
@@ -298,6 +314,24 @@ namespace GuideAntsApi.DataModel
             // ------------------------------------------------------------
             // Configure relationships with restricted delete behavior
             // ------------------------------------------------------------
+
+            modelBuilder.Entity<User>()
+                .HasOne(u => u.ApprovedByUser)
+                .WithMany()
+                .HasForeignKey(u => u.ApprovedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<UserRole>()
+                .HasOne(ur => ur.User)
+                .WithMany(u => u.UserRoles)
+                .HasForeignKey(ur => ur.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<UserRole>()
+                .HasOne(ur => ur.AssignedByUser)
+                .WithMany()
+                .HasForeignKey(ur => ur.AssignedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
             
             // ------------------------------------------------------------
             // UsageEvents - covering indexes for guide usage queries
@@ -759,6 +793,43 @@ namespace GuideAntsApi.DataModel
             modelBuilder.Entity<ProjectExternalAuth>()
                 .Property(e => e.AuthType)
                 .HasMaxLength(32);
+
+            modelBuilder.Entity<ExternalOAuthToken>()
+                .HasIndex(e => new { e.UserId, e.ProviderId })
+                .IsUnique()
+                .HasDatabaseName("IX_ExternalOAuthTokens_UserId_ProviderId_Unique");
+
+            modelBuilder.Entity<ExternalOAuthToken>()
+                .HasIndex(e => e.ExpiresAt);
+
+            modelBuilder.Entity<ExternalOAuthToken>()
+                .Property(e => e.Updated)
+                .HasDefaultValueSql("GETUTCDATE()");
+
+            modelBuilder.Entity<ExternalOAuthToken>()
+                .HasOne(e => e.User)
+                .WithMany(u => u.ExternalOAuthTokens)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ExternalOAuthToken>()
+                .HasOne(e => e.Project)
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<OAuthAuthorizationState>()
+                .HasIndex(e => new { e.UserId, e.ProviderId })
+                .HasDatabaseName("IX_OAuthAuthorizationStates_UserId_ProviderId");
+
+            modelBuilder.Entity<OAuthAuthorizationState>()
+                .HasIndex(e => e.ExpiresAt);
+
+            modelBuilder.Entity<OAuthAuthorizationState>()
+                .HasOne(e => e.User)
+                .WithMany(u => u.OAuthAuthorizationStates)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<SemiStructuredProjectData>()
                 .HasOne(sd => sd.Project)

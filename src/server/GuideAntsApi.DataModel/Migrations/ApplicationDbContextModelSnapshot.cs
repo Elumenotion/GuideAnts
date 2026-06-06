@@ -1044,6 +1044,60 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.ToTable("ExcludedHosts");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ExternalOAuthToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccessTokenEncrypted")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("Created")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProviderId")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("RefreshTokenEncrypted")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Scope")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime>("Updated")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("UserId", "ProviderId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalOAuthTokens_UserId_ProviderId_Unique");
+
+                    b.ToTable("ExternalOAuthTokens");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.FileLineageEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1687,6 +1741,66 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("NotebookTemplates");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.OAuthAuthorizationState", b =>
+                {
+                    b.Property<string>("State")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("ClientId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("CodeVerifier")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime>("Created")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ProviderId")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("RedirectUri")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("ReturnUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("Scopes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("Tenant")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("State");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("UserId", "ProviderId")
+                        .HasDatabaseName("IX_OAuthAuthorizationStates_UserId_ProviderId");
+
+                    b.ToTable("OAuthAuthorizationStates");
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Project", b =>
@@ -2347,6 +2461,12 @@ namespace GuideAntsApi.DataModel.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("Created")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime2")
@@ -2364,23 +2484,41 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<DateTime?>("LastLoginAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("Locale")
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<bool>("MustChangePassword")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<string>("PasswordHash")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("PreferencesJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("SecurityStamp")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWID()");
 
                     b.Property<string>("TimeZone")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ApprovedByUserId");
 
                     b.HasIndex("Email")
                         .IsUnique()
@@ -2420,6 +2558,35 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("ProjectId", "Key");
 
                     b.ToTable("UserProjectContextOption", (string)null);
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.UserRole", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AssignedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("AssignedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedByUserId");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserRoles_UserId_Unique");
+
+                    b.ToTable("UserRoles");
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AgentInvocation", b =>
@@ -2684,6 +2851,24 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("NotebookFile");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ExternalOAuthToken", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("GuideAntsApi.DataModel.Models.User", "User")
+                        .WithMany("ExternalOAuthTokens")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.GuideMember", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.Assistant", "Assistant")
@@ -2912,6 +3097,17 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("SemiStructuredProjectData");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.OAuthAuthorizationState", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.User", "User")
+                        .WithMany("OAuthAuthorizationStates")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Project", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.ContentFile", "HomePageContentFile")
@@ -2992,6 +3188,16 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("UsageReportCategory");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.User", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.User", "ApprovedByUser")
+                        .WithMany()
+                        .HasForeignKey("ApprovedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ApprovedByUser");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.UserProjectContextOption", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.Project", "Project")
@@ -3007,6 +3213,24 @@ namespace GuideAntsApi.DataModel.Migrations
                         .IsRequired();
 
                     b.Navigation("Project");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.UserRole", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.User", "AssignedByUser")
+                        .WithMany()
+                        .HasForeignKey("AssignedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("GuideAntsApi.DataModel.Models.User", "User")
+                        .WithMany("UserRoles")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AssignedByUser");
 
                     b.Navigation("User");
                 });
@@ -3127,6 +3351,15 @@ namespace GuideAntsApi.DataModel.Migrations
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.UsageReportCategory", b =>
                 {
                     b.Navigation("Operations");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.User", b =>
+                {
+                    b.Navigation("ExternalOAuthTokens");
+
+                    b.Navigation("OAuthAuthorizationStates");
+
+                    b.Navigation("UserRoles");
                 });
 #pragma warning restore 612, 618
         }

@@ -9,6 +9,7 @@ public static class ProjectFolderEndpoints
     {
         var group = app.MapGroup("/api/projects/{projectId}/folders")
             .WithTags("Project Folders")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         // Get folder tree
@@ -71,6 +72,7 @@ public static class ProjectFolderEndpoints
             }
         })
         .WithName("CreateProjectFolder")
+        .RequireAuthorization("RequireContributor")
         .Produces<ProjectFolderDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
@@ -98,6 +100,7 @@ public static class ProjectFolderEndpoints
             }
         })
         .WithName("UpdateProjectFolder")
+        .RequireAuthorization("RequireContributor")
         .Produces<ProjectFolderDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status400BadRequest)
@@ -121,6 +124,7 @@ public static class ProjectFolderEndpoints
             }
         })
         .WithName("DeleteProjectFolder")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status400BadRequest)
@@ -136,6 +140,7 @@ public static class ProjectFolderEndpoints
             return Results.NoContent();
         })
         .WithName("MoveProjectFolder")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized);

@@ -3,7 +3,7 @@ import type { MessageDto, PendingAttachment } from '../../types/conversation';
 import { api } from '../../services/api';
 import { uploadTypeToServer } from '../../utils/attachments';
 import { userService } from '../../services/userService';
-import { collectOAuthTokensForTemplate, ensureValidTokensForTemplate } from '../../utils/notebookAuth';
+import { ensureValidTokensForTemplate } from '../../utils/notebookAuth';
 import { checkRuntimeStatus, getRuntimeBlockingMessage, dispatchRuntimeStatusWindowEvent } from './runtimeChecks';
 import type { ActionType, ExtendedConversationState, StreamingMode } from './types';
 
@@ -135,8 +135,6 @@ export function useConversationActions(
       dispatch({ type: 'ADD_MESSAGE', payload: placeholderAssistant });
 
       try {
-        const oauthTokens = collectOAuthTokensForTemplate(state.notebookTemplate || null, projectId);
-
         await api.projects.notebooks.conversations.sendMessageStream(
           projectId,
           notebookId,
@@ -188,8 +186,7 @@ export function useConversationActions(
             });
             try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
           },
-          controller.signal,
-          oauthTokens
+          controller.signal
         );
       } catch (error: any) {
         if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('aborted'))) {
@@ -222,6 +219,20 @@ export function useConversationActions(
               duration: 8000
             });
             try { window.dispatchEvent(new Event('refresh-notebook-toolbar')); } catch {}
+            return;
+          }
+
+          if (body?.code === 'OAUTH_RECONNECT_REQUIRED') {
+            const providers: string[] = Array.isArray(body.providers) ? body.providers : [];
+            const providerList = providers.length > 0 ? providers.join(', ') : 'one or more providers';
+            const message = `Reconnect OAuth for ${providerList} before continuing.`;
+            dispatch({ type: 'SET_STREAMING_ERROR', payload: message });
+            showToast({
+              type: 'error',
+              title: 'Reconnect Required',
+              message,
+              duration: 8000
+            });
             return;
           }
 

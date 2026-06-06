@@ -241,6 +241,24 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             generated);
     }
 
+    public async Task<NotebookChatReadinessDto> GetChatReadinessAsync(
+        Guid notebookId,
+        Guid? conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var toolbar = await GetToolbarAsync(notebookId, conversationId, cancellationToken).ConfigureAwait(false);
+        var chat = toolbar.Chat;
+        return new NotebookChatReadinessDto(
+            chat.EffectiveModelId,
+            chat.EffectiveModelDisplayName,
+            chat.EffectiveProvider,
+            chat.Blockers,
+            chat.SupportsLocalRuntimePower,
+            chat.LocalRuntimeOn,
+            chat.InProgressOperationId,
+            chat.InProgressState);
+    }
+
     private async Task<IReadOnlyList<NotebookToolbarModelOptionDto>> BuildSelectableChatModelOptionsAsync(
         IReadOnlyList<SettingsModelDto> models,
         CancellationToken cancellationToken)

@@ -13,6 +13,7 @@ public static class ProjectContentFileEndpoints
     {
         var group = app.MapGroup("/api/projects/{projectId}/files")
             .WithTags("Project Content Files")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         // Get all content files for a project
@@ -84,6 +85,7 @@ public static class ProjectContentFileEndpoints
             }
         })
         .WithName("UploadProjectFile")
+        .RequireAuthorization("RequireContributor")
         .Accepts<UploadFileForm>("multipart/form-data")
         .DisableAntiforgery()
         .WithMetadata(new RequestSizeLimitAttribute(long.MaxValue), new DisableRequestSizeLimitAttribute())
@@ -113,6 +115,7 @@ public static class ProjectContentFileEndpoints
             }
         })
         .WithName("UpdateProjectContentFile")
+        .RequireAuthorization("RequireContributor")
         .Produces<ContentFileDetailsDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized)
@@ -140,6 +143,7 @@ public static class ProjectContentFileEndpoints
             }
         })
         .WithName("DeleteProjectContentFile")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized)
@@ -170,6 +174,7 @@ public static class ProjectContentFileEndpoints
             }
         })
         .WithName("MoveProjectContentFile")
+        .RequireAuthorization("RequireContributor")
         .Produces<ContentFileDetailsDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status400BadRequest)
@@ -202,6 +207,7 @@ public static class ProjectContentFileEndpoints
             }
         })
         .WithName("RenameProjectContentFile")
+        .RequireAuthorization("RequireContributor")
         .Produces<ContentFileDetailsDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status400BadRequest)

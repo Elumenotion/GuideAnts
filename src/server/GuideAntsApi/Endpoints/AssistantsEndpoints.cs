@@ -10,6 +10,7 @@ public static class AssistantsEndpoints
     {
         var group = app.MapGroup("/api/assistants")
             .WithTags("Assistants")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         // List assistants

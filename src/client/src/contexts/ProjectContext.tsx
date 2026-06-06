@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useReducer, useCallback, ReactNode } from 'react';
 import { ProjectDetailsDto, SelectedItem, SectionType, FolderTreeDto } from '../types/project';
 import { api } from '../services/api';
-import { getPermissions } from '../services/permissions';
+import { useAuth } from './AuthContext';
 
 // State interface
 interface ProjectState {
@@ -112,6 +112,7 @@ interface ProjectProviderProps {
 }
 
 export function ProjectProvider({ children, projectId }: ProjectProviderProps) {
+    const { user, role } = useAuth();
     const [state, dispatch] = useReducer(projectReducer, initialState);
 
 
@@ -134,7 +135,6 @@ export function ProjectProvider({ children, projectId }: ProjectProviderProps) {
             };
             
             dispatch({ type: 'SET_PROJECT', payload: projectWithFolders });
-            dispatch({ type: 'SET_CURRENT_USER_EMAIL', payload: 'oss-lite-user' });
             dispatch({ type: 'SET_FOLDER_TREE', payload: folderTree });
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Failed to fetch project details';
@@ -186,13 +186,12 @@ export function ProjectProvider({ children, projectId }: ProjectProviderProps) {
 
 
 
-    // Computed values (via centralized permissions engine)
-    const perms = React.useMemo(() => {
-        return getPermissions({ userEmail: state.currentUserEmail || '', roles: [] });
-    }, [state.project, state.currentUserEmail]);
+    const canEdit = React.useCallback(() => role === 'Admin' || role === 'Contributor', [role]);
+    const isOwner = React.useCallback(() => role === 'Admin', [role]);
 
-    const canEdit = React.useCallback(() => perms.canEdit, [perms]);
-    const isOwner = React.useCallback(() => perms.isOwner, [perms]);
+    React.useEffect(() => {
+        dispatch({ type: 'SET_CURRENT_USER_EMAIL', payload: user?.email ?? null });
+    }, [user?.email]);
 
     // Load project on mount or projectId change
     React.useEffect(() => {

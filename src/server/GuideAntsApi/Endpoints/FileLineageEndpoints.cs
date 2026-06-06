@@ -11,7 +11,9 @@ public static class FileLineageEndpoints
 {
     public static void MapFileLineageEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/lineage").WithTags("FileLineage");
+        var group = app.MapGroup("/api/lineage")
+            .WithTags("FileLineage")
+            .RequireAuthorization("RequireApprovedUser");
 
         group.MapGet("/{eventId:guid}", async Task<Results<Ok<FileLineageEventDto>, NotFound, UnauthorizedHttpResult>> (
             Guid eventId,

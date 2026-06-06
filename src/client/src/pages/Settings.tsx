@@ -25,6 +25,7 @@ import { ServicesTab, type ServiceKey } from './settings/components/ServicesTab'
 import { SettingsTabNavigation } from './settings/components/SettingsTabNavigation';
 import { TelemetryTab } from './settings/components/TelemetryTab';
 import { AddModelWizard } from './settings/components/catalog/AddModelWizard';
+import { UsersTab } from './settings/components/UsersTab';
 import {
   ActiveAddOperationState,
   ModelsRuntimeDeepLink,
@@ -40,10 +41,14 @@ import {
   getErrorMessage,
 } from './settings/utils';
 import { useLocalModelOnboardingOperation } from '../features/localModelOnboarding/useOperationPolling';
+import { useAuth } from '../contexts/AuthContext';
+import { HeaderUserMenu } from '../components/common/HeaderUserMenu';
 
 export default function Settings() {
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<SettingsTab>('overview');
+  const { role } = useAuth();
+  const isAdmin = role === 'Admin';
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => (isAdmin ? 'overview' : 'personalization'));
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null);
   const [modelsRuntimeDeepLink, setModelsRuntimeDeepLink] = useState<ModelsRuntimeDeepLink | null>(null);
   const [connectionsFocusedSection, setConnectionsFocusedSection] = useState<string | null>(null);
@@ -102,6 +107,18 @@ export default function Settings() {
   const [llamaInventoryLoading, setLlamaInventoryLoading] = useState(true);
   const [llamaInventoryRefreshing, setLlamaInventoryRefreshing] = useState(false);
   const [llamaInventoryError, setLlamaInventoryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAdmin && activeTab !== 'personalization') {
+      setActiveTab('personalization');
+    }
+  }, [activeTab, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin && activeAddOperation) {
+      setActiveAddOperation(null);
+    }
+  }, [activeAddOperation, isAdmin, setActiveAddOperation]);
 
   const loadSectionSummaries = useCallback(async () => {
     try {
@@ -172,15 +189,22 @@ export default function Settings() {
   }, [loadLlamaInventory]);
 
   useEffect(() => {
+    if (!isAdmin) {
+      setModelsLoading(false);
+      setProfilesLoading(false);
+      setLlamaInventoryLoading(false);
+      return;
+    }
+
     void loadSectionSummaries();
     void loadModels();
     void loadProfiles();
     void loadLlamaInventory();
-  }, [loadSectionSummaries, loadModels, loadProfiles, loadLlamaInventory]);
+  }, [isAdmin, loadSectionSummaries, loadModels, loadProfiles, loadLlamaInventory]);
 
   useLocalModelOnboardingOperation({
     operationId: activeAddOperation?.operationId ?? null,
-    enabled: Boolean(activeAddOperation) && !wizardOpen,
+    enabled: isAdmin && Boolean(activeAddOperation) && !wizardOpen,
     onUpdate: (op: ModelDownloadOperationDto) => {
       setActiveAddOperationStatus(op.status);
     },
@@ -611,6 +635,17 @@ export default function Settings() {
   }, []);
 
   const activeTabContent = useMemo(() => {
+    if (!isAdmin && activeTab !== 'personalization') {
+      return (
+        <>
+          <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">
+            You are not authorized to access this settings section. Showing Personalization instead.
+          </div>
+          <PersonalizationTab />
+        </>
+      );
+    }
+
     if (activeTab === 'overview') {
       return (
         <OverviewTab
@@ -630,6 +665,10 @@ export default function Settings() {
 
     if (activeTab === 'personalization') {
       return <PersonalizationTab />;
+    }
+
+    if (activeTab === 'users') {
+      return <UsersTab />;
     }
 
     if (activeTab === 'telemetry') {
@@ -726,6 +765,7 @@ export default function Settings() {
     handleRequestDeleteLlamaRouter,
     handleSaveProfile,
     infrastructureFocusedKey,
+    isAdmin,
     servicesFocusedKey,
     llamaInventory,
     llamaInventoryError,
@@ -768,14 +808,15 @@ export default function Settings() {
           <div className="flex items-center gap-2 self-end sm:self-auto">
             <HomeButton />
             <SettingsButton />
+            <HeaderUserMenu />
             <TourStartButton screenId="settings" inline />
           </div>
         </div>
       </header>
 
-      <SettingsTabNavigation activeTab={activeTab} onTabChange={handleNavigate} />
+      <SettingsTabNavigation activeTab={activeTab} role={role} onTabChange={handleNavigate} />
 
-      {activeAddOperation && (
+      {isAdmin && activeAddOperation && (
         <div
           className="border-b border-blue-200 bg-blue-50 px-8 py-2 text-sm text-blue-900"
           role="status"
@@ -808,19 +849,21 @@ export default function Settings() {
         <div className="mx-auto max-w-7xl space-y-6">{activeTabContent}</div>
       </main>
 
-      <AddModelWizard
-        isOpen={wizardOpen}
-        providerPreselect={wizardProviderPreselect}
-        profiles={profiles}
-        profilesLoading={profilesLoading}
-        inventory={llamaInventory}
-        inventoryError={llamaInventoryError}
-        onClose={() => setWizardOpen(false)}
-        onCreateRuntimeProfileTemplate={createRuntimeProfileFromTemplate}
-        onCreateCustomRuntimeProfile={createCustomRuntimeProfile}
-        onCatalogChanged={handleCatalogDataRefresh}
-        onSetActiveAddOperation={setActiveAddOperation}
-      />
+      {isAdmin ? (
+        <AddModelWizard
+          isOpen={wizardOpen}
+          providerPreselect={wizardProviderPreselect}
+          profiles={profiles}
+          profilesLoading={profilesLoading}
+          inventory={llamaInventory}
+          inventoryError={llamaInventoryError}
+          onClose={() => setWizardOpen(false)}
+          onCreateRuntimeProfileTemplate={createRuntimeProfileFromTemplate}
+          onCreateCustomRuntimeProfile={createCustomRuntimeProfile}
+          onCatalogChanged={handleCatalogDataRefresh}
+          onSetActiveAddOperation={setActiveAddOperation}
+        />
+      ) : null}
 
       {pendingConfirmationView && (
         <ConfirmationDialog

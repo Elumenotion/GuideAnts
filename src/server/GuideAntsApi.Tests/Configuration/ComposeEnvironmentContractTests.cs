@@ -40,7 +40,8 @@ public sealed class ComposeEnvironmentContractTests
         ("docker-compose.ghcr-cpu.yml", "guideants-webapi-ui"),
         ("docker-compose.ghcr-cuda13.yml", "guideants-webapi-ui"),
         ("docker-compose.ghcr-rocm.yml", "guideants-webapi-ui"),
-        ("docker-compose.ghcr-slim.yml", "guideants-webapi-ui")
+        ("docker-compose.ghcr-slim.yml", "guideants-webapi-ui"),
+        ("docker-compose.cuda.api-only-local-build.yml", "guideants-webapi-ui")
     ];
 
     private static readonly string[] RequiredDocumentServerContainerKeys =

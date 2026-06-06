@@ -78,6 +78,9 @@ public static class Agent
             DeploymentId = resolvedAgent.ModelId,
             ExecutionPolicy = resolvedAgent.ExecutionPolicy,
             oAuthUserAccessToken = context.OAuthUserAccessToken,
+            ExternalAuthTokens = context.ExternalAuthTokens == null
+                ? null
+                : new Dictionary<string, string>(context.ExternalAuthTokens, StringComparer.OrdinalIgnoreCase),
             Evaluator = string.IsNullOrWhiteSpace(assistant.InvocationEvaluator)
                 ? null
                 : assistant.InvocationEvaluator

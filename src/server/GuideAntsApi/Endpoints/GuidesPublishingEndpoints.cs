@@ -46,6 +46,7 @@ public static class GuidesPublishingEndpoints
     {
         var group = app.MapGroup("/api/guides/{guideId}/publish")
             .WithTags("Guides Publishing")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         // Validate friendly name availability

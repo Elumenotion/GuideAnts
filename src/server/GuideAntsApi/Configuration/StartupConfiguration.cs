@@ -2,8 +2,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Any;
 using System.Reflection;
+using System.Security.Claims;
+using System.Text;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;
+using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.Services.Components;
@@ -11,7 +15,9 @@ using GuideAntsApi.Options;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Extensions;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.Anthropic;
 using AntRunner.Chat.GoogleGemini;
@@ -19,12 +25,14 @@ using AntRunner.Chat.HuggingFace;
 using AntRunner.Chat.LlamaCpp;
 using AntRunner.Chat.OpenAI;
 using AntRunner.Chat.OpenRouter;
+using Microsoft.AspNetCore.Authorization;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Services.Infrastructure;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.NotebookHeaderToolbar;
+using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace GuideAntsApi.Configuration;
 
@@ -40,6 +48,7 @@ public static class StartupConfiguration
     public static void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         ConfigureDatabase(services, configuration);
+        ConfigureAuthentication(services, configuration);
         ConfigureCors(services, configuration);
         ConfigureMemoryCache(services);
         ConfigureOptions(services, configuration);
@@ -58,6 +67,12 @@ public static class StartupConfiguration
         services.AddSingleton<EfQueryWarningInterceptor>();
 
         // Core Services
+        services.AddHttpContextAccessor();
+        services.AddScoped<IUserContext, HttpUserContext>();
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
+        services.AddScoped<IAdminUserService, AdminUserService>();
+        services.AddScoped<IToolOAuthService, ToolOAuthService>();
+        services.AddSingleton<IUserPasswordHasher, UserPasswordHasher>();
         services.AddSingleton<IStoragePathResolver, StoragePathResolver>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddSingleton<ISettingsSectionRegistry, SettingsSectionRegistry>();
@@ -422,6 +437,92 @@ public static class StartupConfiguration
         });
     }
 
+    private static void ConfigureAuthentication(IServiceCollection services, IConfiguration configuration)
+    {
+        var jwtOptions = configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+        ValidateJwtOptions(jwtOptions);
+
+        // Capture a single immutable snapshot so token issuance and bearer validation
+        // cannot drift if runtime configuration providers reload Jwt settings later.
+        services.AddSingleton<IJwtTokenService>(_ => new JwtTokenService(Microsoft.Extensions.Options.Options.Create(new JwtOptions
+        {
+            Issuer = jwtOptions.Issuer,
+            Audience = jwtOptions.Audience,
+            SigningKey = jwtOptions.SigningKey,
+            LifetimeMinutes = jwtOptions.LifetimeMinutes
+        })));
+
+        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SigningKey));
+        services
+            .AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            })
+            .AddJwtBearer(options =>
+            {
+                options.RequireHttpsMetadata = false;
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidIssuer = jwtOptions.Issuer,
+                    ValidateAudience = true,
+                    ValidAudience = jwtOptions.Audience,
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = signingKey,
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.Zero,
+                    NameClaimType = ClaimTypes.Name,
+                    RoleClaimType = ClaimTypes.Role
+                };
+                options.Events = new JwtBearerEvents
+                {
+                    OnTokenValidated = async context =>
+                    {
+                        var principal = context.Principal;
+                        var userIdValue = principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                        var securityStampValue = principal?.FindFirstValue(JwtClaimTypes.SecurityStamp);
+
+                        if (!Guid.TryParse(userIdValue, out var userId) ||
+                            !Guid.TryParse(securityStampValue, out var tokenSecurityStamp))
+                        {
+                            context.Fail("Token claims are invalid.");
+                            return;
+                        }
+
+                        var db = context.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
+                        var dbSecurityStamp = await db.Users
+                            .AsNoTracking()
+                            .Where(user => user.Id == userId)
+                            .Select(user => (Guid?)user.SecurityStamp)
+                            .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+
+                        if (!dbSecurityStamp.HasValue || dbSecurityStamp.Value != tokenSecurityStamp)
+                        {
+                            context.Fail("Token security stamp mismatch.");
+                        }
+                    }
+                };
+            });
+
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("RequireApprovedUser", policy =>
+                policy.RequireAssertion(context =>
+                    context.User.IsInRole(Role.Reader.ToString())
+                    || context.User.IsInRole(Role.Contributor.ToString())
+                    || context.User.IsInRole(Role.Admin.ToString())));
+
+            options.AddPolicy("RequireContributor", policy =>
+                policy.RequireAssertion(context =>
+                    context.User.IsInRole(Role.Contributor.ToString())
+                    || context.User.IsInRole(Role.Admin.ToString())));
+
+            options.AddPolicy("RequireAdmin", policy =>
+                policy.RequireRole(Role.Admin.ToString()));
+        });
+    }
+
     private static void ConfigureCors(IServiceCollection services, IConfiguration configuration)
     {
         // Read from IConfiguration (appsettings, env, etc.) instead of Environment variables,
@@ -489,6 +590,17 @@ public static class StartupConfiguration
                 }
             });
 
+            options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+            {
+                Name = "Authorization",
+                Description = "JWT Authorization header using the Bearer scheme.",
+                In = ParameterLocation.Header,
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer",
+                BearerFormat = "JWT"
+            });
+            options.OperationFilter<BearerSecurityRequirementsOperationFilter>();
+
             // Configure ScriptType enum for Swagger
             options.MapType<ScriptType>(() => new OpenApiSchema
             {
@@ -531,6 +643,30 @@ public static class StartupConfiguration
         services.Configure<SettingsSecretsOptions>(configuration.GetSection(SettingsSecretsOptions.SectionName));
         services.Configure<LlamaModelManagementOptions>(configuration.GetSection(LlamaModelManagementOptions.SectionName));
         services.Configure<DocumentServerOptions>(configuration.GetSection(DocumentServerOptions.SectionName));
+        services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
+    }
+
+    private static void ValidateJwtOptions(JwtOptions jwtOptions)
+    {
+        if (string.IsNullOrWhiteSpace(jwtOptions.Issuer))
+        {
+            throw new InvalidOperationException("Jwt:Issuer is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(jwtOptions.Audience))
+        {
+            throw new InvalidOperationException("Jwt:Audience is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(jwtOptions.SigningKey))
+        {
+            throw new InvalidOperationException("Jwt:SigningKey is required.");
+        }
+
+        if (jwtOptions.SigningKey.Length < 32)
+        {
+            throw new InvalidOperationException("Jwt:SigningKey must be at least 32 characters.");
+        }
     }
 
     private static Uri DeriveLlamaAdminBaseUri(string llamaBaseUrl)
@@ -551,5 +687,52 @@ public static class StartupConfiguration
         path = path.TrimEnd('/') + ServiceRoutingContracts.LlamaAdminPath + "/";
         builder.Path = path;
         return builder.Uri;
+    }
+}
+
+internal sealed class BearerSecurityRequirementsOperationFilter : IOperationFilter
+{
+    public void Apply(OpenApiOperation operation, OperationFilterContext context)
+    {
+        var endpointMetadata = context.ApiDescription.ActionDescriptor.EndpointMetadata;
+        if (endpointMetadata == null || endpointMetadata.Count == 0)
+        {
+            return;
+        }
+
+        if (endpointMetadata.OfType<IAllowAnonymous>().Any())
+        {
+            return;
+        }
+
+        if (!endpointMetadata.OfType<IAuthorizeData>().Any())
+        {
+            return;
+        }
+
+        operation.Security ??= [];
+        if (!operation.Security.Any(requirement => requirement.Keys.Any(key => key.Reference?.Id == "Bearer")))
+        {
+            operation.Security.Add(new OpenApiSecurityRequirement
+            {
+                [new OpenApiSecurityScheme
+                {
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.SecurityScheme,
+                        Id = "Bearer"
+                    }
+                }] = Array.Empty<string>()
+            });
+        }
+
+        operation.Responses.TryAdd(StatusCodes.Status401Unauthorized.ToString(), new OpenApiResponse
+        {
+            Description = "Unauthorized"
+        });
+        operation.Responses.TryAdd(StatusCodes.Status403Forbidden.ToString(), new OpenApiResponse
+        {
+            Description = "Forbidden"
+        });
     }
 }

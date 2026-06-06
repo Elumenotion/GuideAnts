@@ -1,4 +1,6 @@
 import { API_BASE_URL } from '../config/apiConfig';
+import { withAuthHeaders } from './authService';
+import { broadcastAuthExpired } from './authEvents';
 import type {
   DailyUsageBucketDto,
   GuideUsageConversationsPageDto,
@@ -10,9 +12,15 @@ import type {
 } from '../types/usage';
 
 function getHeaders(): HeadersInit {
-  return {
+  return withAuthHeaders({
     'Content-Type': 'application/json',
-  };
+  });
+}
+
+function handleUnauthorized(response: Response): void {
+  if (response.status === 401) {
+    broadcastAuthExpired('Authentication expired.');
+  }
 }
 
 export const guideUsageApi = {
@@ -29,6 +37,7 @@ export const guideUsageApi = {
       method: 'GET',
       headers: getHeaders(),
     });
+    handleUnauthorized(response);
     
     if (!response.ok) {
       throw new Error(`Failed to fetch guide usage summary: ${response.status}`);
@@ -50,6 +59,7 @@ export const guideUsageApi = {
       method: 'GET',
       headers: getHeaders(),
     });
+    handleUnauthorized(response);
     
     if (!response.ok) {
       throw new Error(`Failed to fetch assistant usage summary: ${response.status}`);
@@ -67,6 +77,7 @@ export const guideUsageApi = {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/charts?${params}`;
     const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch guide usage charts: ${response.status}`);
     }
@@ -82,6 +93,7 @@ export const guideUsageApi = {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/charts?${params}`;
     const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch assistant usage charts: ${response.status}`);
     }
@@ -97,6 +109,7 @@ export const guideUsageApi = {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/crew?${params}`;
     const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch guide usage crew: ${response.status}`);
     }
@@ -112,6 +125,7 @@ export const guideUsageApi = {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/crew?${params}`;
     const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch assistant usage crew: ${response.status}`);
     }
@@ -129,6 +143,7 @@ export const guideUsageApi = {
     const params = new URLSearchParams({ from, to, page: String(page), pageSize: String(pageSize) });
     const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/conversations?${params}`;
     const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch guide usage conversations: ${response.status}`);
     }
@@ -146,6 +161,7 @@ export const guideUsageApi = {
     const params = new URLSearchParams({ from, to, page: String(page), pageSize: String(pageSize) });
     const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/conversations?${params}`;
     const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch assistant usage conversations: ${response.status}`);
     }
@@ -166,6 +182,7 @@ export const guideUsageApi = {
       method: 'GET',
       headers: getHeaders(),
     });
+    handleUnauthorized(response);
     
     if (!response.ok) {
       throw new Error(`Failed to fetch invocation: ${response.status}`);
@@ -187,6 +204,7 @@ export const guideUsageApi = {
       method: 'GET',
       headers: getHeaders(),
     });
+    handleUnauthorized(response);
     
     if (!response.ok) {
       throw new Error(`Failed to fetch turn invocations: ${response.status}`);
@@ -208,6 +226,7 @@ export const guideUsageApi = {
       method: 'GET',
       headers: getHeaders(),
     });
+    handleUnauthorized(response);
     
     if (!response.ok) {
       throw new Error(`Failed to fetch all turn invocations: ${response.status}`);
@@ -229,6 +248,7 @@ export const guideUsageApi = {
       method: 'GET',
       headers: getHeaders(),
     });
+    handleUnauthorized(response);
     
     if (!response.ok) {
       throw new Error(`Failed to fetch turn messages: ${response.status}`);

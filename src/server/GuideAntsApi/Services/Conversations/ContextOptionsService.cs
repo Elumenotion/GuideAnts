@@ -2,18 +2,24 @@ using System.Text.Json;
 using AntRunner.ToolCalling.AssistantDefinitions;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.UserProjectContextOptions;
 
 namespace GuideAntsApi.Services.Conversations;
 
 public class ContextOptionsService : IContextOptionsService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUserService;
     private readonly IUserProjectContextOptionsService _userProjectContextOptionsService;
 
-    public ContextOptionsService(IServiceScopeFactory scopeFactory, IUserProjectContextOptionsService userProjectContextOptionsService)
+    public ContextOptionsService(
+        ApplicationDbContext db,
+        ICurrentUserService currentUserService,
+        IUserProjectContextOptionsService userProjectContextOptionsService)
     {
-        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _currentUserService = currentUserService ?? throw new ArgumentNullException(nameof(currentUserService));
         _userProjectContextOptionsService = userProjectContextOptionsService ?? throw new ArgumentNullException(nameof(userProjectContextOptionsService));
     }
 
@@ -22,7 +28,7 @@ public class ContextOptionsService : IContextOptionsService
         var resolved = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var currentUser = await ResolveCurrentUserAsync(ct);
 
-        // Get project-scoped user-provided values for the OSS-lite single user.
+        // Get project-scoped user-provided values for the authenticated user.
         var userValues = currentUser == null || projectId == Guid.Empty
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string>(
@@ -75,15 +81,13 @@ public class ContextOptionsService : IContextOptionsService
 
     private async Task<CurrentUserContext?> ResolveCurrentUserAsync(CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var currentUser = await _currentUserService.GetCurrentUserAsync(ct);
+        if (currentUser == null)
+        {
+            return null;
+        }
 
-        return await db.Users
-            .AsNoTracking()
-            .OrderBy(u => u.Created)
-            .ThenBy(u => u.Id)
-            .Select(u => new CurrentUserContext(u.Id, u.Name, u.Email))
-            .FirstOrDefaultAsync(ct);
+        return new CurrentUserContext(currentUser.UserId, currentUser.Name, currentUser.Email);
     }
 
     public async Task<string?> BuildContextMessageAsync(AssistantDefinition assistant, Guid projectId, Guid notebookId, Guid conversationId, CancellationToken ct = default)
@@ -156,11 +160,8 @@ public class ContextOptionsService : IContextOptionsService
     {
         try
         {
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
             // Get all files for this notebook
-            var absolutePaths = await db.NotebookFiles
+            var absolutePaths = await _db.NotebookFiles
                 .Where(f => f.NotebookId == notebookId)
                 .Select(f => f.RelativePath)
                 .OrderBy(f => f)
@@ -185,11 +186,8 @@ public class ContextOptionsService : IContextOptionsService
     {
         try
         {
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
             // Get all files for this notebook
-            var absolutePaths = db.NotebookFiles
+            var absolutePaths = _db.NotebookFiles
                 .Where(f => f.NotebookId == notebookId)
                 .Select(f => f.RelativePath)
                 .OrderBy(f => f)
