@@ -98,14 +98,16 @@ public static class DocumentServerEndpoints
         {
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             var documentServerOptions = options.Value;
+            var publicUrl = ResolveDocumentServerPublicUrl(httpContext);
+            var sanitizedPublicUrl = LogValueSanitizer.Sanitize(publicUrl);
             logger.LogInformation(
                 "DocumentServer capabilities requested. enabled={Enabled} publicUrl={PublicUrl}",
                 documentServerOptions.Enabled,
-                documentServerOptions.PublicUrl);
+                sanitizedPublicUrl);
             return Results.Ok(new
             {
                 enabled = documentServerOptions.Enabled,
-                publicUrl = documentServerOptions.PublicUrl,
+                publicUrl,
                 supportedExtensions = service.SupportedExtensions,
                 supportedContentTypes = service.SupportedContentTypes
             });
@@ -302,7 +304,7 @@ public static class DocumentServerEndpoints
                 documentServer.Enabled,
                 documentServer.ApiBaseUrl,
                 documentServer.InternalUrl,
-                documentServer.PublicUrl,
+                LogValueSanitizer.Sanitize(ResolveDocumentServerPublicUrl(httpContext)),
                 "aspnet-data-protection",
                 documentServer.JwtEnabled,
                 documentServerReachable,
@@ -316,7 +318,7 @@ public static class DocumentServerEndpoints
                 enabled = documentServer.Enabled,
                 apiBaseUrl = documentServer.ApiBaseUrl,
                 internalUrl = documentServer.InternalUrl,
-                publicUrl = documentServer.PublicUrl,
+                publicUrl = ResolveDocumentServerPublicUrl(httpContext),
                 tokenProtection = "aspnet-data-protection",
                 jwtEnabled = documentServer.JwtEnabled,
                 documentServer = new
@@ -386,6 +388,17 @@ public static class DocumentServerEndpoints
         }
 
         return $"{internalUri.Scheme}://{internalUri.Authority}{basePath}";
+    }
+
+    private static string ResolveDocumentServerPublicUrl(HttpContext httpContext)
+    {
+        var scheme = httpContext.Request.Scheme?.Trim();
+        if (string.IsNullOrWhiteSpace(scheme) || !httpContext.Request.Host.HasValue)
+        {
+            return "/api/documentserver/ds";
+        }
+
+        return $"{scheme}://{httpContext.Request.Host.Value.TrimEnd('/')}/api/documentserver/ds";
     }
 
     private sealed class DocumentServerProxyHttpTransformer : HttpTransformer

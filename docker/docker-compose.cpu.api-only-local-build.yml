@@ -1,15 +1,14 @@
 name: guideants
 
 services:
+  # SQL Server Database
   mssql-express:
-    image: ${GA_MSSQL_IMAGE:-ghcr.io/elumenotion/mssql2025-express-fts:main}
-    pull_policy: always
-    container_name: mssql-express
+    image: mssql2025-express-fts
     environment:
       - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
+      - MSSQL_SA_PASSWORD=YourStrong!Passw0rd
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}' -Q 'SELECT 1' -C -No | grep -q 1"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'YourStrong!Passw0rd' -Q 'SELECT 1' -C -No | grep -q 1"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -20,29 +19,31 @@ services:
       - mssql_data:/var/opt/mssql/data
       - mssql_ftdata:/var/opt/mssql/FTData
       - mssql_log:/var/opt/mssql/log
-    restart: unless-stopped
 
+  # GuideAnts AI: consolidated llama-server + ScriptExecutionAgent
   guideants-ai:
-    image: ${GA_AI_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-rocm:main}
-    pull_policy: always
+    image: ${GA_AI_CPU_IMAGE:-ghcr.io/elumenotion/guideants-ai-cpu:latest}
     container_name: guideants-ai
-    group_add:
-      - video
-      - render
-    devices:
-      - /dev/kfd
-      - /dev/dri
     shm_size: "8gb"
     volumes:
-      - ai_local_models-new:/models-local
+      # Single named volume backs every local AI model (llama GGUFs,
+      # Whisper/Qwen ASR, SD bundles, TTS weights, embeddings). Each
+      # service reads its own subdir (/models-local/<service>) via its
+      # GA_*_MODEL_DIR env var below. Populated by
+      # docker/scripts/migrate-local-models-to-single-volume.ps1 before
+      # the stack is started for the first time on this host.
+      - ai_local_models:/models-local
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
     environment:
       - FILE_STORAGE_ROOT=/app/ContentFiles
-      - HF_TOKEN=${HF_TOKEN:-}
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      # Optional: host .env HF_TOKEN for docker exec / scripted hf downloads (download-*.ps1). Not used by llama inference.
+      - HF_TOKEN=${HF_TOKEN:-}
+      # Router aliases live on the named volume (with GGUF trees), not a host bind.
+      # GuideAnts API + llama-admin HTTP update this file; optional seed on first boot in entrypoint.sh.
       - GA_LLAMA_MODELS_PRESET=/models-local/router-models.ini
       - GA_LLAMA_MODEL_DIR=/models-local/llama
       - GA_LLAMA_ADMIN_PORT=8086
@@ -91,7 +92,7 @@ services:
       - GA_EMB_PORT=8085
       - GA_EMB_MODEL_DIR=/models-local/emb
       - GA_EMB_DEFAULT_MODEL_PATH=${GA_EMB_DEFAULT_MODEL_PATH}
-      - GA_EMB_DEVICE=${GA_EMB_DEVICE:-rocm}
+      - GA_EMB_DEVICE=${GA_EMB_DEVICE:-cpu}
       - GA_EMB_FIX_MISTRAL_REGEX=${GA_EMB_FIX_MISTRAL_REGEX:-1}
       - GA_EMB_AUTO_LOAD_ON_STARTUP=${GA_EMB_AUTO_LOAD_ON_STARTUP}
       - GA_EMB_WARMUP_ON_LOAD=${GA_EMB_WARMUP_ON_LOAD}
@@ -102,6 +103,12 @@ services:
       - GA_SD_HOST=127.0.0.1
       - GA_SD_PORT=8083
       - GA_SD_MODEL_DIR=/models-local/sd
+      # Diffusion / VAE / text-encoder paths come from the SD service's
+      # active bundle (bundles/<id>/{diffusion,vae,text-encoder}/<file>).
+      # There is no GA_SD_DIFFUSION_MODEL_PATH / GA_SD_VAE_PATH /
+      # GA_SD_LLM_PATH env seam any more — bundle = single source of
+      # truth, set via the UI (Settings > Image generation > Set active)
+      # or the admin API (PUT /admin/bundles/{id}/active).
       - GA_SD_TIMEOUT_SECONDS=900
       - GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=${GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS:-120}
       - GA_SD_STEPS=4
@@ -122,14 +129,16 @@ services:
       - guideants-network
     restart: unless-stopped
 
+
   docling-serve:
     image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.16.1}
-    pull_policy: always
     container_name: docling-serve
     environment:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
     networks:
-      - guideants-network
+      guideants-network:
+        aliases:
+          - docling-serve
     restart: unless-stopped
 
   documentserver:
@@ -151,9 +160,9 @@ services:
       - guideants-network
     restart: unless-stopped
 
+  # Unified API + browser UI service (single image for web app entrypoint)
   guideants-webapi-ui:
-    image: ${GA_WEBAPI_UI_SLIM_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-webapi-ui-slim:main}
-    pull_policy: always
+    image: ${GA_WEBAPI_UI_IMAGE:-guideants-webapi-ui:latest}
     container_name: guideants-webapi-ui
     depends_on:
       mssql-express:
@@ -169,8 +178,8 @@ services:
     environment:
       - ASPNETCORE_URLS=http://127.0.0.1:8081
       - ASPNETCORE_ENVIRONMENT=Development
-      - API_RUNTIME_CONTEXT=compose-ghcr-rocm
-      - ConnectionStrings__DefaultConnection=Server=mssql-express,1433;Initial Catalog=${GA_DB_NAME:-guideants-dev};Persist Security Info=False;User ID=sa;Password=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd};MultipleActiveResultSets=True;Encrypt=False;TrustServerCertificate=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;
+      - API_RUNTIME_CONTEXT=compose
+      - ConnectionStrings__DefaultConnection=Server=mssql-express,1433;Initial Catalog=${GA_DB_NAME:-guideants-dev};Persist Security Info=False;User ID=sa;Password=YourStrong!Passw0rd;MultipleActiveResultSets=True;Encrypt=False;TrustServerCertificate=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;
       - FileStorage__Path=/app/ContentFiles
       - Ui__RootPath=/app/ui
       - Ui__DevServerUrl=
@@ -195,6 +204,8 @@ services:
       - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
       - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox
       - ServiceRouting__Containers__plantuml__BaseUrl=http://plantuml:80
+      # Optional: HF CLI/scripts and Hugging Face downloads can read HF_TOKEN. Prefer storing the token in
+      # Settings → Providers → Llama.cpp (Hugging Face token, DB-backed) for in-app downloads.
       - HF_TOKEN=${HF_TOKEN:-}
       - SettingsSecrets__ActiveKeyId=local-dev
       - SettingsSecrets__Keys__local-dev=MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
@@ -205,9 +216,9 @@ services:
       - default
     restart: unless-stopped
 
+  # PlantUML service
   plantuml:
-    image: ${GA_PLANTUML_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}
-    pull_policy: always
+    image: plantuml-1.2025.2
     container_name: plantuml
     environment:
       - FILE_STORAGE_ROOT=/app/ContentFiles
@@ -222,9 +233,8 @@ services:
     restart: unless-stopped
 
   searxng:
-    image: ${GA_SEARXNG_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}
-    pull_policy: always
     container_name: readweb-searxng
+    image: ${GA_SEARXNG_IMAGE:-guideants-searxng:latest}
     restart: unless-stopped
     volumes:
       - type: bind
@@ -244,9 +254,8 @@ volumes:
   mssql_data:
   mssql_ftdata:
   mssql_log:
-  ai_local_models-new:
+  ai_local_models:
 
 networks:
   guideants-network:
     driver: bridge
-
