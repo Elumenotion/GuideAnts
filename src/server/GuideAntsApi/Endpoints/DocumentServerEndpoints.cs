@@ -99,10 +99,11 @@ public static class DocumentServerEndpoints
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             var documentServerOptions = options.Value;
             var publicUrl = ResolveDocumentServerPublicUrl(httpContext);
+            var sanitizedPublicUrl = LogValueSanitizer.Sanitize(publicUrl);
             logger.LogInformation(
                 "DocumentServer capabilities requested. enabled={Enabled} publicUrl={PublicUrl}",
                 documentServerOptions.Enabled,
-                publicUrl);
+                sanitizedPublicUrl);
             return Results.Ok(new
             {
                 enabled = documentServerOptions.Enabled,
@@ -303,7 +304,7 @@ public static class DocumentServerEndpoints
                 documentServer.Enabled,
                 documentServer.ApiBaseUrl,
                 documentServer.InternalUrl,
-                ResolveDocumentServerPublicUrl(httpContext),
+                LogValueSanitizer.Sanitize(ResolveDocumentServerPublicUrl(httpContext)),
                 "aspnet-data-protection",
                 documentServer.JwtEnabled,
                 documentServerReachable,
