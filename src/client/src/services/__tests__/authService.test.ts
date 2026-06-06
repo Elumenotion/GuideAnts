@@ -1,14 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { authService } from '../authService';
+import { authFetchCredentials, authService, withAuthFetchInit } from '../authService';
 
 describe('authService', () => {
-  it('stores and returns access tokens', () => {
-    authService.clearAuthState();
-    authService.setAccessToken('token-123');
-    expect(authService.getAccessToken()).toBe('token-123');
-  });
-
-  it('stores and returns the active account', () => {
+  it('stores and returns the active account in memory', () => {
     authService.clearAuthState();
     authService.setActiveAccount({
       id: 'u1',
@@ -32,7 +26,6 @@ describe('authService', () => {
   });
 
   it('signOut clears session state', () => {
-    authService.setAccessToken('token-123');
     authService.setActiveAccount({
       id: 'u1',
       name: 'User One',
@@ -41,11 +34,18 @@ describe('authService', () => {
       mustChangePassword: false,
     });
     expect(() => authService.signOut()).not.toThrow();
-    expect(authService.getAccessToken()).toBeNull();
     expect(authService.getActiveAccount()).toBeNull();
   });
 
   it('isReady returns true', () => {
     expect(authService.isReady()).toBe(true);
+  });
+
+  it('uses cookie credentials for authenticated fetch calls', () => {
+    expect(authFetchCredentials).toBe('include');
+    expect(withAuthFetchInit({ method: 'GET' })).toEqual({
+      method: 'GET',
+      credentials: 'include',
+    });
   });
 });

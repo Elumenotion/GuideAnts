@@ -1,8 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Security.Claims;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -47,7 +45,7 @@ public sealed class AdminUsersEndpointsTests
         var admin = await RegisterAsync("First Admin", "admin.one@example.com", "Password123!");
         var pendingUser = await RegisterAsync("Pending User", "pending.user@example.com", "Password123!");
 
-        SetBearerToken(pendingUser.Token);
+        AuthCookieTestHelper.SetBearerToken(_client, pendingUser.Token);
 
         var listResponse = await _client.GetAsync("/api/admin/users");
         var approveResponse = await _client.PostAsJsonAsync($"/api/admin/users/{admin.UserId}/approve", new { role = Role.Reader.ToString() });
@@ -69,7 +67,7 @@ public sealed class AdminUsersEndpointsTests
     {
         var admin = await RegisterAsync("Bootstrap Admin", "bootstrap.admin@example.com", "Password123!");
         var pendingUser = await RegisterAsync("Pending User", "needs.approval@example.com", "Password123!");
-        SetBearerToken(admin.Token);
+        AuthCookieTestHelper.SetBearerToken(_client, admin.Token);
 
         var approveMissingResponse = await _client.PostAsJsonAsync(
             $"/api/admin/users/{Guid.NewGuid()}/approve",
@@ -102,7 +100,7 @@ public sealed class AdminUsersEndpointsTests
     {
         var admin = await RegisterAsync("Bootstrap Admin", "role.admin@example.com", "Password123!");
         var pendingUser = await RegisterAsync("Role Target", "role.target@example.com", "Password123!");
-        SetBearerToken(admin.Token);
+        AuthCookieTestHelper.SetBearerToken(_client, admin.Token);
 
         var approveResponse = await _client.PostAsJsonAsync(
             $"/api/admin/users/{pendingUser.UserId}/approve",
@@ -127,7 +125,7 @@ public sealed class AdminUsersEndpointsTests
     public async Task LastAdminSafeguard_BlocksDeactivateAndDemote()
     {
         var admin = await RegisterAsync("Solo Admin", "solo.admin@example.com", "Password123!");
-        SetBearerToken(admin.Token);
+        AuthCookieTestHelper.SetBearerToken(_client, admin.Token);
 
         var deactivateResponse = await _client.PostAsync($"/api/admin/users/{admin.UserId}/deactivate", content: null);
         deactivateResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
@@ -154,7 +152,7 @@ public sealed class AdminUsersEndpointsTests
         var admin = await RegisterAsync("Bootstrap Admin", "password.admin@example.com", oldPassword);
         var targetUser = await RegisterAsync("Password Target", "password.target@example.com", oldPassword);
 
-        SetBearerToken(admin.Token);
+        AuthCookieTestHelper.SetBearerToken(_client, admin.Token);
         var approveResponse = await _client.PostAsJsonAsync(
             $"/api/admin/users/{targetUser.UserId}/approve",
             new { role = Role.Contributor.ToString() });
@@ -164,13 +162,13 @@ public sealed class AdminUsersEndpointsTests
         var oldToken = oldLogin.Token;
         var oldTokenSecurityStamp = ReadSecurityStampClaim(oldToken);
 
-        SetBearerToken(admin.Token);
+        AuthCookieTestHelper.SetBearerToken(_client, admin.Token);
         var setPasswordResponse = await _client.PostAsJsonAsync(
             $"/api/admin/users/{targetUser.UserId}/set-password",
             new { password = newPassword });
         setPasswordResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        SetBearerToken(null);
+        AuthCookieTestHelper.SetBearerToken(_client, null);
         var oldPasswordLoginResponse = await _client.PostAsJsonAsync("/api/auth/login", new
         {
             email = targetUser.Email,
@@ -181,7 +179,7 @@ public sealed class AdminUsersEndpointsTests
         var newLogin = await LoginAsync(targetUser.Email, newPassword);
         newLogin.MustChangePassword.Should().BeTrue();
 
-        SetBearerToken(oldToken);
+        AuthCookieTestHelper.SetBearerToken(_client, oldToken);
         var meWithOldTokenResponse = await _client.GetAsync("/api/auth/me");
         meWithOldTokenResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
@@ -192,9 +190,9 @@ public sealed class AdminUsersEndpointsTests
         user.SecurityStamp.Should().NotBe(oldTokenSecurityStamp);
     }
 
-    private async Task<AuthResponse> RegisterAsync(string name, string email, string password)
+    private async Task<AuthSession> RegisterAsync(string name, string email, string password)
     {
-        SetBearerToken(null);
+        AuthCookieTestHelper.SetBearerToken(_client, null);
 
         var response = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -206,12 +204,14 @@ public sealed class AdminUsersEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<AuthResponse>();
         body.Should().NotBeNull();
-        return body!;
+        var token = AuthCookieTestHelper.ReadAuthToken(response);
+        token.Should().NotBeNullOrWhiteSpace();
+        return new AuthSession(body!.UserId, body.Name, body.Email, body.Role, body.MustChangePassword, token!);
     }
 
-    private async Task<AuthResponse> LoginAsync(string email, string password)
+    private async Task<AuthSession> LoginAsync(string email, string password)
     {
-        SetBearerToken(null);
+        AuthCookieTestHelper.SetBearerToken(_client, null);
 
         var response = await _client.PostAsJsonAsync("/api/auth/login", new
         {
@@ -222,14 +222,9 @@ public sealed class AdminUsersEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadFromJsonAsync<AuthResponse>();
         body.Should().NotBeNull();
-        return body!;
-    }
-
-    private void SetBearerToken(string? token)
-    {
-        _client.DefaultRequestHeaders.Authorization = string.IsNullOrWhiteSpace(token)
-            ? null
-            : new AuthenticationHeaderValue("Bearer", token);
+        var token = AuthCookieTestHelper.ReadAuthToken(response);
+        token.Should().NotBeNullOrWhiteSpace();
+        return new AuthSession(body!.UserId, body.Name, body.Email, body.Role, body.MustChangePassword, token!);
     }
 
     private static Guid ReadSecurityStampClaim(string token)
@@ -253,11 +248,17 @@ public sealed class AdminUsersEndpointsTests
     }
 
     private sealed record AuthResponse(
-        string Token,
-        DateTime ExpiresAtUtc,
         Guid UserId,
         string Name,
         string Email,
         string Role,
         bool MustChangePassword);
+
+    private sealed record AuthSession(
+        Guid UserId,
+        string Name,
+        string Email,
+        string Role,
+        bool MustChangePassword,
+        string Token);
 }

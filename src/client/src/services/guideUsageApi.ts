@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../config/apiConfig';
-import { withAuthHeaders } from './authService';
+import { withAuthFetchInit, withAuthHeaders } from './authService';
 import { broadcastAuthExpired } from './authEvents';
 import type {
   DailyUsageBucketDto,
@@ -33,10 +33,10 @@ export const guideUsageApi = {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/summary?${params}`;
     
-    const response = await fetch(url, {
+    const response = await fetch(url, withAuthFetchInit({
       method: 'GET',
       headers: getHeaders(),
-    });
+    }));
     handleUnauthorized(response);
     
     if (!response.ok) {
@@ -55,10 +55,10 @@ export const guideUsageApi = {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/summary?${params}`;
     
-    const response = await fetch(url, {
+    const response = await fetch(url, withAuthFetchInit({
       method: 'GET',
       headers: getHeaders(),
-    });
+    }));
     handleUnauthorized(response);
     
     if (!response.ok) {
@@ -76,7 +76,7 @@ export const guideUsageApi = {
   ): Promise<DailyUsageBucketDto[]> {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/charts?${params}`;
-    const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch guide usage charts: ${response.status}`);
@@ -92,7 +92,7 @@ export const guideUsageApi = {
   ): Promise<DailyUsageBucketDto[]> {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/charts?${params}`;
-    const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch assistant usage charts: ${response.status}`);
@@ -108,7 +108,7 @@ export const guideUsageApi = {
   ): Promise<GuideUsageCrewDto> {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/crew?${params}`;
-    const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch guide usage crew: ${response.status}`);
@@ -124,7 +124,7 @@ export const guideUsageApi = {
   ): Promise<GuideUsageCrewDto> {
     const params = new URLSearchParams({ from, to });
     const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/crew?${params}`;
-    const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch assistant usage crew: ${response.status}`);
@@ -142,7 +142,7 @@ export const guideUsageApi = {
   ): Promise<GuideUsageConversationsPageDto> {
     const params = new URLSearchParams({ from, to, page: String(page), pageSize: String(pageSize) });
     const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/conversations?${params}`;
-    const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch guide usage conversations: ${response.status}`);
@@ -160,7 +160,7 @@ export const guideUsageApi = {
   ): Promise<GuideUsageConversationsPageDto> {
     const params = new URLSearchParams({ from, to, page: String(page), pageSize: String(pageSize) });
     const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/conversations?${params}`;
-    const response = await fetch(url, { method: 'GET', headers: getHeaders() });
+    const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
     handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch assistant usage conversations: ${response.status}`);
@@ -178,10 +178,10 @@ export const guideUsageApi = {
   ): Promise<InvocationNodeDto> {
     const url = `${API_BASE_URL}/invocations/${invocationId}?includeMessages=${includeMessages}`;
     
-    const response = await fetch(url, {
+    const response = await fetch(url, withAuthFetchInit({
       method: 'GET',
       headers: getHeaders(),
-    });
+    }));
     handleUnauthorized(response);
     
     if (!response.ok) {
@@ -200,10 +200,10 @@ export const guideUsageApi = {
   ): Promise<TurnInvocationTreeDto> {
     const url = `${API_BASE_URL}/conversations/${conversationId}/turns/${turnIndex}/invocations`;
     
-    const response = await fetch(url, {
+    const response = await fetch(url, withAuthFetchInit({
       method: 'GET',
       headers: getHeaders(),
-    });
+    }));
     handleUnauthorized(response);
     
     if (!response.ok) {
@@ -222,10 +222,10 @@ export const guideUsageApi = {
   ): Promise<TurnInvocationTreeDto[]> {
     const url = `${API_BASE_URL}/conversations/${conversationId}/invocations`;
     
-    const response = await fetch(url, {
+    const response = await fetch(url, withAuthFetchInit({
       method: 'GET',
       headers: getHeaders(),
-    });
+    }));
     handleUnauthorized(response);
     
     if (!response.ok) {
@@ -244,10 +244,10 @@ export const guideUsageApi = {
   ): Promise<TurnMessagesDto> {
     const url = `${API_BASE_URL}/conversations/${conversationId}/turns/${turnIndex}/messages`;
     
-    const response = await fetch(url, {
+    const response = await fetch(url, withAuthFetchInit({
       method: 'GET',
       headers: getHeaders(),
-    });
+    }));
     handleUnauthorized(response);
     
     if (!response.ok) {

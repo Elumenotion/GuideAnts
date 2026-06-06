@@ -1,6 +1,6 @@
 # Auth System — Locked Decisions (single source of truth)
 
-Last updated: 2026-06-05 · Status: **ALL LOCKED** — D1 (JWT Bearer), D2 (UserRoles table), D3 (Appendix-A guards incl. header-toolbar split), D4(a) (OAuthAuthorizationState table), D4(b) (token per User+Provider). Only the pre-flight baseline capture remains before dispatch.
+Last updated: 2026-06-06 · Status: **ALL LOCKED** — D1 (JWT in HttpOnly cookie), D2 (UserRoles table), D3 (Appendix-A guards incl. header-toolbar split), D4(a) (OAuthAuthorizationState table), D4(b) (token per User+Provider). D1 changed 2026-06-06 from Bearer-in-JS to cookie transport (see deviation log in `STATUS.md`).
 
 Every subagent reads this file. If a value here is `UNDECIDED`, the orchestrator
 **must** resolve it with the user (see `00-orchestration.md` §1) before dispatching
@@ -9,34 +9,40 @@ revert + re-dispatch of that phase — so get these right first.
 
 ---
 
-## D1. Session mechanism — **LOCKED: App-issued JWT Bearer** (Phase 2)
+## D1. Session mechanism — **LOCKED: App-issued JWT in HttpOnly cookie** (Phase 2, revised 2026-06-06)
 
-Chosen (plan §3.2):
+Chosen (plan §3.2, revised after Phase 5 hard-refresh defect):
 
-- [x] **App-issued JWT Bearer** — mirrors the existing client `fetch` model; client
-      stores the token and sends `Authorization: Bearer`.
-- [ ] ~~HTTP-only cookie session~~
+- [ ] ~~App-issued JWT Bearer in client JS~~ — rejected: `localStorage`/`sessionStorage`
+      triggers CodeQL `js/clear-text-storage`; in-memory-only JWT loses session on refresh.
+- [x] **App-issued JWT in an HttpOnly secure cookie** — server sets `GuideAnts.Auth`
+      on login/register; browser sends it automatically; JavaScript never reads the token.
 
 **Implications now in force:**
 
-- **No `POST /api/auth/logout` endpoint** is required (client discards the token).
-  Phase 2 does **not** build it; Phase 3 has no logout guard to add; Phase 5
-  `logout()` in `AuthContext` clears client-side token state only.
-- Phase 5 `api.ts` attaches `Authorization: Bearer <token>` (not
-  `credentials:'include'`).
+- **`POST /api/auth/logout`** clears the auth cookie server-side; client `logout()`
+  calls it then clears in-memory user state.
+- Phase 5 `api.ts` uses `credentials: 'include'` on authenticated fetches (not
+  `Authorization: Bearer` from JS). CORS already allows credentials on loopback and
+  configured origins.
+- Login/register JSON responses carry **user profile fields only** — no `token` in the
+  body. Swagger/manual API testing may still send `Authorization: Bearer` (JWT bearer
+  reads cookie **or** header).
 - Phase 6 `appsettings` carries JWT signing config (issuer/audience/lifetime + key
-  **source**); the integration-test auth handler issues/accepts app JWTs per role.
-- **Token invalidation** (Phase 4 set-password / deactivate) requires a
-  server-checkable revocation signal because JWTs are stateless. Use a
-  `SecurityStamp` (or `TokenVersion`) claim on the JWT validated against the `User`
-  row; bumping it invalidates outstanding tokens. **→ Phase 1 must add this column
-  (see D2/Phase 1 note).**
+  **source**); integration tests extract the JWT from `Set-Cookie` or use Bearer.
+- **Token invalidation** (Phase 4 set-password / deactivate) still uses
+  `SecurityStamp` validated against the `User` row; bumping it invalidates
+  outstanding JWTs (cookie or header).
+- Cookie flags: `HttpOnly`, `Secure` when HTTPS, `SameSite=Lax`, `Path=/`, expiry
+  aligned with JWT lifetime.
 
-> Note: GuideAnts streaming uses **POST + `Accept: text/event-stream`**, so the
-> `Authorization` header carries on SSE — no `EventSource` query-string workaround.
+> Note: GuideAnts streaming uses **POST + `Accept: text/event-stream`**. Same-origin
+> `fetch(..., { credentials: 'include' })` sends the auth cookie on SSE POSTs — no
+> `EventSource` query-string workaround and no Bearer header from JS.
 
-**Rationale:** matches the existing stateless `fetch` client; no cookie/CSRF surface
-to add; consistent with the Bearer token the integration tests already send.
+**Rationale:** survives hard refresh/new tabs without storing credentials in
+`localStorage` (CodeQL-clean); JWT stays out of JavaScript (XSS-resistant transport);
+same signed JWT + `SecurityStamp` revocation model as before.
 
 ---
 
@@ -105,13 +111,14 @@ These are decided by the plan and must hold in every phase:
   | name-based **avatar** GETs (`/api/assistants/avatar/{name}`, `/api/notebook-templates/avatar/{name}`) | **Public** (`AllowAnonymous`) | Verified: rendered as raw `<img src>` → see D3 `<img>` rule below. `GET /api/assistants/conversation-starters/{name}` is fetched via `callApi` (carries Bearer) → **`RequireApprovedUser`**. |
 
 - **JWT `<img src>` / `<a href>` rule (consequence of D1).** A raw browser
-  `<img src="/api/...">` or direct link **cannot** carry the `Authorization: Bearer`
-  header, so any endpoint consumed that way **must be Public** *or* the client must
-  load it via the authenticated blob pattern `api.utils.getAuthenticatedUrl(...)`
-  (as `GuideCard.tsx`/`AssistantCard.tsx` already do for the `{id}/avatar` routes,
-  which therefore can stay `RequireAdmin`). Phase 3 must not gate an endpoint that
-  Phase 5 renders as a bare `<img src>` without also reworking the client to blob-
-  fetch it. The name-based avatars above stay Public for exactly this reason.
+  `<img src="/api/...">` or direct link **cannot** carry an auth cookie on cross-origin
+  requests and cannot use JS-set Bearer headers, so any endpoint consumed that way
+  **must be Public** *or* the client must load it via the authenticated blob pattern
+  `api.utils.getAuthenticatedUrl(...)` (as `GuideCard.tsx`/`AssistantCard.tsx` already
+  do for the `{id}/avatar` routes, which therefore can stay `RequireAdmin`). Phase 3
+  must not gate an endpoint that Phase 5 renders as a bare `<img src>` without also
+  reworking the client to blob-fetch it. The name-based avatars above stay Public for
+  exactly this reason.
 
 - **Password hashing** uses a salted KDF (ASP.NET `PasswordHasher<T>` / PBKDF2 /
   bcrypt). Pick **one** hasher in Phase 2 and reuse it everywhere (Phase 4

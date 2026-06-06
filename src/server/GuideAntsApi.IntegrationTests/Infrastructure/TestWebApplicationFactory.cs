@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Options;
 using GuideAntsApi.Services.Auth;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -100,6 +101,19 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
                 .AddScheme<AuthenticationSchemeOptions, IntegrationTestAuthHandler>(
                     IntegrationTestAuthHandler.SchemeName,
                     _ => { });
+
+            // The production JwtTokenService captures an immutable JwtOptions snapshot at
+            // registration time, before this factory's in-memory config override is applied.
+            // Re-register it with the test signing key so cookie/login tokens are signed with
+            // the same key IntegrationTestAuthHandler validates against.
+            services.RemoveAll<IJwtTokenService>();
+            services.AddSingleton<IJwtTokenService>(_ => new JwtTokenService(Microsoft.Extensions.Options.Options.Create(new JwtOptions
+            {
+                Issuer = IntegrationTestAuthHandler.JwtIssuer,
+                Audience = IntegrationTestAuthHandler.JwtAudience,
+                SigningKey = IntegrationTestAuthHandler.JwtSigningKey,
+                LifetimeMinutes = IntegrationTestAuthHandler.JwtLifetimeMinutes
+            })));
 
             services.RemoveAll<ICurrentUserService>();
             services.AddScoped<ICurrentUserService, IntegrationTestCurrentUserService>();
