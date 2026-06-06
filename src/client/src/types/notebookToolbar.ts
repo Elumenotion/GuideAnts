@@ -70,6 +70,17 @@ export interface NotebookHeaderToolbarDto {
   generatedUtc: string;
 }
 
+export interface NotebookChatReadinessDto {
+  effectiveModelId: string | null;
+  effectiveModelDisplayName: string | null;
+  effectiveProvider: string | null;
+  blockers: string[];
+  supportsLocalRuntimePower: boolean;
+  localRuntimeOn: boolean;
+  inProgressOperationId: string | null;
+  inProgressState: string | null;
+}
+
 export interface ModelLoadOperationDto {
   operationId: string;
   state: string;

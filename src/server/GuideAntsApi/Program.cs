@@ -5,6 +5,7 @@ using GuideAntsApi.Endpoints;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Authorization;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Settings;
 
@@ -241,7 +242,12 @@ public class Program
             });
         });
 
-        app.MapGet("/api/startup", () => Results.Ok(new { status = "ready" }));
+        app.UseAuthentication();
+        app.UseAuthorization();
+
+        app.MapGet("/api/startup", () => Results.Ok(new { status = "ready" }))
+            // Startup readiness is a public host probe.
+            .AllowAnonymous();
         
         app.MapProjectEndpoints();
         app.MapGuidesMarkdownEndpoints();
@@ -254,6 +260,8 @@ public class Program
         app.MapProjectContentFileMarkdownEndpoints();
         app.MapProjectFolderEndpoints();
         app.MapLinkEndpoints();
+        app.MapAuthEndpoints();
+        app.MapAdminUsersEndpoints();
         app.MapUserEndpoints();
         app.MapNotebookConversationsEndpoints();
         app.MapNotebookHeaderToolbarEndpoints();

@@ -32,7 +32,7 @@ public static class PublishedNotebookConversationsEndpoints
             var pubId = ctx.Request.Query["pubId"].ToString();
             if (!string.IsNullOrWhiteSpace(pubId) && Guid.TryParse(pubId, out var pubGuid))
             {
-                // Use a custom header so normal JWT middleware does not try to validate it
+                // Use a custom header for published-guide authentication.
                 var authHeader = ctx.Request.Headers["X-Published-Auth"].ToString();
                 var apiKeyHeader = ctx.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
                 var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader);
@@ -158,7 +158,7 @@ public static class PublishedNotebookConversationsEndpoints
 				return Results.BadRequest(new { error = "Missing or invalid 'pubId' query parameter." });
 			}
 
-			// Validate authentication - read from custom header so JWT middleware doesn't process it
+			// Validate authentication from the custom published-guide auth header.
 			var authHeader = ctx.Request.Headers["X-Published-Auth"].ToString();
 			var apiKeyHeader = ctx.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
 			var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader);

@@ -61,7 +61,8 @@ describe('notebookFilesApi', () => {
 
       expect(mockedGetCached).toHaveBeenCalledWith('project-1', 'notebook-1:test.txt');
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/projects/project-1/notebooks/notebook-1/files/content?path=test.txt')
+        expect.stringContaining('/projects/project-1/notebooks/notebook-1/files/content?path=test.txt'),
+        expect.objectContaining({ headers: expect.any(Headers) })
       );
       expect(mockedCacheFile).toHaveBeenCalledWith('project-1', 'notebook-1:test.txt', {
         blob: mockBlob,

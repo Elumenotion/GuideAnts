@@ -17,11 +17,12 @@ export interface UseNotebookHeaderToolbarResult {
 
 export function useNotebookHeaderToolbar(
   notebookId: string | undefined,
-  conversationId: string | null
+  conversationId: string | null,
+  enabled = true
 ): UseNotebookHeaderToolbarResult {
   const { showToast } = useToast();
   const [data, setData] = useState<NotebookHeaderToolbarDto | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(Boolean(enabled));
   const [error, setError] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -45,7 +46,7 @@ export function useNotebookHeaderToolbar(
   };
 
   const refresh = useCallback(async () => {
-    if (!notebookId) return;
+    if (!enabled || !notebookId) return;
     setError(null);
     setIsLoading(true);
     try {
@@ -60,19 +61,28 @@ export function useNotebookHeaderToolbar(
     } finally {
       setIsLoading(false);
     }
-  }, [notebookId, conversationId, showToast]);
+  }, [enabled, notebookId, conversationId, showToast]);
 
   useEffect(() => {
+    if (!enabled) {
+      setData(null);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const onToolbarRefresh = () => {
       void refresh();
     };
     window.addEventListener('refresh-notebook-toolbar', onToolbarRefresh);
     return () => window.removeEventListener('refresh-notebook-toolbar', onToolbarRefresh);
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   useEffect(() => {
     const onVis = () => {
@@ -94,7 +104,7 @@ export function useNotebookHeaderToolbar(
       clearInterval(pollTimer.current);
       pollTimer.current = null;
     }
-    if (!notebookId) return undefined;
+    if (!enabled || !notebookId) return undefined;
 
     const inCooldown = Date.now() < inFlightCooldownUntilMs.current;
     const shouldPoll = inFlight || inCooldown || hasActiveOperation(data);
@@ -119,7 +129,7 @@ export function useNotebookHeaderToolbar(
     return () => {
       if (pollTimer.current) clearInterval(pollTimer.current);
     };
-  }, [notebookId, conversationId, inFlight, data]);
+  }, [enabled, notebookId, conversationId, inFlight, data]);
 
   return {
     data,

@@ -9,6 +9,7 @@ public static class QuickStartEndpoints
     {
         var group = app.MapGroup("/api/quick-start")
             .WithTags("Quick Start")
+            .RequireAuthorization("RequireContributor")
             .WithOpenApi();
 
         group.MapPost("/", async (IQuickStartService service) =>

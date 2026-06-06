@@ -67,7 +67,12 @@ namespace AntRunner.Chat
                 if (Guid.TryParse(projectId, out var pId) && Guid.TryParse(notebookId, out var nId) &&
                     Guid.TryParse(conversationId, out var cId))
                 {
-                    ctx = new InvocationContext(pId, nId, cId, chatRunOptions.oAuthUserAccessToken)
+                    ctx = new InvocationContext(
+                        pId,
+                        nId,
+                        cId,
+                        chatRunOptions.oAuthUserAccessToken,
+                        chatRunOptions.ExternalAuthTokens)
                     {
                         TurnIndex = turnIndex,
                         AssistantId = assistantId,

@@ -14,6 +14,8 @@ import { TourStartButton } from '../tour/TourStartButton';
 import { useRegisterTour } from '../tour/useRegisterTour';
 import { DEFAULT_CONVERSATION_TITLE } from '../constants/conversation';
 import { CONNECTION_SECTION_NAME_SET } from './settings/constants/connectionSections';
+import { useAuth } from '../contexts/AuthContext';
+import { HeaderUserMenu } from '../components/common/HeaderUserMenu';
 
 interface ProjectSummary {
   id: string;
@@ -70,6 +72,7 @@ function HeaderIconActionButton({ title, icon, onClick }: HeaderIconActionButton
 const Home = () => {
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { role } = useAuth();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +87,8 @@ const Home = () => {
   const [showAddAiServicesWizard, setShowAddAiServicesWizard] = useState(false);
 
   const SCREEN_ID = 'home';
+  const canCreateContent = role === 'Admin' || role === 'Contributor';
+  const isAdmin = role === 'Admin';
 
   const fetchProjects = async () => {
     try {
@@ -121,6 +126,11 @@ const Home = () => {
         return;
       }
 
+      if (!isAdmin) {
+        setShowAddAiServicesWizard(false);
+        return;
+      }
+
       try {
         const [sectionSummaries, models] = await Promise.all([
           api.settings.getSections(),
@@ -150,7 +160,7 @@ const Home = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAdmin]);
 
   const persistAddAiServicesWizardDismissal = useCallback(() => {
     try {
@@ -350,6 +360,15 @@ const Home = () => {
   };
 
   const handleQuickStart = useCallback(async () => {
+    if (!canCreateContent) {
+      showToast({
+        type: 'warning',
+        title: 'Read-only account',
+        message: 'Your role does not allow creating new content.',
+      });
+      return;
+    }
+
     try {
       setQuickStartLoading(true);
       if (quickStartTarget) {
@@ -383,7 +402,7 @@ const Home = () => {
     } finally {
       setQuickStartLoading(false);
     }
-  }, [navigate, showToast, quickStartTarget]);
+  }, [canCreateContent, navigate, showToast, quickStartTarget]);
 
   // Home page tour registration
   useRegisterTour(SCREEN_ID, [
@@ -449,25 +468,32 @@ const Home = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <HeaderIconLinkButton
-              to="/new-project"
-              title="New Project"
-              icon={<FiFolderPlus className="h-4 w-4" />}
-              tourId="home.actions.new-project"
-            />
-            <HeaderIconLinkButton
-              to="/usage"
-              title="Usage"
-              icon={<FiBarChart2 className="h-4 w-4" />}
-              tourId="home.actions.usage"
-            />
-            <HeaderIconActionButton
-              title="Setup Wizard"
-              icon={<FiTool className="h-4 w-4" />}
-              onClick={() => setShowAddAiServicesWizard(true)}
-            />
+            {canCreateContent ? (
+              <HeaderIconLinkButton
+                to="/new-project"
+                title="New Project"
+                icon={<FiFolderPlus className="h-4 w-4" />}
+                tourId="home.actions.new-project"
+              />
+            ) : null}
+            {isAdmin ? (
+              <HeaderIconLinkButton
+                to="/usage"
+                title="Usage"
+                icon={<FiBarChart2 className="h-4 w-4" />}
+                tourId="home.actions.usage"
+              />
+            ) : null}
+            {isAdmin ? (
+              <HeaderIconActionButton
+                title="Setup Wizard"
+                icon={<FiTool className="h-4 w-4" />}
+                onClick={() => setShowAddAiServicesWizard(true)}
+              />
+            ) : null}
             <HomeButton />
             <SettingsButton />
+            <HeaderUserMenu />
             <TourStartButton
               screenId={SCREEN_ID}
               inline
@@ -479,15 +505,17 @@ const Home = () => {
         <div className="mb-8">
           <button
             onClick={handleQuickStart}
-            disabled={quickStartLoading}
+            disabled={quickStartLoading || !canCreateContent}
             className={`w-full px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-400 ${shouldPulseAttention ? 'animate-gentle-pulse-5s' : ''}`}
             data-tour-id="home.quick-start"
           >
             {quickStartLoading
               ? (quickStartTarget ? 'Starting chat in latest notebook...' : 'Creating Quick Start Project...')
-              : (quickStartTarget
-                  ? 'Quick Start - Start a new chat in your latest notebook'
-                  : 'Quick Start - Start a new project with a notebook and chat')
+              : (!canCreateContent
+                  ? 'Quick Start is disabled for Reader accounts'
+                  : (quickStartTarget
+                      ? 'Quick Start - Start a new chat in your latest notebook'
+                      : 'Quick Start - Start a new project with a notebook and chat'))
             }
           </button>
         </div>
@@ -517,7 +545,7 @@ const Home = () => {
         )}
       </div>
       <AddAiServicesWizard
-        isOpen={showAddAiServicesWizard}
+        isOpen={isAdmin && showAddAiServicesWizard}
         onDismiss={handleDismissAddAiServicesWizard}
         onOpenSettings={handleOpenSettingsFromAddAiServicesWizard}
       />

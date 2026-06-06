@@ -21,9 +21,10 @@ describe('api service', () => {
 
     const result = await api.projects.getProjectDetails('123');
 
-    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/projects/123/details'), expect.objectContaining({
-      headers: expect.objectContaining({ 'Content-Type': 'application/json' })
-    }));
+    const firstCall = mockFetch.mock.calls[0];
+    expect(firstCall?.[0]).toEqual(expect.stringContaining('/projects/123/details'));
+    const firstHeaders = firstCall?.[1]?.headers as Headers;
+    expect(firstHeaders.get('Content-Type')).toBe('application/json');
 
     expect(result).toEqual(sample);
   });
@@ -201,10 +202,10 @@ describe('api.settings', () => {
     const result = await api.settings.getSections();
 
     expect(result).toEqual(dto);
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/settings/sections'),
-      expect.objectContaining({ headers: expect.objectContaining({ 'Content-Type': 'application/json' }) })
-    );
+    const firstCall = mockFetch.mock.calls[0];
+    expect(firstCall?.[0]).toEqual(expect.stringContaining('/settings/sections'));
+    const firstHeaders = firstCall?.[1]?.headers as Headers;
+    expect(firstHeaders.get('Content-Type')).toBe('application/json');
   });
 
   it('updateSection sends PUT with payload', async () => {
@@ -347,12 +348,10 @@ describe('api.settings.chatDefaults', () => {
     const result = await api.settings.chatDefaults.get();
 
     expect(result).toEqual(dto);
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/settings/chat-defaults'),
-      expect.objectContaining({
-        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
-      })
-    );
+    const firstCall = mockFetch.mock.calls[0];
+    expect(firstCall?.[0]).toEqual(expect.stringContaining('/settings/chat-defaults'));
+    const firstHeaders = firstCall?.[1]?.headers as Headers;
+    expect(firstHeaders.get('Content-Type')).toBe('application/json');
   });
 
   it('update sends PUT with body', async () => {

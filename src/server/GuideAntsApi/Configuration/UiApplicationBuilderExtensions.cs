@@ -1,4 +1,5 @@
 using Microsoft.Extensions.FileProviders;
+using Microsoft.AspNetCore.Authorization;
 
 namespace GuideAntsApi.Configuration;
 
@@ -73,7 +74,9 @@ public static class UiApplicationBuilderExtensions
             context.Response.ContentType = "text/html; charset=utf-8";
             context.Response.Headers["Cache-Control"] = "no-cache";
             await context.Response.SendFileAsync(indexFile);
-        });
+        })
+        // SPA shell must stay public so unauthenticated users can load the client.
+        .AllowAnonymous();
 
         return app;
     }

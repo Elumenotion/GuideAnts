@@ -11,6 +11,7 @@ import { NotebookSidebarSectionType, NotebookSidebarSelectedItem, NotebookFileDt
 import { NotebookTemplateDto } from '../types/project';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNotebookHeaderToolbar } from '../hooks/useNotebookHeaderToolbar';
+import { useNotebookChatReadiness } from '../hooks/useNotebookChatReadiness';
 import { NotebookServiceToolbar } from '../components/notebook/header-toolbar/NotebookServiceToolbar';
 import { PublishToProjectDialog } from '../components/notebook/dialogs/PublishToProjectDialog';
 import { notebookFilesApi } from '../services/notebookFiles';
@@ -28,6 +29,7 @@ import { useRegisterTour } from '../tour/useRegisterTour';
 import { useNotebookFilesPolling } from '../hooks/useNotebookFilesPolling';
 import { NotebookFolderTreeDto } from '../types/notebook';
 import { useToast } from '../components/common/Toast';
+import { useAuth } from '../contexts/AuthContext';
 
 // Inner component that uses notebook context
 function NotebookDetailsContent() {
@@ -35,6 +37,8 @@ function NotebookDetailsContent() {
     const navigate = useNavigate();
     const location = useLocation();
     const { project, canEdit, isLoading: projectLoading, error: projectError, refreshProject, folderTree: projectFolderTree } = useProject();
+    const { role } = useAuth();
+    const isAdmin = role === 'Admin';
     const { showToast } = useToast();
     const { 
         notebook, 
@@ -122,7 +126,8 @@ function NotebookDetailsContent() {
     // Mobile Sidebar State
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-    const headerToolbar = useNotebookHeaderToolbar(notebookId, activeConversationId);
+    const headerToolbar = useNotebookHeaderToolbar(notebookId, activeConversationId, isAdmin);
+    const chatReadiness = useNotebookChatReadiness(notebookId, activeConversationId, Boolean(notebookId));
     const [headerIsMobile, setHeaderIsMobile] = useState<boolean>(() => window.innerWidth < 768);
     useEffect(() => {
         const f = () => setHeaderIsMobile(window.innerWidth < 768);
@@ -173,10 +178,13 @@ function NotebookDetailsContent() {
     }, [activeConversationId]);
 
     const chatModelMissing = Boolean(
-        headerToolbar.data &&
-        !headerToolbar.isLoading &&
-        !headerToolbar.data.chat.effectiveModelId
+        chatReadiness.data &&
+        !chatReadiness.isLoading &&
+        !chatReadiness.data.effectiveModelId
     );
+    const contributorRuntimeLoading =
+        !isAdmin &&
+        chatReadiness.data?.inProgressState === 'loading';
 
     const showNoChatModelDialog =
         chatModelMissing &&
@@ -442,9 +450,14 @@ function NotebookDetailsContent() {
         const oauthSuccess = urlParams.get('oauthSuccess');
         
         if (oauthSuccess && notebookTemplate && projectId) {
-            // Re-check auth requirements after OAuth success
-            const authCheck = checkNotebookAuthRequirements(notebookTemplate, projectId);
-            setShowAuthInterstitial(authCheck.needsAuth);
+            (async () => {
+                try {
+                    const authCheck = await checkNotebookAuthRequirements(notebookTemplate, projectId);
+                    setShowAuthInterstitial(authCheck.needsAuth);
+                } catch (error) {
+                    console.error('Failed to refresh OAuth status after callback:', error);
+                }
+            })();
             
             // Clean up URL parameter
             const newUrl = new URL(window.location.href);
@@ -714,7 +727,7 @@ function NotebookDetailsContent() {
                 
                 // Check authentication requirements
                 if (projectId) {
-                    const authCheck = checkNotebookAuthRequirements(tmpl, projectId);
+                    const authCheck = await checkNotebookAuthRequirements(tmpl, projectId);
                     setShowAuthInterstitial(authCheck.needsAuth);
                     setAuthCheckComplete(true);
                 }
@@ -808,11 +821,17 @@ function NotebookDetailsContent() {
         setShowAuthInterstitial(false);
         // Re-check auth requirements in case user completed some but not all
         if (notebookTemplate && projectId) {
-            const authCheck = checkNotebookAuthRequirements(notebookTemplate, projectId);
-            if (!authCheck.needsAuth) {
-                // All auth requirements satisfied, can proceed
-                console.log('All authentication requirements satisfied');
-            }
+            (async () => {
+                try {
+                    const authCheck = await checkNotebookAuthRequirements(notebookTemplate, projectId);
+                    if (!authCheck.needsAuth) {
+                        // All auth requirements satisfied, can proceed
+                        console.log('All authentication requirements satisfied');
+                    }
+                } catch (error) {
+                    console.error('Failed to check OAuth requirements:', error);
+                }
+            })();
         }
     }, [notebookTemplate, projectId]);
 
@@ -1172,7 +1191,7 @@ function NotebookDetailsContent() {
             canEdit={canEdit()}
             tourScreenId={currentTourScreenId}
             headerCenter={
-                projectId && notebookId ? (
+                isAdmin && projectId && notebookId ? (
                     <NotebookServiceToolbar
                         projectId={projectId}
                         notebookId={notebookId}
@@ -1244,7 +1263,7 @@ function NotebookDetailsContent() {
                             conversationId={activeConversationId} 
                             canEdit={canEdit()}
                             collaboratorCount={1}
-                            isRuntimeLoading={isPolling}
+                            isRuntimeLoading={isPolling || contributorRuntimeLoading}
                             isChatModelMissing={chatModelMissing}
                             onNewConversation={(newConvoId) => handleItemSelect('conversations', newConvoId)}
                           />
@@ -1306,7 +1325,7 @@ function NotebookDetailsContent() {
             isOpen={showNoChatModelDialog}
             onClose={() => setNoChatModelDialogDismissed(true)}
             onGoToSettings={() => navigate('/settings')}
-            blockers={headerToolbar.data?.chat?.blockers}
+            blockers={chatReadiness.data?.blockers}
         />
         <LlamaCrashedModal
             isOpen={crashState !== null}

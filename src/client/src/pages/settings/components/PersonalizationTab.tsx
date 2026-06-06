@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FaRedo, FaSave, FaSpinner } from 'react-icons/fa';
+import { FaKey, FaRedo, FaSave, FaSignOutAlt, FaSpinner } from 'react-icons/fa';
+import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../../../components/LoadingSpinner';
 import { useToast } from '../../../components/common/Toast';
 import { api } from '../../../services/api';
@@ -7,6 +8,7 @@ import { userService } from '../../../services/userService';
 import type { UserDto } from '../../../types/user';
 import { getErrorMessage } from '../utils';
 import { TextActionButton } from './shared/ActionButtons';
+import { useAuth } from '../../../contexts/AuthContext';
 
 interface PersonalizationFormState {
   name: string;
@@ -21,12 +23,19 @@ function createFormState(user: UserDto): PersonalizationFormState {
 }
 
 export function PersonalizationTab() {
+  const navigate = useNavigate();
   const { showToast } = useToast();
+  const { user: authUser, changePassword, logout } = useAuth();
   const [user, setUser] = useState<UserDto | null>(null);
   const [draft, setDraft] = useState<PersonalizationFormState>({ name: '', email: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const loadUser = useCallback(async () => {
     setLoading(true);
@@ -106,6 +115,53 @@ export function PersonalizationTab() {
     }
   }, [user]);
 
+  const passwordValidationError = useMemo(() => {
+    if (!currentPassword.trim()) {
+      return 'Current password is required.';
+    }
+    if (newPassword.trim().length < 8) {
+      return 'New password must be at least 8 characters.';
+    }
+    if (newPassword !== confirmPassword) {
+      return 'Passwords do not match.';
+    }
+    return null;
+  }, [confirmPassword, currentPassword, newPassword]);
+
+  const handleChangePassword = useCallback(async () => {
+    if (passwordValidationError) {
+      setPasswordError(passwordValidationError);
+      return;
+    }
+
+    setPasswordSaving(true);
+    setPasswordError(null);
+    try {
+      await changePassword({
+        currentPassword,
+        newPassword,
+      });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      showToast({ type: 'success', title: 'Password updated' });
+    } catch (changeError) {
+      setPasswordError(getErrorMessage(changeError, 'Unable to update password.'));
+      showToast({
+        type: 'error',
+        title: 'Password update failed',
+        message: getErrorMessage(changeError, 'Request failed.'),
+      });
+    } finally {
+      setPasswordSaving(false);
+    }
+  }, [changePassword, currentPassword, newPassword, passwordValidationError, showToast, confirmPassword]);
+
+  const handleSignOut = useCallback(() => {
+    logout();
+    navigate('/login', { replace: true });
+  }, [logout, navigate]);
+
   if (loading) {
     return <LoadingSpinner message="Loading personalization..." />;
   }
@@ -174,6 +230,76 @@ export function PersonalizationTab() {
               className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </label>
+        </div>
+      </div>
+
+      <div className="rounded border border-gray-200 bg-white p-5 shadow-sm space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Account Security</h3>
+          <p className="mt-1 text-sm text-gray-600">Manage your password and session.</p>
+        </div>
+
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium text-gray-700">Current role</span>
+          <input
+            type="text"
+            value={authUser?.role ?? 'Unknown'}
+            disabled
+            className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm bg-gray-50"
+          />
+        </label>
+
+        {passwordError ? (
+          <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            {passwordError}
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-700">Current password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-700">New password</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-700">Confirm new password</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <TextActionButton
+            tone="primary"
+            icon={passwordSaving ? <FaSpinner className="animate-spin" /> : <FaKey />}
+            disabled={passwordSaving || Boolean(passwordValidationError)}
+            onClick={() => void handleChangePassword()}
+          >
+            {passwordSaving ? 'Updating...' : 'Change Password'}
+          </TextActionButton>
+          <TextActionButton tone="neutral" icon={<FaSignOutAlt />} onClick={handleSignOut}>
+            Sign Out
+          </TextActionButton>
         </div>
       </div>
     </section>

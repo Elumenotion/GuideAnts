@@ -10,6 +10,7 @@ public static class ProjectContentFileMarkdownEndpoints
     {
         var group = app.MapGroup("/api/projects/{projectId}/files")
             .WithTags("Project Content File Markdown")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         // Get markdown shadow for latest version of a file
@@ -180,6 +181,7 @@ public static class ProjectContentFileMarkdownEndpoints
             }
         })
         .WithName("RetryProjectContentFileMarkdownExtraction")
+        .RequireAuthorization("RequireContributor")
         .Produces<ContentFileMarkdownShadowDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound)

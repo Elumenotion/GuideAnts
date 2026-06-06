@@ -9,9 +9,10 @@ public static class SpeechEndpoints
     public static void MapSpeechEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/speech")
-            .WithTags("Speech");
+            .WithTags("Speech")
+            .RequireAuthorization("RequireContributor");
 
-        // POST /api/speech/transcribe - Transcribe audio to text (JWT authenticated)
+        // POST /api/speech/transcribe - Transcribe audio to text
         group.MapPost("/transcribe", async (
             HttpContext ctx,
             [FromServices] ISpeechTranscriptionService transcriptionService,

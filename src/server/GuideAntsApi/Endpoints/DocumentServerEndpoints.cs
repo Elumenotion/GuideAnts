@@ -81,10 +81,13 @@ public static class DocumentServerEndpoints
             return Results.Empty;
         })
         .WithName("DocumentServerProxy")
+        // Browser-loaded document server assets/XHR cannot carry Bearer tokens.
+        .AllowAnonymous()
         .ExcludeFromDescription();
 
         var group = app.MapGroup("/api/documentserver")
             .WithTags("DocumentServer")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         group.MapGet("/capabilities", (
@@ -195,6 +198,7 @@ public static class DocumentServerEndpoints
             }
         })
         .WithName("DocumentServerDownload")
+        .AllowAnonymous()
         .Produces(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound);
@@ -234,6 +238,7 @@ public static class DocumentServerEndpoints
             }
         })
         .WithName("DocumentServerCallback")
+        .AllowAnonymous()
         .Produces(StatusCodes.Status200OK);
 
         group.MapPost("/diagnostics/probe", async (
@@ -330,6 +335,7 @@ public static class DocumentServerEndpoints
             });
         })
         .WithName("DocumentServerDiagnosticsProbe")
+        .RequireAuthorization("RequireAdmin")
         .Produces(StatusCodes.Status200OK);
     }
 

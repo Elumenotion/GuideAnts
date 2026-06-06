@@ -9,7 +9,8 @@ public static class UsageEndpoints
     public static void MapUsageEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/usage")
-            .WithTags("Usage");
+            .WithTags("Usage")
+            .RequireAuthorization("RequireAdmin");
 
         group.MapGet("/summary", async (
             [FromServices] IUsageQueryService usage,

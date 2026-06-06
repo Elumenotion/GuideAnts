@@ -12,7 +12,8 @@ public static class GuidesMarkdownEndpoints
     {
         // File download endpoint
         var fileGroup = app.MapGroup("/api/assistants/{assistantId}/files/{fileId}")
-            .WithTags("Guides");
+            .WithTags("Guides")
+            .RequireAuthorization("RequireAdmin");
 
         fileGroup.MapGet("/download", async (
             Guid assistantId,
@@ -40,7 +41,8 @@ public static class GuidesMarkdownEndpoints
         .Produces(404);
 
         var group = app.MapGroup("/api/assistants/{assistantId}/files/{fileId}/markdown")
-            .WithTags("Guides");
+            .WithTags("Guides")
+            .RequireAuthorization("RequireAdmin");
 
         // Get markdown shadow status
         group.MapGet("", async (

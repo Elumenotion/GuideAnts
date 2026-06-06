@@ -74,7 +74,7 @@ export default function ErrorScreen({
                      errorMessage.toLowerCase().includes('unauthorized');
 
   const handleRetry = async () => {
-    // If it's an authentication error, redirect to login instead of retrying
+    // If it's an authentication error, return to home instead of retrying.
     if (isAuthError) {
       if (navigate) {
         navigate('/login');

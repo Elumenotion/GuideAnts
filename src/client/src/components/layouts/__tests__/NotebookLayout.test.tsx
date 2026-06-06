@@ -25,6 +25,10 @@ vi.mock('../../common/SettingsButton', () => ({
     SettingsButton: () => <button aria-label="Open Settings">Settings</button>,
 }));
 
+vi.mock('../../common/HeaderUserMenu', () => ({
+    HeaderUserMenu: () => <div data-testid="header-user-menu">User</div>,
+}));
+
 vi.mock('../../../tour/TourStartButton', () => ({
     TourStartButton: ({ screenId }: { screenId: string }) => <button aria-label="Start tour" data-screen={screenId}>Tour</button>,
 }));

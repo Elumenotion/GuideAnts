@@ -1,11 +1,12 @@
 using System.Text.Json;
+using System.Security.Claims;
 using AntRunner.ToolCalling.AssistantDefinitions;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.UserProjectContextOptions;
-using GuideAntsApi.Tests.TestUtils;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Tests.Services;
@@ -25,9 +26,14 @@ public sealed class ContextOptionsServiceTests
             Email = "olivia@example.com",
             Created = new DateTime(2026, 4, 28, 12, 0, 0, DateTimeKind.Utc),
         });
+        db.UserRoles.Add(new UserRole
+        {
+            UserId = userId,
+            Role = Role.Admin
+        });
         await db.SaveChangesAsync();
 
-        var service = CreateService(db);
+        var service = CreateService(db, userId);
         var assistant = new AssistantDefinition
         {
             ContextOptions = new Dictionary<string, string>
@@ -61,6 +67,11 @@ public sealed class ContextOptionsServiceTests
             Email = "olivia@example.com",
             Created = new DateTime(2026, 4, 28, 12, 0, 0, DateTimeKind.Utc),
         });
+        db.UserRoles.Add(new UserRole
+        {
+            UserId = userId,
+            Role = Role.Admin
+        });
         db.UserProjectContextOptions.Add(new UserProjectContextOption
         {
             UserId = userId,
@@ -70,7 +81,7 @@ public sealed class ContextOptionsServiceTests
         });
         await db.SaveChangesAsync();
 
-        var service = CreateService(db);
+        var service = CreateService(db, userId);
         var assistant = new AssistantDefinition
         {
             ContextOptions = new Dictionary<string, string>
@@ -88,11 +99,28 @@ public sealed class ContextOptionsServiceTests
         resolved["user.email"].Should().Be("project-specific@example.com");
     }
 
-    private static ContextOptionsService CreateService(ApplicationDbContext db)
+    private static ContextOptionsService CreateService(ApplicationDbContext db, Guid userId)
     {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
+            authenticationType: "TestAuth"));
+        var userContext = new TestUserContext(principal);
+        var currentUserService = new CurrentUserService(db, userContext);
+
         return new ContextOptionsService(
-            new TestServiceScopeFactory(db),
+            db,
+            currentUserService,
             new UserProjectContextOptionsService(db));
+    }
+
+    private sealed class TestUserContext : IUserContext
+    {
+        public TestUserContext(ClaimsPrincipal principal)
+        {
+            Principal = principal;
+        }
+
+        public ClaimsPrincipal? Principal { get; }
     }
 
     private static Dictionary<string, string> ParseContextOptions(string? message)
