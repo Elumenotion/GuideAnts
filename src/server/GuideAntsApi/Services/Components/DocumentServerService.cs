@@ -11,6 +11,8 @@ namespace GuideAntsApi.Services.Components;
 
 public sealed class DocumentServerService : IDocumentServerService
 {
+    private const string DocumentServerProxyPublicPrefix = "/api/documentserver/ds";
+
     private static readonly IReadOnlyCollection<string> SupportedFileExtensions = new[]
     {
         "csv", "doc", "docm", "docx", "dot", "dotm", "dotx", "epub", "fb2", "htm", "html",
@@ -89,14 +91,6 @@ public sealed class DocumentServerService : IDocumentServerService
         if (!options.Enabled)
         {
             throw new InvalidOperationException("DocumentServer is disabled.");
-        }
-        if (string.IsNullOrWhiteSpace(options.PublicUrl))
-        {
-            throw new InvalidOperationException("DocumentServer:PublicUrl must be configured when DocumentServer is enabled.");
-        }
-        if (!Uri.TryCreate(options.PublicUrl, UriKind.Absolute, out _))
-        {
-            throw new InvalidOperationException("DocumentServer:PublicUrl must be an absolute URL.");
         }
 
         var context = await ResolveFileContextAsync(request, cancellationToken);
@@ -203,7 +197,7 @@ public sealed class DocumentServerService : IDocumentServerService
         }
 
         return new DocumentServerEditorConfigResult(
-            DocumentServerUrl: options.PublicUrl.TrimEnd('/'),
+            DocumentServerUrl: ResolveDocumentServerPublicUrl(httpContext),
             Config: config);
     }
 
@@ -503,19 +497,23 @@ public sealed class DocumentServerService : IDocumentServerService
         }
 
         var options = _options.Value;
-        if (!Uri.TryCreate(options.PublicUrl?.Trim(), UriKind.Absolute, out var publicUri))
-        {
-            return sourceUri.ToString();
-        }
-
-        if (!SameOrigin(sourceUri, publicUri))
-        {
-            return sourceUri.ToString();
-        }
-
         if (!Uri.TryCreate(options.InternalUrl?.Trim(), UriKind.Absolute, out var internalUri))
         {
             throw new InvalidOperationException("DocumentServer:InternalUrl must be an absolute URL.");
+        }
+
+        var rewrittenPath = sourceUri.AbsolutePath;
+        if (string.Equals(rewrittenPath, DocumentServerProxyPublicPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            rewrittenPath = "/";
+        }
+        else if (rewrittenPath.StartsWith($"{DocumentServerProxyPublicPrefix}/", StringComparison.OrdinalIgnoreCase))
+        {
+            rewrittenPath = rewrittenPath[DocumentServerProxyPublicPrefix.Length..];
+        }
+        else
+        {
+            return sourceUri.ToString();
         }
 
         var builder = new UriBuilder(sourceUri)
@@ -524,20 +522,6 @@ public sealed class DocumentServerService : IDocumentServerService
             Host = internalUri.Host,
             Port = internalUri.IsDefaultPort ? -1 : internalUri.Port
         };
-
-        var rewrittenPath = sourceUri.AbsolutePath;
-        var publicPath = publicUri.AbsolutePath.TrimEnd('/');
-        if (!string.IsNullOrWhiteSpace(publicPath) && !string.Equals(publicPath, "/", StringComparison.Ordinal))
-        {
-            if (string.Equals(rewrittenPath, publicPath, StringComparison.OrdinalIgnoreCase))
-            {
-                rewrittenPath = "/";
-            }
-            else if (rewrittenPath.StartsWith(publicPath + "/", StringComparison.OrdinalIgnoreCase))
-            {
-                rewrittenPath = rewrittenPath[publicPath.Length..];
-            }
-        }
 
         var internalPath = internalUri.AbsolutePath.TrimEnd('/');
         if (!string.IsNullOrWhiteSpace(internalPath))
@@ -551,18 +535,27 @@ public sealed class DocumentServerService : IDocumentServerService
 
         var rewrittenUrl = builder.Uri.ToString();
         _logger.LogInformation(
-            "DocumentServer callback download URL rewritten from public origin to internal origin. sourceHost={SourceHost} internalHost={InternalHost}",
+            "DocumentServer callback download URL rewritten from proxied path to internal origin. sourceHost={SourceHost} internalHost={InternalHost}",
             LogValueSanitizer.Sanitize(sourceUri.Authority),
             LogValueSanitizer.Sanitize(internalUri.Authority));
 
         return rewrittenUrl;
     }
 
-    private static bool SameOrigin(Uri left, Uri right)
+    private static string ResolveDocumentServerPublicUrl(HttpContext httpContext)
     {
-        return string.Equals(left.Scheme, right.Scheme, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(left.Host, right.Host, StringComparison.OrdinalIgnoreCase)
-            && left.Port == right.Port;
+        var scheme = httpContext.Request.Scheme?.Trim();
+        if (string.IsNullOrWhiteSpace(scheme))
+        {
+            throw new InvalidOperationException("Unable to resolve DocumentServer public URL because request scheme is missing.");
+        }
+
+        if (!httpContext.Request.Host.HasValue)
+        {
+            throw new InvalidOperationException("Unable to resolve DocumentServer public URL because request host is missing.");
+        }
+
+        return $"{scheme}://{httpContext.Request.Host.Value.TrimEnd('/')}{DocumentServerProxyPublicPrefix}";
     }
 
     private string InferContentType(string fileName)
