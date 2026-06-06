@@ -22,7 +22,6 @@ public sealed class ComposeEnvironmentContractTests
     private static readonly string[] RequiredDocumentServerApiKeys =
     [
         "DocumentServer__Enabled",
-        "DocumentServer__PublicUrl",
         "DocumentServer__InternalUrl",
         "DocumentServer__ApiBaseUrl",
         "DocumentServer__JwtEnabled",

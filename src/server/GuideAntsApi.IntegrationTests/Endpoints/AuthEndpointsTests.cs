@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
@@ -41,7 +40,7 @@ public class AuthEndpointsTests
     [TestMethod]
     public async Task RegisterLoginAndMeFlow_MatchesBackendAuthRequirements()
     {
-        _client.DefaultRequestHeaders.Authorization = null;
+        AuthCookieTestHelper.SetBearerToken(_client, null);
 
         var firstRegistration = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -54,14 +53,13 @@ public class AuthEndpointsTests
         firstAuth.Should().NotBeNull();
         firstAuth!.Role.Should().Be(Role.Admin.ToString());
 
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", firstAuth.Token);
         var firstMeResponse = await _client.GetAsync("/api/auth/me");
         firstMeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var firstMe = await firstMeResponse.Content.ReadFromJsonAsync<AuthMeResponse>();
         firstMe.Should().NotBeNull();
         firstMe!.Role.Should().Be(Role.Admin.ToString());
 
-        _client.DefaultRequestHeaders.Authorization = null;
+        AuthCookieTestHelper.SetBearerToken(_client, null);
         var secondRegistration = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             name = "Second User",
@@ -73,14 +71,13 @@ public class AuthEndpointsTests
         secondAuth.Should().NotBeNull();
         secondAuth!.Role.Should().Be(Role.Pending.ToString());
 
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secondAuth.Token);
         var secondMeResponse = await _client.GetAsync("/api/auth/me");
         secondMeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var secondMe = await secondMeResponse.Content.ReadFromJsonAsync<AuthMeResponse>();
         secondMe.Should().NotBeNull();
         secondMe!.Role.Should().Be(Role.Pending.ToString());
 
-        _client.DefaultRequestHeaders.Authorization = null;
+        AuthCookieTestHelper.SetBearerToken(_client, null);
         var badLoginResponse = await _client.PostAsJsonAsync("/api/auth/login", new
         {
             email = "second.user@example.com",
@@ -88,14 +85,15 @@ public class AuthEndpointsTests
         });
         badLoginResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
-        var noAuthResponse = await _client.GetAsync("/api/auth/me");
+        using var anonymousClient = _factory.CreateClient();
+        var noAuthResponse = await anonymousClient.GetAsync("/api/auth/me");
         noAuthResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [TestMethod]
     public async Task RegisterPendingUserThenAdminApprove_AssignsRoleAndUnlocksApprovedEndpoints()
     {
-        _client.DefaultRequestHeaders.Authorization = null;
+        AuthCookieTestHelper.SetBearerToken(_client, null);
 
         var adminRegistration = await _client.PostAsJsonAsync("/api/auth/register", new
         {
@@ -107,9 +105,10 @@ public class AuthEndpointsTests
         var adminAuth = await adminRegistration.Content.ReadFromJsonAsync<AuthResponse>();
         adminAuth.Should().NotBeNull();
         adminAuth!.Role.Should().Be(Role.Admin.ToString());
+        var adminToken = AuthCookieTestHelper.ReadAuthToken(adminRegistration);
 
-        _client.DefaultRequestHeaders.Authorization = null;
-        var pendingRegistration = await _client.PostAsJsonAsync("/api/auth/register", new
+        using var pendingClient = _factory.CreateClient();
+        var pendingRegistration = await pendingClient.PostAsJsonAsync("/api/auth/register", new
         {
             name = "Pending Approval",
             email = "pending.approval@example.com",
@@ -119,19 +118,20 @@ public class AuthEndpointsTests
         var pendingAuth = await pendingRegistration.Content.ReadFromJsonAsync<AuthResponse>();
         pendingAuth.Should().NotBeNull();
         pendingAuth!.Role.Should().Be(Role.Pending.ToString());
+        var pendingToken = AuthCookieTestHelper.ReadAuthToken(pendingRegistration);
 
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", pendingAuth.Token);
-        var pendingCurrentResponse = await _client.GetAsync("/api/users/current");
+        AuthCookieTestHelper.SetBearerToken(pendingClient, pendingToken);
+        var pendingCurrentResponse = await pendingClient.GetAsync("/api/users/current");
         pendingCurrentResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
 
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", adminAuth.Token);
+        AuthCookieTestHelper.SetBearerToken(_client, adminToken);
         var approveResponse = await _client.PostAsJsonAsync(
             $"/api/admin/users/{pendingAuth.UserId}/approve",
             new { role = Role.Reader.ToString() });
         approveResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        _client.DefaultRequestHeaders.Authorization = null;
-        var approvedLoginResponse = await _client.PostAsJsonAsync("/api/auth/login", new
+        AuthCookieTestHelper.SetBearerToken(pendingClient, null);
+        var approvedLoginResponse = await pendingClient.PostAsJsonAsync("/api/auth/login", new
         {
             email = "pending.approval@example.com",
             password = "Password123!"
@@ -141,15 +141,14 @@ public class AuthEndpointsTests
         approvedAuth.Should().NotBeNull();
         approvedAuth!.Role.Should().Be(Role.Reader.ToString());
 
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", approvedAuth.Token);
-        var approvedCurrentResponse = await _client.GetAsync("/api/users/current");
+        var approvedCurrentResponse = await pendingClient.GetAsync("/api/users/current");
         approvedCurrentResponse.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [TestMethod]
     public async Task ConcurrentInitialRegistrations_CreateExactlyOneAdmin()
     {
-        _client.DefaultRequestHeaders.Authorization = null;
+        AuthCookieTestHelper.SetBearerToken(_client, null);
 
         var firstClient = _factory.CreateClient();
         var secondClient = _factory.CreateClient();
@@ -200,8 +199,6 @@ public class AuthEndpointsTests
     }
 
     private sealed record AuthResponse(
-        string Token,
-        DateTime ExpiresAtUtc,
         Guid UserId,
         string Name,
         string Email,

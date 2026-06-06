@@ -42,12 +42,7 @@ public sealed class DocumentServerServiceTests
                     MarkdownProcessedAt: null)),
             enabled: true);
 
-        var httpContext = new DefaultHttpContext
-        {
-            RequestServices = new ServiceCollection()
-                .AddSingleton<IConfiguration>(new ConfigurationBuilder().Build())
-                .BuildServiceProvider()
-        };
+        var httpContext = CreateHttpContext();
         httpContext.Request.Scheme = "http";
         httpContext.Request.Host = new HostString("localhost:5107");
 
@@ -98,12 +93,7 @@ public sealed class DocumentServerServiceTests
                     MarkdownProcessedAt: null)),
             enabled: false);
 
-        var httpContext = new DefaultHttpContext
-        {
-            RequestServices = new ServiceCollection()
-                .AddSingleton<IConfiguration>(new ConfigurationBuilder().Build())
-                .BuildServiceProvider()
-        };
+        var httpContext = CreateHttpContext();
 
         var action = async () => await service.BuildEditorConfigAsync(
             httpContext,
@@ -216,12 +206,7 @@ public sealed class DocumentServerServiceTests
                     MarkdownProcessedAt: null)),
             enabled: true);
 
-        var httpContext = new DefaultHttpContext
-        {
-            RequestServices = new ServiceCollection()
-                .AddSingleton<IConfiguration>(new ConfigurationBuilder().Build())
-                .BuildServiceProvider()
-        };
+        var httpContext = CreateHttpContext();
 
         var tokenResult = await service.BuildEditorConfigAsync(
             httpContext,
@@ -518,7 +503,6 @@ public sealed class DocumentServerServiceTests
             Microsoft.Extensions.Options.Options.Create(new DocumentServerOptions
             {
                 Enabled = enabled,
-                PublicUrl = "http://localhost:5107/api/documentserver/ds",
                 InternalUrl = internalUrl,
                 ApiBaseUrl = "http://host.docker.internal:5106",
                 JwtEnabled = true,

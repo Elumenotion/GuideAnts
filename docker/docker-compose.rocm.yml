@@ -208,7 +208,6 @@ services:
       - LocalServiceHosts__MediaBaseUrl=http://guideants-ai:80
       - LocalServiceHosts__DocumentIntelligenceBaseUrl=http://docling-serve:5001
       - DocumentServer__Enabled=${GA_DOCUMENTSERVER_ENABLED:-false}
-      - DocumentServer__PublicUrl=${GA_DOCUMENTSERVER_PUBLIC_URL:-http://localhost:${GA_DOCUMENTSERVER_PORT:-8082}}
       - DocumentServer__InternalUrl=http://documentserver
       - DocumentServer__ApiBaseUrl=http://guideants-webapi-ui:8080
       - DocumentServer__JwtEnabled=${GA_DOCUMENTSERVER_JWT_ENABLED:-false}

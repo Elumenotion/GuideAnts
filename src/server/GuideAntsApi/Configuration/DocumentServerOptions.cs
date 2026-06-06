@@ -6,8 +6,6 @@ public sealed class DocumentServerOptions
 
     public bool Enabled { get; set; } = false;
 
-    public string PublicUrl { get; set; } = string.Empty;
-
     public string InternalUrl { get; set; } = "http://documentserver";
 
     public string ApiBaseUrl { get; set; } = string.Empty;

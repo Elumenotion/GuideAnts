@@ -181,7 +181,6 @@ GA_SEARXNG_DATA_HOST_PATH=./volumes/searxng/data
 GA_DB_NAME=guideants-dev
 GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest
 GA_DOCUMENTSERVER_ENABLED=true
-GA_DOCUMENTSERVER_PUBLIC_URL=http://localhost:8082
 GA_DOCUMENTSERVER_JWT_ENABLED=false
 # HF_TOKEN=hf_xxxxx
 ```
@@ -196,7 +195,6 @@ Required rules:
    - `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest`
    - `GA_DOCUMENTSERVER_IMAGE=onlyoffice/documentserver:latest`
 1. After changing `GA_DOCUMENTSERVER_IMAGE`, restart the `documentserver` service with your selected compose file so Docker Compose pulls/runs that specific image.
-1. `GA_DOCUMENTSERVER_PUBLIC_URL` must point to the browser-reachable DocumentServer URL (default local mapping is `http://localhost:8082`).
 2. `DocumentServer:ApiBaseUrl` is dedicated to DocumentServer callback/download URLs; do not use `ANTRUNNER_SERVICES_HOST_URL` for this.
 3. JWT for DocumentServer is optional and disabled by default (`GA_DOCUMENTSERVER_JWT_ENABLED=false`, `DocumentServer:JwtEnabled=false`).
 
@@ -206,7 +204,6 @@ Topology-specific values:
   - `DocumentServer:ApiBaseUrl = http://guideants-webapi-ui:8080` (already wired in compose)
 - API on host (`http://localhost:5106`) with services in Docker:
   - `DocumentServer:ApiBaseUrl = http://host.docker.internal:5106`
-  - `DocumentServer:PublicUrl = http://localhost:8082`
   - Optional JWT mode:
     - `GA_DOCUMENTSERVER_JWT_ENABLED=true`
     - `DocumentServer:JwtEnabled=true`
@@ -611,4 +608,3 @@ Read in this order:
 9. [`telemetry-configuration.md`](telemetry-configuration.md)
 10. [`../docker/guideants-ai-build.md`](../docker/guideants-ai-build.md)
 11. [`../docker/build-processes.md`](../docker/build-processes.md)
-
