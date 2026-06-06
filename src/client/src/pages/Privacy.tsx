@@ -6,7 +6,7 @@ const Privacy: React.FC = () => {
             <div className="max-w-3xl mx-auto px-6 py-10">
                 <header className="mb-6">
                     <Link to="/login" className="inline-flex items-center text-sm text-blue-700 hover:underline">
-                        ← Back to Sign in
+                        ← Back to Sign In
                     </Link>
                 </header>
 
@@ -31,7 +31,7 @@ const Privacy: React.FC = () => {
                         <section className="space-y-3">
                             <h2 className="text-lg font-semibold text-gray-900">Information We Collect</h2>
                             <ul className="list-disc pl-6 text-gray-700 leading-7 space-y-1">
-                                <li>Account information from Microsoft sign-in (name, email, tenant ID).</li>
+                                <li>Account information you provide during registration (name and email).</li>
                                 <li>Usage and diagnostic data to improve performance and reliability.</li>
                                 <li>Content you provide to the Service (projects, notebooks, files).</li>
                             </ul>

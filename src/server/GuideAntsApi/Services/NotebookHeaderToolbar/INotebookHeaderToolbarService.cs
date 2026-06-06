@@ -8,4 +8,9 @@ public interface INotebookHeaderToolbarService
     /// <param name="conversationId">When set, chat segment reflects this conversation's effective model.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<NotebookHeaderToolbarDto> GetToolbarAsync(Guid notebookId, Guid? conversationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns only chat run-readiness fields for non-admin notebook runners.
+    /// </summary>
+    Task<NotebookChatReadinessDto> GetChatReadinessAsync(Guid notebookId, Guid? conversationId, CancellationToken cancellationToken = default);
 }

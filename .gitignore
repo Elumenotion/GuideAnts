@@ -417,3 +417,5 @@ FodyWeavers.xsd
 /docker/.build-state
 /docker/.buildx-cache-deps-new
 /_hf_test
+/.codeql
+/scan-recs

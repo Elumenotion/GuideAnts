@@ -1,5 +1,3 @@
-using System.Threading;
-
 namespace GuideAntsApi.Services.Core
 {
     public sealed class TransientAudioExtractionResult : IAsyncDisposable

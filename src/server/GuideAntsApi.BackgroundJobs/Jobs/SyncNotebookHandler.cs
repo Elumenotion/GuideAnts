@@ -77,7 +77,7 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Skipping file during sync due to access issue: {FullPath}", fullPath);
+                Logger.LogWarning(ex, "Skipping file during sync due to access issue: {FullPath}", LogValueSanitizer.Sanitize(fullPath));
                 continue;
             }
 
@@ -160,7 +160,7 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
         // Enqueue re-indexing for updated files
         foreach (var updatedFile in updatedFiles)
         {
-            Logger.LogInformation("Re-indexing updated notebook file: {RelativePath}", updatedFile.RelativePath);
+            Logger.LogInformation("Re-indexing updated notebook file: {RelativePath}", LogValueSanitizer.Sanitize(updatedFile.RelativePath));
             await EnqueueIndexingJobForFile(context, updatedFile, cancellationToken);
         }
 

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models;
+using GuideAntsApi.Services.Auth;
 using System.Net.Mail;
 
 namespace GuideAntsApi.Endpoints;
@@ -11,25 +12,32 @@ public static class UserEndpoints
     {
         var group = app.MapGroup("/api/users")
             .WithTags("Users")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
-        group.MapGet("/current", async (ApplicationDbContext db) =>
+        group.MapGet("/current", async (ApplicationDbContext db, ICurrentUserService currentUserService, CancellationToken cancellationToken) =>
         {
-            var user = await GetSingleUserQuery(db)
-                .AsNoTracking()
-                .FirstOrDefaultAsync();
+            var currentUser = await currentUserService.GetCurrentUserAsync(cancellationToken);
+            if (currentUser == null)
+                return Results.Unauthorized();
 
+            var user = await db.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(candidate => candidate.Id == currentUser.UserId, cancellationToken);
             if (user == null)
-                return Results.NotFound();
+                return Results.Unauthorized();
 
             return Results.Ok(new UserDto(user.Id, user.Name, user.Email));
         })
         .WithName("GetCurrentUser")
         .Produces<UserDto>(StatusCodes.Status200OK)
-        .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
 
-        group.MapPut("/current/personalization", async (UpdateCurrentUserRequest request, ApplicationDbContext db) =>
+        group.MapPut("/current/personalization", async (
+            UpdateCurrentUserRequest request,
+            ApplicationDbContext db,
+            ICurrentUserService currentUserService,
+            CancellationToken cancellationToken) =>
         {
             var errors = ValidateUpdateCurrentUserRequest(request);
             if (errors.Count > 0)
@@ -37,21 +45,32 @@ public static class UserEndpoints
                 return Results.BadRequest(new { errors });
             }
 
-            var user = await GetSingleUserQuery(db).FirstOrDefaultAsync();
+            var currentUser = await currentUserService.GetCurrentUserAsync(cancellationToken);
+            if (currentUser == null)
+                return Results.Unauthorized();
+
+            var user = await db.Users.FirstOrDefaultAsync(candidate => candidate.Id == currentUser.UserId, cancellationToken);
             if (user == null)
-                return Results.NotFound();
+                return Results.Unauthorized();
 
             user.Name = request.Name.Trim();
             user.Email = request.Email.Trim();
 
-            await db.SaveChangesAsync();
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Unable to update profile with the supplied values." });
+            }
 
             return Results.Ok(new UserDto(user.Id, user.Name, user.Email));
         })
         .WithName("UpdateCurrentUserPersonalization")
         .Produces<UserDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
-        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status409Conflict)
         .Produces(StatusCodes.Status401Unauthorized);
 
         // Get user by ID
@@ -67,15 +86,11 @@ public static class UserEndpoints
             return Results.Ok(new UserDto(user.Id, user.Name, user.Email));
         })
         .WithName("GetUserById")
+        .RequireAuthorization("RequireAdmin")
         .Produces<UserDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
     }
-
-    private static IOrderedQueryable<DataModel.Models.User> GetSingleUserQuery(ApplicationDbContext db) =>
-        db.Users
-            .OrderBy(u => u.Created)
-            .ThenBy(u => u.Id);
 
     private static List<string> ValidateUpdateCurrentUserRequest(UpdateCurrentUserRequest request)
     {

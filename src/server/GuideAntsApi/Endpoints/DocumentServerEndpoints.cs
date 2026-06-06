@@ -1,10 +1,8 @@
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Services.Components;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Net;
-using System.Net.Http;
 using Yarp.ReverseProxy.Forwarder;
 
 namespace GuideAntsApi.Endpoints;
@@ -49,7 +47,7 @@ public static class DocumentServerEndpoints
 
             if (!Uri.TryCreate(documentServerOptions.InternalUrl?.Trim(), UriKind.Absolute, out var internalUri))
             {
-                logger.LogWarning("DocumentServer proxy rejected due to invalid internal URL configuration. internalUrl={InternalUrl}", documentServerOptions.InternalUrl);
+                logger.LogWarning("DocumentServer proxy rejected due to invalid internal URL configuration. internalUrl={InternalUrl}", LogValueSanitizer.Sanitize(documentServerOptions.InternalUrl));
                 return Results.BadRequest(new { message = "DocumentServer:InternalUrl must be configured as an absolute URL." });
             }
 
@@ -83,10 +81,13 @@ public static class DocumentServerEndpoints
             return Results.Empty;
         })
         .WithName("DocumentServerProxy")
+        // Browser-loaded document server assets/XHR cannot carry Bearer tokens.
+        .AllowAnonymous()
         .ExcludeFromDescription();
 
         var group = app.MapGroup("/api/documentserver")
             .WithTags("DocumentServer")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         group.MapGet("/capabilities", (
@@ -123,10 +124,10 @@ public static class DocumentServerEndpoints
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             logger.LogInformation(
                 "DocumentServer editor-config requested. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} canEdit={CanEdit}",
-                request.Scope,
-                request.ProjectId,
-                request.FileId,
-                request.NotebookId,
+                LogValueSanitizer.Sanitize(request.Scope),
+                LogValueSanitizer.Sanitize(request.ProjectId),
+                LogValueSanitizer.Sanitize(request.FileId),
+                LogValueSanitizer.Sanitize(request.NotebookId),
                 request.CanEdit);
             if (!options.Value.Enabled)
             {
@@ -146,7 +147,10 @@ public static class DocumentServerEndpoints
             catch (InvalidOperationException ex)
             {
                 logger.LogWarning(ex, "DocumentServer editor-config request failed. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId}",
-                    request.Scope, request.ProjectId, request.FileId, request.NotebookId);
+                    LogValueSanitizer.Sanitize(request.Scope),
+                    LogValueSanitizer.Sanitize(request.ProjectId),
+                    LogValueSanitizer.Sanitize(request.FileId),
+                    LogValueSanitizer.Sanitize(request.NotebookId));
                 return Results.BadRequest(new { message = ex.Message });
             }
         })
@@ -171,10 +175,10 @@ public static class DocumentServerEndpoints
             logger.LogInformation(
                 "DocumentServer download requested. tokenLength={TokenLength} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} versionNumber={VersionNumber}",
                 token?.Length ?? 0,
-                scope,
-                projectId,
-                fileId,
-                notebookId,
+                LogValueSanitizer.Sanitize(scope),
+                LogValueSanitizer.Sanitize(projectId),
+                LogValueSanitizer.Sanitize(fileId),
+                LogValueSanitizer.Sanitize(notebookId),
                 versionNumber);
             try
             {
@@ -194,6 +198,7 @@ public static class DocumentServerEndpoints
             }
         })
         .WithName("DocumentServerDownload")
+        .AllowAnonymous()
         .Produces(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound);
@@ -213,7 +218,7 @@ public static class DocumentServerEndpoints
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             logger.LogInformation(
                 "DocumentServer callback requested. status={Status} hasUrl={HasUrl} tokenLength={TokenLength}",
-                payload.Status,
+                LogValueSanitizer.Sanitize(payload.Status),
                 !string.IsNullOrWhiteSpace(payload.Url),
                 token?.Length ?? 0);
             try
@@ -223,16 +228,17 @@ public static class DocumentServerEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                logger.LogWarning(ex, "DocumentServer callback rejected. status={Status}", payload.Status);
+                logger.LogWarning(ex, "DocumentServer callback rejected. status={Status}", LogValueSanitizer.Sanitize(payload.Status));
                 return Results.Ok(new { error = 1, message = ex.Message });
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "DocumentServer callback failed unexpectedly. status={Status}", payload.Status);
+                logger.LogError(ex, "DocumentServer callback failed unexpectedly. status={Status}", LogValueSanitizer.Sanitize(payload.Status));
                 return Results.Ok(new { error = 1, message = "DocumentServer callback failed unexpectedly." });
             }
         })
         .WithName("DocumentServerCallback")
+        .AllowAnonymous()
         .Produces(StatusCodes.Status200OK);
 
         group.MapPost("/diagnostics/probe", async (
@@ -329,6 +335,7 @@ public static class DocumentServerEndpoints
             });
         })
         .WithName("DocumentServerDiagnosticsProbe")
+        .RequireAuthorization("RequireAdmin")
         .Produces(StatusCodes.Status200OK);
     }
 

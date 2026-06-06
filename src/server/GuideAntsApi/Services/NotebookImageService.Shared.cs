@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using GuideAntsApi.Services.Routing;
 
 namespace GuideAntsApi.Services
@@ -309,7 +308,7 @@ namespace GuideAntsApi.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError("Failed to parse image generation response: {Message}. Raw response: {Response}", ex.Message, responseJson);
+                _logger.LogError("Failed to parse image generation response: {Message}. Raw response: {Response}", LogValueSanitizer.Sanitize(ex.Message), LogValueSanitizer.Sanitize(responseJson));
                 return Task.FromResult<byte[]?>(null);
             }
         }

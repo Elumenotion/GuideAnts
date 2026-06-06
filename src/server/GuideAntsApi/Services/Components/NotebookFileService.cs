@@ -211,7 +211,11 @@ using var scope = CreateDbScope();
         var file = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == relativePath);
         if (file == null) return null;
 
-        var physicalPath = Path.Combine(GetNotebookRootPath(projectId, notebookId), relativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!TryResolveNotebookPath(projectId, notebookId, relativePath, out var physicalPath))
+        {
+            return null;
+        }
+
         if (!File.Exists(physicalPath)) return null;
 
         var contentType = _contentTypeProvider.TryGetContentType(file.RelativePath, out var ct) ? ct : "application/octet-stream";
@@ -239,7 +243,7 @@ using var scope = CreateDbScope();
                 file = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == altPath);
                 if (file != null)
                 {
-                    _logger.LogInformation("Resolved file path from '{OriginalPath}' to '{ResolvedPath}'", normalizedPath, altPath);
+                    _logger.LogInformation("Resolved file path from '{OriginalPath}' to '{ResolvedPath}'", LogValueSanitizer.Sanitize(normalizedPath), LogValueSanitizer.Sanitize(altPath));
                     normalizedPath = altPath;
                     break;
                 }
@@ -251,7 +255,11 @@ using var scope = CreateDbScope();
             throw new FileNotFoundException("Database record not found for the specified file.", relativePath);
         }
 
-        var physicalPath = Path.Combine(GetNotebookRootPath(projectId, notebookId), normalizedPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!TryResolveNotebookPath(projectId, notebookId, normalizedPath, out var physicalPath))
+        {
+            throw new FileNotFoundException("File not found on disk.", normalizedPath);
+        }
+
         if (!File.Exists(physicalPath))
         {
             throw new FileNotFoundException("File not found on disk.", physicalPath);
@@ -353,7 +361,11 @@ using var scope = CreateDbScope();
         if (nf == null) return null;
 
         var notebookRoot = GetNotebookRootPath(nf.Notebook.ProjectId, nf.NotebookId);
-        var physicalPath = Path.Combine(notebookRoot, nf.RelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, nf.RelativePath, out var physicalPath))
+        {
+            return null;
+        }
+
         if (!File.Exists(physicalPath)) return null;
 
         var fileName = Path.GetFileName(nf.RelativePath);
@@ -370,6 +382,12 @@ using var scope = CreateDbScope();
     private string GetNotebookRootPath(Guid projectId, Guid notebookId)
     {
         return _pathResolver.GetNotebookRootPath(projectId, notebookId);
+    }
+
+    private bool TryResolveNotebookPath(Guid projectId, Guid notebookId, string? relativePath, out string fullPath)
+    {
+        var notebookRoot = GetNotebookRootPath(projectId, notebookId);
+        return NotebookStoragePath.TryResolveUnderRoot(notebookRoot, relativePath, out fullPath);
     }
 
     public async Task<NotebookFileDto?> CopyFromProjectAsync(Guid projectId, Guid notebookId, Guid contentFileId, int? versionNumber, string? targetRelativePath)
@@ -395,14 +413,18 @@ using var scope = CreateDbScope();
         // Ensure the source file exists
         if (!File.Exists(sourcePath))
         {
-            _logger.LogError("Source file not found at path: {SourcePath}", sourcePath);
+            _logger.LogError("Source file not found at path: {SourcePath}", LogValueSanitizer.Sanitize(sourcePath));
             return null;
         }
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
         Directory.CreateDirectory(notebookRoot);
         var relativePath = string.IsNullOrWhiteSpace(targetRelativePath) ? version.FileName : targetRelativePath;
-        var destPath = Path.Combine(notebookRoot, relativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, relativePath, out var destPath))
+        {
+            return null;
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
         File.Copy(sourcePath, destPath, overwrite: true);
 
@@ -433,7 +455,7 @@ using var scope = CreateDbScope();
         catch (Exception ex)
         {
             // Log but don't fail the copy operation if markdown shadow preparation fails
-            _logger.LogError(ex, "Failed to prepare markdown shadow for copied file {RelativePath}", relativePath);
+            _logger.LogError(ex, "Failed to prepare markdown shadow for copied file {RelativePath}", LogValueSanitizer.Sanitize(relativePath));
         }
 
         // --- Manually create NotebookFile record instead of relying on sync ---
@@ -515,7 +537,7 @@ using var scope = CreateDbScope();
         catch (Exception ex)
         {
             // Log but don't fail the copy operation if markdown shadow creation fails
-            _logger.LogError(ex, "Failed to create markdown shadow for copied file {RelativePath}", nf.RelativePath);
+            _logger.LogError(ex, "Failed to create markdown shadow for copied file {RelativePath}", LogValueSanitizer.Sanitize(nf.RelativePath));
         }
 
         // Record lineage: project side (CopiedToNotebook)
@@ -537,7 +559,7 @@ using var scope = CreateDbScope();
             null,
             FileLineageAction.Created,
             notebookId,
-            Path.Combine(GetNotebookRootPath(projectId, notebookId), nf.RelativePath));
+            destPath);
 
         // Kernel Memory removed - notebook tag updates no longer needed
 
@@ -561,7 +583,11 @@ using var scope = CreateDbScope();
             throw new ArgumentException("Notebook file not found.");
         }
 
-        var sourcePath = Path.Combine(GetNotebookRootPath(projectId, notebookId), notebookFile.RelativePath);
+        if (!TryResolveNotebookPath(projectId, notebookId, notebookFile.RelativePath, out var sourcePath))
+        {
+            throw new FileNotFoundException("The source notebook file was not found on the server.", notebookFile.RelativePath);
+        }
+
         if (!File.Exists(sourcePath))
         {
             throw new FileNotFoundException("The source notebook file was not found on the server.", sourcePath);
@@ -614,7 +640,11 @@ using var scope = CreateDbScope();
         }
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var targetDirectory = Path.Combine(notebookRoot, targetRelativePath?.Replace("/", Path.DirectorySeparatorChar.ToString()) ?? "");
+        if (!NotebookStoragePath.TryResolveDirectoryUnderRoot(notebookRoot, targetRelativePath, out var targetDirectory))
+        {
+            throw new ArgumentException("Invalid target directory path.");
+        }
+
         Directory.CreateDirectory(targetDirectory);
         
         var processedFiles = new List<NotebookFile>();
@@ -624,7 +654,13 @@ using var scope = CreateDbScope();
         {
             if (file.Length == 0) continue;
 
-            var physicalPath = Path.Combine(targetDirectory, file.FileName);
+            var safeFileName = NotebookStoragePath.SanitizeFileName(file.FileName)
+                ?? throw new ArgumentException("Invalid file name.");
+            if (!NotebookStoragePath.TryResolveUnderRoot(targetDirectory, safeFileName, out var physicalPath))
+            {
+                throw new ArgumentException("Invalid file path.");
+            }
+
             var relativePath = Path.GetRelativePath(notebookRoot, physicalPath).Replace("\\", "/");
             var existingFile = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == relativePath);
             var previousHash = existingFile?.FileHash;
@@ -650,9 +686,9 @@ using var scope = CreateDbScope();
                     projectId,
                     notebookId,
                     existingFile.Id,
-                    relativePath,
-                    previousHash,
-                    fileHash,
+                    LogValueSanitizer.Sanitize(relativePath),
+                    LogValueSanitizer.Sanitize(previousHash),
+                    LogValueSanitizer.Sanitize(fileHash),
                     previousSize,
                     fileInfo.Length,
                     contentChanged,
@@ -688,8 +724,8 @@ using var scope = CreateDbScope();
                     "Created new notebook file record. projectId={ProjectId} notebookId={NotebookId} relativePath={RelativePath} hash={Hash} size={Size}",
                     projectId,
                     notebookId,
-                    relativePath,
-                    fileHash,
+                    LogValueSanitizer.Sanitize(relativePath),
+                    LogValueSanitizer.Sanitize(fileHash),
                     fileInfo.Length);
             }
         }
@@ -722,6 +758,11 @@ using var scope = CreateDbScope();
         // Record lineage events for each created or updated file
         foreach (var nf in processedFiles)
         {
+            if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, nf.RelativePath, out var lineagePath))
+            {
+                continue;
+            }
+
             await _lineageService.RecordAsync(
             FileKind.Notebook,
                 projectId,
@@ -729,7 +770,7 @@ using var scope = CreateDbScope();
                 null,
                 FileLineageAction.Uploaded, // Using "Uploaded" for both create and update
                 notebookId,
-                Path.Combine(GetNotebookRootPath(projectId, notebookId), nf.RelativePath));
+                lineagePath);
         }
 
         // --- Create markdown shadows for uploaded files ---
@@ -745,7 +786,7 @@ using var scope = CreateDbScope();
                         projectId,
                         notebookId,
                         nf.Id,
-                        nf.RelativePath);
+                        LogValueSanitizer.Sanitize(nf.RelativePath));
                 }
                 else
                 {
@@ -755,13 +796,13 @@ using var scope = CreateDbScope();
                         projectId,
                         notebookId,
                         nf.Id,
-                        nf.RelativePath);
+                        LogValueSanitizer.Sanitize(nf.RelativePath));
                 }
             }
             catch (Exception ex)
             {
                 // Log but don't fail the upload if markdown shadow creation fails
-                _logger.LogError(ex, "Failed to create markdown shadow for uploaded file {RelativePath}", nf.RelativePath);
+                _logger.LogError(ex, "Failed to create markdown shadow for uploaded file {RelativePath}", LogValueSanitizer.Sanitize(nf.RelativePath));
             }
         }
 
@@ -778,12 +819,12 @@ using var scope = CreateDbScope();
                     await jobQueue.EnqueueAsync(
                         jobType: nameof(GuideAntsApi.BackgroundJobs.Jobs.IndexDirectTextFileJob).Replace("Job", string.Empty),
                         payload: new GuideAntsApi.BackgroundJobs.Jobs.IndexDirectTextFileJob(nf.Id, IsContentFile: false));
-                    _logger.LogInformation("Created indexing job for uploaded NotebookFile {NotebookFileId} ({RelativePath})", nf.Id, nf.RelativePath);
+                    _logger.LogInformation("Created indexing job for uploaded NotebookFile {NotebookFileId} ({RelativePath})", nf.Id, LogValueSanitizer.Sanitize(nf.RelativePath));
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to create indexing job for uploaded file {RelativePath}", nf.RelativePath);
+                _logger.LogError(ex, "Failed to create indexing job for uploaded file {RelativePath}", LogValueSanitizer.Sanitize(nf.RelativePath));
             }
         }
 
@@ -812,15 +853,18 @@ using var scope = CreateDbScope();
         
         // Normalize relative path (ensure forward slashes)
         var normalizedPath = relativePath.Replace("\\", "/");
+
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, normalizedPath, out var physicalPath))
+        {
+            throw new FileNotFoundException("File not found on disk.", normalizedPath);
+        }
         
         // Ensure parent folder exists (e.g., /conversations)
-        var parentFolder = Path.GetDirectoryName(Path.Combine(notebookRoot, normalizedPath.Replace("/", Path.DirectorySeparatorChar.ToString())));
+        var parentFolder = Path.GetDirectoryName(physicalPath);
         if (!string.IsNullOrEmpty(parentFolder))
         {
             Directory.CreateDirectory(parentFolder);
         }
-        
-        var physicalPath = Path.Combine(notebookRoot, normalizedPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
 
         // Write content to file
         await File.WriteAllTextAsync(physicalPath, content, System.Text.Encoding.UTF8);
@@ -892,12 +936,12 @@ using var scope = CreateDbScope();
         {
             await _markdownExtractionService.CreateNotebookMarkdownShadowAsync(notebookFile.Id);
             _logger.LogInformation("Created markdown shadow for saved conversation file {NotebookFileId} ({RelativePath})", 
-                notebookFile.Id, notebookFile.RelativePath);
+                notebookFile.Id, LogValueSanitizer.Sanitize(notebookFile.RelativePath));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create markdown shadow for saved conversation file {RelativePath}", 
-                notebookFile.RelativePath);
+                LogValueSanitizer.Sanitize(notebookFile.RelativePath));
         }
 
         // Create indexing job for markdown file
@@ -909,12 +953,12 @@ using var scope = CreateDbScope();
                 jobType: nameof(GuideAntsApi.BackgroundJobs.Jobs.IndexDirectTextFileJob).Replace("Job", string.Empty),
                 payload: new GuideAntsApi.BackgroundJobs.Jobs.IndexDirectTextFileJob(notebookFile.Id, IsContentFile: false));
             _logger.LogInformation("Created indexing job for saved conversation file {NotebookFileId} ({RelativePath})", 
-                notebookFile.Id, notebookFile.RelativePath);
+                notebookFile.Id, LogValueSanitizer.Sanitize(notebookFile.RelativePath));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create indexing job for saved conversation file {RelativePath}", 
-                notebookFile.RelativePath);
+                LogValueSanitizer.Sanitize(notebookFile.RelativePath));
         }
 
         await QueueNotebookSyncBestEffortAsync(notebookId);
@@ -1009,11 +1053,14 @@ using var scope = CreateDbScope();
         }
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var physicalPath = Path.Combine(notebookRoot, newFolderPath?.Replace("/", Path.DirectorySeparatorChar.ToString()) ?? "");
+        if (!NotebookStoragePath.TryResolveDirectoryUnderRoot(notebookRoot, newFolderPath, out var physicalPath))
+        {
+            return null;
+        }
 
         if (File.Exists(physicalPath))
         {
-            _logger.LogWarning("Cannot create folder at {Path}; a file exists at this path.", physicalPath);
+            _logger.LogWarning("Cannot create folder at {Path}; a file exists at this path.", LogValueSanitizer.Sanitize(physicalPath));
             return null;
         }
 
@@ -1022,7 +1069,10 @@ using var scope = CreateDbScope();
         {
             Directory.CreateDirectory(physicalPath);
         }
-        _logger.LogInformation("Created folder {FolderPath} in notebook {NotebookId}", newFolderPath, notebookId);
+        _logger.LogInformation(
+            "Created folder {FolderPath} in notebook {NotebookId}",
+            LogValueSanitizer.Sanitize(newFolderPath),
+            LogValueSanitizer.Sanitize(notebookId));
         
         // Return the current folder tree - the new empty folder will be managed client-side
         // until files are added to it
@@ -1042,7 +1092,10 @@ using var scope = CreateDbScope();
         var context = GetDbContext(scope);
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var physicalPath = Path.Combine(notebookRoot, relativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, relativePath, out var physicalPath))
+        {
+            return false;
+        }
 
         if (File.Exists(physicalPath))
         {
@@ -1070,7 +1123,7 @@ using var scope = CreateDbScope();
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Unexpected error during file removal cleanup {RelativePath}", dbFile.RelativePath);
+                        _logger.LogError(ex, "Unexpected error during file removal cleanup {RelativePath}", LogValueSanitizer.Sanitize(dbFile.RelativePath));
                     }
                 }
                 else
@@ -1116,7 +1169,7 @@ using var scope = CreateDbScope();
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", shadow.StoragePath, ex.Message);
+                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", LogValueSanitizer.Sanitize(shadow.StoragePath), LogValueSanitizer.Sanitize(ex.Message));
                             }
                         }
                     }
@@ -1168,7 +1221,7 @@ using var scope = CreateDbScope();
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Unexpected error during file removal cleanup {RelativePath}", dbFile.RelativePath);
+                        _logger.LogError(ex, "Unexpected error during file removal cleanup {RelativePath}", LogValueSanitizer.Sanitize(dbFile.RelativePath));
                     }
                 }
                 else
@@ -1214,7 +1267,7 @@ using var scope = CreateDbScope();
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", shadow.StoragePath, ex.Message);
+                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", LogValueSanitizer.Sanitize(shadow.StoragePath), LogValueSanitizer.Sanitize(ex.Message));
                             }
                         }
                     }
@@ -1266,7 +1319,7 @@ using var scope = CreateDbScope();
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", shadow.StoragePath, ex.Message);
+                                _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", LogValueSanitizer.Sanitize(shadow.StoragePath), LogValueSanitizer.Sanitize(ex.Message));
                             }
                         }
                     }
@@ -1282,7 +1335,7 @@ using var scope = CreateDbScope();
                     notebookId,
                     physicalPath);
 
-                _logger.LogInformation("Soft-deleted DB record for missing notebook file {RelativePath}", normalizedRelPath);
+                _logger.LogInformation("Soft-deleted DB record for missing notebook file {RelativePath}", LogValueSanitizer.Sanitize(normalizedRelPath));
             }
             else
             {
@@ -1313,7 +1366,7 @@ using var scope = CreateDbScope();
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogError(ex, "Failed to update notebook tags after removing file {RelativePath}", dbf.RelativePath);
+                                _logger.LogError(ex, "Failed to update notebook tags after removing file {RelativePath}", LogValueSanitizer.Sanitize(dbf.RelativePath));
                             }
                         }
                         else
@@ -1352,7 +1405,7 @@ using var scope = CreateDbScope();
                                     }
                                     catch (Exception ex)
                                     {
-                                        _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", shadow.StoragePath, ex.Message);
+                                        _logger.LogError(ex, "Failed to delete shadow file {ShadowPath}: {Error}", LogValueSanitizer.Sanitize(shadow.StoragePath), LogValueSanitizer.Sanitize(ex.Message));
                                     }
                                 }
                             }
@@ -1369,12 +1422,12 @@ using var scope = CreateDbScope();
                     }
 
                     context.NotebookFiles.RemoveRange(dbFilesMissingFolder);
-                    _logger.LogInformation("Soft-deleted {Count} DB records for missing notebook folder {RelativePath}", dbFilesMissingFolder.Count, normalizedRelPath);
+                    _logger.LogInformation("Soft-deleted {Count} DB records for missing notebook folder {RelativePath}", dbFilesMissingFolder.Count, LogValueSanitizer.Sanitize(normalizedRelPath));
                 }
                 else
                 {
                     // Nothing to do; treat as idempotent success
-                    _logger.LogInformation("Delete requested for {Path} but nothing found on disk or in DB; treating as success.", physicalPath);
+                    _logger.LogInformation("Delete requested for {Path} but nothing found on disk or in DB; treating as success.", LogValueSanitizer.Sanitize(physicalPath));
                 }
             }
 
@@ -1401,8 +1454,27 @@ using var scope = CreateDbScope();
         var context = GetDbContext(scope);
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var sourcePhysicalPath = Path.Combine(notebookRoot, sourceRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
-        var newPhysicalPath = Path.Combine(Path.GetDirectoryName(sourcePhysicalPath)!, newName);
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, sourceRelativePath, out var sourcePhysicalPath))
+        {
+            return false;
+        }
+
+        var safeNewName = NotebookStoragePath.SanitizeFileName(newName);
+        if (safeNewName == null)
+        {
+            return false;
+        }
+
+        var sourceDirectory = Path.GetDirectoryName(sourcePhysicalPath);
+        if (string.IsNullOrEmpty(sourceDirectory))
+        {
+            return false;
+        }
+
+        if (!NotebookStoragePath.TryResolveUnderRoot(sourceDirectory, safeNewName, out var newPhysicalPath))
+        {
+            return false;
+        }
 
         if (newPhysicalPath == sourcePhysicalPath) return true; // No change
         if (File.Exists(newPhysicalPath) || Directory.Exists(newPhysicalPath)) return false; // Conflict
@@ -1462,9 +1534,20 @@ using var scope = CreateDbScope();
         var context = GetDbContext(scope);
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
-        var sourcePhysicalPath = Path.Combine(notebookRoot, sourceRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
-        var destDirectoryPhysicalPath = Path.Combine(notebookRoot, destinationRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
-        var newPhysicalPath = Path.Combine(destDirectoryPhysicalPath, Path.GetFileName(sourcePhysicalPath));
+        if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, sourceRelativePath, out var sourcePhysicalPath))
+        {
+            return false;
+        }
+
+        if (!NotebookStoragePath.TryResolveDirectoryUnderRoot(notebookRoot, destinationRelativePath, out var destDirectoryPhysicalPath))
+        {
+            return false;
+        }
+
+        if (!NotebookStoragePath.TryResolveUnderRoot(destDirectoryPhysicalPath, Path.GetFileName(sourcePhysicalPath), out var newPhysicalPath))
+        {
+            return false;
+        }
 
         if (newPhysicalPath == sourcePhysicalPath) return true;
         if (File.Exists(newPhysicalPath) || Directory.Exists(newPhysicalPath)) return false;

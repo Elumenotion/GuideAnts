@@ -64,7 +64,7 @@ public sealed class StoragePathResolver(
         var discoveredPath = TryFindNotebookFolderByMetadata(projectRoot, projectId, notebookId);
         if (!string.IsNullOrWhiteSpace(discoveredPath))
         {
-            _logger.LogInformation("Resolved notebook {NotebookId} to externally renamed folder {FolderPath}", notebookId, discoveredPath);
+            _logger.LogInformation("Resolved notebook {NotebookId} to externally renamed folder {FolderPath}", notebookId, LogValueSanitizer.Sanitize(discoveredPath));
             return discoveredPath;
         }
 

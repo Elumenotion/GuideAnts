@@ -12,6 +12,8 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import { getRouterType, isElectron, debugEnvironment } from './utils/environment';
 import OAuthCallback from './pages/OAuthCallback';
 import { UrlCorrector } from './components/common/UrlCorrector';
+import { AuthProvider } from './contexts/AuthContext';
+import AuthExpiredHandler from './components/AuthExpiredHandler';
 
 function App() {
   useAppPort();
@@ -47,9 +49,12 @@ function App() {
           <DndProvider backend={HTML5Backend}>
             <StartupGate enabled={routerType === 'browser'}>
               <Router>
-                <UrlCorrector />
-                {isElectron() && <ZoomControl />}
-                <AppContent />
+                <AuthProvider>
+                  <AuthExpiredHandler />
+                  <UrlCorrector />
+                  {isElectron() && <ZoomControl />}
+                  <AppContent />
+                </AuthProvider>
               </Router>
             </StartupGate>
           </DndProvider>

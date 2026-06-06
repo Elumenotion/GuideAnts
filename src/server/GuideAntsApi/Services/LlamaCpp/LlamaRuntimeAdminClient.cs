@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -291,9 +290,9 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
         {
             _logger.LogWarning(
                 "Failed to read llama admin download status for {OperationId}. Status={StatusCode} Body={Body}",
-                operationId,
+                LogValueSanitizer.Sanitize(operationId),
                 (int)response.StatusCode,
-                body);
+                LogValueSanitizer.Sanitize(body));
             throw new InvalidOperationException(
                 $"Failed to read llama model download status via llama admin ({(int)response.StatusCode}): {body}");
         }
@@ -313,7 +312,7 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
             // Admin surfaces 504 when llama-server didn't respawn or /models didn't answer inside
             // the restart timeout. Bubble that up as a TimeoutException so the API endpoint can
             // map it to an HTTP 504 for the UI's "try again" affordance.
-            _logger.LogError("Llama admin restart timed out. Body={Body}", body);
+            _logger.LogError("Llama admin restart timed out. Body={Body}", LogValueSanitizer.Sanitize(body));
             throw new TimeoutException(
                 $"Llama admin restart timed out: {body}");
         }

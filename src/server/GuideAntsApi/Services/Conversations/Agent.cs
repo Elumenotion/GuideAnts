@@ -12,7 +12,6 @@ using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 
@@ -79,6 +78,9 @@ public static class Agent
             DeploymentId = resolvedAgent.ModelId,
             ExecutionPolicy = resolvedAgent.ExecutionPolicy,
             oAuthUserAccessToken = context.OAuthUserAccessToken,
+            ExternalAuthTokens = context.ExternalAuthTokens == null
+                ? null
+                : new Dictionary<string, string>(context.ExternalAuthTokens, StringComparer.OrdinalIgnoreCase),
             Evaluator = string.IsNullOrWhiteSpace(assistant.InvocationEvaluator)
                 ? null
                 : assistant.InvocationEvaluator

@@ -6,7 +6,7 @@ const Terms: React.FC = () => {
             <div className="max-w-3xl mx-auto px-6 py-10">
                 <header className="mb-6">
                     <Link to="/login" className="inline-flex items-center text-sm text-blue-700 hover:underline">
-                        ← Back to Sign in
+                        ← Back to Sign In
                     </Link>
                 </header>
 
@@ -39,7 +39,7 @@ const Terms: React.FC = () => {
                         <section className="space-y-3">
                             <h2 className="text-lg font-semibold text-gray-900">3. Accounts and Access</h2>
                             <ul className="list-disc pl-6 text-gray-700 leading-7 space-y-1">
-                                <li>You must use a valid Microsoft work, school, or personal account.</li>
+                                <li>You must use a valid GuideAnts account.</li>
                                 <li>You are responsible for maintaining the confidentiality of your account and credentials.</li>
                                 <li>You are responsible for all activities that occur under your account.</li>
                             </ul>

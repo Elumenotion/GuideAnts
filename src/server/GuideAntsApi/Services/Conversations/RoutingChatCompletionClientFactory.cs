@@ -7,7 +7,6 @@ using AntRunner.Chat.OpenAI;
 using AntRunner.Chat.OpenRouter;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GuideAntsApi.Services.Conversations;
@@ -77,9 +76,9 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         var provider = ParseProvider(target);
         _logger.LogInformation(
             "Chat provider route resolved. RequestedModelId={RequestedModelId}, CatalogModelId={CatalogModelId}, Provider={Provider}",
-            string.IsNullOrWhiteSpace(deploymentId) ? "(unset)" : deploymentId,
-            target.ModelId,
-            target.Provider);
+            LogValueSanitizer.Sanitize(string.IsNullOrWhiteSpace(deploymentId) ? "(unset)" : deploymentId),
+            LogValueSanitizer.Sanitize(target.ModelId),
+            LogValueSanitizer.Sanitize(target.Provider));
 
         if (provider == Provider.LlamaCpp)
         {

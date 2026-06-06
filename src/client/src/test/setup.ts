@@ -11,40 +11,6 @@ afterEach(() => {
 // Provide a default same-origin API URL for modules that resolve API_BASE_URL at import time.
 window.__RUNTIME_CONFIG__ = { apiUrl: '/api' };
 
-// Mock MSAL
-vi.mock('@azure/msal-react', () => ({
-  useMsal: vi.fn(() => ({
-    instance: {
-      handleRedirectPromise: vi.fn().mockResolvedValue(null),
-      loginRedirect: vi.fn().mockResolvedValue(null),
-      logoutRedirect: vi.fn().mockResolvedValue(null),
-      getAllAccounts: vi.fn().mockReturnValue([]),
-      addEventCallback: vi.fn().mockReturnValue('callback-id'),
-      removeEventCallback: vi.fn(),
-    },
-    accounts: [],
-    inProgress: 'none',
-  })),
-  useIsAuthenticated: vi.fn().mockReturnValue(false),
-  MsalProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
-
-// Mock MSAL Browser (PublicClientApplication) to avoid WebCrypto requirement
-vi.mock('@azure/msal-browser', () => {
-  class MockPCA {
-    initialize = vi.fn().mockResolvedValue(undefined);
-    handleRedirectPromise = vi.fn().mockResolvedValue(null);
-    loginRedirect = vi.fn().mockResolvedValue(null);
-    logoutRedirect = vi.fn().mockResolvedValue(null);
-    acquireTokenSilent = vi.fn().mockResolvedValue({ accessToken: 'test-token' });
-    acquireTokenRedirect = vi.fn().mockResolvedValue(null);
-    getAllAccounts = vi.fn().mockReturnValue([]);
-    setActiveAccount = vi.fn();
-  }
-  const LogLevel = { Error: 0, Warning: 1, Info: 2, Verbose: 3 } as const;
-  return { PublicClientApplication: MockPCA, LogLevel };
-});
-
 // Mock Electron IPC
 const mockElectron = {
   on: vi.fn(),

@@ -7,7 +7,8 @@ public sealed record InvocationContext(
     Guid ProjectId,
     Guid NotebookId,
     Guid ConversationId,
-    string? OAuthUserAccessToken = null)
+    string? OAuthUserAccessToken = null,
+    IReadOnlyDictionary<string, string>? ExternalAuthTokens = null)
 {
     /// <summary>
     /// Unique 10-character nano-id assigned for each published-notebook invocation.

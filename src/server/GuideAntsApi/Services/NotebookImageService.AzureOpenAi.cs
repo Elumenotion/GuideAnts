@@ -53,7 +53,7 @@ namespace GuideAntsApi.Services
                         var statusCode = (int)genResponse.StatusCode;
                         var reason = genResponse.ReasonPhrase ?? "";
                         var apiError = ExtractErrorMessage(genResult);
-                        _logger.LogWarning("Image API error {StatusCode} {Reason}: {ApiError}", statusCode, reason, apiError);
+                        _logger.LogWarning("Image API error {StatusCode} {Reason}: {ApiError}", statusCode, LogValueSanitizer.Sanitize(reason), LogValueSanitizer.Sanitize(apiError));
                         throw new InvalidOperationException($"Image API error {statusCode} {reason}: {apiError}");
                     }
 
@@ -126,7 +126,7 @@ namespace GuideAntsApi.Services
                 var statusCode = (int)response.StatusCode;
                 var reason = response.ReasonPhrase ?? string.Empty;
                 var apiError = ExtractErrorMessage(result);
-                _logger.LogWarning("Image edits API error {StatusCode} {Reason}: {ApiError}", statusCode, reason, apiError);
+                _logger.LogWarning("Image edits API error {StatusCode} {Reason}: {ApiError}", statusCode, LogValueSanitizer.Sanitize(reason), LogValueSanitizer.Sanitize(apiError));
                 throw new InvalidOperationException($"Image edits API error {statusCode} {reason}: {apiError}");
             }
 

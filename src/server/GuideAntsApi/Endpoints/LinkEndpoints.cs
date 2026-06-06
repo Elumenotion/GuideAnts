@@ -19,6 +19,7 @@ public static class LinkEndpoints
     {
         var group = app.MapGroup("/api/projects/{projectId}/links")
             .WithTags("Links")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         // Create a new link
@@ -28,6 +29,7 @@ public static class LinkEndpoints
             return Results.Created($"/api/projects/{projectId}/links/{link.Id}", link);
         })
         .WithName("CreateLink")
+        .RequireAuthorization("RequireContributor")
         .Produces<LinkDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status402PaymentRequired)
@@ -43,6 +45,7 @@ public static class LinkEndpoints
             return Results.Ok(link);
         })
         .WithName("UpdateLink")
+        .RequireAuthorization("RequireContributor")
         .Produces<LinkDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -57,6 +60,7 @@ public static class LinkEndpoints
             return Results.NoContent();
         })
         .WithName("DeleteLink")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);

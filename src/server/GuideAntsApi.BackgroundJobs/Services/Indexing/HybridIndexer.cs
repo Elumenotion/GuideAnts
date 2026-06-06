@@ -120,7 +120,7 @@ internal sealed class HybridIndexer(
             }
             catch (Exception ex)
             {
-                _log.LogWarning(ex, "Failed to read assistant file {File}", file);
+                _log.LogWarning(ex, "Failed to read assistant file {File}", LogValueSanitizer.Sanitize(file));
             }
         }
 

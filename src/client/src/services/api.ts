@@ -1,8 +1,10 @@
 import { ProjectLink, ProjectDetailsDto, ContentFileDto, ProjectFolderDto, CreateFolderDto, UpdateFolderDto, FolderTreeDto, MoveFolderDto, MoveFileDto, ProjectNotebook, NotebookTemplateDto, NotebookTemplateSummaryDto, UpdateNotebookDto } from '../types/project';
 import { UsageSummaryDto, UsageDetailsQuery, PagedResultDto, UsageEventDto, UsageBucket, ProjectUsageSummaryDto, UsageBreakdownWithCategoriesDto } from '../types/usage';
 import type { UpdateCurrentUserRequest, UserDto } from '../types/user';
+import type { AuthMeResponse, AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest } from '../types/auth';
 import { getCachedFile, cacheFile } from '../utils/fileCache';
 import { FileLineageEvent } from '../types/fileLineage';
+import type { NotebookChatReadinessDto } from '../types/notebookToolbar';
 import {
     AddModelRequest,
     AddModelResponse,
@@ -34,6 +36,8 @@ import {
 } from '../types/settings';
 
 import { API_BASE_URL } from '../config/apiConfig';
+import { withAuthHeaders } from './authService';
+import { broadcastAuthExpired } from './authEvents';
 
 interface CreateProjectDto {
     title: string;
@@ -60,14 +64,32 @@ export interface CopyNotebookDto {
     sourceConversationMessageId?: string;
 }
 
+export type AdminUserStatusFilter = 'all' | 'pending' | 'active' | 'inactive';
+
+export interface AdminUserSummaryDto {
+    userId: string;
+    name: string;
+    email: string;
+    role: import('../types/user').AppRole;
+    isActive: boolean;
+    mustChangePassword: boolean;
+    approvedByUserId?: string | null;
+    approvedAt?: string | null;
+    lastLoginAt?: string | null;
+    created: string;
+}
+
 async function callApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     try {
+        const headers = withAuthHeaders(options.headers);
+        const isFormDataBody = typeof FormData !== 'undefined' && options.body instanceof FormData;
+        if (!isFormDataBody && !headers.has('Content-Type')) {
+            headers.set('Content-Type', 'application/json');
+        }
+
         const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers,
-            }
+            headers,
         });
 
         if (!response.ok) {
@@ -92,6 +114,9 @@ async function callApi<T>(endpoint: string, options: RequestInit = {}): Promise<
             error.status = response.status;
             if (parsed) error.body = parsed; else error.body = rawText;
             error.code = parsed?.code;
+            if (response.status === 401) {
+                broadcastAuthExpired(message);
+            }
             throw error;
         }
 
@@ -113,6 +138,18 @@ async function callApi<T>(endpoint: string, options: RequestInit = {}): Promise<
         console.error('API call error:', error);
         throw error;
     }
+}
+
+async function fetchWithAuth(input: RequestInfo | URL, options: RequestInit = {}): Promise<Response> {
+    const headers = withAuthHeaders(options.headers);
+    const response = await fetch(input, {
+        ...options,
+        headers,
+    });
+    if (response.status === 401) {
+        broadcastAuthExpired('Authentication expired.');
+    }
+    return response;
 }
 
 /**
@@ -185,7 +222,7 @@ function buildLocalModelsFailureFromResponse(
 async function fetchLocalModelsListOutcome(serviceId: string): Promise<LocalModelsListOutcome> {
     let response: Response;
     try {
-        response = await fetch(
+        response = await fetchWithAuth(
             `${API_BASE_URL}/settings/services/${encodeURIComponent(serviceId)}/local-models`,
             {
                 headers: { 'Content-Type': 'application/json' },
@@ -219,7 +256,7 @@ async function fetchLocalModelsListOutcome(serviceId: string): Promise<LocalMode
 async function fetchRuntimeReadinessOutcome(serviceId: string): Promise<LocalModelsListOutcome> {
     let response: Response;
     try {
-        response = await fetch(
+        response = await fetchWithAuth(
             `${API_BASE_URL}/settings/services/${encodeURIComponent(serviceId)}/runtime-readiness`,
             {
                 headers: { 'Content-Type': 'application/json' },
@@ -298,6 +335,31 @@ export const api = {
             }>;
         }
     },
+    auth: {
+        login: (request: LoginRequest) =>
+            callApi<AuthResponse>('/auth/login', {
+                method: 'POST',
+                body: JSON.stringify({
+                    email: request.email.trim(),
+                    password: request.password,
+                }),
+            }),
+        register: (request: RegisterRequest) =>
+            callApi<AuthResponse>('/auth/register', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: request.name.trim(),
+                    email: request.email.trim(),
+                    password: request.password,
+                }),
+            }),
+        me: () => callApi<AuthMeResponse>('/auth/me'),
+        changePassword: (request: ChangePasswordRequest) =>
+            callApi<void>('/auth/change-password', {
+                method: 'POST',
+                body: JSON.stringify(request),
+            }),
+    },
     test: {
         secure: () => callApi<any>('/test/secure')
     },
@@ -322,9 +384,45 @@ export const api = {
             }),
         getUserById: (userId: string) => callApi<UserDto>(`/users/${userId}`),
     },
+    adminUsers: {
+        list: (options?: { role?: string; status?: AdminUserStatusFilter }) => {
+            const query = new URLSearchParams();
+            if (options?.role) {
+                query.set('role', options.role);
+            }
+            if (options?.status) {
+                query.set('status', options.status);
+            }
+            const suffix = query.toString();
+            return callApi<AdminUserSummaryDto[]>(`/admin/users/${suffix ? `?${suffix}` : ''}`);
+        },
+        approve: (userId: string, role: string) =>
+            callApi<AdminUserSummaryDto>(`/admin/users/${encodeURIComponent(userId)}/approve`, {
+                method: 'POST',
+                body: JSON.stringify({ role }),
+            }),
+        changeRole: (userId: string, role: string) =>
+            callApi<AdminUserSummaryDto>(`/admin/users/${encodeURIComponent(userId)}/role`, {
+                method: 'PUT',
+                body: JSON.stringify({ role }),
+            }),
+        deactivate: (userId: string) =>
+            callApi<AdminUserSummaryDto>(`/admin/users/${encodeURIComponent(userId)}/deactivate`, {
+                method: 'POST',
+            }),
+        reactivate: (userId: string) =>
+            callApi<AdminUserSummaryDto>(`/admin/users/${encodeURIComponent(userId)}/reactivate`, {
+                method: 'POST',
+            }),
+        setPassword: (userId: string, password: string) =>
+            callApi<AdminUserSummaryDto>(`/admin/users/${encodeURIComponent(userId)}/set-password`, {
+                method: 'POST',
+                body: JSON.stringify({ password }),
+            }),
+    },
     utils: {
         getAuthenticatedUrl: async (url: string) => {
-            const response = await fetch(url);
+            const response = await fetchWithAuth(url);
 
             if (!response.ok) {
                 const fetchError: any = new Error(`Failed to fetch: ${response.statusText}`);
@@ -396,7 +494,7 @@ export const api = {
                     formData.append('folderId', folderId);
                 }
 
-                const response = await fetch(`${API_BASE_URL}/projects/${projectId}/files`, {
+                const response = await fetchWithAuth(`${API_BASE_URL}/projects/${projectId}/files`, {
                     method: 'POST',
                     body: formData
                 });
@@ -475,7 +573,7 @@ export const api = {
             
             console.log('[TELEMETRY] Fetching URL', { fileIdKey, url });
             
-            const response = await fetch(url);
+            const response = await fetchWithAuth(url);
 
             console.log('[TELEMETRY] Network response received', { 
                 fileIdKey,
@@ -633,7 +731,7 @@ export const api = {
                 ? `/projects/${projectId}/files/${fileId}/versions/${version}/markdown/content`
                 : `/projects/${projectId}/files/${fileId}/markdown/content`;
                 
-            const response = await fetch(`${API_BASE_URL}${endpoint}`);
+            const response = await fetchWithAuth(`${API_BASE_URL}${endpoint}`);
 
             if (!response.ok) {
                 throw new Error('Failed to fetch markdown content');
@@ -781,7 +879,48 @@ export const api = {
                 }),
             
             delete: (projectId: string, providerId: string) =>
-                callApi<void>(`/projects/${projectId}/external-auth/${encodeURIComponent(providerId)}`, { method: 'DELETE' })
+                callApi<void>(`/projects/${projectId}/external-auth/${encodeURIComponent(providerId)}`, { method: 'DELETE' }),
+
+            oauth: {
+                authorizeUrl: (
+                    projectId: string,
+                    providerId: string,
+                    data: {
+                        clientId: string;
+                        tenant: string;
+                        scopes: string[];
+                        redirectUri: string;
+                        returnUrl?: string;
+                    }
+                ) =>
+                    callApi<{
+                        authorizeUrl: string;
+                        state: string;
+                        expiresAt: string;
+                    }>(`/projects/${projectId}/external-auth/${encodeURIComponent(providerId)}/oauth/authorize-url`, {
+                        method: 'POST',
+                        body: JSON.stringify(data),
+                    }),
+                callback: (projectId: string, providerId: string, data: { code: string; state: string }) =>
+                    callApi<{
+                        connected: boolean;
+                        expiresAt: string | null;
+                        scopes: string[];
+                    }>(`/projects/${projectId}/external-auth/${encodeURIComponent(providerId)}/oauth/callback`, {
+                        method: 'POST',
+                        body: JSON.stringify(data),
+                    }),
+                status: (projectId: string, providerId: string) =>
+                    callApi<{
+                        connected: boolean;
+                        expiresAt: string | null;
+                        scopes: string[];
+                    }>(`/projects/${projectId}/external-auth/${encodeURIComponent(providerId)}/oauth/status`),
+                disconnect: (projectId: string, providerId: string) =>
+                    callApi<void>(`/projects/${projectId}/external-auth/${encodeURIComponent(providerId)}/oauth`, {
+                        method: 'DELETE',
+                    }),
+            },
         },
 
         notebooks: {
@@ -797,7 +936,7 @@ export const api = {
                 formData.append('targetRelativePath', targetRelativePath);
                 formData.append('index', index.toString());
 
-                const response = await fetch(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/files/upload`, {
+                const response = await fetchWithAuth(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/files/upload`, {
                     method: 'POST',
                     body: formData
                 });
@@ -921,23 +1060,15 @@ export const api = {
                     onEvent: (event: { type: string; data: any }) => void,
                     onError: (error: Error) => void,
                     onComplete: () => void,
-                    abortSignal?: AbortSignal,
-                    oauthTokens?: Record<string, string>
+                    abortSignal?: AbortSignal
                 ) => {
-                    const requestData = {
-                        ...data,
-                        ...(oauthTokens && Object.keys(oauthTokens).length > 0 && {
-                            externalAuthTokens: oauthTokens
-                        })
-                    };
-
-                    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/messages`, {
+                    const response = await fetchWithAuth(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/conversations/${convoId}/messages`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                             'Accept': 'text/event-stream',
                         },
-                        body: JSON.stringify(requestData),
+                        body: JSON.stringify(data),
                         signal: abortSignal,
                     });
 
@@ -1066,7 +1197,7 @@ export const api = {
         getEvent: (eventId: string) => callApi<FileLineageEvent>(`/lineage/${eventId}`),
 
         download: async (eventId: string) => {
-            const response = await fetch(`${API_BASE_URL}/lineage/${eventId}/download`);
+            const response = await fetchWithAuth(`${API_BASE_URL}/lineage/${eventId}/download`);
 
             if (!response.ok) {
                 throw new Error('Failed to download lineage file');
@@ -1434,7 +1565,7 @@ export const api = {
             duplicate: (guideId: string) => callApi<any>(`/guides/${guideId}/duplicate`, { method: 'POST' }),
             validateRuntime: (dto: any) => callApi<any>(`/guides/runtime/validate`, { method: 'POST', body: JSON.stringify(dto) }),
             export: async (guideId: string): Promise<Blob> => {
-                const response = await fetch(`${API_BASE_URL}/guides/${guideId}/export`);
+                const response = await fetchWithAuth(`${API_BASE_URL}/guides/${guideId}/export`);
                 if (!response.ok) {
                     throw new Error('Export failed');
                 }
@@ -1443,7 +1574,7 @@ export const api = {
             import: async (file: File): Promise<any> => {
                 const formData = new FormData();
                 formData.append('file', file);
-                const response = await fetch(`${API_BASE_URL}/guides/import`, {
+                const response = await fetchWithAuth(`${API_BASE_URL}/guides/import`, {
                     method: 'POST',
                     body: formData,
                 });
@@ -1508,7 +1639,7 @@ export const api = {
             delete: (assistantId: string) => callApi<void>(`/assistants/${assistantId}`, { method: 'DELETE' }),
             duplicate: (assistantId: string) => callApi<any>(`/assistants/${assistantId}/duplicate`, { method: 'POST' }),
             export: async (assistantId: string): Promise<Blob> => {
-                const response = await fetch(`${API_BASE_URL}/assistants/${assistantId}/export`);
+                const response = await fetchWithAuth(`${API_BASE_URL}/assistants/${assistantId}/export`);
                 if (!response.ok) {
                     throw new Error('Export failed');
                 }
@@ -1517,7 +1648,7 @@ export const api = {
             import: async (file: File): Promise<any> => {
                 const formData = new FormData();
                 formData.append('file', file);
-                const response = await fetch(`${API_BASE_URL}/assistants/import`, {
+                const response = await fetchWithAuth(`${API_BASE_URL}/assistants/import`, {
                     method: 'POST',
                     body: formData,
                 });
@@ -1534,7 +1665,7 @@ export const api = {
                 ),
 
             getFileMarkdownContent: async (assistantId: string, fileId: string) => {
-                const response = await fetch(
+                const response = await fetchWithAuth(
                     `${API_BASE_URL}/assistants/${assistantId}/files/${fileId}/markdown/content`
                 );
 
@@ -1579,6 +1710,14 @@ export const api = {
         headerToolbar: (notebookId: string, conversationId?: string) => {
             const q = conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : '';
             return callApi<import('../types/notebookToolbar').NotebookHeaderToolbarDto>(`/notebooks/${notebookId}/header-toolbar${q}`);
+        },
+        chatReadiness: (notebookId: string, conversationId?: string) => {
+            const query = new URLSearchParams();
+            if (conversationId) {
+                query.set('conversationId', conversationId);
+            }
+            const suffix = query.toString();
+            return callApi<NotebookChatReadinessDto>(`/notebooks/${notebookId}/header-toolbar/chat-readiness${suffix ? `?${suffix}` : ''}`);
         },
     },
     conversations: {

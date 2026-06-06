@@ -46,10 +46,10 @@ internal static class HuggingFaceBrowseHandler
         {
             logger.LogInformation(
                 "HfBrowseByService: serviceId={ServiceId} repository={Owner}/{Repo} failed code={Code} status={Status}",
-                serviceOrigin,
-                owner,
-                repo,
-                ex.Code,
+                LogValueSanitizer.Sanitize(serviceOrigin),
+                LogValueSanitizer.Sanitize(owner),
+                LogValueSanitizer.Sanitize(repo),
+                LogValueSanitizer.Sanitize(ex.Code),
                 (int)ex.StatusCode);
 
             return Results.Json(

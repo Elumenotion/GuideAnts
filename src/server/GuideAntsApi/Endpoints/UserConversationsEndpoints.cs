@@ -9,7 +9,8 @@ public static class UserConversationsEndpoints
     public static void MapUserConversationsEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/conversations")
-            .WithTags("UserConversations");
+            .WithTags("UserConversations")
+            .RequireAuthorization("RequireApprovedUser");
 
         // Get user conversations across all projects with pagination, search, and sorting
         group.MapGet("/", async (

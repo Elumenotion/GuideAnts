@@ -9,6 +9,7 @@ public static class ProjectEndpoints
     {
         var group = app.MapGroup("/api/projects")
             .WithTags("Projects")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         // Create a new project
@@ -18,6 +19,7 @@ public static class ProjectEndpoints
             return Results.Created($"/api/projects/{project.Id}", project);
         })
         .WithName("CreateProject")
+        .RequireAuthorization("RequireContributor")
         .Produces<ProjectDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status401Unauthorized);
 
@@ -69,6 +71,7 @@ public static class ProjectEndpoints
             return Results.Ok(project);
         })
         .WithName("UpdateProject")
+        .RequireAuthorization("RequireContributor")
         .Produces<ProjectDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -83,6 +86,7 @@ public static class ProjectEndpoints
             return Results.NoContent();
         })
         .WithName("DeleteProject")
+        .RequireAuthorization("RequireAdmin")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -94,6 +98,7 @@ public static class ProjectEndpoints
             return ok ? Results.NoContent() : Results.NotFound();
         })
         .WithName("SetProjectHomePage")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -105,6 +110,7 @@ public static class ProjectEndpoints
             return ok ? Results.NoContent() : Results.NotFound();
         })
         .WithName("ClearProjectHomePage")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -134,6 +140,7 @@ public static class ProjectEndpoints
             }
         })
         .WithName("CopyProject")
+        .RequireAuthorization("RequireContributor")
         .Produces<ProjectDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);

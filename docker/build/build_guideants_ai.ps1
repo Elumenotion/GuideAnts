@@ -170,11 +170,16 @@ $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $dockerRoot = Split-Path $PSScriptRoot -Parent
 $serverPath = Join-Path $repoRoot 'src\server'
 $buildContext = Join-Path $PSScriptRoot 'guideants-ai'
+$buildStateDir = Join-Path $dockerRoot '.build-state'
 $depsCachePath = Join-Path $dockerRoot '.buildx-cache-deps'
 $finalCachePath = Join-Path $dockerRoot '.buildx-cache-final'
 $depsCachePathNew = "$depsCachePath-new"
 $finalCachePathNew = "$finalCachePath-new"
 $supportsCacheExport = Test-BuildxCacheExportSupport
+
+if (-not (Test-Path $buildStateDir)) {
+    New-Item -ItemType Directory -Path $buildStateDir | Out-Null
+}
 
 foreach ($cachePath in @($depsCachePath, $finalCachePath)) {
     if (-not (Test-Path $cachePath)) {
@@ -279,8 +284,8 @@ if (-not (Test-Path $scriptAgentProject)) {
     exit 1
 }
 
-$publishOutput = Join-Path $scriptAgentProject 'publish'
-$scriptAgentHashFile = Join-Path $publishOutput '.source-hash'
+$publishOutput = Join-Path $buildStateDir 'scriptexecutionagent-guideants-ai-publish'
+$scriptAgentHashFile = Join-Path $buildStateDir 'scriptexecutionagent-guideants-ai.hash'
 $scriptAgentSourceFiles = Get-ChildItem -Path $scriptAgentProject -Recurse -File |
     Where-Object {
         $_.FullName -notlike "*\bin\*" -and
@@ -310,7 +315,7 @@ else {
     Push-Location $scriptAgentProject
     try {
         dotnet restore
-        dotnet publish -c Release -o ./publish
+        dotnet publish -c Release -o $publishOutput
         Set-Content -Path $scriptAgentHashFile -Value $scriptAgentSourceHash -Encoding UTF8
         Write-Host "ScriptExecutionAgent built successfully." -ForegroundColor Green
     }

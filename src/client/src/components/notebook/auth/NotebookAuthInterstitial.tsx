@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { NotebookAuthProviderDto, NotebookTemplateDto } from '../../../types/project';
 import { useToast } from '../../common/Toast';
 import { resolveAgainstApiBase } from '../../../config/apiConfig';
+import { api } from '../../../services/api';
+import { beginOAuthConnection } from '../../../utils/notebookAuth';
 
 interface NotebookAuthInterstitialProps {
     projectId: string;
@@ -30,43 +32,45 @@ export function NotebookAuthInterstitial({
     const [providerStates, setProviderStates] = useState<ProviderAuthState[]>([]);
     const [authenticating, setAuthenticating] = useState(false);
 
-    // Check token status for all OAuth providers
+    // Check server-side OAuth connection status for all providers
     useEffect(() => {
-        const checkTokens = () => {
+        let cancelled = false;
+
+        const checkStatuses = async () => {
             const providers = template.authProviders || [];
-            const states: ProviderAuthState[] = [];
+            const oauthProviders = providers.filter(provider =>
+                provider.authType.toString().toLowerCase() === 'oauth');
 
-            providers.forEach(provider => {
-                const policy = (provider.userConfigPolicy as unknown as string)?.toString().toLowerCase();
-                const isRequired = policy === 'required';
-                
-                // Check all OAuth providers regardless of policy
-                if (provider.authType.toString().toLowerCase() === 'oauth') {
-                    const tokenKey = `oauth_tokens_${projectId}_${provider.id}`;
-                    const tokenData = localStorage.getItem(tokenKey);
+            const states: ProviderAuthState[] = await Promise.all(
+                oauthProviders.map(async provider => {
+                    const policy = (provider.userConfigPolicy as unknown as string)?.toString().toLowerCase();
+                    const isRequired = policy === 'required';
+
                     let isConnected = false;
-
-                    if (tokenData) {
-                        try {
-                            const parsed = JSON.parse(tokenData);
-                            isConnected = Date.now() < parsed.expiresAt;
-                        } catch {
-                            // Invalid token data
-                        }
+                    try {
+                        const status = await api.projects.externalAuth.oauth.status(projectId, provider.id);
+                        isConnected = status.connected;
+                    } catch {
+                        isConnected = false;
                     }
 
-                    states.push({
+                    return {
                         provider,
                         isConnected,
                         isRequired
-                    });
-                }
-            });
+                    };
+                })
+            );
 
-            setProviderStates(states);
+            if (!cancelled) {
+                setProviderStates(states);
+            }
         };
 
-        checkTokens();
+        checkStatuses();
+        return () => {
+            cancelled = true;
+        };
     }, [template, projectId]);
 
     // Check if we need to show the interstitial (any OAuth provider missing tokens)
@@ -86,57 +90,11 @@ export function NotebookAuthInterstitial({
         
         try {
             const provider = providerState.provider;
-            const effectiveClientId = provider.clientId;
-            const effectiveTenant = provider.tenant;
-            const scopes = provider.scopes || [];
-
-            if (!effectiveClientId || !effectiveTenant) {
-                showToast({
-                    type: 'error',
-                    title: 'Configuration Error',
-                    message: 'OAuth configuration is incomplete. Please contact your project administrator.'
-                });
-                return;
-            }
-
-            // Generate PKCE parameters
-            const codeVerifier = generateCodeVerifier();
-            const codeChallenge = await generateCodeChallenge(codeVerifier);
-            const state = crypto.randomUUID();
-            
-            // Store PKCE params in localStorage (persists across redirects)
-            const pkceKey = `oauth_pkce_${projectId}_${provider.id}`;
-            
-            localStorage.setItem(pkceKey, JSON.stringify({
-                codeVerifier,
-                state,
-                providerId: provider.id,
+            await beginOAuthConnection(
                 projectId,
-                clientId: effectiveClientId,
-                tenant: effectiveTenant,
-                scopes: scopes.join(' '),
-                returnUrl: `/projects/${projectId}/notebooks/${notebookId}`
-            }));
-
-            // Build authorization URL
-            const authUrl = new URL(`https://login.microsoftonline.com/${effectiveTenant}/oauth2/v2.0/authorize`);
-            authUrl.searchParams.set('client_id', effectiveClientId);
-            authUrl.searchParams.set('response_type', 'code');
-            // Use same redirect URI logic as MSAL config
-            let redirectUri = window.location.origin;
-            if (window.location.origin.includes('localhost:3000')) {
-                redirectUri = `${window.location.origin}/redirect`;
-            } else {
-                redirectUri = `${window.location.origin}/oauth/callback`;
-            }
-            authUrl.searchParams.set('redirect_uri', redirectUri);
-            authUrl.searchParams.set('scope', scopes.join(' '));
-            authUrl.searchParams.set('state', state);
-            authUrl.searchParams.set('code_challenge', codeChallenge);
-            authUrl.searchParams.set('code_challenge_method', 'S256');
-
-            // Redirect to OAuth flow
-            window.location.href = authUrl.toString();
+                provider,
+                `/projects/${projectId}/notebooks/${notebookId}`
+            );
             
         } catch (error) {
             console.error('OAuth initiation failed:', error);
@@ -147,26 +105,6 @@ export function NotebookAuthInterstitial({
             });
             setAuthenticating(false);
         }
-    };
-
-    // PKCE helper functions (same as ProjectGuideAuthContent)
-    const generateCodeVerifier = (): string => {
-        const array = new Uint8Array(32);
-        crypto.getRandomValues(array);
-        return btoa(String.fromCharCode.apply(null, Array.from(array)))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
-    };
-
-    const generateCodeChallenge = async (verifier: string): Promise<string> => {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(verifier);
-        const digest = await crypto.subtle.digest('SHA-256', data);
-        return btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(digest))))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
     };
 
     const getProviderDisplayName = (providerId: string) => {
