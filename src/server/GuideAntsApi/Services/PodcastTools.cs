@@ -132,7 +132,7 @@ public class NotebookPodcastService : INotebookPodcastService
 
             if (synthResult.Success)
             {
-                _logger?.LogInformation("Podcast saved to: {FilePath}", filePath);
+                _logger?.LogInformation("Podcast saved to: {FilePath}", LogValueSanitizer.Sanitize(filePath));
                 stdOutBuffer.AppendLine($"Podcast generated successfully: {filename}");
 
                 // Calculate relative path for the generated file
@@ -244,11 +244,11 @@ public class NotebookPodcastService : INotebookPodcastService
         // Emit final buffers to logs (truncated to 4k chars)
         if (!string.IsNullOrWhiteSpace(cleanedOutput))
         {
-            _logger?.LogInformation("Final StdOut (truncated): {Out}", cleanedOutput.Length > 4096 ? cleanedOutput.Substring(0, 4096) + "…" : cleanedOutput);
+            _logger?.LogInformation("Final StdOut (truncated): {Out}", LogValueSanitizer.Sanitize(cleanedOutput.Length > 4096 ? cleanedOutput.Substring(0, 4096) + "…" : cleanedOutput));
         }
         if (!string.IsNullOrWhiteSpace(cleanedError))
         {
-            _logger?.LogWarning("Final StdErr (truncated): {Err}", cleanedError.Length > 4096 ? cleanedError.Substring(0, 4096) + "…" : cleanedError);
+            _logger?.LogWarning("Final StdErr (truncated): {Err}", LogValueSanitizer.Sanitize(cleanedError.Length > 4096 ? cleanedError.Substring(0, 4096) + "…" : cleanedError));
         }
 
         return podcastGenerationResult;

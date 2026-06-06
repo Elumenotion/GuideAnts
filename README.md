@@ -56,9 +56,21 @@ Useful options:
 - `--backend cpu|cuda13|rocm|slim` forces the AI/runtime stack. Use `slim` when you need the Python sandbox but plan to use cloud/provider AI instead of local model runtimes.
 - `--compose ghcr|local` chooses prebuilt GHCR stack or local-image stack.
 
-## Pre-release Security And Exposure (June 2026)
+## New: First-Party Authentication And Authorization (June 2026)
 
-GuideAnts is currently in an active hardening phase ahead of release. Authentication, user management, and additional cross-network security controls are being implemented now.
+GuideAnts now ships first-party app authentication and role-based API authorization.
+
+- App-issued JWT bearer auth (`/api/auth/register`, `/api/auth/login`, `/api/auth/me`).
+- Bootstrap-admin flow on fresh installs: first registrant becomes `Admin`; later users are `Pending` until approved.
+- Admin user management endpoints and UI (`Settings -> Users`) for approve/role/deactivate/set-password actions.
+- Role-gated app/API access (`Pending`, `Reader`, `Contributor`, `Admin`) with server-enforced policies.
+- Tool OAuth tokens moved server-side and encrypted at rest (no client `localStorage` token persistence).
+
+For the full flow and bootstrap procedure, see [`docs/auth-flow.md`](docs/auth-flow.md).
+
+## Security And Exposure Status (June 2026)
+
+GuideAnts now includes first-party auth and user/role management, and hardening work continues for cross-network exposure.
 
 Current guidance:
 
@@ -193,7 +205,9 @@ The current operator/developer setup is centered on Docker Compose. The stack de
 
 ### Auth And User Management Status
 
-Auth and user management are in active development as part of release hardening. Additional guidance and defaults for safe cross-network and web deployments will be added as those features land.
+Auth and user management are implemented with app-issued JWTs and role-based authorization. On a fresh install, the first registered account is automatically `Admin`; additional accounts are created as `Pending` until approved by an admin user.
+
+See [`docs/auth-flow.md`](docs/auth-flow.md) for the bootstrap-admin and role/route behavior details.
 
 Set `GA_DOCUMENTSERVER_IMAGE` to whichever compatible DocumentServer image you want the compose stacks to run. The checked-in `docker/.env` sets `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest`; override that value with any compatible image when needed.
 
@@ -213,6 +227,8 @@ To enable DocumentServer JWT, set:
 - API config: `DocumentServer:JwtEnabled=true` and `DocumentServer:JwtSecret=<same secret>`
 
 The `guideants-ai` container is especially important. Full local AI variants are the runtime surface behind llama.cpp, embeddings, speech transcription, speech synthesis, image generation, media extraction, and script execution. The `guideants-ai slim` variant is different: it is the sandbox-oriented AI image for Python script execution when model calls are routed to cloud/provider services. This is separate from `guideants-webapi-ui-slim`, which remains the API/UI image used by split-stack deployments. The Settings UI and API route each AI capability to the correct local or cloud backend rather than treating “the model” as one global switch.
+
+For sandbox hardening, API-to-agent calls now require a shared token (`ScriptExecution__AgentToken` in API, `SCRIPT_EXECUTION_AGENT_TOKEN` in `guideants-ai`) and every script request is notebook-scoped (`ProjectId` + `NotebookId`) with canonical path and reparse-point checks inside the agent.
 
 ## Big Thanks To Upstream Projects
 
@@ -248,12 +264,13 @@ GuideAnts is built on top of excellent open source work. Huge thanks to the team
 If you are new to the repo, these are the best first reads:
 
 1. **[`docs/developer-config-guide.md`](docs/developer-config-guide.md) — start here if you are setting up a dev machine.** It has the full install checklist (Docker, PowerShell Core, Node, .NET, optional GPU drivers) with cross-platform install links, plus per-lane pre-requisites for client, server, and docker work.
-2. [`docs/setup-guide.md`](docs/setup-guide.md) for the end-to-end local stack and Settings workflow.
-3. [`docs/settings-page-provider-model-llama-redesign.md`](docs/settings-page-provider-model-llama-redesign.md) for current Settings architecture and extension seams.
-4. [`docs/settings-and-llama-completion-requirements.md`](docs/settings-and-llama-completion-requirements.md) and [`docs/settings-service-provider-model-requirements.md`](docs/settings-service-provider-model-requirements.md) for normative requirements.
-5. [`docs/default-chat-models.md`](docs/default-chat-models.md), [`docs/llama-model-download-and-runtime-management.md`](docs/llama-model-download-and-runtime-management.md), and [`docs/add-ai-services-wizard.md`](docs/add-ai-services-wizard.md) for focused deep dives.
-6. [`docs/project-and-notebook-files-system.md`](docs/project-and-notebook-files-system.md) for the core project/notebook/file model.
-7. [`docker/guideants-ai-build.md`](docker/guideants-ai-build.md) and [`docker/build-processes.md`](docker/build-processes.md) for building the local images this repo expects.
+2. [`docs/setup-guide.md`](docs/setup-guide.md) for the end-to-end local stack, first-user bootstrap, and Settings workflow.
+3. [`docs/auth-flow.md`](docs/auth-flow.md) for auth lifecycle, role model, and admin approval flow.
+4. [`docs/settings-page-provider-model-llama-redesign.md`](docs/settings-page-provider-model-llama-redesign.md) for current Settings architecture and extension seams.
+5. [`docs/settings-and-llama-completion-requirements.md`](docs/settings-and-llama-completion-requirements.md) and [`docs/settings-service-provider-model-requirements.md`](docs/settings-service-provider-model-requirements.md) for normative requirements.
+6. [`docs/default-chat-models.md`](docs/default-chat-models.md), [`docs/llama-model-download-and-runtime-management.md`](docs/llama-model-download-and-runtime-management.md), and [`docs/add-ai-services-wizard.md`](docs/add-ai-services-wizard.md) for focused deep dives.
+7. [`docs/project-and-notebook-files-system.md`](docs/project-and-notebook-files-system.md) for the core project/notebook/file model.
+8. [`docker/guideants-ai-build.md`](docker/guideants-ai-build.md) and [`docker/build-processes.md`](docker/build-processes.md) for building the local images this repo expects.
 
 ## Development Entry Points
 

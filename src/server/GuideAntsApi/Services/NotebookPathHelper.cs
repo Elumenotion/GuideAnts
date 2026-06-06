@@ -31,7 +31,7 @@ internal static class NotebookPathHelper
     {
         var resolver = TryGetResolver();
         var basePath = resolver != null
-            ? resolver.GetContainerNotebookRootPath(context.ProjectId, context.NotebookId)
+            ? EnsureMetadataThenGetContainerNotebookRootPath(resolver, context.ProjectId, context.NotebookId)
             : $"/app/ContentFiles/{context.ProjectId}/notebooks/{context.NotebookId}";
         var relativeFolder = GetRelativeRunFolder(context);
         return $"{basePath}/{relativeFolder}";
@@ -81,5 +81,11 @@ internal static class NotebookPathHelper
         }
         
         return new string(chars);
+    }
+
+    private static string EnsureMetadataThenGetContainerNotebookRootPath(IStoragePathResolver resolver, Guid projectId, Guid notebookId)
+    {
+        _ = resolver.GetNotebookRootPath(projectId, notebookId);
+        return resolver.GetContainerNotebookRootPath(projectId, notebookId);
     }
 }

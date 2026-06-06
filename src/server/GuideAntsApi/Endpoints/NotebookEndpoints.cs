@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
 using Microsoft.AspNetCore.Mvc;
@@ -68,6 +67,7 @@ public static class NotebookEndpoints
     {
         var group = app.MapGroup("/api/projects/{projectId}/notebooks")
             .WithTags("Notebooks")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         // Create a new notebook
@@ -77,6 +77,7 @@ public static class NotebookEndpoints
             return Results.Created($"/api/projects/{projectId}/notebooks/{notebook.Id}", notebook);
         })
         .WithName("CreateNotebook")
+        .RequireAuthorization("RequireContributor")
         .Produces<NotebookDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status402PaymentRequired)
@@ -92,6 +93,7 @@ public static class NotebookEndpoints
             return Results.Ok(notebook);
         })
         .WithName("UpdateNotebook")
+        .RequireAuthorization("RequireContributor")
         .Produces<NotebookDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -106,6 +108,7 @@ public static class NotebookEndpoints
             return Results.NoContent();
         })
         .WithName("DeleteNotebook")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -141,6 +144,7 @@ public static class NotebookEndpoints
             return ok ? Results.NoContent() : Results.NotFound();
         })
         .WithName("SetNotebookHomePageFile")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -152,6 +156,7 @@ public static class NotebookEndpoints
             return ok ? Results.NoContent() : Results.NotFound();
         })
         .WithName("ClearNotebookHomePage")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -162,14 +167,15 @@ public static class NotebookEndpoints
             return Results.Created($"/api/projects/{projectId}/notebooks/{nb.Id}", nb);
         })
         .WithName("CopyNotebook")
+        .RequireAuthorization("RequireContributor")
         .Produces<NotebookDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status401Unauthorized);
 
         // --- Notebook Files (Snapshots) ---
-        var fileGroup = group.MapGroup("/{notebookId}/files");
+        var fileGroup = group.MapGroup("/{notebookId}/files")
+            .RequireAuthorization("RequireApprovedUser");
 
         fileGroup.MapGet("/", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             INotebookFileService fsService) =>
@@ -182,7 +188,6 @@ public static class NotebookEndpoints
         .Produces(StatusCodes.Status401Unauthorized);
 
         fileGroup.MapGet("/tree", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             INotebookFileService fsService) =>
@@ -195,7 +200,6 @@ public static class NotebookEndpoints
         .Produces(StatusCodes.Status401Unauthorized);
 
         fileGroup.MapPost("/sync", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             INotebookFileSyncService syncService,
@@ -208,6 +212,7 @@ await jobQueue.EnqueueAsync(
             return Results.NoContent();
         })
         .WithName("SyncNotebookFiles")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status401Unauthorized);
 
@@ -233,7 +238,6 @@ try
         .Produces(StatusCodes.Status404NotFound);
 
         fileGroup.MapPost("/copy-from-project", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             CopyFileIntoNotebookDto dto,
@@ -249,12 +253,12 @@ try
             catch (ArgumentException ex) { return Results.NotFound(new { message = ex.Message }); }
         })
         .WithName("CopyFileFromProject")
+        .RequireAuthorization("RequireContributor")
         .Produces<NotebookFileDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         fileGroup.MapPost("/upload", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             [FromForm] IFormFileCollection files,
@@ -280,6 +284,7 @@ try
             }
         })
         .WithName("UploadNotebookFiles")
+        .RequireAuthorization("RequireContributor")
         .DisableAntiforgery()
         .Produces<IEnumerable<NotebookFileDto>>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
@@ -290,7 +295,6 @@ try
 
 
         fileGroup.MapPost("/create-folder", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             NotebookCreateFolderDto dto,
@@ -306,6 +310,7 @@ try
             catch (ArgumentException ex) { return Results.NotFound(new { message = ex.Message }); }
         })
         .WithName("CreateNotebookFolder")
+        .RequireAuthorization("RequireContributor")
         .Produces<NotebookFolderTreeDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound)
@@ -313,7 +318,6 @@ try
 
         // By-ID file operations (no tree lookup required on client)
         fileGroup.MapDelete("/{fileId:guid}", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             Guid fileId,
@@ -340,13 +344,13 @@ try
             catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
         })
         .WithName("DeleteNotebookFileById")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status409Conflict);
 
         fileGroup.MapPatch("/{fileId:guid}/rename", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             Guid fileId,
@@ -362,12 +366,12 @@ try
             catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
         })
         .WithName("RenameNotebookFileById")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         fileGroup.MapPatch("/{fileId:guid}/move", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             Guid fileId,
@@ -383,12 +387,12 @@ try
             catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
         })
         .WithName("MoveNotebookFileById")
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         fileGroup.MapGet("/origin-info", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             [FromQuery] Guid contentFileVersionId,
@@ -408,7 +412,6 @@ try
         .Produces(StatusCodes.Status404NotFound);
 
         fileGroup.MapPost("/publish-to-project", async (
-            ClaimsPrincipal user,
             Guid projectId,
             Guid notebookId,
             PublishNotebookFileDto dto,
@@ -434,6 +437,7 @@ try
             catch (FileNotFoundException ex) { return Results.NotFound(new { message = ex.Message }); }
         })
         .WithName("PublishNotebookFileToProject")
+        .RequireAuthorization("RequireContributor")
         .Produces<PublishNotebookFileResultDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
@@ -450,6 +454,7 @@ var result = await notebookService.CreateNotebookFromFileAsync(projectId, dto);
             return Results.Created($"/api/projects/{projectId}/notebooks/{result.NotebookId}", result);
         })
         .WithName("CreateNotebookFromFile")
+        .RequireAuthorization("RequireContributor")
         .Produces<CreateNotebookFromFileResultDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized);
@@ -457,6 +462,7 @@ var result = await notebookService.CreateNotebookFromFileAsync(projectId, dto);
         // --- Notebook Templates ---
         var templatesGroup = app.MapGroup("/api/notebook-templates")
             .WithTags("Notebooks") // Keep it tagged with Notebooks
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         templatesGroup.MapGet("/", async (
@@ -559,6 +565,7 @@ var result = await notebookService.CreateNotebookFromFileAsync(projectId, dto);
             return Results.Ok(Array.Empty<string>());
         })
         .WithName("GetAssistantConversationStarters")
+        .RequireAuthorization("RequireApprovedUser")
         .Produces<List<string>>(StatusCodes.Status200OK);
     }
 } 

@@ -222,7 +222,7 @@ public class GuidesService(
             }
             catch (JsonException ex)
             {
-                _logger.LogError(ex, "Failed to parse AuthConfigJson for guide {GuideName}", guide.Name);
+                _logger.LogError(ex, "Failed to parse AuthConfigJson for guide {GuideName}", LogValueSanitizer.Sanitize(guide.Name));
             }
         }
 
@@ -348,12 +348,12 @@ public class GuidesService(
             {
                 await _markdownExtractionService.CreateAssistantFileMarkdownShadowAsync(file.Id);
                 _logger.LogInformation("Created markdown shadow for AssistantFile {AssistantFileId} ({RelativePath})", 
-                    file.Id, file.RelativePath);
+                    file.Id, LogValueSanitizer.Sanitize(file.RelativePath));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to create markdown shadow for AssistantFile {AssistantFileId} ({RelativePath})", 
-                    file.Id, file.RelativePath);
+                    file.Id, LogValueSanitizer.Sanitize(file.RelativePath));
                 // Don't fail the creation - extraction will be retried
             }
         }
@@ -686,12 +686,12 @@ public class GuidesService(
             {
                 await _markdownExtractionService.CreateAssistantFileMarkdownShadowAsync(file.Id);
                 _logger.LogInformation("Created markdown shadow for AssistantFile {AssistantFileId} ({RelativePath})", 
-                    file.Id, file.RelativePath);
+                    file.Id, LogValueSanitizer.Sanitize(file.RelativePath));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to create markdown shadow for AssistantFile {AssistantFileId} ({RelativePath})", 
-                    file.Id, file.RelativePath);
+                    file.Id, LogValueSanitizer.Sanitize(file.RelativePath));
                 // Don't fail the creation - extraction will be retried
             }
         }
@@ -1389,7 +1389,7 @@ public class GuidesService(
                         "Failed to parse OpenAPI operations for assistant {AssistantId} schema {SchemaId} custom tool {ToolName}",
                         assistant.Id,
                         schema.Id,
-                        customTool.Name);
+                        LogValueSanitizer.Sanitize(customTool.Name));
                     throw;
                 }
                 foreach (var operation in operations)
@@ -1438,7 +1438,7 @@ public class GuidesService(
                 // Validate file data
                 if (fileDto.ContentBytes == null || fileDto.ContentBytes.Length == 0)
                 {
-                    _logger.LogWarning("Skipping file upload with empty content: {RelativePath}", fileDto.RelativePath);
+                    _logger.LogWarning("Skipping file upload with empty content: {RelativePath}", LogValueSanitizer.Sanitize(fileDto.RelativePath));
                     continue;
                 }
 
@@ -1463,11 +1463,11 @@ public class GuidesService(
                     });
                     
                     _logger.LogInformation("Added file to create queue: {RelativePath} ({Size} bytes, FolderKind: {FolderKind})", 
-                        fileDto.RelativePath, fileDto.ContentBytes.Length, fileDto.FolderKind);
+                        LogValueSanitizer.Sanitize(fileDto.RelativePath), fileDto.ContentBytes.Length, LogValueSanitizer.Sanitize(fileDto.FolderKind));
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to add file to create queue: {RelativePath}", fileDto.RelativePath);
+                    _logger.LogError(ex, "Failed to add file to create queue: {RelativePath}", LogValueSanitizer.Sanitize(fileDto.RelativePath));
                     throw new InvalidOperationException($"Failed to upload file '{fileDto.RelativePath}': {ex.Message}", ex);
                 }
             }
@@ -1673,8 +1673,8 @@ public class GuidesService(
                         {
                             _logger.LogWarning(
                                 "Could not find existing secret for masked ValueTemplate. Schema: {SchemaName}, ApiHost: {ApiHost}. Auth will be cleared.",
-                                customTool.Name,
-                                customTool.ApiHost
+                                LogValueSanitizer.Sanitize(customTool.Name),
+                                LogValueSanitizer.Sanitize(customTool.ApiHost)
                             );
                             valueTemplate = null;
                         }
@@ -1685,8 +1685,8 @@ public class GuidesService(
                     {
                         _logger.LogError(
                             "Attempted to save masked value to database. Schema: {SchemaName}, ApiHost: {ApiHost}. Setting to null.",
-                            customTool.Name,
-                            customTool.ApiHost
+                            LogValueSanitizer.Sanitize(customTool.Name),
+                            LogValueSanitizer.Sanitize(customTool.ApiHost)
                         );
                         valueTemplate = null;
                     }
@@ -1748,7 +1748,7 @@ public class GuidesService(
                         "Failed to parse OpenAPI operations for assistant {AssistantId} schema {SchemaId} custom tool {ToolName}",
                         assistantId,
                         schema.Id,
-                        customTool.Name);
+                        LogValueSanitizer.Sanitize(customTool.Name));
                     throw;
                 }
                 foreach (var operation in operations)
@@ -1824,7 +1824,7 @@ public class GuidesService(
                     // Validate file data
                     if (fileDto.ContentBytes == null || fileDto.ContentBytes.Length == 0)
                     {
-                        _logger.LogWarning("Skipping file upload with empty content: {RelativePath}", fileDto.RelativePath);
+                        _logger.LogWarning("Skipping file upload with empty content: {RelativePath}", LogValueSanitizer.Sanitize(fileDto.RelativePath));
                         continue;
                     }
 
@@ -1850,11 +1850,11 @@ public class GuidesService(
                         newlyAddedFiles.Add(assistantFile);
                         
                         _logger.LogInformation("Added file to upload queue: {RelativePath} ({Size} bytes, FolderKind: {FolderKind})", 
-                            fileDto.RelativePath, fileDto.ContentBytes.Length, fileDto.FolderKind);
+                            LogValueSanitizer.Sanitize(fileDto.RelativePath), fileDto.ContentBytes.Length, LogValueSanitizer.Sanitize(fileDto.FolderKind));
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Failed to add file to upload queue: {RelativePath}", fileDto.RelativePath);
+                        _logger.LogError(ex, "Failed to add file to upload queue: {RelativePath}", LogValueSanitizer.Sanitize(fileDto.RelativePath));
                         throw new InvalidOperationException($"Failed to upload file '{fileDto.RelativePath}': {ex.Message}", ex);
                     }
                 }
@@ -1873,12 +1873,12 @@ public class GuidesService(
                     {
                         await _markdownExtractionService.CreateAssistantFileMarkdownShadowAsync(file.Id);
                         _logger.LogInformation("Created markdown shadow for AssistantFile {AssistantFileId} ({RelativePath})", 
-                            file.Id, file.RelativePath);
+                            file.Id, LogValueSanitizer.Sanitize(file.RelativePath));
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Failed to create markdown shadow for AssistantFile {AssistantFileId} ({RelativePath})", 
-                            file.Id, file.RelativePath);
+                            file.Id, LogValueSanitizer.Sanitize(file.RelativePath));
                         // Don't fail the update - extraction will be retried
                     }
                 }

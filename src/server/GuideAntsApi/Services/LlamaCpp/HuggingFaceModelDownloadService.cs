@@ -57,8 +57,8 @@ public sealed class HuggingFaceModelDownloadService : IHuggingFaceModelDownloadS
             _logger.LogError(
                 ex,
                 "Failed to start delegated llama download for alias {Alias} from repo {Repo}.",
-                request.RouterModelId,
-                request.Repository);
+                LogValueSanitizer.Sanitize(request.RouterModelId),
+                LogValueSanitizer.Sanitize(request.Repository));
             throw;
         }
     }

@@ -10,6 +10,7 @@ public static class GuideUsageEndpoints
         // Guide usage report endpoint
         var guideUsageGroup = app.MapGroup("/api/projects/{projectId}/guides/{guideId}/usage")
             .WithTags("Guide Usage")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         guideUsageGroup.MapGet("/summary", async (
@@ -123,6 +124,7 @@ public static class GuideUsageEndpoints
         // Assistant usage report endpoint (same service, different route for assistants)
         var assistantUsageGroup = app.MapGroup("/api/projects/{projectId}/assistants/{assistantId}/usage")
             .WithTags("Assistant Usage")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         assistantUsageGroup.MapGet("/summary", async (
@@ -236,6 +238,7 @@ public static class GuideUsageEndpoints
         // Invocation details endpoint
         var invocationsGroup = app.MapGroup("/api/invocations")
             .WithTags("Invocations")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         invocationsGroup.MapGet("/{invocationId}", async (
@@ -266,6 +269,7 @@ public static class GuideUsageEndpoints
         // All turn invocations for a conversation (single request)
         var allTurnsGroup = app.MapGroup("/api/conversations/{conversationId}/invocations")
             .WithTags("Invocations")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         allTurnsGroup.MapGet("/", async (
@@ -290,6 +294,7 @@ public static class GuideUsageEndpoints
         // Turn invocations tree endpoint (single turn - kept for backwards compatibility)
         var conversationsGroup = app.MapGroup("/api/conversations/{conversationId}/turns/{turnIndex}/invocations")
             .WithTags("Invocations")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         conversationsGroup.MapGet("/", async (
@@ -318,6 +323,7 @@ public static class GuideUsageEndpoints
         // Turn messages endpoint (for viewing conversation messages with invocation drill-down)
         var turnMessagesGroup = app.MapGroup("/api/conversations/{conversationId}/turns/{turnIndex}/messages")
             .WithTags("Conversation Messages")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         turnMessagesGroup.MapGet("/", async (

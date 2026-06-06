@@ -20,14 +20,14 @@ public class TestJobHandler : JobHandlerBase<TestJob>
 
     public override async Task<bool> HandleAsync(TestJob payload, CancellationToken cancellationToken)
     {
-        Logger.LogInformation("Processing test job with message: {Message}", payload.Message);
+        Logger.LogInformation("Processing test job with message: {Message}", LogValueSanitizer.Sanitize(payload.Message));
         
         if (payload.DelaySeconds > 0)
         {
             await Task.Delay(TimeSpan.FromSeconds(payload.DelaySeconds), cancellationToken);
         }
         
-        Logger.LogInformation("Test job completed successfully: {Message}", payload.Message);
+        Logger.LogInformation("Test job completed successfully: {Message}", LogValueSanitizer.Sanitize(payload.Message));
         return true;
     }
 }

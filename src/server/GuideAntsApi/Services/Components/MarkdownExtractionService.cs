@@ -118,7 +118,7 @@ namespace GuideAntsApi.Services.Components
 
             if (!StoragePathCompatibility.TryResolveExistingFilePath(shadow.StoragePath, _storagePath, out var physicalPath))
             {
-                _logger.LogWarning("Markdown file not found at path: {StoragePath}", shadow.StoragePath);
+                _logger.LogWarning("Markdown file not found at path: {StoragePath}", LogValueSanitizer.Sanitize(shadow.StoragePath));
                 return null;
             }
 
@@ -130,7 +130,7 @@ namespace GuideAntsApi.Services.Components
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error reading markdown file: {StoragePath}", physicalPath);
+                _logger.LogError(ex, "Error reading markdown file: {StoragePath}", LogValueSanitizer.Sanitize(physicalPath));
                 return null;
             }
         }
@@ -250,7 +250,7 @@ namespace GuideAntsApi.Services.Components
 
             if (!StoragePathCompatibility.TryResolveExistingFilePath(shadow.StoragePath, _storagePath, out var physicalPath))
             {
-                _logger.LogWarning("Markdown file not found at path: {StoragePath} for NotebookFile {NotebookFileId}", shadow.StoragePath, notebookFileId);
+                _logger.LogWarning("Markdown file not found at path: {StoragePath} for NotebookFile {NotebookFileId}", LogValueSanitizer.Sanitize(shadow.StoragePath), notebookFileId);
                 return null;
             }
 
@@ -368,13 +368,13 @@ namespace GuideAntsApi.Services.Components
             
             if (shadow?.Status != MarkdownExtractionStatus.Completed || string.IsNullOrEmpty(shadow.StoragePath))
             {
-                _logger.LogInformation("Shadow not ready: Status={Status}, StoragePath={StoragePath}", shadow?.Status, shadow?.StoragePath);
+                _logger.LogInformation("Shadow not ready: Status={Status}, StoragePath={StoragePath}", shadow?.Status, LogValueSanitizer.Sanitize(shadow?.StoragePath));
                 return null;
             }
 
             if (!StoragePathCompatibility.TryResolveExistingFilePath(shadow.StoragePath, _storagePath, out var physicalPath))
             {
-                _logger.LogWarning("Markdown file not found at path: {StoragePath} for AssistantFile {AssistantFileId}", shadow.StoragePath, assistantFileId);
+                _logger.LogWarning("Markdown file not found at path: {StoragePath} for AssistantFile {AssistantFileId}", LogValueSanitizer.Sanitize(shadow.StoragePath), assistantFileId);
                 return null;
             }
 
@@ -382,7 +382,7 @@ namespace GuideAntsApi.Services.Components
                 ? Path.GetFileNameWithoutExtension(shadow.OriginalFile.RelativePath) + ".md"
                 : $"file-{assistantFileId}.md";
             
-            _logger.LogInformation("Returning markdown content from {StoragePath} as {FileName}", shadow.StoragePath, fileName);
+            _logger.LogInformation("Returning markdown content from {StoragePath} as {FileName}", LogValueSanitizer.Sanitize(shadow.StoragePath), LogValueSanitizer.Sanitize(fileName));
             return (new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite), "text/markdown", fileName);
         }
 

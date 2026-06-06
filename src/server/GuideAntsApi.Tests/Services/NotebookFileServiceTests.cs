@@ -247,4 +247,229 @@ public class NotebookFileServiceTests
             if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
         }
     }
+
+    [TestMethod]
+    public async Task UploadFilesAsync_SanitizesFileName_AndKeepsWriteUnderNotebookRoot()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, tmpDir);
+            var bytes = System.Text.Encoding.UTF8.GetBytes("hello");
+            var formFile = new FormFile(new MemoryStream(bytes), 0, bytes.Length, "file", @"..\..\evil.txt")
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = "text/plain"
+            };
+
+            var result = await svc.UploadFilesAsync(project.Id, notebook.Id, new FormFileCollection { formFile }, "uploads");
+
+            Assert.AreEqual(1, result.Count());
+            var dbFile = ctx.NotebookFiles.Single();
+            Assert.AreEqual("uploads/evil.txt", dbFile.RelativePath);
+
+            var expected = Path.Combine(tmpDir, project.Id.ToString(), "notebooks", notebook.Id.ToString(), "uploads", "evil.txt");
+            Assert.IsTrue(File.Exists(expected));
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetFileContentStreamAsync_AllowsLlmRelativePathResolution()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+            await ctx.SaveChangesAsync();
+
+            var notebookRoot = Path.Combine(tmpDir, project.Id.ToString(), "notebooks", notebook.Id.ToString());
+            var resourcesPath = Path.Combine(notebookRoot, "Resources");
+            Directory.CreateDirectory(resourcesPath);
+            var filePath = Path.Combine(resourcesPath, "image.png");
+            await File.WriteAllTextAsync(filePath, "hello");
+
+            ctx.NotebookFiles.Add(new NotebookFile
+            {
+                Id = Guid.NewGuid(),
+                NotebookId = notebook.Id,
+                RelativePath = "Resources/image.png",
+                FileSize = new FileInfo(filePath).Length,
+                LastModifiedUtc = DateTime.UtcNow,
+                FileHash = "abc",
+                Created = DateTime.UtcNow
+            });
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, tmpDir);
+            var result = await svc.GetFileContentStreamAsync(project.Id, notebook.Id, "../Resources/image.png");
+
+            Assert.AreEqual("image/png", result.contentType);
+            using var reader = new StreamReader(result.stream);
+            var content = await reader.ReadToEndAsync();
+            Assert.AreEqual("hello", content);
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task CreateFolderAsync_ReturnsNull_WhenPathEscapesNotebookRoot()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, tmpDir);
+            var result = await svc.CreateFolderAsync(project.Id, notebook.Id, "../../outside");
+
+            Assert.IsNull(result);
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task DeleteAsync_ReturnsFalse_WhenPathEscapesNotebookRoot()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, tmpDir);
+            var result = await svc.DeleteAsync(project.Id, notebook.Id, "../../outside.txt");
+
+            Assert.IsFalse(result);
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task RenameAsync_ReturnsFalse_ForInvalidNewName()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+            await ctx.SaveChangesAsync();
+
+            var notebookRoot = Path.Combine(tmpDir, project.Id.ToString(), "notebooks", notebook.Id.ToString());
+            Directory.CreateDirectory(notebookRoot);
+            var sourcePath = Path.Combine(notebookRoot, "source.txt");
+            await File.WriteAllTextAsync(sourcePath, "hello");
+
+            ctx.NotebookFiles.Add(new NotebookFile
+            {
+                Id = Guid.NewGuid(),
+                NotebookId = notebook.Id,
+                RelativePath = "source.txt",
+                FileSize = new FileInfo(sourcePath).Length,
+                LastModifiedUtc = DateTime.UtcNow,
+                FileHash = "abc",
+                Created = DateTime.UtcNow
+            });
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, tmpDir);
+            var result = await svc.RenameAsync(project.Id, notebook.Id, "source.txt", "..");
+
+            Assert.IsFalse(result);
+            Assert.IsTrue(File.Exists(sourcePath));
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task MoveAsync_ReturnsFalse_WhenDestinationEscapesNotebookRoot()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+            await ctx.SaveChangesAsync();
+
+            var notebookRoot = Path.Combine(tmpDir, project.Id.ToString(), "notebooks", notebook.Id.ToString());
+            Directory.CreateDirectory(notebookRoot);
+            var sourcePath = Path.Combine(notebookRoot, "source.txt");
+            await File.WriteAllTextAsync(sourcePath, "hello");
+
+            ctx.NotebookFiles.Add(new NotebookFile
+            {
+                Id = Guid.NewGuid(),
+                NotebookId = notebook.Id,
+                RelativePath = "source.txt",
+                FileSize = new FileInfo(sourcePath).Length,
+                LastModifiedUtc = DateTime.UtcNow,
+                FileHash = "abc",
+                Created = DateTime.UtcNow
+            });
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, tmpDir);
+            var result = await svc.MoveAsync(project.Id, notebook.Id, "source.txt", "../../outside");
+
+            Assert.IsFalse(result);
+            Assert.IsTrue(File.Exists(sourcePath));
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
 }

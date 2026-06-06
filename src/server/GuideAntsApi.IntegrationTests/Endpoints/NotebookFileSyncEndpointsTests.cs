@@ -29,7 +29,9 @@ public class NotebookFileSyncEndpointsTests
     public void TestInit()
     {
         _client = _factory.CreateClient();
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test_token");
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            IntegrationTestAuthTokenFactory.CreateAdminToken());
     }
 
     [TestCleanup]

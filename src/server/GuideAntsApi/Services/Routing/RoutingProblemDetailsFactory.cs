@@ -105,11 +105,11 @@ public sealed class RoutingExceptionHandler : IExceptionHandler
         _logger.LogWarning(
             routing,
             "Routing failure {Code} for {Path} serviceId={ServiceId} modelId={ModelId} modeId={ModeId}",
-            routing.Code,
-            httpContext.Request.Path,
-            routing.ServiceId,
-            routing.ModelId,
-            routing.ModeId);
+            LogValueSanitizer.Sanitize(routing.Code),
+            LogValueSanitizer.Sanitize(httpContext.Request.Path),
+            LogValueSanitizer.Sanitize(routing.ServiceId),
+            LogValueSanitizer.Sanitize(routing.ModelId),
+            LogValueSanitizer.Sanitize(routing.ModeId));
 
         httpContext.Response.StatusCode = problem.Status ?? StatusCodes.Status500InternalServerError;
         // Pass the content type to WriteAsJsonAsync directly — the overload that

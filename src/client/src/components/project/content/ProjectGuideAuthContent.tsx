@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { NotebookAuthProviderDto, NotebookTemplateDto } from '../../../types/project';
 import { api } from '../../../services/api';
-import { getRouterType } from '../../../utils/environment';
+import { beginOAuthConnection } from '../../../utils/notebookAuth';
 import { useToast } from '../../common/Toast';
 
 interface ProjectGuideAuthContentProps {
@@ -49,26 +49,25 @@ export function ProjectGuideAuthContent({ projectId, templateId, canEdit = false
                 if (cancelled) return;
                 setTemplate(t);
                 
-                const initial: ProviderState[] = (t.authProviders || [])
+                const initial = (t.authProviders || [])
                     .filter(p => {
                         const policy = (p.userConfigPolicy as unknown as string | undefined)?.toString().toLowerCase();
                         return policy === 'optional' || policy === 'required';
                     })
-                    .map(p => {
+                    .map(async p => {
                         // Check for existing override
                         const override = existingOverrides.find(o => o.providerId === p.id);
-                        
-                        // Check for existing OAuth tokens
-                        const tokenKey = `oauth_tokens_${projectId}_${p.id}`;
-                        const tokenData = localStorage.getItem(tokenKey);
+
                         let isConnected = false;
-                        if (tokenData) {
+                        if (p.authType.toString().toLowerCase() === 'oauth') {
                             try {
-                                const parsed = JSON.parse(tokenData);
-                                isConnected = Date.now() < parsed.expiresAt;
-                            } catch {}
+                                const status = await api.projects.externalAuth.oauth.status(projectId, p.id);
+                                isConnected = status.connected;
+                            } catch {
+                                isConnected = false;
+                            }
                         }
-                        
+
                         return {
                             provider: p,
                             clientId: override?.clientId || p.clientId || '',
@@ -79,7 +78,7 @@ export function ProjectGuideAuthContent({ projectId, templateId, canEdit = false
                             isDirty: false
                         };
                     });
-                setProviders(initial);
+                setProviders(await Promise.all(initial));
             } catch (e) {
                 setError('Failed to load guide authorization details.');
             } finally {
@@ -101,23 +100,23 @@ export function ProjectGuideAuthContent({ projectId, templateId, canEdit = false
                 title: 'OAuth Connection Successful',
                 message: `Successfully connected to ${oauthSuccess}`
             });
-            
-            // Update UI to show connected state
-            const tokenKey = `oauth_tokens_${projectId}_${oauthSuccess}`;
-            const tokenData = localStorage.getItem(tokenKey);
-            if (tokenData) {
-                const next = [...providers];
-                const providerIndex = next.findIndex(p => p.provider.id === oauthSuccess);
-                if (providerIndex >= 0) {
-                    next[providerIndex] = { ...next[providerIndex], isConnected: true };
-                    setProviders(next);
-                }
-            }
-            
-            // Clean up URL parameter
-            const newUrl = new URL(window.location.href);
-            newUrl.searchParams.delete('oauthSuccess');
-            window.history.replaceState({}, '', newUrl.toString());
+
+            api.projects.externalAuth.oauth.status(projectId, oauthSuccess)
+                .then(status => {
+                    setProviders(prev => {
+                        const next = [...prev];
+                        const providerIndex = next.findIndex(p => p.provider.id === oauthSuccess);
+                        if (providerIndex >= 0) {
+                            next[providerIndex] = { ...next[providerIndex], isConnected: status.connected };
+                        }
+                        return next;
+                    });
+                })
+                .finally(() => {
+                    const newUrl = new URL(window.location.href);
+                    newUrl.searchParams.delete('oauthSuccess');
+                    window.history.replaceState({}, '', newUrl.toString());
+                });
         }
     }, [location.search, projectId, showToast]); // Remove providers dependency to prevent loops
 
@@ -226,94 +225,24 @@ export function ProjectGuideAuthContent({ projectId, templateId, canEdit = false
         const ps = oauthProviders[index];
         if (!ps || ps.clientIdError || ps.tenantError) return;
 
-        const effectiveClientId = ps.clientId?.trim() || ps.provider.clientId;
-        const effectiveTenant = ps.tenant?.trim() || ps.provider.tenant;
-        const scopes = ps.provider.scopes || [];
-
-        if (!effectiveClientId || !effectiveTenant) {
-            setError('Client ID and Tenant are required for OAuth test');
-            return;
-        }
-
         setSaving(true);
         
         try {
-            // Generate PKCE parameters
-            const codeVerifier = generateCodeVerifier();
-            const codeChallenge = await generateCodeChallenge(codeVerifier);
-            const state = crypto.randomUUID();
-            
-            // Store PKCE params in localStorage (persists across redirects)
-            const pkceKey = `oauth_pkce_${projectId}_${ps.provider.id}`;
-            
-            localStorage.setItem(pkceKey, JSON.stringify({
-                codeVerifier,
-                state,
-                providerId: ps.provider.id,
-                projectId,
-                clientId: effectiveClientId,
-                tenant: effectiveTenant,
-                scopes: scopes.join(' '),
-                returnUrl: getRouterType() === 'hash'
-                    ? (() => {
-                        // For HashRouter, extract the route from hash
-                        const hashRoute = window.location.hash.substring(1);
-                        const separator = hashRoute.includes('?') ? '&' : '?';
-                        return hashRoute + `${separator}section=guideAuthorization&item=${templateId}`;
-                    })()
-                    : (() => {
-                        // For BrowserRouter, use pathname + search
-                        const currentUrl = window.location.pathname + window.location.search;
-                        const separator = currentUrl.includes('?') ? '&' : '?';
-                        return currentUrl + `${separator}section=guideAuthorization&item=${templateId}`;
-                    })()
-            }));
+            const currentUrl = window.location.pathname + window.location.search;
+            const separator = currentUrl.includes('?') ? '&' : '?';
+            const returnUrl = currentUrl + `${separator}section=guideAuthorization&item=${templateId}`;
 
-            // Build authorization URL
-            const authUrl = new URL(`https://login.microsoftonline.com/${effectiveTenant}/oauth2/v2.0/authorize`);
-            authUrl.searchParams.set('client_id', effectiveClientId);
-            authUrl.searchParams.set('response_type', 'code');
-            // Use same redirect URI logic as MSAL config
-            let redirectUri = window.location.origin;
-            if (window.location.origin.includes('localhost:3000')) {
-                redirectUri = `${window.location.origin}/redirect`;
-            } else {
-                redirectUri = `${window.location.origin}/oauth/callback`;
-            }
-            authUrl.searchParams.set('redirect_uri', redirectUri);
-            authUrl.searchParams.set('scope', scopes.join(' '));
-            authUrl.searchParams.set('state', state);
-            authUrl.searchParams.set('code_challenge', codeChallenge);
-            authUrl.searchParams.set('code_challenge_method', 'S256');
-
-            // Redirect to OAuth flow (this will leave the page immediately)
-            window.location.href = authUrl.toString();
+            await beginOAuthConnection(projectId, {
+                ...ps.provider,
+                clientId: ps.clientId?.trim() || ps.provider.clientId,
+                tenant: ps.tenant?.trim() || ps.provider.tenant
+            }, returnUrl);
             
         } catch (error) {
             console.error('OAuth test failed:', error);
             setError('Failed to start OAuth test');
             setSaving(false);
         }
-    };
-
-    // PKCE helper functions
-    const generateCodeVerifier = (): string => {
-        const array = new Uint8Array(32);
-        crypto.getRandomValues(array);
-        return btoa(String.fromCharCode.apply(null, Array.from(array)))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
-    };
-
-    const generateCodeChallenge = async (verifier: string): Promise<string> => {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(verifier);
-        const digest = await crypto.subtle.digest('SHA-256', data);
-        return btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(digest))))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
     };
 
     if (loading) return <div className="p-4">Loading guide authorization…</div>;

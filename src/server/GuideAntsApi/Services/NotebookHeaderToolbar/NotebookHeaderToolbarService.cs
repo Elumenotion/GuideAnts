@@ -1,8 +1,5 @@
-using System.Net.Http;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Endpoints;
 using GuideAntsApi.Models;
@@ -242,6 +239,24 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             chat,
             new[] { image, tts, asr },
             generated);
+    }
+
+    public async Task<NotebookChatReadinessDto> GetChatReadinessAsync(
+        Guid notebookId,
+        Guid? conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        var toolbar = await GetToolbarAsync(notebookId, conversationId, cancellationToken).ConfigureAwait(false);
+        var chat = toolbar.Chat;
+        return new NotebookChatReadinessDto(
+            chat.EffectiveModelId,
+            chat.EffectiveModelDisplayName,
+            chat.EffectiveProvider,
+            chat.Blockers,
+            chat.SupportsLocalRuntimePower,
+            chat.LocalRuntimeOn,
+            chat.InProgressOperationId,
+            chat.InProgressState);
     }
 
     private async Task<IReadOnlyList<NotebookToolbarModelOptionDto>> BuildSelectableChatModelOptionsAsync(

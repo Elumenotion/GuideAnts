@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.HuggingFace;
@@ -20,6 +19,7 @@ public static class SettingsEndpoints
     {
         var group = app.MapGroup("/api/settings")
             .WithTags("Settings")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         group.MapGet("/sections", async (
@@ -199,10 +199,10 @@ public static class SettingsEndpoints
                     var logger = loggerFactory.CreateLogger("LocalModelOnboarding");
                     logger.LogInformation(
                         "Local model onboarding request. ui={OnboardingUi} source={InstallSource} catalogModelId={CatalogModelId} routerModelId={RouterModelId}",
-                        string.IsNullOrWhiteSpace(command.OnboardingUi) ? "unknown" : command.OnboardingUi,
-                        command.InstallSource,
-                        command.CatalogModelId,
-                        command.RouterModelId);
+                        LogValueSanitizer.Sanitize(string.IsNullOrWhiteSpace(command.OnboardingUi) ? "unknown" : command.OnboardingUi),
+                        LogValueSanitizer.Sanitize(command.InstallSource),
+                        LogValueSanitizer.Sanitize(command.CatalogModelId),
+                        LogValueSanitizer.Sanitize(command.RouterModelId));
 
                     await localModelOnboardingValidator.ValidateAsync(request, command, cancellationToken).ConfigureAwait(false);
                     var onboardingResult = await localModelOnboardingOrchestrator
@@ -414,6 +414,7 @@ public static class SettingsEndpoints
 
         var serviceEditorsGroup = app.MapGroup("/api/settings/services")
             .WithTags("SettingsServiceEditors")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         // See LocalServiceAdminRouting for the admin base/prefix rules and
@@ -898,6 +899,7 @@ public static class SettingsEndpoints
         // Non-chat routing mode matrix — Phase A.5.
         var routingGroup = app.MapGroup("/api/settings/routing")
             .WithTags("SettingsRouting")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         routingGroup.MapGet("/chat-targets", async (
@@ -1177,6 +1179,7 @@ public static class SettingsEndpoints
 
         var llamaGroup = app.MapGroup("/api/settings/llama")
             .WithTags("SettingsLlama")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         static bool HasConfiguredLlamaRuntime(IConfiguration configuration) =>
@@ -1392,6 +1395,7 @@ public static class SettingsEndpoints
 
         var huggingFaceGroup = app.MapGroup("/api/settings/huggingface")
             .WithTags("SettingsHuggingFace")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         huggingFaceGroup.MapGet("/repositories/{owner}/{repo}/files", (

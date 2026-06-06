@@ -187,7 +187,7 @@ ASP.NET Core 8 solution with multiple projects.
 ### Runtime dependencies (from API project)
 
 - ASP.NET Core 8.0 hosting
-- `Microsoft.AspNetCore.Authentication.JwtBearer` + `Microsoft.Identity.Web` 3.14.1 (Entra/Azure AD auth)
+- `Microsoft.AspNetCore.Authentication.JwtBearer` (first-party app-issued JWT auth)
 - `Microsoft.AspNetCore.SpaServices.Extensions`
 - `Swashbuckle.AspNetCore` 9.0.6 (Swagger)
 - `Microsoft.CognitiveServices.Speech` 1.47.0 (Azure Speech SDK)
@@ -204,6 +204,7 @@ The API ships *example* settings only; you must create the live files yourself:
 Minimum config keys needed for local dev:
 
 - `ConnectionStrings:DefaultConnection` — SQL Server. Default points to `localhost,1434` which matches the compose-published port for `mssql-express`.
+- `Jwt:Issuer`, `Jwt:Audience`, `Jwt:LifetimeMinutes`, `Jwt:SigningKey` — first-party auth token settings. Keep `SigningKey` out of source control (use `dotnet user-secrets` or environment variable `Jwt__SigningKey` for local host runs).
 - `SettingsSecrets:ActiveKeyId` + `SettingsSecrets:Keys:<id>` — a base64-encoded 16/24/32-byte AES key. The container default `MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=` is `local-dev` only.
 - `LocalServiceHosts:*` URLs — six keys pointing at the AI/docling containers (probed by the Settings → Infrastructure UI).
 - `LlamaCpp:BaseUrl` — `http://localhost:8110/llama-cpp` for direct host runs.
@@ -396,5 +397,5 @@ A few items worth confirming explicitly before onboarding a new dev:
 |---|---|---|
 | **Run only** | Docker + Compose, ~60 GB disk, curl, WSL2 (Win) | NVIDIA R580+ or AMD ROCm GPU, HF token |
 | **Client dev** | Node 20+/22+, npm, `.env.*` files, a running API | Electron 41 (desktop), ANALYZE=true tooling |
-| **Server dev** | .NET 8 SDK, PowerShell 7+ (cross-platform), `appsettings*.json`, SQL Server (containerized) | EF CLI tools for migrations, Azure Speech key (if testing Azure speech path), Entra app reg (if testing JWT auth) |
+| **Server dev** | .NET 8 SDK, PowerShell 7+ (cross-platform), `appsettings*.json`, SQL Server (containerized) | EF CLI tools for migrations, Azure Speech key (if testing Azure speech path), local/admin test accounts for role-gated endpoint checks |
 | **Docker builds** | All of the above + BuildKit, GPU runtime for CUDA/ROCm image builds, dotnet publish for ScriptExecutionAgent | GHCR write access (only for publish workflows) |

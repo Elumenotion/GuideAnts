@@ -1,10 +1,12 @@
 import { api } from './api';
-import type { UserDto } from '../types/user';
+import type { AppRole, UserDto } from '../types/user';
 
 interface UserInfo {
   id?: string;
   name?: string;
   email?: string;
+  role?: AppRole;
+  mustChangePassword?: boolean;
 }
 
 class UserService {
@@ -29,9 +31,16 @@ class UserService {
       return this.currentUser;
     }
 
-    const user = await api.users.getCurrent();
-    this.currentUser = this.toUserInfo(user);
-    this.userCache.set(user.id, this.currentUser);
+    const authUser = await api.auth.me();
+    const userInfo: UserInfo = {
+      id: authUser.userId,
+      name: authUser.name,
+      email: authUser.email,
+      role: authUser.role,
+      mustChangePassword: authUser.mustChangePassword,
+    };
+    this.currentUser = userInfo;
+    this.userCache.set(authUser.userId, userInfo);
     return this.currentUser;
   }
 
@@ -58,20 +67,15 @@ class UserService {
       const userInfo: UserInfo = {
         id: user.id,
         name: user.name,
-        email: user.email
+        email: user.email,
+        role: user.role,
+        mustChangePassword: user.mustChangePassword,
       };
       this.userCache.set(userId, userInfo);
       return userInfo;
     } catch (error) {
       console.warn(`Failed to fetch user ${userId}:`, error);
-      
-      // Create minimal fallback that will show generic "U"
-      const fallbackUser: UserInfo = { 
-        id: userId
-        // No name or email - this will make UserAvatar fall back to "U"
-      };
-      this.userCache.set(userId, fallbackUser);
-      return fallbackUser;
+      return null;
     }
   }
 
@@ -138,6 +142,8 @@ class UserService {
       id: user.id,
       name: user.name,
       email: user.email,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 }

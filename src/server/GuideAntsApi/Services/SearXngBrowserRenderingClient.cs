@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using GuideAntsApi.Options;
 using Microsoft.Extensions.Options;
 
@@ -31,7 +30,7 @@ public sealed class SearXngBrowserRenderingClient(
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to parse browser rendering response for {Url}", uri);
+                _logger.LogWarning(ex, "Failed to parse browser rendering response for {Url}", LogValueSanitizer.Sanitize(uri));
             }
 
             if (payload is not null)
@@ -61,7 +60,7 @@ public sealed class SearXngBrowserRenderingClient(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Browser rendering failed for {Url}", uri);
+            _logger.LogWarning(ex, "Browser rendering failed for {Url}", LogValueSanitizer.Sanitize(uri));
             return new BrowserRenderedPageResult(false, null, ex.Message, uri.AbsoluteUri, null);
         }
     }

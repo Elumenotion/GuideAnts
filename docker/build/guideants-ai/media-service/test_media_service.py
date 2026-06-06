@@ -57,7 +57,7 @@ class MediaServiceTests(unittest.TestCase):
             outputPath=".system/media-extract/abc123/output.mp3",
         )
 
-        def fake_run(command, capture_output, text, check):  # noqa: ANN001
+        def fake_run(command, capture_output, text, check, timeout):  # noqa: ANN001
             output_path = Path(command[-1])
             output_path.write_bytes(b"mp3-data")
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -86,6 +86,47 @@ class MediaServiceTests(unittest.TestCase):
             media_service.process_extract_audio_request(payload, storage_root=self.storage_root)
 
         self.assertEqual(context.exception.status_code, 409)
+
+    def test_process_extract_audio_request_rejects_invalid_audio_quality(self) -> None:
+        source_path = self.storage_root / ".system" / "media-extract" / "abc123" / "input.mp4"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(b"video")
+
+        payload = media_service.ExtractAudioRequest(
+            sourcePath=".system/media-extract/abc123/input.mp4",
+            outputPath=".system/media-extract/abc123/output.mp3",
+            audioQuality="10",
+        )
+
+        with self.assertRaises(media_service.MediaServiceError) as context:
+            media_service.process_extract_audio_request(payload, storage_root=self.storage_root)
+
+        self.assertEqual(context.exception.status_code, 400)
+        self.assertIn("audioQuality must be an integer between 0 and 9.", context.exception.detail)
+
+    def test_run_ffmpeg_raises_error_when_timeout_expires(self) -> None:
+        source_path = self.storage_root / ".system" / "media-extract" / "abc123" / "input.mp4"
+        output_path = self.storage_root / ".system" / "media-extract" / "abc123" / "output.mp3"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(b"video")
+
+        with patch.object(
+            media_service.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(cmd=["ffmpeg"], timeout=1),
+        ):
+            with self.assertRaises(media_service.MediaServiceError) as context:
+                media_service.run_ffmpeg(
+                    source_path=source_path,
+                    output_path=output_path,
+                    codec="libmp3lame",
+                    audio_quality="2",
+                    overwrite=True,
+                    timeout_seconds=1,
+                )
+
+        self.assertEqual(context.exception.status_code, 500)
+        self.assertIn("ffmpeg timed out after 1 seconds.", context.exception.detail)
 
 
 if __name__ == "__main__":

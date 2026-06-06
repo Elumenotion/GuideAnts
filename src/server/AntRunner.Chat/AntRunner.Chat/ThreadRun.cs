@@ -6,7 +6,6 @@ using AntRunner.Chat.Abstractions;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace AntRunner.Chat
@@ -340,6 +339,7 @@ namespace AntRunner.Chat
                                         assistantDef,
                                         choice.Message.ToolCalls!,
                                         messages,
+                                        externalAuthTokens: options.ExternalAuthTokens,
                                         oAuthUserAccessToken: options.oAuthUserAccessToken,
                                         httpClient: httpClient,
                                         messageAdded: onMessage,
@@ -400,6 +400,7 @@ namespace AntRunner.Chat
                                         assistantDef,
                                         serverHandled,
                                         messages,
+                                        externalAuthTokens: options.ExternalAuthTokens,
                                         oAuthUserAccessToken: options.oAuthUserAccessToken,
                                         httpClient: httpClient,
                                         messageAdded: onMessage,
@@ -698,6 +699,7 @@ namespace AntRunner.Chat
             AssistantDefinition assistantDef,
             IReadOnlyList<ChatToolCall> toolCalls,
             List<ChatMessage> messages,
+            IReadOnlyDictionary<string, string>? externalAuthTokens = null,
             string? oAuthUserAccessToken = null,
             HttpClient? httpClient = null,
             MessageAddedEventHandler? messageAdded = null,
@@ -777,8 +779,12 @@ namespace AntRunner.Chat
                             string responseContent;
                             try
                             {
+                                var resolvedOAuthToken = ResolveOAuthAccessTokenForTool(
+                                    builder,
+                                    externalAuthTokens,
+                                    oAuthUserAccessToken);
                                 var response = await builder.ExecuteWebApiAsync(
-                                    oAuthUserAccessToken,
+                                    resolvedOAuthToken,
                                     httpClient ?? _httpClient,
                                     cancellationToken);
                                 responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -1036,6 +1042,70 @@ namespace AntRunner.Chat
             }
 
             return (allNewFiles.ToList(), allModifiedFiles.ToList());
+        }
+
+        private static string? ResolveOAuthAccessTokenForTool(
+            ToolCaller builder,
+            IReadOnlyDictionary<string, string>? externalAuthTokens,
+            string? defaultToken)
+        {
+            if (!builder.OAuth || externalAuthTokens == null || externalAuthTokens.Count == 0)
+            {
+                return defaultToken;
+            }
+
+            foreach (var authority in GetAuthorityCandidates(builder.BaseUrl))
+            {
+                foreach (var kv in externalAuthTokens)
+                {
+                    if (string.Equals(kv.Key, authority, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return kv.Value;
+                    }
+                }
+            }
+
+            return defaultToken;
+        }
+
+        private static IEnumerable<string> GetAuthorityCandidates(string baseUrl)
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                yield break;
+            }
+
+            if (!TryParseAbsoluteUri(baseUrl, out var uri))
+            {
+                yield break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(uri.Authority))
+            {
+                yield return uri.Authority;
+            }
+
+            if (!string.IsNullOrWhiteSpace(uri.Host))
+            {
+                yield return uri.Host;
+            }
+        }
+
+        private static bool TryParseAbsoluteUri(string raw, out Uri uri)
+        {
+            if (Uri.TryCreate(raw, UriKind.Absolute, out uri!))
+            {
+                return true;
+            }
+
+            if (!raw.Contains("://", StringComparison.Ordinal)
+                && Uri.TryCreate($"https://{raw}", UriKind.Absolute, out uri!))
+            {
+                return true;
+            }
+
+            uri = null!;
+            return false;
         }
 
         static async Task EnsureRequestBuilderCache(string assistantName)

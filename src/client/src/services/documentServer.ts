@@ -1,4 +1,6 @@
 import { API_BASE_URL } from '../config/apiConfig';
+import { withAuthHeaders } from './authService';
+import { broadcastAuthExpired } from './authEvents';
 
 export type DocumentServerScope = 'project' | 'notebook';
 
@@ -202,7 +204,15 @@ async function fetchWithTimeout(
     const controller = new AbortController();
     const timeoutHandle = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-        return await fetch(input, { ...init, signal: controller.signal });
+        const response = await fetch(input, {
+            ...init,
+            headers: withAuthHeaders(init.headers),
+            signal: controller.signal,
+        });
+        if (response.status === 401) {
+            broadcastAuthExpired('Authentication expired.');
+        }
+        return response;
     } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
             throw new Error(`DocumentServer request timed out after ${timeoutMs}ms.`);

@@ -5,9 +5,9 @@ using GuideAntsApi.Endpoints;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Authorization;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Settings;
-using Microsoft.Extensions.Logging;
 
 public class Program
 {
@@ -208,12 +208,12 @@ public class Program
                     logger.LogWarning(
                         routingException,
                         "Routing failure {Code} for {Method} {Path} serviceId={ServiceId} modelId={ModelId} modeId={ModeId}",
-                        routingException.Code,
-                        context.Request.Method,
-                        context.Request.Path,
-                        routingException.ServiceId,
-                        routingException.ModelId,
-                        routingException.ModeId);
+                        LogValueSanitizer.Sanitize(routingException.Code),
+                        LogValueSanitizer.Sanitize(context.Request.Method),
+                        LogValueSanitizer.Sanitize(context.Request.Path),
+                        LogValueSanitizer.Sanitize(routingException.ServiceId),
+                        LogValueSanitizer.Sanitize(routingException.ModelId),
+                        LogValueSanitizer.Sanitize(routingException.ModeId));
 
                     context.Response.StatusCode = problem.Status ?? 500;
                     context.Response.ContentType = "application/problem+json";
@@ -222,7 +222,12 @@ public class Program
                 }
 
                 if (exception != null)
-                    logger.LogError(exception, "Unhandled exception for {Method} {Path}: {Message}", context.Request.Method, context.Request.Path, exception.Message);
+                    logger.LogError(
+                        exception,
+                        "Unhandled exception for {Method} {Path}: {Message}",
+                        LogValueSanitizer.Sanitize(context.Request.Method),
+                        LogValueSanitizer.Sanitize(context.Request.Path),
+                        LogValueSanitizer.Sanitize(exception.Message));
 
                 context.Response.StatusCode = 500;
                 context.Response.ContentType = "application/json";
@@ -237,7 +242,12 @@ public class Program
             });
         });
 
-        app.MapGet("/api/startup", () => Results.Ok(new { status = "ready" }));
+        app.UseAuthentication();
+        app.UseAuthorization();
+
+        app.MapGet("/api/startup", () => Results.Ok(new { status = "ready" }))
+            // Startup readiness is a public host probe.
+            .AllowAnonymous();
         
         app.MapProjectEndpoints();
         app.MapGuidesMarkdownEndpoints();
@@ -250,6 +260,8 @@ public class Program
         app.MapProjectContentFileMarkdownEndpoints();
         app.MapProjectFolderEndpoints();
         app.MapLinkEndpoints();
+        app.MapAuthEndpoints();
+        app.MapAdminUsersEndpoints();
         app.MapUserEndpoints();
         app.MapNotebookConversationsEndpoints();
         app.MapNotebookHeaderToolbarEndpoints();

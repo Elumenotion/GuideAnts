@@ -134,7 +134,9 @@ public class NotebookConversationStreamingEndpointsTests
     public void TestInit()
     {
         _client = _factory.CreateClient();
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test_token");
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            IntegrationTestAuthTokenFactory.CreateAdminToken());
     }
 
     [TestCleanup]
@@ -220,7 +222,9 @@ public class NotebookConversationStreamingEndpointsTests
         });
 
         using var lockedClient = lockedFactory.CreateClient();
-        lockedClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test_token");
+        lockedClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            IntegrationTestAuthTokenFactory.CreateAdminToken());
 
         var createProjectResp = await lockedClient.PostAsJsonAsync("/api/projects", new { title = "proj-locked", description = "d" });
         createProjectResp.EnsureSuccessStatusCode();

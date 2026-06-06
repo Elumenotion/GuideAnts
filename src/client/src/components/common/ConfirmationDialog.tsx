@@ -8,11 +8,13 @@ interface ConfirmationDialogProps {
   onConfirm: () => void;
   title: string;
   message: string;
+  body?: React.ReactNode;
   confirmText?: string;
   cancelText?: string;
   confirmButtonClass?: string;
   icon?: React.ComponentType<{ className?: string }>;
   isLoading?: boolean;
+  confirmDisabled?: boolean;
   showCancelButton?: boolean;
 }
 
@@ -22,11 +24,13 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   onConfirm,
   title,
   message,
+  body,
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   confirmButtonClass = 'bg-red-600 hover:bg-red-700 text-white',
   icon: Icon = FiAlertTriangle,
   isLoading = false,
+  confirmDisabled = false,
   showCancelButton = true
 }) => {
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
@@ -53,6 +57,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
       } else if (e.key === 'Enter') {
         // If focus is on a button (like Cancel), let native behavior handle it
         if (document.activeElement?.tagName === 'BUTTON') return;
+        if (confirmDisabled) return;
         
         e.preventDefault();
         onConfirm();
@@ -61,10 +66,10 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isLoading, onClose, onConfirm]);
+  }, [isOpen, isLoading, onClose, onConfirm, confirmDisabled]);
 
   const handleConfirm = () => {
-    if (!isLoading) {
+    if (!isLoading && !confirmDisabled) {
       onConfirm();
     }
   };
@@ -91,8 +96,11 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
           </div>
         </div>
 
-        <div className="px-6 pb-6">
-          <p className="text-sm text-gray-600 leading-relaxed">{message}</p>
+        <div className="px-6 pb-6 space-y-4">
+          {message ? (
+            <p className="text-sm text-gray-600 leading-relaxed">{message}</p>
+          ) : null}
+          {body}
         </div>
 
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
@@ -108,7 +116,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
           <button
             ref={confirmButtonRef}
             onClick={handleConfirm}
-            disabled={isLoading}
+            disabled={isLoading || confirmDisabled}
             className={`px-4 py-2 text-sm rounded-md disabled:opacity-50 ${confirmButtonClass} ${isLoading ? 'cursor-not-allowed' : ''}`}
             data-testid="confirm"
           >

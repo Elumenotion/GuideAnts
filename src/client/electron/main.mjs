@@ -263,12 +263,27 @@ function createWindow() {
     }
   })
 
+  // Hosts permitted to open an authentication popup window. Matched by exact
+  // hostname only — never with startsWith(), which would also accept
+  // look-alikes such as "login.microsoftonline.com.evil.com".
+  const AUTH_POPUP_HOSTS = new Set(['login.microsoftonline.com'])
+  const isAllowedAuthPopupUrl = (candidate) => {
+    // MSAL/OAuth popups are created as about:blank, then navigate to the provider.
+    if (candidate === 'about:blank') return true
+    try {
+      const parsed = new URL(candidate)
+      return parsed.protocol === 'https:' && AUTH_POPUP_HOSTS.has(parsed.hostname)
+    } catch {
+      return false
+    }
+  }
+
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     console.log('Handling external URL:', url)
 
-    // Allow MSAL to open its authentication popup (initially about:blank, then navigates to Azure)
-    if (url === 'about:blank' || url.startsWith('https://login.microsoftonline.com')) {
+    // Allow approved auth providers to open their authentication popup.
+    if (isAllowedAuthPopupUrl(url)) {
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {

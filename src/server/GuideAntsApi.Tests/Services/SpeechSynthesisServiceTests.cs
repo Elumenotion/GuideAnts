@@ -1,5 +1,4 @@
 using System.Net;
-using System.Linq;
 using System.Text;
 using FluentAssertions;
 using GuideAntsApi.Options;

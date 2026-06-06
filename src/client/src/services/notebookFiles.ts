@@ -9,20 +9,26 @@ import {
 import { NotebookFileMarkdownShadowDto } from '../types/api';
 import { getCachedFile, cacheFile, deleteCachedFile } from '../utils/fileCache';
 import { API_BASE_URL } from '../config/apiConfig';
+import { withAuthHeaders } from './authService';
+import { broadcastAuthExpired } from './authEvents';
 
 // API_BASE_URL is resolved at runtime via window.__RUNTIME_CONFIG__
 
 async function callNotebookApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   try {
+    const headers = withAuthHeaders(options.headers);
+    if (!(typeof FormData !== 'undefined' && options.body instanceof FormData) && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      }
+      headers,
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        broadcastAuthExpired('Authentication expired.');
+      }
       throw new Error(`API call failed: ${response.statusText}`);
     }
 
@@ -57,8 +63,12 @@ export const notebookFilesApi = {
 
     const response = await fetch(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/files/upload`, {
       method: 'POST',
+      headers: withAuthHeaders(),
       body: formData,
     });
+    if (response.status === 401) {
+      broadcastAuthExpired('Authentication expired.');
+    }
     if (!response.ok) throw new Error('Failed to upload files');
     
     const result = await response.json();
@@ -202,7 +212,10 @@ export const notebookFilesApi = {
 
     const url = `${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/files/content?path=${encodeURIComponent(relativePath)}`;
 
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: withAuthHeaders() });
+    if (response.status === 401) {
+      broadcastAuthExpired('Authentication expired.');
+    }
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -258,7 +271,12 @@ export const notebookFilesApi = {
       }
     }
 
-    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/files/${fileId}/markdown/content`);
+    const response = await fetch(`${API_BASE_URL}/projects/${projectId}/notebooks/${notebookId}/files/${fileId}/markdown/content`, {
+      headers: withAuthHeaders(),
+    });
+    if (response.status === 401) {
+      broadcastAuthExpired('Authentication expired.');
+    }
 
     if (!response.ok) {
       throw new Error('Failed to fetch markdown content');

@@ -157,7 +157,9 @@ public sealed class HuggingFaceRepositoryBrowser : IHuggingFaceRepositoryBrowser
             {
                 _logger.LogWarning(
                     "HF tree listing failed for {Repo}. status={Status} body={Body}",
-                    repoFull, (int)response.StatusCode, Truncate(body, 512));
+                    LogValueSanitizer.Sanitize(repoFull),
+                    (int)response.StatusCode,
+                    LogValueSanitizer.Sanitize(Truncate(body, 512)));
                 throw new HuggingFaceBrowseException(
                     "HF_UPSTREAM",
                     $"Hugging Face returned {(int)response.StatusCode} while listing '{repoFull}'.",

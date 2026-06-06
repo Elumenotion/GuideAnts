@@ -7,6 +7,7 @@ import { TwoColumnLayout } from './TwoColumnLayout';
 import { TourStartButton } from '../../tour/TourStartButton';
 import { HomeButton } from '../common/HomeButton';
 import { SettingsButton } from '../common/SettingsButton';
+import { HeaderUserMenu } from '../common/HeaderUserMenu';
 import { HiMenu } from 'react-icons/hi';
 import { FiEdit2 } from 'react-icons/fi';
 
@@ -118,6 +119,7 @@ function NotebookHeader({
                         </button>
                         <HomeButton />
                         <SettingsButton />
+                        <HeaderUserMenu />
                         <TourStartButton screenId={tourScreenId ?? 'notebook'} inline />
                     </div>
                 </div>

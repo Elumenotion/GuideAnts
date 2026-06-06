@@ -70,7 +70,7 @@ namespace GuideAntsApi.Services.Components
             catch (Exception ex)
             {
                 CleanupDirectory(workspacePath);
-                _logger.LogError(ex, "Failed to extract audio from staged video content for {FileName}", fileName);
+                _logger.LogError(ex, "Failed to extract audio from staged video content for {FileName}", LogValueSanitizer.Sanitize(fileName));
                 throw;
             }
         }
@@ -256,7 +256,7 @@ namespace GuideAntsApi.Services.Components
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to clean up transient media workspace {WorkspacePath}", path);
+                _logger.LogWarning(ex, "Failed to clean up transient media workspace {WorkspacePath}", LogValueSanitizer.Sanitize(path));
             }
         }
     }

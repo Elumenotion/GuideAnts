@@ -1,14 +1,11 @@
 using System.Text;
 using System.Text.Json;
-using System.Diagnostics;
-using System.Net.Http.Headers;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Components;
-using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Routing;
 using GuideAnts.Usage;
 using AntRunner.ToolCalling.Functions;
@@ -93,7 +90,7 @@ namespace GuideAntsApi.Services
             var stdErrBuffer = new StringBuilder();
             Exception? executionException = null;
 
-            _logger.LogInformation("GenerateImage invoked. Project={ProjectId}, Notebook={NotebookId}, Prompt={Prompt}", context?.ProjectId, context?.NotebookId, prompt);
+            _logger.LogInformation("GenerateImage invoked. Project={ProjectId}, Notebook={NotebookId}, Prompt={Prompt}", context?.ProjectId, context?.NotebookId, LogValueSanitizer.Sanitize(prompt));
 
             if (string.IsNullOrWhiteSpace(prompt))
             {
@@ -152,7 +149,7 @@ namespace GuideAntsApi.Services
             if (storageRoot == null) throw new InvalidOperationException("FileStorage:Path is not configured");
             var notebookDirectory = NotebookPathHelper.GetLocalWorkingDirectory(context!, storageRoot);
 
-            _logger?.LogInformation("Will generate image and save to directory: {NotebookDirectory}", notebookDirectory);
+            _logger?.LogInformation("Will generate image and save to directory: {NotebookDirectory}", LogValueSanitizer.Sanitize(notebookDirectory));
 
             string? createdFileCwdPath = null;
 
@@ -256,7 +253,7 @@ namespace GuideAntsApi.Services
                     var filePath = Path.Combine(notebookDirectory, filename);
                     await File.WriteAllBytesAsync(filePath, imageBytes);
 
-                    _logger?.LogInformation("Image saved to: {FilePath}, Size: {Size} bytes", filePath, imageBytes.Length);
+                    _logger?.LogInformation("Image saved to: {FilePath}, Size: {Size} bytes", LogValueSanitizer.Sanitize(filePath), imageBytes.Length);
                     stdOutBuffer.AppendLine($"Image generated successfully: {filename}");
 
                     var relativePath = Path.Combine(NotebookPathHelper.GetRelativeRunFolder(context!), filename).Replace("\\", "/");
@@ -299,7 +296,7 @@ namespace GuideAntsApi.Services
             catch (Exception ex)
             {
                 var errorMsg = $"Error generating image: {ex.Message}";
-                _logger?.LogError(ex, "Image generation failed. Project={ProjectId}, Notebook={NotebookId}, Prompt={Prompt}", context?.ProjectId, context?.NotebookId, prompt);
+                _logger?.LogError(ex, "Image generation failed. Project={ProjectId}, Notebook={NotebookId}, Prompt={Prompt}", context?.ProjectId, context?.NotebookId, LogValueSanitizer.Sanitize(prompt));
                 stdErrBuffer.AppendLine(errorMsg);
                 executionException = ex;
             }
@@ -320,9 +317,9 @@ namespace GuideAntsApi.Services
             };
 
             if (!string.IsNullOrWhiteSpace(cleanedOutput))
-                _logger?.LogInformation("Final StdOut (truncated): {Out}", cleanedOutput.Length > 4096 ? cleanedOutput.Substring(0, 4096) + "…" : cleanedOutput);
+                _logger?.LogInformation("Final StdOut (truncated): {Out}", LogValueSanitizer.Sanitize(cleanedOutput.Length > 4096 ? cleanedOutput.Substring(0, 4096) + "…" : cleanedOutput));
             if (!string.IsNullOrWhiteSpace(cleanedError))
-                _logger?.LogWarning("Final StdErr (truncated): {Err}", cleanedError.Length > 4096 ? cleanedError.Substring(0, 4096) + "…" : cleanedError);
+                _logger?.LogWarning("Final StdErr (truncated): {Err}", LogValueSanitizer.Sanitize(cleanedError.Length > 4096 ? cleanedError.Substring(0, 4096) + "…" : cleanedError));
 
             var basePath = Environment.GetEnvironmentVariable("DOCKER_EXEC_LOG_PATH") ?? "/tmp/scripts";
             var imageFolder = Path.Combine(basePath, "GenerateImage", executionException == null ? "success" : "failure");
@@ -361,7 +358,7 @@ namespace GuideAntsApi.Services
             Exception? executionException = null;
 
             _logger.LogInformation("CreateImageFromImage invoked. Project={ProjectId}, Notebook={NotebookId}, SourceImage={SourceImage}, Prompt={Prompt}",
-                context?.ProjectId, context?.NotebookId, sourceImageFilename, prompt);
+                context?.ProjectId, context?.NotebookId, LogValueSanitizer.Sanitize(sourceImageFilename), LogValueSanitizer.Sanitize(prompt));
 
             if (string.IsNullOrWhiteSpace(prompt))
             {
@@ -416,7 +413,7 @@ namespace GuideAntsApi.Services
             if (storageRoot == null) throw new InvalidOperationException("FileStorage:Path is not configured");
             var notebookDirectory = NotebookPathHelper.GetLocalWorkingDirectory(context!, storageRoot);
 
-            _logger?.LogInformation("Will generate image from source image and save to directory: {NotebookDirectory}", notebookDirectory);
+            _logger?.LogInformation("Will generate image from source image and save to directory: {NotebookDirectory}", LogValueSanitizer.Sanitize(notebookDirectory));
 
             string? createdFileCwdPath = null;
 
@@ -467,7 +464,7 @@ namespace GuideAntsApi.Services
                         sourceImageContentType = res.Value.ContentType;
                         sourceImageFileName = res.Value.FileName;
 
-                        _logger?.LogInformation("Loaded source image file. Name={FileName}, Bytes={ByteCount}", sourceImageFileName, sourceImageBytes.Length);
+                        _logger?.LogInformation("Loaded source image file. Name={FileName}, Bytes={ByteCount}", LogValueSanitizer.Sanitize(sourceImageFileName), sourceImageBytes.Length);
                     }
                     catch (Exception ex)
                     {
@@ -493,7 +490,7 @@ namespace GuideAntsApi.Services
                 var imageSizeProfileName = ResolveImageSizeProfileName(imageProvider, mode);
 
                 string size = DetermineBestSizeForImage(sourceImageBytes, imageSizeProfileName);
-                _logger?.LogInformation("Automatically determined size '{Size}' for source image '{SourceImage}'", size, sourceImageFilename);
+                _logger?.LogInformation("Automatically determined size '{Size}' for source image '{SourceImage}'", LogValueSanitizer.Sanitize(size), LogValueSanitizer.Sanitize(sourceImageFilename));
 
                 byte[]? imageBytes = imageProvider switch
                 {
@@ -564,7 +561,7 @@ namespace GuideAntsApi.Services
                     await File.WriteAllBytesAsync(filePath, imageBytes);
 
                     _logger?.LogInformation("Image edited successfully from source '{SourceImage}': {OutputFile}, Size: {Size} bytes",
-                        sourceImageFilename, outputFilename, imageBytes.Length);
+                        LogValueSanitizer.Sanitize(sourceImageFilename), LogValueSanitizer.Sanitize(outputFilename), imageBytes.Length);
                     stdOutBuffer.AppendLine($"Image edited successfully from '{sourceImageFilename}': {outputFilename}");
 
                     var relativePath = Path.Combine(NotebookPathHelper.GetRelativeRunFolder(context!), outputFilename).Replace("\\", "/");
@@ -608,7 +605,7 @@ namespace GuideAntsApi.Services
             {
                 var errorMsg = $"Error editing image: {ex.Message}";
                 _logger?.LogError(ex, "Image edit failed. Project={ProjectId}, Notebook={NotebookId}, SourceImage={SourceImage}, Prompt={Prompt}",
-                    context?.ProjectId, context?.NotebookId, sourceImageFilename, prompt);
+                    context?.ProjectId, context?.NotebookId, LogValueSanitizer.Sanitize(sourceImageFilename), LogValueSanitizer.Sanitize(prompt));
                 stdErrBuffer.AppendLine(errorMsg);
                 executionException = ex;
             }
@@ -629,9 +626,9 @@ namespace GuideAntsApi.Services
             };
 
             if (!string.IsNullOrWhiteSpace(cleanedOutput))
-                _logger?.LogInformation("Final StdOut (truncated): {Out}", cleanedOutput.Length > 4096 ? cleanedOutput.Substring(0, 4096) + "…" : cleanedOutput);
+                _logger?.LogInformation("Final StdOut (truncated): {Out}", LogValueSanitizer.Sanitize(cleanedOutput.Length > 4096 ? cleanedOutput.Substring(0, 4096) + "…" : cleanedOutput));
             if (!string.IsNullOrWhiteSpace(cleanedError))
-                _logger?.LogWarning("Final StdErr (truncated): {Err}", cleanedError.Length > 4096 ? cleanedError.Substring(0, 4096) + "…" : cleanedError);
+                _logger?.LogWarning("Final StdErr (truncated): {Err}", LogValueSanitizer.Sanitize(cleanedError.Length > 4096 ? cleanedError.Substring(0, 4096) + "…" : cleanedError));
 
             var basePath = Environment.GetEnvironmentVariable("DOCKER_EXEC_LOG_PATH") ?? "/tmp/scripts";
             var imageFolder = Path.Combine(basePath, "EditImage", executionException == null ? "success" : "failure");

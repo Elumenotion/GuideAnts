@@ -8,7 +8,8 @@ public static class NotebookLlamaRuntimeEndpoints
     public static void MapNotebookLlamaRuntimeEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/notebooks/{notebookId:guid}/llama-runtime")
-            .WithTags("NotebookLlamaRuntime");
+            .WithTags("NotebookLlamaRuntime")
+            .RequireAuthorization("RequireApprovedUser");
 
         group.MapGet("/", async (
             [FromServices] INotebookModelRuntimeService runtimeService,
@@ -37,6 +38,7 @@ public static class NotebookLlamaRuntimeEndpoints
                 return Results.BadRequest(new { error = ex.Message });
             }
         })
+        .RequireAuthorization("RequireContributor")
         .Produces<ModelLoadOperationDto>(StatusCodes.Status202Accepted)
         .Produces(StatusCodes.Status400BadRequest);
 
@@ -61,6 +63,7 @@ public static class NotebookLlamaRuntimeEndpoints
                 return Results.BadRequest(new { error = ex.Message });
             }
         })
+        .RequireAuthorization("RequireAdmin")
         .Produces<ModelLoadOperationDto>(StatusCodes.Status202Accepted)
         .Produces(StatusCodes.Status400BadRequest);
 
@@ -117,6 +120,7 @@ public static class NotebookLlamaRuntimeEndpoints
                     title: "Failed to restart local model runtime.");
             }
         })
+        .RequireAuthorization("RequireAdmin")
         .Produces<LlamaAdminRestartResultDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status502BadGateway)
         .Produces(StatusCodes.Status504GatewayTimeout);

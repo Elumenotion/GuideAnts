@@ -10,6 +10,7 @@ public static class NotebookFileMarkdownEndpoints
     {
         var group = app.MapGroup("/api/projects/{projectId}/notebooks/{notebookId}/files")
             .WithTags("Notebook File Markdown")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         // Get markdown shadow info for a notebook file
@@ -105,6 +106,7 @@ public static class NotebookFileMarkdownEndpoints
             }
         })
         .WithName("RetryNotebookFileMarkdownExtraction")
+        .RequireAuthorization("RequireContributor")
         .WithSummary("Retry markdown extraction for a notebook file");
 
         // Create markdown shadow for a notebook file (manual trigger)
@@ -140,6 +142,7 @@ public static class NotebookFileMarkdownEndpoints
             }
         })
         .WithName("CreateNotebookFileMarkdownShadow")
+        .RequireAuthorization("RequireContributor")
         .WithSummary("Create/queue markdown extraction for a notebook file");
 
         // Health check endpoint removed: BackgroundJobs manages leases/cleanup

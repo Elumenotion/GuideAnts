@@ -1,6 +1,7 @@
 export type SettingsTab =
   | 'overview'
   | 'personalization'
+  | 'users'
   | 'telemetry'
   | 'services'
   | 'connections'
