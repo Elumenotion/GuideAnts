@@ -1,6 +1,6 @@
 # GuideAnts Setup Guide
 
-Last updated: 2026-06-03
+Last updated: 2026-06-05
 
 This is the setup-first operator guide for GuideAnts.
 Use it to get a working environment from zero to usable chat/services, then use linked docs for deeper architecture details.
@@ -32,7 +32,7 @@ Useful options:
 - `--backend cpu|cuda13|rocm|slim` (force backend; `slim` is the sandbox-oriented stack)
 - `--compose ghcr|local` (prebuilt GHCR vs local images)
 
-If the launcher gets you to `http://localhost:5107/`, skip to section 5.
+If the launcher gets you to `http://localhost:5107/`, skip to section 5 for first-user auth bootstrap and initial wizard flow.
 
 ## 2. What you are setting up
 
@@ -74,13 +74,17 @@ Settings ownership split:
 
 Settings top-level tab order (current):
 
-1. Overview
-2. Personalization
-3. Connections
-4. Models & Runtime
-5. Services
-6. Infrastructure
-7. Telemetry
+- Admin users see the full administrative settings surface, including the `Users` tab.
+- Non-admin users see `Personalization` only.
+- Admin tab groups:
+  1. Overview
+  2. Personalization
+  3. Users
+  4. Connections
+  5. Models & Runtime
+  6. Services
+  7. Infrastructure
+  8. Telemetry
 
 ## 3. Prerequisites
 
@@ -274,9 +278,31 @@ Seeding is idempotent and does not overwrite user edits.
 
 Reference: [`../src/server/GuideAntsApi/Resources/bootstrap/README.md`](../src/server/GuideAntsApi/Resources/bootstrap/README.md)
 
-## 5. First load and first-launch wizard
+## 5. First load, auth bootstrap, and first-launch wizard
 
 Open `http://localhost:5107`.
+
+### 5.1 Authentication bootstrap (required)
+
+GuideAnts now ships first-party JWT auth with role-based authorization.
+
+On a fresh install:
+
+1. You are routed to `/register`.
+2. The first successful registration is auto-assigned `Admin`.
+3. Subsequent registrations are created as `Pending`.
+4. An admin approves pending users and assigns roles in `Settings -> Users`.
+
+Route behavior:
+
+- Anonymous users are sent to `/login` (or `/register` for first account creation).
+- Authenticated `Pending` users are routed to `/pending`.
+- Authenticated users with `MustChangePassword` are routed to `/change-password`.
+- Approved users (`Reader`, `Contributor`, `Admin`) can access product routes by role.
+
+Reference: [`auth-flow.md`](auth-flow.md)
+
+### 5.2 First-launch wizard behavior
 
 On first-load conditions, Home auto-opens Add AI Services Wizard when either is true:
 
@@ -329,10 +355,14 @@ Detailed walkthroughs:
 
 - [`add-ai-services-wizard.md`](add-ai-services-wizard.md)
 - [`local-ai-setup-guide.md`](local-ai-setup-guide.md)
+- [`auth-flow.md`](auth-flow.md)
 
 ## 6. Configure AI services (manual Settings path)
 
 Use this if you skip wizard or need fine-grained changes.
+
+> Note: AI/service/runtime configuration tabs are admin-only. Non-admin users only
+> have access to `Personalization`.
 
 ### Step 1: Connections
 
@@ -518,6 +548,12 @@ This removes compose-managed volumes for that stack.
 
 ## 11. Troubleshooting
 
+### Cannot access Settings admin tabs
+
+- Confirm the user role is `Admin`.
+- `Pending`, `Reader`, and `Contributor` users are intentionally limited to `Personalization`.
+- Use an admin account to approve and role-assign users in `Settings -> Users`.
+
 ### Wizard did not auto-open
 
 - Check local storage key `guideants.firstLaunch.addAiServicesWizard.dismissed.v1`.
@@ -566,12 +602,13 @@ Read in this order:
 
 1. [`add-ai-services-wizard.md`](add-ai-services-wizard.md)
 2. [`local-ai-setup-guide.md`](local-ai-setup-guide.md)
-3. [`settings-architecture.md`](settings-architecture.md)
-4. [`settings-and-llama-completion-requirements.md`](settings-and-llama-completion-requirements.md)
-5. [`settings-and-llama-completion-requirements.md#r-13-non-chat-service-editor-requirements`](settings-and-llama-completion-requirements.md#r-13-non-chat-service-editor-requirements)
-6. [`settings-architecture.md#default-chat-model-behavior`](settings-architecture.md#default-chat-model-behavior)
-7. [`llama-model-download-and-runtime-management.md`](llama-model-download-and-runtime-management.md)
-8. [`telemetry-configuration.md`](telemetry-configuration.md)
-9. [`../docker/guideants-ai-build.md`](../docker/guideants-ai-build.md)
-10. [`../docker/build-processes.md`](../docker/build-processes.md)
+3. [`auth-flow.md`](auth-flow.md)
+4. [`settings-architecture.md`](settings-architecture.md)
+5. [`settings-and-llama-completion-requirements.md`](settings-and-llama-completion-requirements.md)
+6. [`settings-and-llama-completion-requirements.md#r-13-non-chat-service-editor-requirements`](settings-and-llama-completion-requirements.md#r-13-non-chat-service-editor-requirements)
+7. [`settings-architecture.md#default-chat-model-behavior`](settings-architecture.md#default-chat-model-behavior)
+8. [`llama-model-download-and-runtime-management.md`](llama-model-download-and-runtime-management.md)
+9. [`telemetry-configuration.md`](telemetry-configuration.md)
+10. [`../docker/guideants-ai-build.md`](../docker/guideants-ai-build.md)
+11. [`../docker/build-processes.md`](../docker/build-processes.md)
 
