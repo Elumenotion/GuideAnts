@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../config/apiConfig';
-import { withAuthHeaders } from './authService';
+import { withAuthFetchInit, withAuthHeaders } from './authService';
 import { broadcastAuthExpired } from './authEvents';
 
 export type DocumentServerScope = 'project' | 'notebook';
@@ -204,11 +204,11 @@ async function fetchWithTimeout(
     const controller = new AbortController();
     const timeoutHandle = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const response = await fetch(input, {
+        const response = await fetch(input, withAuthFetchInit({
             ...init,
             headers: withAuthHeaders(init.headers),
             signal: controller.signal,
-        });
+        }));
         if (response.status === 401) {
             broadcastAuthExpired('Authentication expired.');
         }

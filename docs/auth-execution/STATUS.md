@@ -18,7 +18,7 @@ State values: `BLOCKED` · `READY` · `IN_PROGRESS` · `GATE_FAILED` · `DONE`.
 | CodeQL baseline | `codeql-gate.md` §4.1 (local, no GitHub) — save `.codeql/baseline/` | **captured** (`C#=7, Python=0, JS=3`) | 2026-06-05 |
 | `dotnet ef` available | `dotnet ef --version` | **pass** (`9.0.12`) | 2026-06-05 |
 | Clean tree | `git status` | **not clean (expected pre-existing docs/plan artifacts)** | 2026-06-05 |
-| DECISIONS finalized | D1=**JWT** ✅, D2=**UserRoles table** ✅, D3 Appendix-A questions ✅ (delete=Admin, usage=Admin, speech=Contributor, llama load=Contributor / unload+restart=Admin, ext-auth cfg=Admin, name-avatars=Public, header-toolbar=Admin + new chat-readiness=ApprovedUser split), D4(a)=**state table** ✅, D4(b)=**token per (User,Provider)** ✅ | **complete** | 2026-06-05 |
+| DECISIONS finalized | D1=**JWT in HttpOnly cookie** ✅ (revised 2026-06-06), D2=**UserRoles table** ✅, D3 Appendix-A questions ✅, D4(a)=**state table** ✅, D4(b)=**token per (User,Provider)** ✅ | **complete** | 2026-06-06 |
 
 ---
 
@@ -32,7 +32,7 @@ State values: `BLOCKED` · `READY` · `IN_PROGRESS` · `GATE_FAILED` · `DONE`.
 | 3 — Authorization | `task-phase-3-authorization.md` | **DONE** | 1 | **PASS** | Applied policy guards across endpoint surface + toolbar read split; CodeQL new-vs-baseline `0`. |
 | 4 — Admin users | `task-phase-4-admin-users.md` | **DONE** | 1 | **PASS** | Added `/api/admin/users` endpoints, last-admin safeguards, password reset revocation; CodeQL `0` new. |
 | 4.5 — Tool OAuth | `task-phase-4.5-tool-oauth.md` | **DONE** | 1 | **PASS** | Moved OAuth tokens server-side encrypted; removed client token storage/transmit paths; CodeQL `0` new. |
-| 5 — Frontend | `task-phase-5-frontend.md` | **DONE** | 2 | **PASS** | Attempt 1 interrupted; attempt 2 completed auth pages/context/guards/users tab. Fixed pending redirect loop and restored orphan delta to baseline. |
+| 5 — Frontend | `task-phase-5-frontend.md` | **DONE** | 2 | **PASS** | Attempt 1 interrupted; attempt 2 completed auth pages/context/guards/users tab. Fixed pending redirect loop and restored orphan delta to baseline. **Post-close fix (2026-06-06):** hard-refresh session loss → HttpOnly cookie transport (D1 revised); no JS token storage. |
 | 6 — OpenAPI/tests/docs | `task-phase-6-openapi-tests-docs.md` | **DONE** | 1 | **PASS** | Added Swagger bearer security, role-matrix integration coverage, JWT config placeholders, and auth-flow docs. |
 
 ---
@@ -51,6 +51,7 @@ Baseline counts and per-gate **new-finding** diffs (`codeql-gate.md`). Target: e
 | After Phase 4.5 | 7 | 0 | 2 | **0** | JS clear-text storage finding dropped after client token removal |
 | After Phase 5 | 7 | 0 | 2 | **0** | frontend auth plumbing + storage/logging checks |
 | Final acceptance | 7 | 0 | 2 | **0** | final close-out scan; no new findings |
+| After D1 cookie revision | 7 | 0 | 2 | **0** | 2026-06-06 — HttpOnly cookie session; `localStorage` JWT rejected (CodeQL) |
 
 ---
 
@@ -64,6 +65,7 @@ Record every gate failure, scope-creep revert, and decision change here.
 | 2 | 5 | 1 | missing DoD | Subagent execution interrupted before report/verification | Re-dispatched Phase 5 and completed full report + gates | Pass |
 | 3 | 5 | 2 | missing DoD | `find-orphans` increased from baseline by one new unused file (`src/client/src/services/permissions.ts`) | Removed obsolete unused file and re-ran client gates | Pass |
 | 4 | 3/4/5 gate runs | 1 | build/test red | Intermittent file-lock build failures from concurrent process access | Re-ran build/tests sequentially | Pass |
+| 5 | post-6 | 1 | decision drift | Hard refresh logged user out; `localStorage` JWT would trigger CodeQL `js/clear-text-storage` | Revised **D1** to HttpOnly cookie (`GuideAnts.Auth`); client uses `credentials:'include'`; added `POST /api/auth/logout`; token removed from login/register JSON | Pass (611 server tests, 912 client tests, CodeQL new-vs-baseline **0**) |
 
 Classifications (orchestration §5): `build/test red` · `missing DoD` ·
 `scope creep` · `decision drift` · `fallback/masking`.
@@ -75,6 +77,6 @@ Classifications (orchestration §5): `build/test red` · `missing DoD` ·
 - [x] All Phase 0–6 checkboxes in `../auth-system-plan.md` §4 satisfiable.
 - [x] Every Appendix A endpoint has its stated guard (grep + role-matrix test).
 - [x] Fresh-install bootstrap proven (0 users → Admin → Pending → approve).
-- [x] No `localStorage` tool-OAuth tokens remain.
+- [x] No `localStorage` auth or tool-OAuth tokens remain.
 - [x] Global invariants green on final tree.
 - [x] No open deviations above.

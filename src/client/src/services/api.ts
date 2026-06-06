@@ -36,7 +36,7 @@ import {
 } from '../types/settings';
 
 import { API_BASE_URL } from '../config/apiConfig';
-import { withAuthHeaders } from './authService';
+import { withAuthFetchInit, withAuthHeaders } from './authService';
 import { broadcastAuthExpired } from './authEvents';
 
 interface CreateProjectDto {
@@ -87,10 +87,10 @@ async function callApi<T>(endpoint: string, options: RequestInit = {}): Promise<
             headers.set('Content-Type', 'application/json');
         }
 
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, withAuthFetchInit({
             ...options,
             headers,
-        });
+        }));
 
         if (!response.ok) {
             let parsed: any = null;
@@ -142,10 +142,10 @@ async function callApi<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 async function fetchWithAuth(input: RequestInfo | URL, options: RequestInit = {}): Promise<Response> {
     const headers = withAuthHeaders(options.headers);
-    const response = await fetch(input, {
+    const response = await fetch(input, withAuthFetchInit({
         ...options,
         headers,
-    });
+    }));
     if (response.status === 401) {
         broadcastAuthExpired('Authentication expired.');
     }
@@ -354,6 +354,7 @@ export const api = {
                 }),
             }),
         me: () => callApi<AuthMeResponse>('/auth/me'),
+        logout: () => callApi<void>('/auth/logout', { method: 'POST' }),
         changePassword: (request: ChangePasswordRequest) =>
             callApi<void>('/auth/change-password', {
                 method: 'POST',

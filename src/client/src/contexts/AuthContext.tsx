@@ -44,8 +44,7 @@ function accountToUser(account: AuthAccount | null): AuthUser | null {
   };
 }
 
-function persistSession(user: AuthUser, token: string): void {
-  authService.setAccessToken(token);
+function persistSession(user: AuthUser): void {
   authService.setActiveAccount({
     id: user.id,
     name: user.name,
@@ -61,28 +60,18 @@ function clearSession(): void {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(() => accountToUser(authService.getActiveAccount()));
-  const [status, setStatus] = useState<AuthStatus>(() => {
-    const token = authService.getAccessToken();
-    if (token) {
-      return 'loading';
-    }
-    return user ? 'authenticated' : 'anonymous';
-  });
+  const [status, setStatus] = useState<AuthStatus>('loading');
 
   const logout = useCallback(() => {
+    void api.auth.logout().catch(() => {
+      // Local session should still clear when the server logout call fails.
+    });
     clearSession();
     setUser(null);
     setStatus('anonymous');
   }, []);
 
   const refresh = useCallback(async (): Promise<AuthUser | null> => {
-    const token = authService.getAccessToken();
-    if (!token) {
-      setUser(null);
-      setStatus('anonymous');
-      return null;
-    }
-
     try {
       const me = await api.auth.me();
       const refreshedUser: AuthUser = {
@@ -93,15 +82,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         mustChangePassword: me.mustChangePassword,
         lastLoginAt: me.lastLoginAt ?? null,
       };
-      persistSession(refreshedUser, token);
+      persistSession(refreshedUser);
       setUser(refreshedUser);
       setStatus('authenticated');
       return refreshedUser;
     } catch {
-      logout();
+      clearSession();
+      setUser(null);
+      setStatus('anonymous');
       return null;
     }
-  }, [logout]);
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -117,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mustChangePassword: response.mustChangePassword,
       lastLoginAt: null,
     };
-    persistSession(authenticatedUser, response.token);
+    persistSession(authenticatedUser);
     setUser(authenticatedUser);
     setStatus('authenticated');
     return authenticatedUser;
@@ -133,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mustChangePassword: response.mustChangePassword,
       lastLoginAt: null,
     };
-    persistSession(authenticatedUser, response.token);
+    persistSession(authenticatedUser);
     setUser(authenticatedUser);
     setStatus('authenticated');
     return authenticatedUser;
