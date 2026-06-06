@@ -31,21 +31,27 @@ public sealed class IntegrationTestAuthHandler : AuthenticationHandler<Authentic
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (!Request.Headers.TryGetValue("Authorization", out var authorizationValues))
+        string? token = null;
+
+        if (Request.Headers.TryGetValue("Authorization", out var authorizationValues))
         {
-            return AuthenticateResult.NoResult();
+            var authorization = authorizationValues.ToString();
+            if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                token = authorization["Bearer ".Length..].Trim();
+            }
         }
 
-        var authorization = authorizationValues.ToString();
-        if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(token)
+            && Request.Cookies.TryGetValue(AuthCookieConstants.CookieName, out var cookieToken)
+            && !string.IsNullOrWhiteSpace(cookieToken))
         {
-            return AuthenticateResult.NoResult();
+            token = cookieToken;
         }
 
-        var token = authorization["Bearer ".Length..].Trim();
         if (string.IsNullOrWhiteSpace(token))
         {
-            return AuthenticateResult.Fail("Missing bearer token.");
+            return AuthenticateResult.NoResult();
         }
 
         ClaimsPrincipal principal;

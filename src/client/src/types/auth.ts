@@ -17,8 +17,6 @@ export interface ChangePasswordRequest {
 }
 
 export interface AuthResponse {
-  token: string;
-  expiresAtUtc: string;
   userId: string;
   name: string;
   email: string;

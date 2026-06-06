@@ -15,14 +15,15 @@ public static class AuthEndpoints
     {
         var group = app.MapGroup("/api/auth")
             .WithTags("Auth")
-            .RequireAuthorization()
             .WithOpenApi();
 
         group.MapPost("/register", async (
             [FromBody] RegisterRequest request,
+            HttpContext httpContext,
             [FromServices] ApplicationDbContext db,
             [FromServices] IUserPasswordHasher passwordHasher,
             [FromServices] IJwtTokenService jwtTokenService,
+            [FromServices] IAuthCookieService authCookieService,
             CancellationToken cancellationToken) =>
         {
             var errors = ValidateRegisterRequest(request);
@@ -87,9 +88,8 @@ public static class AuthEndpoints
                 }
 
                 var issuedToken = jwtTokenService.IssueToken(user, assignedRole);
+                authCookieService.AppendAuthCookie(httpContext.Response, httpContext.Request, issuedToken);
                 return Results.Ok(new AuthResponse(
-                    issuedToken.Token,
-                    issuedToken.ExpiresAtUtc,
                     user.Id,
                     user.Name,
                     user.Email,
@@ -105,9 +105,11 @@ public static class AuthEndpoints
 
         group.MapPost("/login", async (
             [FromBody] LoginRequest request,
+            HttpContext httpContext,
             [FromServices] ApplicationDbContext db,
             [FromServices] IUserPasswordHasher passwordHasher,
             [FromServices] IJwtTokenService jwtTokenService,
+            [FromServices] IAuthCookieService authCookieService,
             CancellationToken cancellationToken) =>
         {
             var errors = ValidateLoginRequest(request);
@@ -120,16 +122,22 @@ public static class AuthEndpoints
             var password = request.Password.Trim();
 
             var user = await db.Users
-                .FirstOrDefaultAsync(candidate => candidate.Email == trimmedEmail, cancellationToken);
+                .FirstOrDefaultAsync(
+                    candidate => candidate.Email.ToLower() == trimmedEmail.ToLower(),
+                    cancellationToken);
             if (user?.PasswordHash == null)
             {
-                return Results.Unauthorized();
+                return Results.Json(
+                    new { message = "Invalid email or password." },
+                    statusCode: StatusCodes.Status401Unauthorized);
             }
 
             var passwordIsValid = passwordHasher.VerifyPassword(user, user.PasswordHash, password);
             if (!passwordIsValid)
             {
-                return Results.Unauthorized();
+                return Results.Json(
+                    new { message = "Invalid email or password." },
+                    statusCode: StatusCodes.Status401Unauthorized);
             }
 
             var role = await db.UserRoles
@@ -139,22 +147,25 @@ public static class AuthEndpoints
                 .SingleOrDefaultAsync(cancellationToken);
             if (role == null)
             {
-                return Results.Unauthorized();
+                return Results.Json(
+                    new { message = "Invalid email or password." },
+                    statusCode: StatusCodes.Status401Unauthorized);
             }
 
             var isDeactivated = role.Value != Role.Pending && user.ApprovedAt == null;
             if (isDeactivated)
             {
-                return Results.Unauthorized();
+                return Results.Json(
+                    new { message = "This account has been deactivated. Contact an administrator." },
+                    statusCode: StatusCodes.Status401Unauthorized);
             }
 
             user.LastLoginAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
 
             var issuedToken = jwtTokenService.IssueToken(user, role.Value);
+            authCookieService.AppendAuthCookie(httpContext.Response, httpContext.Request, issuedToken);
             return Results.Ok(new AuthResponse(
-                issuedToken.Token,
-                issuedToken.ExpiresAtUtc,
                 user.Id,
                 user.Name,
                 user.Email,
@@ -188,6 +199,17 @@ public static class AuthEndpoints
         .WithName("GetAuthenticatedUser")
         .Produces<AuthMeResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status401Unauthorized);
+
+        group.MapPost("/logout", (
+            HttpContext httpContext,
+            [FromServices] IAuthCookieService authCookieService) =>
+        {
+            authCookieService.ClearAuthCookie(httpContext.Response, httpContext.Request);
+            return Results.NoContent();
+        })
+        .WithName("LogoutUser")
+        .AllowAnonymous()
+        .Produces(StatusCodes.Status204NoContent);
     }
 
     private static List<string> ValidateRegisterRequest(RegisterRequest request)
@@ -262,8 +284,6 @@ public static class AuthEndpoints
     public sealed record LoginRequest(string Email, string Password);
 
     public sealed record AuthResponse(
-        string Token,
-        DateTime ExpiresAtUtc,
         Guid UserId,
         string Name,
         string Email,

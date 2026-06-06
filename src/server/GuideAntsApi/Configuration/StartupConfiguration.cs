@@ -451,6 +451,7 @@ public static class StartupConfiguration
             SigningKey = jwtOptions.SigningKey,
             LifetimeMinutes = jwtOptions.LifetimeMinutes
         })));
+        services.AddSingleton<IAuthCookieService, AuthCookieService>();
 
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SigningKey));
         services
@@ -477,6 +478,17 @@ public static class StartupConfiguration
                 };
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        if (string.IsNullOrEmpty(context.Token)
+                            && context.Request.Cookies.TryGetValue(AuthCookieConstants.CookieName, out var cookieToken)
+                            && !string.IsNullOrWhiteSpace(cookieToken))
+                        {
+                            context.Token = cookieToken;
+                        }
+
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = async context =>
                     {
                         var principal = context.Principal;
@@ -500,7 +512,10 @@ public static class StartupConfiguration
                         if (!dbSecurityStamp.HasValue || dbSecurityStamp.Value != tokenSecurityStamp)
                         {
                             context.Fail("Token security stamp mismatch.");
+                            return;
                         }
+
+                        SlidingSessionRenewal.RenewIfNeeded(context, principal!, userId, tokenSecurityStamp);
                     }
                 };
             });

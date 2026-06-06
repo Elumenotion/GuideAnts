@@ -35,14 +35,22 @@ map to roles as follows:
 ## User journey
 
 1. User registers (`/register`) or logs in (`/login`).
-2. API issues an app JWT (`Authorization: Bearer <token>`).
-3. Client calls `GET /api/auth/me` to hydrate auth state.
+2. API issues an app JWT in an **HttpOnly** cookie (`GuideAnts.Auth`); the client
+   never stores the token in JavaScript.
+3. Authenticated API calls use `fetch(..., { credentials: 'include' })` so the
+   browser sends the cookie; `GET /api/auth/me` hydrates auth state on load.
+   The session is **sliding**: the server re-issues the cookie on authenticated
+   requests once the token is older than `SlidingSessionRenewal.RenewalInterval`
+   (1 day), so an active user is never logged out mid-session. With the default
+   30-day (`Jwt:LifetimeMinutes = 43200`) lifetime, only a genuinely idle session
+   (no requests for ~30 days) lapses. There is no absolute session cap.
 4. Route behavior:
    - anonymous -> `/login`
    - authenticated `Pending` -> `/pending`
    - authenticated with `MustChangePassword` -> `/change-password`
    - approved user -> app routes
-5. Admin-managed recovery:
+5. Logout calls `POST /api/auth/logout` to clear the cookie, then clears client state.
+6. Admin-managed recovery:
    - Admin sets password via `POST /api/admin/users/{id}/set-password`
    - user receives `MustChangePassword = true` and rotates password at next sign-in
 
