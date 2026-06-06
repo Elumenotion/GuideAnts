@@ -36,7 +36,6 @@ services:
       FileStorage__Path: /app/ContentFiles
       Ui__RootPath: /app/ui
       DocumentServer__Enabled: ${GA_DOCUMENTSERVER_ENABLED:-false}
-      DocumentServer__PublicUrl: ${GA_DOCUMENTSERVER_PUBLIC_URL:-http://localhost:${GA_DOCUMENTSERVER_PORT:-8082}}
       DocumentServer__InternalUrl: http://documentserver
       DocumentServer__ApiBaseUrl: http://guideants-webapi-ui-mssql:8080
       DocumentServer__JwtEnabled: "${GA_DOCUMENTSERVER_JWT_ENABLED:-false}"

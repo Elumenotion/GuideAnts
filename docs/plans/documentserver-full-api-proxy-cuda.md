@@ -49,8 +49,8 @@ Derived from `docker/docker-compose.cuda.yml`, with these test-focused changes:
   - `documentserver`
   - `plantuml`
   - `searxng`
-- Sets default API-proxied DocumentServer URL:
-  - `DocumentServer__PublicUrl=http://localhost:5107/api/documentserver/ds`
+- Uses a deterministic API proxy path for browser traffic:
+  - `/api/documentserver/ds`
 
 ## Run Instructions (CUDA API-Only Test Stack)
 
@@ -88,4 +88,4 @@ Updated unit tests in `DocumentServerServiceTests` to cover:
 
 This scope is intentionally focused on full functional proxying for DocumentServer via API in CUDA stack test topology.
 
-The API-only test compose pins `DocumentServer__PublicUrl` directly to the proxied URL to avoid accidental override from `docker/.env` values like `GA_DOCUMENTSERVER_PUBLIC_URL=http://localhost:8082`, which would reintroduce direct browser dependency on a non-exposed host port.
+The proxy path is deterministic and no longer depends on a configurable public URL in compose or `.env`.
