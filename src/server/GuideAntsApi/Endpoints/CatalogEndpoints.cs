@@ -9,6 +9,7 @@ public static class CatalogEndpoints
     {
         var group = app.MapGroup("/api/catalogs")
             .WithTags("Catalogs")
+            .RequireAuthorization("RequireApprovedUser")
             .WithOpenApi();
 
         // Get all models

@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Services.Auth;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using AntRunner.Chat.Abstractions;
@@ -60,7 +62,11 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
             {
                 ["ConnectionStrings:DefaultConnection"] = _connectionString,
                 ["KernelMemory:BaseUrl"] = "http://localhost:9001",
-                ["NOTEBOOK_TEMPLATES_BASE_FOLDER_PATH"] = Path.GetFullPath(Path.Combine(testProjectDir, "..", "NotebookTemplates"))
+                ["NOTEBOOK_TEMPLATES_BASE_FOLDER_PATH"] = Path.GetFullPath(Path.Combine(testProjectDir, "..", "NotebookTemplates")),
+                ["Jwt:Issuer"] = IntegrationTestAuthHandler.JwtIssuer,
+                ["Jwt:Audience"] = IntegrationTestAuthHandler.JwtAudience,
+                ["Jwt:LifetimeMinutes"] = IntegrationTestAuthHandler.JwtLifetimeMinutes.ToString(),
+                ["Jwt:SigningKey"] = IntegrationTestAuthHandler.JwtSigningKey
             });
         });
 
@@ -84,6 +90,19 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
             // Integration tests should not depend on external LLM providers.
             services.RemoveAll<IChatCompletionClientFactory>();
             services.AddSingleton<IChatCompletionClientFactory, FakeChatCompletionClientFactory>();
+
+            services
+                .AddAuthentication(options =>
+                {
+                    options.DefaultAuthenticateScheme = IntegrationTestAuthHandler.SchemeName;
+                    options.DefaultChallengeScheme = IntegrationTestAuthHandler.SchemeName;
+                })
+                .AddScheme<AuthenticationSchemeOptions, IntegrationTestAuthHandler>(
+                    IntegrationTestAuthHandler.SchemeName,
+                    _ => { });
+
+            services.RemoveAll<ICurrentUserService>();
+            services.AddScoped<ICurrentUserService, IntegrationTestCurrentUserService>();
         });
     }
 

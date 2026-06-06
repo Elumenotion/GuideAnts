@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +11,8 @@ namespace GuideAntsApi.IntegrationTests.Infrastructure;
 [TestClass]
 public abstract class BaseIntegrationTest : IAsyncDisposable
 {
+    private static readonly Guid DefaultAuthenticatedUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
     protected static TestWebApplicationFactory? SharedFactory;
     protected HttpClient Client { get; private set; } = null!;
 
@@ -154,16 +157,64 @@ public abstract class BaseIntegrationTest : IAsyncDisposable
         await db.SaveChangesAsync();
     }
 
-    protected void SetupAuthentication(string email = "test@example.com", string name = "Test User")
+    protected void SetupAuthentication(
+        Role role = Role.Admin,
+        string email = "integration.user@guideants.local",
+        string name = "Integration Test User",
+        Guid? userId = null,
+        bool mustChangePassword = false)
     {
-        var token = "test_token";
+        var claims = BuildTokenClaims(
+            userId ?? DefaultAuthenticatedUserId,
+            role,
+            email,
+            name,
+            mustChangePassword);
+        var token = IntegrationTestAuthHandler.CreateToken(claims);
         Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
 
     protected void SetupAuthenticationWithClaims(params Claim[] claims)
     {
-        var token = "test_token";
+        var baselineClaims = BuildTokenClaims(
+            DefaultAuthenticatedUserId,
+            Role.Admin,
+            "integration.user@guideants.local",
+            "Integration Test User",
+            mustChangePassword: false)
+            .ToDictionary(claim => claim.Type, claim => claim, StringComparer.Ordinal);
+
+        foreach (var claim in claims)
+        {
+            baselineClaims[claim.Type] = claim;
+        }
+
+        var token = IntegrationTestAuthHandler.CreateToken(baselineClaims.Values);
         Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+
+    private static List<Claim> BuildTokenClaims(
+        Guid userId,
+        Role role,
+        string email,
+        string name,
+        bool mustChangePassword)
+    {
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, name),
+            new(ClaimTypes.Email, email),
+            new(ClaimTypes.Role, role.ToString())
+        };
+
+        if (mustChangePassword)
+        {
+            claims.Add(new Claim("mustChangePassword", bool.TrueString));
+        }
+
+        return claims;
     }
 
     protected async Task<Guid> GetDefaultGuideIdAsync()

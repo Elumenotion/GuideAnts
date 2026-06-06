@@ -216,7 +216,9 @@ public class NotebookConversationAssistantSwitchingTests
     public async Task TestInit()
     {
         _client = _factory.CreateClient();
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test_token");
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            IntegrationTestAuthTokenFactory.CreateAdminToken());
 
         // Create real entities so endpoint pre-checks (e.g. runtime lookup by notebookId) succeed.
         var projectResp = await _client.PostAsJsonAsync("/api/projects", new { title = $"switch-test-{Guid.NewGuid():N}", description = "assistant-switching test" });

@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Services.Auth;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -11,10 +11,10 @@ public static class ProjectExternalAuthEndpoints
     public static void MapProjectExternalAuthEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/projects/{projectId:guid}/external-auth")
-            .WithTags("Projects");
+            .WithTags("Projects")
+            .RequireAuthorization("RequireApprovedUser");
 
         group.MapGet("", async (
-            ClaimsPrincipal user,
             Guid projectId,
             [FromServices] ApplicationDbContext db) =>
         {
@@ -40,7 +40,6 @@ var list = await db.ProjectExternalAuths
         .Produces(StatusCodes.Status403Forbidden);
 
         group.MapPut("{providerId}", async (
-            ClaimsPrincipal user,
             Guid projectId,
             string providerId,
             [FromBody] ExternalAuthRequest req,
@@ -115,12 +114,12 @@ if (string.IsNullOrWhiteSpace(providerId))
             return Results.NoContent();
         })
         .WithName("UpsertProjectExternalAuth")
+        .RequireAuthorization("RequireAdmin")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status400BadRequest);
 
         group.MapDelete("{providerId}", async (
-            ClaimsPrincipal user,
             Guid projectId,
             string providerId,
             [FromServices] ApplicationDbContext db) =>
@@ -136,9 +135,168 @@ var entity = await db.ProjectExternalAuths
             return Results.NoContent();
         })
         .WithName("DeleteProjectExternalAuth")
+        .RequireAuthorization("RequireAdmin")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound);
+
+        group.MapPost("{providerId}/oauth/authorize-url", async (
+            Guid projectId,
+            string providerId,
+            [FromBody] OAuthAuthorizeUrlRequest request,
+            [FromServices] ICurrentUserService currentUserService,
+            [FromServices] IToolOAuthService toolOAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            var currentUser = await currentUserService.GetCurrentUserAsync(cancellationToken);
+            if (currentUser == null)
+            {
+                return Results.Unauthorized();
+            }
+
+            try
+            {
+                var result = await toolOAuthService.CreateAuthorizeUrlAsync(
+                    projectId,
+                    providerId,
+                    currentUser.UserId,
+                    new ToolOAuthAuthorizeUrlRequest(
+                        request?.ClientId ?? string.Empty,
+                        request?.Tenant ?? "organizations",
+                        request?.Scopes ?? [],
+                        request?.RedirectUri ?? string.Empty,
+                        request?.ReturnUrl),
+                    cancellationToken);
+
+                return Results.Ok(new
+                {
+                    authorizeUrl = result.AuthorizeUrl,
+                    state = result.State,
+                    expiresAt = result.ExpiresAtUtc
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        })
+        .WithName("StartProjectExternalOAuth")
+        .Produces(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        group.MapPost("{providerId}/oauth/callback", async (
+            Guid projectId,
+            string providerId,
+            [FromBody] OAuthCallbackRequest request,
+            [FromServices] ICurrentUserService currentUserService,
+            [FromServices] IToolOAuthService toolOAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            var currentUser = await currentUserService.GetCurrentUserAsync(cancellationToken);
+            if (currentUser == null)
+            {
+                return Results.Unauthorized();
+            }
+
+            if (request == null || string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.State))
+            {
+                return Results.BadRequest(new { message = "code and state are required." });
+            }
+
+            try
+            {
+                var status = await toolOAuthService.CompleteCallbackAsync(
+                    projectId,
+                    providerId,
+                    currentUser.UserId,
+                    request.Code,
+                    request.State,
+                    cancellationToken);
+
+                return Results.Ok(new
+                {
+                    connected = status.Connected,
+                    expiresAt = status.ExpiresAt,
+                    scopes = status.Scopes
+                });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Results.Json(new { message = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
+        })
+        .WithName("CompleteProjectExternalOAuthCallback")
+        .Produces(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        group.MapGet("{providerId}/oauth/status", async (
+            string providerId,
+            [FromServices] ICurrentUserService currentUserService,
+            [FromServices] IToolOAuthService toolOAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            var currentUser = await currentUserService.GetCurrentUserAsync(cancellationToken);
+            if (currentUser == null)
+            {
+                return Results.Unauthorized();
+            }
+
+            var status = await toolOAuthService.GetStatusAsync(
+                currentUser.UserId,
+                providerId,
+                cancellationToken);
+
+            return Results.Ok(new
+            {
+                connected = status.Connected,
+                expiresAt = status.ExpiresAt,
+                scopes = status.Scopes
+            });
+        })
+        .WithName("GetProjectExternalOAuthStatus")
+        .Produces(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        group.MapDelete("{providerId}/oauth", async (
+            string providerId,
+            [FromServices] ICurrentUserService currentUserService,
+            [FromServices] IToolOAuthService toolOAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            var currentUser = await currentUserService.GetCurrentUserAsync(cancellationToken);
+            if (currentUser == null)
+            {
+                return Results.Unauthorized();
+            }
+
+            await toolOAuthService.DisconnectAsync(
+                currentUser.UserId,
+                providerId,
+                cancellationToken);
+
+            return Results.NoContent();
+        })
+        .WithName("DisconnectProjectExternalOAuth")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
     }
 
     public sealed class ExternalAuthRequest
@@ -148,5 +306,20 @@ var entity = await db.ProjectExternalAuths
         public string? Tenant { get; set; }
         public string? HeaderName { get; set; }
         public string? HeaderValue { get; set; }
+    }
+
+    public sealed class OAuthAuthorizeUrlRequest
+    {
+        public string? ClientId { get; set; }
+        public string? Tenant { get; set; }
+        public List<string>? Scopes { get; set; }
+        public string? RedirectUri { get; set; }
+        public string? ReturnUrl { get; set; }
+    }
+
+    public sealed class OAuthCallbackRequest
+    {
+        public string? Code { get; set; }
+        public string? State { get; set; }
     }
 }

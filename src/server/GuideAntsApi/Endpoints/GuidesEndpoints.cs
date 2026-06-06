@@ -12,6 +12,7 @@ public static class GuidesEndpoints
     {
         var group = app.MapGroup("/api/guides")
             .WithTags("Guides")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         // List guides
@@ -202,6 +203,7 @@ public static class GuidesEndpoints
         // OpenAPI Operations endpoints
         var operationsGroup = app.MapGroup("/api/operations")
             .WithTags("OpenAPI Operations")
+            .RequireAuthorization("RequireAdmin")
             .WithOpenApi();
 
         // Get single operation

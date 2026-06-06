@@ -62,3 +62,13 @@ public sealed record NotebookToolbarChatDto(
     IReadOnlyList<string> Blockers,
     string? InProgressOperationId,
     string? InProgressState);
+
+public sealed record NotebookChatReadinessDto(
+    string? EffectiveModelId,
+    string? EffectiveModelDisplayName,
+    string? EffectiveProvider,
+    IReadOnlyList<string> Blockers,
+    bool SupportsLocalRuntimePower,
+    bool LocalRuntimeOn,
+    string? InProgressOperationId,
+    string? InProgressState);

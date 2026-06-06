@@ -9,6 +9,7 @@ using System.Runtime.CompilerServices;
 using GuideAntsApi.Services.Core;
 using System.Text.Json;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
 using Microsoft.Extensions.Options;
@@ -47,6 +48,7 @@ public class ConversationService : IConversationService
     private readonly IContextOptionsService _contextOptionsService;
     private readonly IOptions<MarkdownAttachmentOptions> _markdownAttachmentOptions;
     private readonly IChatModelResolver _chatModelResolver;
+    private readonly IToolOAuthService? _toolOAuthService;
 
     public ConversationService(IHttpClientFactory httpClientFactory,
         ITurnManager turnManager,
@@ -62,7 +64,8 @@ public class ConversationService : IConversationService
         INotebookFileSyncService? notebookFileSyncService = null,
         IMarkdownExtractionService? markdownExtractionService = null,
         ILogger<ConversationService>? logger = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        IToolOAuthService? toolOAuthService = null)
     {
         _httpClientFactory = httpClientFactory;
         _turnManager = turnManager;
@@ -79,6 +82,7 @@ public class ConversationService : IConversationService
         _contextOptionsService = contextOptionsService ?? throw new ArgumentNullException(nameof(contextOptionsService));
         _markdownAttachmentOptions = markdownAttachmentOptions ?? throw new ArgumentNullException(nameof(markdownAttachmentOptions));
         _chatModelResolver = chatModelResolver ?? throw new ArgumentNullException(nameof(chatModelResolver));
+        _toolOAuthService = toolOAuthService;
         _storagePath = configuration?["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured");
     }
 
@@ -430,6 +434,10 @@ public class ConversationService : IConversationService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var currentUserService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
+        var currentUser = await currentUserService.GetCurrentUserAsync().ConfigureAwait(false)
+            ?? throw new UnauthorizedAccessException("Authenticated user is required.");
+        var currentUserId = currentUser.UserId;
 
         var message = await db.NotebookConversationMessages
             .Include(m => m.NotebookConversation)
@@ -453,7 +461,7 @@ public class ConversationService : IConversationService
                 MessageId = messageId,
                 OriginalContent = message.Content,
                 OriginalToolCalls = message.ToolCalls,
-                FirstEditedByUserId = null,
+                FirstEditedByUserId = currentUserId,
                 FirstEditedAt = DateTime.UtcNow
             };
             db.MessageEditHistories.Add(editHistory);
@@ -462,7 +470,7 @@ public class ConversationService : IConversationService
         // Update the message
         message.Content = newContent;
         message.IsEdited = true;
-        message.LastEditedByUserId = null;
+        message.LastEditedByUserId = currentUserId;
         message.LastEditedAt = DateTime.UtcNow;
 
         // Clear tool calls since user is providing new content
@@ -1668,6 +1676,7 @@ public class ConversationService : IConversationService
         public ResolvedExecutionPolicy? ExecutionPolicy { get; init; }
         public required List<ChatMessage> PreviousMessages { get; init; }
         public Guid? AssistantId { get; init; }
+        public required Dictionary<string, string> ExternalAuthTokens { get; init; }
 
         // populated later
         public int TurnIndex { get; set; }
@@ -1693,6 +1702,7 @@ public class ConversationService : IConversationService
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var currentUserService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();
 
         var conv = await db.NotebookConversations
             .Include(c => c.Messages)
@@ -1706,7 +1716,14 @@ public class ConversationService : IConversationService
             ?? throw new KeyNotFoundException("Conversation not found");
 
 
-        var dbUser = new User { Id = Guid.Empty, Name = "User", Email = "user@example.com" };
+        var currentUser = await currentUserService.GetCurrentUserAsync(ct).ConfigureAwait(false)
+            ?? throw new UnauthorizedAccessException("Authenticated user is required.");
+        var dbUser = new User
+        {
+            Id = currentUser.UserId,
+            Name = currentUser.Name,
+            Email = currentUser.Email
+        };
 
         var assistantName = string.IsNullOrWhiteSpace(request.AssistantName) ? "assistant" : request.AssistantName;
 
@@ -1739,6 +1756,15 @@ public class ConversationService : IConversationService
             .Select(a => (Guid?)a.Id)
             .FirstOrDefaultAsync(ct);
 
+        var externalAuthTokens = _toolOAuthService != null
+            ? await _toolOAuthService.ResolveExternalAuthTokensForAssistantAsync(
+                currentUser.UserId,
+                conv.Notebook.ProjectId,
+                assistantId,
+                assistantName,
+                ct)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         return new StreamSendContext
         {
             ConversationId = conversationId,
@@ -1749,7 +1775,8 @@ public class ConversationService : IConversationService
             ModelDeploymentId = modelDeploymentId,
             ExecutionPolicy = resolvedModel.ExecutionPolicy,
             PreviousMessages = previousMessages,
-            AssistantId = assistantId
+            AssistantId = assistantId,
+            ExternalAuthTokens = externalAuthTokens
         };
     }
 
@@ -1790,7 +1817,7 @@ public class ConversationService : IConversationService
             Content = ctx.Request.Instructions,
             AssistantName = "user",
             ModelDeploymentId = ctx.ModelDeploymentId,
-            UserId = null,
+            UserId = ctx.DbUser.Id,
             Created = DateTime.UtcNow,
             AssistantId = ctx.AssistantId
         };
@@ -1826,8 +1853,8 @@ public class ConversationService : IConversationService
             AssistantName = ctx.AssistantName,
             DeploymentId = ctx.ModelDeploymentId,
             Instructions = ctx.Request.Instructions,
-            oAuthUserAccessToken = ctx.Request.ExternalAuthTokens?.FirstOrDefault().Value,
-            ExternalAuthTokens = ctx.Request.ExternalAuthTokens,
+            oAuthUserAccessToken = ctx.ExternalAuthTokens.FirstOrDefault().Value,
+            ExternalAuthTokens = ctx.ExternalAuthTokens,
             ExecutionPolicy = ctx.ExecutionPolicy,
         };
     }

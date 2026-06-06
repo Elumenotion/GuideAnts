@@ -55,7 +55,9 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
         }
 
         Client = SharedFactory.CreateClient();
-        Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test_token");
+        Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            IntegrationTestAuthTokenFactory.CreateAdminToken());
 
         await ResetRoutingStateAsync();
         ResetStubs();

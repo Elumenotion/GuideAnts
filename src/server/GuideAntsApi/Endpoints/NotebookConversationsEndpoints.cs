@@ -3,6 +3,7 @@ using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.Auth;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Utils;
@@ -16,7 +17,8 @@ public static class NotebookConversationsEndpoints
     public static void MapNotebookConversationsEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/projects/{projectId:guid}/notebooks/{notebookId:guid}/conversations")
-            .WithTags("NotebookConversations");
+            .WithTags("NotebookConversations")
+            .RequireAuthorization("RequireApprovedUser");
 
         // List
         group.MapGet("/", async ([FromServices] IConversationService svc, Guid notebookId) =>
@@ -41,6 +43,7 @@ public static class NotebookConversationsEndpoints
             var dto = await svc.CreateConversationAsync(notebookId, req.Title);
             return Results.Ok(dto);
         })
+        .RequireAuthorization("RequireContributor")
         .Produces<NotebookConversationListDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status402PaymentRequired);
 
@@ -50,6 +53,7 @@ public static class NotebookConversationsEndpoints
             await svc.RenameConversationAsync(convoId, req.Title);
             return Results.NoContent();
         })
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent);
 
         // Generate and set conversation title using Conversation Title Generator assistant
@@ -123,6 +127,7 @@ public static class NotebookConversationsEndpoints
             // 8) Return the final title
             return Results.Ok(new { title });
         })
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .WithSummary("Generate and set a conversation title using the Conversation Title Generator assistant");
@@ -133,6 +138,7 @@ public static class NotebookConversationsEndpoints
             await svc.DeleteConversationAsync(convoId);
             return Results.NoContent();
         })
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent);
 
         // POST send message (requires SSE via Accept: text/event-stream)
@@ -208,9 +214,23 @@ public static class NotebookConversationsEndpoints
                     await ctx.Response.WriteAsJsonAsync(new { error = ex.Message });
                 }
             }
+            catch (ToolOAuthReconnectRequiredException ex)
+            {
+                if (!ctx.Response.HasStarted)
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status409Conflict;
+                    await ctx.Response.WriteAsJsonAsync(new
+                    {
+                        code = "OAUTH_RECONNECT_REQUIRED",
+                        message = "Reconnect required for one or more OAuth providers.",
+                        providers = ex.ProviderIds
+                    });
+                }
+            }
 
             return Results.Empty;
         })
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status409Conflict)
         .Produces(StatusCodes.Status402PaymentRequired);
@@ -232,6 +252,7 @@ public static class NotebookConversationsEndpoints
                 return Results.BadRequest(ex.Message);
             }
         })
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status402PaymentRequired)
@@ -243,6 +264,7 @@ public static class NotebookConversationsEndpoints
             await service.UndoLastForConversationAsync(convoId);
             return Results.NoContent();
         })
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status402PaymentRequired);
 
@@ -252,6 +274,7 @@ public static class NotebookConversationsEndpoints
             await service.UndoForConversationAsync(convoId, messageId);
             return Results.NoContent();
         })
+        .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status402PaymentRequired);
 
@@ -316,13 +339,12 @@ public static class NotebookConversationsEndpoints
             }
         })
         .WithName("SaveConversationAsMarkdown")
+        .RequireAuthorization("RequireContributor")
         .Produces<NotebookFileDto>(StatusCodes.Status201Created)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status400BadRequest);
     }
-
-    // Removed custom token validation; JwtBearer handles token extraction/validation
 
     public record CreateConversationRequest(string Title);
     public record RenameConversationRequest(string Title);
