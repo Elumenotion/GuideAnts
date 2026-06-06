@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../config/apiConfig';
-import { withAuthHeaders } from './authService';
+import { withAuthFetchInit, withAuthHeaders } from './authService';
 import { broadcastAuthExpired } from './authEvents';
 
 export interface TranscribeAudioParams {
@@ -25,11 +25,11 @@ export async function transcribeAudio(params: TranscribeAudioParams): Promise<Tr
     formData.append('language', params.language);
   }
 
-  const response = await fetch(`${API_BASE_URL}/speech/transcribe`, {
+  const response = await fetch(`${API_BASE_URL}/speech/transcribe`, withAuthFetchInit({
     method: 'POST',
     headers: withAuthHeaders(),
     body: formData,
-  });
+  }));
   if (response.status === 401) {
     broadcastAuthExpired('Authentication expired.');
   }
