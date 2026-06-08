@@ -5,6 +5,8 @@ export interface MessageDto {
   role: ChatRole;
   content: string;
   userId?: string;
+  userName?: string;
+  userEmail?: string;
   assistantName?: string;
   isEdited: boolean;
   lastEditedAt?: string;

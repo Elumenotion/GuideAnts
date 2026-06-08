@@ -1,5 +1,6 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -49,15 +50,47 @@ public sealed class ExcludedHostServiceTests
     }
 
     [TestMethod]
-    public async Task TryAddExcludedHostAsync_DeduplicatesNormalizedHosts()
+    public async Task TryAddExcludedHostAsync_RefreshesExistingHost()
     {
         var first = await _service.TryAddExcludedHostAsync("https://example.com/path", "reason");
+        var original = await _context.ExcludedHosts.SingleAsync();
+        var originalUpdated = original.Updated;
+
+        await Task.Delay(20);
         var second = await _service.TryAddExcludedHostAsync("EXAMPLE.COM", "reason");
 
         first.Should().BeTrue();
-        second.Should().BeFalse();
+        second.Should().BeTrue();
 
         var all = await _service.GetExcludedHostsAsync();
         all.Should().BeEquivalentTo(["example.com"]);
+
+        var refreshed = await _context.ExcludedHosts.SingleAsync();
+        refreshed.Updated.Should().BeAfter(originalUpdated!.Value);
+    }
+
+    [TestMethod]
+    public async Task GetExcludedHostsAsync_FiltersOutHostsOlderThanSevenDays()
+    {
+        var now = DateTime.UtcNow;
+        _context.ExcludedHosts.AddRange(
+            new ExcludedHost
+            {
+                Host = "fresh.example.com",
+                Created = now.AddDays(-2),
+                Updated = now.AddDays(-2)
+            },
+            new ExcludedHost
+            {
+                Host = "stale.example.com",
+                Created = now.AddDays(-10),
+                Updated = now.AddDays(-10)
+            });
+        await _context.SaveChangesAsync();
+
+        var all = await _service.GetExcludedHostsAsync();
+
+        all.Should().Contain("fresh.example.com");
+        all.Should().NotContain("stale.example.com");
     }
 }

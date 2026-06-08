@@ -101,15 +101,48 @@ function UserCellWrapper({
   projectId?: string;
   notebookId?: string;
 }) {
-  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(() => {
+    if (!message.userId && !message.userName && !message.userEmail) {
+      return null;
+    }
+
+    return {
+      id: message.userId,
+      name: message.userName,
+      email: message.userEmail,
+    };
+  });
 
   useEffect(() => {
+    let cancelled = false;
+
     const loadUserInfo = async () => {
+      if (message.userId || message.userName || message.userEmail) {
+        setUserInfo((previous) => ({
+          id: message.userId ?? previous?.id,
+          name: message.userName ?? previous?.name,
+          email: message.userEmail ?? previous?.email,
+        }));
+      }
+
       const info = await getUserInfo(message.userId);
-      setUserInfo(info);
+      if (cancelled || !info) {
+        return;
+      }
+
+      setUserInfo((previous) => ({
+        id: info.id ?? previous?.id ?? message.userId,
+        name: info.name ?? previous?.name ?? message.userName,
+        email: info.email ?? previous?.email ?? message.userEmail,
+      }));
     };
-    loadUserInfo();
-  }, [message.userId, getUserInfo]);
+
+    void loadUserInfo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [message.userId, message.userName, message.userEmail, getUserInfo]);
 
   return (
     <UserCell
@@ -118,9 +151,9 @@ function UserCellWrapper({
       isLast={isLast}
       onUndo={onUndo}
       onEdit={onEdit}
-      userId={userInfo?.id}
-      userName={userInfo?.name}
-      userEmail={userInfo?.email}
+      userId={userInfo?.id ?? message.userId}
+      userName={userInfo?.name ?? message.userName}
+      userEmail={userInfo?.email ?? message.userEmail}
       attachments={attachments}
       onPreviewFile={onPreviewFile}
       projectId={projectId}
@@ -222,9 +255,9 @@ function AssistantCellWrapper({
       editError={editError}
       assistantName={messageAssistant?.name}
       avatarUrl={messageAssistant?.avatarUrl}
-      editorUserId={displayEditorInfo?.id}
-      editorUserName={displayEditorInfo?.name}
-      editorUserEmail={displayEditorInfo?.email}
+      editorUserId={displayEditorInfo?.id ?? message.userId}
+      editorUserName={displayEditorInfo?.name ?? message.userName}
+      editorUserEmail={displayEditorInfo?.email ?? message.userEmail}
       lastEditedAt={message.lastEditedAt}
       // Save functionality props
       projectId={projectId}
@@ -628,7 +661,11 @@ const CellList = React.memo(function CellList({
         setCurrentUser(user);
         // cache current user immediately
         if (user?.id) {
-          setUserCache(prev => new Map(prev.set(user.id!, user)));
+          setUserCache(prev => {
+            const map = new Map(prev);
+            map.set(user.id!, user);
+            return map;
+          });
         }
       } catch (error) {
         console.warn('Failed to load current user:', error);
@@ -676,9 +713,8 @@ const CellList = React.memo(function CellList({
       }
     };
 
-    preloadUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages]);
+    void preloadUsers();
+  }, [messages, userCache, currentUser]);
 
   // Get user info for a message, with caching
   const getUserInfo = useCallback(async (userId?: string): Promise<UserInfo | null> => {
@@ -694,26 +730,38 @@ const CellList = React.memo(function CellList({
     try {
       // Check if this is the current user
       if (currentUser && await userService.isCurrentUser(userId)) {
-        setUserCache(prev => new Map(prev.set(userId, currentUser)));
+        setUserCache(prev => {
+          const map = new Map(prev);
+          map.set(userId, currentUser);
+          return map;
+        });
         return currentUser;
       }
 
       // Try to fetch user by ID
       const userInfo = await userService.getUserById(userId);
       if (userInfo) {
-        setUserCache(prev => new Map(prev.set(userId, userInfo)));
+        setUserCache(prev => {
+          const map = new Map(prev);
+          map.set(userId, userInfo);
+          return map;
+        });
         return userInfo;
       }
 
       // Fallback: create basic user info from userId
       const fallbackUser: UserInfo = { id: userId };
-      setUserCache(prev => new Map(prev.set(userId, fallbackUser)));
+      setUserCache(prev => {
+        const map = new Map(prev);
+        map.set(userId, fallbackUser);
+        return map;
+      });
       return fallbackUser;
     } catch (error) {
       console.warn(`Failed to get user info for ${userId}:`, error);
       return currentUser;
     }
-  }, [currentUser]); // Remove userCache from dependencies to prevent unnecessary recreations
+  }, [currentUser, userCache]);
 
   // Get assistant info for a message
   const getAssistantInfo = useCallback((assistantName?: string): AssistantOption | undefined => {
