@@ -12,6 +12,7 @@ interface EditorHeaderProps {
 }
 
 import { TourStartButton } from '../../../tour/TourStartButton';
+import { HeaderActionsBar } from '../../common/HeaderActionsBar';
 import { HomeButton } from '../../common/HomeButton';
 import { SettingsButton } from '../../common/SettingsButton';
 
@@ -22,21 +23,21 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
   return (
     <div className="bg-white border-b px-8 py-4" data-tour-id="guide.header.container">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-4">
             <button
               onClick={onCancel}
-              className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-1"
+              className="text-sm text-gray-600 hover:text-gray-900 flex shrink-0 items-center gap-1"
               data-tour-id="guide.header.back"
             >
               ← {backLabel}
             </button>
-            <div className="h-6 w-px bg-gray-300"></div>
-            <h1 className="text-xl font-semibold text-gray-900" data-tour-id="guide.header.title">
+            <div className="h-6 w-px shrink-0 bg-gray-300"></div>
+            <h1 className="truncate text-xl font-semibold text-gray-900" data-tour-id="guide.header.title">
               {isEditing && entityName ? `Editing ${entityName} ${entityLabel}` : isEditing ? `Edit ${entityLabel}` : `Create ${entityLabel}`}
             </h1>
           </div>
-          <div className="flex gap-2">
+          <HeaderActionsBar>
             {isEditing && showExport && (
               <button
                 onClick={onExport}
@@ -67,7 +68,7 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
             <div data-tour-id="guide.header.help">
               <TourStartButton screenId={tourScreenId ?? 'guideBuilder'} inline />
             </div>
-          </div>
+          </HeaderActionsBar>
         </div>
       </div>
     </div>

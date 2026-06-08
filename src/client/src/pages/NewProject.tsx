@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
 import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import { api } from '../services/api';
@@ -59,12 +60,12 @@ export default function NewProject() {
     return (
         <div className="min-h-screen bg-gray-50 p-8">
             <div className="max-w-2xl mx-auto">
-                <div className="flex justify-end mb-2">
-                    <div className="flex items-center gap-2">
+                <div className="mb-2">
+                    <HeaderActionsBar>
                         <HomeButton />
                         <SettingsButton />
                         <TourStartButton screenId="new-project" inline />
-                    </div>
+                    </HeaderActionsBar>
                 </div>
                 <div className="mb-8">
                     <h1 className="text-2xl font-bold text-gray-900">Create New Project</h1>
