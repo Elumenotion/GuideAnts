@@ -1,7 +1,8 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AntRunner.Chat.Abstractions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenAI;
 using OpenAI.Responses;
 using ResponseImageContent = OpenAI.Responses.ImageContent;
@@ -15,10 +16,12 @@ namespace AntRunner.Chat.OpenAI;
 public sealed class OpenAiResponsesClient : IChatCompletionClient
 {
     private readonly OpenAIClient _client;
+    private readonly ILogger<OpenAiResponsesClient> _logger;
 
-    public OpenAiResponsesClient(OpenAIClient client)
+    public OpenAiResponsesClient(OpenAIClient client, ILogger<OpenAiResponsesClient>? logger = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
+        _logger = logger ?? NullLogger<OpenAiResponsesClient>.Instance;
     }
 
     public async Task<ChatCompletionResponse> GetCompletionAsync(
@@ -30,7 +33,7 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
             responseRequest,
             _ => Task.CompletedTask,
             cancellationToken);
-        return OpenAiResponsesMapper.FromResponse(response);
+        return OpenAiResponsesMapper.FromResponseWithLogger(response, _logger);
     }
 
     public async Task<ChatCompletionResponse> StreamCompletionAsync(
@@ -44,7 +47,7 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
             responseRequest,
             streamHandler.HandleEventAsync,
             cancellationToken);
-        return OpenAiResponsesMapper.FromResponse(response);
+        return OpenAiResponsesMapper.FromResponseWithLogger(response, _logger);
     }
 
     private sealed class ResponsesStreamHandler
@@ -219,6 +222,16 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
 
         internal static ChatCompletionResponse FromResponse(Response response)
         {
+            return FromResponseCore(response, NullLogger<OpenAiResponsesClient>.Instance);
+        }
+
+        internal static ChatCompletionResponse FromResponseWithLogger(Response response, ILogger logger)
+        {
+            return FromResponseCore(response, logger ?? NullLogger<OpenAiResponsesClient>.Instance);
+        }
+
+        private static ChatCompletionResponse FromResponseCore(Response response, ILogger logger)
+        {
             if (response == null)
             {
                 throw new ArgumentNullException(nameof(response));
@@ -233,7 +246,7 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
                 switch (item)
                 {
                     case Message message when message.Role == Role.Assistant:
-                        AppendMessageContent(message.Content, content, reasoningSummaries);
+                        AppendMessageContent(message.Content, content, reasoningSummaries, logger);
                         break;
                     case FunctionToolCall toolCall:
                         toolCalls.Add(FromToolCall(toolCall));
@@ -242,10 +255,10 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
                         AppendReasoningItem(reasoningItem, reasoningSummaries);
                         break;
                     case FunctionToolCallOutput:
-                        Trace.TraceWarning("OpenAI Responses returned tool outputs in the output list.");
+                        logger.LogWarning("OpenAI Responses returned tool outputs in the output list.");
                         break;
                     default:
-                        Trace.TraceWarning($"Unsupported OpenAI response item: {item.GetType().Name}");
+                        logger.LogWarning("Unsupported OpenAI response item: {ResponseItemType}", item.GetType().Name);
                         break;
                 }
             }
@@ -307,7 +320,8 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
         private static void AppendMessageContent(
             IReadOnlyList<IResponseContent> contents,
             List<ChatContent> output,
-            List<string> reasoningSummaries)
+            List<string> reasoningSummaries,
+            ILogger logger)
         {
             foreach (var content in contents)
             {
@@ -323,7 +337,7 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
                         }
                         else if (!string.IsNullOrWhiteSpace(imageContent.FileId))
                         {
-                            Trace.TraceWarning("OpenAI Responses returned image content with FileId only.");
+                            logger.LogWarning("OpenAI Responses returned image content with FileId only.");
                         }
                         break;
                     case ResponseRefusalContent refusalContent:
@@ -339,7 +353,7 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
                         }
                         break;
                     default:
-                        Trace.TraceWarning($"Unsupported OpenAI response content: {content.GetType().Name}");
+                        logger.LogWarning("Unsupported OpenAI response content: {ResponseContentType}", content.GetType().Name);
                         break;
                 }
             }

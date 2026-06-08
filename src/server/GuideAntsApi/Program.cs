@@ -6,6 +6,8 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Authorization;
+using AntRunner.Chat;
+using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Settings;
 
@@ -58,13 +60,6 @@ public class Program
         // EnsureCatalogAndMigrate so no configuration access triggers ApplicationSettingsConfigurationProvider.Load
         // before dbo.ApplicationSettings exists.
         var defaultConnectionString = bootstrapConfiguration.GetConnectionString("DefaultConnection");
-
-        // Only enable console tracing in development to reduce log ingestion costs
-        if (builder.Environment.IsDevelopment())
-        {
-            System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(Console.Out));
-            System.Diagnostics.Trace.AutoFlush = true;
-        }
 
         // Configure FormOptions
         builder.Services.Configure<FormOptions>(options =>
@@ -119,6 +114,10 @@ public class Program
 
         var app = builder.Build();
 
+        var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+        ChatDiagnostics.Initialize(loggerFactory);
+        ToolCallingDiagnostics.Initialize(loggerFactory);
+
         // Seed missing settings sections from bootstrap config and then force a config reload
         // so DB-primary values are active before service initialization.
         using (var scope = app.Services.CreateScope())
@@ -166,6 +165,9 @@ public class Program
 
         // Initialize static service provider for MemoryTools (KM queries)
         GuideAntsApi.Services.MemoryTools.InitializeServiceProvider(app.Services);
+
+        // Initialize static service provider for ReadWeb tools
+        GuideAntsApi.Services.ReadWebTools.InitializeServiceProvider(app.Services);
 
         // Initialize static service provider for NotebookImageService
         GuideAntsApi.Services.NotebookImageService.InitializeServiceProvider(app.Services);

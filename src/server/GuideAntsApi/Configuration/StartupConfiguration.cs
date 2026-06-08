@@ -224,13 +224,21 @@ public static class StartupConfiguration
         {
             var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
             var resolver = provider.GetRequiredService<IProviderConfigurationResolver>();
-            return new OpenAiResponsesClientFactory(httpClientFactory, configAccessor: resolver.GetOpenAiConfig);
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+            return new OpenAiResponsesClientFactory(
+                httpClientFactory,
+                configAccessor: resolver.GetOpenAiConfig,
+                loggerFactory: loggerFactory);
         });
         services.AddKeyedSingleton(RoutingChatCompletionClientFactory.AzureOpenAiFactoryKey, (provider, _) =>
         {
             var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
             var resolver = provider.GetRequiredService<IProviderConfigurationResolver>();
-            return new OpenAiResponsesClientFactory(httpClientFactory, configAccessor: resolver.GetAzureOpenAiConfig);
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+            return new OpenAiResponsesClientFactory(
+                httpClientFactory,
+                configAccessor: resolver.GetAzureOpenAiConfig,
+                loggerFactory: loggerFactory);
         });
         services.AddSingleton(provider =>
         {
