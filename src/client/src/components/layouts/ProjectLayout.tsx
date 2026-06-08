@@ -4,6 +4,7 @@ import { TwoColumnLayout } from './TwoColumnLayout';
 import { TourStartButton } from '../../tour/TourStartButton';
 import { HomeButton } from '../common/HomeButton';
 import { SettingsButton } from '../common/SettingsButton';
+import { HeaderActionsBar } from '../common/HeaderActionsBar';
 import { HeaderUserMenu } from '../common/HeaderUserMenu';
 import { HiMenu } from 'react-icons/hi';
 import { FiEdit2 } from 'react-icons/fi';
@@ -47,8 +48,8 @@ function ProjectHeader({
 
     return (
         <div className="border-b py-2 px-4 bg-white">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center min-w-0">
+            <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-1 items-center">
                     {/* Mobile hamburger menu */}
                     {onMobileSidebarToggle && (
                         <button
@@ -67,7 +68,7 @@ function ProjectHeader({
                         </>
                     )}
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <HeaderActionsBar>
                     {canEdit && onEdit && (
                         <button
                             onClick={onEdit}
@@ -82,7 +83,7 @@ function ProjectHeader({
                     <SettingsButton />
                     <HeaderUserMenu />
                     <TourStartButton screenId={tourScreenId ?? 'projectDetails'} inline />
-                </div>
+                </HeaderActionsBar>
             </div>
             <div className="text-sm text-gray-600 mt-0.5">
                 Created on {new Date(project.created).toLocaleDateString()}

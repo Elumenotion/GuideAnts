@@ -7,6 +7,7 @@ import { TwoColumnLayout } from './TwoColumnLayout';
 import { TourStartButton } from '../../tour/TourStartButton';
 import { HomeButton } from '../common/HomeButton';
 import { SettingsButton } from '../common/SettingsButton';
+import { HeaderActionsBar } from '../common/HeaderActionsBar';
 import { HeaderUserMenu } from '../common/HeaderUserMenu';
 import { HiMenu } from 'react-icons/hi';
 import { FiEdit2 } from 'react-icons/fi';
@@ -55,7 +56,7 @@ function NotebookHeader({
         <div className="border-b bg-white">
             {/* Main Header */}
             <div className="py-2 px-2 md:px-4">
-                <div className="grid min-w-0 min-h-0 w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                <div className="grid min-w-0 min-h-0 w-full grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-2">
                     <div className="flex min-w-0 items-center">
                         {/* Mobile Hamburger Menu */}
                         <button
@@ -96,7 +97,7 @@ function NotebookHeader({
                     >
                         {headerCenter ?? null}
                     </div>
-                    <div className="flex min-w-0 items-center justify-end justify-self-end gap-1 sm:gap-2">
+                    <HeaderActionsBar className="w-full justify-self-end">
                         {canEdit && onEdit && (
                             <button
                                 onClick={onEdit}
@@ -121,7 +122,7 @@ function NotebookHeader({
                         <SettingsButton />
                         <HeaderUserMenu />
                         <TourStartButton screenId={tourScreenId ?? 'notebook'} inline />
-                    </div>
+                    </HeaderActionsBar>
                 </div>
             </div>
         </div>

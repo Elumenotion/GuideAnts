@@ -72,8 +72,8 @@ public sealed class IntegrationTestAuthHandler : AuthenticationHandler<Authentic
 
         EnsureNameIdentifierClaim(identity);
 
-        var securityStampIsValid = await ValidateSecurityStampAsync(identity.Claims.ToList()).ConfigureAwait(false);
-        if (!securityStampIsValid)
+        var authorityIsValid = await ApplyDbAuthorityAsync(identity).ConfigureAwait(false);
+        if (!authorityIsValid)
         {
             return AuthenticateResult.Fail("Token security stamp mismatch.");
         }
@@ -132,11 +132,15 @@ public sealed class IntegrationTestAuthHandler : AuthenticationHandler<Authentic
         }
     }
 
-    private async Task<bool> ValidateSecurityStampAsync(IReadOnlyCollection<Claim> claims)
+    // Mirrors production OnTokenValidated: tokens that carry a security stamp represent a real
+    // DB-backed identity, so the stamp is validated and the live role is applied (replacing the
+    // possibly stale role claim minted at login). Synthetic fixture tokens (no stamp claim) skip
+    // the DB and keep their declared role.
+    private async Task<bool> ApplyDbAuthorityAsync(ClaimsIdentity identity)
     {
-        var userIdValue = claims.FirstOrDefault(claim => claim.Type == ClaimTypes.NameIdentifier)?.Value
-            ?? claims.FirstOrDefault(claim => claim.Type == JwtRegisteredClaimNames.Sub)?.Value;
-        var securityStampValue = claims.FirstOrDefault(claim => claim.Type == JwtClaimTypes.SecurityStamp)?.Value;
+        var userIdValue = identity.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? identity.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+        var securityStampValue = identity.FindFirst(JwtClaimTypes.SecurityStamp)?.Value;
 
         if (!Guid.TryParse(userIdValue, out var userId) || !Guid.TryParse(securityStampValue, out var tokenSecurityStamp))
         {
@@ -144,11 +148,19 @@ public sealed class IntegrationTestAuthHandler : AuthenticationHandler<Authentic
         }
 
         var db = Context.RequestServices.GetRequiredService<ApplicationDbContext>();
-        var dbUser = await db.Users
+        var account = await db.UserRoles
             .AsNoTracking()
-            .SingleOrDefaultAsync(user => user.Id == userId, Context.RequestAborted)
+            .Where(userRole => userRole.UserId == userId)
+            .Select(userRole => new { userRole.User.SecurityStamp, userRole.Role })
+            .SingleOrDefaultAsync(Context.RequestAborted)
             .ConfigureAwait(false);
 
-        return dbUser?.SecurityStamp == tokenSecurityStamp;
+        if (account is null || account.SecurityStamp != tokenSecurityStamp)
+        {
+            return false;
+        }
+
+        AuthRoleClaims.ApplyLiveRole(identity, account.Role);
+        return true;
     }
 }

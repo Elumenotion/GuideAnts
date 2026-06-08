@@ -37,8 +37,9 @@ function NotebookDetailsContent() {
     const navigate = useNavigate();
     const location = useLocation();
     const { project, canEdit, isLoading: projectLoading, error: projectError, refreshProject, folderTree: projectFolderTree } = useProject();
-    const { role } = useAuth();
+    const { role, status } = useAuth();
     const isAdmin = role === 'Admin';
+    const isAuthenticatedAdmin = status === 'authenticated' && isAdmin;
     const { showToast } = useToast();
     const { 
         notebook, 
@@ -126,7 +127,7 @@ function NotebookDetailsContent() {
     // Mobile Sidebar State
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-    const headerToolbar = useNotebookHeaderToolbar(notebookId, activeConversationId, isAdmin);
+    const headerToolbar = useNotebookHeaderToolbar(notebookId, activeConversationId, isAuthenticatedAdmin);
     const chatReadiness = useNotebookChatReadiness(notebookId, activeConversationId, Boolean(notebookId));
     const [headerIsMobile, setHeaderIsMobile] = useState<boolean>(() => window.innerWidth < 768);
     useEffect(() => {
@@ -1191,7 +1192,7 @@ function NotebookDetailsContent() {
             canEdit={canEdit()}
             tourScreenId={currentTourScreenId}
             headerCenter={
-                isAdmin && projectId && notebookId ? (
+                isAuthenticatedAdmin && projectId && notebookId ? (
                     <NotebookServiceToolbar
                         projectId={projectId}
                         notebookId={notebookId}

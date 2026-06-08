@@ -502,17 +502,30 @@ public static class StartupConfiguration
                             return;
                         }
 
+                        // Resolve identity (security stamp) AND live authority (role) in a single
+                        // round-trip. The cookie/JWT proves only WHO the caller is; the role is
+                        // mutable server state that an admin can change at any time, so RBAC must
+                        // read it from the source of truth per request rather than trusting the
+                        // role claim cached in the token. This is why an approved user no longer has
+                        // to sign out and back in: the new role takes effect on the next request.
                         var db = context.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
-                        var dbSecurityStamp = await db.Users
+                        var account = await db.UserRoles
                             .AsNoTracking()
-                            .Where(user => user.Id == userId)
-                            .Select(user => (Guid?)user.SecurityStamp)
+                            .Where(userRole => userRole.UserId == userId)
+                            .Select(userRole => new { userRole.User.SecurityStamp, userRole.Role })
                             .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
 
-                        if (!dbSecurityStamp.HasValue || dbSecurityStamp.Value != tokenSecurityStamp)
+                        if (account is null || account.SecurityStamp != tokenSecurityStamp)
                         {
                             context.Fail("Token security stamp mismatch.");
                             return;
+                        }
+
+                        // Replace the (potentially stale) role claim from the token with the live
+                        // role so the authorization policies below evaluate current authority.
+                        if (principal!.Identity is ClaimsIdentity identity)
+                        {
+                            AuthRoleClaims.ApplyLiveRole(identity, account.Role);
                         }
 
                         SlidingSessionRenewal.RenewIfNeeded(context, principal!, userId, tokenSecurityStamp);

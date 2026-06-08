@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { UserConversationDto, UserConversationsQuery } from '../types/conversation';
 import { api } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
 import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import ErrorScreen from '../components/ErrorScreen';
@@ -317,13 +318,13 @@ const Conversations = () => {
   return (
     <div className="h-full overflow-auto bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="truncate text-xl font-semibold text-gray-900 sm:text-2xl">All Conversations</h1>
-          <div className="flex items-center gap-2">
+        <div className="mb-6 flex items-center justify-between gap-2">
+          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold text-gray-900 sm:text-2xl">All Conversations</h1>
+          <HeaderActionsBar>
             <HomeButton />
             <SettingsButton />
             <TourStartButton screenId="conversations-list" inline />
-          </div>
+          </HeaderActionsBar>
         </div>
 
         {/* Search and Sort Controls */}

@@ -284,7 +284,7 @@ export function NotebookServiceToolbar({
   return (
     <div
       ref={rootRef}
-      className="flex w-full min-w-0 max-w-full flex-nowrap items-center justify-center gap-0.5 sm:gap-1"
+      className="flex w-full min-w-0 max-w-full flex-nowrap items-center justify-start gap-0.5 sm:justify-center sm:gap-1"
       data-testid="notebook-service-toolbar"
     >
       {order.map((entry) => (

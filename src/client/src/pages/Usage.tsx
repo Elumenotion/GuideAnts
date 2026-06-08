@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { UsageBucket, UsageSummaryDto, ProjectUsageSummaryDto, UsageBreakdownWithCategoriesDto } from '../types/usage';
+import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
 import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import { TourStartButton } from '../tour/TourStartButton';
@@ -122,12 +123,19 @@ const Usage = () => {
   return (
     <div className="h-full overflow-auto bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center mb-8">
-          <img src="./guide.png" alt="GuideAnts" className="w-12 h-12 mr-4" />
-          <div>
-            <h1 className="text-xl font-semibold">Usage</h1>
-            <p className="text-sm text-gray-600">Track activity and costs across your owned projects.</p>
+        <div className="mb-6 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-center">
+            <img src="./guide.png" alt="GuideAnts" className="w-12 h-12 mr-4 shrink-0" />
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold">Usage</h1>
+              <p className="text-sm text-gray-600">Track activity and costs across your owned projects.</p>
+            </div>
           </div>
+          <HeaderActionsBar>
+            <HomeButton />
+            <SettingsButton />
+            <TourStartButton screenId="usage" inline />
+          </HeaderActionsBar>
         </div>
 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -152,13 +160,6 @@ const Usage = () => {
               <option value="week">Week</option>
               <option value="month">Month</option>
             </select>
-          </div>
-          <div className="flex justify-end">
-            <div className="flex items-center gap-2">
-              <HomeButton />
-              <SettingsButton />
-              <TourStartButton screenId="usage" inline />
-            </div>
           </div>
         </div>
 
