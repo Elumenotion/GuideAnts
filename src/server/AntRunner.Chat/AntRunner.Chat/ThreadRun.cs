@@ -3,6 +3,7 @@ using AntRunner.ToolCalling.AssistantDefinitions;
 using AntRunner.ToolCalling.AssistantDefinitions.Storage;
 using AntRunner.ToolCalling.Functions;
 using AntRunner.Chat.Abstractions;
+using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Text;
@@ -17,6 +18,7 @@ namespace AntRunner.Chat
     public static class ThreadRun
     {
         static readonly HttpClient _httpClient = HttpClientUtility.Get();
+        private static ILogger Logger => ChatDiagnostics.CreateLogger(nameof(ThreadRun));
 
         private static readonly ConcurrentDictionary<string, Dictionary<string, ToolCaller>> RequestBuilderCache = new();
 
@@ -160,7 +162,7 @@ namespace AntRunner.Chat
             // 256000 is the maximum instruction length allowed by the API
             if (options.Instructions.Length >= 256000)
             {
-                TraceWarning("Instructions are too long, truncating");
+                Logger.LogWarning("Instructions are too long, truncating.");
                 options.Instructions = options.Instructions[..255999];
             }
 
@@ -547,8 +549,11 @@ namespace AntRunner.Chat
                     }
 
                     var delay = GetStreamRetryDelay(attempt);
-                    Trace.TraceWarning(
-                        $"Streaming attempt {attempt} failed with {ex.GetType().Name}. Retrying in {delay.TotalMilliseconds}ms.");
+                    Logger.LogWarning(
+                        "Streaming attempt {Attempt} failed with {ExceptionType}. Retrying in {DelayMs}ms.",
+                        attempt,
+                        ex.GetType().Name,
+                        delay.TotalMilliseconds);
                     await Task.Delay(delay, cancellationToken);
                 }
             }
@@ -619,14 +624,14 @@ namespace AntRunner.Chat
             }
             catch (Exception ex) when (IsTransientStreamFailure(ex, cancellationToken))
             {
-                Trace.TraceWarning($"Streaming recovery failed with {ex.GetType().Name}.");
+                Logger.LogWarning("Streaming recovery failed with {ExceptionType}.", ex.GetType().Name);
                 return null;
             }
 
             var fullText = NormalizeAssistantText(response.FirstChoice?.Message?.GetText());
             if (!fullText.StartsWith(streamedContent, StringComparison.Ordinal))
             {
-                Trace.TraceWarning("Streaming recovery response did not match streamed prefix; aborting recovery.");
+                Logger.LogWarning("Streaming recovery response did not match streamed prefix; aborting recovery.");
                 return null;
             }
 
@@ -971,7 +976,7 @@ namespace AntRunner.Chat
                 {
                     var task = Task.Run(() =>
                     {
-                        Trace.TraceError($"No request builder found for {toolName}");
+                        Logger.LogError("No request builder found for {ToolName}", toolName);
                         return new ToolOutput()
                         {
                             Output = $"Error: {toolName} is not a valid tool.",
@@ -1132,7 +1137,9 @@ namespace AntRunner.Chat
 
                     if (!validationResult.Status || spec == null)
                     {
-                        TraceWarning($"OpenAPI schema '{kvp.Key}' from database is not valid. Ignoring");
+                        Logger.LogWarning(
+                            "OpenAPI schema {SchemaKey} from database is not valid. Ignoring.",
+                            kvp.Key);
                         continue;
                     }
 
@@ -1182,7 +1189,10 @@ namespace AntRunner.Chat
                         }
                         catch (Exception ex)
                         {
-                            TraceWarning($"Failed to generate schema for {fullyQualifiedMethodName}: {ex.Message}");
+                            Logger.LogWarning(
+                                ex,
+                                "Failed to generate schema for {FullyQualifiedMethodName}.",
+                                fullyQualifiedMethodName);
                         }
                     }
                 }

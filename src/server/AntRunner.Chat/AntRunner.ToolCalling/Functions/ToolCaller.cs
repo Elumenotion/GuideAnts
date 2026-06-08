@@ -1,5 +1,6 @@
 using AntRunner.ToolCalling.AssistantDefinitions.Storage;
 using AntRunner.ToolCalling.HttpClient;
+using Microsoft.Extensions.Logging;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -52,6 +53,7 @@ namespace AntRunner.ToolCalling.Functions
         bool authRequiredButMissing = false)
     {
         public static Func<string, string?>? ConfigurationVariableResolver { get; set; }
+        private static ILogger Logger => ToolCallingDiagnostics.CreateLogger<ToolCaller>();
 
         /// <summary>
         /// Generates request builders based on the OpenAPI specification.
@@ -385,7 +387,10 @@ namespace AntRunner.ToolCalling.Functions
                 }
             }
 
-            TraceInformation($"{nameof(ExecuteWebApiAsync)}:{request.RequestUri!.Host}");
+            Logger.LogInformation(
+                "{Operation}:{Host}",
+                nameof(ExecuteWebApiAsync),
+                request.RequestUri!.Host);
 
             // Execute the request based on the specified HTTP method
             switch (Method.ToUpperInvariant())
@@ -652,7 +657,11 @@ namespace AntRunner.ToolCalling.Functions
             var property = type.GetProperty(memberName, BindingFlags.Static | BindingFlags.Public);
             if (property != null)
             {
-                TraceInformation($"{nameof(ExecuteLocalFunctionAsync)}:{memberName} (Property)");
+                Logger.LogInformation(
+                    "{Operation}:{MemberName} ({MemberKind})",
+                    nameof(ExecuteLocalFunctionAsync),
+                    memberName,
+                    "Property");
                 return property.GetValue(null);
             }
 
@@ -719,7 +728,11 @@ namespace AntRunner.ToolCalling.Functions
 
             if (method == null) throw new InvalidOperationException($"No matching method found for {memberName} with the provided parameters");
 
-            TraceInformation($"{nameof(ExecuteLocalFunctionAsync)}:{memberName} (Method)");
+            Logger.LogInformation(
+                "{Operation}:{MemberName} ({MemberKind})",
+                nameof(ExecuteLocalFunctionAsync),
+                memberName,
+                "Method");
 
             // Get the parameters for the method
             var methodParameters = method.GetParameters();

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using Microsoft.Extensions.Logging;
 using YamlDotNet.Serialization;
 
 namespace AntRunner.ToolCalling.Functions
@@ -461,7 +462,9 @@ namespace AntRunner.ToolCalling.Functions
 
             if (!validationResult.Status || spec == null)
             {
-                Trace.TraceWarning("Json is not a valid openapi spec {0}. Ignoring", json);
+                ToolCallingDiagnostics
+                    .CreateLogger<OpenApiHelper>()
+                    .LogWarning("Json is not a valid openapi spec. Ignoring payload.");
                 return new List<ToolDefinition>();
             }
 

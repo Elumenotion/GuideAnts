@@ -534,7 +534,7 @@ namespace HtmlAgility
             }
 
             string? htmlContent;
-            int timeoutInSeconds = 15; // Increased timeout for better reliability
+            int timeoutInSeconds = 5; // Keep web fetches fail-fast for tool responsiveness
 
             using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutInSeconds)))
             {
