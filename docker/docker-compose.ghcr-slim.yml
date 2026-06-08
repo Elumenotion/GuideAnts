@@ -69,6 +69,9 @@ services:
       - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
       - MSSQL_DB_NAME=${GA_DB_NAME:-guideants-dev}
       - ASPNETCORE_ENVIRONMENT=Development
+      # Idle session window (minutes). Default 30 days; the sliding renewal re-issues
+      # the cookie past the halfway point so active sessions never hard-expire.
+      - Jwt__LifetimeMinutes=${GA_JWT_LIFETIME_MINUTES:-43200}
       - API_RUNTIME_CONTEXT=compose-ghcr-slim
       - ALLOWED_ORIGINS=*
       - FileStorage__Path=/app/ContentFiles

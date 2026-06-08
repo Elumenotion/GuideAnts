@@ -12,25 +12,30 @@ namespace GuideAntsApi.Services.Auth;
 public static class SlidingSessionRenewal
 {
     /// <summary>
-    /// Re-issue the cookie once the current token has been alive longer than this interval.
-    /// Keeping it small relative to the token lifetime means an active session's expiry is
-    /// always kept near the full configured idle window, while limiting Set-Cookie churn to
-    /// roughly one re-issue per interval per active session.
+    /// Re-issue the cookie once the token has passed this fraction of its own lifetime.
+    /// Using a fraction of the actual lifetime (rather than a fixed interval) guarantees
+    /// renewal always fires well before expiry for ANY configured lifetime — a fixed
+    /// interval larger than the lifetime would silently never renew and hard-expire the
+    /// session. Renewing at the halfway point keeps an active session's expiry near the
+    /// full configured idle window while bounding Set-Cookie churn.
     /// </summary>
-    public static readonly TimeSpan RenewalInterval = TimeSpan.FromDays(1);
+    public const double RenewAfterLifetimeFraction = 0.5;
 
     /// <summary>
-    /// True once enough time has elapsed since the token was issued that the cookie should be
-    /// refreshed. A <c>default</c> (unset) issuance time never triggers renewal.
+    /// True once the token is past <see cref="RenewAfterLifetimeFraction"/> of its lifetime,
+    /// so an active session's cookie is refreshed before it can expire. An unset issuance
+    /// time or a non-positive lifetime never triggers renewal.
     /// </summary>
-    public static bool ShouldRenew(DateTime issuedAtUtc, DateTime nowUtc)
+    public static bool ShouldRenew(DateTime issuedAtUtc, DateTime expiresAtUtc, DateTime nowUtc)
     {
-        if (issuedAtUtc == default)
+        if (issuedAtUtc == default || expiresAtUtc <= issuedAtUtc)
         {
             return false;
         }
 
-        return nowUtc - issuedAtUtc >= RenewalInterval;
+        var lifetime = expiresAtUtc - issuedAtUtc;
+        var renewAfter = TimeSpan.FromTicks((long)(lifetime.Ticks * RenewAfterLifetimeFraction));
+        return nowUtc - issuedAtUtc >= renewAfter;
     }
 
     public static void RenewIfNeeded(
@@ -45,7 +50,8 @@ public static class SlidingSessionRenewal
         }
 
         var issuedAtUtc = DateTime.SpecifyKind(context.SecurityToken.ValidFrom, DateTimeKind.Utc);
-        if (!ShouldRenew(issuedAtUtc, DateTime.UtcNow))
+        var expiresAtUtc = DateTime.SpecifyKind(context.SecurityToken.ValidTo, DateTimeKind.Utc);
+        if (!ShouldRenew(issuedAtUtc, expiresAtUtc, DateTime.UtcNow))
         {
             return;
         }
