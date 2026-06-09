@@ -46,7 +46,7 @@ This is where most AI initiatives stall. Your team builds something impressive w
 
 Every interaction in GuideAnts is traced: you can see exactly which model handled which message, which assistant drove which cost, which tool invocation mattered, and which step could run on a smaller model without anyone noticing the difference.
 
-EveryEventEver is the proof. The site is maintained using published guides. The first version ran on a state-of-the-art frontier model and cost hundreds of dollars per day. Using GuideAnts traceability, the team identified which parts of the workflow needed the expensive model and which didn't. The same inference now costs about ten dollars a day.
+[EveryEventEver](https://everyeventever.com/) is the proof. The content in the site is maintained using published guides. The first version ran on a state-of-the-art frontier model and cost hundreds of dollars per day. Using GuideAnts traceability, the team identified which parts of the workflow needed the expensive model and which didn't. The same inference now costs about ten dollars a day.
 
 ### From internal workflow to shipped product
 
