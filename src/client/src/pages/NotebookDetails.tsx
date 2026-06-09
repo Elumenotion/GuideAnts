@@ -30,6 +30,7 @@ import { useNotebookFilesPolling } from '../hooks/useNotebookFilesPolling';
 import { NotebookFolderTreeDto } from '../types/notebook';
 import { useToast } from '../components/common/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { notebookPathMatches } from '../utils/notebookPath';
 
 // Inner component that uses notebook context
 function NotebookDetailsContent() {
@@ -573,7 +574,10 @@ function NotebookDetailsContent() {
         
         // Check files in this folder
         for (const file of tree.files) {
-            if (file.relativePath === relativePath || file.fileName === relativePath) {
+            if (
+                notebookPathMatches(file.relativePath, relativePath) ||
+                notebookPathMatches(file.fileName, relativePath)
+            ) {
                 return file;
             }
         }
