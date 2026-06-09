@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { FaSignInAlt, FaSpinner } from 'react-icons/fa';
-import { TextActionButton } from './settings/components/shared/ActionButtons';
+import { textButtonClassName } from './settings/components/shared/ActionButtons';
 import { getErrorMessage } from './settings/utils';
 import { useAuth, type AuthUser } from '../contexts/AuthContext';
 
@@ -37,6 +37,17 @@ function getPostAuthPath(user: AuthUser, requestedPath: string | null): string {
   return '/';
 }
 
+function syncControlledInput(
+  event: FocusEvent<HTMLInputElement>,
+  currentValue: string,
+  setter: (value: string) => void,
+): void {
+  const domValue = event.currentTarget.value;
+  if (domValue !== currentValue) {
+    setter(domValue);
+  }
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -44,8 +55,10 @@ export default function Login() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [emailAutoComplete, setEmailAutoComplete] = useState<'username' | 'off'>('username');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const userEditedEmailRef = useRef<string | null>(null);
 
   const requestedPath = useMemo(() => resolveRequestedPath(location.search), [location.search]);
 
@@ -55,7 +68,8 @@ export default function Login() {
     }
   }, [isAuthenticated, navigate, requestedPath, user]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
@@ -65,6 +79,32 @@ export default function Login() {
       setError(getErrorMessage(submitError, 'Sign in failed.'));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    userEditedEmailRef.current = value;
+    if (emailAutoComplete === 'username') {
+      setEmailAutoComplete('off');
+    }
+  };
+
+  const handleEmailFocus = (event: FocusEvent<HTMLInputElement>) => {
+    syncControlledInput(event, email, setEmail);
+  };
+
+  const handlePasswordFocus = (event: FocusEvent<HTMLInputElement>) => {
+    syncControlledInput(event, password, setPassword);
+
+    const preservedEmail = userEditedEmailRef.current;
+    if (preservedEmail !== null) {
+      // Chromium credential-set autofill can clobber a user-edited email when
+      // focus moves to the password field; restore the last typed value after
+      // the browser finishes its autofill pass.
+      requestAnimationFrame(() => {
+        setEmail(preservedEmail);
+      });
     }
   };
 
@@ -78,7 +118,12 @@ export default function Login() {
             <p className="mt-1 text-sm text-gray-600">Sign in with your GuideAnts account.</p>
           </div>
 
-          <div className="mt-6 space-y-4">
+          <form
+            className="mt-6 space-y-4"
+            method="post"
+            autoComplete="on"
+            onSubmit={(event) => void handleSubmit(event)}
+          >
             {error ? (
               <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
                 {error}
@@ -89,9 +134,11 @@ export default function Login() {
               <span className="mb-1 block text-sm font-medium text-gray-700">Email</span>
               <input
                 type="email"
-                autoComplete="email"
+                name="username"
+                autoComplete={emailAutoComplete}
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => handleEmailChange(event.target.value)}
+                onFocus={handleEmailFocus}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 required
               />
@@ -101,25 +148,29 @@ export default function Login() {
               <span className="mb-1 block text-sm font-medium text-gray-700">Password</span>
               <input
                 type="password"
+                name="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
+                onFocus={handlePasswordFocus}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 required
               />
             </label>
 
             <div className="pt-1">
-              <TextActionButton
-                tone="primary"
-                icon={submitting ? <FaSpinner className="animate-spin" /> : <FaSignInAlt />}
+              <button
+                type="submit"
                 disabled={submitting || email.trim().length === 0 || password.trim().length === 0}
-                onClick={() => void handleSubmit()}
+                className={`${textButtonClassName('primary')} w-full`}
               >
-                {submitting ? 'Signing in...' : 'Sign In'}
-              </TextActionButton>
+                <span className="text-[12px] leading-none" aria-hidden="true">
+                  {submitting ? <FaSpinner className="animate-spin" /> : <FaSignInAlt />}
+                </span>
+                <span>{submitting ? 'Signing in...' : 'Sign In'}</span>
+              </button>
             </div>
-          </div>
+          </form>
 
           <div className="mt-5 space-y-2 text-sm text-gray-700">
             <p>

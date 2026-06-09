@@ -6,14 +6,19 @@ namespace GuideAntsApi.Services;
 
 public sealed class ExcludedHostService(ApplicationDbContext context, ILogger<ExcludedHostService> logger) : IExcludedHostService
 {
+    private const int ExclusionWindowDays = 7;
+
     private readonly ApplicationDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
     private readonly ILogger<ExcludedHostService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public async Task<HashSet<string>> GetExcludedHostsAsync(CancellationToken cancellationToken = default)
     {
+        var cutoffUtc = DateTime.UtcNow.AddDays(-ExclusionWindowDays);
+
         var hosts = await _context.ExcludedHosts
             .AsNoTracking()
             .Where(x => x.Host != string.Empty)
+            .Where(x => (x.Updated ?? x.Created) >= cutoffUtc)
             .Select(x => x.Host)
             .ToListAsync(cancellationToken);
 
@@ -83,21 +88,38 @@ public sealed class ExcludedHostService(ApplicationDbContext context, ILogger<Ex
         if (string.IsNullOrWhiteSpace(normalizedHost))
             return false;
 
-        if (await _context.ExcludedHosts.AnyAsync(x => x.Host == normalizedHost, cancellationToken))
-            return false;
+        var nowUtc = DateTime.UtcNow;
+        var normalizedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        var existing = await _context.ExcludedHosts
+            .FirstOrDefaultAsync(x => x.Host == normalizedHost, cancellationToken);
 
-        _context.ExcludedHosts.Add(new ExcludedHost
+        if (existing is null)
         {
-            Host = normalizedHost,
-            Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
-            Created = DateTime.UtcNow,
-            Updated = DateTime.UtcNow
-        });
+            _context.ExcludedHosts.Add(new ExcludedHost
+            {
+                Host = normalizedHost,
+                Reason = normalizedReason,
+                Created = nowUtc,
+                Updated = nowUtc
+            });
+        }
+        else
+        {
+            existing.Updated = nowUtc;
+            if (!string.IsNullOrWhiteSpace(normalizedReason))
+            {
+                existing.Reason = normalizedReason;
+            }
+        }
 
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("Added excluded host {Host}.", normalizedHost);
+            _logger.LogInformation(
+                existing is null
+                    ? "Added excluded host {Host}."
+                    : "Refreshed excluded host {Host}.",
+                normalizedHost);
             return true;
         }
         catch (DbUpdateException ex)

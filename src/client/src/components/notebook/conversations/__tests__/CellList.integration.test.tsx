@@ -154,4 +154,35 @@ describe('CellList integration behaviour', () => {
     // Should not show editor avatar (only single assistant avatar)
     expect(screen.queryByTitle('Editor User')).not.toBeInTheDocument();
   });
-}); 
+
+  it('renders historical user initials from message user profile fields', async () => {
+    const msgs: MessageDto[] = [
+      {
+        id: 'u-legacy',
+        role: 'user',
+        content: 'Hello, my name is Doug.',
+        created: new Date().toISOString(),
+        isEdited: false,
+        userId: 'legacy-user-id',
+        userName: 'Doug Walker',
+        userEmail: 'doug.walker@example.com',
+      },
+      {
+        id: 'a-legacy',
+        role: 'assistant',
+        content: 'Nice to meet you, Doug!',
+        created: new Date().toISOString(),
+        isEdited: false,
+        assistantName: 'GPT',
+      },
+    ];
+
+    renderWithToast(<CellList {...BASE_PROPS} messages={msgs} />);
+
+    await waitFor(() => {
+      const avatar = screen.getByTitle('Doug Walker');
+      expect(avatar).toBeInTheDocument();
+      expect(avatar).toHaveTextContent('DW');
+    });
+  });
+});

@@ -42,6 +42,7 @@ import {
 } from './settings/utils';
 import { useLocalModelOnboardingOperation } from '../features/localModelOnboarding/useOperationPolling';
 import { useAuth } from '../contexts/AuthContext';
+import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
 import { HeaderUserMenu } from '../components/common/HeaderUserMenu';
 
 export default function Settings() {
@@ -805,12 +806,12 @@ export default function Settings() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 self-end sm:self-auto">
+          <HeaderActionsBar className="self-end sm:self-auto">
             <HomeButton />
             <SettingsButton />
             <HeaderUserMenu />
             <TourStartButton screenId="settings" inline />
-          </div>
+          </HeaderActionsBar>
         </div>
       </header>
 

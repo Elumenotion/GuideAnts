@@ -15,6 +15,7 @@ import { useRegisterTour } from '../tour/useRegisterTour';
 import { DEFAULT_CONVERSATION_TITLE } from '../constants/conversation';
 import { CONNECTION_SECTION_NAME_SET } from './settings/constants/connectionSections';
 import { useAuth } from '../contexts/AuthContext';
+import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
 import { HeaderUserMenu } from '../components/common/HeaderUserMenu';
 
 interface ProjectSummary {
@@ -459,15 +460,15 @@ const Home = () => {
   return (
     <div className="h-full overflow-auto bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center">
-            <img src="./guide.png" alt="GuideAnts" className="w-12 h-12 mr-4" />
-            <div>
+        <div className="mb-8 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-center">
+            <img src="./guide.png" alt="GuideAnts" className="w-12 h-12 mr-4 shrink-0" />
+            <div className="min-w-0">
               <h1 className="text-xl font-semibold">GuideAnts Notebooks</h1>
               <p className="text-sm text-gray-600">AI for people</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <HeaderActionsBar>
             {canCreateContent ? (
               <HeaderIconLinkButton
                 to="/new-project"
@@ -499,7 +500,7 @@ const Home = () => {
               inline
               className={shouldPulseAttention ? 'animate-tour-pulse-5s' : ''}
             />
-          </div>
+          </HeaderActionsBar>
         </div>
 
         <div className="mb-8">

@@ -22,7 +22,9 @@ public record MessageDto(
     Guid? AttachedNotebookFileId = null, // DEPRECATED: kept for backward compatibility
     int? TurnIndex = null,
     IReadOnlyList<string>? TurnFilesCreated = null,
-    IReadOnlyList<string>? TurnFilesModified = null
+    IReadOnlyList<string>? TurnFilesModified = null,
+    string? UserName = null,
+    string? UserEmail = null
 );
 
 public record AttachedFileDto(

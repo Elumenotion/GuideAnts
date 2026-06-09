@@ -453,6 +453,17 @@ namespace GuideAntsApi.DataModel
                 },
                 new
                 {
+                    Id = new Guid("b0000000-0000-0000-0000-00000000000e"),
+                    ToolType = "GetContentFromUrl",
+                    DisplayName = "Get Content From URL",
+                    Description = "Fetch a web page and convert it to markdown.",
+                    Category = "Search",
+                    IsActive = true,
+                    DisplayOrder = 4,
+                    Created = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new
+                {
                     Id = new Guid("b0000000-0000-0000-0000-000000000002"),
                     ToolType = "generate_image",
                     DisplayName = "Generate Image",
