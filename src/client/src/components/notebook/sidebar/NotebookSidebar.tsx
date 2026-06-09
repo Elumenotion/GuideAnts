@@ -200,8 +200,9 @@ export interface NotebookSidebarProps {
   onDeleteLink?: (linkId: string) => Promise<void>;
   
   // Conversation operations
-  onConversationDeleted?: (deletedConversationId: string) => void;
-  onConversationsDeleted?: (deletedConversationIds: string[]) => void;
+  onConversationDeleted?: (deletedConversationId: string, nextConversationId: string | null) => void;
+  onConversationsDeleted?: (deletedConversationIds: string[], nextConversationId: string | null) => void;
+  activeConversationId?: string | null;
   
   // Home page functionality
   homePageFileId?: string;
@@ -235,6 +236,7 @@ function NotebookSidebarInner({
   onDeleteLink,
   onConversationDeleted,
   onConversationsDeleted,
+  activeConversationId,
   homePageFileId,
   onSetHomePage,
   canEdit, 
@@ -528,8 +530,15 @@ function NotebookSidebarInner({
     if (conversationToDelete) {
       try {
         await deleteConversation(conversationToDelete);
-        // Notify parent component that a conversation was deleted
-        onConversationDeleted?.(conversationToDelete);
+        const deletedActive = activeConversationId === conversationToDelete;
+        const nextConversationId = deletedActive
+          ? (sortedConversations.find(c => c.id !== conversationToDelete)?.id ?? null)
+          : null;
+        if (deletedActive && nextConversationId) {
+          onItemSelect('conversations', nextConversationId);
+        }
+        // Notify parent component with tree-driven next target (or null when none remain)
+        onConversationDeleted?.(conversationToDelete, nextConversationId);
         // Refresh conversations list immediately after successful deletion
         refreshConversations();
       } catch (error) {
@@ -539,7 +548,15 @@ function NotebookSidebarInner({
         const idsToDelete = Array.from(conversationSelect.selectedIds);
         try {
             await deleteConversations(idsToDelete);
-            onConversationsDeleted?.(idsToDelete);
+            const deletedIdSet = new Set(idsToDelete);
+            const deletedActive = !!activeConversationId && deletedIdSet.has(activeConversationId);
+            const nextConversationId = deletedActive
+              ? (sortedConversations.find(c => !deletedIdSet.has(c.id))?.id ?? null)
+              : null;
+            if (deletedActive && nextConversationId) {
+              onItemSelect('conversations', nextConversationId);
+            }
+            onConversationsDeleted?.(idsToDelete, nextConversationId);
             conversationSelect.clearSelection();
             refreshConversations();
         } catch (error) {

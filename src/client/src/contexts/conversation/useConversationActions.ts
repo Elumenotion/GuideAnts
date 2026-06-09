@@ -35,6 +35,10 @@ export function useConversationActions(
 
   const sendMessage = useCallback(
     async (content: string, attachments: PendingAttachment[] = []) => {
+      if (state._isUndoing) {
+        return;
+      }
+
       const isRuntimeNotReadyError = (error: any): boolean => {
         const bodyText = (() => {
           const body = error?.body;
@@ -265,7 +269,7 @@ export function useConversationActions(
         });
       }
     },
-    [state.selectedAssistant, state.assistants, state.notebookTemplate, projectId, notebookId, conversationId, handleStreamingEvent, state.pendingAttachments, loadNotebookFiles, showToast]
+    [state._isUndoing, state.selectedAssistant, state.assistants, state.notebookTemplate, projectId, notebookId, conversationId, handleStreamingEvent, state.pendingAttachments, loadNotebookFiles, showToast]
   );
 
   const editAssistantMessage = useCallback(
@@ -391,15 +395,23 @@ export function useConversationActions(
   }, [currentStreamController, projectId, notebookId, conversationId, state.isStreaming]);
 
   const undoLastTurn = useCallback(async () => {
+    if (state._isUndoing) {
+      return;
+    }
+
     const hasUserMessage = state.messages.some(m => (m.role || '').toLowerCase() === 'user');
     if (!hasUserMessage) {
       console.warn('No user messages to undo');
       return;
     }
 
+    // Finalize any in-flight streaming state first; COMPLETE_STREAMING_TURN must run before we
+    // flag the undo as in-progress so it can't clear the flag we are about to set.
     dispatch({ type: 'FINALIZE_STREAMING_MESSAGE', payload: {} });
     dispatch({ type: 'CONVERT_STREAMING_IDS' });
     dispatch({ type: 'COMPLETE_STREAMING_TURN' });
+
+    dispatch({ type: 'SET_UNDOING', payload: true });
 
     const originalMessages = [...state.messages];
     const previousDraft = state.draftUserContent || '';
@@ -415,12 +427,21 @@ export function useConversationActions(
 
     try {
       await api.projects.notebooks.conversations.undoLast(projectId, notebookId, conversationId);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Undo turn failed', err);
       dispatch({ type: 'SET_MESSAGES', payload: originalMessages });
       dispatch({ type: 'SET_DRAFT', payload: previousDraft });
+      showToast({
+        type: 'error',
+        title: 'Undo Failed',
+        message: err?.status === 409
+          ? 'The conversation is busy right now. Wait for the current response to finish and try again.'
+          : 'Could not undo the last message. Please try again.'
+      });
+    } finally {
+      dispatch({ type: 'SET_UNDOING', payload: false });
     }
-  }, [projectId, notebookId, conversationId, state.messages]);
+  }, [projectId, notebookId, conversationId, state.messages, state._isUndoing, showToast]);
 
   const setSelectedAssistant = useCallback(async (name: string) => {
     dispatch({ type: 'SET_ASSISTANT', payload: name });
