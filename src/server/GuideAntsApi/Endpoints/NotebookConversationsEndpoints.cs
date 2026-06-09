@@ -261,21 +261,47 @@ public static class NotebookConversationsEndpoints
         // DELETE undo last
         group.MapDelete("/{convoId:guid}/messages/last", async ([FromServices] IConversationService service, Guid notebookId, Guid convoId) =>
         {
-            await service.UndoLastForConversationAsync(convoId);
-            return Results.NoContent();
+            try
+            {
+                await service.UndoLastForConversationAsync(convoId);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound(new { error = "Conversation not found" });
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("Conversation is locked by", StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
         })
         .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status409Conflict)
         .Produces(StatusCodes.Status402PaymentRequired);
 
         // DELETE undo specific
         group.MapDelete("/{convoId:guid}/messages/{messageId:guid}", async ([FromServices] IConversationService service, Guid notebookId, Guid convoId, Guid messageId) =>
         {
-            await service.UndoForConversationAsync(convoId, messageId);
-            return Results.NoContent();
+            try
+            {
+                await service.UndoForConversationAsync(convoId, messageId);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("Conversation is locked by", StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
         })
         .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status409Conflict)
         .Produces(StatusCodes.Status402PaymentRequired);
 
         // POST save conversation as markdown file

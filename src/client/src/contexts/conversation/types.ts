@@ -21,6 +21,7 @@ export interface ConversationContextProps extends EnhancedConversationState {
   isEditLoading: boolean;
   isInitialized: boolean;
   isCancelling: boolean;
+  isUndoing: boolean;
   streamingError?: string;
   streamingMode: StreamingMode;
   activeStreamingUser?: { userId: string; userName: string };
@@ -51,7 +52,7 @@ export interface ProviderProps {
 export interface ActionType {
   type: 'SET_MESSAGES' | 'ADD_MESSAGE' | 'UPDATE_MESSAGE' | 'REMOVE_LAST_TURN' | 'SET_STREAMING' | 'SET_ASSISTANT' | 'SET_DRAFT' | 'SET_EDITING' | 'SET_EDIT_ERROR' | 'SET_EDIT_LOADING' | 'APPEND_TOKEN' | 'FINALIZE_STREAMING_MESSAGE' | 'SET_ASSISTANTS' | 'SET_CONVERSATION_STARTERS' | 'SET_INITIALIZED' | 'SET_JUST_COMPLETED_STREAMING' | 'SET_CANCELLING' | 'SET_USER_PROFILES' | 'SET_STREAMING_ERROR' | 'SET_NOTEBOOK_TEMPLATE' |
   'START_STREAMING_TURN' | 'SET_TOOL_CALLS' | 'ENSURE_TOOL_CALL' | 'ADD_TOOL_RESULT' | 'ADD_FINAL_RESPONSE' | 'COMPLETE_STREAMING_TURN' | 'UPDATE_STREAMING_PROGRESS' | 'ADD_TOOL_ERROR' | 'ADD_ATTACHMENT' | 'REMOVE_ATTACHMENT' | 'CLEAR_ATTACHMENTS' | 'CONVERT_STREAMING_IDS' | 'CLEAR_STREAMING_CELL' | 'SET_PENDING_CELL_CLEAR' |
-  'SET_STREAMING_MODE';
+  'SET_STREAMING_MODE' | 'SET_UNDOING';
   payload?: any;
 }
 
@@ -67,6 +68,7 @@ export interface ExtendedConversationState extends EnhancedConversationState {
   _isInitialized?: boolean;
   _justCompletedStreaming?: boolean;
   _isCancelling?: boolean;
+  _isUndoing?: boolean;
   pendingAttachments?: PendingAttachment[];
   userProfiles?: Record<string, UserInfo>;
   notebookTemplate?: NotebookTemplateDto;
