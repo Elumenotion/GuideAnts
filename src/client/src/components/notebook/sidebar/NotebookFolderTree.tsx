@@ -10,6 +10,7 @@ import { useSidebarKeyboardShortcuts } from '../../../hooks/useSidebarKeyboardSh
 import { useLongPress } from '../../../hooks/useLongPress';
 
 import { getContentTypeFromFileName, formatFileSize } from '../../../utils/fileUtils';
+import { notebookPathMatches } from '../../../utils/notebookPath';
 import { 
   NotebookFolderTreeDto, 
   NotebookFileDto, 
@@ -1371,7 +1372,10 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
   const findFileAndParents = useCallback((node: NotebookFolderTreeDto, relativePath: string, parentPaths: string[] = []): { file: NotebookFileDto; parentPaths: string[] } | null => {
     // Check files in this folder
     for (const file of node.files) {
-      if (file.relativePath === relativePath || file.fileName === relativePath) {
+      if (
+        notebookPathMatches(file.relativePath, relativePath) ||
+        notebookPathMatches(file.fileName, relativePath)
+      ) {
         return { file, parentPaths: [...parentPaths, node.relativePath || 'ROOT'] };
       }
     }
