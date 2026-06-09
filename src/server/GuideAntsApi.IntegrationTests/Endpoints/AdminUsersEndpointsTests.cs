@@ -96,6 +96,76 @@ public sealed class AdminUsersEndpointsTests
     }
 
     [TestMethod]
+    public async Task ApprovedUser_GainsApprovedAccessImmediately_WithoutReLogin()
+    {
+        var admin = await RegisterAsync("Bootstrap Admin", "immediate.admin@example.com", "Password123!");
+        var pendingUser = await RegisterAsync("Pending User", "immediate.pending@example.com", "Password123!");
+
+        // The pending user's existing session token, captured before approval (role = Pending).
+        var preApprovalToken = pendingUser.Token;
+
+        // While pending, an approved-only route must be forbidden (authenticated, but not authorized).
+        AuthCookieTestHelper.SetBearerToken(_client, preApprovalToken);
+        var beforeApproval = await _client.GetAsync("/api/catalogs/models");
+        beforeApproval.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        // Admin approves the pending user as a Reader.
+        AuthCookieTestHelper.SetBearerToken(_client, admin.Token);
+        var approveResponse = await _client.PostAsJsonAsync(
+            $"/api/admin/users/{pendingUser.UserId}/approve",
+            new { role = Role.Reader.ToString() });
+        approveResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Using the SAME pre-approval token (no sign-out/sign-in), the route must now succeed
+        // because RBAC resolves the live role per request rather than trusting the stale claim.
+        AuthCookieTestHelper.SetBearerToken(_client, preApprovalToken);
+        var afterApproval = await _client.GetAsync("/api/catalogs/models");
+        afterApproval.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [TestMethod]
+    public async Task ChangeRole_DoesNotRevokeSession_NorForceReLogin()
+    {
+        var admin = await RegisterAsync("Bootstrap Admin", "rolechange.admin@example.com", "Password123!");
+        var target = await RegisterAsync("Role Target", "rolechange.target@example.com", "Password123!");
+
+        AuthCookieTestHelper.SetBearerToken(_client, admin.Token);
+        var approveResponse = await _client.PostAsJsonAsync(
+            $"/api/admin/users/{target.UserId}/approve",
+            new { role = Role.Reader.ToString() });
+        approveResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Target establishes an active session as Reader.
+        var readerSession = await LoginAsync(target.Email, "Password123!");
+        var readerStamp = ReadSecurityStampClaim(readerSession.Token);
+
+        AuthCookieTestHelper.SetBearerToken(_client, readerSession.Token);
+        var beforeChange = await _client.GetAsync("/api/catalogs/models");
+        beforeChange.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Admin promotes the target to Contributor.
+        AuthCookieTestHelper.SetBearerToken(_client, admin.Token);
+        var changeRoleResponse = await _client.PutAsJsonAsync(
+            $"/api/admin/users/{target.UserId}/role",
+            new { role = Role.Contributor.ToString() });
+        changeRoleResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // A role change is an authority change, not a revocation: the security stamp must be
+        // unchanged so the user's active session is not invalidated.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var user = await db.Users.SingleAsync(candidate => candidate.Id == target.UserId);
+            user.SecurityStamp.Should().Be(readerStamp);
+        }
+
+        // The same pre-change token still authenticates (no forced sign-out).
+        AuthCookieTestHelper.SetBearerToken(_client, readerSession.Token);
+        var afterChange = await _client.GetAsync("/api/catalogs/models");
+        afterChange.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [TestMethod]
     public async Task ChangeRole_UpdatesSingleRoleRow()
     {
         var admin = await RegisterAsync("Bootstrap Admin", "role.admin@example.com", "Password123!");

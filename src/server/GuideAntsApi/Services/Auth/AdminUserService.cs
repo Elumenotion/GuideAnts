@@ -177,7 +177,6 @@ public sealed class AdminUserService : IAdminUserService
             target.Value.UserRole.AssignedByUserId = actingAdminUserId;
             target.Value.User.ApprovedAt = nowUtc;
             target.Value.User.ApprovedByUserId = actingAdminUserId;
-            target.Value.User.SecurityStamp = Guid.NewGuid();
 
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             return AdminUserOperationResult<AdminUserSummary>.Success(ToSummary(target.Value.User, target.Value.UserRole));
@@ -238,7 +237,9 @@ public sealed class AdminUserService : IAdminUserService
             target.Value.UserRole.Role = requestedRole;
             target.Value.UserRole.AssignedAt = nowUtc;
             target.Value.UserRole.AssignedByUserId = actingAdminUserId;
-            target.Value.User.SecurityStamp = Guid.NewGuid();
+            // No SecurityStamp rotation: a role change is an authority change, not a revocation.
+            // RBAC resolves the live role per request (see OnTokenValidated), so the new role
+            // takes effect on the user's next request without forcing them to sign out and back in.
 
             await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             return AdminUserOperationResult<AdminUserSummary>.Success(ToSummary(target.Value.User, target.Value.UserRole));

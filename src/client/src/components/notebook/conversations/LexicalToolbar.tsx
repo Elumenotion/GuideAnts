@@ -24,6 +24,7 @@ import { $createImageNode } from './ImageNode';
 import { $createAudioNode } from './AudioNode';
 import { $createVideoNode } from './VideoNode';
 import { ToolbarConfig } from './LexicalEditor';
+import { HeaderActionsBar } from '../../common/HeaderActionsBar';
 
 interface LexicalToolbarProps {
   config: ToolbarConfig;
@@ -712,14 +713,14 @@ export default function LexicalToolbar({
   return (
     <>
       <div className={`lexical-toolbar flex items-center gap-1 p-1.5 md:p-2 border-b border-gray-200 bg-gray-50 ${className}`} data-tour-id="guide.content.instructions.toolbar">
-        {/* When in HTML preview mode (not source), show indicator and hide formatting buttons */}
-        {isHtmlPreviewMode && !isSourceMode && (
-          <span className="text-sm text-gray-500 px-2">HTML Preview (read-only)</span>
-        )}
-        
-        {/* Header dropdown - first position - hidden in HTML preview mode */}
-        {config.heading && !isHtmlPreviewMode && (
-          <>
+        <HeaderActionsBar align="start" variant="toolbar" className="flex-1 min-w-0">
+          {/* When in HTML preview mode (not source), show indicator and hide formatting buttons */}
+          {isHtmlPreviewMode && !isSourceMode && (
+            <span className="text-sm text-gray-500 px-2">HTML Preview (read-only)</span>
+          )}
+
+          {/* Header dropdown - first position - hidden in HTML preview mode */}
+          {config.heading && !isHtmlPreviewMode && (
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setIsHeaderDropdownOpen(!isHeaderDropdownOpen)}
@@ -731,7 +732,7 @@ export default function LexicalToolbar({
               >
                 {['h1', 'h2', 'h3', 'h4', 'h5'].includes(blockType) ? blockType.toUpperCase() : 'H'} <span className="text-xs">▼</span>
               </button>
-              
+
               {isHeaderDropdownOpen && (
                 <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded shadow-lg z-10 min-w-[160px]">
                   {headerOptions.map(({ tag, label, className }) => (
@@ -748,164 +749,164 @@ export default function LexicalToolbar({
                 </div>
               )}
             </div>
-            <div className="toolbar-divider w-px h-6 bg-gray-300 mx-1 hidden md:block" />
-          </>
-        )}
+          )}
+          {config.heading && !isHtmlPreviewMode && (
+            <div className="toolbar-divider w-px h-6 bg-gray-300" />
+          )}
 
-        {config.bold && !isHtmlPreviewMode && (
-          <button
-            onClick={() => formatText('bold')}
-            className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 font-bold disabled:opacity-50 disabled:cursor-not-allowed ${
-              isBold ? 'bg-blue-100 text-blue-700' : ''
-            }`}
-            title="Bold (Ctrl+B)"
-            disabled={isSourceMode}
-          >
-            B
-          </button>
-        )}
-        
-        {config.italic && !isHtmlPreviewMode && (
-          <button
-            onClick={() => formatText('italic')}
-            className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 italic disabled:opacity-50 disabled:cursor-not-allowed ${
-              isItalic ? 'bg-blue-100 text-blue-700' : ''
-            }`}
-            title="Italic (Ctrl+I)"
-            disabled={isSourceMode}
-          >
-            I
-          </button>
-        )}
-        
-        {/* Strikethrough - hidden on mobile */}
-        {config.strikethrough && !isHtmlPreviewMode && (
-          <button
-            onClick={() => formatText('strikethrough')}
-            className={`hidden md:block toolbar-button px-2 py-1 rounded hover:bg-gray-200 line-through disabled:opacity-50 disabled:cursor-not-allowed ${
-              isStrikethrough ? 'bg-blue-100 text-blue-700' : ''
-            }`}
-            title="Strikethrough"
-            disabled={isSourceMode}
-          >
-            S
-          </button>
-        )}
-        
-        {/* Inline Code - hidden on mobile */}
-        {config.code && !isHtmlPreviewMode && (
-          <button
-            onClick={() => formatText('code')}
-            className={`hidden md:block toolbar-button px-2 py-1 rounded hover:bg-gray-200 font-mono disabled:opacity-50 disabled:cursor-not-allowed ${
-              isCode ? 'bg-blue-100 text-blue-700' : 'bg-gray-100'
-            }`}
-            title="Inline Code"
-            disabled={isSourceMode}
-          >
-            &lt;/&gt;
-          </button>
-        )}
+          {config.bold && !isHtmlPreviewMode && (
+            <button
+              onClick={() => formatText('bold')}
+              className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 font-bold disabled:opacity-50 disabled:cursor-not-allowed ${
+                isBold ? 'bg-blue-100 text-blue-700' : ''
+              }`}
+              title="Bold (Ctrl+B)"
+              disabled={isSourceMode}
+            >
+              B
+            </button>
+          )}
 
-        {/* Media buttons section - hidden on mobile */}
-        {(config.link || config.image || config.audio || config.video) && (
-          <div className="hidden md:block toolbar-divider w-px h-6 bg-gray-300 mx-1" />
-        )}
+          {config.italic && !isHtmlPreviewMode && (
+            <button
+              onClick={() => formatText('italic')}
+              className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 italic disabled:opacity-50 disabled:cursor-not-allowed ${
+                isItalic ? 'bg-blue-100 text-blue-700' : ''
+              }`}
+              title="Italic (Ctrl+I)"
+              disabled={isSourceMode}
+            >
+              I
+            </button>
+          )}
 
-        {config.link && !isHtmlPreviewMode && (
-          <button
-            onClick={() => setIsLinkDialogOpen(true)}
-            className={`hidden md:block toolbar-button px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${
-              isLink ? 'bg-blue-100' : ''
-            }`}
-            title="Insert Link"
-            disabled={isSourceMode}
-          >
-            🔗
-          </button>
-        )}
+          {config.strikethrough && !isHtmlPreviewMode && (
+            <button
+              onClick={() => formatText('strikethrough')}
+              className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 line-through disabled:opacity-50 disabled:cursor-not-allowed ${
+                isStrikethrough ? 'bg-blue-100 text-blue-700' : ''
+              }`}
+              title="Strikethrough"
+              disabled={isSourceMode}
+            >
+              S
+            </button>
+          )}
 
-        {config.image && !isHtmlPreviewMode && (
-          <button
-            onClick={() => setIsImageDialogOpen(true)}
-            className="hidden md:block toolbar-button px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Insert Image"
-            disabled={isSourceMode}
-          >
-            🖼️
-          </button>
-        )}
+          {config.code && !isHtmlPreviewMode && (
+            <button
+              onClick={() => formatText('code')}
+              className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 font-mono disabled:opacity-50 disabled:cursor-not-allowed ${
+                isCode ? 'bg-blue-100 text-blue-700' : 'bg-gray-100'
+              }`}
+              title="Inline Code"
+              disabled={isSourceMode}
+            >
+              &lt;/&gt;
+            </button>
+          )}
 
-        {config.audio && !isHtmlPreviewMode && (
-          <button
-            onClick={() => setIsAudioDialogOpen(true)}
-            className="hidden md:block toolbar-button px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Insert Audio"
-            disabled={isSourceMode}
-          >
-            🎵
-          </button>
-        )}
+          {/* Media buttons section */}
+          {(config.link || config.image || config.audio || config.video) && !isHtmlPreviewMode && (
+            <div className="toolbar-divider w-px h-6 bg-gray-300" />
+          )}
 
-        {config.video && !isHtmlPreviewMode && (
-          <button
-            onClick={() => setIsVideoDialogOpen(true)}
-            className="hidden md:block toolbar-button px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Insert Video"
-            disabled={isSourceMode}
-          >
-            🎬
-          </button>
-        )}
+          {config.link && !isHtmlPreviewMode && (
+            <button
+              onClick={() => setIsLinkDialogOpen(true)}
+              className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                isLink ? 'bg-blue-100' : ''
+              }`}
+              title="Insert Link"
+              disabled={isSourceMode}
+            >
+              🔗
+            </button>
+          )}
 
-        {/* List buttons section */}
-        {(config.unorderedList || config.orderedList) && (
-          <div className="toolbar-divider w-px h-6 bg-gray-300 mx-1 hidden md:block" />
-        )}
+          {config.image && !isHtmlPreviewMode && (
+            <button
+              onClick={() => setIsImageDialogOpen(true)}
+              className="toolbar-button px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Insert Image"
+              disabled={isSourceMode}
+            >
+              🖼️
+            </button>
+          )}
 
-        {config.unorderedList && !isHtmlPreviewMode && (
-          <button
-            onClick={() => formatList('bullet')}
-            className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${
-              blockType === 'bullet' ? 'bg-blue-100 text-blue-700' : ''
-            }`}
-            title="Bullet List"
-            disabled={isSourceMode}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <circle cx="3" cy="4" r="1.5"/>
-              <rect x="6" y="3" width="8" height="2"/>
-              <circle cx="3" cy="8" r="1.5"/>
-              <rect x="6" y="7" width="8" height="2"/>
-              <circle cx="3" cy="12" r="1.5"/>
-              <rect x="6" y="11" width="8" height="2"/>
-            </svg>
-          </button>
-        )}
+          {config.audio && !isHtmlPreviewMode && (
+            <button
+              onClick={() => setIsAudioDialogOpen(true)}
+              className="toolbar-button px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Insert Audio"
+              disabled={isSourceMode}
+            >
+              🎵
+            </button>
+          )}
 
-        {config.orderedList && !isHtmlPreviewMode && (
-          <button
-            onClick={() => formatList('number')}
-            className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${
-              blockType === 'number' ? 'bg-blue-100 text-blue-700' : ''
-            }`}
-            title="Numbered List"
-            disabled={isSourceMode}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <text x="1" y="6" fontSize="8" fontFamily="monospace">1.</text>
-              <rect x="6" y="3" width="8" height="2"/>
-              <text x="1" y="10" fontSize="8" fontFamily="monospace">2.</text>
-              <rect x="6" y="7" width="8" height="2"/>
-              <text x="1" y="14" fontSize="8" fontFamily="monospace">3.</text>
-              <rect x="6" y="11" width="8" height="2"/>
-            </svg>
-          </button>
-        )}
+          {config.video && !isHtmlPreviewMode && (
+            <button
+              onClick={() => setIsVideoDialogOpen(true)}
+              className="toolbar-button px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Insert Video"
+              disabled={isSourceMode}
+            >
+              🎬
+            </button>
+          )}
 
-        {/* Blockquote - hidden on mobile */}
-        {config.blockquote && !isHtmlPreviewMode && (
-          <div className="hidden md:contents">
-            <div className="toolbar-divider w-px h-6 bg-gray-300 mx-1" />
+          {/* List buttons section */}
+          {(config.unorderedList || config.orderedList) && (
+            <div className="toolbar-divider w-px h-6 bg-gray-300" />
+          )}
+
+          {config.unorderedList && !isHtmlPreviewMode && (
+            <button
+              onClick={() => formatList('bullet')}
+              className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${
+                blockType === 'bullet' ? 'bg-blue-100 text-blue-700' : ''
+              }`}
+              title="Bullet List"
+              disabled={isSourceMode}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <circle cx="3" cy="4" r="1.5"/>
+                <rect x="6" y="3" width="8" height="2"/>
+                <circle cx="3" cy="8" r="1.5"/>
+                <rect x="6" y="7" width="8" height="2"/>
+                <circle cx="3" cy="12" r="1.5"/>
+                <rect x="6" y="11" width="8" height="2"/>
+              </svg>
+            </button>
+          )}
+
+          {config.orderedList && !isHtmlPreviewMode && (
+            <button
+              onClick={() => formatList('number')}
+              className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${
+                blockType === 'number' ? 'bg-blue-100 text-blue-700' : ''
+              }`}
+              title="Numbered List"
+              disabled={isSourceMode}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <text x="1" y="6" fontSize="8" fontFamily="monospace">1.</text>
+                <rect x="6" y="3" width="8" height="2"/>
+                <text x="1" y="10" fontSize="8" fontFamily="monospace">2.</text>
+                <rect x="6" y="7" width="8" height="2"/>
+                <text x="1" y="14" fontSize="8" fontFamily="monospace">3.</text>
+                <rect x="6" y="11" width="8" height="2"/>
+              </svg>
+            </button>
+          )}
+
+          {/* Blockquote */}
+          {config.blockquote && !isHtmlPreviewMode && (
+            <div className="toolbar-divider w-px h-6 bg-gray-300" />
+          )}
+          {config.blockquote && !isHtmlPreviewMode && (
             <button
               onClick={formatQuote}
               className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -916,13 +917,13 @@ export default function LexicalToolbar({
             >
               "
             </button>
-          </div>
-        )}
+          )}
 
-        {/* Table - hidden on mobile */}
-        {config.table && !isHtmlPreviewMode && (
-          <div className="hidden md:contents">
-            <div className="toolbar-divider w-px h-6 bg-gray-300 mx-1" />
+          {/* Table */}
+          {config.table && !isHtmlPreviewMode && (
+            <div className="toolbar-divider w-px h-6 bg-gray-300" />
+          )}
+          {config.table && !isHtmlPreviewMode && (
             <div className="relative">
               <button
                 ref={tableButtonRef}
@@ -942,13 +943,13 @@ export default function LexicalToolbar({
                 anchorRef={tableButtonRef}
               />
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Source mode toggle */}
-        {onToggleSourceMode && (
-          <>
-            <div className="toolbar-divider w-px h-6 bg-gray-300 mx-1 hidden md:block" />
+          {/* Source mode toggle */}
+          {onToggleSourceMode && (
+            <div className="toolbar-divider w-px h-6 bg-gray-300" />
+          )}
+          {onToggleSourceMode && (
             <button
               onClick={onToggleSourceMode}
               className={`toolbar-button px-2 py-1 rounded hover:bg-gray-200 font-mono text-sm ${
@@ -959,13 +960,12 @@ export default function LexicalToolbar({
             >
               {`{ }`}
             </button>
-          </>
-        )}
+          )}
+        </HeaderActionsBar>
 
-        {/* Action buttons at the end of toolbar */}
+        {/* Action buttons pinned to the right of the toolbar */}
         {(submitButton || cancelButton || fullScreenButton) && (
-          <>
-            <div className="flex-1" /> {/* Spacer to push buttons to the right */}
+          <div className="flex shrink-0 items-center">
             {fullScreenButton && (
               <button
                 onClick={fullScreenButton.onClick}
@@ -1009,7 +1009,7 @@ export default function LexicalToolbar({
                 )}
               </button>
             )}
-          </>
+          </div>
         )}
       </div>
       

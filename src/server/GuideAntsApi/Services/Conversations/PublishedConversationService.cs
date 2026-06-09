@@ -103,6 +103,12 @@ public class PublishedConversationService : IPublishedConversationService
                         m.Role,
                         m.Content,
                         UserId = m.UserId ?? m.LastEditedByUserId,
+                        UserName = m.UserId.HasValue
+                            ? (m.User != null ? m.User.Name : null)
+                            : (m.LastEditedByUser != null ? m.LastEditedByUser.Name : null),
+                        UserEmail = m.UserId.HasValue
+                            ? (m.User != null ? m.User.Email : null)
+                            : (m.LastEditedByUser != null ? m.LastEditedByUser.Email : null),
                         m.AssistantName,
                         m.IsEdited,
                         m.LastEditedAt,
@@ -173,7 +179,9 @@ public class PublishedConversationService : IPublishedConversationService
                 msg.ToolCallId,
                 msg.FunctionName,
                 attachments,
-                msg.MessageContentType
+                msg.MessageContentType,
+                UserName: msg.UserName,
+                UserEmail: msg.UserEmail
             ));
         }
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FaSignOutAlt, FaUserCircle } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { TextActionButton } from '../../pages/settings/components/shared/ActionButtons';
+import { textButtonClassName } from '../../pages/settings/components/shared/ActionButtons';
 
 export function HeaderUserMenu() {
   const navigate = useNavigate();
@@ -49,16 +49,19 @@ export function HeaderUserMenu() {
             <div className="truncate text-xs text-gray-600">{user.email}</div>
             <div className="mt-1 text-xs text-gray-600">Role: {user.role}</div>
           </div>
-          <TextActionButton
-            tone="danger"
-            icon={<FaSignOutAlt />}
+          <button
+            type="button"
+            className={`${textButtonClassName('danger')} w-full`}
             onClick={() => {
               logout();
               navigate('/login', { replace: true });
             }}
           >
-            Sign Out
-          </TextActionButton>
+            <span className="text-[12px] leading-none" aria-hidden="true">
+              <FaSignOutAlt />
+            </span>
+            <span>Sign Out</span>
+          </button>
         </div>
       ) : null}
     </div>

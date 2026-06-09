@@ -96,6 +96,10 @@ public class ConversationService : IConversationService
             .Include(c => c.Messages)
                 .ThenInclude(m => m.EditHistory)
             .Include(c => c.Messages)
+                .ThenInclude(m => m.User)
+            .Include(c => c.Messages)
+                .ThenInclude(m => m.LastEditedByUser)
+            .Include(c => c.Messages)
                 .ThenInclude(m => m.Attachments)
                     .ThenInclude(a => a.NotebookFile)
             .FirstOrDefaultAsync(c => c.Id == conversationId);
@@ -153,6 +157,12 @@ public class ConversationService : IConversationService
                         m.Role,
                         m.Content,
                         UserId = m.UserId ?? m.LastEditedByUserId,
+                        UserName = m.UserId.HasValue
+                            ? (m.User != null ? m.User.Name : null)
+                            : (m.LastEditedByUser != null ? m.LastEditedByUser.Name : null),
+                        UserEmail = m.UserId.HasValue
+                            ? (m.User != null ? m.User.Email : null)
+                            : (m.LastEditedByUser != null ? m.LastEditedByUser.Email : null),
                         m.AssistantName,
                         m.IsEdited,
                         m.LastEditedAt,
@@ -298,7 +308,9 @@ public class ConversationService : IConversationService
                 null, // AttachedNotebookFileId (deprecated)
                 msg.TurnIndex,
                 filesCreated,
-                filesModified
+                filesModified,
+                msg.UserName,
+                msg.UserEmail
             ));
         }
 
@@ -1292,7 +1304,9 @@ public class ConversationService : IConversationService
             m.ToolCallId,
             m.FunctionName,
             attachments, // NEW: Multiple attachments
-            m.MessageContentType
+            m.MessageContentType,
+            UserName: m.User?.Name ?? m.LastEditedByUser?.Name,
+            UserEmail: m.User?.Email ?? m.LastEditedByUser?.Email
         );
     }
 

@@ -100,16 +100,37 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
       if (convo) {
         if (convo.messages) {
           const idsSet = new Set<string>();
+          const profileMap: Record<string, any> = {};
           convo.messages.forEach(m => { if (m.userId) idsSet.add(m.userId); });
+          convo.messages.forEach(m => {
+            if (m.userId && (m.userName || m.userEmail)) {
+              profileMap[m.userId] = {
+                ...(profileMap[m.userId] || {}),
+                id: m.userId,
+                name: m.userName,
+                email: m.userEmail,
+              };
+            }
+          });
           try {
             const me = await userService.getCurrentUser();
-            if (me?.id) idsSet.add(me.id);
+            if (me?.id) {
+              idsSet.add(me.id);
+              profileMap[me.id] = { ...(profileMap[me.id] || {}), ...me };
+            }
           } catch {}
 
           const ids = Array.from(idsSet);
-          const profiles = await Promise.all(ids.map(id => userService.getUserById(id as string).catch(() => null)));
-          const profileMap: Record<string, any> = {};
-          ids.forEach((id, idx) => { if (id && profiles[idx]) profileMap[id] = profiles[idx]; });
+          const idsToFetch = ids.filter(id => {
+            const cached = profileMap[id];
+            return !cached || (!cached.name && !cached.email);
+          });
+
+          if (idsToFetch.length > 0) {
+            const profiles = await Promise.all(idsToFetch.map(id => userService.getUserById(id as string).catch(() => null)));
+            idsToFetch.forEach((id, idx) => { if (id && profiles[idx]) profileMap[id] = profiles[idx]; });
+          }
+
           dispatch({ type: 'SET_USER_PROFILES', payload: profileMap });
         }
 

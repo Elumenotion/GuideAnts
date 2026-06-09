@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using AntRunner.Chat.Abstractions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenAI;
 
 namespace AntRunner.Chat.OpenAI;
@@ -9,17 +11,21 @@ public sealed class OpenAiResponsesClientFactory : IChatCompletionClientFactory
     private readonly AzureOpenAiConfig? _config;
     private readonly Func<AzureOpenAiConfig>? _configAccessor;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<OpenAiResponsesClient> _clientLogger;
     private readonly ConcurrentDictionary<string, OpenAIClient> _clientCache = new();
     private string? _activeSignature;
 
     public OpenAiResponsesClientFactory(
         IHttpClientFactory httpClientFactory,
         AzureOpenAiConfig? config = null,
-        Func<AzureOpenAiConfig>? configAccessor = null)
+        Func<AzureOpenAiConfig>? configAccessor = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _config = config;
         _configAccessor = configAccessor;
+        _clientLogger = loggerFactory?.CreateLogger<OpenAiResponsesClient>()
+            ?? NullLogger<OpenAiResponsesClient>.Instance;
     }
 
     public string? DefaultDeploymentId => GetCurrentConfig().DeploymentId;
@@ -27,7 +33,7 @@ public sealed class OpenAiResponsesClientFactory : IChatCompletionClientFactory
     public IChatCompletionClient CreateClient(string? deploymentId, HttpClient? httpClient = null)
     {
         var client = GetOrCreateOpenAiClient(deploymentId, httpClient);
-        return new OpenAiResponsesClient(client);
+        return new OpenAiResponsesClient(client, _clientLogger);
     }
 
     private OpenAIClient GetOrCreateOpenAiClient(string? deploymentId, HttpClient? overrideClient)
