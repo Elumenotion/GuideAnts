@@ -57,8 +57,6 @@ function NotebookDetailsContent() {
         isLoading: isNotebookLoading,
         error: notebookError,
         filesError,
-        conversations,
-        isLoadingConversations,
         assistants,
         setHomePageFile,
         clearHomePage
@@ -73,7 +71,7 @@ function NotebookDetailsContent() {
     const [fileToPreview, setFileToPreview] = useState<NotebookFileDto | null>(null);
 
     // Use polling hook to get folder tree for file-by-path lookup
-    const { folderTree } = useNotebookFilesPolling({
+    const { folderTree, lastUpdated: fileTreeLastUpdated } = useNotebookFilesPolling({
         projectId: projectId || '',
         notebookId: notebookId || '',
         enabled: Boolean(projectId && notebookId),
@@ -116,6 +114,8 @@ function NotebookDetailsContent() {
     const folderTreeRef = useRef<NotebookFolderTreeDto | null>(null);
     // Track if we've ever had a valid folder tree (for initial load trigger)
     const [folderTreeReady, setFolderTreeReady] = useState(false);
+    // Deduplicate conversation resolution attempts per tree-refresh signal.
+    const lastConversationResolveAttemptRef = useRef<string | null>(null);
     
     // Update ref and track when folder tree first becomes available
     useEffect(() => {
@@ -392,24 +392,67 @@ function NotebookDetailsContent() {
 
     const currentTourScreenId = getTourScreenId();
 
-    // Restore selectedItem when conversation ID is loaded from URL (e.g., after iOS resume)
+    // Resolve active conversation against source of truth when the file tree refreshes.
+    // Do not validate against local conversation arrays; they can be stale across tabs.
     useEffect(() => {
-        if (!activeConversationId || isLoadingConversations) return;
+        if (!activeConversationId) return;
 
-        const conversationExists = conversations.some(c => c.id === activeConversationId);
-        if (!conversationExists) {
-            setActiveConversationId(null);
-            if (selectedItem?.type === 'conversations' && selectedItem.id === activeConversationId) {
-                setSelectedItem(null);
-            }
-            return;
-        }
-
-        // Only update if selectedItem doesn't already match
+        // Keep sidebar selection aligned with the active conversation immediately.
         if (!selectedItem || selectedItem.type !== 'conversations' || selectedItem.id !== activeConversationId) {
             setSelectedItem({ type: 'conversations', id: activeConversationId });
         }
-    }, [activeConversationId, conversations, isLoadingConversations, selectedItem, setActiveConversationId]);
+
+        if (!projectId || !notebookId) return;
+
+        // Use tree refresh as the signal to retry resolving conversation existence.
+        const treeSignal = fileTreeLastUpdated?.getTime();
+        if (!treeSignal) return;
+
+        const attemptKey = `${activeConversationId}:${treeSignal}`;
+        if (lastConversationResolveAttemptRef.current === attemptKey) return;
+        lastConversationResolveAttemptRef.current = attemptKey;
+
+        let cancelled = false;
+        (async () => {
+            try {
+                await api.projects.notebooks.conversations.get(projectId, notebookId, activeConversationId);
+                if (cancelled) return;
+
+                if (!selectedItem || selectedItem.type !== 'conversations' || selectedItem.id !== activeConversationId) {
+                    setSelectedItem({ type: 'conversations', id: activeConversationId });
+                }
+
+                // Ask sidebar poller to update its list quickly after successful resolution.
+                try {
+                    window.dispatchEvent(new Event('refresh-conversations'));
+                } catch {
+                    // best effort
+                }
+            } catch (error) {
+                if (cancelled) return;
+                const status = (error as any)?.status as number | undefined;
+                if (status === 404) {
+                    setActiveConversationId(null);
+                    if (selectedItem?.type === 'conversations' && selectedItem.id === activeConversationId) {
+                        setSelectedItem(null);
+                    }
+                    return;
+                }
+                console.error('Failed to resolve active conversation:', error);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        activeConversationId,
+        projectId,
+        notebookId,
+        selectedItem,
+        setActiveConversationId,
+        fileTreeLastUpdated
+    ]);
 
     // Handle conversation ID from navigation state (consume once without overriding user selection)
     useEffect(() => {
@@ -423,9 +466,6 @@ function NotebookDetailsContent() {
             return;
         }
 
-        // Wait until conversations are loaded (and have items) to resolve the id
-        if (!conversations || conversations.length === 0) return;
-
         // If the user already selected a conversation, do not override it
         if (activeConversationId) {
             setNavConversationApplied(true);
@@ -434,17 +474,12 @@ function NotebookDetailsContent() {
             return;
         }
 
-        // Apply the deep-linked conversation if it exists
-        const conversation = conversations.find(c => c.id === conversationId);
-        if (conversation) {
-            setActiveConversationId(conversationId);
-            setSelectedItem({ type: 'conversations', id: conversationId });
-            // Mark as consumed and clear navigation state to prevent future overrides
-            setNavConversationApplied(true);
-            navigate('.', { replace: true, state: {} });
-        }
-        // If not found, keep state intact and wait for the next conversations refresh
-    }, [navConversationApplied, location.state?.conversationId, conversations, activeConversationId, navigate, setActiveConversationId]);
+        // Apply deep-link directly; existence is resolved separately from source of truth.
+        setActiveConversationId(conversationId);
+        setSelectedItem({ type: 'conversations', id: conversationId });
+        setNavConversationApplied(true);
+        navigate('.', { replace: true, state: {} });
+    }, [navConversationApplied, location.state?.conversationId, activeConversationId, navigate, setActiveConversationId]);
 
     // Handle OAuth success from callback
     useEffect(() => {
@@ -499,52 +534,42 @@ function NotebookDetailsContent() {
         }
     }, []);
 
-    const handleConversationDeleted = useCallback((deletedConversationId: string) => {
-        // If the deleted conversation was the active one, we need to navigate to another conversation or clear the active state
+    const handleConversationDeleted = useCallback((deletedConversationId: string, nextConversationId: string | null) => {
+        // Sidebar/tree chooses the next navigation target after delete.
         if (activeConversationId === deletedConversationId) {
-            if (conversations && conversations.length > 0) {
-                // Find a conversation that's not the deleted one
-                const remainingConversation = conversations.find((c) => c.id !== deletedConversationId);
-                if (remainingConversation) {
-                    // Select the first remaining conversation
-                    setActiveConversationId(remainingConversation.id);
-                    setSelectedItem({ type: 'conversations', id: remainingConversation.id });
-                } else {
-                    // No conversations left, clear the active state
-                    setActiveConversationId(null);
-                    setSelectedItem(null);
-                }
+            if (nextConversationId) {
+                setActiveConversationId(nextConversationId);
+                setSelectedItem({ type: 'conversations', id: nextConversationId });
             } else {
-                // No conversations left, clear the active state
                 setActiveConversationId(null);
                 setSelectedItem(null);
             }
+            return;
         }
-        
-        // If the deleted conversation was selected in the sidebar (but not necessarily active), clear the selection
-        if (selectedItem?.type === 'conversations' && selectedItem.id === deletedConversationId) {
-            setSelectedItem(null);
-        }
-    }, [activeConversationId, selectedItem, conversations]);
 
-    const handleConversationsDeleted = useCallback((deletedConversationIds: string[]) => {
+        if (selectedItem?.type === 'conversations' && selectedItem.id === deletedConversationId) {
+            setSelectedItem(nextConversationId ? { type: 'conversations', id: nextConversationId } : null);
+        }
+    }, [activeConversationId, selectedItem, setActiveConversationId]);
+
+    const handleConversationsDeleted = useCallback((deletedConversationIds: string[], nextConversationId: string | null) => {
         const deletedIdSet = new Set(deletedConversationIds);
 
         if (activeConversationId && deletedIdSet.has(activeConversationId)) {
-            const remainingConversation = (conversations || []).find(c => !deletedIdSet.has(c.id));
-            if (remainingConversation) {
-                setActiveConversationId(remainingConversation.id);
-                setSelectedItem({ type: 'conversations', id: remainingConversation.id });
+            if (nextConversationId) {
+                setActiveConversationId(nextConversationId);
+                setSelectedItem({ type: 'conversations', id: nextConversationId });
             } else {
                 setActiveConversationId(null);
                 setSelectedItem(null);
             }
+            return;
         }
 
         if (selectedItem?.type === 'conversations' && deletedIdSet.has(selectedItem.id)) {
-            setSelectedItem(null);
+            setSelectedItem(nextConversationId ? { type: 'conversations', id: nextConversationId } : null);
         }
-    }, [activeConversationId, selectedItem, conversations]);
+    }, [activeConversationId, selectedItem, setActiveConversationId]);
 
     const handleSetHomePage = useCallback(async (fileId: string | null) => {
         if (fileId) {
@@ -1241,6 +1266,7 @@ function NotebookDetailsContent() {
                         
                         onConversationDeleted={handleConversationDeleted}
                         onConversationsDeleted={handleConversationsDeleted}
+                        activeConversationId={activeConversationId}
                         canEdit={canEdit()}
                         homePageFileId={notebook?.homePageFileId}
                         onSetHomePage={handleSetHomePage}
@@ -1249,7 +1275,7 @@ function NotebookDetailsContent() {
             }
             content={
                 <>
-                    {activeConversationId && !isLoadingConversations ? (
+                    {activeConversationId ? (
                         <ConversationProvider
                           key={activeConversationId}
                           projectId={projectId!}

@@ -36,6 +36,7 @@ const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?:
   const { 
     messages, 
     isStreaming, 
+    isUndoing,
     streamingMode,
     sendMessage, 
     undoLastTurn,
@@ -55,12 +56,15 @@ const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?:
     onPreviewFileByPath
   } = useConversation();
 
-  const sendBlocked = !canEdit || !!isRuntimeLoading || !!isChatModelMissing;
+  const sendBlocked = !canEdit || !!isRuntimeLoading || !!isChatModelMissing || !!isUndoing;
+  // Undo and assistant/new-conversation controls do not need a chat model or a ready runtime;
+  // they are only blocked by lack of edit permission or an undo already in flight.
+  const conversationBusy = !canEdit || !!isUndoing;
 
   return (
     <div className="flex flex-col h-full min-h-0 w-full overflow-hidden">
       {/* Conversation header */}
-      <ConversationHeader onUndo={undoLastTurn} canEdit={canEdit} onNewConversation={onNewConversation} data-tour-id="conversation.header" />
+      <ConversationHeader onUndo={undoLastTurn} canEdit={!conversationBusy} onNewConversation={onNewConversation} data-tour-id="conversation.header" />
 
       {isChatModelMissing && (
         <div className="mx-4 mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800" data-tour-id="conversation.no-model-warning">
@@ -92,7 +96,8 @@ const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?:
         onEditAssistant={!sendBlocked ? startEditingAssistant : () => {}}
         onSaveAssistant={!sendBlocked ? editAssistantMessage : async () => {}}
         onAssistantSelect={!sendBlocked ? setSelectedAssistant : () => {}}
-        onUndo={!sendBlocked ? undoLastTurn : () => {}}
+        onUndo={!conversationBusy ? undoLastTurn : () => {}}
+        canUndo={!conversationBusy}
         onEditUserMessage={(messageId, content) => {
           if (sendBlocked) return;
           console.log('Edit user message:', messageId, content);

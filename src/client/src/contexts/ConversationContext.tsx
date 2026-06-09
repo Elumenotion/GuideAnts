@@ -48,6 +48,7 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     isEditLoading: false,
     _isInitialized: false,
     _isCancelling: false,
+    _isUndoing: false,
     pendingAttachments: [],
     userProfiles: {},
   });
@@ -57,7 +58,7 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
   const inflightRuntimeChecksRef = React.useRef<Set<string>>(new Set());
   const runtimeReadyCacheRef = React.useRef<Set<string>>(getNotebookRuntimeReadyCache(notebookId));
 
-  const { loadNotebookFiles, conversations, loadConversations } = useNotebook();
+  const { loadNotebookFiles } = useNotebook();
   const { showToast } = useToast();
 
   const isStreamingRef = React.useRef(state.isStreaming);
@@ -336,7 +337,7 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
 
   // --- Custom hooks for streaming events and actions ---
   const handleStreamingEvent = useStreamingEventHandler(dispatch, state, {
-    loadNotebookFiles, loadConversations, conversations, showToast,
+    loadNotebookFiles, showToast,
     projectId, notebookId, conversationId, setCurrentStreamController,
   });
 
@@ -384,6 +385,7 @@ export function ConversationProvider({ projectId, notebookId, conversationId, gu
     isEditLoading: state.isEditLoading ?? false,
     isInitialized: state._isInitialized ?? false,
     isCancelling: state._isCancelling ?? false,
+    isUndoing: state._isUndoing ?? false,
     streamingError: state.streamingError,
     streamingMode: state.streamingMode ?? 'at-rest',
     activeStreamingUser: state.activeStreamingUser,

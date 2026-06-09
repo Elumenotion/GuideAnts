@@ -76,6 +76,9 @@ interface CellListProps {
   /** Handler to preview a file by its relative path (for turn file pills) */
   onPreviewFileByPath?: (relativePath: string) => void;
   canEdit?: boolean;
+  /** Whether the undo control is available. Undo does not require a chat model/runtime, so it is
+   *  gated separately from canEdit (which also covers sending/editing). */
+  canUndo?: boolean;
   'data-tour-id'?: string;
 }
 
@@ -307,6 +310,7 @@ const CellList = React.memo(function CellList({
   onPreviewFile,
   onPreviewFileByPath,
   canEdit = false,
+  canUndo = false,
   'data-tour-id': dataTourId
 }: CellListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -954,7 +958,7 @@ const CellList = React.memo(function CellList({
                         key={um.id}
                         message={um}
                         isLast={isLastUser}
-                        onUndo={canEdit && isLastUser && isLastTurn ? onUndo : undefined}
+                        onUndo={canUndo && isLastUser && isLastTurn ? onUndo : undefined}
                         onEdit={onEditUserMessage ? (content: string) => onEditUserMessage(um.id, content) : undefined}
                         getUserInfo={getUserInfo}
                         attachments={turn.attachedFiles}

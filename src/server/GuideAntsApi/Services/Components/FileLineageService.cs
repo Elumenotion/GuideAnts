@@ -1,6 +1,9 @@
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Core;
+using GuideAntsApi.Services.Auth;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 
 namespace GuideAntsApi.Services.Components;
 
@@ -8,10 +11,12 @@ namespace GuideAntsApi.Services.Components;
 public class FileLineageService : IFileLineageService
 {
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IUserContext _userContext;
 
-    public FileLineageService(IServiceScopeFactory scopeFactory)
+    public FileLineageService(IServiceScopeFactory scopeFactory, IUserContext userContext)
     {
         _scopeFactory = scopeFactory;
+        _userContext = userContext;
     }
     
     /// <summary>
@@ -35,7 +40,7 @@ public class FileLineageService : IFileLineageService
         string storagePath,
         bool saveImmediately = true)
     {
-        var userId = Guid.Empty.ToString();
+        var userId = ResolveActorId(_userContext.Principal);
 
         var entity = new FileLineageEvent
         {
@@ -59,4 +64,20 @@ public class FileLineageService : IFileLineageService
             await context.SaveChangesAsync();
         }
     }
-} 
+
+    private static string ResolveActorId(ClaimsPrincipal? principal)
+    {
+        if (principal?.Identity?.IsAuthenticated == true)
+        {
+            var userIdValue = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
+
+            if (!string.IsNullOrWhiteSpace(userIdValue))
+            {
+                return userIdValue;
+            }
+        }
+
+        return "system";
+    }
+}

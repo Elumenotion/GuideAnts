@@ -114,6 +114,9 @@ export function reducer(state: ExtendedConversationState, action: ActionType): E
     case 'SET_CANCELLING':
       return { ...state, _isCancelling: action.payload };
 
+    case 'SET_UNDOING':
+      return { ...state, _isUndoing: action.payload };
+
     case 'SET_USER_PROFILES':
       return { ...state, userProfiles: { ...(state.userProfiles || {}), ...action.payload } };
 

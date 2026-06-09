@@ -1,13 +1,10 @@
 import { useCallback } from 'react';
 import type { MessageDto, StreamingMessage } from '../../types/conversation';
 import { api } from '../../services/api';
-import { DEFAULT_CONVERSATION_TITLE } from '../../constants/conversation';
 import type { ActionType, ExtendedConversationState } from './types';
 
 interface StreamingEventDeps {
   loadNotebookFiles: () => Promise<void>;
-  loadConversations: () => Promise<void>;
-  conversations: any[];
   showToast: (opts: any) => void;
   projectId: string;
   notebookId: string;
@@ -21,7 +18,7 @@ export function useStreamingEventHandler(
   deps: StreamingEventDeps,
 ): (event: { type: string; data: any }) => void {
   const {
-    loadNotebookFiles, loadConversations, conversations, showToast,
+    loadNotebookFiles, showToast,
     projectId, notebookId, conversationId, setCurrentStreamController,
   } = deps;
 
@@ -85,12 +82,13 @@ export function useStreamingEventHandler(
           try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
 
           try {
-            const convoMeta = (conversations || []).find(c => c.id === conversationId);
-            if (convoMeta && convoMeta.title === DEFAULT_CONVERSATION_TITLE) {
+            const hasPriorCompletedAssistantTurn = (state.messages || []).some(
+              m => m.role?.toLowerCase() === 'assistant' && !m.id.startsWith('streaming-')
+            );
+            if (!hasPriorCompletedAssistantTurn) {
               api.projects.notebooks.conversations
                 .generateTitle(projectId, notebookId, conversationId)
                 .then(() => {
-                  loadConversations().catch(() => {});
                   try { window.dispatchEvent(new Event('refresh-conversations')); } catch {}
                 })
                 .catch(err => console.warn('Auto title generation failed:', err));
@@ -287,5 +285,5 @@ export function useStreamingEventHandler(
         }
         break;
     }
-  }, [loadNotebookFiles, showToast, conversations, loadConversations, projectId, notebookId, conversationId]);
+  }, [loadNotebookFiles, showToast, projectId, notebookId, conversationId]);
 }

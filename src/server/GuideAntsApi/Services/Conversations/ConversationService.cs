@@ -333,112 +333,200 @@ public class ConversationService : IConversationService
         );
     }
 
+    // Undo is a user-initiated recovery action, so it deliberately takes over a lock left behind by
+    // a crashed/hard-killed stream (an "orphaned" lock that has not yet hit its TTL) instead of
+    // failing — otherwise a single failed stream would block undo for up to the lock lifetime. It
+    // still refuses when a stream is genuinely active in this process so undo never races live writes.
+    // Returns the per-conversation gate it holds; callers MUST release it in a finally.
+    private async Task<SemaphoreSlim> AcquireUndoLockAsync(Guid conversationId)
+    {
+        var lockResult = await _distributedLock.TryAcquireLockAsync(conversationId, "User", CancellationToken.None);
+
+        if (lockResult.Status == LockAcquisitionStatus.ConversationNotFound)
+        {
+            throw new KeyNotFoundException("Conversation not found");
+        }
+
+        if (lockResult.Status != LockAcquisitionStatus.Acquired)
+        {
+            // A stream actively running in this process holds the per-conversation gate (count 0).
+            // Refuse so undo cannot race the live stream's writes.
+            if (_conversationLocks.TryGetValue(conversationId, out var activeGate) && activeGate.CurrentCount == 0)
+            {
+                throw new InvalidOperationException($"Conversation is locked by {lockResult.LockedByUserName}");
+            }
+
+            // No active local stream: the distributed lock is orphaned (its owner crashed before
+            // cleanup, or it lives on another container). Clear it so the user is not blocked until
+            // the lock TTL expires, then re-acquire it for the undo's own duration.
+            _logger.LogWarning("Undo clearing orphaned conversation lock for {ConversationId} (previously held by {LockedBy})",
+                conversationId, lockResult.LockedByUserName);
+            await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
+
+            var retry = await _distributedLock.TryAcquireLockAsync(conversationId, "User", CancellationToken.None);
+            if (retry.Status != LockAcquisitionStatus.Acquired)
+            {
+                // A genuine concurrent writer grabbed the lock in the race window.
+                throw new InvalidOperationException("Conversation is locked by another user");
+            }
+        }
+
+        // Hold the in-process gate for the deletes so we serialize against a stream that may have
+        // passed the distributed-lock check but not yet started writing. If a stream is mid-flight
+        // we can't get the gate quickly; treat that as a live conflict rather than blocking the undo.
+        var streamGate = _conversationLocks.GetOrAdd(conversationId, _ => new SemaphoreSlim(1, 1));
+        if (!await streamGate.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None))
+        {
+            try
+            {
+                await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
+            }
+            catch (Exception releaseEx)
+            {
+                _logger.LogError(releaseEx, "Failed to release conversation lock after undo gate timeout for {ConversationId}", conversationId);
+            }
+            throw new InvalidOperationException("Conversation is locked by another user");
+        }
+
+        return streamGate;
+    }
+
+    private async Task ReleaseUndoLockAsync(Guid conversationId, SemaphoreSlim streamGate)
+    {
+        try
+        {
+            streamGate.Release();
+        }
+        catch (Exception gateEx)
+        {
+            _logger.LogWarning(gateEx, "Failed to release undo gate for {ConversationId}", conversationId);
+        }
+
+        try
+        {
+            await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
+            _logger.LogInformation("Released conversation lock during undo for {ConversationId}", conversationId);
+        }
+        catch (Exception releaseEx)
+        {
+            _logger.LogError(releaseEx, "Failed to release conversation lock during undo for {ConversationId}", conversationId);
+        }
+    }
+
     public async Task UndoLastForConversationAsync(Guid conversationId)
     {
+        var streamGate = await AcquireUndoLockAsync(conversationId);
+
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        try
+        {
+            _logger.LogCritical("🚨 UNDO LAST called for conversation {ConversationId}", conversationId);
+            var conv = await db.NotebookConversations
+                .Include(c => c.Notebook)
+                .Include(c => c.Messages)
+                    .ThenInclude(m => m.EditHistory)
+                .FirstOrDefaultAsync(c => c.Id == conversationId)
+                ?? throw new KeyNotFoundException("Conversation not found");
 
-        _logger.LogCritical("🚨 UNDO LAST called for conversation {ConversationId}", conversationId);
-        var conv = await db.NotebookConversations
-            .Include(c => c.Notebook)
-            .Include(c => c.Messages)
-                .ThenInclude(m => m.EditHistory)
-            .FirstOrDefaultAsync(c => c.Id == conversationId)
-            ?? throw new KeyNotFoundException("Conversation not found");
 
+            // Find the last turn that has a user message
+            var lastUserMessage = conv.Messages
+                .Where(m => m.Role == DataModelChatRole.User)
+                .OrderByDescending(m => m.TurnIndex)
+                .ThenByDescending(m => m.MessageSequence)
+                .FirstOrDefault();
 
-        // Find the last turn that has a user message
-        var lastUserMessage = conv.Messages
-            .Where(m => m.Role == DataModelChatRole.User)
-            .OrderByDescending(m => m.TurnIndex)
-            .ThenByDescending(m => m.MessageSequence)
-            .FirstOrDefault();
+            if (lastUserMessage == null) return;
 
-        if (lastUserMessage == null) return;
+            // Remove all messages from this turn onwards
+            var messagesToRemove = conv.Messages
+                .Where(m => m.TurnIndex >= lastUserMessage.TurnIndex)
+                .ToList();
 
-        // Remove all messages from this turn onwards
-        var messagesToRemove = conv.Messages
-            .Where(m => m.TurnIndex >= lastUserMessage.TurnIndex)
-            .ToList();
+            // Remove all turns from this turn index onwards
+            var turnsToRemove = await db.ConversationTurns
+                .Where(t => t.NotebookConversationId == conversationId)
+                .Where(t => t.TurnIndex >= lastUserMessage.TurnIndex)
+                .ToListAsync();
 
-        // Remove all turns from this turn index onwards
-        var turnsToRemove = await db.ConversationTurns
-            .Where(t => t.NotebookConversationId == conversationId)
-            .Where(t => t.TurnIndex >= lastUserMessage.TurnIndex)
-            .ToListAsync();
+            _logger.LogCritical("🚨 UNDO LAST removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}",
+                messagesToRemove.Count, turnsToRemove.Count, lastUserMessage.TurnIndex, conversationId);
 
-        _logger.LogCritical("🚨 UNDO LAST removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}",
-            messagesToRemove.Count, turnsToRemove.Count, lastUserMessage.TurnIndex, conversationId);
+            db.NotebookConversationMessages.RemoveRange(messagesToRemove);
+            db.ConversationTurns.RemoveRange(turnsToRemove);
+            await db.SaveChangesAsync();
 
-        db.NotebookConversationMessages.RemoveRange(messagesToRemove);
-        db.ConversationTurns.RemoveRange(turnsToRemove);
-        await db.SaveChangesAsync();
+            // Broadcast turn_removed event to all observers
+            await _broadcastHub.BroadcastToConversationAsync(conversationId,
+                new StreamingEvent(StreamingEventTypes.TurnRemoved, JsonSerializer.Serialize(new
+                {
+                    turnIndex = lastUserMessage.TurnIndex,
+                    messagesRemoved = messagesToRemove.Count,
+                    timestamp = DateTime.UtcNow
+                }, _jsonOptions)));
 
-        // CRITICAL: Release conversation lock if it exists (fixes stuck "locked state" bug)
-        await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
-        _logger.LogInformation("Released conversation lock during undo for {ConversationId}", conversationId);
-
-        // Broadcast turn_removed event to all observers
-        await _broadcastHub.BroadcastToConversationAsync(conversationId,
-            new StreamingEvent(StreamingEventTypes.TurnRemoved, JsonSerializer.Serialize(new
-            {
-                turnIndex = lastUserMessage.TurnIndex,
-                messagesRemoved = messagesToRemove.Count,
-                timestamp = DateTime.UtcNow
-            }, _jsonOptions)));
-
-        _logger.LogCritical("🚨 UNDO LAST completed for conversation {ConversationId}", conversationId);
+            _logger.LogCritical("🚨 UNDO LAST completed for conversation {ConversationId}", conversationId);
+        }
+        finally
+        {
+            await ReleaseUndoLockAsync(conversationId, streamGate);
+        }
     }
 
     public async Task UndoForConversationAsync(Guid conversationId, Guid messageId)
     {
+        var streamGate = await AcquireUndoLockAsync(conversationId);
+
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        try
+        {
+            _logger.LogCritical("🚨 UNDO FOR MESSAGE called for conversation {ConversationId}, message {MessageId}", conversationId, messageId);
+            var conv = await db.NotebookConversations
+                .Include(c => c.Notebook)
+                .Include(c => c.Messages)
+                    .ThenInclude(m => m.EditHistory)
+                .FirstOrDefaultAsync(c => c.Id == conversationId)
+                ?? throw new KeyNotFoundException("Conversation not found");
 
-        _logger.LogCritical("🚨 UNDO FOR MESSAGE called for conversation {ConversationId}, message {MessageId}", conversationId, messageId);
-        var conv = await db.NotebookConversations
-            .Include(c => c.Notebook)
-            .Include(c => c.Messages)
-                .ThenInclude(m => m.EditHistory)
-            .FirstOrDefaultAsync(c => c.Id == conversationId)
-            ?? throw new KeyNotFoundException("Conversation not found");
 
+            var targetMessage = conv.Messages.FirstOrDefault(m => m.Id == messageId)
+                        ?? throw new KeyNotFoundException("Message not found");
 
-        var targetMessage = conv.Messages.FirstOrDefault(m => m.Id == messageId)
-                    ?? throw new KeyNotFoundException("Message not found");
+            // Remove all messages from this turn onwards
+            var messagesToRemove = conv.Messages
+                .Where(m => m.TurnIndex >= targetMessage.TurnIndex)
+                .ToList();
 
-        // Remove all messages from this turn onwards
-        var messagesToRemove = conv.Messages
-            .Where(m => m.TurnIndex >= targetMessage.TurnIndex)
-            .ToList();
+            // Remove all turns from this turn index onwards
+            var turnsToRemove = await db.ConversationTurns
+                .Where(t => t.NotebookConversationId == conversationId)
+                .Where(t => t.TurnIndex >= targetMessage.TurnIndex)
+                .ToListAsync();
 
-        // Remove all turns from this turn index onwards
-        var turnsToRemove = await db.ConversationTurns
-            .Where(t => t.NotebookConversationId == conversationId)
-            .Where(t => t.TurnIndex >= targetMessage.TurnIndex)
-            .ToListAsync();
+            _logger.LogCritical("🚨 UNDO FOR MESSAGE removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}",
+                messagesToRemove.Count, turnsToRemove.Count, targetMessage.TurnIndex, conversationId);
 
-        _logger.LogCritical("🚨 UNDO FOR MESSAGE removing {MessageCount} messages and {TurnCount} turns from turn {TurnIndex} onwards in conversation {ConversationId}",
-            messagesToRemove.Count, turnsToRemove.Count, targetMessage.TurnIndex, conversationId);
+            db.NotebookConversationMessages.RemoveRange(messagesToRemove);
+            db.ConversationTurns.RemoveRange(turnsToRemove);
+            await db.SaveChangesAsync();
 
-        db.NotebookConversationMessages.RemoveRange(messagesToRemove);
-        db.ConversationTurns.RemoveRange(turnsToRemove);
-        await db.SaveChangesAsync();
+            // Broadcast turn_removed event to all observers
+            await _broadcastHub.BroadcastToConversationAsync(conversationId,
+                new StreamingEvent(StreamingEventTypes.TurnRemoved, JsonSerializer.Serialize(new
+                {
+                    turnIndex = targetMessage.TurnIndex,
+                    messagesRemoved = messagesToRemove.Count,
+                    timestamp = DateTime.UtcNow
+                }, _jsonOptions)));
 
-        // CRITICAL: Release conversation lock if it exists (fixes stuck "locked state" bug)
-        await _distributedLock.ReleaseLockAsync(conversationId, CancellationToken.None);
-        _logger.LogInformation("Released conversation lock during undo for {ConversationId}", conversationId);
-
-        // Broadcast turn_removed event to all observers
-        await _broadcastHub.BroadcastToConversationAsync(conversationId,
-            new StreamingEvent(StreamingEventTypes.TurnRemoved, JsonSerializer.Serialize(new
-            {
-                turnIndex = targetMessage.TurnIndex,
-                messagesRemoved = messagesToRemove.Count,
-                timestamp = DateTime.UtcNow
-            }, _jsonOptions)));
-
-        _logger.LogCritical("🚨 UNDO FOR MESSAGE completed for conversation {ConversationId}", conversationId);
+            _logger.LogCritical("🚨 UNDO FOR MESSAGE completed for conversation {ConversationId}", conversationId);
+        }
+        finally
+        {
+            await ReleaseUndoLockAsync(conversationId, streamGate);
+        }
     }
 
     // Placeholder for the new Edit method
@@ -664,10 +752,17 @@ public class ConversationService : IConversationService
             {
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var turn = await db.ConversationTurns
-                    .FirstAsync(t => t.Id == ctx.DbTurn!.Id, cancellationToken);
-                turn.Status = "streaming";
-                turn.LastUpdated = DateTime.UtcNow;
-                await db.SaveChangesAsync(cancellationToken);
+                    .FirstOrDefaultAsync(t => t.Id == ctx.DbTurn!.Id, cancellationToken);
+                if (turn != null)
+                {
+                    turn.Status = "streaming";
+                    turn.LastUpdated = DateTime.UtcNow;
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+                else
+                {
+                    _logger.LogWarning("Turn {TurnId} disappeared before streaming status update in conversation {ConversationId}", ctx.DbTurn!.Id, conversationId);
+                }
             }
 
             // Broadcast turn creation to observers
@@ -719,10 +814,17 @@ public class ConversationService : IConversationService
             {
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var turn = await db.ConversationTurns
-                    .FirstAsync(t => t.Id == ctx.DbTurn!.Id, cancellationToken);
-                turn.Status = "completed";
-                turn.LastUpdated = DateTime.UtcNow;
-                await db.SaveChangesAsync(cancellationToken);
+                    .FirstOrDefaultAsync(t => t.Id == ctx.DbTurn!.Id, cancellationToken);
+                if (turn != null)
+                {
+                    turn.Status = "completed";
+                    turn.LastUpdated = DateTime.UtcNow;
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+                else
+                {
+                    _logger.LogWarning("Turn {TurnId} disappeared before completion status update in conversation {ConversationId}", ctx.DbTurn!.Id, conversationId);
+                }
             }
 
             // Do not block unlock on a full notebook walk. File-producing tools already reconcile
