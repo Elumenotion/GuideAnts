@@ -48,6 +48,7 @@ vi.mock('../../contexts/ProjectContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../contexts/ProjectContext')>();
   return {
     ...actual,
+    ProjectProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useProject: () => mockProjectContext,
   };
 });
@@ -56,6 +57,7 @@ vi.mock('../../contexts/NotebookContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../contexts/NotebookContext')>();
   return {
     ...actual,
+    NotebookProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useNotebook: () => mockNotebookContext,
   };
 });

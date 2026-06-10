@@ -265,7 +265,7 @@ public class NotebookFileServiceTests
 
             var svc = CreateService(ctx, tmpDir);
             var bytes = System.Text.Encoding.UTF8.GetBytes("hello");
-            var formFile = new FormFile(new MemoryStream(bytes), 0, bytes.Length, "file", @"..\..\evil.txt")
+            var formFile = new FormFile(new MemoryStream(bytes), 0, bytes.Length, "file", "../../evil.txt")
             {
                 Headers = new HeaderDictionary(),
                 ContentType = "text/plain"
