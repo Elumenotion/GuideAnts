@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { 
   generateMarkdownFile, 
   generateFileName, 
@@ -153,6 +153,8 @@ describe('assistantContentFile utilities', () => {
     });
 
     it('should format dates correctly in header', async () => {
+      vi.stubEnv('TZ', 'UTC');
+
       const metadata: AssistantContentMetadata = {
         messageId: 'msg-123',
         generatedAt: '2024-01-15T10:30:00.000Z',
@@ -168,7 +170,7 @@ describe('assistantContentFile utilities', () => {
       const text = await getFileContent(file);
       
       expect(text).toContain('January 15, 2024');
-      expect(text).toContain('05:30 AM'); // UTC time converted to local time
+      expect(text).toContain('10:30 AM');
       expect(text).toContain('**GPT-4**');
     });
 
