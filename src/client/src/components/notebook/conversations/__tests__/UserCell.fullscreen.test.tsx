@@ -27,62 +27,20 @@ vi.mock('react-dom', async () => {
   };
 });
 
-// Mock FullScreenEditor – expose save / cancel controls to drive callbacks
-vi.mock('../FullScreenEditor', () => ({
-  default: ({ content, onSave, onCancel }: { content: string; onSave: (c: string) => void; onCancel: () => void }) => (
-    <div data-testid="mock-fse">
-      <span>{content}</span>
-      <button onClick={() => onSave(`${content} (edited)`)} data-testid="fse-save">save</button>
-      <button onClick={onCancel} data-testid="fse-cancel">cancel</button>
-    </div>
-  ),
-}));
-
 /**
  * Tests ---------------------------------------------------------------------
  */
 
-describe('UserCell – full-screen & edit interactions', () => {
+describe('UserCell – full-screen viewer', () => {
   it('toggles to full-screen view and back', async () => {
     const user = userEvent.setup();
     render(<UserCell content="Viewing message" isLast={true} />);
 
-    // Open full-screen overlay
     await user.click(screen.getByLabelText('Full screen'));
     expect(screen.getByLabelText('Exit full screen')).toBeInTheDocument();
 
-    // Exit overlay
     await user.click(screen.getByLabelText('Exit full screen'));
     expect(screen.queryByLabelText('Exit full screen')).not.toBeInTheDocument();
-  });
-
-  it('shows full-screen viewer (no in-place edit path) and allows exit', async () => {
-    const user = userEvent.setup();
-    const onEdit = vi.fn();
-
-    render(<UserCell content="Original" isLast={true} onEdit={onEdit} />);
-
-    await user.click(screen.getByLabelText('Full screen'));
-    expect(screen.getByLabelText('Exit full screen')).toBeInTheDocument();
-    // Ensure no edit UI is present in viewer-only mode
-    expect(screen.queryByLabelText('Edit message')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('mock-fse')).not.toBeInTheDocument();
-
-    await user.click(screen.getByLabelText('Exit full screen'));
-    expect(screen.queryByLabelText('Exit full screen')).not.toBeInTheDocument();
-    expect(onEdit).not.toHaveBeenCalled();
-  });
-
-  it('exits full-screen without calling onEdit', async () => {
-    const user = userEvent.setup();
-    const onEdit = vi.fn();
-
-    render(<UserCell content="Original" isLast={true} onEdit={onEdit} />);
-
-    await user.click(screen.getByLabelText('Full screen'));
-    await user.click(screen.getByLabelText('Exit full screen'));
-
-    expect(onEdit).not.toHaveBeenCalled();
   });
 });
 
@@ -105,16 +63,14 @@ describe('UserCell – undo dialog extra path', () => {
 
     render(<UserCell content="Hello" isLast={true} onUndo={onUndo} />);
 
-    // Open dialog
     await user.click(screen.getByLabelText('Undo last turn'));
     const heading = screen.getByText('Undo Last Turn');
     expect(heading).toBeInTheDocument();
 
-    // Fire Escape on the dialog container to trigger handler
     const dialogContainer = heading.closest('div');
     fireEvent.keyDown(dialogContainer as HTMLElement, { key: 'Escape', code: 'Escape' });
 
     expect(screen.queryByText('Undo Last Turn')).not.toBeInTheDocument();
     expect(onUndo).not.toHaveBeenCalled();
   });
-}); 
+});

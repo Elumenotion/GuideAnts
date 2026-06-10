@@ -211,6 +211,225 @@ public class ConversationManagerTests
         // Assert
         result.Should().BeEmpty();
     }
+
+    [TestMethod]
+    public async Task GetCurrentStateAsync_WithLatestTurnAndFileLists_ShouldReturnComputedState()
+    {
+        var createdAt = DateTime.UtcNow.AddMinutes(-2);
+        _context.ConversationTurns.Add(new ConversationTurn
+        {
+            NotebookConversationId = _conversationId,
+            TurnIndex = 2,
+            AssistantName = "planner",
+            ModelDeploymentId = "gpt-4.1",
+            Instructions = "Build plan",
+            FilesCreated = "[\"docs/plan.md\",\"src/main.cs\"]",
+            FilesModified = "[\"README.md\"]",
+            Created = createdAt
+        });
+        await _context.SaveChangesAsync();
+
+        var state = await _manager.GetCurrentStateAsync(_conversationId);
+
+        state.ConversationId.Should().Be(_conversationId);
+        state.CurrentAssistantName.Should().Be("planner");
+        state.CurrentModelDeploymentId.Should().Be("gpt-4.1");
+        state.LastInstructions.Should().Be("Build plan");
+        state.CurrentTurnIndex.Should().Be(2);
+        state.LastActivity.Should().BeCloseTo(createdAt, TimeSpan.FromSeconds(1));
+        state.LastTurnFilesCreated.Should().BeEquivalentTo(["docs/plan.md", "src/main.cs"]);
+        state.LastTurnFilesModified.Should().BeEquivalentTo(["README.md"]);
+    }
+
+    [TestMethod]
+    public async Task GetCurrentStateAsync_WithInvalidFileJson_ShouldIgnoreFileLists()
+    {
+        _context.ConversationTurns.Add(new ConversationTurn
+        {
+            NotebookConversationId = _conversationId,
+            TurnIndex = 1,
+            AssistantName = "assistant",
+            ModelDeploymentId = "gpt-4o-mini",
+            Instructions = "Test",
+            FilesCreated = "{bad-json",
+            FilesModified = "[\"ok\",",
+            Created = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync();
+
+        var state = await _manager.GetCurrentStateAsync(_conversationId);
+
+        state.CurrentTurnIndex.Should().Be(1);
+        state.LastTurnFilesCreated.Should().BeNull();
+        state.LastTurnFilesModified.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task GetCurrentStateAsync_ShouldReturnCachedStateUntilInvalidated()
+    {
+        _context.ConversationTurns.Add(new ConversationTurn
+        {
+            NotebookConversationId = _conversationId,
+            TurnIndex = 1,
+            AssistantName = "assistant-one",
+            ModelDeploymentId = "gpt-4o-mini",
+            Instructions = "First turn",
+            Created = DateTime.UtcNow.AddMinutes(-2)
+        });
+        await _context.SaveChangesAsync();
+
+        var initialState = await _manager.GetCurrentStateAsync(_conversationId);
+        initialState.CurrentAssistantName.Should().Be("assistant-one");
+        initialState.CurrentTurnIndex.Should().Be(1);
+
+        _context.ConversationTurns.Add(new ConversationTurn
+        {
+            NotebookConversationId = _conversationId,
+            TurnIndex = 2,
+            AssistantName = "assistant-two",
+            ModelDeploymentId = "gpt-4.1",
+            Instructions = "Second turn",
+            Created = DateTime.UtcNow.AddMinutes(-1)
+        });
+        await _context.SaveChangesAsync();
+
+        var cachedState = await _manager.GetCurrentStateAsync(_conversationId);
+        cachedState.CurrentAssistantName.Should().Be("assistant-one");
+        cachedState.CurrentTurnIndex.Should().Be(1);
+
+        _manager.InvalidateCache(_conversationId);
+        var refreshedState = await _manager.GetCurrentStateAsync(_conversationId);
+
+        refreshedState.CurrentAssistantName.Should().Be("assistant-two");
+        refreshedState.CurrentTurnIndex.Should().Be(2);
+    }
+
+    [TestMethod]
+    public async Task LoadConversationAsync_WithSystemAndUserMessages_Throws_when_assistant_definition_missing()
+    {
+        _context.ConversationTurns.Add(new ConversationTurn
+        {
+            NotebookConversationId = _conversationId,
+            TurnIndex = 1,
+            AssistantName = "Code Executor",
+            ModelDeploymentId = "gpt-4o-mini",
+            Instructions = "Seed turn",
+            Created = DateTime.UtcNow.AddMinutes(-3)
+        });
+        _context.NotebookConversationMessages.AddRange(
+            new NotebookConversationMessage
+            {
+                NotebookConversationId = _conversationId,
+                TurnIndex = 1,
+                MessageSequence = 1,
+                Role = ChatRole.System,
+                Content = "System context",
+                Created = DateTime.UtcNow.AddMinutes(-2)
+            },
+            new NotebookConversationMessage
+            {
+                NotebookConversationId = _conversationId,
+                TurnIndex = 1,
+                MessageSequence = 2,
+                Role = ChatRole.User,
+                Content = "Hello",
+                Created = DateTime.UtcNow.AddMinutes(-1)
+            });
+        await _context.SaveChangesAsync();
+
+        var act = () => _manager.LoadConversationAsync(_conversationId);
+
+        await act.Should().ThrowAsync<Exception>()
+            .WithMessage("*Can't find assistant definition*");
+    }
+
+    [TestMethod]
+    public async Task LoadConversationAsync_WithToolMessage_Throws_when_assistant_definition_missing()
+    {
+        _context.ConversationTurns.Add(new ConversationTurn
+        {
+            NotebookConversationId = _conversationId,
+            TurnIndex = 1,
+            AssistantName = "Code Executor",
+            ModelDeploymentId = "gpt-4o-mini",
+            Instructions = "Use search tool",
+            Created = DateTime.UtcNow.AddMinutes(-2)
+        });
+        _context.NotebookConversationMessages.AddRange(
+            new NotebookConversationMessage
+            {
+                NotebookConversationId = _conversationId,
+                TurnIndex = 1,
+                MessageSequence = 1,
+                Role = ChatRole.User,
+                Content = "Find docs",
+                Created = DateTime.UtcNow.AddMinutes(-2)
+            },
+            new NotebookConversationMessage
+            {
+                NotebookConversationId = _conversationId,
+                TurnIndex = 1,
+                MessageSequence = 2,
+                Role = ChatRole.Assistant,
+                AssistantName = "Code Executor",
+                Content = "Calling tool",
+                Created = DateTime.UtcNow.AddMinutes(-1)
+            },
+            new NotebookConversationMessage
+            {
+                NotebookConversationId = _conversationId,
+                TurnIndex = 1,
+                MessageSequence = 3,
+                Role = ChatRole.Tool,
+                FunctionName = "SearchDocs",
+                ToolCallId = "call_123",
+                Content = "{\"result\":\"ok\"}",
+                Created = DateTime.UtcNow
+            });
+        await _context.SaveChangesAsync();
+
+        var act = () => _manager.LoadConversationAsync(_conversationId);
+
+        await act.Should().ThrowAsync<Exception>()
+            .WithMessage("*Can't find assistant definition*");
+    }
+
+    [TestMethod]
+    public async Task InvalidateCache_ShouldForceAssistantRefresh()
+    {
+        _context.ConversationTurns.Add(new ConversationTurn
+        {
+            NotebookConversationId = _conversationId,
+            TurnIndex = 1,
+            AssistantName = "assistant-one",
+            ModelDeploymentId = "gpt-4o-mini",
+            Instructions = "First",
+            Created = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync();
+
+        var firstAssistant = await _manager.GetCurrentAssistantAsync(_conversationId);
+        firstAssistant.Should().Be("assistant-one");
+
+        _context.ConversationTurns.Add(new ConversationTurn
+        {
+            NotebookConversationId = _conversationId,
+            TurnIndex = 2,
+            AssistantName = "assistant-two",
+            ModelDeploymentId = "gpt-4.1",
+            Instructions = "Second",
+            Created = DateTime.UtcNow.AddSeconds(1)
+        });
+        await _context.SaveChangesAsync();
+
+        var cachedAssistant = await _manager.GetCurrentAssistantAsync(_conversationId);
+        cachedAssistant.Should().Be("assistant-one");
+
+        _manager.InvalidateCache(_conversationId);
+        var refreshedAssistant = await _manager.GetCurrentAssistantAsync(_conversationId);
+
+        refreshedAssistant.Should().Be("assistant-two");
+    }
     #endregion
 
 

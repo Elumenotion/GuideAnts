@@ -66,6 +66,20 @@ describe('AssistantCell – edited message overlay', () => {
     expect(screen.queryByTestId('message-diff')).not.toBeInTheDocument();
   });
 
+  it('renders assistant avatar image in edited layout when avatarUrl is provided', () => {
+    renderWithToast(
+      <AssistantCell
+        {...baseProps}
+        assistantName="Helper"
+        avatarUrl="https://example.com/avatar.png"
+        editorUserName="Doug"
+        editorUserEmail="doug@example.com"
+      />,
+    );
+
+    expect(screen.getByAltText('Helper')).toHaveAttribute('src', 'https://example.com/avatar.png');
+  });
+
   it('closes overlay via close button', async () => {
     const user = userEvent.setup();
     renderWithToast(<AssistantCell {...baseProps} />);

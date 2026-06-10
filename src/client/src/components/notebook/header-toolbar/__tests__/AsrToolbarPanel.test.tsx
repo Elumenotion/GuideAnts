@@ -128,4 +128,143 @@ describe('AsrToolbarPanel', () => {
 
     expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });
+
+  it('switches cloud provider when selecting an available cloud option', async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn(async () => {});
+    render(
+      <AsrToolbarPanel
+        service={{
+          serviceId: 'SpeechTranscription',
+          displayName: 'Speech Transcription',
+          kind: 'asr',
+          status: 'ready',
+          summary: 'ready',
+          activeProviderId: 'SpeechTranscription.LocalAsr.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          providerOptions: [
+            {
+              providerId: 'SpeechTranscription.Google.SpeechToText',
+              displayName: 'GoogleGeminiApi',
+              providerKind: 'Cloud',
+              canActivate: true,
+              blockers: [],
+              providerSection: 'GoogleGeminiApi',
+              modelId: 'gemini-2.5-flash',
+            },
+            {
+              providerId: 'SpeechTranscription.LocalAsr.Http',
+              displayName: 'LocalServiceHosts:SpeechTranscriptionBaseUrl',
+              providerKind: 'LocalHttp',
+              canActivate: true,
+              blockers: [],
+              providerSection: 'LocalServiceHosts:SpeechTranscriptionBaseUrl',
+              modelId: null,
+            },
+          ],
+          selection: null,
+          blockers: [],
+          localModelOptions: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={onRefresh}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('option', { name: /google/i }));
+    expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
+      'SpeechTranscription',
+      'SpeechTranscription.Google.SpeechToText'
+    );
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it('loads and unloads local runtime when power controls are used', async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn(async () => {});
+    render(
+      <AsrToolbarPanel
+        service={{
+          serviceId: 'SpeechTranscription',
+          displayName: 'Speech Transcription',
+          kind: 'asr',
+          status: 'ready',
+          summary: 'ready',
+          activeProviderId: 'SpeechTranscription.LocalAsr.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          providerOptions: [],
+          selection: null,
+          blockers: [],
+          localModelOptions: [
+            { modelRef: 'asr-1', displayLabel: 'asr-1', isComplete: true, isActive: true },
+          ],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={onRefresh}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /turn asr runtime on/i }));
+    expect(api.settings.localModels.load).toHaveBeenCalledWith('SpeechTranscription', {
+      model_path: 'asr-1',
+    });
+
+    await user.click(screen.getByRole('button', { name: /turn asr runtime off/i }));
+    expect(api.settings.localModels.unload).toHaveBeenCalledWith('SpeechTranscription');
+  });
+
+  it('renders service blockers and opens settings', async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(
+      <AsrToolbarPanel
+        service={{
+          serviceId: 'SpeechTranscription',
+          displayName: 'Speech Transcription',
+          kind: 'asr',
+          status: 'blocked',
+          summary: 'blocked',
+          activeProviderId: 'SpeechTranscription.LocalAsr.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          providerOptions: [],
+          selection: null,
+          blockers: ['ASR endpoint missing'],
+          localModelOptions: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={onOpenSettings}
+      />
+    );
+
+    expect(screen.getByText('ASR endpoint missing')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /open in settings/i }));
+    expect(onOpenSettings).toHaveBeenCalled();
+  });
 });

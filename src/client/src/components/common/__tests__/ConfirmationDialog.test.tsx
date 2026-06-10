@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { ConfirmationDialog } from '../ConfirmationDialog';
@@ -131,5 +131,53 @@ describe('ConfirmationDialog', () => {
     // The icon should be rendered (FiAlertTriangle)
     const icon = document.querySelector('svg');
     expect(icon).toBeInTheDocument();
+  });
+
+  it('calls onConfirm when Enter is pressed outside focused buttons', async () => {
+    const user = userEvent.setup();
+    render(<ConfirmationDialog {...defaultProps} />);
+
+    await user.keyboard('{Enter}');
+    expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not confirm on Enter when confirmDisabled is true', async () => {
+    const user = userEvent.setup();
+    render(<ConfirmationDialog {...defaultProps} confirmDisabled />);
+
+    await user.keyboard('{Enter}');
+    expect(defaultProps.onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('does not call onClose on Escape when loading', async () => {
+    const user = userEvent.setup();
+    render(<ConfirmationDialog {...defaultProps} isLoading />);
+
+    await user.keyboard('{Escape}');
+    expect(defaultProps.onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not confirm on Enter when a button is focused', () => {
+    render(<ConfirmationDialog {...defaultProps} />);
+
+    const cancelButton = screen.getByText('Cancel');
+    cancelButton.focus();
+    fireEvent.keyDown(window, { key: 'Enter' });
+
+    expect(defaultProps.onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('renders custom body content and hides cancel button when requested', () => {
+    render(
+      <ConfirmationDialog
+        {...defaultProps}
+        message=""
+        body={<div>Extra body</div>}
+        showCancelButton={false}
+      />
+    );
+
+    expect(screen.getByText('Extra body')).toBeInTheDocument();
+    expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
   });
 }); 

@@ -35,6 +35,28 @@ vi.mock('../../services/api', () => ({
   },
 }));
 
+vi.mock('../../components/ErrorScreen', () => ({
+  default: ({
+    title,
+    onRetry,
+    onBack,
+  }: {
+    title?: string;
+    onRetry?: () => void;
+    onBack?: () => void;
+  }) => (
+    <div>
+      <h1>{title}</h1>
+      <button type="button" onClick={onRetry}>
+        Try Again
+      </button>
+      <button type="button" onClick={onBack}>
+        Go Back
+      </button>
+    </div>
+  ),
+}));
+
 describe('EditNotebook page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -123,5 +145,67 @@ describe('EditNotebook page', () => {
     await userEvent.click(cancelButton);
     
     expect(mockNavigate).toHaveBeenCalledWith('/projects/test-project-id/notebooks/test-notebook-id');
+  });
+
+  it('shows loading spinner while project context is loading', () => {
+    mockProjectContext.isLoading = true;
+    render(<EditNotebook />);
+    expect(screen.getByText('Loading notebook...')).toBeInTheDocument();
+  });
+
+  it('shows critical error screen when project context fails to fetch', () => {
+    mockProjectContext.error = 'Failed to fetch project';
+    render(<EditNotebook />);
+    expect(screen.getByText('Failed to Load Notebook')).toBeInTheDocument();
+  });
+
+  it('shows notebook not found when id is missing from project', async () => {
+    mockProjectContext.project.notebooks = [];
+    render(<EditNotebook />);
+    expect(await screen.findByText('Notebook not found')).toBeInTheDocument();
+  });
+
+  it('refreshes project and includes description on successful update', async () => {
+    (api.projects.updateNotebook as any).mockResolvedValue({});
+    const refreshProject = vi.fn().mockResolvedValue(undefined);
+    mockProjectContext.refreshProject = refreshProject;
+
+    render(<EditNotebook />);
+
+    await userEvent.type(screen.getByLabelText(/description/i), 'Updated description');
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(api.projects.updateNotebook).toHaveBeenCalledWith(
+      'test-project-id',
+      'test-notebook-id',
+      expect.objectContaining({ description: 'Updated description' })
+    );
+    expect(refreshProject).toHaveBeenCalled();
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/test-project-id/notebooks/test-notebook-id');
+  });
+
+  it('retries and navigates back from the critical load error screen', async () => {
+    const reloadSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload: reloadSpy },
+    });
+    mockProjectContext.error = 'Failed to fetch project';
+    render(<EditNotebook />);
+
+    await screen.findByText('Failed to Load Notebook');
+    await userEvent.click(screen.getByRole('button', { name: /try again/i }));
+    expect(reloadSpy).toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: /go back/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/test-project-id/notebooks/test-notebook-id');
+  });
+
+  it('shows saving state while notebook update is in flight', async () => {
+    (api.projects.updateNotebook as any).mockImplementation(() => new Promise(() => {}));
+    render(<EditNotebook />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText('Saving...')).toBeInTheDocument();
   });
 }); 

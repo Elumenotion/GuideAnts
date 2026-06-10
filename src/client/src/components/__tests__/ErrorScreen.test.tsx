@@ -88,6 +88,68 @@ describe('ErrorScreen', () => {
     renderWithRouter(<ErrorScreen error={new Error('Failed to fetch')} />);
     expect(screen.getByText('Unable to connect to the server. Please check your internet connection and try again.')).toBeInTheDocument();
   });
+
+  it('navigates to login when retry is clicked on auth errors', () => {
+    renderWithRouter(<ErrorScreen error={new Error('Unauthorized access')} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+    expect(screen.getByRole('button', { name: 'Sign In' })).toBeInTheDocument();
+  });
+
+  it('reloads page when retry has no handler', () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+
+    renderWithRouter(<ErrorScreen error={new Error('Generic failure')} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it('calls onBack when back button is clicked', () => {
+    const onBack = vi.fn();
+    renderWithRouter(<ErrorScreen onBack={onBack} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Home' }));
+    expect(onBack).toHaveBeenCalled();
+  });
+
+  it('hides retry and back buttons when configured off', () => {
+    renderWithRouter(
+      <ErrorScreen showRetryButton={false} showBackButton={false} />
+    );
+
+    expect(screen.queryByRole('button', { name: 'Try Again' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back to Home' })).not.toBeInTheDocument();
+  });
+
+  it('shows generic warning icon for unknown errors', () => {
+    renderWithRouter(<ErrorScreen error={new Error('Something unexpected')} />);
+    expect(screen.getByText('⚠️')).toBeInTheDocument();
+  });
+
+  it('translates network errors to friendly copy', () => {
+    renderWithRouter(<ErrorScreen error={new Error('network error occurred')} />);
+    expect(
+      screen.getByText('A network error occurred. Please check your connection and try again.')
+    ).toBeInTheDocument();
+  });
+
+  it('translates authentication token errors', () => {
+    renderWithRouter(<ErrorScreen error={new Error('No authentication token provided')} />);
+    expect(
+      screen.getByText('Authentication failed. Please sign in again to continue.')
+    ).toBeInTheDocument();
+  });
+
+  it('translates timeout errors', () => {
+    renderWithRouter(<ErrorScreen error={new Error('Request timeout exceeded')} />);
+    expect(
+      screen.getByText('The request timed out. The server might be busy, please try again in a moment.')
+    ).toBeInTheDocument();
+  });
 });
 
 describe('NetworkErrorScreen', () => {

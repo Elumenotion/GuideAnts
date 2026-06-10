@@ -67,7 +67,6 @@ interface CellListProps {
   onAssistantSelect: (assistantName: string) => void;
 
   onUndo: () => void;
-  onEditUserMessage?: (messageId: string, content: string) => void;
   editError?: string;
   isEditLoading?: boolean;
   conversationId?: string;
@@ -87,7 +86,6 @@ function UserCellWrapper({
   message, 
   isLast, 
   onUndo,
-  onEdit,
   getUserInfo,
   attachments,
   onPreviewFile,
@@ -97,7 +95,6 @@ function UserCellWrapper({
   message: MessageDto; 
   isLast: boolean; 
   onUndo?: () => void;
-  onEdit?: (content: string) => void;
   getUserInfo: (userId?: string) => Promise<UserInfo | null>;
   attachments?: AttachedFile[];
   onPreviewFile?: (fileId: string) => void;
@@ -153,7 +150,6 @@ function UserCellWrapper({
       content={message.content}
       isLast={isLast}
       onUndo={onUndo}
-      onEdit={onEdit}
       userId={userInfo?.id ?? message.userId}
       userName={userInfo?.name ?? message.userName}
       userEmail={userInfo?.email ?? message.userEmail}
@@ -302,7 +298,6 @@ const CellList = React.memo(function CellList({
   onAssistantSelect,
 
   onUndo,
-  onEditUserMessage,
   editError,
   isEditLoading = false,
   conversationId,
@@ -959,7 +954,6 @@ const CellList = React.memo(function CellList({
                         message={um}
                         isLast={isLastUser}
                         onUndo={canUndo && isLastUser && isLastTurn ? onUndo : undefined}
-                        onEdit={onEditUserMessage ? (content: string) => onEditUserMessage(um.id, content) : undefined}
                         getUserInfo={getUserInfo}
                         attachments={turn.attachedFiles}
                         onPreviewFile={onPreviewFile}

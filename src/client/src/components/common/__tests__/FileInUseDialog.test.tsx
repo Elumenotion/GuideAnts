@@ -323,6 +323,41 @@ describe('FileInUseDialog', () => {
     });
   });
 
+  describe('Keyboard handling', () => {
+    it('calls onClose when Escape is pressed while open', () => {
+      const onClose = vi.fn();
+      renderWithRouter({ ...defaultProps, isOpen: true, onClose });
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('calls onClose when Enter is pressed outside a button', () => {
+      const onClose = vi.fn();
+      renderWithRouter({ ...defaultProps, isOpen: true, onClose });
+
+      fireEvent.keyDown(window, { key: 'Enter' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not call onClose when Enter is pressed on the close button', () => {
+      const onClose = vi.fn();
+      renderWithRouter({ ...defaultProps, isOpen: true, onClose });
+
+      const closeButton = screen.getByRole('button', { name: /close/i });
+      fireEvent.keyDown(closeButton, { key: 'Enter' });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('does not attach key handlers when dialog is closed', () => {
+      const onClose = vi.fn();
+      renderWithRouter({ ...defaultProps, isOpen: false, onClose });
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Accessibility', () => {
     it('has accessible close button', () => {
       renderWithRouter({ ...defaultProps, isOpen: true });

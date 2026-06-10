@@ -92,4 +92,30 @@ describe('AssistantDropdown', () => {
     await user.click(button);
     expect(button).toHaveAttribute('aria-expanded', 'true');
   });
+
+  it('filters assistants by model name in search', async () => {
+    const user = userEvent.setup();
+    render(<AssistantDropdown {...defaultProps} />);
+
+    await user.click(screen.getByRole('button'));
+    await user.type(screen.getByPlaceholderText(/search guides/i), 'gpt-3.5');
+
+    expect(screen.getByRole('option', { name: /Web Ants/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Code Ants/ })).not.toBeInTheDocument();
+  });
+
+  it('shows empty state when search matches nothing', async () => {
+    const user = userEvent.setup();
+    render(<AssistantDropdown {...defaultProps} />);
+
+    await user.click(screen.getByRole('button'));
+    await user.type(screen.getByPlaceholderText(/search guides/i), 'zzzz-no-match');
+
+    expect(screen.getByText(/No guides found matching/i)).toBeInTheDocument();
+  });
+
+  it('synthesizes selected assistant when name is not in list', () => {
+    render(<AssistantDropdown {...defaultProps} selectedName="Custom Guide" assistants={[]} />);
+    expect(screen.getByText('Custom Guide')).toBeInTheDocument();
+  });
 }); 

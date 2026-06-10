@@ -98,11 +98,6 @@ const ConversationPanelContent: React.FC<{ canEdit: boolean; onNewConversation?:
         onAssistantSelect={!sendBlocked ? setSelectedAssistant : () => {}}
         onUndo={!conversationBusy ? undoLastTurn : () => {}}
         canUndo={!conversationBusy}
-        onEditUserMessage={(messageId, content) => {
-          if (sendBlocked) return;
-          console.log('Edit user message:', messageId, content);
-          sendMessage(content);
-        }}
         editError={editError}
         isEditLoading={isEditLoading}
         turnBasedMode={true}

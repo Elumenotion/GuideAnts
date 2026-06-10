@@ -65,7 +65,7 @@ const defaultProps = {
   onPublishToProject: vi.fn(),
   onPreviewFile: vi.fn(),
   onRenameFile: vi.fn(),
-  disabled: false,
+  canEdit: true,
 };
 
 describe('NotebookFolderTree', () => {
@@ -101,8 +101,8 @@ describe('NotebookFolderTree', () => {
       expect(indexedFileElement?.querySelector('svg')).toBeInTheDocument();
     });
 
-    it('hides action buttons when disabled', () => {
-      render(<NotebookFolderTree {...defaultProps} disabled={true} />);
+    it('hides action buttons when canEdit is false', () => {
+      render(<NotebookFolderTree {...defaultProps} canEdit={false} />);
       const folderElement = screen.getByText('Documents');
       fireEvent.mouseEnter(folderElement);
       
@@ -139,10 +139,10 @@ describe('NotebookFolderTree', () => {
 //    });
   });
 
-  describe('Disabled State', () => {
-    it('disables interactions when disabled prop is true', async () => {
+  describe('Read-only state', () => {
+    it('disables interactions when canEdit is false', async () => {
       const user = userEvent.setup();
-      const { baseElement } = render(<NotebookFolderTree {...defaultProps} disabled={true} />);
+      const { baseElement } = render(<NotebookFolderTree {...defaultProps} canEdit={false} />);
       
       const file = screen.getByText('test.txt');
       await user.click(file);

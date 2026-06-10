@@ -1,10 +1,26 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockBroadcastAuthExpired = vi.fn();
+
+vi.mock('../authEvents', () => ({
+  broadcastAuthExpired: (...args: unknown[]) => mockBroadcastAuthExpired(...args),
+}));
+
+vi.mock('../authService', () => ({
+  withAuthFetchInit: (init: RequestInit) => ({ ...init, credentials: 'include' }),
+  withAuthHeaders: (headers?: HeadersInit) => new Headers(headers),
+}));
+
 import {
+  createDocumentServerEditorConfig,
+  getDocumentServerCapabilities,
   isDocumentServerSupportedByContentType,
   isDocumentServerSupportedByExtension,
   looksLikeDocumentServerFile,
   type DocumentServerCapabilities,
 } from '../documentServer';
+
+const mockFetch = vi.fn();
 
 const enabledCapabilities: DocumentServerCapabilities = {
   enabled: true,
@@ -40,5 +56,117 @@ describe('documentServer PDF exclusions', () => {
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       )
     ).toBe(true);
+  });
+
+  it('returns false when capabilities are disabled or missing', () => {
+    expect(isDocumentServerSupportedByExtension('sample.docx', { ...enabledCapabilities, enabled: false })).toBe(false);
+    expect(isDocumentServerSupportedByExtension('sample.docx', null)).toBe(false);
+    expect(isDocumentServerSupportedByExtension('no-extension', enabledCapabilities)).toBe(false);
+  });
+
+  it('classifies office files by extension and content type markers', () => {
+    expect(looksLikeDocumentServerFile('report.xlsx')).toBe(true);
+    expect(
+      looksLikeDocumentServerFile(
+        'unknown.bin',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      )
+    ).toBe(true);
+    expect(looksLikeDocumentServerFile('unknown.bin')).toBe(false);
+  });
+});
+
+describe('documentServer API', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // @ts-expect-error test override
+    global.fetch = mockFetch;
+  });
+
+  it('loads capabilities and reuses cache on subsequent calls', async () => {
+    const payload: DocumentServerCapabilities = {
+      enabled: true,
+      publicUrl: 'http://localhost:8082',
+      supportedExtensions: ['docx'],
+      supportedContentTypes: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    };
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue(payload),
+    });
+
+    await expect(getDocumentServerCapabilities(true)).resolves.toEqual(payload);
+    await expect(getDocumentServerCapabilities()).resolves.toEqual(payload);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws formatted error when capabilities request fails', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ message: 'Document server offline' })),
+    });
+
+    await expect(getDocumentServerCapabilities(true)).rejects.toThrow(
+      'Document server offline (HTTP 503)'
+    );
+  });
+
+  it('creates editor config on success', async () => {
+    const response = {
+      documentServerUrl: 'http://localhost:8082/editor',
+      config: { documentType: 'word' },
+    };
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue(response),
+    });
+
+    const request = {
+      scope: 'notebook' as const,
+      projectId: 'proj-1',
+      notebookId: 'nb-1',
+      fileId: 'file-1',
+      canEdit: true,
+    };
+
+    await expect(createDocumentServerEditorConfig(request)).resolves.toEqual(response);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/documentserver/editor-config'),
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify(request),
+      })
+    );
+  });
+
+  it('broadcasts auth expired on 401 responses', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: vi.fn().mockResolvedValue(''),
+    });
+
+    await expect(
+      createDocumentServerEditorConfig({
+        scope: 'project',
+        projectId: 'proj-1',
+        fileId: 'file-1',
+        canEdit: false,
+      })
+    ).rejects.toThrow('HTTP 401');
+    expect(mockBroadcastAuthExpired).toHaveBeenCalledWith('Authentication expired.');
+  });
+
+  it('throws timeout error when fetch aborts', async () => {
+    const abortError = new DOMException('Aborted', 'AbortError');
+    mockFetch.mockRejectedValue(abortError);
+
+    await expect(getDocumentServerCapabilities(true)).rejects.toThrow(
+      'DocumentServer request timed out after 10000ms.'
+    );
   });
 });

@@ -108,7 +108,7 @@ root/
    - Unit tests for components
    - Integration tests for flows
    - E2E tests for critical paths
-   - >= 80% code coverage
+   - >= 85% line coverage (statements/functions/branches thresholds enforced separately in vitest.config.ts)
 
 2. Backend:
    - Unit tests for services
@@ -120,7 +120,6 @@ root/
 1. Code Documentation:
    - JSDoc for TypeScript
    - XML comments for C#
-   - README for each directory
    - Architecture updates
 
 2. API Documentation:

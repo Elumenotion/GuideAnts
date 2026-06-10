@@ -188,4 +188,47 @@ describe('NotebookLayout', () => {
 
         expect(screen.queryByText(/starter/)).not.toBeInTheDocument();
     });
-}); 
+
+    it('persists sidebar width via requestAnimationFrame and collapse to localStorage', async () => {
+        const setItem = vi.spyOn(Storage.prototype, 'setItem');
+        const rafQueue: FrameRequestCallback[] = [];
+        vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+            rafQueue.push(cb);
+            return rafQueue.length;
+        });
+        vi.stubGlobal('cancelAnimationFrame', vi.fn());
+
+        function SidebarProbe(props: {
+            onWidthChange?: (width: number) => void;
+            onCollapseChange?: (collapsed: boolean) => void;
+        }) {
+            return (
+                <div>
+                    <button type="button" onClick={() => props.onWidthChange?.(320)}>
+                        Resize sidebar
+                    </button>
+                    <button type="button" onClick={() => props.onCollapseChange?.(true)}>
+                        Collapse sidebar
+                    </button>
+                </div>
+            );
+        }
+
+        render(
+            <NotebookLayout
+                {...defaultProps}
+                sidebar={<SidebarProbe />}
+            />
+        );
+
+        await userEvent.click(screen.getByRole('button', { name: /resize sidebar/i }));
+        rafQueue.forEach((cb) => cb(0));
+        expect(setItem).toHaveBeenCalledWith('notebookSidebarWidth', '320');
+
+        await userEvent.click(screen.getByRole('button', { name: /collapse sidebar/i }));
+        expect(setItem).toHaveBeenCalledWith('notebookSidebarCollapsed', 'true');
+
+        setItem.mockRestore();
+        vi.unstubAllGlobals();
+    });
+});
