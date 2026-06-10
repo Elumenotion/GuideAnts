@@ -307,4 +307,64 @@ describe('DraftUserCell', () => {
       expect(screen.getByLabelText('Full screen')).toBeInTheDocument();
     });
   });
+
+  it('shows read-only state when canEdit is false', () => {
+    render(
+      <DraftUserCell
+        value="Locked content"
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        canEdit={false}
+      />
+    );
+
+    expect(screen.getByText('Read-only')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+  });
+
+  it('disables send while streaming', async () => {
+    render(
+      <DraftUserCell
+        value="Draft while streaming"
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        isStreaming
+      />
+    );
+
+    expect(screen.getByText('Sending...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+
+  it('shows @ mention hint when assistants are available', () => {
+    render(
+      <DraftUserCell
+        value=""
+        onChange={vi.fn()}
+        onSend={vi.fn()}
+        assistants={[{ name: 'Guide A', model: 'gpt-4' }]}
+      />
+    );
+
+    expect(screen.getByText('@')).toBeInTheDocument();
+    expect(screen.getByText('to mention guide')).toBeInTheDocument();
+  });
+
+  it('does not send when content is only whitespace', async () => {
+    const user = userEvent.setup();
+    const mockOnSend = vi.fn();
+
+    render(
+      <DraftUserCell
+        value="   "
+        onChange={vi.fn()}
+        onSend={mockOnSend}
+      />
+    );
+
+    const sendButton = screen.getByRole('button', { name: 'Send' });
+    expect(sendButton).toBeDisabled();
+    await user.click(sendButton);
+    expect(mockOnSend).not.toHaveBeenCalled();
+  });
 }); 

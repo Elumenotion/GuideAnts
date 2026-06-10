@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
@@ -383,4 +383,55 @@ describe('FullScreenEditor', () => {
     expect(screen.getByText(/Ctrl\+Enter/)).toBeInTheDocument();
     expect(screen.getByText(/Esc/)).toBeInTheDocument();
   });
+
+  it('saves on Ctrl+Enter and cancels on Escape', async () => {
+    const user = userEvent.setup();
+    const mockOnSave = vi.fn();
+    const mockOnCancel = vi.fn();
+
+    render(
+      <FullScreenEditor
+        content="Keyboard test"
+        onSave={mockOnSave}
+        onCancel={mockOnCancel}
+        mode="edit"
+      />,
+    );
+
+    const captureTarget = screen.getByTestId('lexical-editor').parentElement!;
+    fireEvent.keyDown(captureTarget, { key: 'Enter', ctrlKey: true });
+    expect(mockOnSave).toHaveBeenCalled();
+
+    fireEvent.keyDown(captureTarget, { key: 'Escape' });
+    expect(mockOnCancel).toHaveBeenCalled();
+  });
+
+  it('shows Saving... indicator in edit mode while loading', () => {
+    render(
+      <FullScreenEditor
+        content="Saving"
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        mode="edit"
+        isLoading
+      />,
+    );
+
+    expect(screen.getByText('Saving...')).toBeInTheDocument();
+  });
+
+  it('renders custom title when provided', () => {
+    render(
+      <FullScreenEditor
+        content=""
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        mode="edit"
+        title="Custom Editor Title"
+      />,
+    );
+
+    expect(screen.getByText('Custom Editor Title')).toBeInTheDocument();
+  });
+
 }); 

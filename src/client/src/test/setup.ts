@@ -178,32 +178,34 @@ afterAll(() => {
   console.error = originalConsoleError;
 });
 
-// Mock ConversationContext to provide minimal implementation for components that need it
-vi.mock('../contexts/ConversationContext', () => {
-  return {
-    ConversationProvider: ({ children }: { children: any }) => children,
-    useConversation: () => ({
-      sendMessage: vi.fn(),
-      editAssistantMessage: vi.fn(),
-      undoLastTurn: vi.fn(),
-      setSelectedAssistant: vi.fn(),
-      setDraftUserContent: vi.fn(),
-      startEditingAssistant: vi.fn(),
-      cancelEditingAssistant: vi.fn(),
-      refresh: vi.fn(),
-      assistants: [],
-      conversationStarters: [],
-      isEditLoading: false,
-      isInitialized: true,
-      isCancelling: false,
-      isStreaming: false,
-      messages: [],
-      draftUserContent: '',
-      pendingAttachments: [],
-      addPendingAttachment: vi.fn(),
-      removePendingAttachment: vi.fn(),
-      handleStreamingEvent: vi.fn(),
-      cancelStream: vi.fn(),
-    }),
-  };
-});
+// MediaRecorder stub for audio/camera hook tests
+class MockMediaRecorder {
+  static isTypeSupported = vi.fn(() => true);
+  state: RecordingState = 'inactive';
+  ondataavailable: ((ev: BlobEvent) => void) | null = null;
+  onstop: (() => void) | null = null;
+  onerror: ((ev: Event) => void) | null = null;
+
+  constructor(_stream: MediaStream, _options?: MediaRecorderOptions) {}
+
+  start() {
+    this.state = 'recording';
+  }
+
+  stop() {
+    this.state = 'inactive';
+    this.ondataavailable?.({ data: new Blob(['audio'], { type: 'audio/webm' }) } as BlobEvent);
+    this.onstop?.();
+  }
+
+  pause() {
+    this.state = 'paused';
+  }
+
+  resume() {
+    this.state = 'recording';
+  }
+}
+
+// @ts-expect-error test global
+global.MediaRecorder = MockMediaRecorder;

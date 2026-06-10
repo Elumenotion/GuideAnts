@@ -126,4 +126,22 @@ describe('SidebarSection', () => {
     
     expect(onOpenUploadDialog).toHaveBeenCalled();
   });
+
+  it('forwards selected files from the hidden upload input', () => {
+    const onUploadFiles = vi.fn();
+    render(
+      <SidebarSection
+        {...defaultProps}
+        type="notebookFiles"
+        onUploadFiles={onUploadFiles}
+      />
+    );
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(onUploadFiles).toHaveBeenCalled();
+    expect(input.value).toBe('');
+  });
 }); 

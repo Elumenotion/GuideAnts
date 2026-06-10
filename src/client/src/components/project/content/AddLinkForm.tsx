@@ -21,11 +21,6 @@ export function AddLinkForm({ onAdd, onCancel }: AddLinkFormProps) {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        
-        if (!url.trim()) {
-            setError('Please enter a URL.');
-            return;
-        }
 
         if (!isValidUrl(url)) {
             setError('Please enter a valid URL starting with http:// or https://');

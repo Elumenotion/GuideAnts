@@ -548,4 +548,75 @@ describe('NotebookUploadDialog', () => {
       expect(cancelBtn).toHaveFocus();
     });
   });
+
+  it('closes on Escape and uploads on Enter', async () => {
+    render(<NotebookUploadDialog isOpen onClose={onClose} onUpload={onUpload} />);
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = createFile('enter.txt', 256, 'text/plain');
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    fireEvent.keyDown(window, { key: 'Enter' });
+    await waitFor(() => {
+      expect(onUpload).toHaveBeenCalledWith([file], undefined);
+    });
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('removes a selected local file before upload', () => {
+    render(<NotebookUploadDialog isOpen onClose={onClose} onUpload={onUpload} />);
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = createFile('remove-me.txt', 128, 'text/plain');
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    expect(screen.getByText('remove-me.txt')).toBeInTheDocument();
+
+    const removeBtn = screen.getByText('remove-me.txt').closest('div')!.parentElement!
+      .querySelector('button.text-red-600') as HTMLButtonElement;
+    fireEvent.click(removeBtn);
+
+    expect(screen.queryByText('remove-me.txt')).not.toBeInTheDocument();
+  });
+
+  it('respects disabled prop on upload action', () => {
+    render(<NotebookUploadDialog isOpen onClose={onClose} onUpload={onUpload} disabled />);
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = createFile('blocked.txt', 128, 'text/plain');
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    const uploadBtn = screen.getByRole('button', { name: /upload files/i });
+    expect(uploadBtn).toBeDisabled();
+    fireEvent.click(uploadBtn);
+    expect(onUpload).not.toHaveBeenCalled();
+  });
+
+  it('formats gigabyte file sizes in the project picker', () => {
+    const hugeFile: ProjectContentFile = {
+      ...mockProjectFile,
+      id: 'huge-1',
+      fileName: 'archive.zip',
+      fileSize: 1073741824,
+    };
+    const tree: FolderTreeDto = {
+      ...mockProjectFolderTree,
+      files: [hugeFile],
+      subFolders: [],
+    };
+
+    render(
+      <NotebookUploadDialog
+        isOpen
+        onClose={onClose}
+        onUpload={onUpload}
+        onCopyFromProject={onCopyFromProject}
+        projectFolderTree={tree}
+      />,
+    );
+
+    fireEvent.click(screen.getByText(/select project files/i));
+    expect(screen.getByText('1 GB')).toBeInTheDocument();
+  });
 }); 

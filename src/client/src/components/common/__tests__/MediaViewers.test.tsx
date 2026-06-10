@@ -38,6 +38,18 @@ describe('Media viewers', () => {
     expect(screen.getByRole('button', { name: 'Full screen' })).toBeInTheDocument();
   });
 
+  it('TextViewer renders inline without preview chrome', () => {
+    render(<TextViewer text="Inline body" inlineMode />);
+    expect(screen.getByText('Inline body')).toBeInTheDocument();
+    expect(screen.queryByText('Preview')).not.toBeInTheDocument();
+  });
+
+  it('TextViewer can hide the preview header', () => {
+    render(<TextViewer text="Hidden header" hidePreviewHeader />);
+    expect(screen.getByText('Hidden header')).toBeInTheDocument();
+    expect(screen.queryByText('Preview')).not.toBeInTheDocument();
+  });
+
   it('ImageViewer renders img and PreviewContainer', () => {
     const blob = createDummyBlob('image/png');
     const objectUrl = URL.createObjectURL(blob);

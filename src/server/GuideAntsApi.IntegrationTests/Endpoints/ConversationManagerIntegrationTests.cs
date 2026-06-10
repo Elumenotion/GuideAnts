@@ -132,6 +132,15 @@ public class ConversationManagerIntegrationTests : BaseEndpointTest
         currentState.Should().NotBeNull();
         currentState!.CurrentAssistantName.Should().Be("Diagrams"); // Should reflect the last assistant used
         currentState.CurrentTurnIndex.Should().Be(2); // Should have 2 turns
+        currentState.LastInstructions.Should().Be("Hello from Diagram assistant");
+
+        // Validate endpoint projection uses the same latest assistant selection.
+        var getResponse = await Client.GetAsync($"/api/projects/{project.Id}/notebooks/{notebook.Id}/conversations/{conversation.Id}");
+        getResponse.EnsureSuccessStatusCode();
+        var loadedConversation = await getResponse.Content.ReadFromJsonAsync<NotebookConversationWithMessagesDto>();
+        loadedConversation.Should().NotBeNull();
+        loadedConversation!.AssistantName.Should().Be("Diagrams");
+        loadedConversation.Messages.Should().Contain(m => m.Role == ChatRole.User && m.Content == "Hello from Diagram assistant");
     }
     #endregion
 
@@ -355,6 +364,7 @@ public class ConversationManagerIntegrationTests : BaseEndpointTest
         systemMessages.Should().BeEmpty("System instructions should not be persisted in conversation messages");
         
         // Verify the assistant switch took effect: last turn uses the new assistant
+        loadedConversation.AssistantName.Should().Be("Search");
         var lastAssistant = messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.AssistantName;
         lastAssistant.Should().Be("Search");
     }

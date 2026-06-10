@@ -1,10 +1,12 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, within } from '../../../../test/test-utils';
+import { render, screen, fireEvent, waitFor, within, act } from '../../../../test/test-utils';
 import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
 import { FilePreviewOverlay } from '../FilePreviewOverlay';
 import { NotebookFileDto } from '../../../../types/notebook';
 import { notebookFilesApi } from '../../../../services/notebookFiles';
 import { getDocumentServerCapabilities, isDocumentServerSupportedByExtension, looksLikeDocumentServerFile } from '../../../../services/documentServer';
+import { MarkdownExtractionStatus } from '../../../../types/api';
+import { resolveHtmlResources } from '../../../../utils/htmlResourceResolver';
 
 // Mock the services
 vi.mock('../../../../services/notebookFiles', () => ({
@@ -12,13 +14,61 @@ vi.mock('../../../../services/notebookFiles', () => ({
     getNotebookFileContent: vi.fn(),
     getNotebookFileMarkdownShadow: vi.fn().mockResolvedValue({ status: 'Skipped' }),
     getNotebookFileMarkdownContent: vi.fn().mockResolvedValue({ blob: new Blob([''], { type: 'text/markdown' }) }),
+    uploadFiles: vi.fn().mockResolvedValue([]),
   },
+}));
+
+vi.mock('../../conversations/FullScreenEditor', () => ({
+  default: ({
+    onSave,
+    onCancel,
+    content,
+  }: {
+    onSave: (value: string) => void;
+    onCancel: () => void;
+    content: string;
+  }) => (
+    <div data-testid="fullscreen-md-editor">
+      <span>{content}</span>
+      <button type="button" onClick={() => onSave('# Updated markdown')}>
+        Save markdown
+      </button>
+      <button type="button" onClick={onCancel}>
+        Cancel markdown
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('../../../../services/documentServer', () => ({
   getDocumentServerCapabilities: vi.fn(),
   isDocumentServerSupportedByExtension: vi.fn(),
   looksLikeDocumentServerFile: vi.fn(() => false),
+}));
+
+vi.mock('../../../../utils/htmlResourceResolver', () => ({
+  resolveHtmlResources: vi.fn(),
+  cleanupBlobUrls: vi.fn(),
+}));
+
+vi.mock('../../../common/ConfirmationDialog', () => ({
+  ConfirmationDialog: ({
+    isOpen,
+    message,
+    onConfirm,
+  }: {
+    isOpen: boolean;
+    message: string;
+    onConfirm: () => void;
+  }) =>
+    isOpen ? (
+      <div role="dialog">
+        <p>{message}</p>
+        <button type="button" onClick={onConfirm}>
+          OK
+        </button>
+      </div>
+    ) : null,
 }));
 
 vi.mock('../../../common/DocumentServerEditor', () => ({
@@ -134,6 +184,11 @@ describe('FilePreviewOverlay', () => {
     });
     (isDocumentServerSupportedByExtension as Mock).mockReturnValue(false);
     (looksLikeDocumentServerFile as Mock).mockReturnValue(false);
+    (resolveHtmlResources as Mock).mockResolvedValue({
+      html: '<html><body>Resolved HTML</body></html>',
+      blobUrls: new Set<string>(),
+      discoveredRoot: 'site',
+    });
   });
 
   describe('Component Rendering', () => {
@@ -633,6 +688,313 @@ describe('FilePreviewOverlay', () => {
     });
   });
 
+  describe('Embedded and fullscreen modes', () => {
+    it('renders embedded layout without backdrop close behavior', async () => {
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockTextBlob);
+
+      render(<FilePreviewOverlay {...defaultProps} file={mockFile} isEmbedded />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('text-viewer')).toBeInTheDocument();
+      });
+
+      const overlay = screen.getByText('test-file.txt').closest('.h-full');
+      fireEvent.click(overlay!);
+      expect(defaultProps.onClose).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText('Close')).not.toBeInTheDocument();
+    });
+
+    it('toggles fullscreen from overlay controls', async () => {
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockTextBlob);
+
+      render(<FilePreviewOverlay {...defaultProps} file={mockFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('text-viewer')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Full screen'));
+      expect(document.querySelector('.fixed.inset-0.z-50.bg-white')).toBeTruthy();
+
+      fireEvent.click(screen.getByLabelText('Exit full screen'));
+      expect(document.querySelector('.bg-black.bg-opacity-60')).toBeTruthy();
+    });
+
+    it('closes via close button and Escape key', async () => {
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockTextBlob);
+
+      render(<FilePreviewOverlay {...defaultProps} file={mockFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('text-viewer')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Close'));
+      expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(defaultProps.onClose).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('Markdown extraction tabs', () => {
+    it('shows extraction tabs and switches to extracted text', async () => {
+      const pdfFile = { ...mockFile, fileName: 'report.pdf' };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockPdfBlob);
+      (notebookFilesApi.getNotebookFileMarkdownShadow as Mock).mockResolvedValue({
+        status: MarkdownExtractionStatus.Completed,
+        contentHash: 'md-hash',
+      });
+      (notebookFilesApi.getNotebookFileMarkdownContent as Mock).mockResolvedValue({
+        blob: createMockBlob('Extracted markdown body', 'text/markdown'),
+      });
+
+      render(<FilePreviewOverlay {...defaultProps} file={pdfFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Original Content')).toBeInTheDocument();
+        expect(screen.getByText(/Extracted Text/)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText(/Extracted Text/));
+
+      await waitFor(() => {
+        expect(screen.getByText('Extracted markdown body')).toBeInTheDocument();
+      });
+    });
+
+    it('shows failed extraction status on the extracted text tab label', async () => {
+      const pdfFile = { ...mockFile, fileName: 'broken.pdf' };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockPdfBlob);
+      (notebookFilesApi.getNotebookFileMarkdownShadow as Mock).mockResolvedValue({
+        status: MarkdownExtractionStatus.Failed,
+        contentHash: 'md-hash',
+      });
+
+      render(<FilePreviewOverlay {...defaultProps} file={pdfFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Extracted Text/i })).toBeDisabled();
+      });
+    });
+
+    it('shows markdown load error with retry on the extracted text tab', async () => {
+      const pdfFile = { ...mockFile, fileName: 'report.pdf' };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockPdfBlob);
+      (notebookFilesApi.getNotebookFileMarkdownShadow as Mock).mockResolvedValue({
+        status: MarkdownExtractionStatus.Completed,
+        contentHash: 'md-hash',
+      });
+      (notebookFilesApi.getNotebookFileMarkdownContent as Mock).mockRejectedValue(
+        new Error('extraction read failed')
+      );
+
+      render(<FilePreviewOverlay {...defaultProps} file={pdfFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Extracted Text/)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText(/Extracted Text/));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Failed to load markdown content/i)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      expect(notebookFilesApi.getNotebookFileMarkdownContent).toHaveBeenCalledTimes(2);
+    });
+
+    it('shows loading state while extracted markdown is being fetched', async () => {
+      const pdfFile = { ...mockFile, fileName: 'report.pdf' };
+      let resolveFetch: (value: { blob: Blob }) => void = () => {};
+      const pending = new Promise<{ blob: Blob }>((resolve) => {
+        resolveFetch = resolve;
+      });
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockPdfBlob);
+      (notebookFilesApi.getNotebookFileMarkdownShadow as Mock).mockResolvedValue({
+        status: MarkdownExtractionStatus.Completed,
+        contentHash: 'md-hash',
+      });
+      (notebookFilesApi.getNotebookFileMarkdownContent as Mock).mockReturnValue(pending);
+
+      render(<FilePreviewOverlay {...defaultProps} file={pdfFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Extracted Text/)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText(/Extracted Text/));
+      expect(screen.getByText(/Loading extracted text/i)).toBeInTheDocument();
+
+      await act(async () => {
+        resolveFetch({ blob: createMockBlob('loaded markdown', 'text/markdown') });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('loaded markdown')).toBeInTheDocument();
+      });
+    });
+
+    it('shows placeholder when extracted markdown content is empty', async () => {
+      const pdfFile = { ...mockFile, fileName: 'report.pdf' };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockPdfBlob);
+      (notebookFilesApi.getNotebookFileMarkdownShadow as Mock).mockResolvedValue({
+        status: MarkdownExtractionStatus.Completed,
+        contentHash: 'md-hash',
+      });
+      (notebookFilesApi.getNotebookFileMarkdownContent as Mock).mockResolvedValue({
+        blob: createMockBlob('', 'text/markdown'),
+      });
+
+      render(<FilePreviewOverlay {...defaultProps} file={pdfFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Extracted Text/)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText(/Extracted Text/));
+
+      await waitFor(() => {
+        expect(screen.getByText('No markdown content available')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('HTML preview navigation', () => {
+    it('renders resolved HTML in iframe', async () => {
+      const htmlFile = { ...mockFile, fileName: 'index.html', relativePath: 'site/index.html' };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
+        createMockBlob('<html><body>Hello</body></html>', 'text/html')
+      );
+
+      render(<FilePreviewOverlay {...defaultProps} file={htmlFile} />);
+
+      await waitFor(() => {
+        expect(resolveHtmlResources).toHaveBeenCalled();
+        expect(screen.getByTitle('HTML Preview')).toHaveAttribute(
+          'srcDoc',
+          '<html><body>Resolved HTML</body></html>'
+        );
+      });
+    });
+
+    it('resolves relative and parent-relative navigation targets', async () => {
+      const htmlFile = { ...mockFile, fileName: 'page.html', relativePath: 'site/deep/page.html' };
+      const onNavigate = vi.fn();
+      const fileExists = vi.fn(
+        (path: string) =>
+          path === 'site/sibling.html' || path === 'site/deep/index.html' || path === 'site/index.html'
+      );
+
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
+        createMockBlob('<html><body>Hello</body></html>', 'text/html')
+      );
+
+      render(
+        <FilePreviewOverlay
+          {...defaultProps}
+          file={htmlFile}
+          onNavigate={onNavigate}
+          fileExists={fileExists}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTitle('HTML Preview')).toBeInTheDocument();
+      });
+
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'html-preview-navigate', href: '../sibling.html' },
+        })
+      );
+
+      await waitFor(() => {
+        expect(onNavigate).toHaveBeenCalledWith('site/sibling.html');
+      });
+
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'html-preview-navigate', href: './' },
+        })
+      );
+
+      await waitFor(() => {
+        expect(onNavigate).toHaveBeenCalledWith('site/deep/index.html');
+      });
+    });
+
+    it('does not navigate when the resolved target file is missing', async () => {
+      const htmlFile = { ...mockFile, fileName: 'index.html', relativePath: 'site/index.html' };
+      const onNavigate = vi.fn();
+      const fileExists = vi.fn().mockReturnValue(false);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
+        createMockBlob('<html><body>Hello</body></html>', 'text/html')
+      );
+
+      render(
+        <FilePreviewOverlay
+          {...defaultProps}
+          file={htmlFile}
+          onNavigate={onNavigate}
+          fileExists={fileExists}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTitle('HTML Preview')).toBeInTheDocument();
+      });
+
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'html-preview-navigate', href: 'missing/page.html' },
+        })
+      );
+
+      await waitFor(() => {
+        expect(onNavigate).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalled();
+      });
+      warnSpy.mockRestore();
+    });
+
+    it('navigates to linked file via postMessage', async () => {
+      const htmlFile = { ...mockFile, fileName: 'index.html', relativePath: 'site/index.html' };
+      const onNavigate = vi.fn();
+      const fileExists = vi.fn().mockReturnValue(true);
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
+        createMockBlob('<html><body>Hello</body></html>', 'text/html')
+      );
+
+      render(
+        <FilePreviewOverlay
+          {...defaultProps}
+          file={htmlFile}
+          onNavigate={onNavigate}
+          fileExists={fileExists}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTitle('HTML Preview')).toBeInTheDocument();
+      });
+
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'html-preview-navigate', href: '/other/page.html' },
+        })
+      );
+
+      await waitFor(() => {
+        expect(onNavigate).toHaveBeenCalledWith('site/other/page.html');
+      });
+    });
+  });
+
   describe('DocumentServer Integration', () => {
     it('does not request DocumentServer capabilities for image previews', async () => {
       (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockImageBlob);
@@ -663,6 +1025,178 @@ describe('FilePreviewOverlay', () => {
         expect(screen.getByTestId('documentserver-editor')).toBeInTheDocument();
       });
       expect(screen.getByTestId('documentserver-editor')).toHaveAttribute('data-show-error-dialog-on-error', 'false');
+    });
+
+    it('downloads file content when download button is clicked', async () => {
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockTextBlob);
+      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+      render(<FilePreviewOverlay {...defaultProps} file={mockFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('text-viewer')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Download'));
+      expect(clickSpy).toHaveBeenCalled();
+      clickSpy.mockRestore();
+    });
+
+    it('auto-switches to extracted text for non-previewable files', async () => {
+      const docFile = { ...mockFile, fileName: 'slides.pptx', relativePath: 'slides.pptx' };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
+        createMockBlob('binary', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
+      );
+      (notebookFilesApi.getNotebookFileMarkdownShadow as Mock).mockResolvedValue({
+        status: MarkdownExtractionStatus.Completed,
+        contentHash: 'hash-doc',
+      });
+      (notebookFilesApi.getNotebookFileMarkdownContent as Mock).mockResolvedValue({
+        blob: createMockBlob('Extracted from doc', 'text/markdown'),
+      });
+
+      render(<FilePreviewOverlay {...defaultProps} file={docFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Extracted from doc')).toBeInTheDocument();
+      });
+    });
+
+    it('shows configuration error when capabilities fetch fails', async () => {
+      (looksLikeDocumentServerFile as Mock).mockReturnValue(true);
+      (getDocumentServerCapabilities as Mock).mockRejectedValue(new Error('config missing'));
+      const docxFile = { ...mockFile, fileName: 'proposal.docx', relativePath: 'proposal.docx' };
+
+      render(<FilePreviewOverlay {...defaultProps} file={docxFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('DocumentServer configuration error')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Markdown editing and extraction tab states', () => {
+    it('opens markdown editor and saves updated content', async () => {
+      const mdFile = { ...mockFile, fileName: 'notes.md', relativePath: 'notes.md' };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
+        createMockBlob('# Hello', 'text/markdown')
+      );
+      (notebookFilesApi.getNotebookFileMarkdownContent as Mock).mockResolvedValue({
+        blob: createMockBlob('# Hello', 'text/markdown'),
+      });
+
+      render(<FilePreviewOverlay {...defaultProps} file={mdFile} canEdit />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-viewer')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Edit markdown'));
+      expect(await screen.findByTestId('fullscreen-md-editor')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('Save markdown'));
+
+      await waitFor(() => {
+        expect(notebookFilesApi.uploadFiles).toHaveBeenCalled();
+        expect(screen.queryByTestId('fullscreen-md-editor')).not.toBeInTheDocument();
+      });
+    });
+
+    it('shows original content error dialog when text extraction fails', async () => {
+      const failingBlob = createMockBlob('broken', 'text/plain');
+      failingBlob.text = async () => {
+        throw new Error('read failed');
+      };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(failingBlob);
+
+      render(<FilePreviewOverlay {...defaultProps} file={mockFile} />);
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText('Failed to read text content. Please try again.')).toBeInTheDocument();
+
+      fireEvent.click(within(dialog).getByText('OK'));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('shows processing badge and switches back to original tab', async () => {
+      const pdfFile = { ...mockFile, fileName: 'report.pdf' };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockPdfBlob);
+      (notebookFilesApi.getNotebookFileMarkdownShadow as Mock).mockResolvedValue({
+        status: MarkdownExtractionStatus.Processing,
+        contentHash: 'md-hash',
+      });
+
+      render(<FilePreviewOverlay {...defaultProps} file={pdfFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Processing')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText('Original Content'));
+      await waitFor(() => {
+        expect(screen.getByTestId('pdf-viewer')).toBeInTheDocument();
+      });
+    });
+
+    it('does not close overlay on Escape while markdown editor is open', async () => {
+      const mdFile = { ...mockFile, fileName: 'notes.md', relativePath: 'notes.md' };
+      const onClose = vi.fn();
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
+        createMockBlob('# Hello', 'text/markdown')
+      );
+      (notebookFilesApi.getNotebookFileMarkdownContent as Mock).mockResolvedValue({
+        blob: createMockBlob('# Hello', 'text/markdown'),
+      });
+
+      render(<FilePreviewOverlay {...defaultProps} file={mdFile} canEdit onClose={onClose} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-viewer')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Edit markdown'));
+      await screen.findByTestId('fullscreen-md-editor');
+      fireEvent.keyDown(window, { key: 'Escape' });
+
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByTestId('fullscreen-md-editor')).toBeInTheDocument();
+    });
+
+    it('cancels markdown editor without saving', async () => {
+      const mdFile = { ...mockFile, fileName: 'notes.md', relativePath: 'notes.md' };
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
+        createMockBlob('# Hello', 'text/markdown')
+      );
+      (notebookFilesApi.getNotebookFileMarkdownContent as Mock).mockResolvedValue({
+        blob: createMockBlob('# Hello', 'text/markdown'),
+      });
+
+      render(<FilePreviewOverlay {...defaultProps} file={mdFile} canEdit />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('markdown-viewer')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Edit markdown'));
+      fireEvent.click(await screen.findByText('Cancel markdown'));
+
+      expect(screen.queryByTestId('fullscreen-md-editor')).not.toBeInTheDocument();
+      expect(notebookFilesApi.uploadFiles).not.toHaveBeenCalled();
+    });
+
+    it('opens preview in a new window when embedded in a host surface', async () => {
+      const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(mockTextBlob);
+
+      render(<FilePreviewOverlay {...defaultProps} file={mockFile} isEmbedded />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('text-viewer')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByLabelText('Open in new window'));
+      expect(openSpy).toHaveBeenCalled();
+      openSpy.mockRestore();
     });
   });
 }); 

@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatToolbarPanel } from '../ChatToolbarPanel';
 import { api } from '../../../../services/api';
 
@@ -61,6 +61,11 @@ vi.mock('../../../../services/api', () => ({
 describe('ChatToolbarPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('changes global chat default model through settings API when override is enabled', async () => {
@@ -262,6 +267,363 @@ describe('ChatToolbarPanel', () => {
     expect(screen.getByRole('button', { name: /load selected local chat model/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /load selected local chat model/i })).toHaveTextContent('Load model');
     expect(screen.queryByRole('button', { name: /unload selected local chat model/i })).not.toBeInTheDocument();
+  });
+
+  it('shows error when chat defaults fail to load', async () => {
+    vi.mocked(api.settings.chatDefaults.get).mockRejectedValueOnce(new Error('Defaults unavailable'));
+
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'ready',
+          summary: 'Chat ready',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'gpt-5-mini',
+          effectiveModelDisplayName: 'GPT-5 mini',
+          effectiveProvider: 'azure-openai',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Defaults unavailable')).toBeInTheDocument());
+  });
+
+  it('shows error when catalog models fail to load', async () => {
+    vi.mocked(api.guides.catalogs.models).mockRejectedValueOnce(new Error('Catalog offline'));
+
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'ready',
+          summary: 'Chat ready',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'gpt-5-mini',
+          effectiveModelDisplayName: 'GPT-5 mini',
+          effectiveProvider: 'azure-openai',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Catalog offline')).toBeInTheDocument());
+  });
+
+  it('toggles override-all-chat-models checkbox', async () => {
+    const user = userEvent.setup();
+    const setInFlight = vi.fn();
+    vi.mocked(api.settings.chatDefaults.update).mockResolvedValueOnce({
+      rowVersion: 'rv-3',
+      defaultModelId: 'gpt-5-mini',
+      overrideAllChatModels: false,
+      temperature: null,
+      topP: null,
+      reasoningEffort: null,
+      samplingParametersJson: null,
+    });
+
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'ready',
+          summary: 'Chat ready',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'gpt-5-mini',
+          effectiveModelDisplayName: 'GPT-5 mini',
+          effectiveProvider: 'azure-openai',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={setInFlight}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(api.settings.chatDefaults.get).toHaveBeenCalled());
+    const checkbox = screen.getByRole('checkbox');
+    expect(checkbox).toBeChecked();
+    await user.click(checkbox);
+    expect(api.settings.chatDefaults.update).toHaveBeenCalledWith(
+      expect.objectContaining({ overrideAllChatModels: false })
+    );
+    expect(setInFlight).toHaveBeenCalledWith(true);
+    expect(setInFlight).toHaveBeenCalledWith(false);
+  });
+
+  it('does not change model when override is disabled', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.chatDefaults.get).mockResolvedValueOnce({
+      rowVersion: 'rv-off',
+      defaultModelId: 'gpt-5-mini',
+      overrideAllChatModels: false,
+      temperature: null,
+      topP: null,
+      reasoningEffort: null,
+      samplingParametersJson: null,
+    });
+
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'ready',
+          summary: 'Chat ready',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'gpt-5-mini',
+          effectiveModelDisplayName: 'GPT-5 mini',
+          effectiveProvider: 'azure-openai',
+          overrideAllChatModels: false,
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+            { modelId: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', provider: 'google-gemini-chat', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(api.settings.chatDefaults.get).toHaveBeenCalled());
+    const option = screen.getByRole('option', { name: /Gemini 2.5 Flash/i });
+    expect(option).toBeDisabled();
+    await user.click(option);
+    expect(api.settings.chatDefaults.update).not.toHaveBeenCalled();
+  });
+
+  it('polls local runtime load until ready', async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn(async () => {});
+    const setInFlight = vi.fn();
+    vi.mocked(api.projects.notebooks.conversations.loadLlamaRuntime).mockResolvedValueOnce({
+      operationId: 'op-pending',
+      state: 'running',
+    });
+    vi.mocked(api.projects.notebooks.conversations.pollLlamaRuntimeOperation).mockResolvedValueOnce({
+      operationId: 'op-pending',
+      state: 'ready',
+    });
+
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'requiresLoad',
+          summary: 'Load model',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'qwen-local',
+          effectiveModelDisplayName: 'Qwen',
+          effectiveProvider: 'llama-cpp',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'qwen-local', displayName: 'Qwen', provider: 'llama-cpp', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        assistantIdForLlama="asst-1"
+        inFlight={false}
+        setInFlight={setInFlight}
+        onRefresh={onRefresh}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: /load selected local chat model/i }));
+
+    await waitFor(
+      () => {
+        expect(api.projects.notebooks.conversations.loadLlamaRuntime).toHaveBeenCalledWith('p1', 'n1', 'asst-1');
+        expect(api.projects.notebooks.conversations.pollLlamaRuntimeOperation).toHaveBeenCalled();
+        expect(onRefresh).toHaveBeenCalled();
+      },
+      { timeout: 5000 }
+    );
+    expect(setInFlight).toHaveBeenCalledWith(true);
+    expect(setInFlight).toHaveBeenCalledWith(false);
+  }, 10000);
+
+  it('shows switching label when runtime operation is in progress', async () => {
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'loading',
+          summary: 'Switching model',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'qwen-local',
+          effectiveModelDisplayName: 'Qwen',
+          effectiveProvider: 'llama-cpp',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'qwen-local', displayName: 'Qwen', provider: 'llama-cpp', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: 'op-1',
+          inProgressState: 'running',
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(api.guides.catalogs.models).toHaveBeenCalled());
+    expect(screen.getByText('Switching...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /load selected local chat model/i })).toBeDisabled();
+  });
+
+  it('calls onOpenSettings when settings link clicked', async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'ready',
+          summary: 'Chat ready',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'gpt-5-mini',
+          effectiveModelDisplayName: 'GPT-5 mini',
+          effectiveProvider: 'azure-openai',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={onOpenSettings}
+        onRequestUnloadConfirm={vi.fn()}
+        showWorkspaceCopy={false}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /open in settings/i }));
+    expect(onOpenSettings).toHaveBeenCalled();
+    expect(screen.queryByText(/workspace controls/i)).not.toBeInTheDocument();
+  });
+
+  it('shows update error when model change fails', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.chatDefaults.update).mockRejectedValueOnce(new Error('Update rejected'));
+
+    render(
+      <ChatToolbarPanel
+        chat={{
+          status: 'ready',
+          summary: 'Chat ready',
+          conversationId: 'c1',
+          selectedAssistantName: 'assistant',
+          effectiveModelId: 'gpt-5-mini',
+          effectiveModelDisplayName: 'GPT-5 mini',
+          effectiveProvider: 'azure-openai',
+          overrideAllChatModels: true,
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          modelOptions: [
+            { modelId: 'gpt-5-mini', displayName: 'GPT-5 mini', provider: 'azure-openai', isActive: true },
+            { modelId: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', provider: 'google-gemini-chat', isActive: true },
+          ],
+          blockers: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+        onRequestUnloadConfirm={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('option', { name: /Gemini 2.5 Flash/i }));
+    await waitFor(() => expect(screen.getByText('Update rejected')).toBeInTheDocument());
   });
 
   it('shows loaded state and unload action when selected local model is loaded', async () => {

@@ -1,41 +1,14 @@
 import ChatMarkdownViewer from './ChatMarkdownViewer';
 import UserAvatar from '../../common/UserAvatar';
-import FullScreenEditor from './FullScreenEditor';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
 import { FaUndoAlt, FaExpandAlt } from 'react-icons/fa';
 import { useState } from 'react';
 import { AttachedFile } from '../../../types/conversation';
 
-/**
- * Normalizes markdown content for chat messages by converting paragraph breaks
- * (double newlines from Lexical) to single newlines. This ensures:
- * - Consistent storage format with minimal client
- * - Clean copy behavior (no extra line breaks when copying from display)
- */
-function normalizeForChat(content: string): string {
-  // Replace double+ newlines with single newlines
-  // Preserve newlines in code blocks by processing outside of them
-  const codeBlockRegex = /```[\s\S]*?```/g;
-  const codeBlocks: string[] = [];
-  
-  // Extract code blocks
-  const withPlaceholders = content.replace(codeBlockRegex, (match) => {
-    codeBlocks.push(match);
-    return `\x00CODE_BLOCK_${codeBlocks.length - 1}\x00`;
-  });
-  
-  // Normalize newlines outside code blocks
-  const normalized = withPlaceholders.replace(/\n\n+/g, '\n');
-  
-  // Restore code blocks
-  return normalized.replace(/\x00CODE_BLOCK_(\d+)\x00/g, (_, index) => codeBlocks[parseInt(index)]);
-}
-
 interface UserCellProps {
   content: string;
   isLast: boolean;
   onUndo?: () => void;
-  onEdit?: (content: string) => void;
   userId?: string;
   userName?: string;
   userEmail?: string;
@@ -50,36 +23,20 @@ interface UserCellProps {
  * Shows undo button on the last user cell if provided.
  * Displays user avatar with initials instead of generic "U".
  */
-export default function UserCell({ 
-  content, 
-  isLast, 
-  onUndo, 
-  onEdit,
-  userId, 
-  userName, 
+export default function UserCell({
+  content,
+  isLast,
+  onUndo,
+  userId,
+  userName,
   userEmail,
   attachments,
   onPreviewFile,
   projectId,
-  notebookId
+  notebookId,
 }: UserCellProps) {
   const [isFull, setIsFull] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
   const [showUndoConfirm, setShowUndoConfirm] = useState(false);
-
-  const handleEdit = (editedContent: string) => {
-    if (onEdit) {
-      // Normalize content: convert double newlines to single for consistent storage
-      onEdit(normalizeForChat(editedContent));
-    }
-    setIsFull(false);
-    setIsEditing(false);
-  };
-
-  const handleCancel = (_currentContent?: string) => {
-    setIsFull(false);
-    setIsEditing(false);
-  };
 
   const handleUndoClick = () => {
     setShowUndoConfirm(true);
@@ -96,23 +53,7 @@ export default function UserCell({
     setShowUndoConfirm(false);
   };
 
-  // Handle full-screen editing
-  if (isFull && isEditing) {
-    return (
-      <FullScreenEditor
-        content={content}
-        onSave={handleEdit}
-        onCancel={handleCancel}
-        mode="edit"
-        placeholder="Edit your message..."
-        projectId={projectId}
-        notebookId={notebookId}
-      />
-    );
-  }
-
-  // Handle full-screen viewing
-  if (isFull && !isEditing) {
+  if (isFull) {
     return (
       <div className="fixed inset-0 z-50 bg-white overflow-auto select-text">
         {/* Header with controls */}
@@ -154,11 +95,11 @@ export default function UserCell({
           className="sm:!h-10 sm:!w-10 md:!h-12 md:!w-12 lg:!h-14 lg:!w-14" // Restore desktop sizes
         />
       </div>
-      
+
       {/* Message content spanning into the third column */}
-      <div 
+      <div
         className={`col-span-2 relative border rounded-md bg-white p-2 sm:p-3 md:p-4 shadow-sm my-1 sm:my-2 w-full pl-8 sm:pl-10 md:pl-6 lg:pl-6 ${isLast ? 'pr-8 sm:pr-10 md:pr-12 lg:pr-16' : ''}`}
-        role="group" 
+        role="group"
         aria-label="User message"
         data-testid="message"
         data-role="user"
@@ -173,10 +114,10 @@ export default function UserCell({
             notebookId={notebookId}
           />
         </div>
-        
+
         {attachments && attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
-            {attachments.map(att => (
+            {attachments.map((att) => (
               <button
                 key={att.id}
                 onClick={() => onPreviewFile?.(att.notebookFileId)}
@@ -236,4 +177,4 @@ export default function UserCell({
       />
     </>
   );
-} 
+}

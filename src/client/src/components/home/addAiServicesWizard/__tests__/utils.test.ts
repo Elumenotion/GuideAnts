@@ -10,6 +10,7 @@ import {
   OPENROUTER_DEFAULT_RUNTIME_PROFILE_ID,
   OPENROUTER_SECTION,
   OPENROUTER_SERVICE_PROVIDER_IDS,
+  LOCAL_AI_SERVICE_PROVIDER_IDS,
   DOCUMENT_INTELLIGENCE_SECTION,
   EMBEDDINGS_SECTION,
   GEMINI_CORE_SECTION,
@@ -36,6 +37,12 @@ import {
   summarizeHuggingFaceOptionalServiceWarnings,
   summarizeOptionalServiceWarnings,
   summarizeOpenRouterOptionalServiceWarnings,
+  summarizeLocalAiOptionalServiceWarnings,
+  toExistingLocalModels,
+  buildLocalAiModelRequest,
+  withSecretPreserved,
+  getSchemaDefault,
+  isPositiveIntegerValue,
   toExistingHuggingFaceModels,
   toExistingOpenRouterModels,
   toExistingGeminiModels,
@@ -392,5 +399,124 @@ describe('addAiServicesWizard utils', () => {
     });
 
     expect(summarizeOpenRouterOptionalServiceWarnings(snapshot)).toEqual([]);
+  });
+});
+
+describe('local ai optional service helpers', () => {
+  it('warns when local ai provider cannot activate', () => {
+    const snapshot = createSnapshot({
+      serviceStates: {
+        ...createSnapshot().serviceStates,
+        Embeddings: createServiceState('Embeddings', LOCAL_AI_SERVICE_PROVIDER_IDS.Embeddings, false),
+      },
+    });
+
+    expect(summarizeLocalAiOptionalServiceWarnings(snapshot)).toEqual(
+      expect.arrayContaining([expect.stringContaining('activation blockers')])
+    );
+  });
+
+  it('returns no warnings when local ai optional services are ready', () => {
+    const snapshot = createSnapshot({
+      serviceStates: {
+        Embeddings: createServiceState('Embeddings', LOCAL_AI_SERVICE_PROVIDER_IDS.Embeddings),
+        ImageGeneration: createServiceState('ImageGeneration', LOCAL_AI_SERVICE_PROVIDER_IDS.ImageGeneration),
+        SpeechTranscription: createServiceState('SpeechTranscription', LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechTranscription),
+        SpeechSynthesis: createServiceState('SpeechSynthesis', LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechSynthesis),
+        DocumentIntelligence: createServiceState(
+          'DocumentIntelligence',
+          LOCAL_AI_SERVICE_PROVIDER_IDS.DocumentIntelligence
+        ),
+      },
+    });
+
+    expect(summarizeLocalAiOptionalServiceWarnings(snapshot)).toEqual([]);
+  });
+
+  it('warns when local ai service is not selected', () => {
+    const snapshot = createSnapshot({
+      serviceStates: {
+        ...createSnapshot().serviceStates,
+        Embeddings: {
+          ...createServiceState('Embeddings', LOCAL_AI_SERVICE_PROVIDER_IDS.Embeddings),
+          activeProviderId: 'other-provider',
+        },
+      },
+    });
+
+    expect(summarizeLocalAiOptionalServiceWarnings(snapshot)[0]).toContain('not set to Local AI');
+  });
+});
+
+describe('shared wizard form helpers', () => {
+  it('returns blank when secret is not stored and value is empty', () => {
+    expect(withSecretPreserved('   ', false)).toBe('');
+  });
+
+  it('falls back when schema default is missing', () => {
+    expect(
+      getSchemaDefault({ sections: [{ sectionName: 'OpenAI', properties: [] }] }, 'OpenAI', 'Endpoint', 'fallback')
+    ).toBe('fallback');
+  });
+
+  it('uses schema default when present', () => {
+    expect(
+      getSchemaDefault(
+        {
+          sections: [
+            {
+              sectionName: 'OpenAI',
+              properties: [{ name: 'Endpoint', defaultValue: 'https://api.openai.com/v1' }],
+            },
+          ],
+        },
+        'OpenAI',
+        'Endpoint',
+        'fallback'
+      )
+    ).toBe('https://api.openai.com/v1');
+  });
+
+  it('rejects non-positive integer timeout strings', () => {
+    expect(isPositiveIntegerValue('0')).toBe(false);
+    expect(isPositiveIntegerValue('12')).toBe(true);
+  });
+});
+
+describe('local model catalog helpers', () => {
+  it('filters and sorts llama-cpp models for existing-model pickers', () => {
+    const models = toExistingLocalModels([
+      { provider: 'openai-chat', modelId: 'gpt-4o' } as never,
+      { provider: 'llama-cpp', modelId: 'qwen-local' } as never,
+      { provider: 'llama-cpp', modelId: 'alpha-local' } as never,
+    ]);
+
+    expect(models.map((m) => m.modelId)).toEqual(['alpha-local', 'qwen-local']);
+  });
+
+  it('throws when local ai draft fails validation', () => {
+    expect(() =>
+      buildLocalAiModelRequest({
+        localId: 'draft-1',
+        persisted: false,
+        asyncOperationId: null,
+        asyncStatus: 'submitted',
+        asyncProgress: null,
+        asyncError: null,
+        setAsGlobalDefault: false,
+        installSource: 'huggingface',
+        routerModelId: '',
+        runtimeProfileId: '',
+        huggingFaceRepository: '',
+        huggingFaceQuantIncludePattern: '',
+        huggingFaceMmprojIncludePattern: '',
+        huggingFaceTargetDirectory: '',
+        existingAliasRouterModelId: '',
+        routerContextSize: '',
+        routerCacheRamMib: '',
+        catalogModelId: '',
+        catalogDisplayName: '',
+      })
+    ).toThrow();
   });
 });

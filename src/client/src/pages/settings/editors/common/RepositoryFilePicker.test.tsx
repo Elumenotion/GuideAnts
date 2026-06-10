@@ -174,5 +174,63 @@ describe('RepositoryFilePicker', () => {
     expect(last[LLAMA_MODEL_ROLE_ID]).toBe('model-Q5_K_M.gguf');
     expect(last[LLAMA_MMPROJ_ROLE_ID]).toBe('mmproj-F16.gguf');
   });
+
+  it('shows token-specific guidance for REPO_TOKEN_MISSING browse errors', async () => {
+    const err = Object.assign(new Error('Token required.'), {
+      code: 'REPO_TOKEN_MISSING',
+      status: 401,
+    });
+    (api.settings.browseHuggingFaceRepository as any).mockRejectedValueOnce(err);
+    render(
+      <RepoHarness
+        previewOnly
+        classifyPreview={snapshotPreviewClassifier}
+        initialRepo="acme/gated"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Configure a Hugging Face token/i)).toBeInTheDocument();
+    });
+  });
+
+  it('toggles manual filename entry for role pickers', async () => {
+    const files = [makeFile('model-Q5_K_M.gguf', { category: 'gguf', quantLabel: 'Q5_K_M', size: 1_000 })];
+    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce(
+      makeListing('acme/llama', files),
+    );
+    const roles: RolePickerSpec[] = [{ id: LLAMA_MODEL_ROLE_ID, label: 'Model file (GGUF)' }];
+    render(
+      <RepoHarness
+        roles={roles}
+        classify={llamaCppClassifier}
+        initialRepo="acme/llama"
+        manualFallbackEnabled
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Enter filename manually/i }));
+    expect(screen.getByLabelText(/Model file \(GGUF\)/i)).toBeInTheDocument();
+  });
+
+  it('shows gated repository warning in preview mode', async () => {
+    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce(
+      makeListing('acme/gated', [makeFile('model.safetensors')], { gated: true }),
+    );
+    render(
+      <RepoHarness
+        previewOnly
+        classifyPreview={snapshotPreviewClassifier}
+        initialRepo="acme/gated"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Gated repository/i)).toBeInTheDocument();
+    });
+  });
 });
 

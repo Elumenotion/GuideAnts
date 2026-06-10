@@ -324,6 +324,192 @@ describe('api.settings.localModels.listOutcome', () => {
   });
 });
 
+describe('api.auth', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it('me calls /auth/me and returns user', async () => {
+    const dto = {
+      userId: 'u1',
+      name: 'Alice',
+      email: 'alice@example.com',
+      role: 'Contributor',
+      mustChangePassword: false,
+    };
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue(dto) });
+
+    const result = await api.auth.me();
+
+    expect(result).toEqual(dto);
+    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/auth/me'), expect.anything());
+  });
+
+  it('logout sends POST to /auth/logout', async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 204, json: vi.fn() });
+
+    await expect(api.auth.logout()).resolves.toBeUndefined();
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/logout'),
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('login sends POST with credentials', async () => {
+    const dto = {
+      userId: 'u1',
+      name: 'Alice',
+      email: 'alice@example.com',
+      role: 'Contributor',
+      mustChangePassword: false,
+    };
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue(dto) });
+
+    const result = await api.auth.login({ email: ' alice@example.com ', password: 'secret' });
+
+    expect(result).toEqual(dto);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/login'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ email: 'alice@example.com', password: 'secret' }),
+      })
+    );
+  });
+});
+
+describe('api.users', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it('getUserById calls /users/:id', async () => {
+    const dto = {
+      id: 'u2',
+      name: 'Bob',
+      email: 'bob@example.com',
+      role: 'Viewer',
+      mustChangePassword: false,
+    };
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue(dto) });
+
+    const result = await api.users.getUserById('u2');
+
+    expect(result).toEqual(dto);
+    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/users/u2'), expect.anything());
+  });
+
+  it('getCurrent calls /users/current', async () => {
+    const dto = {
+      id: 'u1',
+      name: 'Alice',
+      email: 'alice@example.com',
+      role: 'Contributor',
+      mustChangePassword: false,
+    };
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue(dto) });
+
+    const result = await api.users.getCurrent();
+
+    expect(result).toEqual(dto);
+    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/users/current'), expect.anything());
+  });
+});
+
+describe('api.projects.externalAuth.oauth', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it('authorizeUrl sends POST with oauth payload', async () => {
+    const dto = {
+      authorizeUrl: 'https://login.example.com/oauth',
+      state: 'state-123',
+      expiresAt: '2026-01-01T00:00:00Z',
+    };
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue(dto) });
+
+    const payload = {
+      clientId: 'client',
+      tenant: 'organizations',
+      scopes: ['read'],
+      redirectUri: 'https://app.example.com/oauth/callback',
+      returnUrl: '/back',
+    };
+    const result = await api.projects.externalAuth.oauth.authorizeUrl('proj-1', 'provider-1', payload);
+
+    expect(result).toEqual(dto);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/projects/proj-1/external-auth/provider-1/oauth/authorize-url'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+    );
+  });
+
+  it('status calls oauth status endpoint', async () => {
+    const dto = { connected: true, expiresAt: '2026-01-01T00:00:00Z' };
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue(dto) });
+
+    const result = await api.projects.externalAuth.oauth.status('proj-1', 'provider-1');
+
+    expect(result).toEqual(dto);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/projects/proj-1/external-auth/provider-1/oauth/status'),
+      expect.anything()
+    );
+  });
+
+  it('disconnect sends DELETE', async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 204, json: vi.fn() });
+
+    await expect(api.projects.externalAuth.oauth.disconnect('proj-1', 'provider-1')).resolves.toBeUndefined();
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/projects/proj-1/external-auth/provider-1/oauth'),
+      expect.objectContaining({ method: 'DELETE' })
+    );
+  });
+});
+
+describe('api.utils.getAuthenticatedUrl', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it('returns objectUrl from successful blob response', async () => {
+    const blob = new Blob(['image'], { type: 'image/png' });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: vi.fn().mockResolvedValue(blob),
+      headers: {
+        get: vi.fn().mockReturnValue('attachment; filename="logo.png"'),
+      },
+    });
+
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url');
+
+    const result = await api.utils.getAuthenticatedUrl('http://localhost/api/projects/1/files/f1/content');
+
+    expect(result.objectUrl).toBe('blob:mock-url');
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    createObjectURL.mockRestore();
+  });
+
+  it('throws when fetch is not ok', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+    });
+
+    await expect(
+      api.utils.getAuthenticatedUrl('http://localhost/api/projects/1/files/missing/content')
+    ).rejects.toThrow('Failed to fetch: Not Found');
+  });
+});
+
 describe('api.settings.chatDefaults', () => {
   beforeEach(() => {
     mockFetch.mockReset();
@@ -352,6 +538,17 @@ describe('api.settings.chatDefaults', () => {
     expect(firstCall?.[0]).toEqual(expect.stringContaining('/settings/chat-defaults'));
     const firstHeaders = firstCall?.[1]?.headers as Headers;
     expect(firstHeaders.get('Content-Type')).toBe('application/json');
+  });
+
+  it('users.updatePersonalization sends PUT', async () => {
+    const updated = { id: 'u1', name: 'Alice', email: 'a@b.com', role: 'Contributor', mustChangePassword: false };
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: vi.fn().mockResolvedValue(updated) });
+    const result = await api.users.updatePersonalization({ name: 'Alice' });
+    expect(result).toEqual(updated);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/users/current/personalization'),
+      expect.objectContaining({ method: 'PUT' }),
+    );
   });
 
   it('update sends PUT with body', async () => {
