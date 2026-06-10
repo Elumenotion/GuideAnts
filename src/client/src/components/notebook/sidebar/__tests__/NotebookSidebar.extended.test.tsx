@@ -62,6 +62,7 @@ vi.mock('../../../../contexts/NotebookContext', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../../contexts/NotebookContext')>();
   return {
     ...actual,
+    NotebookProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useNotebook: () => ({
       createConversation: mockCreateConversation,
       renameConversation: mockRenameConversation,

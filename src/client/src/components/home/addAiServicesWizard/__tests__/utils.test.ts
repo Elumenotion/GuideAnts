@@ -54,7 +54,6 @@ function createProvider(providerId: string, canActivate = true): ProviderEditorS
   return {
     providerId,
     providerKind: 'Cloud',
-    displayName: providerId,
     providerSection: 'Test',
     modeId: null,
     hasExplicitMode: true,
@@ -74,7 +73,6 @@ function createProvider(providerId: string, canActivate = true): ProviderEditorS
 function createServiceState(serviceId: OptionalServiceKey, providerId: string, canActivate = true): ServiceEditorStateDto {
   return {
     serviceId,
-    displayName: serviceId,
     activeProviderId: providerId,
     providers: [createProvider(providerId, canActivate)],
     readiness: {
@@ -90,32 +88,24 @@ function createSnapshot(overrides?: Partial<WizardLoadSnapshot>): WizardLoadSnap
     sectionSummaries: [
       {
         sectionName: EMBEDDINGS_SECTION,
-        displayName: 'Embeddings',
-        displayOrder: 1,
         hasSecrets: true,
         readinessStatus: 'configured',
         missingFields: [],
       },
       {
         sectionName: IMAGES_SECTION,
-        displayName: 'Images',
-        displayOrder: 2,
         hasSecrets: true,
         readinessStatus: 'configured',
         missingFields: [],
       },
       {
         sectionName: SPEECH_SECTION,
-        displayName: 'Speech',
-        displayOrder: 3,
         hasSecrets: true,
         readinessStatus: 'configured',
         missingFields: [],
       },
       {
         sectionName: DOCUMENT_INTELLIGENCE_SECTION,
-        displayName: 'Document Intelligence',
-        displayOrder: 4,
         hasSecrets: true,
         readinessStatus: 'configured',
         missingFields: [],
@@ -245,8 +235,6 @@ describe('addAiServicesWizard utils', () => {
         ...createSnapshot().sectionSummaries,
         {
           sectionName: GEMINI_CORE_SECTION,
-          displayName: 'Google Gemini API',
-          displayOrder: 9,
           hasSecrets: true,
           readinessStatus: 'configured',
           missingFields: [],
@@ -357,8 +345,6 @@ describe('addAiServicesWizard utils', () => {
         ...createSnapshot().sectionSummaries,
         {
           sectionName: HUGGINGFACE_SECTION,
-          displayName: 'Hugging Face',
-          displayOrder: 10,
           hasSecrets: true,
           readinessStatus: 'configured',
           missingFields: [],
@@ -382,8 +368,6 @@ describe('addAiServicesWizard utils', () => {
         ...createSnapshot().sectionSummaries,
         {
           sectionName: OPENROUTER_SECTION,
-          displayName: 'OpenRouter',
-          displayOrder: 11,
           hasSecrets: true,
           readinessStatus: 'configured',
           missingFields: [],

@@ -20,6 +20,7 @@ vi.mock('../../../../contexts/ProjectContext', async (importOriginal) => {
   const actual: any = await importOriginal();
   return {
     ...actual,
+    ProjectProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useProject: () => projectMock,
   } as any;
 });
