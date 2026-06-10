@@ -412,7 +412,7 @@ public sealed class DocumentServerServiceTests
             null,
             null,
             null,
-            new DocumentServerCallbackPayload(Status: 2, Url: "/cache/files/edited.docx?token=abc"),
+            new DocumentServerCallbackPayload(Status: 2, Url: "cache/files/edited.docx?token=abc"),
             CancellationToken.None);
 
         await action.Should().ThrowAsync<InvalidOperationException>()

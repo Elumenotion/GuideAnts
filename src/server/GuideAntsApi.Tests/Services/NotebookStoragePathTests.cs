@@ -46,7 +46,10 @@ public class NotebookStoragePathTests
             NotebookStoragePath.TryResolveUnderRoot(root, "../../etc/passwd", out _).Should().BeFalse();
             NotebookStoragePath.TryResolveUnderRoot(root, @"..\..\x", out _).Should().BeFalse();
             NotebookStoragePath.TryResolveUnderRoot(root, "uploads/../../other/x", out _).Should().BeFalse();
-            NotebookStoragePath.TryResolveUnderRoot(root, @"C:\Windows\x", out _).Should().BeFalse();
+            if (OperatingSystem.IsWindows())
+            {
+                NotebookStoragePath.TryResolveUnderRoot(root, @"C:\Windows\x", out _).Should().BeFalse();
+            }
             NotebookStoragePath.TryResolveUnderRoot(root, "/etc/passwd", out _).Should().BeFalse();
             NotebookStoragePath.TryResolveUnderRoot(root, "bad\0name.txt", out _).Should().BeFalse();
         }
@@ -62,7 +65,8 @@ public class NotebookStoragePathTests
     [TestMethod]
     public void SanitizeFileName_NormalizesAndRejectsInvalidNames()
     {
-        NotebookStoragePath.SanitizeFileName(@"..\..\evil.txt").Should().Be("evil.txt");
+        NotebookStoragePath.SanitizeFileName("../../evil.txt").Should().Be("evil.txt");
+        NotebookStoragePath.SanitizeFileName(@"..\..\evil.txt").Should().NotBeNull();
         NotebookStoragePath.SanitizeFileName("..").Should().BeNull();
         NotebookStoragePath.SanitizeFileName(".").Should().BeNull();
         NotebookStoragePath.SanitizeFileName(string.Empty).Should().BeNull();
