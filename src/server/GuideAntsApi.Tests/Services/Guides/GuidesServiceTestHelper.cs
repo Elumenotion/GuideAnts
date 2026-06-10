@@ -15,11 +15,13 @@ namespace GuideAntsApi.Tests.Services.Guides;
 
 internal static class GuidesServiceTestHelper
 {
-    internal static GuidesService CreateGuidesService(ApplicationDbContext context) =>
+    internal static GuidesService CreateGuidesService(
+        ApplicationDbContext context,
+        IRuntimeProfileResolver? runtimeProfileResolver = null) =>
         new(
             context,
             CreateMarkdownExtractionService(),
-            Mock.Of<IRuntimeProfileResolver>(),
+            runtimeProfileResolver ?? Mock.Of<IRuntimeProfileResolver>(),
             NullLogger<GuidesService>.Instance);
 
     internal static GuideExportImportService CreateExportImportService(ApplicationDbContext context, DbContextOptions<ApplicationDbContext> options) =>

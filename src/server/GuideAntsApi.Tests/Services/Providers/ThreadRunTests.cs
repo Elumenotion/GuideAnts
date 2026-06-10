@@ -1,0 +1,218 @@
+using System.Reflection;
+using System.Text.Json;
+using AntRunner.Chat;
+using FluentAssertions;
+
+namespace GuideAntsApi.Tests.Services.Providers;
+
+/// <summary>
+/// Deterministic, network-free coverage of <see cref="ThreadRun"/> helpers.
+/// The execution engine itself depends on assistant storage / live providers, so these
+/// tests target the pure static helpers (reachable via reflection) and the public
+/// request-builder cache surface.
+/// </summary>
+[TestClass]
+public sealed class ThreadRunTests
+{
+    private static readonly Type ThreadRunType = typeof(ThreadRun);
+
+    private static T Invoke<T>(string name, params object?[] args)
+    {
+        var method = ThreadRunType.GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new MissingMethodException(nameof(ThreadRun), name);
+        return (T)method.Invoke(null, args)!;
+    }
+
+    [TestMethod]
+    public void NormalizeAssistantText_ReplacesEmDashWithEnDash()
+    {
+        Invoke<string>("NormalizeAssistantText", "before\u2014after").Should().Be("before\u2013after");
+    }
+
+    [TestMethod]
+    public void NormalizeAssistantText_NullOrEmpty_ReturnsEmpty()
+    {
+        Invoke<string>("NormalizeAssistantText", new object?[] { null }).Should().Be(string.Empty);
+        Invoke<string>("NormalizeAssistantText", string.Empty).Should().Be(string.Empty);
+    }
+
+    [TestMethod]
+    public void NormalizeAssistantText_LeavesPlainTextUnchanged()
+    {
+        Invoke<string>("NormalizeAssistantText", "no dashes here").Should().Be("no dashes here");
+    }
+
+    [TestMethod]
+    public void FormatFileChangesConsole_RendersNewAndModifiedSections()
+    {
+        var result = Invoke<string>(
+            "FormatFileChangesConsole",
+            new List<string> { "a.txt", "b.txt" },
+            new List<string> { "c.txt" });
+
+        result.Should().StartWith("```console");
+        result.Should().Contain("# New Files");
+        result.Should().Contain("a.txt");
+        result.Should().Contain("b.txt");
+        result.Should().Contain("# Modified Files");
+        result.Should().Contain("c.txt");
+        result.Should().EndWith("```");
+    }
+
+    [TestMethod]
+    public void FormatFileChangesConsole_OmitsEmptySections()
+    {
+        var result = Invoke<string>(
+            "FormatFileChangesConsole",
+            new List<string>(),
+            new List<string> { "only-modified.txt" });
+
+        result.Should().NotContain("# New Files");
+        result.Should().Contain("# Modified Files");
+        result.Should().Contain("only-modified.txt");
+    }
+
+    [TestMethod]
+    public void BuildSamplingParameters_KeepsNumericValuesOnly()
+    {
+        var input = new Dictionary<string, JsonElement>
+        {
+            ["temperature"] = JsonSerializer.SerializeToElement(0.7),
+            ["top_p"] = JsonSerializer.SerializeToElement(0.9),
+            ["reasoning_effort"] = JsonSerializer.SerializeToElement("high"),
+            ["enabled"] = JsonSerializer.SerializeToElement(true)
+        };
+
+        var result = Invoke<IReadOnlyDictionary<string, double>?>("BuildSamplingParameters", input);
+
+        result.Should().NotBeNull();
+        result!.Should().ContainKey("temperature").WhoseValue.Should().Be(0.7);
+        result.Should().ContainKey("top_p").WhoseValue.Should().Be(0.9);
+        result.Should().NotContainKey("reasoning_effort");
+        result.Should().NotContainKey("enabled");
+    }
+
+    [TestMethod]
+    public void BuildSamplingParameters_ReturnsNull_WhenNoNumericValues()
+    {
+        var input = new Dictionary<string, JsonElement>
+        {
+            ["reasoning_effort"] = JsonSerializer.SerializeToElement("high")
+        };
+
+        var result = Invoke<IReadOnlyDictionary<string, double>?>("BuildSamplingParameters", input);
+
+        result.Should().BeNull();
+    }
+
+    [TestMethod]
+    public void TryGetStringParameter_ReturnsTrimmedString()
+    {
+        var input = new Dictionary<string, JsonElement>
+        {
+            ["reasoning_effort"] = JsonSerializer.SerializeToElement("  high  ")
+        };
+
+        Invoke<string?>("TryGetStringParameter", input, "reasoning_effort").Should().Be("high");
+    }
+
+    [TestMethod]
+    public void TryGetStringParameter_ReturnsNull_ForMissingWhitespaceOrNonString()
+    {
+        var input = new Dictionary<string, JsonElement>
+        {
+            ["blank"] = JsonSerializer.SerializeToElement("   "),
+            ["num"] = JsonSerializer.SerializeToElement(5)
+        };
+
+        Invoke<string?>("TryGetStringParameter", input, "missing").Should().BeNull();
+        Invoke<string?>("TryGetStringParameter", input, "blank").Should().BeNull();
+        Invoke<string?>("TryGetStringParameter", input, "num").Should().BeNull();
+    }
+
+    [TestMethod]
+    public void GetStreamRetryDelay_ClampsToConfiguredDelays()
+    {
+        Invoke<TimeSpan>("GetStreamRetryDelay", 0).Should().Be(TimeSpan.FromSeconds(5));
+        Invoke<TimeSpan>("GetStreamRetryDelay", 1).Should().Be(TimeSpan.FromSeconds(5));
+        Invoke<TimeSpan>("GetStreamRetryDelay", 2).Should().Be(TimeSpan.FromSeconds(10));
+        Invoke<TimeSpan>("GetStreamRetryDelay", 5).Should().Be(TimeSpan.FromSeconds(10));
+    }
+
+    [TestMethod]
+    public void IsTransientStreamFailure_TrueForRetryableConditions()
+    {
+        var ct = CancellationToken.None;
+        Invoke<bool>("IsTransientStreamFailure", new HttpRequestException("boom"), ct).Should().BeTrue();
+        Invoke<bool>("IsTransientStreamFailure",
+            new HttpRequestException("500", null, System.Net.HttpStatusCode.InternalServerError), ct).Should().BeTrue();
+        Invoke<bool>("IsTransientStreamFailure",
+            new HttpRequestException("429", null, System.Net.HttpStatusCode.TooManyRequests), ct).Should().BeTrue();
+        Invoke<bool>("IsTransientStreamFailure",
+            new HttpRequestException("408", null, System.Net.HttpStatusCode.RequestTimeout), ct).Should().BeTrue();
+        Invoke<bool>("IsTransientStreamFailure", new IOException("reset"), ct).Should().BeTrue();
+        Invoke<bool>("IsTransientStreamFailure",
+            new System.Net.Sockets.SocketException(), ct).Should().BeTrue();
+        Invoke<bool>("IsTransientStreamFailure",
+            new InvalidOperationException("outer", new IOException("inner")), ct).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void IsTransientStreamFailure_FalseForNonRetryableConditions()
+    {
+        var ct = CancellationToken.None;
+        Invoke<bool>("IsTransientStreamFailure",
+            new HttpRequestException("400", null, System.Net.HttpStatusCode.BadRequest), ct).Should().BeFalse();
+        Invoke<bool>("IsTransientStreamFailure", new OperationCanceledException(), ct).Should().BeFalse();
+        Invoke<bool>("IsTransientStreamFailure", new InvalidOperationException("plain"), ct).Should().BeFalse();
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        Invoke<bool>("IsTransientStreamFailure", new HttpRequestException("boom"), cts.Token).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void TryParseAbsoluteUri_ParsesAbsoluteAndSchemelessHosts()
+    {
+        var absoluteArgs = new object?[] { "https://api.example.com/path", null };
+        Invoke<bool>("TryParseAbsoluteUri", absoluteArgs).Should().BeTrue();
+        ((Uri)absoluteArgs[1]!).Host.Should().Be("api.example.com");
+
+        var schemelessArgs = new object?[] { "api.example.com", null };
+        Invoke<bool>("TryParseAbsoluteUri", schemelessArgs).Should().BeTrue();
+        ((Uri)schemelessArgs[1]!).Host.Should().Be("api.example.com");
+    }
+
+    [TestMethod]
+    public void GetAuthorityCandidates_YieldsAuthorityThenHost()
+    {
+        var result = Invoke<IEnumerable<string>>("GetAuthorityCandidates", "https://api.example.com:8443/v1").ToList();
+
+        result.Should().Contain("api.example.com:8443");
+        result.Should().Contain("api.example.com");
+    }
+
+    [TestMethod]
+    public void GetAuthorityCandidates_EmptyForBlankInput()
+    {
+        Invoke<IEnumerable<string>>("GetAuthorityCandidates", "").Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void ExtractSandboxInitFilename_ExtractsHostAndPath()
+    {
+        Invoke<string>("ExtractSandboxInitFilename", "sandbox://init.py").Should().Be("init.py");
+        Invoke<string>("ExtractSandboxInitFilename", "sandbox://folder/start.py").Should().Be("start.py");
+    }
+
+    [TestMethod]
+    public void ClearRequestBuilderCache_AndClearAll_DoNotThrow()
+    {
+        Action clearOne = () => ThreadRun.ClearRequestBuilderCache("non-existent-assistant");
+        Action clearAll = ThreadRun.ClearAllRequestBuilderCache;
+
+        clearOne.Should().NotThrow();
+        clearAll.Should().NotThrow();
+        clearOne.Should().NotThrow();
+    }
+}

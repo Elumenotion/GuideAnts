@@ -1159,3 +1159,8 @@ public enum ScriptType
     PowerShell,
     Python
 }
+
+/// <summary>
+/// Entry-point marker for in-process test hosting (WebApplicationFactory).
+/// </summary>
+public partial class Program;

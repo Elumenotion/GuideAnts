@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.IO.Compression;
+using System.Text.Json;
 using FluentAssertions;
 using GuideAntsApi.IntegrationTests.Infrastructure;
 using GuideAntsApi.Models.Guides;
@@ -99,5 +101,119 @@ public sealed class GuidesEndpointsTests : BaseEndpointTest
         var result = await response.Content.ReadFromJsonAsync<GuideRuntimeValidationDto>();
         result.Should().NotBeNull();
         result!.IsValid.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ExportGuide_Requires_admin_authorization()
+    {
+        var guideId = Guid.NewGuid();
+        Client.DefaultRequestHeaders.Authorization = null;
+
+        var response = await Client.GetAsync($"/api/guides/{guideId}/export");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [TestMethod]
+    public async Task ExportGuide_Returns_bad_request_for_missing_guide()
+    {
+        var response = await Client.GetAsync($"/api/guides/{Guid.NewGuid()}/export");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("Guide not found");
+    }
+
+    [TestMethod]
+    public async Task ExportGuide_Returns_zip_with_manifest_behavior()
+    {
+        var createDto = new CreateGuideDto(
+            Name: $"Export Guide {Guid.NewGuid():N}",
+            Description: "Integration export",
+            Instructions: "Export instructions",
+            HomePageMarkdown: "# Home",
+            ModelId: "gpt-4.1",
+            Temperature: null,
+            TopP: null,
+            ReasoningEffort: null,
+            SamplingParametersJson: null,
+            AvatarImageBytes: null,
+            AvatarContentType: null,
+            ToolIds: null,
+            CustomTools: null,
+            ContextOptions:
+            [
+                new ContextOptionDto("audience", "engineering"),
+                new ContextOptionDto("locale", "en-US")
+            ],
+            AuthProviders: null,
+            Files: null,
+            ConversationStarters: ["Start", "Investigate"],
+            CrewMemberIds: null);
+
+        var createResponse = await Client.PostAsJsonAsync("/api/guides", createDto);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = await createResponse.Content.ReadFromJsonAsync<GuideDto>();
+        created.Should().NotBeNull();
+
+        var exportResponse = await Client.GetAsync($"/api/guides/{created!.Id}/export");
+
+        exportResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        exportResponse.Content.Headers.ContentType?.MediaType.Should().Be("application/zip");
+        var bytes = await exportResponse.Content.ReadAsByteArrayAsync();
+        bytes.Length.Should().BeGreaterThan(0);
+
+        using var archive = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read);
+        var manifestEntry = archive.GetEntry("manifest.json");
+        manifestEntry.Should().NotBeNull();
+        using var reader = new StreamReader(manifestEntry!.Open());
+        var manifestJson = await reader.ReadToEndAsync();
+        var manifest = JsonDocument.Parse(manifestJson).RootElement;
+        manifest.GetProperty("name").GetString().Should().Be(createDto.Name);
+        manifest.GetProperty("description").GetString().Should().Be(createDto.Description);
+
+        var instructionsEntry = archive.GetEntry("instructions.md");
+        instructionsEntry.Should().NotBeNull();
+        using (var instructionsReader = new StreamReader(instructionsEntry!.Open()))
+        {
+            (await instructionsReader.ReadToEndAsync()).Should().Be(createDto.Instructions);
+        }
+
+        var homeEntry = archive.GetEntry("HostExtensions/UI/home.md");
+        homeEntry.Should().NotBeNull();
+        using (var homeReader = new StreamReader(homeEntry!.Open()))
+        {
+            (await homeReader.ReadToEndAsync()).Should().Be(createDto.HomePageMarkdown);
+        }
+
+        var startersEntry = archive.GetEntry("HostExtensions/UI/conversationStarters.json");
+        startersEntry.Should().NotBeNull();
+        using (var startersReader = new StreamReader(startersEntry!.Open()))
+        {
+            var starters = JsonDocument.Parse(await startersReader.ReadToEndAsync())
+                .RootElement
+                .EnumerateArray()
+                .Select(item => item.GetString())
+                .ToList();
+            starters.Should().Equal(["Start", "Investigate"]);
+        }
+
+        var contextEntry = archive.GetEntry("HostExtensions/UI/contextOptions.json");
+        contextEntry.Should().NotBeNull();
+        using (var contextReader = new StreamReader(contextEntry!.Open()))
+        {
+            var contextOptions = JsonDocument.Parse(await contextReader.ReadToEndAsync())
+                .RootElement
+                .EnumerateArray()
+                .Select(item => new
+                {
+                    Key = item.GetProperty("key").GetString(),
+                    Value = item.GetProperty("value").GetString()
+                })
+                .ToList();
+
+            contextOptions.Should().Contain(option => option.Key == "audience" && option.Value == "engineering");
+            contextOptions.Should().Contain(option => option.Key == "locale" && option.Value == "en-US");
+        }
     }
 }

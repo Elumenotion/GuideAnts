@@ -146,6 +146,8 @@ _TeamCity*
 coverage*.json
 coverage*.xml
 coverage*.info
+src/server/coverage-*
+src/server/TestResults/
 
 # Visual Studio code coverage results
 *.coverage
@@ -420,3 +422,4 @@ FodyWeavers.xsd
 /.codeql
 /scan-recs
 /.playwright-mcp
+/src/server/docker/volumes/content-files
