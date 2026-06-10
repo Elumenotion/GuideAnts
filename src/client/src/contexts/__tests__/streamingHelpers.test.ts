@@ -245,5 +245,23 @@ describe('streamingHelpers', () => {
       expect(progress.completedSteps).toBe(2);
       expect(progress.totalSteps).toBeGreaterThanOrEqual(2);
     });
+
+    it('counts assistantStepSection when chunks are absent', () => {
+      const turn = makeTurn({
+        assistantStepSection: { content: 'thinking', toolCalls: [], isVisible: true },
+      });
+      const progress = calculateStreamingProgress(turn);
+      expect(progress.completedSteps).toBe(1);
+      expect(progress.totalSteps).toBeGreaterThanOrEqual(1);
+    });
+
+    it('treats errored tool calls as completed groups', () => {
+      const turn = makeTurn({
+        toolCalls: [makeToolCall({ status: 'error' })],
+      });
+      const progress = calculateStreamingProgress(turn);
+      expect(progress.completedSteps).toBeGreaterThanOrEqual(1);
+      expect(progress.currentPhase).toBe('final_response');
+    });
   });
 });

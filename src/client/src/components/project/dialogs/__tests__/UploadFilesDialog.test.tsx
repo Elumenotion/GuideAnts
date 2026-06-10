@@ -1,28 +1,35 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '../../../../test/test-utils';
+import { render, screen, waitFor, fireEvent } from '../../../../test/test-utils';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { UploadFilesDialog } from '../UploadFilesDialog';
-import { ProjectFolderDto } from '../../../../types/project';
+import { FolderTreeDto } from '../../../../types/project';
 
-// Helper to create a mock File
 const createMockFile = (name: string, size: number, type: string): File => {
   return new File([new Array(size).join('a')], name, { type });
 };
 
-// Minimal folders used for tests
-const mockFolders: ProjectFolderDto[] = [
-  { id: 'root', name: 'Test Project', relativePath: '', parentFolderId: undefined } as ProjectFolderDto,
-];
+const folderTree: FolderTreeDto = {
+  id: 'root',
+  name: 'Project Root',
+  relativePath: '',
+  subFolders: [
+    {
+      id: 'folder-docs',
+      name: 'Docs',
+      relativePath: 'Docs',
+      subFolders: [],
+    },
+  ],
+};
 
-// Render helper
 const renderDialog = (props?: Partial<React.ComponentProps<typeof UploadFilesDialog>>) => {
   const defaultProps = {
     isOpen: true,
     onClose: vi.fn(),
     onUpload: vi.fn().mockResolvedValue(undefined),
-    folders: mockFolders,
+    folderTree,
   } as React.ComponentProps<typeof UploadFilesDialog>;
 
   return render(<UploadFilesDialog {...defaultProps} {...props} />);
@@ -35,7 +42,7 @@ describe('UploadFilesDialog (project)', () => {
 
   it('renders nothing when closed', () => {
     const { container } = render(
-      <UploadFilesDialog isOpen={false} onClose={vi.fn()} onUpload={vi.fn()} folders={mockFolders} />
+      <UploadFilesDialog isOpen={false} onClose={vi.fn()} onUpload={vi.fn()} />
     );
     expect(container.firstChild).toBeNull();
   });
@@ -43,10 +50,7 @@ describe('UploadFilesDialog (project)', () => {
   it('renders dialog header and cancel button when open', () => {
     renderDialog();
 
-    // Header is rendered as a heading element
     expect(screen.getByRole('heading', { name: /upload files/i })).toBeInTheDocument();
-
-    // Footer cancel button
     expect(screen.getByRole('button', { name: /^cancel$/i })).toBeInTheDocument();
   });
 
@@ -54,15 +58,12 @@ describe('UploadFilesDialog (project)', () => {
     renderDialog();
 
     const file = createMockFile('example.txt', 1024, 'text/plain');
-
-    // Hidden input is still in the DOM
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     expect(fileInput).not.toBeNull();
 
     await userEvent.upload(fileInput, file);
 
     expect(await screen.findByText('example.txt')).toBeInTheDocument();
-    // The underlying size resolution may yield 1023 B due to File constructor quirk
     expect(screen.getByText(/\d+ (B|KB)/)).toBeInTheDocument();
   });
 
@@ -76,7 +77,6 @@ describe('UploadFilesDialog (project)', () => {
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     await userEvent.upload(input, file);
 
-    // Upload Files button
     const uploadBtn = await screen.findByRole('button', { name: /upload files/i });
     expect(uploadBtn).not.toBeDisabled();
 
@@ -92,9 +92,56 @@ describe('UploadFilesDialog (project)', () => {
     const closeSpy = vi.fn();
     renderDialog({ onClose: closeSpy });
 
-    const cancelBtn = await screen.findByRole('button', { name: /cancel/i });
-    await userEvent.click(cancelBtn);
-
+    await userEvent.click(await screen.findByRole('button', { name: /cancel/i }));
     expect(closeSpy).toHaveBeenCalled();
   });
-}); 
+
+  it('accepts files from drag and drop', async () => {
+    renderDialog();
+
+    const file = createMockFile('dropped.txt', 512, 'text/plain');
+    const dropZone = screen.getByText(/click to upload/i).closest('div')!;
+
+    fireEvent.drop(dropZone, {
+      dataTransfer: { files: [file] },
+    });
+
+    expect(await screen.findByText('dropped.txt')).toBeInTheDocument();
+  });
+
+  it('uploads to selected destination folder', async () => {
+    const uploadSpy = vi.fn().mockResolvedValue(undefined);
+    renderDialog({ onUpload: uploadSpy, initialFolderId: 'folder-docs' });
+
+    const file = createMockFile('in-folder.txt', 256, 'text/plain');
+    await userEvent.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+    await userEvent.click(screen.getByRole('button', { name: /upload files/i }));
+
+    await waitFor(() => {
+      expect(uploadSpy).toHaveBeenCalledWith([file], 'folder-docs');
+      expect(screen.getByText(/to Project Root\/Docs/i)).toBeInTheDocument();
+    });
+  });
+
+  it('removes a selected file from the list', async () => {
+    renderDialog();
+
+    const file = createMockFile('remove-me.txt', 128, 'text/plain');
+    await userEvent.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+    expect(await screen.findByText('remove-me.txt')).toBeInTheDocument();
+
+    const row = screen.getByText('remove-me.txt').closest('div')!;
+    const removeButton = row.parentElement?.querySelector('button') as HTMLButtonElement;
+    await userEvent.click(removeButton);
+
+    expect(screen.queryByText('remove-me.txt')).not.toBeInTheDocument();
+  });
+
+  it('closes on Escape when not uploading', async () => {
+    const onClose = vi.fn();
+    renderDialog({ onClose });
+
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
+  });
+});

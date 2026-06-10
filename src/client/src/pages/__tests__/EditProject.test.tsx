@@ -27,6 +27,28 @@ vi.mock('../../services/api', () => ({
   },
 }));
 
+vi.mock('../../components/ErrorScreen', () => ({
+  default: ({
+    title,
+    onRetry,
+    onBack,
+  }: {
+    title?: string;
+    onRetry?: () => void;
+    onBack?: () => void;
+  }) => (
+    <div>
+      <h1>{title}</h1>
+      <button type="button" onClick={onRetry}>
+        Try Again
+      </button>
+      <button type="button" onClick={onBack}>
+        Go Back
+      </button>
+    </div>
+  ),
+}));
+
 describe('EditProject page', () => {
   const sampleProject = { id: '123', title: 'Old', description: 'Desc', created: 'now', userRoles: [] };
 
@@ -61,5 +83,64 @@ describe('EditProject page', () => {
     (api.projects.getProject as any).mockRejectedValue(new Error('Failed'));
     render(<EditProject />);
     expect(await screen.findByText('Failed')).toBeInTheDocument();
+  });
+
+  it('shows critical error screen when fetch reports failed to fetch', async () => {
+    (api.projects.getProject as any).mockRejectedValue(new Error('Failed to fetch project data'));
+    render(<EditProject />);
+    expect(await screen.findByText('Failed to Load Project')).toBeInTheDocument();
+  });
+
+  it('validates empty title on submit', async () => {
+    (api.projects.getProject as any).mockResolvedValue(sampleProject);
+    render(<EditProject />);
+    const titleInput = await screen.findByLabelText(/project title/i);
+    await userEvent.clear(titleInput);
+    await userEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    expect(await screen.findByText('Project title is required')).toBeInTheDocument();
+  });
+
+  it('shows update error and navigates on cancel', async () => {
+    (api.projects.getProject as any).mockResolvedValue(sampleProject);
+    (api.projects.updateProject as any).mockRejectedValue(new Error('Save failed'));
+    render(<EditProject />);
+
+    await screen.findByLabelText(/project title/i);
+    await userEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    expect(await screen.findByText('Save failed')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/123');
+  });
+
+  it('retries and navigates home from the critical load error screen', async () => {
+    const reloadSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload: reloadSpy },
+    });
+    (api.projects.getProject as any).mockRejectedValue(new Error('Failed to fetch project data'));
+    render(<EditProject />);
+
+    await screen.findByText('Failed to Load Project');
+    await userEvent.click(screen.getByRole('button', { name: /try again/i }));
+    expect(reloadSpy).toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: /go back/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('/');
+  });
+
+  it('updates description and shows saving state while submit is in flight', async () => {
+    (api.projects.getProject as any).mockResolvedValue(sampleProject);
+    (api.projects.updateProject as any).mockImplementation(() => new Promise(() => {}));
+    render(<EditProject />);
+
+    const description = await screen.findByLabelText(/description/i);
+    await userEvent.clear(description);
+    await userEvent.type(description, 'Updated description');
+    await userEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    expect(await screen.findByText('Saving...')).toBeInTheDocument();
+    expect((description as HTMLTextAreaElement).value).toBe('Updated description');
   });
 }); 

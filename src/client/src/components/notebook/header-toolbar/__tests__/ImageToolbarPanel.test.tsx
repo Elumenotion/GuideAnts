@@ -129,4 +129,96 @@ describe('ImageToolbarPanel', () => {
 
     expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });
+
+  it('switches cloud provider and powers local runtime on/off', async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn(async () => {});
+    render(
+      <ImageToolbarPanel
+        service={{
+          serviceId: 'ImageGeneration',
+          displayName: 'Image Generation',
+          kind: 'image',
+          status: 'ready',
+          summary: 'ready',
+          activeProviderId: 'ImageGeneration.LocalSd.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          providerOptions: [
+            {
+              providerId: 'ImageGeneration.Google.Imagen',
+              displayName: 'GoogleGeminiApi',
+              providerKind: 'Cloud',
+              canActivate: true,
+              blockers: [],
+              providerSection: 'GoogleGeminiApi',
+              modelId: 'imagen-3',
+            },
+          ],
+          selection: null,
+          blockers: [],
+          localModelOptions: [
+            { modelRef: 'bundle-a', displayLabel: 'bundle-a', isComplete: true, isActive: true },
+          ],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={onRefresh}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('option', { name: /google/i }));
+    expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
+      'ImageGeneration',
+      'ImageGeneration.Google.Imagen'
+    );
+
+    await user.click(screen.getByRole('button', { name: /turn image engine on/i }));
+    expect(api.settings.localModels.load).toHaveBeenCalledWith('ImageGeneration', {});
+
+    await user.click(screen.getByRole('button', { name: /turn image engine off/i }));
+    expect(api.settings.localModels.unload).toHaveBeenCalledWith('ImageGeneration');
+  });
+
+  it('shows blockers and hides workspace copy when requested', () => {
+    render(
+      <ImageToolbarPanel
+        service={{
+          serviceId: 'ImageGeneration',
+          displayName: 'Image Generation',
+          kind: 'image',
+          status: 'blocked',
+          summary: 'blocked',
+          activeProviderId: 'ImageGeneration.LocalSd.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: false,
+          localRuntimeOn: false,
+          providerOptions: [],
+          selection: null,
+          blockers: ['Image endpoint missing'],
+          localModelOptions: [],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+        showWorkspaceCopy={false}
+      />
+    );
+
+    expect(screen.getByText('Image endpoint missing')).toBeInTheDocument();
+    expect(screen.queryByText(/Workspace controls apply/i)).not.toBeInTheDocument();
+  });
 });

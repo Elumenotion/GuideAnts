@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AntRunner.Chat.LlamaCpp", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GuideAnts.Logging", "GuideAnts.Logging\GuideAnts.Logging.csproj", "{D4DCA4B1-3739-47E3-866C-CB13D34E1822}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScriptExecutionAgent.Tests", "ScriptExecutionAgent.Tests\ScriptExecutionAgent.Tests.csproj", "{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -223,6 +225,18 @@ Global
 		{D4DCA4B1-3739-47E3-866C-CB13D34E1822}.Release|x64.Build.0 = Release|Any CPU
 		{D4DCA4B1-3739-47E3-866C-CB13D34E1822}.Release|x86.ActiveCfg = Release|Any CPU
 		{D4DCA4B1-3739-47E3-866C-CB13D34E1822}.Release|x86.Build.0 = Release|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Debug|x64.Build.0 = Debug|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Debug|x86.Build.0 = Debug|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Release|x64.ActiveCfg = Release|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Release|x64.Build.0 = Release|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Release|x86.ActiveCfg = Release|Any CPU
+		{AEF8CFBE-3274-4C70-A5DB-D80BF64BD44F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

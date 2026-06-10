@@ -83,10 +83,24 @@ describe('LineageTimeline', () => {
       })
     ];
     
-    render(<LineageTimeline events={events} canDownload={false} />);
+    render(<LineageTimeline events={events} canDownload={false} initialRoute="/projects/p1" />);
     
     const notebookButton = screen.getByRole('button', { name: /📓 Data Analysis Notebook/i });
-    expect(notebookButton).toBeInTheDocument();
+    await userEvent.click(notebookButton);
     expect(notebookButton).toHaveAttribute('title', 'Open Data Analysis Notebook notebook');
+  });
+
+  it('renders icons for lineage action variants', () => {
+    const events = [
+      makeEvent({ id: 'e1', action: 'PublishedToProject' }),
+      makeEvent({ id: 'e2', action: 'Moved' }),
+      makeEvent({ id: 'e3', action: 'Renamed' }),
+      makeEvent({ id: 'e4', action: 'UnknownAction' }),
+    ];
+    render(<LineageTimeline events={events} canDownload={false} />);
+    expect(screen.getByText('PublishedToProject')).toBeInTheDocument();
+    expect(screen.getByText('Moved')).toBeInTheDocument();
+    expect(screen.getByText('Renamed')).toBeInTheDocument();
+    expect(screen.getByText('UnknownAction')).toBeInTheDocument();
   });
 }); 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '../../../../test/test-utils';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { AddLinkForm } from '../AddLinkForm';
@@ -16,13 +16,20 @@ const typeUrl = async (input: HTMLInputElement, value: string) => {
 describe('AddLinkForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (window as unknown as { electron?: unknown }).electron = undefined;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    (window as unknown as { electron?: unknown }).electron = undefined;
   });
 
-  it('shows validation error when submitting empty or invalid URL', async () => {
+  it('disables submit when URL is empty', () => {
+    render(<AddLinkForm onAdd={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /add link/i })).toBeDisabled();
+  });
+
+  it('shows validation error when submitting invalid URL', async () => {
     const onAdd = vi.fn();
     render(<AddLinkForm onAdd={onAdd} onCancel={vi.fn()} />);
 
@@ -32,6 +39,7 @@ describe('AddLinkForm', () => {
     await userEvent.click(screen.getByRole('button', { name: /add link/i }));
 
     expect(onAdd).not.toHaveBeenCalled();
+    expect(await screen.findByText(/valid url starting with http/i)).toBeInTheDocument();
   });
 
   it('calls onAdd and onCancel when a valid URL is submitted', async () => {
@@ -64,7 +72,21 @@ describe('AddLinkForm', () => {
     expect(await screen.findByText(/failed to add link/i)).toBeInTheDocument();
   });
 
-  it('calls window.open when "Open in new tab" clicked', async () => {
+  it('uses electron openExternal when available', async () => {
+    const openExternal = vi.fn().mockResolvedValue(undefined);
+    (window as unknown as { electron: { openExternal: typeof openExternal } }).electron = {
+      openExternal,
+    };
+
+    render(<AddLinkForm onAdd={vi.fn()} onCancel={vi.fn()} />);
+    const input = screen.getByLabelText(/url/i);
+    await typeUrl(input as HTMLInputElement, 'https://electron.example');
+
+    await userEvent.click(screen.getByRole('button', { name: /open in new tab/i }));
+    expect(openExternal).toHaveBeenCalledWith('https://electron.example');
+  });
+
+  it('calls window.open when electron is unavailable', async () => {
     render(<AddLinkForm onAdd={vi.fn()} onCancel={vi.fn()} />);
 
     const input = screen.getByLabelText(/url/i);
@@ -72,10 +94,10 @@ describe('AddLinkForm', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /open in new tab/i }));
 
-    expect((window.open as any)).toHaveBeenCalledWith(
+    expect(window.open).toHaveBeenCalledWith(
       'https://open-test.com',
       '_blank',
       'noopener,noreferrer',
     );
   });
-}); 
+});

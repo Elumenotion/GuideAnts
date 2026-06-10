@@ -60,4 +60,47 @@ describe('ChatMarkdownViewer', () => {
     const href = link?.getAttribute('href') || '';
     expect(href).not.toContain('data:text/html');
   });
+
+  it('renders ordered list followed by nested bullet', () => {
+    const md = '1. First\n- Nested bullet\n2. Second';
+    const { container } = render(<ChatMarkdownViewer text={md} />);
+
+    const listItems = container.querySelectorAll('li');
+    expect(listItems.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('converts HTML audio tags to playable audio elements', () => {
+    const md = '<audio src="clip.mp3" controls></audio>';
+    const { container } = render(<ChatMarkdownViewer text={md} />);
+
+    const audio = container.querySelector('audio');
+    expect(audio).toBeInTheDocument();
+    expect(audio).toHaveAttribute('src', 'clip.mp3');
+  });
+
+  it('converts HTML video tags to playable video elements', () => {
+    const md = '<video src="demo.mp4" controls></video>';
+    const { container } = render(<ChatMarkdownViewer text={md} />);
+
+    const video = container.querySelector('video');
+    expect(video).toBeInTheDocument();
+    expect(video).toHaveAttribute('src', 'demo.mp4');
+  });
+
+  it('preserves single newlines as line breaks', () => {
+    const md = 'Line one\nLine two';
+    const { container } = render(<ChatMarkdownViewer text={md} />);
+
+    expect(container.querySelector('br')).toBeInTheDocument();
+    expect(container.textContent).toContain('Line one');
+    expect(container.textContent).toContain('Line two');
+  });
+
+  it('renders GFM task list checkboxes', () => {
+    const md = '- [x] Done\n- [ ] Todo';
+    const { container } = render(<ChatMarkdownViewer text={md} />);
+
+    const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+    expect(checkboxes.length).toBe(2);
+  });
 }); 

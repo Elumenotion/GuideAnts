@@ -30,4 +30,17 @@ describe('notebookPath', () => {
   it('matches case-insensitively', () => {
     expect(notebookPathMatches('output/docs/Guide.md', 'Output/docs/guide.md')).toBe(true);
   });
+
+  it('returns no candidates for blank paths and rejects empty candidate matches', () => {
+    expect(getNotebookPathCandidates('   ')).toEqual([]);
+    expect(notebookPathMatches('', 'docs/guide.md')).toBe(false);
+  });
+
+  it('handles output-prefixed candidate generation', () => {
+    expect(getNotebookPathCandidates('output/report.md')).toEqual([
+      'output/report.md',
+      'report.md',
+      'Output/report.md',
+    ]);
+  });
 });

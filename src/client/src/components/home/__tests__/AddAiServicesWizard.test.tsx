@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import AddAiServicesWizard from '../AddAiServicesWizard';
 import { api } from '../../../services/api';
+import {
+  HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS,
+  HUGGINGFACE_SERVICE_PROVIDER_IDS,
+  OPENAI_SERVICE_PROVIDER_IDS,
+  OPENROUTER_SERVICE_PROVIDER_IDS,
+} from '../addAiServicesWizard/constants';
 
 vi.mock('../../../services/api', () => ({
   api: {
@@ -12,6 +18,8 @@ vi.mock('../../../services/api', () => ({
       getSection: vi.fn(),
       updateSection: vi.fn(),
       addModel: vi.fn(),
+      getRuntimeProfiles: vi.fn(),
+      getLlamaInventory: vi.fn(),
       chatDefaults: {
         get: vi.fn(),
         update: vi.fn(),
@@ -20,6 +28,10 @@ vi.mock('../../../services/api', () => ({
         get: vi.fn(),
         updateProviderFields: vi.fn(),
         updateActiveProvider: vi.fn(),
+      },
+      localModels: {
+        cancelOperation: vi.fn(),
+        getOperation: vi.fn(),
       },
     },
   },
@@ -36,6 +48,14 @@ describe('AddAiServicesWizard', () => {
     let coreApiVersion = '2025-04-01-preview';
     let coreApiKeyStored = false;
     let geminiApiKeyStored = false;
+    let openAiApiKeyStored = false;
+    let openAiEndpoint = '';
+    let hfTokenStored = false;
+    let hfRouterBaseUrl = HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS.routerBaseUrl;
+    let openRouterApiKeyStored = false;
+    let openRouterBaseUrl = 'https://openrouter.ai/api/v1';
+    let openRouterHttpReferer = '';
+    let openRouterAppTitle = '';
     let models: Array<{
       modelId: string;
       displayName: string;
@@ -90,6 +110,24 @@ describe('AddAiServicesWizard', () => {
         readinessStatus: geminiApiKeyStored ? 'configured' : 'unconfigured',
         missingFields: geminiApiKeyStored ? [] : ['ApiKey'],
       },
+      {
+        sectionName: 'OpenAI',
+        hasSecrets: true,
+        readinessStatus: openAiApiKeyStored ? 'configured' : 'unconfigured',
+        missingFields: openAiApiKeyStored ? [] : ['ApiKey'],
+      },
+      {
+        sectionName: 'HuggingFace',
+        hasSecrets: true,
+        readinessStatus: hfTokenStored ? 'configured' : 'unconfigured',
+        missingFields: hfTokenStored ? [] : ['Token'],
+      },
+      {
+        sectionName: 'OpenRouter',
+        hasSecrets: true,
+        readinessStatus: openRouterApiKeyStored ? 'configured' : 'unconfigured',
+        missingFields: openRouterApiKeyStored ? [] : ['ApiKey'],
+      },
     ]);
 
     vi.mocked(api.settings.getSections).mockImplementation(async () => getSectionSummaries());
@@ -141,6 +179,35 @@ describe('AddAiServicesWizard', () => {
             },
           ],
         },
+        {
+          sectionName: 'OpenAI',
+          schemaVersion: 1,
+          hasSecrets: true,
+          properties: [
+            { name: 'ApiKey', valueType: 'string', isSecret: true, isEditable: true, isRequired: true },
+            { name: 'Endpoint', valueType: 'string', isSecret: false, isEditable: true, isRequired: false },
+          ],
+        },
+        {
+          sectionName: 'HuggingFace',
+          schemaVersion: 1,
+          hasSecrets: true,
+          properties: [
+            { name: 'Token', valueType: 'string', isSecret: true, isEditable: true, isRequired: true },
+            { name: 'RouterBaseUrl', valueType: 'string', isSecret: false, isEditable: true, isRequired: true },
+          ],
+        },
+        {
+          sectionName: 'OpenRouter',
+          schemaVersion: 1,
+          hasSecrets: true,
+          properties: [
+            { name: 'ApiKey', valueType: 'string', isSecret: true, isEditable: true, isRequired: true },
+            { name: 'BaseUrl', valueType: 'string', isSecret: false, isEditable: true, isRequired: true },
+            { name: 'HttpReferer', valueType: 'string', isSecret: false, isEditable: true, isRequired: false },
+            { name: 'AppTitle', valueType: 'string', isSecret: false, isEditable: true, isRequired: false },
+          ],
+        },
       ],
       services: [],
       providers: [],
@@ -180,6 +247,44 @@ describe('AddAiServicesWizard', () => {
           },
         };
       }
+      if (sectionName === 'OpenAI') {
+        return {
+          ...base,
+          payload: {
+            ApiKey: '',
+            Endpoint: openAiEndpoint,
+          },
+          secretHasValue: {
+            ApiKey: openAiApiKeyStored,
+          },
+        };
+      }
+      if (sectionName === 'HuggingFace') {
+        return {
+          ...base,
+          payload: {
+            Token: '',
+            RouterBaseUrl: hfRouterBaseUrl,
+          },
+          secretHasValue: {
+            Token: hfTokenStored,
+          },
+        };
+      }
+      if (sectionName === 'OpenRouter') {
+        return {
+          ...base,
+          payload: {
+            ApiKey: '',
+            BaseUrl: openRouterBaseUrl,
+            HttpReferer: openRouterHttpReferer,
+            AppTitle: openRouterAppTitle,
+          },
+          secretHasValue: {
+            ApiKey: openRouterApiKeyStored,
+          },
+        };
+      }
       return base;
     });
     vi.mocked(api.settings.updateSection).mockImplementation(async (sectionName: string, request: any) => {
@@ -195,6 +300,39 @@ describe('AddAiServicesWizard', () => {
         const payload = request?.payload ?? {};
         if (typeof payload.ApiKey === 'string' && payload.ApiKey.trim().length > 0) {
           geminiApiKeyStored = true;
+        }
+      }
+      if (sectionName === 'OpenAI') {
+        const payload = request?.payload ?? {};
+        if (typeof payload.ApiKey === 'string' && payload.ApiKey.trim().length > 0) {
+          openAiApiKeyStored = true;
+        }
+        if (typeof payload.Endpoint === 'string') {
+          openAiEndpoint = payload.Endpoint;
+        }
+      }
+      if (sectionName === 'HuggingFace') {
+        const payload = request?.payload ?? {};
+        if (typeof payload.Token === 'string' && payload.Token.trim().length > 0) {
+          hfTokenStored = true;
+        }
+        if (typeof payload.RouterBaseUrl === 'string' && payload.RouterBaseUrl.trim().length > 0) {
+          hfRouterBaseUrl = payload.RouterBaseUrl;
+        }
+      }
+      if (sectionName === 'OpenRouter') {
+        const payload = request?.payload ?? {};
+        if (typeof payload.ApiKey === 'string' && payload.ApiKey.trim().length > 0) {
+          openRouterApiKeyStored = true;
+        }
+        if (typeof payload.BaseUrl === 'string' && payload.BaseUrl.trim().length > 0) {
+          openRouterBaseUrl = payload.BaseUrl;
+        }
+        if (typeof payload.HttpReferer === 'string') {
+          openRouterHttpReferer = payload.HttpReferer;
+        }
+        if (typeof payload.AppTitle === 'string') {
+          openRouterAppTitle = payload.AppTitle;
         }
       }
       rowVersion += 1;
@@ -240,6 +378,31 @@ describe('AddAiServicesWizard', () => {
     vi.mocked(api.settings.services.get).mockRejectedValue(new Error('service state not needed for this test'));
     vi.mocked(api.settings.services.updateProviderFields).mockResolvedValue(undefined as never);
     vi.mocked(api.settings.services.updateActiveProvider).mockResolvedValue(undefined as never);
+    vi.mocked(api.settings.getRuntimeProfiles).mockResolvedValue([
+      {
+        profileId: 'qwen3_6',
+        displayName: 'Qwen 3.6',
+        providerKind: 'llama-cpp',
+        description: 'Test profile',
+        isDefault: true,
+        samplingParametersJson: null,
+        reasoningEffort: null,
+      },
+    ] as any);
+    vi.mocked(api.settings.getLlamaInventory).mockResolvedValue([
+      {
+        routerModelId: 'qwen3-local',
+        runtimeState: 'unloaded',
+        hasModelFile: true,
+        hasMmprojFile: false,
+        catalogModelIds: [],
+        notebookReferenceCount: 0,
+        modelPath: '/models/qwen3.gguf',
+        mmprojPath: null,
+      },
+    ] as any);
+    vi.mocked(api.settings.localModels.cancelOperation).mockResolvedValue(undefined as never);
+    vi.mocked(api.settings.localModels.getOperation).mockRejectedValue(new Error('not used'));
   });
 
   it('shows both provider paths in the first step', async () => {
@@ -579,6 +742,263 @@ describe('AddAiServicesWizard', () => {
     await screen.findByRole('heading', { name: /Finish setup/i });
     expect(onDismiss).not.toHaveBeenCalled();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(onDismiss).toHaveBeenCalledWith(false));
+  });
+
+  it('completes the OpenAI provider happy path through finish', async () => {
+    const onDismiss = vi.fn();
+
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={onDismiss}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'openai' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /OpenAI connection details/i });
+    fireEvent.change(screen.getByLabelText(/api key/i), { target: { value: 'openai-secret-key-12345' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /OpenAI models \(required\)/i });
+    fireEvent.change(screen.getByLabelText(/^Model$/i), { target: { value: 'gpt-4.1-mini' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() =>
+      expect(api.settings.addModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'openai-chat',
+          catalog: expect.objectContaining({ modelId: 'gpt-4.1-mini' }),
+        })
+      )
+    );
+
+    await screen.findByRole('heading', { name: /Optional OpenAI services/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() =>
+      expect(api.settings.services.updateProviderFields).toHaveBeenCalledWith(
+        'SpeechTranscription',
+        OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription,
+        expect.objectContaining({ ModelId: 'whisper-1' })
+      )
+    );
+
+    await screen.findByRole('heading', { name: /Finish setup/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(onDismiss).toHaveBeenCalledWith(false));
+  });
+
+  it('completes the Hugging Face provider happy path through finish', async () => {
+    const onDismiss = vi.fn();
+
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={onDismiss}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'huggingface' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Hugging Face connection details/i });
+    fireEvent.change(screen.getByLabelText(/^Token$/i), { target: { value: 'hf-secret-token-12345' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Hugging Face chat models \(required\)/i });
+    fireEvent.change(screen.getByLabelText(/^Model$/i), { target: { value: 'deepseek-ai/DeepSeek-V4-Pro' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() =>
+      expect(api.settings.addModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'hf-inference-chat',
+          catalog: expect.objectContaining({ modelId: 'deepseek-ai/DeepSeek-V4-Pro' }),
+        })
+      )
+    );
+
+    await screen.findByRole('heading', { name: /Optional Hugging Face services/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() =>
+      expect(api.settings.services.updateProviderFields).toHaveBeenCalledWith(
+        'Embeddings',
+        HUGGINGFACE_SERVICE_PROVIDER_IDS.Embeddings,
+        expect.objectContaining({ ModelId: 'microsoft/harrier-oss-v1-0.6b' })
+      )
+    );
+
+    await screen.findByRole('heading', { name: /Finish setup/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(onDismiss).toHaveBeenCalledWith(false));
+  });
+
+  it('completes the OpenRouter provider happy path through finish', async () => {
+    const onDismiss = vi.fn();
+
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={onDismiss}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'openrouter' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /OpenRouter connection details/i });
+    fireEvent.change(screen.getByLabelText(/api key/i), { target: { value: 'openrouter-secret-key-12345' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /OpenRouter models \(required\)/i });
+    fireEvent.change(screen.getByLabelText(/^Model$/i), { target: { value: 'minimax/minimax-m3' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() =>
+      expect(api.settings.addModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'openrouter-chat',
+          catalog: expect.objectContaining({ modelId: 'minimax/minimax-m3' }),
+        })
+      )
+    );
+
+    await screen.findByRole('heading', { name: /Optional OpenRouter services/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() =>
+      expect(api.settings.services.updateProviderFields).toHaveBeenCalledWith(
+        'Embeddings',
+        OPENROUTER_SERVICE_PROVIDER_IDS.Embeddings,
+        expect.objectContaining({ ModelId: 'nvidia/llama-nemotron-embed-vl-1b-v2:free' })
+      )
+    );
+
+    await screen.findByRole('heading', { name: /Finish setup/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(onDismiss).toHaveBeenCalledWith(false));
+  });
+
+  it('completes the Local AI happy path with an existing catalog model and skipped service steps', async () => {
+    const onDismiss = vi.fn();
+    vi.mocked(api.settings.getModels).mockResolvedValue([
+      {
+        modelId: 'qwen3-local',
+        displayName: 'Qwen 3 Local',
+        provider: 'llama-cpp',
+        isActive: true,
+        created: NOW,
+      },
+    ]);
+
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={onDismiss}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'local-ai' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Local AI Prerequisites/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Local Chat Models/i });
+    expect(screen.getByText('qwen3-local')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    for (let index = 0; index < 5; index += 1) {
+      const skipButton = await screen.findByRole('button', { name: 'Skip this service' });
+      fireEvent.click(skipButton);
+    }
+
+    await screen.findByRole('heading', { name: /Finish setup/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(onDismiss).toHaveBeenCalledWith(false));
+  });
+
+  it('installs a local model via existing alias and reaches the finish step', async () => {
+    const onDismiss = vi.fn();
+    vi.mocked(api.settings.addModel).mockImplementation(async (request: any) => ({
+      operationId: undefined,
+      addOperation: {
+        kind: 'sync',
+        status: 'completed',
+        catalogModel: {
+          modelId: request.catalog.modelId,
+          displayName: request.catalog.displayName,
+          provider: request.provider,
+          isActive: true,
+          created: NOW,
+        },
+      },
+    } as any));
+
+    render(
+      <AddAiServicesWizard
+        isOpen={true}
+        onDismiss={onDismiss}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    const providerSelect = await screen.findByLabelText(/provider/i);
+    fireEvent.change(providerSelect, { target: { value: 'local-ai' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Local AI Prerequisites/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await screen.findByRole('heading', { name: /Local Chat Models/i });
+    await waitFor(() => expect(api.settings.getRuntimeProfiles).toHaveBeenCalled());
+
+    const installSection = screen.getByText('Install a model').closest('.rounded.border') as HTMLElement;
+    const [installSourceSelect] = within(installSection).getAllByRole('combobox');
+    fireEvent.change(installSourceSelect, { target: { value: 'existingAlias' } });
+    await waitFor(() => {
+      const controls = within(installSection).getAllByRole('combobox');
+      expect(controls).toHaveLength(3);
+    });
+    const [, runtimeProfileSelect, existingAliasSelect] = within(installSection).getAllByRole('combobox');
+    fireEvent.change(runtimeProfileSelect, { target: { value: 'qwen3_6' } });
+    fireEvent.change(existingAliasSelect, { target: { value: 'qwen3-local' } });
+    fireEvent.click(screen.getByRole('button', { name: /Install model/i }));
+
+    await waitFor(() =>
+      expect(api.settings.addModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'llama-cpp',
+          catalog: expect.objectContaining({ modelId: 'qwen3-local' }),
+        })
+      )
+    );
+
+    await waitFor(() => expect(screen.getByText('Installed')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    for (let index = 0; index < 5; index += 1) {
+      const skipButton = await screen.findByRole('button', { name: 'Skip this service' });
+      fireEvent.click(skipButton);
+    }
+
+    await screen.findByRole('heading', { name: /Finish setup/i });
     fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
     await waitFor(() => expect(onDismiss).toHaveBeenCalledWith(false));
   });

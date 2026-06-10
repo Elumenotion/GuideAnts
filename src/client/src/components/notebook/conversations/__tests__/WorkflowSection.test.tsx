@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import WorkflowSection from '../WorkflowSection';
 import { MessageDto, StreamingTurn } from '../../../../types/conversation';
 import { ToastProvider } from '../../../common/Toast';
@@ -23,13 +23,41 @@ vi.mock('../../../../contexts/ConversationContext', () => ({
   reducer: vi.fn()
 }));
 
+const mockUploadFiles = vi.fn();
+const mockNotebookContext = {
+  folderTree: null,
+  uploadFiles: mockUploadFiles,
+  notebookFiles: [] as unknown[],
+  notebook: { title: 'Test Notebook' },
+  projectId: 'project-1',
+  notebookId: 'notebook-1',
+};
+
 // Mock the NotebookContext
 vi.mock('../../../../contexts/NotebookContext', () => ({
-  useNotebook: () => ({
-    folderTree: null,
-    uploadFiles: vi.fn(),
-    notebookFiles: []
-  })
+  useNotebook: () => mockNotebookContext,
+}));
+
+vi.mock('../../dialogs/SaveAssistantContentDialog', () => ({
+  SaveAssistantContentDialog: ({
+    isOpen,
+    onClose,
+    onSave,
+  }: {
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (fileName: string) => Promise<void>;
+  }) =>
+    isOpen ? (
+      <div data-testid="save-dialog">
+        <button type="button" onClick={() => void onSave('saved-tool.md')}>
+          Confirm save
+        </button>
+        <button type="button" onClick={onClose}>
+          Close save
+        </button>
+      </div>
+    ) : null,
 }));
 
 const renderWithProviders = (component: React.ReactElement) => {
@@ -41,6 +69,15 @@ const renderWithProviders = (component: React.ReactElement) => {
 };
 
 describe('WorkflowSection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConversationContext.currentTurn = undefined;
+    mockConversationContext.isStreamingThinking = false;
+    mockConversationContext.isStreamingToolCalls = false;
+    mockConversationContext.streamingProgress = { currentPhase: 'complete', completedSteps: 0, totalSteps: 0 };
+    mockUploadFiles.mockResolvedValue(undefined);
+  });
+
   const mockToolCallMessage: MessageDto = {
     id: 'assistant-1',
     role: 'assistant',
@@ -408,5 +445,197 @@ describe('WorkflowSection', () => {
       mockConversationContext.isStreamingToolCalls = false;
       mockConversationContext.streamingProgress = { currentPhase: 'complete', completedSteps: 0, totalSteps: 0 };
     });
+  });
+
+  it('toggles workflow visibility with Hide and Show buttons', () => {
+    const messages = [mockToolCallMessage, mockToolResultMessage];
+    renderWithProviders(<WorkflowSection messages={messages} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+    expect(screen.getByText('runPython')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Hide workflow/ }));
+    expect(screen.queryByText('Parameters:')).not.toBeInTheDocument();
+  });
+
+  it('shows parallel tool execution label', () => {
+    const parallelToolCallMessage: MessageDto = {
+      id: 'assistant-parallel',
+      role: 'assistant',
+      content: '',
+      isEdited: false,
+      created: '2025-01-07T10:00:00Z',
+      toolCalls: [
+        { id: 'call_1', type: 'function', function: { name: 'tool1', arguments: '{}' } },
+        { id: 'call_2', type: 'function', function: { name: 'tool2', arguments: '{}' } },
+      ],
+    };
+
+    renderWithProviders(<WorkflowSection messages={[parallelToolCallMessage]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+
+    expect(screen.getByText(/Tool Execution \(2 parallel\)/)).toBeInTheDocument();
+  });
+
+  it('shows millisecond duration for fast tool calls', () => {
+    const fastCall: MessageDto = {
+      ...mockToolCallMessage,
+      created: '2025-01-07T10:00:00.000Z',
+    };
+    const fastResult: MessageDto = {
+      ...mockToolResultMessage,
+      created: '2025-01-07T10:00:00.200Z',
+    };
+
+    renderWithProviders(<WorkflowSection messages={[fastCall, fastResult]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+
+    expect(screen.getByText(/200ms/)).toBeInTheDocument();
+  });
+
+  it('renders invalid JSON tool arguments as raw text', () => {
+    const badArgsMessage: MessageDto = {
+      id: 'assistant-bad-json',
+      role: 'assistant',
+      content: '',
+      isEdited: false,
+      created: '2025-01-07T10:00:00Z',
+      toolCalls: [{
+        id: 'call_bad',
+        type: 'function',
+        function: { name: 'brokenTool', arguments: 'not-json' },
+      }],
+    };
+    const badResult: MessageDto = {
+      id: 'tool-bad',
+      role: 'tool',
+      content: 'done',
+      isEdited: false,
+      created: '2025-01-07T10:00:01Z',
+      toolCallId: 'call_bad',
+    };
+
+    renderWithProviders(<WorkflowSection messages={[badArgsMessage, badResult]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+    fireEvent.click(screen.getByText('brokenTool').closest('button')!);
+
+    expect(screen.getByText('not-json')).toBeInTheDocument();
+  });
+
+  it('copies completed tool result to clipboard', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      writable: true,
+      configurable: true,
+    });
+
+    renderWithProviders(<WorkflowSection messages={[mockToolCallMessage, mockToolResultMessage]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+    fireEvent.click(screen.getByLabelText('Copy tool call'));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalled();
+      expect(screen.getByText('Tool call copied to clipboard')).toBeInTheDocument();
+    });
+  });
+
+  it('opens save dialog and uploads tool markdown', async () => {
+    renderWithProviders(<WorkflowSection messages={[mockToolCallMessage, mockToolResultMessage]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+    fireEvent.click(screen.getByLabelText('Save tool call'));
+
+    expect(screen.getByTestId('save-dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Confirm save'));
+
+    await waitFor(() => {
+      expect(mockUploadFiles).toHaveBeenCalled();
+    });
+  });
+
+  it('dispatches refresh-notebook-files when tool group completes', async () => {
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+    renderWithProviders(<WorkflowSection messages={[mockToolCallMessage, mockToolResultMessage]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+
+    await waitFor(() => {
+      expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'refresh-notebook-files' }));
+    });
+
+    dispatchSpy.mockRestore();
+  });
+
+  it('dedupes consecutive assistant thinking steps', () => {
+    const thinkingA: MessageDto = {
+      id: 'assistant-a',
+      role: 'assistant',
+      content: 'Let me think',
+      isEdited: false,
+      created: '2025-01-07T10:00:00Z',
+    };
+    const thinkingB: MessageDto = {
+      id: 'assistant-b',
+      role: 'assistant',
+      content: 'Let me think more deeply',
+      isEdited: false,
+      created: '2025-01-07T10:00:01Z',
+    };
+
+    renderWithProviders(<WorkflowSection messages={[thinkingA, thinkingB]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+
+    expect(screen.getAllByText('Assistant Thinking')).toHaveLength(1);
+    expect(screen.getByTestId('markdown-content')).toHaveTextContent('Let me think more deeply');
+  });
+
+  it('shows default streaming phase label', () => {
+    const streamingTurn: StreamingTurn = {
+      id: 'streaming-default',
+      toolCalls: [],
+      toolResults: [],
+      startTime: new Date('2025-01-07T10:00:00Z'),
+      isComplete: false,
+    };
+
+    mockConversationContext.currentTurn = streamingTurn;
+    mockConversationContext.streamingProgress = {
+      currentPhase: 'unknown-phase',
+      completedSteps: 0,
+      totalSteps: 1,
+    };
+
+    renderWithProviders(<WorkflowSection messages={[]} isStreaming />);
+    expect(screen.getByText('Assistant working...')).toBeInTheDocument();
+  });
+
+  it('shows streaming indicators when expanded during tool execution', () => {
+    const streamingTurn: StreamingTurn = {
+      id: 'streaming-tools',
+      toolCalls: [{
+        id: 'call_stream',
+        name: 'runPython',
+        arguments: '{}',
+        status: 'executing',
+        timestamp: new Date('2025-01-07T10:00:00Z'),
+      }],
+      toolResults: [],
+      startTime: new Date('2025-01-07T10:00:00Z'),
+      isComplete: false,
+    };
+
+    mockConversationContext.currentTurn = streamingTurn;
+    mockConversationContext.isStreamingToolCalls = true;
+    mockConversationContext.streamingProgress = {
+      currentPhase: 'tool_execution',
+      completedSteps: 0,
+      totalSteps: 2,
+    };
+
+    renderWithProviders(<WorkflowSection messages={[]} isStreaming />);
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+
+    expect(screen.getByText(/Assistant is working hard/i)).toBeInTheDocument();
+    expect(screen.getByText(/Processing your request with care/i)).toBeInTheDocument();
   });
 }); 

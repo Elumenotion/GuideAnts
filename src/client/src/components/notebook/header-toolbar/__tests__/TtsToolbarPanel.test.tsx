@@ -129,4 +129,97 @@ describe('TtsToolbarPanel', () => {
     expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });
 
+  it('switches cloud provider and powers local runtime on/off', async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn(async () => {});
+    render(
+      <TtsToolbarPanel
+        service={{
+          serviceId: 'SpeechSynthesis',
+          displayName: 'Speech Synthesis',
+          kind: 'tts',
+          status: 'ready',
+          summary: 'ready',
+          activeProviderId: 'SpeechSynthesis.LocalTts.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          providerOptions: [
+            {
+              providerId: 'SpeechSynthesis.Google.TextToSpeech',
+              displayName: 'GoogleGeminiApi',
+              providerKind: 'Cloud',
+              canActivate: true,
+              blockers: [],
+              providerSection: 'GoogleGeminiApi',
+              modelId: 'tts-1',
+            },
+          ],
+          selection: null,
+          blockers: [],
+          localModelOptions: [
+            { modelRef: 'voice-1', displayLabel: 'voice-1', isComplete: true, isActive: true },
+          ],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={onRefresh}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('option', { name: /google/i }));
+    expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
+      'SpeechSynthesis',
+      'SpeechSynthesis.Google.TextToSpeech'
+    );
+
+    await user.click(screen.getByRole('button', { name: /turn tts runtime on/i }));
+    expect(api.settings.localModels.load).toHaveBeenCalledWith('SpeechSynthesis', {
+      model_path: 'voice-1',
+    });
+
+    await user.click(screen.getByRole('button', { name: /turn tts runtime off/i }));
+    expect(api.settings.localModels.unload).toHaveBeenCalledWith('SpeechSynthesis');
+  });
+
+  it('disables incomplete local model options', () => {
+    render(
+      <TtsToolbarPanel
+        service={{
+          serviceId: 'SpeechSynthesis',
+          displayName: 'Speech Synthesis',
+          kind: 'tts',
+          status: 'ready',
+          summary: 'ready',
+          activeProviderId: 'SpeechSynthesis.LocalTts.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          providerOptions: [],
+          selection: null,
+          blockers: [],
+          localModelOptions: [
+            { modelRef: 'voice-partial', displayLabel: 'voice-partial', isComplete: false, isActive: false },
+          ],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('option', { name: /voice-partial/i })).toBeDisabled();
+  });
 });

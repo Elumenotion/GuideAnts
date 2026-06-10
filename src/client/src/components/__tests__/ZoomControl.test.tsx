@@ -64,4 +64,15 @@ describe('ZoomControl', () => {
     // should have been called at least 3 times
     expect(electronMock.setZoom).toHaveBeenCalledTimes(3);
   });
+
+  it('ignores keyboard zoom shortcuts while typing in form fields', () => {
+    render(<ZoomControl />);
+    electronMock.setZoom.mockClear();
+
+    const select = document.createElement('select');
+    document.body.appendChild(select);
+    select.dispatchEvent(new KeyboardEvent('keydown', { key: '=', ctrlKey: true, bubbles: true }));
+    expect(electronMock.setZoom).not.toHaveBeenCalled();
+    document.body.removeChild(select);
+  });
 }); 

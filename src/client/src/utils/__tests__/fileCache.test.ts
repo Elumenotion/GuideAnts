@@ -27,11 +27,21 @@ describe('fileCache utility', () => {
     const put = vi.fn();
     const get = vi.fn().mockResolvedValue(undefined);
     const del = vi.fn();
+    const createObjectStore = vi.fn();
 
-    const dbMock = { put, get, delete: del, objectStoreNames: [] } as any;
+    const dbMock = {
+      put,
+      get,
+      delete: del,
+      objectStoreNames: { contains: () => false },
+      createObjectStore,
+    } as any;
 
     // Mock idb.openDB at runtime (non-hoisted) before importing module under test
-    const openDBMock = vi.fn().mockResolvedValue(dbMock);
+    const openDBMock = vi.fn().mockImplementation((_name, _version, options) => {
+      options?.upgrade?.(dbMock);
+      return Promise.resolve(dbMock);
+    });
 
     vi.doMock('idb', () => ({ openDB: openDBMock }));
 
@@ -50,5 +60,22 @@ describe('fileCache utility', () => {
 
     await deleteCachedFile('p', 'f');
     expect(del).toHaveBeenCalled();
+  });
+
+  it('disables cache when indexedDB open fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const openDBMock = vi.fn().mockRejectedValue(new Error('idb blocked'));
+
+    vi.doMock('idb', () => ({ openDB: openDBMock }));
+
+    // @ts-ignore
+    global.indexedDB = {};
+
+    const { cacheFile, getCachedFile } = await importFresh();
+
+    await cacheFile('p', 'f', { blob: new Blob(), contentType: 'text/plain', fileName: 'x' });
+    await expect(getCachedFile('p', 'f')).resolves.toBeNull();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 }); 

@@ -11,7 +11,7 @@
 | Test-Runner                     | **Vitest ≥ 1.3**                     |
 | Assertion / RTL helpers         | **@testing-library/react**           |
 | DOM emulation                   | **jsdom** (auto by Vitest)           |
-| Coverage                        | **@vitest/coverage-v8** (optional)   |
+| Coverage                        | **@vitest/coverage-v8** — **≥85% lines** enforced in CI |
 | Build / Bundler                 | **Vite**                             |
 | Framework                       | **React 19 + TypeScript strict**     |
 
