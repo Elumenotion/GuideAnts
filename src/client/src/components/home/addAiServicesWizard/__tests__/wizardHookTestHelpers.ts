@@ -16,7 +16,6 @@ export function createProvider(providerId: string, canActivate = true): Provider
   return {
     providerId,
     providerKind: 'Cloud',
-    displayName: providerId,
     providerSection: 'Test',
     modeId: null,
     hasExplicitMode: true,
@@ -36,7 +35,6 @@ export function createProvider(providerId: string, canActivate = true): Provider
 export function createServiceState(serviceId: OptionalServiceKey, providerId: string, canActivate = true): ServiceEditorStateDto {
   return {
     serviceId,
-    displayName: serviceId,
     activeProviderId: providerId,
     providers: [createProvider(providerId, canActivate)],
     readiness: {
@@ -63,32 +61,24 @@ export function createWizardSnapshot(overrides?: Partial<WizardLoadSnapshot>): W
     sectionSummaries: [
       {
         sectionName: EMBEDDINGS_SECTION,
-        displayName: 'Embeddings',
-        displayOrder: 1,
         hasSecrets: true,
         readinessStatus: 'configured',
         missingFields: [],
       },
       {
         sectionName: IMAGES_SECTION,
-        displayName: 'Images',
-        displayOrder: 2,
         hasSecrets: true,
         readinessStatus: 'configured',
         missingFields: [],
       },
       {
         sectionName: SPEECH_SECTION,
-        displayName: 'Speech',
-        displayOrder: 3,
         hasSecrets: true,
         readinessStatus: 'configured',
         missingFields: [],
       },
       {
         sectionName: DOCUMENT_INTELLIGENCE_SECTION,
-        displayName: 'Document Intelligence',
-        displayOrder: 4,
         hasSecrets: true,
         readinessStatus: 'configured',
         missingFields: [],
