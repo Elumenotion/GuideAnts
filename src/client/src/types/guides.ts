@@ -360,6 +360,10 @@ export interface PublishedGuideDto {
   showAttachments?: boolean;
   /** Indicates whether an API key is configured (the key itself is never returned) */
   hasApiKey?: boolean;
+  /** Whether MCP (Model Context Protocol) access is enabled */
+  mcpEnabled?: boolean;
+  /** Client-facing description for MCP discovery */
+  mcpDescription?: string | null;
 }
 
 /** Response returned when generating or regenerating an API key */
@@ -386,6 +390,8 @@ export interface PublishGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  mcpEnabled?: boolean;
+  mcpDescription?: string;
 }
 
 export interface UpdatePublishedGuideDto {
@@ -403,4 +409,6 @@ export interface UpdatePublishedGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  mcpEnabled?: boolean;
+  mcpDescription?: string;
 }

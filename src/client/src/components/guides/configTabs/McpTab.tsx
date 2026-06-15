@@ -1,0 +1,261 @@
+import { useState } from 'react';
+import { API_BASE_URL } from '../../../config/apiConfig';
+
+interface McpTabProps {
+  mcpEnabled: boolean;
+  setMcpEnabled: (enabled: boolean) => void;
+  mcpDescription: string;
+  setMcpDescription: (desc: string) => void;
+  hasApiKey: boolean;
+  publishedGuideId?: string;
+  onGenerateApiKey?: () => Promise<string>;
+}
+
+export function McpTab({
+  mcpEnabled,
+  setMcpEnabled,
+  mcpDescription,
+  setMcpDescription,
+  hasApiKey,
+  publishedGuideId,
+  onGenerateApiKey
+}: McpTabProps) {
+  const [copied, setCopied] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [keyCopied, setKeyCopied] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+
+  // GuideAnts API_BASE_URL already includes the "/api" prefix, so the resolved
+  // endpoint is "<base>/api/published/mcp?pubId=..." per the cross-team contract.
+  const mcpEndpointUrl = publishedGuideId
+    ? `${API_BASE_URL}/published/mcp?pubId=${publishedGuideId}`
+    : null;
+
+  const copyEndpoint = async () => {
+    if (mcpEndpointUrl) {
+      await navigator.clipboard.writeText(mcpEndpointUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleGenerateAndEnable = async () => {
+    if (!onGenerateApiKey) return;
+    setIsGenerating(true);
+    setGenError(null);
+    try {
+      const key = await onGenerateApiKey();
+      setGeneratedKey(key);
+      setMcpEnabled(true);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to generate API key';
+      setGenError(message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const copyApiKey = async () => {
+    if (generatedKey) {
+      await navigator.clipboard.writeText(generatedKey);
+      setKeyCopied(true);
+      setTimeout(() => setKeyCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-medium text-gray-900">MCP Server</h3>
+        <p className="text-sm text-gray-500 mt-1">
+          Expose this guide as a <a href="https://modelcontextprotocol.io" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">Model Context Protocol</a> server so AI agents and MCP clients can interact with it programmatically.
+        </p>
+      </div>
+
+      {/* Client-facing description — always visible so it can be drafted before enabling */}
+      <div>
+        <label htmlFor="mcpDescription" className="block text-sm font-medium text-gray-700 mb-1">
+          Guide Description for MCP Clients
+        </label>
+        <textarea
+          id="mcpDescription"
+          value={mcpDescription}
+          onChange={(e) => setMcpDescription(e.target.value)}
+          rows={4}
+          maxLength={2000}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y"
+          placeholder={"Describe what this guide does and how MCP clients should interact with it.\n\nExample: This guide assists with software architecture design. It has access to code execution and diagram tools. Provide requirements or paste existing code for review. Supports multi-turn conversations for iterative design work."}
+        />
+        <div className="flex justify-between mt-1">
+          <p className="text-xs text-gray-500">
+            Shown as the tool description for the guide assistant in <code className="bg-gray-100 px-1 rounded">tools/list</code>.
+          </p>
+          <span className="text-xs text-gray-400">{mcpDescription.length}/2000</span>
+        </div>
+      </div>
+
+      {!hasApiKey ? (
+        <div className="space-y-4">
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <div>
+                <p className="text-sm font-medium text-amber-900">API key required</p>
+                <p className="text-sm text-amber-700 mt-1">
+                  MCP access requires API key authentication. Generate one to get started.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {onGenerateApiKey ? (
+            <button
+              type="button"
+              onClick={handleGenerateAndEnable}
+              disabled={isGenerating}
+              className="w-full px-4 py-3 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isGenerating ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                  Generate API Key &amp; Enable MCP
+                </>
+              )}
+            </button>
+          ) : (
+            <p className="text-xs text-gray-500 italic">
+              Publish the guide first, then return here to generate an API key and enable MCP.
+            </p>
+          )}
+
+          {genError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+              {genError}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {/* Show freshly generated key */}
+          {generatedKey && (
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-sm font-medium text-green-800">API Key Generated &amp; MCP Enabled</span>
+              </div>
+              <div className="flex items-center gap-2 mb-3">
+                <code className="flex-1 px-3 py-2 bg-white border border-green-300 rounded font-mono text-xs text-gray-900 select-all break-all">
+                  {generatedKey}
+                </code>
+                <button
+                  type="button"
+                  onClick={copyApiKey}
+                  className="px-3 py-2 text-xs font-medium text-green-700 bg-white border border-green-300 rounded hover:bg-green-50 flex-shrink-0"
+                >
+                  {keyCopied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                <p className="font-medium">Save this key now!</p>
+                <p className="mt-1">This API key will only be displayed once. Store it securely — you will not be able to retrieve it again.</p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between py-3 border-b border-gray-100">
+            <div>
+              <span className="block text-sm font-medium text-gray-700">Enable MCP Endpoint</span>
+              <span className="block text-xs text-gray-500">Allow MCP clients to connect using the API key for authentication</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mcpEnabled}
+                onChange={(e) => setMcpEnabled(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
+
+          {mcpEnabled && mcpEndpointUrl && (
+            <div className="space-y-4">
+              <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                <p className="text-xs font-medium text-purple-800 mb-2">Endpoint URL</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 bg-white border border-purple-300 rounded font-mono text-xs text-gray-900 select-all break-all">
+                    {mcpEndpointUrl}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={copyEndpoint}
+                    className="px-3 py-2 text-xs font-medium text-purple-700 bg-white border border-purple-300 rounded hover:bg-purple-50 flex-shrink-0"
+                  >
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-gray-200 rounded-lg p-4">
+                <h4 className="text-sm font-medium text-gray-900 mb-3">Connection Details</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-start gap-2">
+                    <span className="text-gray-500 flex-shrink-0 w-20">Transport:</span>
+                    <span className="text-gray-900">HTTP (Streamable HTTP), stateless</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-gray-500 flex-shrink-0 w-20">Method:</span>
+                    <span className="text-gray-900 font-mono text-xs">POST</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-gray-500 flex-shrink-0 w-20">Auth header:</span>
+                    <code className="text-gray-900 bg-gray-100 px-1.5 py-0.5 rounded text-xs">x-guideants-apikey: gak_...</code>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border border-gray-200 rounded-lg p-4">
+                <h4 className="text-sm font-medium text-gray-900 mb-3">MCP Tools</h4>
+                <div className="space-y-3 text-sm text-gray-600">
+                  <p>
+                    <code className="text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded text-xs font-medium">tools/list</code>{' '}
+                    returns one tool per addressable assistant — the guide plus each crew member — using each assistant&apos;s name and description.
+                  </p>
+                  <p>
+                    Each assistant tool accepts <code className="bg-gray-100 px-1 rounded text-xs">instructions</code> and an optional{' '}
+                    <code className="bg-gray-100 px-1 rounded text-xs">conversationId</code> to continue on a shared thread (you can switch assistants between turns).
+                  </p>
+                  <p>
+                    <code className="text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded text-xs font-medium">conversation_get</code>{' '}
+                    retrieves conversation history. Client-side tool execution is not supported over MCP.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mcpEnabled && !publishedGuideId && (
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600 italic">
+              The MCP endpoint URL will be shown after saving.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

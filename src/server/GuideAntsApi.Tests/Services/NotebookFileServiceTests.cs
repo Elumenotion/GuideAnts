@@ -287,6 +287,51 @@ public class NotebookFileServiceTests
     }
 
     [TestMethod]
+    public async Task GetFileContentStreamAsync_ResolvesCwdRelativeFilenameInRunsFolder()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+            await ctx.SaveChangesAsync();
+
+            var notebookRoot = Path.Combine(tmpDir, project.Id.ToString(), "notebooks", notebook.Id.ToString());
+            var runPath = Path.Combine(notebookRoot, "Runs", "ABC123");
+            Directory.CreateDirectory(runPath);
+            var filePath = Path.Combine(runPath, "friendly_duck.png");
+            await File.WriteAllBytesAsync(filePath, [0x89, 0x50, 0x4E, 0x47]);
+
+            ctx.NotebookFiles.Add(new NotebookFile
+            {
+                Id = Guid.NewGuid(),
+                NotebookId = notebook.Id,
+                RelativePath = "Runs/ABC123/friendly_duck.png",
+                FileSize = new FileInfo(filePath).Length,
+                LastModifiedUtc = DateTime.UtcNow,
+                FileHash = "abc",
+                Created = DateTime.UtcNow
+            });
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, tmpDir);
+            var result = await svc.GetFileContentStreamAsync(project.Id, notebook.Id, "friendly_duck.png");
+
+            Assert.AreEqual("image/png", result.contentType);
+            await result.stream.DisposeAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
     public async Task GetFileContentStreamAsync_AllowsLlmRelativePathResolution()
     {
         var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());

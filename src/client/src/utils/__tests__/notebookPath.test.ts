@@ -23,6 +23,10 @@ describe('notebookPath', () => {
     ]);
   });
 
+  it('matches CWD-relative filenames to Runs folder paths', () => {
+    expect(notebookPathMatches('Runs/ABC123/friendly_duck.png', 'friendly_duck.png')).toBe(true);
+  });
+
   it('matches CWD-relative assistant paths to Output tree paths', () => {
     expect(notebookPathMatches('Output/docs/guideants-product-sheet-v2.md', 'docs/guideants-product-sheet-v2.md')).toBe(true);
   });

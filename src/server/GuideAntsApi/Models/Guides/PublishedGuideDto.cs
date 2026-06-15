@@ -30,6 +30,16 @@ public class PublishedGuideDto
     /// The actual key is never returned - only shown once at creation/regeneration.
     /// </summary>
     public bool HasApiKey { get; set; }
+
+    /// <summary>
+    /// Whether MCP (Model Context Protocol) access is enabled for this published guide.
+    /// </summary>
+    public bool McpEnabled { get; set; }
+
+    /// <summary>
+    /// Client-facing description for MCP discovery. Describes what this guide does and how to use it.
+    /// </summary>
+    public string? McpDescription { get; set; }
 }
 
 public class PublishGuideDto
@@ -52,6 +62,9 @@ public class PublishGuideDto
     public bool Collapsible { get; set; }
     public bool ShowConversationStarters { get; set; }
     public bool ShowAttachments { get; set; }
+    public bool McpEnabled { get; set; }
+    [StringLength(2000)]
+    public string? McpDescription { get; set; }
 }
 
 public class UpdatePublishedGuideDto
@@ -73,6 +86,9 @@ public class UpdatePublishedGuideDto
     public bool Collapsible { get; set; }
     public bool ShowConversationStarters { get; set; }
     public bool ShowAttachments { get; set; }
+    public bool McpEnabled { get; set; }
+    [StringLength(2000)]
+    public string? McpDescription { get; set; }
 }
 
 /// <summary>
