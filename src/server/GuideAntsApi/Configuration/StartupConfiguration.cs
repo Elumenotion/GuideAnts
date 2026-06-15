@@ -32,6 +32,7 @@ using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.NotebookHeaderToolbar;
+using GuideAntsApi.Services.Mcp;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace GuideAntsApi.Configuration;
@@ -366,6 +367,20 @@ public static class StartupConfiguration
             client.Timeout = TimeSpan.FromMinutes(15);
         });
         services.AddScoped<INotebookPodcastService, NotebookPodcastService>();
+
+        // MCP (Model Context Protocol) server for published guides
+        services.Configure<McpImageEmbeddingOptions>(
+            configuration.GetSection(McpImageEmbeddingOptions.SectionName));
+        services.AddScoped<McpPublishedGuideContext>();
+        services.AddScoped<McpPublishedGuideInvokeService>();
+        services.AddScoped<McpPublishedRunImageEmbedder>();
+        services.AddMcpServer()
+            .WithHttpTransport(options =>
+            {
+                options.Stateless = true;
+            })
+            .WithListToolsHandler(McpPublishedGuideToolHandlers.ListToolsAsync)
+            .WithCallToolHandler(McpPublishedGuideToolHandlers.CallToolAsync);
 
     }
 

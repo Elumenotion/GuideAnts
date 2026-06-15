@@ -123,6 +123,22 @@ namespace GuideAntsApi.DataModel.Models
         public string? ApiKeyHash { get; set; }
 
         /// <summary>
+        /// Whether MCP (Model Context Protocol) access is enabled for this published guide.
+        /// Requires an API key (ApiKeyHash must be set). When enabled, clients can connect
+        /// via the /api/published/mcp?pubId={id} endpoint using a stateless HTTP transport.
+        /// </summary>
+        public bool McpEnabled { get; set; }
+
+        /// <summary>
+        /// Client-facing description exposed via MCP discovery (guide_info tool).
+        /// Written for external AI agents and MCP clients to understand what this guide does,
+        /// what it's good at, and how to interact with it effectively.
+        /// Not the system prompt — this is specifically crafted for client consumption.
+        /// </summary>
+        [StringLength(2000)]
+        public string? McpDescription { get; set; }
+
+        /// <summary>
         /// Optional maximum customer charge (USD) allowed per UTC day for this published guide's notebook.
         /// When exceeded, the guide is automatically blocked for public access until the next UTC day.
         /// </summary>

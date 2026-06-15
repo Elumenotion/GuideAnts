@@ -38,7 +38,9 @@ public static class GuidesPublishingEndpoints
             Collapsible = pg.Collapsible,
             ShowConversationStarters = pg.ShowConversationStarters,
             ShowAttachments = pg.ShowAttachments,
-            HasApiKey = !string.IsNullOrWhiteSpace(pg.ApiKeyHash)
+            HasApiKey = !string.IsNullOrWhiteSpace(pg.ApiKeyHash),
+            McpEnabled = pg.McpEnabled,
+            McpDescription = pg.McpDescription
         };
     }
 
@@ -203,7 +205,9 @@ var guide = await db.Assistants
                 ShowTurnNavigation = dto.ShowTurnNavigation,
                 Collapsible = dto.Collapsible,
                 ShowConversationStarters = dto.ShowConversationStarters,
-                ShowAttachments = dto.ShowAttachments
+                ShowAttachments = dto.ShowAttachments,
+                McpEnabled = dto.McpEnabled,
+                McpDescription = dto.McpDescription
             };
 
             db.PublishedGuides.Add(publishedGuide);
@@ -324,6 +328,15 @@ var publishedGuide = await db.PublishedGuides
                 return Results.BadRequest(new { error = "Billing period cost limit must be >= 0", field = "billingPeriodChargeLimitUsd" });
             }
 
+            // McpEnabled requires an API key to be configured
+            if (dto.McpEnabled && string.IsNullOrWhiteSpace(publishedGuide.ApiKeyHash))
+            {
+                return Results.BadRequest(new {
+                    error = "MCP requires an API key. Generate one first via the API key endpoint.",
+                    field = "mcpEnabled"
+                });
+            }
+
             // Update fields
             publishedGuide.RetentionPeriod = dto.RetentionPeriod;
             publishedGuide.MaxUserMessageLength = dto.MaxUserMessageLength;
@@ -339,6 +352,8 @@ var publishedGuide = await db.PublishedGuides
             publishedGuide.Collapsible = dto.Collapsible;
             publishedGuide.ShowConversationStarters = dto.ShowConversationStarters;
             publishedGuide.ShowAttachments = dto.ShowAttachments;
+            publishedGuide.McpEnabled = dto.McpEnabled;
+            publishedGuide.McpDescription = dto.McpDescription;
 
             await db.SaveChangesAsync();
 
@@ -486,6 +501,7 @@ publishedGuide.Active = false;
             // Verify project access (must be contributor)
 
 publishedGuide.ApiKeyHash = null;
+            publishedGuide.McpEnabled = false;
             await db.SaveChangesAsync();
 
             return Results.NoContent();
