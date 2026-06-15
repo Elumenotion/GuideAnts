@@ -85,6 +85,10 @@ public static class PublishedGuidesEndpoints
                 collapsible = publishedGuide.Collapsible,
                 showConversationStarters = publishedGuide.ShowConversationStarters,
                 showAttachments = publishedGuide.ShowAttachments,
+                mcpEnabled = publishedGuide.McpEnabled,
+                mcpEndpoint = publishedGuide.McpEnabled
+                    ? $"/api/published/mcp?pubId={publishedGuide.Id}"
+                    : null,
                 conversationStarters = publishedGuide.Guide.ConversationStarters
                     .OrderBy(cs => cs.OrderIndex)
                     .Select(cs => cs.Prompt)
@@ -169,6 +173,10 @@ public static class PublishedGuidesEndpoints
                 collapsible = publishedGuide.Collapsible,
                 showConversationStarters = publishedGuide.ShowConversationStarters,
                 showAttachments = publishedGuide.ShowAttachments,
+                mcpEnabled = publishedGuide.McpEnabled,
+                mcpEndpoint = publishedGuide.McpEnabled
+                    ? $"/api/published/mcp?pubId={publishedGuide.Id}"
+                    : null,
                 conversationStarters = publishedGuide.Guide.ConversationStarters
                     .OrderBy(cs => cs.OrderIndex)
                     .Select(cs => cs.Prompt)

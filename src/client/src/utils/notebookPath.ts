@@ -41,6 +41,20 @@ export function notebookPathMatches(candidatePath: string, requestedPath: string
     return false;
   }
 
-  return getNotebookPathCandidates(requestedPath)
-    .some(pathCandidate => normalizeNotebookRelativePath(pathCandidate).toLowerCase() === normalizedCandidate);
+  if (getNotebookPathCandidates(requestedPath)
+    .some(pathCandidate => normalizeNotebookRelativePath(pathCandidate).toLowerCase() === normalizedCandidate)) {
+    return true;
+  }
+
+  const normalizedRequested = normalizeNotebookRelativePath(requestedPath).toLowerCase();
+  if (!normalizedRequested) {
+    return false;
+  }
+
+  // CWD-relative paths from published runs (e.g. "duck.png" -> "Runs/{runId}/duck.png")
+  if (normalizedCandidate === normalizedRequested) {
+    return true;
+  }
+
+  return normalizedCandidate.endsWith(`/${normalizedRequested}`);
 }

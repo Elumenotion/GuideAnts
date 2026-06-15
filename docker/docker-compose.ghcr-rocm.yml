@@ -178,7 +178,6 @@ services:
       - Ui__RootPath=/app/ui
       - Ui__DevServerUrl=
       - ALLOWED_ORIGINS=*
-      - ANTRUNNER_SERVICES_HOST_URL=http://guideants-webapi-ui:8080/
       - SearXngSearch__BaseUrl=http://searxng:8080
       - BrowserRendering__BaseUrl=http://searxng:8080
       - LocalServiceHosts__SpeechTranscriptionBaseUrl=http://guideants-ai:80

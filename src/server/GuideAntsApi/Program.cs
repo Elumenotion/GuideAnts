@@ -1,6 +1,7 @@
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Database;
 using GuideAntsApi.Services.Migrations;
+using GuideAntsApi.Services.Mcp;
 using GuideAntsApi.Endpoints;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
@@ -247,6 +248,12 @@ public class Program
         app.UseAuthentication();
         app.UseAuthorization();
 
+        // MCP API key auth middleware — runs only on /api/published/mcp path
+        app.UseWhen(
+            ctx => ctx.Request.Path.StartsWithSegments("/api/published/mcp"),
+            branch => branch.UseMiddleware<McpApiKeyMiddleware>()
+        );
+
         app.MapGet("/api/startup", () => Results.Ok(new { status = "ready" }))
             // Startup readiness is a public host probe.
             .AllowAnonymous();
@@ -281,6 +288,25 @@ public class Program
         app.MapGuideUsageEndpoints();
         app.MapSettingsEndpoints();
         app.MapDocumentServerEndpoints();
+
+        app.MapMcp("/api/published/mcp")
+            .AllowAnonymous()
+            .RequireCors("PublicApiCors");
+
+        // Stateless Streamable HTTP does not map the GET (SSE) or DELETE endpoints. Without an
+        // explicit handler the SPA catch-all fallback answers GET /api/published/mcp with a 404,
+        // which clients such as Cursor treat as a fatal transport error and tombstone the server.
+        // The Streamable HTTP spec requires a 405 here to signal "no server-initiated SSE stream";
+        // compliant clients then operate POST-only. Registered before the SPA pipeline so it wins
+        // over the fallback.
+        app.MapMethods("/api/published/mcp", new[] { "GET", "DELETE" }, (HttpContext ctx) =>
+            {
+                ctx.Response.Headers.Allow = "POST";
+                return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+            })
+            .AllowAnonymous()
+            .RequireCors("PublicApiCors");
+
         app.UseGuideAntsUiPipeline(builder.Configuration);
 
         app.Run();

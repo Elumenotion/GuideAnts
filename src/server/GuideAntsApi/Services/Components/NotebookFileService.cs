@@ -207,11 +207,11 @@ using var scope2 = CreateDbScope();
 
 using var scope = CreateDbScope();
         var context = GetDbContext(scope);
-        
-        var file = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == relativePath);
+
+        var (file, resolvedPath) = await FindNotebookFileByRelativePathAsync(context, notebookId, relativePath);
         if (file == null) return null;
 
-        if (!TryResolveNotebookPath(projectId, notebookId, relativePath, out var physicalPath))
+        if (!TryResolveNotebookPath(projectId, notebookId, resolvedPath, out var physicalPath))
         {
             return null;
         }
@@ -229,27 +229,8 @@ using var scope = CreateDbScope();
 using var scope = CreateDbScope();
         var context = GetDbContext(scope);
 
-        var normalizedPath = relativePath.Replace("\\", "/");
-        
-        // Try to find the file with the exact path first
-        var file = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == normalizedPath);
-        
-        // If not found, try alternative path resolutions
-        if (file == null)
-        {
-            var alternativePaths = GetAlternativePaths(normalizedPath);
-            foreach (var altPath in alternativePaths)
-            {
-                file = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == altPath);
-                if (file != null)
-                {
-                    _logger.LogInformation("Resolved file path from '{OriginalPath}' to '{ResolvedPath}'", LogValueSanitizer.Sanitize(normalizedPath), LogValueSanitizer.Sanitize(altPath));
-                    normalizedPath = altPath;
-                    break;
-                }
-            }
-        }
-        
+        var (file, normalizedPath) = await FindNotebookFileByRelativePathAsync(context, notebookId, relativePath);
+
         if (file == null)
         {
             throw new FileNotFoundException("Database record not found for the specified file.", relativePath);
@@ -269,6 +250,63 @@ using var scope = CreateDbScope();
         var stream = new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         return (stream, contentType);
     }
+
+    private async Task<(NotebookFile? file, string normalizedPath)> FindNotebookFileByRelativePathAsync(
+        ApplicationDbContext context,
+        Guid notebookId,
+        string relativePath)
+    {
+        var normalizedPath = relativePath.Replace("\\", "/");
+
+        var file = await context.NotebookFiles.FirstOrDefaultAsync(
+            f => f.NotebookId == notebookId && f.RelativePath == normalizedPath);
+        if (file != null)
+        {
+            return (file, normalizedPath);
+        }
+
+        foreach (var altPath in GetAlternativePaths(normalizedPath))
+        {
+            file = await context.NotebookFiles.FirstOrDefaultAsync(
+                f => f.NotebookId == notebookId && f.RelativePath == altPath);
+            if (file != null)
+            {
+                _logger.LogInformation(
+                    "Resolved file path from '{OriginalPath}' to '{ResolvedPath}'",
+                    LogValueSanitizer.Sanitize(normalizedPath),
+                    LogValueSanitizer.Sanitize(altPath));
+                return (file, altPath);
+            }
+        }
+
+        if (ShouldTryCwdSuffixMatch(normalizedPath))
+        {
+            file = await context.NotebookFiles
+                .Where(f => f.NotebookId == notebookId)
+                .Where(f => f.RelativePath == normalizedPath || f.RelativePath.EndsWith("/" + normalizedPath))
+                .OrderByDescending(f => f.LastModifiedUtc)
+                .FirstOrDefaultAsync();
+            if (file != null)
+            {
+                _logger.LogInformation(
+                    "Resolved CWD-relative path '{OriginalPath}' to '{ResolvedPath}'",
+                    LogValueSanitizer.Sanitize(normalizedPath),
+                    LogValueSanitizer.Sanitize(file.RelativePath));
+                return (file, file.RelativePath);
+            }
+        }
+
+        return (null, normalizedPath);
+    }
+
+    /// <summary>
+    /// Whether to try suffix matching for CWD-relative paths (e.g. "duck.png" -> "Runs/{runId}/duck.png").
+    /// </summary>
+    private static bool ShouldTryCwdSuffixMatch(string path) =>
+        !string.IsNullOrWhiteSpace(path)
+        && !path.StartsWith("../", StringComparison.Ordinal)
+        && !path.StartsWith("Runs/", StringComparison.OrdinalIgnoreCase)
+        && !path.StartsWith("Output/", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Generates alternative paths to try when a relative file path is not found.

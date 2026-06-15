@@ -348,6 +348,7 @@ public class PublishedConversationService : IPublishedConversationService
 
             var assistantName = dbConversation!.Notebook.Guide?.Name
                 ?? throw new InvalidOperationException("Notebook Guide.Name is required for published conversations.");
+            var publishedAssistantId = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
 
             // Handlers mirroring SendMessageStreamAsync
             StreamingMessageProgressEventHandler onProgress = (_, e) =>
@@ -385,6 +386,7 @@ public class PublishedConversationService : IPublishedConversationService
                         TurnIndex = dbTurn!.TurnIndex,
                         MessageSequence = currentMessageSequence++,
                         Role = DataModelChatRole.Assistant,
+                        AssistantId = publishedAssistantId,
                         AssistantName = assistantName,
                         Content = sanitizedAssistant,
                         IsStreaming = false,
@@ -410,6 +412,7 @@ public class PublishedConversationService : IPublishedConversationService
                         TurnIndex = dbTurn!.TurnIndex,
                         MessageSequence = currentMessageSequence++,
                         Role = DataModelChatRole.Tool,
+                        AssistantId = publishedAssistantId,
                         Content = e.Message,
                         ToolCallId = e.ToolCallId,
                         FunctionName = e.FunctionName,
@@ -466,6 +469,7 @@ public class PublishedConversationService : IPublishedConversationService
                     ConversationId: dbConversation.Id,
                     OAuthUserAccessToken: null)
                 {
+                    TurnIndex = dbTurn!.TurnIndex,
                     AssistantId = invocationAssistantId,
                     NotebookConversationMessageId = notebookConversationMessageId
                 };
@@ -488,6 +492,7 @@ public class PublishedConversationService : IPublishedConversationService
                 ConversationId: dbConversation.Id,
                 OAuthUserAccessToken: null)
             {
+                TurnIndex = dbTurn!.TurnIndex,
                 AssistantId = resumeAssistantId,
                 NotebookConversationMessageId = notebookConversationMessageId
             };
@@ -783,9 +788,18 @@ public class PublishedConversationService : IPublishedConversationService
 				}
 			}
 
-			// Determine assistant strictly from the Guide (client does not send AssistantName)
-			var assistantName = dbConversation.Notebook.Guide?.Name
+			// Resolve assistant: guide default, or explicit AssistantName (guide or crew member).
+			var guideId = dbConversation.Notebook.GuideId
+				?? throw new InvalidOperationException("Notebook GuideId is required for published conversations.");
+			var guideName = dbConversation.Notebook.Guide?.Name
 				?? throw new InvalidOperationException("Notebook Guide.Name is required for published conversations.");
+
+			var (assistantName, runningAssistantId) = await ResolvePublishedAssistantAsync(
+				request,
+				guideId,
+				guideName,
+				cancellationToken);
+
 			string? modelDeploymentId = request.ModelDeploymentId;
 
 			if (string.IsNullOrWhiteSpace(modelDeploymentId))
@@ -833,6 +847,7 @@ public class PublishedConversationService : IPublishedConversationService
 					Role = DataModelChatRole.User,
 					Content = request.Instructions,
 					AssistantName = "user",
+					AssistantId = runningAssistantId,
 					ModelDeploymentId = modelDeploymentId,
 					UserId = null, // published has no user
 					ExternalUserIdentity = externalUserIdentity,
@@ -889,6 +904,7 @@ public class PublishedConversationService : IPublishedConversationService
 						TurnIndex = dbTurn!.TurnIndex,
 						MessageSequence = currentMessageSequence++,
 						Role = DataModelChatRole.Assistant,
+						AssistantId = runningAssistantId,
 						AssistantName = assistantName,
 						ModelDeploymentId = modelDeploymentId,
 						Content = string.Empty,
@@ -958,6 +974,7 @@ public class PublishedConversationService : IPublishedConversationService
 								TurnIndex = dbTurn!.TurnIndex,
 								MessageSequence = currentMessageSequence++,
 								Role = DataModelChatRole.Assistant,
+								AssistantId = runningAssistantId,
 								AssistantName = assistantName,
 								ModelDeploymentId = modelDeploymentId,
 								Content = toolCallAssistantText,
@@ -998,6 +1015,7 @@ public class PublishedConversationService : IPublishedConversationService
 							TurnIndex = dbTurn!.TurnIndex,
 							MessageSequence = currentMessageSequence++,
 							Role = DataModelChatRole.Assistant,
+							AssistantId = runningAssistantId,
 							AssistantName = assistantName,
 							ModelDeploymentId = modelDeploymentId,
 							Content = sanitizedAssistant,
@@ -1055,6 +1073,7 @@ public class PublishedConversationService : IPublishedConversationService
 						TurnIndex = dbTurn!.TurnIndex,
 						MessageSequence = currentMessageSequence++,
 						Role = DataModelChatRole.Tool,
+						AssistantId = runningAssistantId,
 						Content = sanitizedContent,
 						ToolCallId = e.ToolCallId,
 						FunctionName = e.FunctionName,
@@ -1095,7 +1114,6 @@ public class PublishedConversationService : IPublishedConversationService
 							}
 							
 							var publishedUrl = BuildPublishedFileUrl(
-								hostUrl,
 								dbConversation.Notebook.ProjectId,
 								dbConversation.NotebookId,
 								dbConversation.Id,
@@ -1144,14 +1162,14 @@ public class PublishedConversationService : IPublishedConversationService
 			};
 
 			// Build invocation context explicitly for published runs.
-			var publishedAssistantId = dbConversation.Notebook.GuideId ?? dbConversation.Notebook.NotebookTemplateId;
 			var ctx = new AntRunner.ToolCalling.InvocationContext(
 				ProjectId: dbConversation.Notebook.ProjectId,
 				NotebookId: dbConversation.NotebookId,
 				ConversationId: dbConversation.Id,
 				OAuthUserAccessToken: chatOptions.oAuthUserAccessToken)
 			{
-				AssistantId = publishedAssistantId,
+				TurnIndex = dbTurn!.TurnIndex,
+				AssistantId = runningAssistantId,
 				NotebookConversationMessageId = userMessageId
 			};
 
@@ -1597,7 +1615,12 @@ public class PublishedConversationService : IPublishedConversationService
 		{
 			var path = m.Groups["path"].Value;
 			var relativePath = NormalizeSandboxPath(path);
-			var publishedUrl = BuildPublishedFileUrl(hostUrl, projectId, notebookId, conversationId, relativePath, publisherId);
+			var publishedUrl = BuildPublishedFileUrl(
+								projectId,
+								notebookId,
+								conversationId,
+								relativePath,
+								publisherId);
 			return m.Groups["head"].Value + publishedUrl + m.Groups["tail"].Value;
 		});
 
@@ -1610,7 +1633,12 @@ public class PublishedConversationService : IPublishedConversationService
 		{
 			var path = m.Groups["path"].Value;
 			var relativePath = NormalizeSandboxPath(path);
-			var publishedUrl = BuildPublishedFileUrl(hostUrl, projectId, notebookId, conversationId, relativePath, publisherId);
+			var publishedUrl = BuildPublishedFileUrl(
+								projectId,
+								notebookId,
+								conversationId,
+								relativePath,
+								publisherId);
 			return $"{m.Groups["attr"].Value}=\"{publishedUrl}\"";
 		});
 
@@ -1623,7 +1651,12 @@ public class PublishedConversationService : IPublishedConversationService
 		{
 			var path = m.Groups["path"].Value;
 			var relativePath = NormalizeSandboxPath(path);
-			var publishedUrl = BuildPublishedFileUrl(hostUrl, projectId, notebookId, conversationId, relativePath, publisherId);
+			var publishedUrl = BuildPublishedFileUrl(
+								projectId,
+								notebookId,
+								conversationId,
+								relativePath,
+								publisherId);
 			return $"{m.Groups["attr"].Value}='{publishedUrl}'";
 		});
 
@@ -1788,7 +1821,7 @@ public class PublishedConversationService : IPublishedConversationService
 		return map;
 	}
 
-	private static string BuildPublishedFileUrl(string? hostUrl, Guid projectId, Guid notebookId, Guid conversationId, string relativePath, string? pubId)
+	private static string BuildPublishedFileUrl(Guid projectId, Guid notebookId, Guid conversationId, string relativePath, string? pubId)
 	{
 		var pathEncoded = Uri.EscapeDataString(relativePath);
 		var basePath = $"/api/published/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/files/content?path={pathEncoded}";
@@ -1797,13 +1830,7 @@ public class PublishedConversationService : IPublishedConversationService
 			basePath += $"&pubId={Uri.EscapeDataString(pubId)}";
 		}
 
-		if (!string.IsNullOrWhiteSpace(hostUrl))
-		{
-			var trimmed = hostUrl!.TrimEnd('/');
-			return $"{trimmed}{basePath}";
-		}
-
-		// No host configured: return path rooted at /api so client can resolve with api base
+		// Path-only URL: each client (browser, Electron, MCP) resolves against its own API origin.
 		return basePath;
 	}
 
@@ -1985,7 +2012,7 @@ public class PublishedConversationService : IPublishedConversationService
 				}
 
 				// Build published URL
-				var publishedBase = BuildPublishedFileUrl(hostUrl, projectId, notebookId, conversationId, relativeFilePath!, publisherId);
+				var publishedBase = BuildPublishedFileUrl(projectId, notebookId, conversationId, relativeFilePath!, publisherId);
 				if (!string.IsNullOrWhiteSpace(mValue))
 				{
 					publishedBase = AppendQueryParamIfMissing(publishedBase, "m", mValue!);
@@ -2025,49 +2052,43 @@ public class PublishedConversationService : IPublishedConversationService
 	private async Task<List<ChatMessage>> BuildMessagesForAssistantAsync(NotebookConversation conv, string assistantName, string? clientContext, CancellationToken ct)
 	{
 		var list = new List<ChatMessage>();
+		AntRunner.ToolCalling.AssistantDefinitions.AssistantDefinition? assistantDef = null;
 
 		// Assistant definition system messages
 		try
 		{
-			var assistantDef = await AssistantUtility.GetAssistantCreateRequest(assistantName);
+			assistantDef = await AssistantUtility.GetAssistantCreateRequest(assistantName);
 			if (assistantDef != null)
 			{
-				// 1. Assistant instructions (primary system prompt)
 				if (!string.IsNullOrWhiteSpace(assistantDef.Instructions))
 				{
 					list.Add(new ChatMessage(ChatMessageRole.System, assistantDef.Instructions));
 				}
 
-				// 2. Client-provided context (if any)
 				if (!string.IsNullOrWhiteSpace(clientContext))
 				{
 					list.Add(new ChatMessage(ChatMessageRole.System, clientContext));
-				}
-
-				// 3. Server-side context options come LAST to separate them clearly
-				var serverContextMsg = _contextOptionsService.BuildPublishedContextMessage(
-					assistantDef,
-					conv.Notebook?.ProjectId ?? Guid.Empty,
-					conv.Notebook?.Id ?? Guid.Empty);
-				if (!string.IsNullOrWhiteSpace(serverContextMsg))
-				{
-					list.Add(new ChatMessage(ChatMessageRole.System, serverContextMsg));
 				}
 			}
 		}
 		catch { /* ignore */ }
 
+		var isNewConversation = PublishedAssistantHistoryBuilder.IsNewConversation(conv);
+		var isAssistantSwitch = !isNewConversation && PublishedAssistantHistoryBuilder.IsAssistantSwitch(conv, assistantName);
+		var historyMessages = isNewConversation
+			? Array.Empty<NotebookConversationMessage>()
+			: PublishedAssistantHistoryBuilder.FilterMessages(conv, assistantName, isAssistantSwitch);
+
 		// Add conversation history with attachment support
 		using (var scope = _scopeFactory.CreateScope())
 		{
 			var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-			// Pre-index tool messages by toolCallId so we can place them immediately after their assistant tool_calls
-			var toolById = conv.Messages
+			var toolById = historyMessages
 				.Where(x => x.Role == DataModelChatRole.Tool && x.ToolCallId != null && x.FunctionName != null)
 				.ToDictionary(x => x.ToolCallId!, x => x, StringComparer.OrdinalIgnoreCase);
 			var emittedToolCallIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-			foreach (var m in conv.Messages.OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence))
+			foreach (var m in historyMessages)
 			{
 				// Tool response filtering: include only tool messages that belong to included assistant messages
 				// For simplicity, include all user/assistant messages and tool messages with IDs.
@@ -2173,7 +2194,55 @@ public class PublishedConversationService : IPublishedConversationService
 			}
 		}
 
+		if (isAssistantSwitch && conv.Messages.Count > 0)
+		{
+			list.Add(new ChatMessage(ChatMessageRole.System, PublishedAssistantHistoryBuilder.HandoffSystemMessage));
+		}
+
+		if (assistantDef != null)
+		{
+			var serverContextMsg = _contextOptionsService.BuildPublishedContextMessage(
+				assistantDef,
+				conv.Notebook?.ProjectId ?? Guid.Empty,
+				conv.Notebook?.Id ?? Guid.Empty);
+			if (!string.IsNullOrWhiteSpace(serverContextMsg))
+			{
+				list.Add(new ChatMessage(ChatMessageRole.System, serverContextMsg));
+			}
+		}
+
 		return list;
+	}
+
+	private async Task<(string Name, Guid Id)> ResolvePublishedAssistantAsync(
+		SendMessageRequest request,
+		Guid guideId,
+		string guideName,
+		CancellationToken cancellationToken)
+	{
+		var assistantName = string.IsNullOrWhiteSpace(request.AssistantName)
+			? guideName
+			: request.AssistantName.Trim();
+
+		if (string.Equals(assistantName, guideName, StringComparison.OrdinalIgnoreCase))
+			return (guideName, guideId);
+
+		using var scope = _scopeFactory.CreateScope();
+		var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+		var crewMember = await db.GuideMembers
+			.AsNoTracking()
+			.Where(gm => gm.GuideId == guideId && gm.Assistant.Name == assistantName)
+			.Select(gm => new { gm.AssistantId, Name = gm.Assistant.Name })
+			.FirstOrDefaultAsync(cancellationToken);
+
+		if (crewMember == null)
+		{
+			throw new InvalidOperationException(
+				$"Assistant '{assistantName}' is not a member of this published guide.");
+		}
+
+		return (crewMember.Name, crewMember.AssistantId);
 	}
 
 	private static IReadOnlyList<ChatThinkingBlock>? DeserializeThinkingBlocks(string? json)

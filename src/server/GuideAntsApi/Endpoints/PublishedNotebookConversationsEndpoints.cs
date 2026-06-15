@@ -241,24 +241,15 @@ public static class PublishedNotebookConversationsEndpoints
 			// Normalize relative path
 			var normalizedPath = path.Replace("\\", "/");
 
-			// Lookup file by notebook + relative path
-			var nf = await db.NotebookFiles
-				.AsNoTracking()
-				.Where(f => f.NotebookId == notebookId && f.RelativePath == normalizedPath)
-				.FirstOrDefaultAsync();
-			if (nf == null)
+			try
+			{
+				var res = await fileService.GetFileContentStreamAsync(projectId, notebookId, normalizedPath);
+				return Results.Stream(res.stream, res.contentType);
+			}
+			catch (FileNotFoundException)
 			{
 				return Results.NotFound();
 			}
-
-			// Stream through file service (overload by id does not require a user principal)
-			var res = await fileService.GetFileContentStreamAsync(nf.Id);
-			if (res == null)
-			{
-				return Results.NotFound();
-			}
-
-			return Results.Stream(res.Value.Stream, res.Value.ContentType);
 		})
 		.Produces(StatusCodes.Status200OK)
 		.Produces(StatusCodes.Status400BadRequest)

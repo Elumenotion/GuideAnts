@@ -7,6 +7,7 @@ import { InterfaceTab } from './configTabs/InterfaceTab';
 import { FeaturesTab } from './configTabs/FeaturesTab';
 import { LimitsTab } from './configTabs/LimitsTab';
 import { AuthTab } from './configTabs/AuthTab';
+import { McpTab } from './configTabs/McpTab';
 
 interface PublishGuideDialogProps {
   guideName: string;
@@ -19,7 +20,7 @@ interface PublishGuideDialogProps {
   onCancel: () => void;
 }
 
-type TabId = 'general' | 'interface' | 'features' | 'limits' | 'auth';
+type TabId = 'general' | 'interface' | 'features' | 'limits' | 'auth' | 'mcp';
 
 export function PublishGuideDialog({ 
   guideName, 
@@ -67,7 +68,16 @@ export function PublishGuideDialog({
   const [authWebhookTimeout, setAuthWebhookTimeout] = useState<number>(publishedGuide?.authWebhookTimeoutSeconds || 5);
   const [hasApiKey, setHasApiKey] = useState(publishedGuide?.hasApiKey || false);
 
+  // MCP
+  const [mcpEnabled, setMcpEnabled] = useState(publishedGuide?.mcpEnabled || false);
+  const [mcpDescription, setMcpDescription] = useState(publishedGuide?.mcpDescription || '');
+
   const isActive = publishedGuide?.active ?? true;
+
+  // MCP requires an API key — keep it disabled while none is configured
+  useEffect(() => {
+    if (!hasApiKey) setMcpEnabled(false);
+  }, [hasApiKey]);
 
   // Debounced friendly name validation
   const validateFriendlyName = useCallback(async (name: string) => {
@@ -145,6 +155,8 @@ export function PublishGuideDialog({
       billingPeriodChargeLimitUsd: billingPeriodChargeLimitUsd ?? undefined,
       authValidationWebhookUrl: authWebhookUrl.trim() || undefined,
       authWebhookTimeoutSeconds: authWebhookUrl.trim() ? authWebhookTimeout : undefined,
+      mcpEnabled,
+      mcpDescription: mcpDescription.trim() || undefined,
     };
 
     if (isEditMode && onUpdate) {
@@ -163,6 +175,14 @@ export function PublishGuideDialog({
       onDeactivate();
     }
     setShowDeactivateConfirm(false);
+  };
+
+  const handleGenerateApiKey = async (): Promise<string> => {
+    const pubId = publishedGuide?.id;
+    if (!pubId) throw new Error('Guide must be published first');
+    const response = await api.guides.guides.generateApiKey(guideId, pubId);
+    setHasApiKey(true);
+    return response.apiKey;
   };
 
   useEffect(() => {
@@ -191,6 +211,7 @@ export function PublishGuideDialog({
     { id: 'features', label: 'Features' },
     { id: 'limits', label: 'Limits' },
     { id: 'auth', label: 'Auth' },
+    { id: 'mcp', label: 'MCP' },
   ];
 
   const dialogMarkup = (
@@ -329,6 +350,18 @@ export function PublishGuideDialog({
                 guideId={guideId}
                 publishedGuideId={publishedGuide?.id}
                 onApiKeyChange={setHasApiKey}
+              />
+            )}
+
+            {activeTab === 'mcp' && (
+              <McpTab
+                mcpEnabled={mcpEnabled}
+                setMcpEnabled={setMcpEnabled}
+                mcpDescription={mcpDescription}
+                setMcpDescription={setMcpDescription}
+                hasApiKey={hasApiKey}
+                publishedGuideId={publishedGuide?.id}
+                onGenerateApiKey={publishedGuide?.id ? handleGenerateApiKey : undefined}
               />
             )}
           </fieldset>
