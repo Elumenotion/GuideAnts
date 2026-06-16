@@ -3,18 +3,14 @@ import { SECRET_MASK } from '../constants';
 interface OpenRouterConnectionStepProps {
   apiKey: string;
   baseUrl: string;
-  httpReferer: string;
-  appTitle: string;
   apiKeyHasStoredValue: boolean;
   errors: Partial<Record<'apiKey' | 'baseUrl', string>>;
-  onChange: (patch: Partial<{ apiKey: string; baseUrl: string; httpReferer: string; appTitle: string }>) => void;
+  onChange: (patch: Partial<{ apiKey: string; baseUrl: string }>) => void;
 }
 
 export function OpenRouterConnectionStep({
   apiKey,
   baseUrl,
-  httpReferer,
-  appTitle,
   apiKeyHasStoredValue,
   errors,
   onChange,
@@ -68,34 +64,6 @@ export function OpenRouterConnectionStep({
           Keep the default unless you are routing through a compatible proxy.
         </p>
         {errors.baseUrl ? <p className="text-xs text-red-700">{errors.baseUrl}</p> : null}
-      </div>
-
-      <div className="space-y-1">
-        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-600" htmlFor="openrouter-http-referer">
-          HTTP Referer (optional)
-        </label>
-        <input
-          id="openrouter-http-referer"
-          type="text"
-          value={httpReferer}
-          onChange={(event) => onChange({ httpReferer: event.target.value })}
-          placeholder="https://guideants.local"
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-      </div>
-
-      <div className="space-y-1">
-        <label className="block text-xs font-semibold uppercase tracking-wide text-gray-600" htmlFor="openrouter-app-title">
-          App Title (optional)
-        </label>
-        <input
-          id="openrouter-app-title"
-          type="text"
-          value={appTitle}
-          onChange={(event) => onChange({ appTitle: event.target.value })}
-          placeholder="GuideAnts"
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
       </div>
     </div>
   );

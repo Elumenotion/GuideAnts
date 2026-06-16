@@ -6,7 +6,7 @@
 ARG SDCPP_REF=master
 ARG SD_CUDA_ARCHITECTURES="75;80;86;89;90"
 ARG GA_DEPS_CUDA13_IMAGE=deps-cuda13
-ARG GA_UBUNTU_MIRROR_URL=http://mirrors.kernel.org/ubuntu
+ARG GA_UBUNTU_MIRROR_URL=http://archive.ubuntu.com/ubuntu
 ARG PYTHON311_VERSION=3.11.11
 
 FROM nvidia/cuda:13.0.0-devel-ubuntu24.04 AS sd-cli-cuda-builder
@@ -26,7 +26,6 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
             /etc/apt/sources.list; \
     fi
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends build-essential ca-certificates cmake git \
     && rm -rf /var/lib/apt/lists/*
@@ -73,7 +72,6 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
     fi
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl \
@@ -117,7 +115,6 @@ ENV C_INCLUDE_PATH=/usr/include/gdal
 
 FROM runtime-cuda13-base AS pydeps-cuda13-builder
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential cmake git \
@@ -150,7 +147,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 FROM runtime-cuda13-base AS deps-cuda13
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         graphviz ffmpeg bash sqlite3 nginx util-linux passwd \

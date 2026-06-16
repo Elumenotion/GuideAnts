@@ -24,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.OpenRouter\AntRunner.Chat.OpenRouter.csproj" />
     <ProjectReference Include="..\GuideAnts.Logging\GuideAnts.Logging.csproj" />
     <ProjectReference Include="..\GuideAntsApi.DataModel\GuideAntsApi.DataModel.csproj" />
     <ProjectReference Include="..\GuideAnts.Usage\GuideAnts.Usage.csproj" />

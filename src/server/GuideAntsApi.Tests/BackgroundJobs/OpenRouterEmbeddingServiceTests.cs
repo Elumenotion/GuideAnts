@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using AntRunner.Chat.OpenRouter;
 using FluentAssertions;
 using GuideAntsApi.BackgroundJobs.Services.Embeddings;
 using Microsoft.Extensions.Configuration;
@@ -81,8 +82,10 @@ public sealed class OpenRouterEmbeddingServiceTests
 
         handler.LastRequestUri!.ToString().Should().Be("https://openrouter.ai/api/v1/embeddings");
         handler.LastAuthorizationParameter.Should().Be("or-key");
-        handler.HeaderValue("HTTP-Referer").Should().Be("https://example.test");
-        handler.HeaderValue("X-Title").Should().Be("GuideAnts");
+        handler.HeaderValue("HTTP-Referer").Should().Be(OpenRouterAttribution.HttpReferer);
+        handler.HeaderValue("X-OpenRouter-Title").Should().Be(OpenRouterAttribution.AppTitle);
+        handler.HeaderValue("X-Title").Should().Be(OpenRouterAttribution.AppTitle);
+        handler.HeaderValue("X-OpenRouter-Categories").Should().Be(OpenRouterAttribution.AppCategories);
 
         using var requestJson = JsonDocument.Parse(handler.LastRequestBody);
         requestJson.RootElement.GetProperty("model").GetString().Should().Be("text-embed");
@@ -198,17 +201,15 @@ public sealed class OpenRouterEmbeddingServiceTests
         await service.GetEmbeddingsAsync(["a"], "text-embed", requestPresetJson: null);
 
         handler.LastRequestUri!.ToString().Should().Be("https://proxy.internal/api/embeddings");
-        handler.HeaderValue("HTTP-Referer").Should().BeNull();
-        handler.HeaderValue("X-Title").Should().BeNull();
+        handler.HeaderValue("HTTP-Referer").Should().Be(OpenRouterAttribution.HttpReferer);
+        handler.HeaderValue("X-OpenRouter-Title").Should().Be(OpenRouterAttribution.AppTitle);
     }
 
     private static IConfiguration BuildConfiguration() =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["OpenRouter:ApiKey"] = "or-key",
-                ["OpenRouter:HttpReferer"] = "https://example.test",
-                ["OpenRouter:AppTitle"] = "GuideAnts"
+                ["OpenRouter:ApiKey"] = "or-key"
             })
             .Build();
 

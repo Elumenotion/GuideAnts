@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Net.Http.Headers;
+using AntRunner.Chat.OpenRouter;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Routing;
 
@@ -152,19 +153,7 @@ namespace GuideAntsApi.Services
 
         private sealed record OpenRouterImageUrl(string Url);
 
-        private void AddOpenRouterAttributionHeaders(HttpRequestMessage request)
-        {
-            var httpReferer = _configuration["OpenRouter:HttpReferer"]?.Trim();
-            if (!string.IsNullOrWhiteSpace(httpReferer))
-            {
-                request.Headers.TryAddWithoutValidation("HTTP-Referer", httpReferer);
-            }
-
-            var appTitle = _configuration["OpenRouter:AppTitle"]?.Trim();
-            if (!string.IsNullOrWhiteSpace(appTitle))
-            {
-                request.Headers.TryAddWithoutValidation("X-Title", appTitle);
-            }
-        }
+        private void AddOpenRouterAttributionHeaders(HttpRequestMessage request) =>
+            OpenRouterAttribution.Apply(request);
     }
 }

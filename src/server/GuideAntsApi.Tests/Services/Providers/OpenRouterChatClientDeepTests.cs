@@ -12,16 +12,14 @@ namespace GuideAntsApi.Tests.Services.Providers;
 public sealed class OpenRouterChatClientDeepTests
 {
     [TestMethod]
-    public async Task GetCompletionAsync_BuildsEndpoint_AndOptionalHeaders()
+    public async Task GetCompletionAsync_BuildsEndpoint_AndAttributionHeaders()
     {
         var handler = new OrCapturingHandler(_ => JsonResponse(TextResponse("hi")));
         using var httpClient = new HttpClient(handler);
         var client = new OpenRouterChatClient(httpClient, new OpenRouterChatConfig
         {
             ApiKey = "or-key",
-            BaseUrl = "https://openrouter.ai/api/v1/",
-            HttpReferer = "https://example.test",
-            AppTitle = "GuideAnts"
+            BaseUrl = "https://openrouter.ai/api/v1/"
         }, "openai/gpt-4o-mini");
 
         await client.GetCompletionAsync(new ChatCompletionRequest(messages: [new ChatMessage(ChatRole.User, "hi")], model: null));
@@ -30,9 +28,13 @@ public sealed class OpenRouterChatClientDeepTests
         handler.LastRequestHeaders.TryGetValues("Authorization", out var auth).Should().BeTrue();
         auth!.Single().Should().Be("Bearer or-key");
         handler.LastRequestHeaders.TryGetValues("HTTP-Referer", out var referer).Should().BeTrue();
-        referer!.Single().Should().Be("https://example.test");
+        referer!.Single().Should().Be(OpenRouterAttribution.HttpReferer);
+        handler.LastRequestHeaders.TryGetValues("X-OpenRouter-Title", out var openRouterTitle).Should().BeTrue();
+        openRouterTitle!.Single().Should().Be(OpenRouterAttribution.AppTitle);
         handler.LastRequestHeaders.TryGetValues("X-Title", out var title).Should().BeTrue();
-        title!.Single().Should().Be("GuideAnts");
+        title!.Single().Should().Be(OpenRouterAttribution.AppTitle);
+        handler.LastRequestHeaders.TryGetValues("X-OpenRouter-Categories", out var categories).Should().BeTrue();
+        categories!.Single().Should().Be(OpenRouterAttribution.AppCategories);
     }
 
     [TestMethod]

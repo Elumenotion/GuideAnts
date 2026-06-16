@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
+using AntRunner.Chat.OpenRouter;
 using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Services.Components
@@ -672,20 +673,8 @@ namespace GuideAntsApi.Services.Components
         private static bool IsOpenRouterAudioFormatSupported(string format) =>
             format is "wav" or "mp3" or "ogg" or "webm" or "flac" or "m4a";
 
-        private void AddOpenRouterAttributionHeaders(HttpRequestMessage request)
-        {
-            var httpReferer = _configurationForSection(OpenRouterProviderSection, "HttpReferer")?.Trim();
-            if (!string.IsNullOrWhiteSpace(httpReferer))
-            {
-                request.Headers.TryAddWithoutValidation("HTTP-Referer", httpReferer);
-            }
-
-            var appTitle = _configurationForSection(OpenRouterProviderSection, "AppTitle")?.Trim();
-            if (!string.IsNullOrWhiteSpace(appTitle))
-            {
-                request.Headers.TryAddWithoutValidation("X-Title", appTitle);
-            }
-        }
+        private void AddOpenRouterAttributionHeaders(HttpRequestMessage request) =>
+            OpenRouterAttribution.Apply(request);
 
         private long ResolveOpenRouterAudioMaxBytes(string? requestPresetJson)
         {

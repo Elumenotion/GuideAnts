@@ -57,9 +57,7 @@ public sealed class ProviderNativeChatClientTests
             new OpenRouterChatConfig
             {
                 ApiKey = "or-key",
-                BaseUrl = "https://openrouter.ai/api/v1",
-                HttpReferer = "https://example.test",
-                AppTitle = "GuideAnts"
+                BaseUrl = "https://openrouter.ai/api/v1"
             },
             "openai/gpt-4o-mini");
 
@@ -70,7 +68,7 @@ public sealed class ProviderNativeChatClientTests
         handler.LastRequestHeaders.Authorization?.Scheme.Should().Be("Bearer");
         handler.LastRequestHeaders.Authorization?.Parameter.Should().Be("or-key");
         handler.LastRequestHeaders.TryGetValues("HTTP-Referer", out var refererValues).Should().BeTrue();
-        refererValues!.Single().Should().Be("https://example.test");
+        refererValues!.Single().Should().Be(OpenRouterAttribution.HttpReferer);
 
         using var requestJson = JsonDocument.Parse(handler.LastRequestBody);
         requestJson.RootElement.GetProperty("model").GetString().Should().Be("openai/gpt-4o-mini");

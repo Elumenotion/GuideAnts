@@ -39,7 +39,7 @@ describe('useOpenRouterWizardState', () => {
       createSection(
         sectionName,
         sectionName === OPENROUTER_SECTION
-          ? { ApiKey: '', BaseUrl: 'https://openrouter.ai/api/v1', HttpReferer: '', AppTitle: '' }
+          ? { ApiKey: '', BaseUrl: 'https://openrouter.ai/api/v1' }
           : {}
       )
     );
@@ -121,7 +121,7 @@ describe('useOpenRouterWizardState', () => {
     expect(result.current.coreErrors.baseUrl).toBe('Base URL is required.');
   });
 
-  it('persists connection details including optional metadata', async () => {
+  it('persists connection details', async () => {
     const snapshot = createWizardSnapshot();
     const { result } = renderHook(() => useOpenRouterWizardState());
 
@@ -129,8 +129,6 @@ describe('useOpenRouterWizardState', () => {
       result.current.setCoreForm({
         apiKey: 'openrouter-secret-key-12345',
         baseUrl: 'https://openrouter.ai/api/v1',
-        httpReferer: 'https://guideants.test',
-        appTitle: 'GuideAnts',
       });
     });
 
@@ -144,8 +142,6 @@ describe('useOpenRouterWizardState', () => {
         payload: expect.objectContaining({
           ApiKey: 'openrouter-secret-key-12345',
           BaseUrl: 'https://openrouter.ai/api/v1',
-          HttpReferer: 'https://guideants.test',
-          AppTitle: 'GuideAnts',
         }),
       })
     );

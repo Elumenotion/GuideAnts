@@ -127,15 +127,7 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
             Content = new StringContent(JsonSerializer.Serialize(payload, SerializerOptions), Encoding.UTF8, "application/json")
         };
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _config.ApiKey);
-        if (!string.IsNullOrWhiteSpace(_config.HttpReferer))
-        {
-            message.Headers.TryAddWithoutValidation("HTTP-Referer", _config.HttpReferer);
-        }
-
-        if (!string.IsNullOrWhiteSpace(_config.AppTitle))
-        {
-            message.Headers.TryAddWithoutValidation("X-Title", _config.AppTitle);
-        }
+        OpenRouterAttribution.Apply(message);
 
         return message;
     }
@@ -635,8 +627,6 @@ public sealed record OpenRouterChatConfig
 {
     public string ApiKey { get; init; } = string.Empty;
     public string BaseUrl { get; init; } = "https://openrouter.ai/api/v1";
-    public string? HttpReferer { get; init; }
-    public string? AppTitle { get; init; }
 }
 
 internal sealed record OpenRouterChatRequest(

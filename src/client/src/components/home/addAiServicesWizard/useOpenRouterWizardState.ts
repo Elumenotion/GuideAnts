@@ -65,8 +65,6 @@ export function useOpenRouterWizardState(): UseOpenRouterWizardStateResult {
   const [coreForm, setCoreFormState] = useState<OpenRouterCoreConnectionFormState>({
     apiKey: '',
     baseUrl: 'https://openrouter.ai/api/v1',
-    httpReferer: '',
-    appTitle: '',
     apiKeyHasStoredValue: false,
   });
 
@@ -149,8 +147,6 @@ export function useOpenRouterWizardState(): UseOpenRouterWizardStateResult {
     const payload = {
       ApiKey: withSecretPreserved(coreForm.apiKey, coreForm.apiKeyHasStoredValue),
       BaseUrl: coreForm.baseUrl.trim(),
-      HttpReferer: coreForm.httpReferer.trim(),
-      AppTitle: coreForm.appTitle.trim(),
     };
 
     let nextSections = snapshot.sectionsByName;
@@ -167,8 +163,6 @@ export function useOpenRouterWizardState(): UseOpenRouterWizardStateResult {
       apiKey: payload.ApiKey,
       apiKeyHasStoredValue: true,
       baseUrl: payload.BaseUrl,
-      httpReferer: payload.HttpReferer,
-      appTitle: payload.AppTitle,
     }));
   }, [coreForm, validateConnection]);
 
