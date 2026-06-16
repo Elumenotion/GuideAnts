@@ -164,15 +164,15 @@ public static class NotebookConversationsEndpoints
             {
                 var assistant = await dbContext.Assistants
                     .Where(a => a.Name == request.AssistantName)
-                    .FirstOrDefaultAsync(ctx.RequestAborted);
+                    .FirstOrDefaultAsync(CancellationToken.None);
                 if (assistant != null)
                 {
                     targetAssistantId = assistant.Id;
                 }
             }
 
-            // Preflight local runtime readiness
-            var runtimeStatus = await runtimeService.GetRuntimeStatusAsync(notebookId, targetAssistantId, ctx.RequestAborted);
+            // Preflight local runtime readiness (do not link to client disconnect; streaming setup must still run)
+            var runtimeStatus = await runtimeService.GetRuntimeStatusAsync(notebookId, targetAssistantId, CancellationToken.None);
             if (runtimeStatus.State != "ready" && runtimeStatus.RequiredModels.Any(m => m.RuntimeConfig != null))
             {
                 return Results.Conflict(new { 

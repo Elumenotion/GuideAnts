@@ -3,6 +3,7 @@ using AntRunner.Chat;
 using AntRunner.ToolCalling;
 using FluentAssertions;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Services.Conversations.Mapping;
 
 namespace GuideAntsApi.Tests.ChatLayer;
 
@@ -96,7 +97,7 @@ public sealed class AgentTests
 
         var input = new List<NotebookConversationMessage> { withTools, toollessDuplicate, unrelated };
 
-        var result = (List<NotebookConversationMessage>)InvokePrivate("FilterDuplicateAssistantMessages", input)!;
+        var result = ConversationMessageMapper.FilterDuplicateAssistantMessages(input);
 
         result.Should().Contain(withTools);
         result.Should().Contain(unrelated);
@@ -116,7 +117,7 @@ public sealed class AgentTests
 
         var input = new List<NotebookConversationMessage> { toolless };
 
-        var result = (List<NotebookConversationMessage>)InvokePrivate("FilterDuplicateAssistantMessages", input)!;
+        var result = ConversationMessageMapper.FilterDuplicateAssistantMessages(input);
 
         result.Should().ContainSingle().Which.Should().Be(toolless);
     }
@@ -142,7 +143,7 @@ public sealed class AgentTests
 
         var input = new List<NotebookConversationMessage> { withTools, toollessOtherTurn };
 
-        var result = (List<NotebookConversationMessage>)InvokePrivate("FilterDuplicateAssistantMessages", input)!;
+        var result = ConversationMessageMapper.FilterDuplicateAssistantMessages(input);
 
         result.Should().HaveCount(2);
     }

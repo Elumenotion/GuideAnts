@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -8,7 +9,9 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.IntegrationTests.Infrastructure;
 using GuideAntsApi.Models.Conversations;
+using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Services.Conversations.Mapping;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
@@ -35,6 +38,7 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
     public override async Task BaseTestInitialize()
     {
         await base.BaseTestInitialize();
+        FakeChatCompletionBehavior.Instance.Reset();
         SetupAuthentication();
     }
 
@@ -115,6 +119,166 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         };
         return JsonSerializer.Serialize(toolCalls, CamelCase);
     }
+
+    private static async Task EnsureUserAsync(ApplicationDbContext db, Guid userId, string email, string name)
+    {
+        if (await db.Users.AnyAsync(u => u.Id == userId))
+        {
+            return;
+        }
+
+        db.Users.Add(new User
+        {
+            Id = userId,
+            Name = name,
+            Email = email,
+            PasswordHash = "integration-test-hash",
+            SecurityStamp = Guid.NewGuid(),
+            LastLoginAt = DateTime.UtcNow,
+            ApprovedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<List<(string EventType, string Payload)>> SendConversationStreamToCompletionAsync(
+        Guid projectId,
+        Guid notebookId,
+        Guid conversationId,
+        object requestBody)
+    {
+        using var req = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/messages")
+        {
+            Content = JsonContent.Create(requestBody)
+        };
+        req.Headers.Accept.Clear();
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        using var resp = await Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        resp.EnsureSuccessStatusCode();
+
+        var events = new List<(string EventType, string Payload)>();
+        await using var stream = await resp.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+
+        string? currentEvent = null;
+        while (!reader.EndOfStream)
+        {
+            var line = await reader.ReadLineAsync();
+            if (line == null)
+            {
+                break;
+            }
+
+            if (line.StartsWith("event:", StringComparison.Ordinal))
+            {
+                currentEvent = line["event:".Length..].Trim();
+                continue;
+            }
+
+            if (line.StartsWith("data:", StringComparison.Ordinal) && currentEvent != null)
+            {
+                var payload = line["data:".Length..].Trim();
+                events.Add((currentEvent, payload));
+
+                if (currentEvent == StreamingEventTypes.Error)
+                {
+                    Assert.Fail($"Stream returned error: {payload}");
+                }
+            }
+        }
+
+        events.Should().Contain(e => e.EventType == StreamingEventTypes.Complete);
+        return events;
+    }
+
+    private async Task<List<(string EventType, string Payload)>> SendConversationStreamUntilCancelledAsync(
+        Guid projectId,
+        Guid notebookId,
+        Guid conversationId,
+        object requestBody,
+        CancellationToken cancellationToken)
+    {
+        using var req = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/notebooks/{notebookId}/conversations/{conversationId}/messages")
+        {
+            Content = JsonContent.Create(requestBody)
+        };
+        req.Headers.Accept.Clear();
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+        var events = new List<(string EventType, string Payload)>();
+
+        using var resp = await Client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None);
+        if (!resp.IsSuccessStatusCode && (int)resp.StatusCode != 499)
+        {
+            resp.EnsureSuccessStatusCode();
+        }
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            return events;
+        }
+
+        await using var stream = await resp.Content.ReadAsStreamAsync(CancellationToken.None);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+
+        string? currentEvent = null;
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (reader.EndOfStream)
+                {
+                    break;
+                }
+
+                var line = await reader.ReadLineAsync(cancellationToken);
+                if (line == null)
+                {
+                    break;
+                }
+
+                if (line.StartsWith("event:", StringComparison.Ordinal))
+                {
+                    currentEvent = line["event:".Length..].Trim();
+                    continue;
+                }
+
+                if (line.StartsWith("data:", StringComparison.Ordinal) && currentEvent != null)
+                {
+                    events.Add((currentEvent, line["data:".Length..].Trim()));
+                }
+            }
+        }
+        catch (IOException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The test host aborts the response body when the client cancels mid-stream.
+        }
+
+        return events;
+    }
+
+    private async Task<List<StreamingEvent>> CollectServiceStreamAsync(
+        IConversationService service,
+        Guid conversationId,
+        SendMessageRequest request,
+        CancellationToken cancellationToken)
+    {
+        var events = new List<StreamingEvent>();
+        await foreach (var ev in service.SendMessageStreamToConversationAsync(conversationId, request, cancellationToken))
+        {
+            events.Add(ev);
+        }
+
+        return events;
+    }
+
+    private static int IndexOfEvent(IReadOnlyList<(string EventType, string Payload)> events, string eventType) =>
+        events.ToList().FindIndex(e => e.EventType == eventType);
 
     // ----- GetConversationByIdAsync -----
 
@@ -522,6 +686,370 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
         (await db2.NotebookConversationMessages.AnyAsync(m => m.NotebookConversationId == conversationId)).Should().BeFalse();
     }
 
+    // ----- SendMessageStreamToConversationAsync (real service through SSE endpoint) -----
+
+    [TestMethod]
+    public async Task SendMessageStream_Persists_turn_messages_usage_and_releases_lock()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Streaming persistence");
+        }
+
+        var events = await SendConversationStreamToCompletionAsync(
+            projectId,
+            notebookId,
+            conversationId,
+            new { instructions = "Hello from the persistence test", assistantName = "assistant" });
+
+        events.Should().Contain(e => e.EventType == StreamingEventTypes.AssistantMessage);
+        events.Should().Contain(e => e.EventType == StreamingEventTypes.Usage);
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var turn = await db2.ConversationTurns.SingleAsync(t => t.NotebookConversationId == conversationId);
+        turn.TurnIndex.Should().Be(1);
+        turn.AssistantName.Should().Be("assistant");
+        turn.Status.Should().Be("completed");
+        turn.ChatRunOutputJson.Should().NotBeNullOrWhiteSpace();
+        turn.UsageJson.Should().NotBeNullOrWhiteSpace();
+
+        var messages = await db2.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId)
+            .OrderBy(m => m.MessageSequence)
+            .ToListAsync();
+
+        messages.Should().ContainSingle(m =>
+            m.Role == DataModelChatRole.User &&
+            m.Content == "Hello from the persistence test" &&
+            m.UserId != null);
+
+        var assistant = messages.Should().ContainSingle(m => m.Role == DataModelChatRole.Assistant).Subject;
+        assistant.Content.Should().Contain("Test assistant response.");
+        assistant.IsStreaming.Should().BeFalse();
+        assistant.AssistantName.Should().Be("assistant");
+        assistant.AssistantId.Should().NotBeNull();
+
+        var usage = await db2.UsageEvents
+            .Where(u => u.ConversationId == conversationId && u.Category == UsageCategory.ChatCompletion)
+            .SingleAsync();
+        usage.NotebookConversationMessageId.Should().Be(assistant.Id);
+        usage.ValueInput.Should().Be(1);
+        usage.ValueOutput.Should().Be(1);
+
+        (await db2.ConversationLocks.AnyAsync(l => l.ConversationId == conversationId)).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_Cancel_finalizes_partial_message_marks_turn_cancelled_and_prunes_incomplete_tool_calls()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Cancel partial stream");
+        }
+
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.SlowCancellableStream;
+        FakeChatCompletionBehavior.Instance.ChunkDelayMs = 120;
+
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(250));
+        try
+        {
+            await SendConversationStreamUntilCancelledAsync(
+                projectId,
+                notebookId,
+                conversationId,
+                new { instructions = "Cancel me mid-stream", assistantName = "assistant" },
+                cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // expected when the HTTP stream is aborted
+        }
+
+        await Task.Delay(500);
+
+        using (var verifyScope = SharedFactory!.Services.CreateScope())
+        {
+            var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            var turn = await db2.ConversationTurns.SingleAsync(t => t.NotebookConversationId == conversationId);
+            turn.Status.Should().Be("cancelled");
+
+            var assistant = await db2.NotebookConversationMessages
+                .Where(m => m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.Assistant)
+                .SingleAsync();
+            assistant.IsStreaming.Should().BeFalse();
+            assistant.Content.Should().NotBeNullOrWhiteSpace();
+            assistant.Content.Should().Contain("Partial");
+
+            (await db2.ConversationLocks.AnyAsync(l => l.ConversationId == conversationId)).Should().BeFalse();
+        }
+
+        Guid pruneConversationId;
+        using (var seedScope = SharedFactory!.Services.CreateScope())
+        {
+            var seedDb = seedScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            pruneConversationId = await SeedConversationAsync(seedDb, notebookId, "Cancel prune tools");
+        }
+
+        using var pruneCts = new CancellationTokenSource();
+        FakeChatCompletionBehavior.Instance.Reset();
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.ToolCallsCancelBeforeExecution;
+        FakeChatCompletionBehavior.Instance.OnToolCallsReturning = () => pruneCts.Cancel();
+
+        try
+        {
+            await SendConversationStreamUntilCancelledAsync(
+                projectId,
+                notebookId,
+                pruneConversationId,
+                new { instructions = "Trigger tool calls then cancel", assistantName = "assistant" },
+                pruneCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // expected when tool execution is cancelled before results are persisted
+        }
+
+        await Task.Delay(500);
+
+        using (var pruneVerifyScope = SharedFactory!.Services.CreateScope())
+        {
+            var pruneVerifyDb = pruneVerifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            var pruneTurn = await pruneVerifyDb.ConversationTurns.SingleAsync(t => t.NotebookConversationId == pruneConversationId);
+            pruneTurn.Status.Should().Be("cancelled");
+
+            var pruneAssistant = await pruneVerifyDb.NotebookConversationMessages
+                .Where(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Assistant)
+                .SingleAsync();
+            pruneAssistant.ToolCalls.Should().BeNull();
+
+            (await pruneVerifyDb.NotebookConversationMessages
+                .AnyAsync(m => m.NotebookConversationId == pruneConversationId && m.Role == DataModelChatRole.Tool))
+                .Should().BeFalse();
+        }
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_Persists_tool_call_assistant_and_tool_result_with_idempotent_tool_usage()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Tool call persistence");
+        }
+
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.ToolCallThenReply;
+        FakeChatCompletionBehavior.Instance.FinalAssistantText = "Tool flow complete.";
+
+        var events = await SendConversationStreamToCompletionAsync(
+            projectId,
+            notebookId,
+            conversationId,
+            new { instructions = "Use a tool", assistantName = "assistant" });
+
+        events.Should().Contain(e => e.EventType == StreamingEventTypes.ToolResult);
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var assistantWithToolCalls = await db2.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId
+                        && m.Role == DataModelChatRole.Assistant
+                        && m.ToolCalls != null)
+            .SingleAsync();
+        assistantWithToolCalls.ToolCalls.Should().Contain(FakeChatCompletionBehavior.Instance.ToolCallId);
+
+        var toolMessage = await db2.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.Tool)
+            .SingleAsync();
+        toolMessage.ToolCallId.Should().Be(FakeChatCompletionBehavior.Instance.ToolCallId);
+        toolMessage.FunctionName.Should().Be(FakeChatCompletionBehavior.Instance.ToolFunctionName);
+        toolMessage.Content.Should().NotBeNullOrWhiteSpace();
+
+        var toolUsageEvents = await db2.UsageEvents
+            .Where(u => u.NotebookConversationMessageId == toolMessage.Id && u.Category == UsageCategory.ToolCall)
+            .ToListAsync();
+        toolUsageEvents.Should().ContainSingle();
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_With_attachment_persists_MessageAttachment_and_includes_file_in_history()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        Guid notebookFileId;
+        const string fileContent = "attachment body for history projection";
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Attachment send");
+
+            var fileService = scope.ServiceProvider.GetRequiredService<INotebookFileService>();
+            var created = await fileService.CreateTextFileAsync(projectId, notebookId, "Output/attach-notes.txt", fileContent);
+            created.Should().NotBeNull();
+            notebookFileId = created.Id;
+        }
+
+        var events = await SendConversationStreamToCompletionAsync(
+            projectId,
+            notebookId,
+            conversationId,
+            new
+            {
+                instructions = " ",
+                assistantName = "assistant",
+                attachments = new[] { new { notebookFileId, uploadType = 0 } }
+            });
+
+        events.Should().Contain(e => e.EventType == StreamingEventTypes.Complete);
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var userMessage = await db2.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.User)
+            .SingleAsync();
+
+        var attachmentRows = await db2.MessageAttachments
+            .Where(ma => ma.MessageId == userMessage.Id)
+            .ToListAsync();
+        attachmentRows.Should().ContainSingle(a => a.NotebookFileId == notebookFileId);
+
+        var service = ResolveService(verifyScope);
+        var historyBuilder = verifyScope.ServiceProvider.GetRequiredService<IConversationHistoryBuilder>();
+        var conv = await db2.NotebookConversations
+            .Include(c => c.Messages)
+            .Include(c => c.Turns)
+            .Include(c => c.Notebook)
+            .FirstAsync(c => c.Id == conversationId);
+
+        var history = await historyBuilder.BuildOpenAiMessagesAsync(conv, "assistant");
+        history.Should().Contain(m => m.GetText().Contains("attach-notes.txt"));
+        history.Should().Contain(m => m.GetText().Contains(fileContent));
+
+        var dto = await service.GetConversationByIdAsync(conversationId);
+        dto.Should().NotBeNull();
+        dto!.Messages.Should().ContainSingle(m =>
+            m.Attachments != null && m.Attachments.Any(a => a.FileName == "attach-notes.txt"));
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_Emits_thinking_blocks_in_stream_and_persists_to_assistant_message()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Thinking stream");
+        }
+
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.ThinkingStream;
+        FakeChatCompletionBehavior.Instance.ThinkingText = "integration reasoning step";
+        FakeChatCompletionBehavior.Instance.FinalAssistantText = "Answer after thinking.";
+
+        var events = await SendConversationStreamToCompletionAsync(
+            projectId,
+            notebookId,
+            conversationId,
+            new { instructions = "Think then answer", assistantName = "assistant" });
+
+        events.Should().Contain(e =>
+            e.EventType == StreamingEventTypes.AssistantMessage &&
+            e.Payload.Contains("contentDelta", StringComparison.Ordinal) &&
+            e.Payload.Contains("integration", StringComparison.Ordinal));
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var assistant = await db2.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.Assistant)
+            .SingleAsync();
+        assistant.ThinkingBlocksJson.Should().NotBeNullOrWhiteSpace();
+        assistant.ThinkingBlocksJson.Should().Contain("integration reasoning step");
+
+        var service = ResolveService(verifyScope);
+        var dto = await service.GetConversationWithMessagesAsync(conversationId);
+        dto!.Messages.Should().Contain(m => m.Content == "integration reasoning step");
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_Complete_event_is_emitted_after_unlock_for_stream_client_and_observers()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Event ordering");
+        }
+
+        using var observerScope = SharedFactory!.Services.CreateScope();
+        var hub = observerScope.ServiceProvider.GetRequiredService<IConversationBroadcastHub>();
+        using var observerCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var observerEvents = new List<StreamingEvent>();
+        var observerTask = Task.Run(async () =>
+        {
+            await foreach (var ev in hub.SubscribeToConversationAsync(conversationId, $"observer-{Guid.NewGuid():N}", observerCts.Token))
+            {
+                observerEvents.Add(ev);
+            }
+        });
+
+        await Task.Delay(100);
+
+        var streamEvents = await SendConversationStreamToCompletionAsync(
+            projectId,
+            notebookId,
+            conversationId,
+            new { instructions = "Ordering check", assistantName = "assistant" });
+
+        await Task.Delay(200);
+        observerCts.Cancel();
+        try
+        {
+            await observerTask;
+        }
+        catch (OperationCanceledException)
+        {
+            // expected when the observer subscription is cancelled
+        }
+
+        var streamUnlockIndex = IndexOfEvent(streamEvents, StreamingEventTypes.ConversationUnlocked);
+        var streamCompleteIndex = IndexOfEvent(streamEvents, StreamingEventTypes.Complete);
+        streamCompleteIndex.Should().Be(streamEvents.Count - 1);
+        streamUnlockIndex.Should().Be(-1, "unlock is broadcast to observers only, not the active SSE client");
+
+        var observerUnlockIndex = observerEvents.FindIndex(e => e.EventType == StreamingEventTypes.ConversationUnlocked);
+        var observerCompleteIndex = observerEvents.FindIndex(e => e.EventType == StreamingEventTypes.Complete);
+        observerUnlockIndex.Should().BeGreaterThan(-1);
+        observerCompleteIndex.Should().BeGreaterThan(observerUnlockIndex);
+    }
+
     // ----- UndoLastForConversationAsync / UndoForConversationAsync (FK-driven lock) -----
 
     [TestMethod]
@@ -807,9 +1335,15 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
     [TestMethod]
     public async Task GetUserConversations_excludes_deleted_projects_and_applies_search_sort_paging()
     {
+        var currentUserId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        SetupAuthentication(userId: currentUserId, email: "owner@example.com", name: "Owner User");
+
         using (var scope = SharedFactory!.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            await EnsureUserAsync(db, currentUserId, "owner@example.com", "Owner User");
+            await EnsureUserAsync(db, otherUserId, "other@example.com", "Other User");
 
             var (_, liveNotebook) = await SeedProjectNotebookAsync(db);
             var liveConv = new NotebookConversation { NotebookId = liveNotebook, Title = "Alpha conversation", Created = DateTime.UtcNow.AddHours(-2) };
@@ -822,6 +1356,7 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
                 TurnIndex = 1,
                 MessageSequence = 1,
                 Role = DataModelChatRole.User,
+                UserId = currentUserId,
                 Content = "hello",
                 Created = DateTime.UtcNow.AddHours(-1)
             });
@@ -837,8 +1372,26 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
                 TurnIndex = 1,
                 MessageSequence = 1,
                 Role = DataModelChatRole.User,
+                UserId = currentUserId,
                 Content = "hi",
                 Created = DateTime.UtcNow.AddMinutes(-30)
+            });
+
+            // Another user's live conversation must not appear in this user's list.
+            var (_, otherUserNotebook) = await SeedProjectNotebookAsync(db);
+            var otherUserConv = new NotebookConversation { NotebookId = otherUserNotebook, Title = "Gamma other user", Created = DateTime.UtcNow };
+            db.NotebookConversations.Add(otherUserConv);
+            await db.SaveChangesAsync();
+            AddTurn(db, otherUserConv.Id, 1);
+            db.NotebookConversationMessages.Add(new NotebookConversationMessage
+            {
+                NotebookConversationId = otherUserConv.Id,
+                TurnIndex = 1,
+                MessageSequence = 1,
+                Role = DataModelChatRole.User,
+                UserId = otherUserId,
+                Content = "not mine",
+                Created = DateTime.UtcNow
             });
 
             // Deleted project conversation must be excluded.
@@ -853,39 +1406,48 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
                 TurnIndex = 1,
                 MessageSequence = 1,
                 Role = DataModelChatRole.User,
+                UserId = currentUserId,
                 Content = "secret",
                 Created = DateTime.UtcNow
             });
             await db.SaveChangesAsync();
         }
 
-        using var verifyScope = SharedFactory!.Services.CreateScope();
-        var service = ResolveService(verifyScope);
-
         // No search: both live conversations, ordered by last activity desc (Beta newer).
-        var all = await service.GetUserConversationsAsync(new UserConversationsQuery { Page = 1, PageSize = 50, SortBy = "date", SortOrder = "desc" });
-        all.Items.Should().HaveCount(2);
+        var all = await Client.GetFromJsonAsync<PagedUserConversationsDto>(
+            "/api/conversations?page=1&pageSize=50&sortBy=date&sortOrder=desc");
+        all.Should().NotBeNull();
+        all!.Items.Should().HaveCount(2);
         all.Items.Should().NotContain(i => i.Title == "Alpha hidden");
+        all.Items.Should().NotContain(i => i.Title == "Gamma other user");
         all.Items[0].Title.Should().Be("Beta conversation");
         all.TotalCount.Should().Be(2);
 
         // Search filter (case-insensitive).
-        var search = await service.GetUserConversationsAsync(new UserConversationsQuery { Search = "alpha", Page = 1, PageSize = 50 });
-        search.Items.Should().ContainSingle(i => i.Title == "Alpha conversation");
+        var search = await Client.GetFromJsonAsync<PagedUserConversationsDto>(
+            "/api/conversations?search=alpha&page=1&pageSize=50");
+        search.Should().NotBeNull();
+        search!.Items.Should().ContainSingle(i => i.Title == "Alpha conversation");
 
         // Sort by title-bearing column ascending (date asc here) + pagination.
-        var firstPage = await service.GetUserConversationsAsync(new UserConversationsQuery { Page = 1, PageSize = 1, SortBy = "date", SortOrder = "asc" });
-        firstPage.Items.Should().HaveCount(1);
+        var firstPage = await Client.GetFromJsonAsync<PagedUserConversationsDto>(
+            "/api/conversations?page=1&pageSize=1&sortBy=date&sortOrder=asc");
+        firstPage.Should().NotBeNull();
+        firstPage!.Items.Should().HaveCount(1);
         firstPage.TotalPages.Should().Be(2);
         // asc by last activity: Alpha (-1h) precedes Beta (-30m)
         firstPage.Items[0].Title.Should().Be("Alpha conversation");
 
         // Sort by project ascending exercises that branch.
-        var byProject = await service.GetUserConversationsAsync(new UserConversationsQuery { SortBy = "project", SortOrder = "asc", Page = 1, PageSize = 50 });
-        byProject.Items.Should().HaveCount(2);
+        var byProject = await Client.GetFromJsonAsync<PagedUserConversationsDto>(
+            "/api/conversations?sortBy=project&sortOrder=asc&page=1&pageSize=50");
+        byProject.Should().NotBeNull();
+        byProject!.Items.Should().HaveCount(2);
 
         // Sort by notebook descending exercises that branch.
-        var byNotebook = await service.GetUserConversationsAsync(new UserConversationsQuery { SortBy = "notebook", SortOrder = "desc", Page = 1, PageSize = 50 });
-        byNotebook.Items.Should().HaveCount(2);
+        var byNotebook = await Client.GetFromJsonAsync<PagedUserConversationsDto>(
+            "/api/conversations?sortBy=notebook&sortOrder=desc&page=1&pageSize=50");
+        byNotebook.Should().NotBeNull();
+        byNotebook!.Items.Should().HaveCount(2);
     }
 }

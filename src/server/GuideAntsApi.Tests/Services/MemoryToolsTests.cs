@@ -1,8 +1,6 @@
 using AntRunner.ToolCalling;
 using FluentAssertions;
-using GuideAnts.Usage;
 using GuideAntsApi.BackgroundJobs.Services.Search;
-using GuideAntsApi.Models;
 using GuideAntsApi.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;

@@ -149,8 +149,8 @@ public sealed class LlamaCppChatClientDeepTests2
             "noCombine",
             CombineSystemAndDeveloperMessages: false,
             ThoughtBlockPattern: null,
-            SamplingDefaults: null,
-            ThinkingControl: null);
+            SamplingDefaults: new Dictionary<string, double>(),
+            ThinkingControl: new ThinkingControl(string.Empty, new Dictionary<string, IReadOnlyList<ThinkingAction>>()));
         var handler = new CapturingHandler(_ => ChatHttpResponses.Json(
             """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"""));
         using var httpClient = new HttpClient(handler);
@@ -176,7 +176,7 @@ public sealed class LlamaCppChatClientDeepTests2
             "p",
             CombineSystemAndDeveloperMessages: true,
             ThoughtBlockPattern: null,
-            SamplingDefaults: null,
+            SamplingDefaults: new Dictionary<string, double>(),
             ThinkingControl: new ThinkingControl(
                 DefaultChoice: "",
                 ChoiceActions: new Dictionary<string, IReadOnlyList<ThinkingAction>>
@@ -201,7 +201,7 @@ public sealed class LlamaCppChatClientDeepTests2
             "p",
             CombineSystemAndDeveloperMessages: true,
             ThoughtBlockPattern: null,
-            SamplingDefaults: null,
+            SamplingDefaults: new Dictionary<string, double>(),
             ThinkingControl: new ThinkingControl(
                 DefaultChoice: "none",
                 ChoiceActions: new Dictionary<string, IReadOnlyList<ThinkingAction>>
@@ -248,7 +248,7 @@ public sealed class LlamaCppChatClientDeepTests2
             "p",
             CombineSystemAndDeveloperMessages: true,
             ThoughtBlockPattern: null,
-            SamplingDefaults: null,
+            SamplingDefaults: new Dictionary<string, double>(),
             ThinkingControl: new ThinkingControl(
                 DefaultChoice: "enabled",
                 ChoiceActions: new Dictionary<string, IReadOnlyList<ThinkingAction>>

@@ -14,6 +14,12 @@ using GuideAntsApi.Services.Components;
 using GuideAntsApi.Options;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Services.Conversations.Attachments;
+using GuideAntsApi.Services.Conversations.Commands;
+using GuideAntsApi.Services.Conversations.Mapping;
+using GuideAntsApi.Services.Conversations.Queries;
+using GuideAntsApi.Services.Conversations.Persistence;
+using GuideAntsApi.Services.Conversations.Streaming;
 using GuideAntsApi.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
@@ -99,6 +105,16 @@ public static class StartupConfiguration
         services.AddScoped<IContentFileService, ContentFileService>();
         services.AddScoped<IProjectFolderService, ProjectFolderService>();
         services.AddScoped<ISemiStructuredDataService, SemiStructuredDataService>();
+        services.AddScoped<IConversationQueryService, ConversationQueryService>();
+        services.AddScoped<IConversationCommandService, ConversationCommandService>();
+        services.AddScoped<IAttachmentContentService, AttachmentContentService>();
+        services.AddScoped<IConversationHistoryBuilder, ConversationHistoryBuilder>();
+        services.AddScoped<IConversationPersistence, ConversationPersistence>();
+        services.AddScoped<IConversationUsageReporter, ConversationUsageReporter>();
+        services.AddScoped<PrivateConversationStreamPolicy>();
+        services.AddScoped<PublishedConversationStreamPolicy>();
+        services.AddScoped<IConversationStreamEngine, ConversationStreamEngine>();
+        services.AddScoped<IConversationUndoService, ConversationUndoService>();
         services.AddScoped<IConversationService, ConversationService>();
         services.AddScoped<IPublishedConversationService, PublishedConversationService>();
         services.AddScoped<GuideAntsApi.Services.Auth.IPublishedGuideAuthService, GuideAntsApi.Services.Auth.PublishedGuideAuthService>();
@@ -191,7 +207,6 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.PublishedGuides.IPublishedGuideCostLimitService, GuideAntsApi.Services.PublishedGuides.PublishedGuideCostLimitService>();
 
         // Conversation Management Services
-        services.AddScoped<ITurnManager, TurnManager>();
         services.AddSingleton<IConversationBroadcastHub, ConversationBroadcastHub>();
         services.AddScoped<IDistributedConversationLock, DistributedConversationLockService>();
         services.AddHostedService<LockCleanupBackgroundService>();

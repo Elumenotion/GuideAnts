@@ -9,6 +9,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Services.Conversations.Mapping;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
@@ -500,7 +501,7 @@ or contains pronouns or vague terms which might be clear in the broader conversa
         sb.AppendLine("---");
 
         // Filter out duplicate assistant messages (legacy data where streaming created duplicates)
-        var filteredMessages = FilterDuplicateAssistantMessages(conversation.Messages.ToList());
+        var filteredMessages = ConversationMessageMapper.FilterDuplicateAssistantMessages(conversation.Messages);
 
         foreach (var message in filteredMessages.OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence))
         {
@@ -526,40 +527,6 @@ or contains pronouns or vague terms which might be clear in the broader conversa
         }
 
         return sb.ToString();
-    }
-
-    /// <summary>
-    /// Filters out duplicate assistant messages that have the same content but no ToolCalls
-    /// when another message in the same turn has the same content WITH ToolCalls.
-    /// This handles legacy data where streaming created duplicate rows.
-    /// </summary>
-    private static List<NotebookConversationMessage> FilterDuplicateAssistantMessages(List<NotebookConversationMessage> messages)
-    {
-        // Build set of (turn, content) pairs that have a message WITH ToolCalls
-        var turnContentWithToolCalls = new HashSet<(int turn, string content)>();
-        foreach (var m in messages.Where(m => m.Role == DataModelChatRole.Assistant && !string.IsNullOrEmpty(m.ToolCalls)))
-        {
-            var key = (m.TurnIndex, m.Content?.Trim() ?? "");
-            turnContentWithToolCalls.Add(key);
-        }
-
-        // Filter out duplicates: skip assistant messages without ToolCalls if same content exists with ToolCalls
-        var result = new List<NotebookConversationMessage>();
-        foreach (var m in messages)
-        {
-            if (m.Role == DataModelChatRole.Assistant && string.IsNullOrEmpty(m.ToolCalls))
-            {
-                var key = (m.TurnIndex, m.Content?.Trim() ?? "");
-                if (turnContentWithToolCalls.Contains(key))
-                {
-                    // Skip: this message has no ToolCalls but another with same content does
-                    continue;
-                }
-            }
-            result.Add(m);
-        }
-
-        return result;
     }
 
 }
