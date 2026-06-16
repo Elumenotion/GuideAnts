@@ -6,7 +6,6 @@ using GuideAntsApi.Endpoints;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Authorization;
 using AntRunner.Chat;
 using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.Functions;

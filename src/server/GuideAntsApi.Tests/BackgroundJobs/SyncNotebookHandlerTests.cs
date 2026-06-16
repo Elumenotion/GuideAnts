@@ -1,7 +1,6 @@
 using FluentAssertions;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.DataModel.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 

@@ -14,7 +14,7 @@ namespace GuideAntsApi.Tests.Services.Guides;
 [TestClass]
 public sealed class GuideExportImportServiceDeep2Tests
 {
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(0, "low")]
     [DataRow(1, "minimal")]
     [DataRow(2, "low")]

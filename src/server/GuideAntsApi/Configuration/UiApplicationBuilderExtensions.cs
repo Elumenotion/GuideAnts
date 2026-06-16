@@ -1,5 +1,4 @@
 using Microsoft.Extensions.FileProviders;
-using Microsoft.AspNetCore.Authorization;
 
 namespace GuideAntsApi.Configuration;
 

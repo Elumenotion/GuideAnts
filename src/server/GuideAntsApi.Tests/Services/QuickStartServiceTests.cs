@@ -2,11 +2,9 @@ using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Services;
 using GuideAntsApi.Tests.BackgroundJobs;
-using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Core;
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace GuideAntsApi.Tests.Services;

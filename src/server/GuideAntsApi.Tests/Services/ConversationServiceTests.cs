@@ -1,12 +1,11 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
-using GuideAntsApi.Options;
 using Moq;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Tests.TestUtils;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAnts.Usage;
@@ -36,8 +35,6 @@ public class ConversationServiceTests
         mockHttpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(_httpClient);
         
         
-        var turnManagerMock = new Mock<ITurnManager>();
-        var messageManagerMock = new Mock<IMessageManager>();
         var broadcastHubMock = new Mock<IConversationBroadcastHub>();
         var markdownExtractionServiceMock = new Mock<IMarkdownExtractionService>();
         var chatClientFactoryMock = new Mock<IChatCompletionClientFactory>();
@@ -66,23 +63,25 @@ public class ConversationServiceTests
                     ParameterAuthority.AssistantDefinition,
                     new Dictionary<string, System.Text.Json.JsonElement>())));
 
-        _service = new ConversationService(
-            mockHttpClientFactory.Object,
-            turnManagerMock.Object,
-            broadcastHubMock.Object,
-            distributedLockMock.Object,
+        var (queryService, commandService, historyBuilder, attachmentService) = ConversationTestServices.Create(
             scopeFactory,
-            usageRecorderMock.Object,
-            chatClientFactoryMock.Object,
             contextOptionsServiceMock.Object,
-            Microsoft.Extensions.Options.Options.Create(new MarkdownAttachmentOptions()),
-            chatModelResolverMock.Object,
-            null,
-            null,
             markdownExtractionServiceMock.Object,
-            Mock.Of<ILogger<ConversationService>>(),
-            configurationMock.Object
-        );
+            configurationMock.Object);
+        var (persistence, usageReporter) = ConversationTestServices.CreatePersistence(scopeFactory, usageRecorderMock.Object);
+
+        _service = ConversationTestServices.CreateConversationService(
+            scopeFactory,
+            chatModelResolverMock.Object,
+            queryService,
+            commandService,
+            historyBuilder,
+            attachmentService,
+            persistence,
+            usageReporter,
+            chatClientFactoryMock.Object,
+            distributedLockMock.Object,
+            broadcastHubMock.Object);
 
         // Seed notebook
         var project = new Project { Id = Guid.NewGuid(), Title = "Proj" };

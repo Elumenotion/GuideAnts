@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.OpenRouter;
 using FluentAssertions;

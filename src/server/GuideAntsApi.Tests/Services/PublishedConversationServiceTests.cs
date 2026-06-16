@@ -3,6 +3,11 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Services.Conversations.Attachments;
+using GuideAntsApi.Services.Conversations.Commands;
+using GuideAntsApi.Services.Conversations.Mapping;
+using GuideAntsApi.Services.Conversations.Persistence;
+using GuideAntsApi.Services.Conversations.Queries;
 using GuideAntsApi.Services.Routing;
 using GuideAnts.Usage;
 using GuideAntsApi.Tests.BackgroundJobs;
@@ -10,7 +15,6 @@ using AntRunner.Chat.Abstractions;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using System.Text.Json;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
@@ -462,20 +466,42 @@ public sealed class PublishedConversationServiceTests
     private static ServiceProvider CreateServiceProvider(DbContextOptions<ApplicationDbContext> options)
     {
         var services = new ServiceCollection();
-        services.AddSingleton(new TestDbContextFactory(options));
-        services.AddSingleton<IDbContextFactory<ApplicationDbContext>>(sp => sp.GetRequiredService<TestDbContextFactory>());
+        var dbFactory = new TestDbContextFactory(options);
+        services.AddSingleton(dbFactory);
+        services.AddSingleton<IDbContextFactory<ApplicationDbContext>>(_ => dbFactory);
         services.AddScoped<ApplicationDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
+        services.AddSingleton<IServiceScopeFactory>(sp =>
+        {
+            var db = sp.GetRequiredService<ApplicationDbContext>();
+            return new TestServiceScopeFactory(db);
+        });
+        services.AddLogging();
+        services.AddScoped<IConversationQueryService, ConversationQueryService>();
+        services.AddScoped<IConversationCommandService, ConversationCommandService>();
+        services.AddScoped<IAttachmentContentService, AttachmentContentService>();
+        services.AddScoped<IConversationHistoryBuilder, ConversationHistoryBuilder>();
+        services.AddScoped<IConversationPersistence, ConversationPersistence>();
+        services.AddScoped<IConversationUsageReporter, ConversationUsageReporter>();
+        services.AddSingleton<IUsageRecorder>(Mock.Of<IUsageRecorder>());
+        services.AddSingleton<IContextOptionsService>(Mock.Of<IContextOptionsService>());
+        services.AddSingleton<IChatModelResolver>(Mock.Of<IChatModelResolver>());
+        services.AddSingleton(Microsoft.Extensions.Options.Options.Create(new MarkdownAttachmentOptions()));
         return services.BuildServiceProvider();
     }
 
-    private static PublishedConversationService CreateService(IServiceProvider provider) =>
-        new(
-            provider.GetRequiredService<IServiceScopeFactory>(),
-            Mock.Of<IHttpClientFactory>(),
-            Mock.Of<IContextOptionsService>(),
-            Mock.Of<IChatCompletionClientFactory>(),
-            Mock.Of<IUsageRecorder>(),
-            NullLogger<PublishedConversationService>.Instance,
-            Microsoft.Extensions.Options.Options.Create(new MarkdownAttachmentOptions()),
-            Mock.Of<IChatModelResolver>());
+    private static PublishedConversationService CreateService(IServiceProvider provider)
+    {
+        var db = provider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext();
+        var scopeFactory = new TestServiceScopeFactory(db);
+        return ConversationTestServices.CreatePublishedConversationService(
+            scopeFactory,
+            provider.GetRequiredService<IChatModelResolver>(),
+            provider.GetRequiredService<IConversationQueryService>(),
+            provider.GetRequiredService<IConversationCommandService>(),
+            provider.GetRequiredService<IConversationHistoryBuilder>(),
+            provider.GetRequiredService<IAttachmentContentService>(),
+            provider.GetRequiredService<IConversationPersistence>(),
+            provider.GetRequiredService<IConversationUsageReporter>(),
+            Mock.Of<IChatCompletionClientFactory>());
+    }
 }

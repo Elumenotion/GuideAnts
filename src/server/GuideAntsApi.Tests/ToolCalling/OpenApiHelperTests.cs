@@ -66,9 +66,10 @@ public sealed class OpenApiHelperTests
         var tools = OpenApiHelper.GetToolDefinitionsFromSchema(validation.Spec!);
 
         tools.Should().ContainSingle();
-        tools[0].Function!.AsObject!.Name.Should().Be("listItems");
-        tools[0].Function.AsObject.Description.Should().Be("List items");
-        tools[0].Function.AsObject.Parameters!.Properties.Should().ContainKey("limit");
+        var function = tools[0].Function!.AsObject!;
+        function.Name.Should().Be("listItems");
+        function.Description.Should().Be("List items");
+        function.Parameters!.Properties.Should().ContainKey("limit");
     }
 
     [TestMethod]
@@ -129,8 +130,9 @@ public sealed class OpenApiHelperTests
         var tools = OpenApiHelper.GetToolDefinitionsFromSchema(validation.Spec!);
 
         tools.Should().ContainSingle();
-        tools[0].Function!.AsObject!.Parameters!.Properties.Should().ContainKey("name");
-        tools[0].Function.AsObject.Parameters.Properties.Should().ContainKey("count");
+        var parameters = tools[0].Function!.AsObject!.Parameters!;
+        parameters.Properties.Should().ContainKey("name");
+        parameters.Properties.Should().ContainKey("count");
     }
 
     [TestMethod]
