@@ -54,8 +54,6 @@ describe('AddAiServicesWizard', () => {
     let hfRouterBaseUrl = HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS.routerBaseUrl;
     let openRouterApiKeyStored = false;
     let openRouterBaseUrl = 'https://openrouter.ai/api/v1';
-    let openRouterHttpReferer = '';
-    let openRouterAppTitle = '';
     let models: Array<{
       modelId: string;
       displayName: string;
@@ -204,8 +202,6 @@ describe('AddAiServicesWizard', () => {
           properties: [
             { name: 'ApiKey', valueType: 'string', isSecret: true, isEditable: true, isRequired: true },
             { name: 'BaseUrl', valueType: 'string', isSecret: false, isEditable: true, isRequired: true },
-            { name: 'HttpReferer', valueType: 'string', isSecret: false, isEditable: true, isRequired: false },
-            { name: 'AppTitle', valueType: 'string', isSecret: false, isEditable: true, isRequired: false },
           ],
         },
       ],
@@ -277,8 +273,6 @@ describe('AddAiServicesWizard', () => {
           payload: {
             ApiKey: '',
             BaseUrl: openRouterBaseUrl,
-            HttpReferer: openRouterHttpReferer,
-            AppTitle: openRouterAppTitle,
           },
           secretHasValue: {
             ApiKey: openRouterApiKeyStored,
@@ -327,12 +321,6 @@ describe('AddAiServicesWizard', () => {
         }
         if (typeof payload.BaseUrl === 'string' && payload.BaseUrl.trim().length > 0) {
           openRouterBaseUrl = payload.BaseUrl;
-        }
-        if (typeof payload.HttpReferer === 'string') {
-          openRouterHttpReferer = payload.HttpReferer;
-        }
-        if (typeof payload.AppTitle === 'string') {
-          openRouterAppTitle = payload.AppTitle;
         }
       }
       rowVersion += 1;

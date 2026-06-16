@@ -14,7 +14,7 @@ namespace GuideAntsApi.Tests.Services.Providers;
 public sealed class OpenRouterChatClientDeepTests2
 {
     private static OpenRouterChatClient Client(CapturingHandler handler, HttpClient httpClient) =>
-        new(httpClient, new OpenRouterChatConfig { ApiKey = "or-key", HttpReferer = "https://app.test", AppTitle = "App" }, "anthropic/claude");
+        new(httpClient, new OpenRouterChatConfig { ApiKey = "or-key" }, "anthropic/claude");
 
     private static ChatCompletionRequest UserRequest() =>
         new(messages: [new ChatMessage(ChatRole.User, "hi")], model: "anthropic/claude");
@@ -36,8 +36,10 @@ public sealed class OpenRouterChatClientDeepTests2
             model: "anthropic/claude"));
 
         handler.LastRequestHeaders.TryGetValues("HTTP-Referer", out var referer).Should().BeTrue();
-        referer!.Single().Should().Be("https://app.test");
+        referer!.Single().Should().Be(OpenRouterAttribution.HttpReferer);
+        handler.LastRequestHeaders.TryGetValues("X-OpenRouter-Title", out _).Should().BeTrue();
         handler.LastRequestHeaders.TryGetValues("X-Title", out _).Should().BeTrue();
+        handler.LastRequestHeaders.TryGetValues("X-OpenRouter-Categories", out _).Should().BeTrue();
 
         using var body = JsonDocument.Parse(handler.LastRequestBody);
         body.RootElement.GetProperty("messages")[0].GetProperty("role").GetString().Should().Be("developer");

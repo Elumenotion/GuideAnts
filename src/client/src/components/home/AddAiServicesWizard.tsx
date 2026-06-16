@@ -865,8 +865,6 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
             <OpenRouterConnectionStep
               apiKey={openRouter.coreForm.apiKey}
               baseUrl={openRouter.coreForm.baseUrl}
-              httpReferer={openRouter.coreForm.httpReferer}
-              appTitle={openRouter.coreForm.appTitle}
               apiKeyHasStoredValue={openRouter.coreForm.apiKeyHasStoredValue}
               errors={openRouter.coreErrors}
               onChange={openRouter.setCoreForm}

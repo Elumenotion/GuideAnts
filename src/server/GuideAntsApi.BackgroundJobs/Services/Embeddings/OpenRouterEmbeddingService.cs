@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AntRunner.Chat.OpenRouter;
 using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.BackgroundJobs.Services.Embeddings;
@@ -53,7 +54,7 @@ internal sealed class OpenRouterEmbeddingService(
             Content = new StringContent(requestBody, Encoding.UTF8, "application/json")
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        AddOpenRouterAttributionHeaders(request);
+        OpenRouterAttribution.Apply(request);
 
         using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -86,21 +87,6 @@ internal sealed class OpenRouterEmbeddingService(
         }
 
         return body.ToJsonString();
-    }
-
-    private void AddOpenRouterAttributionHeaders(HttpRequestMessage request)
-    {
-        var httpReferer = _configuration["OpenRouter:HttpReferer"]?.Trim();
-        if (!string.IsNullOrWhiteSpace(httpReferer))
-        {
-            request.Headers.TryAddWithoutValidation("HTTP-Referer", httpReferer);
-        }
-
-        var appTitle = _configuration["OpenRouter:AppTitle"]?.Trim();
-        if (!string.IsNullOrWhiteSpace(appTitle))
-        {
-            request.Headers.TryAddWithoutValidation("X-Title", appTitle);
-        }
     }
 
     private static bool TryReadPositiveInt(string? requestPresetJson, string fieldName, out int value)

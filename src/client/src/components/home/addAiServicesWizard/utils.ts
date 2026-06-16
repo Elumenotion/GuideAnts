@@ -1041,8 +1041,6 @@ export function buildOpenRouterCoreForm(snapshot: WizardLoadSnapshot): OpenRoute
   return {
     apiKey: String(section?.payload.ApiKey ?? ''),
     baseUrl: String(section?.payload.BaseUrl ?? 'https://openrouter.ai/api/v1'),
-    httpReferer: String(section?.payload.HttpReferer ?? ''),
-    appTitle: String(section?.payload.AppTitle ?? ''),
     apiKeyHasStoredValue: Boolean(section?.secretHasValue?.ApiKey),
   };
 }

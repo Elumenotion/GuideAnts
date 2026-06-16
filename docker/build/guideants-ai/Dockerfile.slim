@@ -4,7 +4,7 @@
 # Slim backend (no stable-diffusion, ASR, TTS, EMB, or Playwright)
 # =============================================================================
 ARG GA_DEPS_SLIM_IMAGE=deps-slim
-ARG GA_UBUNTU_MIRROR_URL=http://mirrors.kernel.org/ubuntu
+ARG GA_UBUNTU_MIRROR_URL=http://archive.ubuntu.com/ubuntu
 ARG PYTHON311_VERSION=3.11.11
 
 FROM python:${PYTHON311_VERSION}-slim-bookworm AS python311-runtime
@@ -30,7 +30,6 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
     fi
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl \
@@ -70,7 +69,6 @@ ENV PYTHONUNBUFFERED=1
 
 FROM runtime-cpu-base AS pydeps-slim-builder
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential cmake git \
@@ -86,12 +84,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip "setuptools<82" wheel \
     && grep -viE '^[[:space:]]*starlette([[:space:]]|=|<|>|!|~|\[|$)' /tmp/requirements.txt > /tmp/requirements.without-starlette.txt \
     && pip install -r /tmp/requirements.without-starlette.txt \
-    && pip install --no-deps --force-reinstall starlette==1.2.1 \
+    && pip install --no-deps --force-reinstall starlette==1.3.1 \
     && rm -f /tmp/requirements.txt /tmp/requirements.without-starlette.txt
 
 FROM runtime-cpu-base AS deps-slim
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         graphviz ffmpeg bash sqlite3 nginx util-linux passwd \
