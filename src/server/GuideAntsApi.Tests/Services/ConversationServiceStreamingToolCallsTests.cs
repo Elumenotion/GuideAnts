@@ -1,17 +1,17 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Moq;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Tests.TestUtils;
+using GuideAntsApi.Services.Conversations.Streaming;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAnts.Usage;
 using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
-using GuideAntsApi.Options;
 using AntRunner.Chat.Abstractions;
 
 namespace GuideAntsApi.Tests.Services;
@@ -22,8 +22,6 @@ public class ConversationServiceStreamingToolCallsTests
     private ApplicationDbContext _dbContext = null!;
     private ConversationService _service = null!;
     private Mock<IHttpClientFactory> _mockHttpClientFactory = null!;
-    private Mock<ITurnManager> _mockTurnManager = null!;
-    private Mock<IMessageManager> _mockMessageManager = null!;
     private Mock<IChatCompletionClientFactory> _mockChatClientFactory = null!;
     private ClaimsPrincipal _testUser = null!;
     private Guid _userId;
@@ -44,8 +42,6 @@ public class ConversationServiceStreamingToolCallsTests
         // Setup mocks
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockHttpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
-        _mockTurnManager = new Mock<ITurnManager>();
-        _mockMessageManager = new Mock<IMessageManager>();
         _mockChatClientFactory = new Mock<IChatCompletionClientFactory>();
 
         // Setup test data
@@ -88,23 +84,24 @@ public class ConversationServiceStreamingToolCallsTests
                     ParameterAuthority.AssistantDefinition,
                     new Dictionary<string, System.Text.Json.JsonElement>())));
 
-        _service = new ConversationService(
-            _mockHttpClientFactory.Object,
-            _mockTurnManager.Object,
-            Mock.Of<IConversationBroadcastHub>(),
-            distributedLockMock.Object,
+        var (queryService, commandService, historyBuilder, attachmentService) = ConversationTestServices.Create(
             scopeFactory,
-            usageRecorderMock.Object,
-            _mockChatClientFactory.Object,
             contextOptionsServiceMock.Object,
-            Microsoft.Extensions.Options.Options.Create(new MarkdownAttachmentOptions()),
-            chatModelResolverMock.Object,
-            null,
-            null,
             Mock.Of<IMarkdownExtractionService>(),
-            Mock.Of<ILogger<ConversationService>>(),
-            configurationMock.Object
-        );
+            configurationMock.Object);
+        var (persistence, usageReporter) = ConversationTestServices.CreatePersistence(scopeFactory, usageRecorderMock.Object);
+
+        _service = ConversationTestServices.CreateConversationService(
+            scopeFactory,
+            chatModelResolverMock.Object,
+            queryService,
+            commandService,
+            historyBuilder,
+            attachmentService,
+            persistence,
+            usageReporter,
+            _mockChatClientFactory.Object,
+            distributedLockMock.Object);
 
         // Seed test data
         SeedTestData();
@@ -151,95 +148,52 @@ public class ConversationServiceStreamingToolCallsTests
     [TestMethod]
     public void DetermineEventType_UserMessage_ReturnsUserMessageType()
     {
-        // Arrange
-        var role = "User";
-        var message = "Hello, how are you?";
-
-        // Act
-        var result = InvokePrivateStaticMethod<string>("DetermineEventType", role, message);
-
-        // Assert
-        result.Should().Be(StreamingEventTypes.UserMessage);
+        StreamingEvents.DetermineEventType("User", "Hello, how are you?")
+            .Should().Be(StreamingEventTypes.UserMessage);
     }
 
     [TestMethod]
     public void DetermineEventType_AssistantWithToolCalls_ReturnsAssistantMessage()
     {
-        // Arrange
-        var role = "Assistant";
-        var message = "I need to use tool_calls to help you with that.";
-
-        // Act
-        var result = InvokePrivateStaticMethod<string>("DetermineEventType", role, message);
-
-        // Assert
-        result.Should().Be(StreamingEventTypes.AssistantMessage);
+        StreamingEvents.DetermineEventType("Assistant", "I need to use tool_calls to help you with that.")
+            .Should().Be(StreamingEventTypes.AssistantMessage);
     }
 
     [TestMethod]
     public void DetermineEventType_AssistantWithoutToolCalls_ReturnsAssistantMessage()
     {
-        // Arrange
-        var role = "Assistant";
-        var message = "Here's the answer to your question.";
-
-        // Act
-        var result = InvokePrivateStaticMethod<string>("DetermineEventType", role, message);
-
-        // Assert
-        result.Should().Be(StreamingEventTypes.AssistantMessage);
+        StreamingEvents.DetermineEventType("Assistant", "Here's the answer to your question.")
+            .Should().Be(StreamingEventTypes.AssistantMessage);
     }
 
     [TestMethod]
     public void DetermineEventType_ToolMessage_ReturnsToolResult()
     {
-        // Arrange
-        var role = "Tool";
-        var message = "Function execution completed successfully.";
-
-        // Act
-        var result = InvokePrivateStaticMethod<string>("DetermineEventType", role, message);
-
-        // Assert
-        result.Should().Be(StreamingEventTypes.ToolResult);
+        StreamingEvents.DetermineEventType("Tool", "Function execution completed successfully.")
+            .Should().Be(StreamingEventTypes.ToolResult);
     }
 
     [TestMethod]
     public void DetermineEventType_SystemMessage_ReturnsSystemMessage()
     {
-        // Arrange
-        var role = "System";
-        var message = "You are a helpful assistant.";
-
-        // Act
-        var result = InvokePrivateStaticMethod<string>("DetermineEventType", role, message);
-
-        // Assert
-        result.Should().Be(StreamingEventTypes.SystemMessage);
+        StreamingEvents.DetermineEventType("System", "You are a helpful assistant.")
+            .Should().Be(StreamingEventTypes.SystemMessage);
     }
 
     [TestMethod]
     public void DetermineEventType_UnknownRole_ReturnsMessage()
     {
-        // Arrange
-        var role = "Unknown";
-        var message = "Some message";
-
-        // Act
-        var result = InvokePrivateStaticMethod<string>("DetermineEventType", role, message);
-
-        // Assert
-        result.Should().Be(StreamingEventTypes.Message);
+        StreamingEvents.DetermineEventType("Unknown", "Some message")
+            .Should().Be(StreamingEventTypes.Message);
     }
 
     [TestMethod]
     public void DetermineEventType_CaseInsensitive_WorksCorrectly()
     {
-        // Arrange & Act & Assert
-        InvokePrivateStaticMethod<string>("DetermineEventType", "USER", "Hello").Should().Be(StreamingEventTypes.UserMessage);
-        InvokePrivateStaticMethod<string>("DetermineEventType", "assistant", "Hello").Should().Be(StreamingEventTypes.AssistantMessage);
-        InvokePrivateStaticMethod<string>("DetermineEventType", "TOOL", "Result").Should().Be(StreamingEventTypes.ToolResult);
-        InvokePrivateStaticMethod<string>("DetermineEventType", "system", "Instruction").Should().Be(StreamingEventTypes.SystemMessage);
+        StreamingEvents.DetermineEventType("USER", "Hello").Should().Be(StreamingEventTypes.UserMessage);
+        StreamingEvents.DetermineEventType("assistant", "Hello").Should().Be(StreamingEventTypes.AssistantMessage);
+        StreamingEvents.DetermineEventType("TOOL", "Result").Should().Be(StreamingEventTypes.ToolResult);
+        StreamingEvents.DetermineEventType("system", "Instruction").Should().Be(StreamingEventTypes.SystemMessage);
     }
 
     #endregion
@@ -269,38 +223,22 @@ public class ConversationServiceStreamingToolCallsTests
     [TestMethod]
     public void MessageAddedCallback_WithUserMessage_CreatesCorrectStreamingEvent()
     {
-        // Arrange
-        var testEvents = new List<StreamingEvent>();
-        var mockChannel = CreateMockChannel(testEvents);
-        
-        // This test would require more complex mocking to test the actual callback
-        // For now, we test the event type determination logic which is the core functionality
-        
-        // Act
-        var eventType = InvokePrivateStaticMethod<string>("DetermineEventType", "User", "Hello");
-        
-        // Assert
-        eventType.Should().Be(StreamingEventTypes.UserMessage);
+        StreamingEvents.DetermineEventType("User", "Hello")
+            .Should().Be(StreamingEventTypes.UserMessage);
     }
 
     [TestMethod]
     public void MessageAddedCallback_WithToolResult_CreatesCorrectStreamingEvent()
     {
-        // Arrange & Act
-        var eventType = InvokePrivateStaticMethod<string>("DetermineEventType", "Tool", "Function result");
-        
-        // Assert
-        eventType.Should().Be(StreamingEventTypes.ToolResult);
+        StreamingEvents.DetermineEventType("Tool", "Function result")
+            .Should().Be(StreamingEventTypes.ToolResult);
     }
 
     [TestMethod]
     public void MessageAddedCallback_WithAssistantThinking_CreatesCorrectStreamingEvent()
     {
-        // Arrange & Act
-        var eventType = InvokePrivateStaticMethod<string>("DetermineEventType", "Assistant", "I need to use tool_calls to solve this");
-        
-        // Assert
-        eventType.Should().Be(StreamingEventTypes.AssistantMessage);
+        StreamingEvents.DetermineEventType("Assistant", "I need to use tool_calls to solve this")
+            .Should().Be(StreamingEventTypes.AssistantMessage);
     }
 
     #endregion
@@ -310,39 +248,9 @@ public class ConversationServiceStreamingToolCallsTests
     [TestMethod]
     public void MessageAddedCallback_WithException_ShouldNotBreakStreaming()
     {
-        // This test verifies that exceptions in the callback are handled gracefully
-        // The actual callback includes try-catch to prevent streaming from breaking
-        
-        // Arrange
-        var problematicRole = "Assistant";
-        var problematicMessage = "Some message that might cause issues";
-        
-        // Act & Assert (Should not throw)
-        var eventType = InvokePrivateStaticMethod<string>("DetermineEventType", problematicRole, problematicMessage);
-        eventType.Should().Be(StreamingEventTypes.AssistantMessage);
+        StreamingEvents.DetermineEventType("Assistant", "Some message that might cause issues")
+            .Should().Be(StreamingEventTypes.AssistantMessage);
     }
 
     #endregion
-
-    #region Helper Methods
-
-    private static T InvokePrivateStaticMethod<T>(string methodName, params object[] parameters)
-    {
-        var method = typeof(ConversationService).GetMethod(methodName, 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        
-        method.Should().NotBeNull($"Method {methodName} should exist");
-        
-        var result = method!.Invoke(null, parameters);
-        return (T)result!;
-    }
-
-    private static object CreateMockChannel(List<StreamingEvent> capturedEvents)
-    {
-        // This would be used for more complex streaming tests
-        // For now, we focus on the core logic testing
-        return new object();
-    }
-
-    #endregion
-} 
+}

@@ -1,12 +1,16 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Services.Conversations.Mapping;
 
 namespace GuideAntsApi.Tests.Services.Conversations;
 
 [TestClass]
 public sealed class PublishedAssistantHistoryBuilderTests
 {
+    // FilterMessages / IsAssistantSwitch are pure and do not touch the injected dependencies.
+    private static ConversationHistoryBuilder CreateBuilder() =>
+        new(null!, null!, null!, null!);
+
     [TestMethod]
     public void FilterMessages_on_switch_keeps_user_and_plain_assistant_text()
     {
@@ -37,7 +41,7 @@ public sealed class PublishedAssistantHistoryBuilderTests
             ]
         };
 
-        var filtered = PublishedAssistantHistoryBuilder.FilterMessages(conv, "Researcher", isAssistantSwitch: true);
+        var filtered = CreateBuilder().FilterMessages(conv, "Researcher", isAssistantSwitch: true);
 
         filtered.Should().HaveCount(2);
         filtered[0].Role.Should().Be(ChatRole.User);
@@ -52,7 +56,8 @@ public sealed class PublishedAssistantHistoryBuilderTests
             Turns = [new ConversationTurn { TurnIndex = 1, AssistantName = "Guide" }]
         };
 
-        PublishedAssistantHistoryBuilder.IsAssistantSwitch(conv, "Researcher").Should().BeTrue();
-        PublishedAssistantHistoryBuilder.IsAssistantSwitch(conv, "Guide").Should().BeFalse();
+        var builder = CreateBuilder();
+        builder.IsAssistantSwitch(conv, "Researcher").Should().BeTrue();
+        builder.IsAssistantSwitch(conv, "Guide").Should().BeFalse();
     }
 }

@@ -2,7 +2,6 @@ using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Tests.BackgroundJobs;
-using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Tests.Services.Guides;
 

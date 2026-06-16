@@ -6,7 +6,6 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.IntegrationTests.Infrastructure;
 using GuideAntsApi.Models;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GuideAntsApi.IntegrationTests.Endpoints;

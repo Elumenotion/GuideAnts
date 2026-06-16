@@ -36,6 +36,7 @@ public sealed class PublishedConversationStreamingTests : BaseEndpointTest
     public override async Task BaseTestInitialize()
     {
         await base.BaseTestInitialize();
+        FakeChatCompletionBehavior.Instance.Reset();
         SetupAuthentication();
     }
 

@@ -4,9 +4,7 @@ using GuideAntsApi.BackgroundJobs.Options;
 using GuideAntsApi.BackgroundJobs.Services;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Moq;
 
 namespace GuideAntsApi.Tests.BackgroundJobs;

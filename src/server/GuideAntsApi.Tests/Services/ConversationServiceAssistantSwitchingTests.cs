@@ -1,9 +1,10 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Moq;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations;
+using GuideAntsApi.Services.Conversations.Mapping;
+using GuideAntsApi.Tests.TestUtils;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAnts.Usage;
@@ -14,7 +15,6 @@ using AntRunner.Chat;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 using ChatMessageRole = AntRunner.Chat.Abstractions.ChatRole;
 using Microsoft.Extensions.Configuration;
-using GuideAntsApi.Options;
 
 namespace GuideAntsApi.Tests.Services;
 
@@ -23,9 +23,8 @@ public class ConversationServiceAssistantSwitchingTests
 {
     private ApplicationDbContext _dbContext = null!;
     private ConversationService _service = null!;
+    private ConversationHistoryBuilder _historyBuilder = null!;
     private Mock<IHttpClientFactory> _mockHttpClientFactory = null!;
-    private Mock<ITurnManager> _mockTurnManager = null!;
-    private Mock<IMessageManager> _mockMessageManager = null!;
     private Mock<IChatCompletionClientFactory> _mockChatClientFactory = null!;
     private ClaimsPrincipal _testUser = null!;
     private Guid _userId;
@@ -46,8 +45,6 @@ public class ConversationServiceAssistantSwitchingTests
         // Setup mocks
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockHttpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
-        _mockTurnManager = new Mock<ITurnManager>();
-        _mockMessageManager = new Mock<IMessageManager>();
         _mockChatClientFactory = new Mock<IChatCompletionClientFactory>();
 
         // Setup test data
@@ -90,23 +87,25 @@ public class ConversationServiceAssistantSwitchingTests
                     ParameterAuthority.AssistantDefinition,
                     new Dictionary<string, System.Text.Json.JsonElement>())));
 
-        _service = new ConversationService(
-            _mockHttpClientFactory.Object,
-            _mockTurnManager.Object,
-            Mock.Of<IConversationBroadcastHub>(),
-            distributedLockMock.Object,
+        var (queryService, commandService, historyBuilder, attachmentService) = ConversationTestServices.Create(
             scopeFactory,
-            usageRecorderMock.Object,
-            _mockChatClientFactory.Object,
             contextOptionsServiceMock.Object,
-            Microsoft.Extensions.Options.Options.Create(new MarkdownAttachmentOptions()),
-            chatModelResolverMock.Object,
-            null,
-            null,
             Mock.Of<IMarkdownExtractionService>(),
-            Mock.Of<ILogger<ConversationService>>(),
-            configurationMock.Object
-        );
+            configurationMock.Object);
+        var (persistence, usageReporter) = ConversationTestServices.CreatePersistence(scopeFactory, usageRecorderMock.Object);
+        _historyBuilder = historyBuilder;
+
+        _service = ConversationTestServices.CreateConversationService(
+            scopeFactory,
+            chatModelResolverMock.Object,
+            queryService,
+            commandService,
+            historyBuilder,
+            attachmentService,
+            persistence,
+            usageReporter,
+            _mockChatClientFactory.Object,
+            distributedLockMock.Object);
 
         // Seed test data
         SeedTestData();
@@ -163,9 +162,8 @@ public class ConversationServiceAssistantSwitchingTests
             .FirstAsync(c => c.Id == _conversationId);
 
         // Act
-        var result = await InvokePrivateMethod<List<ChatMessage>>(
-            "PrepareMessagesForAssistantAsync", 
-            conversation, 
+        var result = await _historyBuilder.PrepareMessagesForAssistantAsync(
+            conversation,
             "assistant",
             _userId,
             CancellationToken.None);
@@ -184,9 +182,8 @@ public class ConversationServiceAssistantSwitchingTests
             .FirstAsync(c => c.Id == _conversationId);
 
         // Act
-        var result = await InvokePrivateMethod<List<ChatMessage>>(
-            "PrepareMessagesForAssistantAsync", 
-            conversation, 
+        var result = await _historyBuilder.PrepareMessagesForAssistantAsync(
+            conversation,
             "python-assistant",
             _userId,
             CancellationToken.None);
@@ -206,9 +203,8 @@ public class ConversationServiceAssistantSwitchingTests
         var conversation = await SetupConversationWithMessages("assistant");
 
         // Act
-        var result = await InvokePrivateMethod<List<ChatMessage>>(
-            "PrepareMessagesForAssistantAsync", 
-            conversation, 
+        var result = await _historyBuilder.PrepareMessagesForAssistantAsync(
+            conversation,
             "assistant",
             _userId,
             CancellationToken.None);
@@ -232,9 +228,8 @@ public class ConversationServiceAssistantSwitchingTests
         var switchedAssistant = await AssistantUtility.GetAssistantCreateRequest("Code and Data");
 
         // Act
-        var result = await InvokePrivateMethod<List<ChatMessage>>(
-            "PrepareMessagesForAssistantAsync", 
-            conversation, 
+        var result = await _historyBuilder.PrepareMessagesForAssistantAsync(
+            conversation,
             "Code and Data",
             _userId,
             CancellationToken.None);
@@ -273,9 +268,8 @@ public class ConversationServiceAssistantSwitchingTests
         var conversation = await SetupConversationWithMessages("assistant");
 
         // Act
-        var result = await InvokePrivateMethod<List<ChatMessage>>(
-            "PrepareMessagesForAssistantAsync", 
-            conversation, 
+        var result = await _historyBuilder.PrepareMessagesForAssistantAsync(
+            conversation,
             "definitely-does-not-exist-assistant",
             _userId,
             CancellationToken.None);
@@ -423,23 +417,6 @@ public class ConversationServiceAssistantSwitchingTests
         await _dbContext.SaveChangesAsync();
 
         return conversation;
-    }
-
-    private async Task<T> InvokePrivateMethod<T>(string methodName, params object[] parameters)
-    {
-        var method = typeof(ConversationService).GetMethod(methodName, 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        
-        method.Should().NotBeNull($"Method {methodName} should exist");
-        
-        var result = method!.Invoke(_service, parameters);
-        
-        if (result is Task<T> taskResult)
-        {
-            return await taskResult;
-        }
-        
-        return (T)result!;
     }
 
     #endregion
