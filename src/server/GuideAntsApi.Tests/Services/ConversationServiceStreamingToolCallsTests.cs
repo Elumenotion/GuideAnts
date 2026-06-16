@@ -10,6 +10,8 @@ using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAnts.Usage;
 using System.Security.Claims;
+using System.Text.Json;
+using AntRunner.ToolCalling;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using AntRunner.Chat.Abstractions;
@@ -214,6 +216,30 @@ public class ConversationServiceStreamingToolCallsTests
         StreamingEventTypes.AssistantMessage.Should().Be("assistant_message");
         StreamingEventTypes.ToolResult.Should().Be("tool_result");
         StreamingEventTypes.SystemMessage.Should().Be("system_message");
+    }
+
+    [TestMethod]
+    public void BuildToolActivityProgress_UsesStreamingProgressEventAndDoesNotAlterUsage()
+    {
+        var activity = new ToolActivityUpdate(
+            "ReadWeb",
+            "running",
+            "call-1",
+            Guid.NewGuid(),
+            1,
+            "tool_call",
+            new DateTime(2026, 6, 16, 15, 42, 10, DateTimeKind.Utc));
+
+        var streamEvent = StreamingEvents.BuildToolActivityProgress(activity);
+
+        streamEvent.EventType.Should().Be(StreamingEventTypes.StreamingProgress);
+        streamEvent.EventType.Should().NotBe(StreamingEventTypes.Usage);
+
+        using var payload = JsonDocument.Parse(streamEvent.Payload);
+        var toolActivity = payload.RootElement.GetProperty("toolActivity");
+        toolActivity.GetProperty("name").GetString().Should().Be("ReadWeb");
+        toolActivity.GetProperty("status").GetString().Should().Be("running");
+        toolActivity.GetProperty("toolCallId").GetString().Should().Be("call-1");
     }
 
     #endregion

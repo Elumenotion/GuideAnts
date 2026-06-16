@@ -241,6 +241,91 @@ describe('conversation reducer', () => {
     expect(withProfiles.userProfiles?.u1).toBeTruthy();
   });
 
+  it('stores active tool activity on the current streaming turn', () => {
+    const currentTurn = {
+      id: 'turn-activity',
+      toolCalls: [],
+      toolResults: [],
+      startTime: new Date('2026-01-01T00:00:00Z'),
+      isComplete: false,
+    };
+    const activity = {
+      name: 'ReadWeb',
+      status: 'running' as const,
+      source: 'read_web',
+      timestamp: new Date('2026-01-01T00:00:01Z'),
+    };
+
+    const next = reducer(
+      { ...initialState, currentTurn },
+      { type: 'SET_ACTIVE_TOOL_ACTIVITY', payload: activity }
+    );
+
+    expect(next.currentTurn?.activeToolActivity).toEqual(activity);
+  });
+
+  it('stores agent invocation activity as the active crew and clears the active tool', () => {
+    const currentTurn = {
+      id: 'turn-activity-crew',
+      toolCalls: [],
+      toolResults: [],
+      activeToolActivity: {
+        name: 'ReadWeb',
+        status: 'running' as const,
+        source: 'read_web',
+        timestamp: new Date('2026-01-01T00:00:01Z'),
+      },
+      startTime: new Date('2026-01-01T00:00:00Z'),
+      isComplete: false,
+    };
+    const activity = {
+      name: 'Search',
+      status: 'running' as const,
+      source: 'agent_invocation',
+      timestamp: new Date('2026-01-01T00:00:02Z'),
+    };
+
+    const next = reducer(
+      { ...initialState, currentTurn },
+      { type: 'SET_ACTIVE_TOOL_ACTIVITY', payload: activity }
+    );
+
+    expect(next.currentTurn?.activeCrewActivity).toEqual(activity);
+    expect(next.currentTurn?.activeToolActivity).toBeUndefined();
+  });
+
+  it('creates a streaming turn when active tool activity arrives during an active stream', () => {
+    const activity = {
+      name: 'ReadWeb',
+      status: 'running' as const,
+      source: 'read_web',
+      timestamp: new Date('2026-01-01T00:00:01Z'),
+    };
+
+    const next = reducer(
+      { ...initialState, isStreaming: true, streamingMode: 'observing' },
+      { type: 'SET_ACTIVE_TOOL_ACTIVITY', payload: activity }
+    );
+
+    expect(next.currentTurn).toBeDefined();
+    expect(next.currentTurn?.activeToolActivity).toEqual(activity);
+    expect(next.streamingProgress.currentPhase).toBe('tool_execution');
+    expect(next.isStreamingToolCalls).toBe(true);
+  });
+
+  it('ignores active tool activity when there is no active stream', () => {
+    const next = reducer(initialState, {
+      type: 'SET_ACTIVE_TOOL_ACTIVITY',
+      payload: {
+        name: 'ReadWeb',
+        status: 'running',
+        timestamp: new Date('2026-01-01T00:00:01Z'),
+      },
+    });
+
+    expect(next).toBe(initialState);
+  });
+
   it('returns the existing state for unknown actions', () => {
     const next = reducer(initialState, { type: 'UNKNOWN_ACTION' as never });
     expect(next).toBe(initialState);

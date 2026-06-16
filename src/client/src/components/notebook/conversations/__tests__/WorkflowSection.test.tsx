@@ -137,7 +137,7 @@ describe('WorkflowSection', () => {
     
     // Should show tool execution
     expect(screen.getByText(/Tool Execution/)).toBeInTheDocument();
-    expect(screen.getByText('runPython')).toBeInTheDocument();
+    expect(screen.getByText('Run python')).toBeInTheDocument();
   });
 
   it('should pair tool calls with their results correctly', () => {
@@ -163,7 +163,7 @@ describe('WorkflowSection', () => {
     fireEvent.click(showButton);
     
     // Click to expand tool call details
-    const toolCallButton = screen.getByText('runPython').closest('button');
+    const toolCallButton = screen.getByText('Run python').closest('button');
     expect(toolCallButton).toBeTruthy();
     fireEvent.click(toolCallButton!);
     
@@ -397,7 +397,7 @@ describe('WorkflowSection', () => {
       fireEvent.click(showButton);
       
       // Should show completed tool
-      expect(screen.getByText('runPython')).toBeInTheDocument();
+      expect(screen.getByText('Run python')).toBeInTheDocument();
       
       // Reset mock
       mockConversationContext.currentTurn = undefined;
@@ -452,7 +452,7 @@ describe('WorkflowSection', () => {
     renderWithProviders(<WorkflowSection messages={messages} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
-    expect(screen.getByText('runPython')).toBeInTheDocument();
+    expect(screen.getByText('Run python')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Hide workflow/ }));
     expect(screen.queryByText('Parameters:')).not.toBeInTheDocument();
@@ -517,7 +517,7 @@ describe('WorkflowSection', () => {
 
     renderWithProviders(<WorkflowSection messages={[badArgsMessage, badResult]} />);
     fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
-    fireEvent.click(screen.getByText('brokenTool').closest('button')!);
+    fireEvent.click(screen.getByText('Broken tool').closest('button')!);
 
     expect(screen.getByText('not-json')).toBeInTheDocument();
   });
@@ -637,5 +637,191 @@ describe('WorkflowSection', () => {
 
     expect(screen.getByText(/Assistant is working hard/i)).toBeInTheDocument();
     expect(screen.getByText(/Processing your request with care/i)).toBeInTheDocument();
+  });
+
+  it('shows the latest running tool name in the collapsed working slot', () => {
+    const streamingTurn: StreamingTurn = {
+      id: 'streaming-latest-tool-collapsed',
+      toolCalls: [{
+        id: 'call_old',
+        name: 'DraftOutline',
+        arguments: '{}',
+        status: 'executing',
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      }, {
+        id: 'call_new',
+        name: 'generate_image',
+        arguments: '{}',
+        status: 'executing',
+        timestamp: new Date('2026-01-01T00:00:01Z'),
+      }],
+      toolResults: [],
+      startTime: new Date('2026-01-01T00:00:00Z'),
+      isComplete: false,
+    };
+
+    mockConversationContext.currentTurn = streamingTurn;
+    mockConversationContext.isStreamingToolCalls = true;
+    mockConversationContext.streamingProgress = {
+      currentPhase: 'tool_execution',
+      completedSteps: 0,
+      totalSteps: 2,
+    };
+
+    renderWithProviders(<WorkflowSection messages={[]} isStreaming />);
+
+    expect(screen.getByText('Generate image')).toBeInTheDocument();
+    expect(screen.queryByText('working...')).not.toBeInTheDocument();
+  });
+
+  it('shows the latest running tool name in the expanded running slot', () => {
+    const streamingTurn: StreamingTurn = {
+      id: 'streaming-latest-tool-expanded',
+      toolCalls: [{
+        id: 'call_old_expanded',
+        name: 'DraftOutline',
+        arguments: '{}',
+        status: 'executing',
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      }, {
+        id: 'call_new_expanded',
+        name: 'Search',
+        arguments: '{}',
+        status: 'executing',
+        timestamp: new Date('2026-01-01T00:00:01Z'),
+      }],
+      toolResults: [],
+      startTime: new Date('2026-01-01T00:00:00Z'),
+      isComplete: false,
+    };
+
+    mockConversationContext.currentTurn = streamingTurn;
+    mockConversationContext.isStreamingToolCalls = true;
+    mockConversationContext.streamingProgress = {
+      currentPhase: 'tool_execution',
+      completedSteps: 0,
+      totalSteps: 2,
+    };
+
+    renderWithProviders(<WorkflowSection messages={[]} isStreaming />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+    expect(screen.getAllByText('Search').length).toBeGreaterThan(0);
+    expect(screen.queryByText('running...')).not.toBeInTheDocument();
+  });
+
+  it('shows formatted crew and nested tool activity in the collapsed working slot', () => {
+    const streamingTurn: StreamingTurn = {
+      id: 'streaming-active-tool-collapsed',
+      toolCalls: [{
+        id: 'call_search',
+        name: 'Search',
+        arguments: '{}',
+        status: 'executing',
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      }],
+      toolResults: [],
+      activeCrewActivity: {
+        name: 'Search',
+        status: 'running',
+        source: 'agent_invocation',
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      },
+      activeToolActivity: {
+        name: 'ReadWeb',
+        status: 'running',
+        toolCallId: 'call_readweb',
+        source: 'read_web',
+        timestamp: new Date('2026-01-01T00:00:01Z'),
+      },
+      startTime: new Date('2026-01-01T00:00:00Z'),
+      isComplete: false,
+    };
+
+    mockConversationContext.currentTurn = streamingTurn;
+    mockConversationContext.isStreamingToolCalls = true;
+    mockConversationContext.streamingProgress = {
+      currentPhase: 'tool_execution',
+      completedSteps: 0,
+      totalSteps: 2,
+    };
+
+    renderWithProviders(<WorkflowSection messages={[]} isStreaming />);
+
+    expect(screen.getByText('Search: Read web')).toBeInTheDocument();
+    expect(screen.queryByText('working...')).not.toBeInTheDocument();
+  });
+
+  it('shows only the formatted crew member in the collapsed slot before a nested tool starts', () => {
+    const streamingTurn: StreamingTurn = {
+      id: 'streaming-active-crew-collapsed',
+      toolCalls: [{
+        id: 'call_search_crew_only',
+        name: 'Search',
+        arguments: '{}',
+        status: 'executing',
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      }],
+      toolResults: [],
+      activeCrewActivity: {
+        name: 'Search',
+        status: 'running',
+        source: 'agent_invocation',
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      },
+      startTime: new Date('2026-01-01T00:00:00Z'),
+      isComplete: false,
+    };
+
+    mockConversationContext.currentTurn = streamingTurn;
+    mockConversationContext.isStreamingToolCalls = true;
+    mockConversationContext.streamingProgress = {
+      currentPhase: 'tool_execution',
+      completedSteps: 0,
+      totalSteps: 2,
+    };
+
+    renderWithProviders(<WorkflowSection messages={[]} isStreaming />);
+
+    expect(screen.getByText('Search')).toBeInTheDocument();
+    expect(screen.queryByText(/Search:/)).not.toBeInTheDocument();
+    expect(screen.queryByText('working...')).not.toBeInTheDocument();
+  });
+
+  it('prefers formatted live nested tool activity in the expanded running slot', () => {
+    const streamingTurn: StreamingTurn = {
+      id: 'streaming-active-tool-expanded',
+      toolCalls: [{
+        id: 'call_search_expanded',
+        name: 'Search',
+        arguments: '{}',
+        status: 'executing',
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      }],
+      toolResults: [],
+      activeToolActivity: {
+        name: 'ReadWeb',
+        status: 'running',
+        toolCallId: 'call_readweb_expanded',
+        source: 'read_web',
+        timestamp: new Date('2026-01-01T00:00:01Z'),
+      },
+      startTime: new Date('2026-01-01T00:00:00Z'),
+      isComplete: false,
+    };
+
+    mockConversationContext.currentTurn = streamingTurn;
+    mockConversationContext.isStreamingToolCalls = true;
+    mockConversationContext.streamingProgress = {
+      currentPhase: 'tool_execution',
+      completedSteps: 0,
+      totalSteps: 2,
+    };
+
+    renderWithProviders(<WorkflowSection messages={[]} isStreaming />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Show workflow/ }));
+    expect(screen.getAllByText('Read web').length).toBeGreaterThan(0);
+    expect(screen.queryByText('running...')).not.toBeInTheDocument();
   });
 }); 

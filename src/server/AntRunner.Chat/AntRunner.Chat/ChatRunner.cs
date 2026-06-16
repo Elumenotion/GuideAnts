@@ -57,6 +57,7 @@ namespace AntRunner.Chat
             int turnIndex = 0,
             Guid? assistantId = null,
             Guid? notebookConversationMessageId = null,
+            Action<ToolActivityUpdate>? toolActivitySink = null,
             CancellationToken cancellationToken = default)
         {
             // Create InvocationContext if we have the required context parameters
@@ -76,7 +77,8 @@ namespace AntRunner.Chat
                     {
                         TurnIndex = turnIndex,
                         AssistantId = assistantId,
-                        NotebookConversationMessageId = notebookConversationMessageId
+                        NotebookConversationMessageId = notebookConversationMessageId,
+                        ToolActivitySink = toolActivitySink
                     };
                 }
             }

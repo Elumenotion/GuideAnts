@@ -318,6 +318,39 @@ describe('useStreamingEventHandler streaming branches', () => {
     });
   });
 
+  it('stores tool activity from streaming_progress without appending visible content', () => {
+    const { handler, dispatch } = mountHandler({ currentTurn: {
+      id: 'turn-1',
+      toolCalls: [],
+      toolResults: [],
+      startTime: new Date(),
+      isComplete: false,
+    } as any });
+
+    handler({
+      type: 'streaming_progress',
+      data: {
+        toolActivity: {
+          name: 'ReadWeb',
+          status: 'running',
+          toolCallId: 'tc-read',
+          timestamp: '2026-06-16T15:42:10.162Z',
+        },
+      },
+    });
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'SET_ACTIVE_TOOL_ACTIVITY',
+      payload: expect.objectContaining({
+        name: 'ReadWeb',
+        status: 'running',
+        toolCallId: 'tc-read',
+        timestamp: expect.any(Date),
+      }),
+    });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'APPEND_TOKEN' }));
+  });
+
   it('creates observer placeholder on first assistant_message in observing mode', () => {
     const { handler, dispatch } = mountHandler({ streamingMode: 'observing', messages: [] });
 

@@ -84,6 +84,9 @@ export default function WorkflowSection({
 
   // Dedupe consecutive identical assistant-thinking steps, keeping the latter
   const workflowSteps = dedupeConsecutiveAssistantThinkingSteps(rawWorkflowSteps);
+  const latestRunningActivityLabel = shouldShowStreaming
+    ? getCollapsedActivityLabel(currentTurn)
+    : undefined;
 
   if (workflowSteps.length === 0 && !shouldShowStreaming) {
     return null;
@@ -224,7 +227,9 @@ export default function WorkflowSection({
                           <FaCog className="w-3 h-3 text-blue-500 animate-spin" />
                           <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-green-400 rounded-full animate-bounce"></div>
                         </div>
-                        <span className="text-blue-600 animate-pulse">working...</span>
+                        <span className="text-blue-600 animate-pulse">
+                          {latestRunningActivityLabel || 'working...'}
+                        </span>
                         <div className="w-1 h-1 bg-yellow-400 rounded-full animate-ping"></div>
                       </div>
                     </>
@@ -251,6 +256,7 @@ export default function WorkflowSection({
                           stepNumber={stepNumber}
                           expandedToolCalls={expandedToolCalls}
                           onToggleToolCall={toggleToolCall}
+                          activeToolActivityName={getExpandedToolActivityLabel(currentTurn)}
                         />
                       )}
                     </div>
@@ -422,11 +428,93 @@ function groupStreamingToolCallsByExecution(toolCalls: StreamingToolCall[]): Str
   return groups;
 }
 
+function getCollapsedActivityLabel(turn?: StreamingTurn): string | undefined {
+  const crewName = formatWorkflowName(turn?.activeCrewActivity?.name);
+  const toolName = formatWorkflowName(turn?.activeToolActivity?.name);
+
+  if (crewName && toolName) {
+    return `${crewName}: ${toolName}`;
+  }
+
+  if (crewName) {
+    return crewName;
+  }
+
+  if (toolName) {
+    return toolName;
+  }
+
+  if (!turn?.toolCalls?.length) {
+    return undefined;
+  }
+
+  const runningTools = turn.toolCalls.filter(tool => tool.status === 'executing' || tool.status === 'pending');
+  if (runningTools.length === 0) {
+    return undefined;
+  }
+
+  const latest = runningTools.reduce((current, next) =>
+    next.timestamp.getTime() >= current.timestamp.getTime() ? next : current
+  );
+
+  return formatWorkflowName(latest.name);
+}
+
+function getExpandedToolActivityLabel(turn?: StreamingTurn): string | undefined {
+  return formatWorkflowName(turn?.activeToolActivity?.name);
+}
+
+function getLatestRunningToolNameFromGroup(
+  toolCalls: ToolCallWithResult[],
+  activeToolActivityName?: string
+): string | undefined {
+  if (activeToolActivityName) {
+    return activeToolActivityName;
+  }
+
+  const runningTools = toolCalls.filter(tool => tool.status === 'running' || tool.status === 'pending');
+  if (runningTools.length === 0) {
+    return undefined;
+  }
+
+  const latest = runningTools.reduce((current, next) =>
+    new Date(next.callMessage.created).getTime() >= new Date(current.callMessage.created).getTime() ? next : current
+  );
+
+  return formatWorkflowName(latest.call.function.name);
+}
+
+function formatWorkflowName(name?: string): string | undefined {
+  const trimmed = name?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const needsSyntheticSplit =
+    /[_-]/.test(trimmed) ||
+    /[a-z0-9][A-Z]/.test(trimmed) ||
+    /[A-Z]{2,}[A-Z][a-z]/.test(trimmed);
+
+  if (!needsSyntheticSplit) {
+    return trimmed;
+  }
+
+  const spaced = trimmed
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : undefined;
+}
+
 // Component to show streaming indicators
 function StreamingIndicators({ 
   isStreamingThinking, 
   isStreamingToolCalls, 
-  streamingProgress 
+  streamingProgress
 }: {
   isStreamingThinking: boolean;
   isStreamingToolCalls: boolean;
@@ -672,16 +760,19 @@ function ToolExecutionGroupComponent({
   step, 
   stepNumber,
   expandedToolCalls,
-  onToggleToolCall
+  onToggleToolCall,
+  activeToolActivityName
 }: { 
   step: ToolExecutionGroupStep; 
   stepNumber: number;
   expandedToolCalls: Set<string>;
   onToggleToolCall: (toolCallId: string) => void;
+  activeToolActivityName?: string;
 }) {
   const allCompleted = step.toolCalls.every(tc => tc.status === 'completed');
   const hasErrors = step.toolCalls.some(tc => tc.status === 'error');
   const isRunning = step.toolCalls.some(tc => tc.status === 'running');
+  const latestRunningToolName = getLatestRunningToolNameFromGroup(step.toolCalls, activeToolActivityName);
 
   // Signal the notebook files refresh one-time when this group completes
   const [refreshSignaled, setRefreshSignaled] = useState(false);
@@ -732,7 +823,9 @@ function ToolExecutionGroupComponent({
           {isRunning && (
             <div className="flex items-center space-x-1">
               <FaClock className="w-3 h-3 text-yellow-500 animate-spin" />
-              <span className="text-xs text-yellow-600 animate-pulse">running...</span>
+              <span className="text-xs text-yellow-600 animate-pulse">
+                {latestRunningToolName || 'running...'}
+              </span>
             </div>
           )}
           {allCompleted && !hasErrors && (
@@ -775,6 +868,7 @@ function ToolCallCard({
   onToggle: () => void;
 }) {
   const { call, result, status, duration } = toolCallWithResult;
+  const displayToolName = formatWorkflowName(call.function.name) ?? call.function.name;
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
@@ -890,7 +984,7 @@ function ToolCallCard({
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center space-x-2 min-w-0 flex-1">
               <span className="flex-shrink-0">{statusIcon}</span>
-              <span className="text-sm font-medium text-gray-900 truncate">{call.function.name}</span>
+              <span className="text-sm font-medium text-gray-900 truncate">{displayToolName}</span>
               {duration && (
                 <span className="text-xs text-gray-500 flex-shrink-0">
                   ({duration < 1000 ? `${duration}ms` : `${(duration / 1000).toFixed(1)}s`})

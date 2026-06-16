@@ -1,4 +1,4 @@
-import type { MessageDto, EnhancedConversationState, StreamingProgress, StreamingMessage, StreamingToolResult } from '../../types/conversation';
+import type { MessageDto, EnhancedConversationState, StreamingProgress, StreamingMessage, StreamingToolActivity, StreamingToolResult } from '../../types/conversation';
 import type { ActionType, ExtendedConversationState, StreamingMode } from './types';
 import { generateTurnId, appendAssistantStepChunk, convertTurnToMessages, calculateStreamingProgress } from './streamingHelpers';
 
@@ -495,6 +495,49 @@ export function reducer(state: ExtendedConversationState, action: ActionType): E
         },
         _justCompletedStreaming: true,
         _isCancelling: false
+      };
+    }
+
+    case 'SET_ACTIVE_TOOL_ACTIVITY': {
+      const activity = action.payload as StreamingToolActivity;
+      const hasActiveStream =
+        state.isStreaming ||
+        state.streamingMode === 'sending' ||
+        state.streamingMode === 'observing';
+
+      if (!state.currentTurn && !hasActiveStream) return state;
+
+      const currentTurn = state.currentTurn ?? {
+        id: generateTurnId(),
+        assistantStepChunks: [],
+        toolCalls: [],
+        toolResults: [],
+        startTime: new Date(),
+        isComplete: false
+      };
+
+      const currentProgress = state.streamingProgress ?? initialState.streamingProgress;
+      const streamingProgress: StreamingProgress = {
+        currentPhase: 'tool_execution',
+        completedSteps: currentProgress.completedSteps,
+        totalSteps: Math.max(currentProgress.totalSteps, 1)
+      };
+
+      return {
+        ...state,
+        isStreamingToolCalls: true,
+        isStreamingThinking: false,
+        currentTurn: {
+          ...currentTurn,
+          activeCrewActivity: activity.source === 'agent_invocation'
+            ? activity
+            : currentTurn.activeCrewActivity,
+          activeToolActivity: activity.source === 'agent_invocation'
+            ? undefined
+            : activity
+        },
+        streamingProgress,
+        _renderCounter: (state._renderCounter || 0) + 1
       };
     }
 

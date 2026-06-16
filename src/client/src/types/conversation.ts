@@ -170,6 +170,16 @@ export interface StreamingToolResult {
   timestamp: Date;
 }
 
+export interface StreamingToolActivity {
+  name: string;
+  status?: 'running' | 'completed' | 'error';
+  toolCallId?: string;
+  invocationId?: string;
+  invocationDepth?: number;
+  source?: 'tool_call' | 'agent_invocation' | string;
+  timestamp: Date;
+}
+
 export interface AssistantStepSection {
   content: string;
   toolCalls: StreamingToolCall[];
@@ -189,6 +199,8 @@ export interface StreamingTurn {
   toolCalls: StreamingToolCall[];
   toolResults: StreamingToolResult[];
   finalResponse?: StreamingMessage;
+  activeCrewActivity?: StreamingToolActivity;
+  activeToolActivity?: StreamingToolActivity;
   startTime: Date;
   isComplete: boolean;
   pendingCellClear?: boolean; // When true, next token should clear cell first (for phase transitions)
