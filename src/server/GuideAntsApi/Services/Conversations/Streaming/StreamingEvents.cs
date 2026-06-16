@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using AntRunner.Chat;
+using AntRunner.ToolCalling;
 using GuideAntsApi.Models.Conversations;
 
 namespace GuideAntsApi.Services.Conversations.Streaming;
@@ -74,5 +75,26 @@ public static class StreamingEvents
                 writer.TryWrite(new StreamingEvent("assistant_message", JsonSerializer.Serialize(payload, JsonOptions)));
             }
         }
+    }
+
+    public static StreamingEvent BuildToolActivityProgress(ToolActivityUpdate activity)
+    {
+        var payload = new
+        {
+            toolActivity = new
+            {
+                name = activity.Name,
+                status = activity.Status,
+                toolCallId = activity.ToolCallId,
+                invocationId = activity.InvocationId,
+                invocationDepth = activity.InvocationDepth,
+                source = activity.Source,
+                timestamp = activity.Timestamp
+            }
+        };
+
+        return new StreamingEvent(
+            StreamingEventTypes.StreamingProgress,
+            JsonSerializer.Serialize(payload, JsonOptions));
     }
 }

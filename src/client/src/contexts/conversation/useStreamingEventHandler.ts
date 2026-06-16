@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { MessageDto, StreamingMessage } from '../../types/conversation';
+import type { MessageDto, StreamingMessage, StreamingToolActivity } from '../../types/conversation';
 import { api } from '../../services/api';
 import type { ActionType, ExtendedConversationState } from './types';
 
@@ -58,6 +58,16 @@ export function useStreamingEventHandler(
 
       case 'usage':
         console.log('Usage:', event.data);
+        break;
+
+      case 'streaming_progress':
+        if (event.data.toolActivity?.name) {
+          const activity = event.data.toolActivity;
+          dispatch({ type: 'SET_ACTIVE_TOOL_ACTIVITY', payload: {
+            ...activity,
+            timestamp: new Date(activity.timestamp || new Date())
+          } as StreamingToolActivity });
+        }
         break;
 
       case 'complete':

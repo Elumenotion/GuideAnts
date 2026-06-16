@@ -329,7 +329,18 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     {
                         TurnIndex = context.TurnIndex,
                         AssistantId = context.AssistantId,
-                        NotebookConversationMessageId = context.UserMessageId
+                        NotebookConversationMessageId = context.UserMessageId,
+                        ToolActivitySink = activity =>
+                        {
+                            try
+                            {
+                                TryWrite(StreamingEvents.BuildToolActivityProgress(activity));
+                            }
+                            catch
+                            {
+                                // Activity metadata is best-effort; never interrupt tool execution.
+                            }
+                        }
                     };
 
                     output = await AntRunner.Chat.ThreadRun.ExecuteAsync(
@@ -371,6 +382,17 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                         turnIndex: context.TurnIndex,
                         assistantId: context.AssistantId,
                         notebookConversationMessageId: context.UserMessageId,
+                        toolActivitySink: activity =>
+                        {
+                            try
+                            {
+                                TryWrite(StreamingEvents.BuildToolActivityProgress(activity));
+                            }
+                            catch
+                            {
+                                // Activity metadata is best-effort; never interrupt tool execution.
+                            }
+                        },
                         cancellationToken: externalCt);
                 }
 

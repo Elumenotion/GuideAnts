@@ -1,3 +1,4 @@
+using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.Attributes;
 using HtmlAgility;
 using HtmlAgilityPack;
@@ -24,9 +25,13 @@ public static class ReadWebTools
         OperationId = "GetContentFromUrl",
         Summary = "Reads a web page and returns markdown of the content"
     )]
+    [RequiresNotebookContext]
     public static async Task<MarkdownConversionResult> GetContentFromUrl(
         [Parameter(Description = "The absolute HTTP or HTTPS URL of the page to read.")]
         string url,
+
+        [Parameter(Description = "Invocation context", Hidden = true)]
+        InvocationContext? context = null,
 
         [Parameter(Description = "Cancellation token", Hidden = true)]
         CancellationToken cancellationToken = default)
@@ -43,6 +48,8 @@ public static class ReadWebTools
             errorResult.Content = "Error: Invalid URL format. Only HTTP and HTTPS URLs are supported.";
             return errorResult;
         }
+
+        TryReportReadWebActivity(context);
 
         await using var scope = _serviceProvider.CreateAsyncScope();
         var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
@@ -229,6 +236,25 @@ public static class ReadWebTools
 
         uri = null!;
         return false;
+    }
+
+    private static void TryReportReadWebActivity(InvocationContext? context)
+    {
+        try
+        {
+            context?.ToolActivitySink?.Invoke(new ToolActivityUpdate(
+                "ReadWeb",
+                "running",
+                context.TriggeringToolCallId,
+                context.CurrentInvocationId,
+                context.InvocationDepth,
+                "read_web",
+                DateTime.UtcNow));
+        }
+        catch
+        {
+            // Activity metadata must never affect page fetching.
+        }
     }
 
     private sealed record DirectFetchResult(string? Html, int? StatusCode, string? Error);

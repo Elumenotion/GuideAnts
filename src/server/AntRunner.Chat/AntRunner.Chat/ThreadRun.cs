@@ -777,6 +777,7 @@ namespace AntRunner.Chat
                     var task = Task.Run(async () =>
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        TryReportToolActivity(ctx, toolName, toolCallId);
 
                         string output;
                         if (builder.ActionType == ActionType.WebApi)
@@ -1301,6 +1302,32 @@ namespace AntRunner.Chat
             CancellationToken token)
         {
             return await DatabaseStorage.ResolveModelReasoningEffortAsync(modelId, reasoningEffort, token);
+        }
+
+        private static void TryReportToolActivity(InvocationContext? context, string toolName, string toolCallId)
+        {
+            try
+            {
+                context?.ToolActivitySink?.Invoke(new ToolActivityUpdate(
+                    NormalizeToolActivityName(toolName),
+                    "running",
+                    toolCallId,
+                    context.CurrentInvocationId,
+                    context.InvocationDepth,
+                    "tool_call",
+                    DateTime.UtcNow));
+            }
+            catch
+            {
+                // Activity metadata must not affect tool execution.
+            }
+        }
+
+        private static string NormalizeToolActivityName(string toolName)
+        {
+            return string.Equals(toolName, "GetContentFromUrl", StringComparison.OrdinalIgnoreCase)
+                ? "ReadWeb"
+                : toolName;
         }
 
         /// <summary>

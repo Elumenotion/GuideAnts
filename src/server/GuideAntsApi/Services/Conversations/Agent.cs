@@ -117,6 +117,14 @@ public static class Agent
             evaluator: opts.Evaluator,
             depth: context.InvocationDepth);
 
+        TryReportToolActivity(
+            context,
+            assistantName,
+            status: "running",
+            toolCallId: context.TriggeringToolCallId,
+            invocationId: invocationId,
+            source: "agent_invocation");
+
         // Create child context for nested invocations
         var childContext = context with
         {
@@ -251,6 +259,31 @@ public static class Agent
                 toolCallCount: toolCallCount,
                 durationMs: (long)elapsed.TotalMilliseconds);
             throw;
+        }
+    }
+
+    private static void TryReportToolActivity(
+        InvocationContext context,
+        string name,
+        string status,
+        string? toolCallId,
+        Guid? invocationId,
+        string source)
+    {
+        try
+        {
+            context.ToolActivitySink?.Invoke(new ToolActivityUpdate(
+                name,
+                status,
+                toolCallId,
+                invocationId,
+                context.InvocationDepth,
+                source,
+                DateTime.UtcNow));
+        }
+        catch
+        {
+            // Live activity labels are best-effort metadata.
         }
     }
 

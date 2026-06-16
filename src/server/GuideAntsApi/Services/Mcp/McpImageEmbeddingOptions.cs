@@ -15,7 +15,7 @@ public sealed class McpImageEmbeddingOptions
     public int MaxImagesPerResponse { get; set; } = 5;
 
     /// <summary>Maximum size (bytes) of an individual image to embed; larger files are skipped.</summary>
-    public long MaxImageBytes { get; set; } = 4L * 1024 * 1024;
+    public long MaxImageBytes { get; set; } = 16L * 1024 * 1024;
 
     /// <summary>Whether files modified during the turn (in addition to created) are eligible for embedding.</summary>
     public bool IncludeModifiedFiles { get; set; } = true;
