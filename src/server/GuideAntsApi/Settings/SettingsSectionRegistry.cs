@@ -371,9 +371,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             Properties =
             [
                 new("ApiKey", "OpenRouter:ApiKey", IsSecret: true),
-                new("BaseUrl", "OpenRouter:BaseUrl", DefaultValue: "https://openrouter.ai/api/v1"),
-                new("HttpReferer", "OpenRouter:HttpReferer"),
-                new("AppTitle", "OpenRouter:AppTitle")
+                new("BaseUrl", "OpenRouter:BaseUrl", DefaultValue: "https://openrouter.ai/api/v1")
             ]
         },
         // Single source of truth for the Hugging Face token used by every HF

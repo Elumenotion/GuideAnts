@@ -6,7 +6,7 @@
 ARG SDCPP_REF=master
 ARG SD_AMDGPU_TARGETS="gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
 ARG GA_DEPS_ROCM_IMAGE=deps-rocm
-ARG GA_UBUNTU_MIRROR_URL=http://mirrors.kernel.org/ubuntu
+ARG GA_UBUNTU_MIRROR_URL=http://archive.ubuntu.com/ubuntu
 ARG PYTHON311_VERSION=3.11.11
 
 FROM rocm/dev-ubuntu-24.04:latest AS sd-cli-rocm-builder
@@ -26,7 +26,6 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
             /etc/apt/sources.list; \
     fi
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends build-essential ca-certificates cmake git hipblas-dev rocblas-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -74,7 +73,6 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
     fi
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl \
@@ -117,7 +115,6 @@ ENV C_INCLUDE_PATH=/usr/include/gdal
 
 FROM runtime-rocm-base AS pydeps-rocm-builder
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential cmake git \
@@ -150,7 +147,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 FROM runtime-rocm-base AS deps-rocm
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
         graphviz ffmpeg bash sqlite3 nginx util-linux passwd \

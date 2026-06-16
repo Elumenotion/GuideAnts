@@ -405,8 +405,6 @@ public sealed partial class ApplicationSettingsService
             "Region",
             "Resource",
             "AuthToken",
-            "HttpReferer",
-            "AppTitle",
             "RouterBaseUrl"
         ];
 

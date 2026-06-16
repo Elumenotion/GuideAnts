@@ -19,27 +19,21 @@ public sealed class ProviderConfigurationResolverDeep2Tests
 
         config.ApiKey.Should().BeEmpty();
         config.BaseUrl.Should().Be("https://openrouter.ai/api/v1");
-        config.HttpReferer.Should().BeNull();
-        config.AppTitle.Should().BeNull();
     }
 
     [TestMethod]
-    public void GetOpenRouterChatConfig_HonorsConfiguredOptionalFields()
+    public void GetOpenRouterChatConfig_HonorsConfiguredValues()
     {
         var resolver = CreateResolver(new Dictionary<string, string?>
         {
             ["OpenRouter:ApiKey"] = "or-key",
-            ["OpenRouter:BaseUrl"] = "https://openrouter.test/v1",
-            ["OpenRouter:HttpReferer"] = "https://referer.test",
-            ["OpenRouter:AppTitle"] = "Test App"
+            ["OpenRouter:BaseUrl"] = "https://openrouter.test/v1"
         });
 
         var config = resolver.GetOpenRouterChatConfig();
 
         config.ApiKey.Should().Be("or-key");
         config.BaseUrl.Should().Be("https://openrouter.test/v1");
-        config.HttpReferer.Should().Be("https://referer.test");
-        config.AppTitle.Should().Be("Test App");
     }
 
     [TestMethod]
@@ -85,17 +79,13 @@ public sealed class ProviderConfigurationResolverDeep2Tests
         var resolver = CreateResolver(new Dictionary<string, string?>
         {
             ["OpenRouter:ApiKey"] = "or-key",
-            ["OpenRouter:BaseUrl"] = "https://openrouter.test/v1",
-            ["OpenRouter:HttpReferer"] = "https://referer.test",
-            ["OpenRouter:AppTitle"] = "Title"
+            ["OpenRouter:BaseUrl"] = "https://openrouter.test/v1"
         });
 
         var options = resolver.GetOpenRouterOptions();
 
         options.ApiKey.Should().Be("or-key");
         options.BaseUrl.Should().Be("https://openrouter.test/v1");
-        options.HttpReferer.Should().Be("https://referer.test");
-        options.AppTitle.Should().Be("Title");
     }
 
     [TestMethod]

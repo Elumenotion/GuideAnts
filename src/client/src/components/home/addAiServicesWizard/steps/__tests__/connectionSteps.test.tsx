@@ -198,13 +198,11 @@ describe('OpenRouterConnectionStep', () => {
     vi.clearAllMocks();
   });
 
-  it('renders all connection fields', () => {
+  it('renders connection fields', () => {
     render(
       <OpenRouterConnectionStep
         apiKey=""
         baseUrl="https://openrouter.ai/api/v1"
-        httpReferer=""
-        appTitle=""
         apiKeyHasStoredValue={false}
         errors={{}}
         onChange={onChange}
@@ -214,8 +212,6 @@ describe('OpenRouterConnectionStep', () => {
     expect(screen.getByText('OpenRouter connection details')).toBeInTheDocument();
     expect(screen.getByLabelText('API key')).toBeInTheDocument();
     expect(screen.getByLabelText('Base URL')).toHaveValue('https://openrouter.ai/api/v1');
-    expect(screen.getByLabelText('HTTP Referer (optional)')).toBeInTheDocument();
-    expect(screen.getByLabelText('App Title (optional)')).toBeInTheDocument();
   });
 
   it('calls onChange for each editable field', () => {
@@ -223,8 +219,6 @@ describe('OpenRouterConnectionStep', () => {
       <OpenRouterConnectionStep
         apiKey=""
         baseUrl=""
-        httpReferer=""
-        appTitle=""
         apiKeyHasStoredValue={false}
         errors={{}}
         onChange={onChange}
@@ -233,15 +227,9 @@ describe('OpenRouterConnectionStep', () => {
 
     fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'or-key' } });
     fireEvent.change(screen.getByLabelText('Base URL'), { target: { value: 'https://proxy/v1' } });
-    fireEvent.change(screen.getByLabelText('HTTP Referer (optional)'), {
-      target: { value: 'https://app.example' },
-    });
-    fireEvent.change(screen.getByLabelText('App Title (optional)'), { target: { value: 'My App' } });
 
     expect(onChange).toHaveBeenCalledWith({ apiKey: 'or-key' });
     expect(onChange).toHaveBeenCalledWith({ baseUrl: 'https://proxy/v1' });
-    expect(onChange).toHaveBeenCalledWith({ httpReferer: 'https://app.example' });
-    expect(onChange).toHaveBeenCalledWith({ appTitle: 'My App' });
   });
 
   it('shows stored key hint and validation errors', () => {
@@ -249,8 +237,6 @@ describe('OpenRouterConnectionStep', () => {
       <OpenRouterConnectionStep
         apiKey=""
         baseUrl=""
-        httpReferer=""
-        appTitle=""
         apiKeyHasStoredValue
         errors={{ apiKey: 'Required', baseUrl: 'Bad URL' }}
         onChange={onChange}

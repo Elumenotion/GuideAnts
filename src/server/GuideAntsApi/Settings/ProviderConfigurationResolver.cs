@@ -68,9 +68,7 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
         return new OpenRouterChatConfig
         {
             ApiKey = GetValue("OpenRouter:ApiKey") ?? string.Empty,
-            BaseUrl = GetValue("OpenRouter:BaseUrl") ?? "https://openrouter.ai/api/v1",
-            HttpReferer = GetValue("OpenRouter:HttpReferer"),
-            AppTitle = GetValue("OpenRouter:AppTitle")
+            BaseUrl = GetValue("OpenRouter:BaseUrl") ?? "https://openrouter.ai/api/v1"
         };
     }
 
@@ -104,9 +102,7 @@ public sealed class ProviderConfigurationResolver(IConfiguration configuration) 
         return new OpenRouterOptions
         {
             ApiKey = GetValue("OpenRouter:ApiKey") ?? string.Empty,
-            BaseUrl = GetValue("OpenRouter:BaseUrl") ?? "https://openrouter.ai/api/v1",
-            HttpReferer = GetValue("OpenRouter:HttpReferer"),
-            AppTitle = GetValue("OpenRouter:AppTitle")
+            BaseUrl = GetValue("OpenRouter:BaseUrl") ?? "https://openrouter.ai/api/v1"
         };
     }
 

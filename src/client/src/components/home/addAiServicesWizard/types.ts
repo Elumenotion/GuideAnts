@@ -111,8 +111,6 @@ export interface HuggingFaceCoreConnectionFormState {
 export interface OpenRouterCoreConnectionFormState {
   apiKey: string;
   baseUrl: string;
-  httpReferer: string;
-  appTitle: string;
   apiKeyHasStoredValue: boolean;
 }
 

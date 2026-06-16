@@ -71,7 +71,7 @@
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.5.2",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^4.5.0",
+    "@vitejs/plugin-react": "^6.0.2",
     "@vitest/coverage-v8": "^4.1.0",
     "@vitest/ui": "^4.1.0",
     "autoprefixer": "^10.4.21",
@@ -83,7 +83,7 @@
     "postcss": "^8.5.3",
     "rollup-plugin-visualizer": "^6.0.5",
     "tailwindcss": "^3.4.1",
-    "vite": "^6.3.5",
+    "vite": "^8.0.16",
     "vitest": "^4.1.0"
   },
   "build": {
@@ -120,7 +120,13 @@
     }
   },
   "overrides": {
+    "@babel/core": "7.29.6",
+    "dompurify": "3.4.9",
+    "form-data": "4.0.6",
+    "js-yaml": "4.2.0",
     "qs": "6.15.2",
-    "tmp": "0.2.6"
+    "tar": "7.5.16",
+    "tmp": "0.2.7",
+    "ws": "8.21.0"
   }
 }
