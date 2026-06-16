@@ -52,6 +52,38 @@ public sealed class ReadWebToolsTests
     }
 
     [TestMethod]
+    public async Task GetContentFromUrl_WhenDirectFetchStarts_ReportsReadWebActivity()
+    {
+        var activities = new List<ToolActivityUpdate>();
+        var invocationId = Guid.NewGuid();
+        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())
+        {
+            CurrentInvocationId = invocationId,
+            InvocationDepth = 2,
+            TriggeringToolCallId = "call-readweb",
+            ToolActivitySink = activities.Add
+        };
+
+        InitializeTool(
+            new FakeHttpClientFactory(new StaticHttpMessageHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html><body><p>Hello direct</p></body></html>")
+                })),
+            new FakeBrowserRenderingClient());
+
+        _ = await ReadWebTools.GetContentFromUrl("https://example.com/page", context);
+
+        activities.Should().ContainSingle();
+        activities[0].Name.Should().Be("ReadWeb");
+        activities[0].Status.Should().Be("running");
+        activities[0].ToolCallId.Should().Be("call-readweb");
+        activities[0].InvocationId.Should().Be(invocationId);
+        activities[0].InvocationDepth.Should().Be(2);
+        activities[0].Source.Should().Be("read_web");
+    }
+
+    [TestMethod]
     public async Task GetContentFromUrl_WhenDirectFetchFailsAndBrowserRenderSucceeds_ReturnsMarkdownAndDoesNotWriteExcludedHost()
     {
         var browser = new FakeBrowserRenderingClient
@@ -130,10 +162,16 @@ public sealed class ReadWebToolsTests
         tools.Should().ContainKey("GetContentFromUrl");
         tools["GetContentFromUrl"].Should().Be("GuideAntsApi.Services.ReadWebTools.GetContentFromUrl");
 
+        var contract = ToolContractRegistry.GetContract(tools["GetContentFromUrl"]);
+        contract.RequiresNotebookContext.Should().BeTrue();
+        contract.ParameterMetadata.Should().ContainKey("context");
+        contract.ParameterMetadata["context"].Hidden.Should().BeTrue();
+
         var schema = ToolContractRegistry.GenerateOpenApiSchema(tools["GetContentFromUrl"]);
         schema.Should().Contain("\"operationId\": \"GetContentFromUrl\"");
         schema.Should().Contain("\"GuideAntsApi.Services.ReadWebTools.GetContentFromUrl\"");
         schema.Should().Contain("\"url\"");
+        schema.Should().NotContain("\"context\"");
     }
 
     private void InitializeTool(IHttpClientFactory httpClientFactory, IBrowserRenderingClient browserRenderingClient)

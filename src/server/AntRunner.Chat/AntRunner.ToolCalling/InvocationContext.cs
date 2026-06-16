@@ -57,6 +57,12 @@ public sealed record InvocationContext(
     /// </summary>
     public Guid? AssistantId { get; set; }
 
+    /// <summary>
+    /// Optional live activity sink used by the parent conversation stream to expose
+    /// current tool/invocation progress without changing persisted messages or usage.
+    /// </summary>
+    public Action<ToolActivityUpdate>? ToolActivitySink { get; set; }
+
     public bool IsPublished { get; init; } = CheckIsPublished(NotebookId);
 
     private static bool CheckIsPublished(Guid notebookId)
@@ -74,3 +80,11 @@ public sealed record InvocationContext(
     }
 }
 
+public sealed record ToolActivityUpdate(
+    string Name,
+    string Status,
+    string? ToolCallId,
+    Guid? InvocationId,
+    int InvocationDepth,
+    string Source,
+    DateTime Timestamp);
