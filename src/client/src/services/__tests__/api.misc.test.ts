@@ -260,6 +260,27 @@ describe('api.guides and notebooks', () => {
     expect(result).toBe(blob);
   });
 
+  it('guides downloadClaudeSkill returns blob', async () => {
+    const blob = new Blob(['zip'], { type: 'application/zip' });
+    mockFetch.mockResolvedValue({ ok: true, blob: vi.fn().mockResolvedValue(blob) });
+    const result = await api.guides.guides.downloadClaudeSkill('g1', 'pub-1');
+    expect(result).toBe(blob);
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/guides/g1/publish/pub-1/claude-skill'),
+      expect.any(Object)
+    );
+  });
+
+  it('guides downloadClaudeSkill throws with server error message', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: vi.fn().mockResolvedValue({ error: 'mcp_not_enabled', message: 'MCP must be enabled' }),
+    });
+    await expect(api.guides.guides.downloadClaudeSkill('g1', 'pub-1')).rejects.toThrow(
+      'MCP must be enabled'
+    );
+  });
+
   it('guides import returns parsed JSON', async () => {
     const file = new File(['{}'], 'guide.json', { type: 'application/json' });
     mockFetch.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ id: 'g1' }) });

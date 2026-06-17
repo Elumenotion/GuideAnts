@@ -19,6 +19,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\EmailTemplates\*.html" />
     <EmbeddedResource Include="Resources\EmailTemplates\*.txt" />
+    <EmbeddedResource Include="Templates\ClaudeSkill\**\*" />
   </ItemGroup>
 
   <ItemGroup>

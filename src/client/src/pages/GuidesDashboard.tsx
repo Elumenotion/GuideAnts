@@ -334,7 +334,10 @@ export default function GuidesDashboard() {
         message: `${publishDialogState.guide.name} has been published successfully.`
       });
 
-      setPublishDialogState(null);
+      setPublishDialogState({
+        guide: publishDialogState.guide,
+        publishedGuide: result,
+      });
     } catch (error: any) {
       showToast({
         type: 'error',
@@ -344,7 +347,15 @@ export default function GuidesDashboard() {
     }
   };
 
-  // Update/edit existing publish
+  const handlePublishedGuideUpdated = (updated: PublishedGuideDto) => {
+    if (!publishDialogState) return;
+    setPublishedGuides(prev => new Map(prev).set(publishDialogState.guide.id, updated));
+    setPublishDialogState({
+      guide: publishDialogState.guide,
+      publishedGuide: updated,
+    });
+  };
+
   const handleUpdatePublish = async (config: UpdatePublishedGuideDto) => {
     if (!publishDialogState?.publishedGuide) return;
 
@@ -886,6 +897,7 @@ export default function GuidesDashboard() {
           onDeactivate={publishDialogState.publishedGuide ? handleDeactivatePublish : undefined}
           onReactivate={publishDialogState.publishedGuide ? handleReactivatePublish : undefined}
           onCancel={() => setPublishDialogState(null)}
+          onPublishedGuideUpdated={handlePublishedGuideUpdated}
         />
       )}
     </>
