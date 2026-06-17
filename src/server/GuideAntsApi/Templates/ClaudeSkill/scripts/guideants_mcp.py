@@ -95,20 +95,29 @@ def load_env() -> dict[str, str]:
     return env
 
 
+def api_key_configured(env: dict[str, str]) -> bool:
+    """Report whether a usable API key is present without exposing its value.
+
+    Returning a plain boolean keeps the secret string out of any structure that
+    later reaches stdout/stderr."""
+    value = env.get("GUIDEANTS_API_KEY", "")
+    return bool(value) and value != API_KEY_PLACEHOLDER
+
+
 def require_config(env: dict[str, str]) -> tuple[str, str, str]:
     base = env.get("GUIDEANTS_API_BASE", "").rstrip("/")
     pub = env.get("GUIDEANTS_PUB_ID", "")
     key = env.get("GUIDEANTS_API_KEY", "")
 
-    missing = [
-        name
-        for name, value in (
-            ("GUIDEANTS_API_BASE", base),
-            ("GUIDEANTS_PUB_ID", pub),
-            ("GUIDEANTS_API_KEY", key),
-        )
-        if not value
-    ]
+    # Build the missing-name list from literals gated on presence so the secret
+    # value never flows into the reported payload.
+    missing: list[str] = []
+    if not base:
+        missing.append("GUIDEANTS_API_BASE")
+    if not pub:
+        missing.append("GUIDEANTS_PUB_ID")
+    if not key:
+        missing.append("GUIDEANTS_API_KEY")
     if missing:
         fail(
             "missing_config",
@@ -471,18 +480,19 @@ def cmd_download(args: argparse.Namespace, env: dict[str, str]) -> int:
 def cmd_doctor(args: argparse.Namespace, env: dict[str, str]) -> int:
     base = env.get("GUIDEANTS_API_BASE", "").rstrip("/")
     pub = env.get("GUIDEANTS_PUB_ID", "")
-    key = env.get("GUIDEANTS_API_KEY", "")
 
     checks = [
         {"check": "env_api_base", "ok": bool(base), "value": base},
         {"check": "env_pub_id", "ok": bool(pub)},
-        {"check": "env_api_key", "ok": bool(key) and key != API_KEY_PLACEHOLDER},
+        {"check": "env_api_key", "ok": api_key_configured(env)},
     ]
 
     reachable = False
     tool_count = 0
     if all(c["ok"] for c in checks):
-        ok, tool_count = _try_tools_list(base, pub, key)
+        # Read the key only as a call argument used for the request header; it is
+        # never bound to a local that feeds the emitted checks payload.
+        ok, tool_count = _try_tools_list(base, pub, env.get("GUIDEANTS_API_KEY", ""))
         reachable = ok
     checks.append({"check": "mcp_reachable", "ok": reachable, "toolCount": tool_count})
 
