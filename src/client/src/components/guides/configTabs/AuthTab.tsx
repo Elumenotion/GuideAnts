@@ -8,9 +8,11 @@ interface AuthTabProps {
   setAuthWebhookTimeout: (timeout: number) => void;
   friendlyName: string;
   hasApiKey: boolean;
+  sessionApiKey: string | null;
   guideId: string;
   publishedGuideId?: string;
   onApiKeyChange: (hasKey: boolean) => void;
+  onSessionApiKeyChange: (apiKey: string | null) => void;
 }
 
 export function AuthTab({
@@ -20,11 +22,12 @@ export function AuthTab({
   setAuthWebhookTimeout,
   friendlyName,
   hasApiKey,
+  sessionApiKey,
   guideId,
   publishedGuideId,
-  onApiKeyChange
+  onApiKeyChange,
+  onSessionApiKeyChange,
 }: AuthTabProps) {
-  const [generatedApiKey, setGeneratedApiKey] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
@@ -38,7 +41,7 @@ export function AuthTab({
     setError(null);
     try {
       const response = await api.guides.guides.generateApiKey(guideId, publishedGuideId);
-      setGeneratedApiKey(response.apiKey);
+      onSessionApiKeyChange(response.apiKey);
       onApiKeyChange(true);
       setShowRegenerateConfirm(false);
     } catch (err: unknown) {
@@ -56,7 +59,7 @@ export function AuthTab({
     setError(null);
     try {
       await api.guides.guides.removeApiKey(guideId, publishedGuideId);
-      setGeneratedApiKey(null);
+      onSessionApiKeyChange(null);
       onApiKeyChange(false);
       setShowRemoveConfirm(false);
     } catch (err: unknown) {
@@ -68,15 +71,15 @@ export function AuthTab({
   };
 
   const copyToClipboard = async () => {
-    if (generatedApiKey) {
-      await navigator.clipboard.writeText(generatedApiKey);
+    if (sessionApiKey) {
+      await navigator.clipboard.writeText(sessionApiKey);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
   };
 
   const canUseApiKey = !authWebhookUrl.trim();
-  const canUseWebhook = !hasApiKey && !generatedApiKey;
+  const canUseWebhook = !hasApiKey && !sessionApiKey;
   const isEditMode = !!publishedGuideId;
 
   return (
@@ -99,7 +102,7 @@ export function AuthTab({
               Simple key-based authentication via <code className="bg-gray-100 px-1 rounded">x-guideants-apikey</code> header
             </p>
           </div>
-          {hasApiKey && !generatedApiKey && (
+          {hasApiKey && !sessionApiKey && (
             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
               Enabled
             </span>
@@ -115,7 +118,7 @@ export function AuthTab({
         {canUseApiKey && (
           <div className="space-y-3">
             {/* Show generated key */}
-            {generatedApiKey && (
+            {sessionApiKey && (
               <div className="p-4 bg-green-50 border border-green-200 rounded-md">
                 <div className="flex items-center gap-2 mb-2">
                   <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -125,7 +128,7 @@ export function AuthTab({
                 </div>
                 <div className="flex items-center gap-2 mb-3">
                   <code className="flex-1 px-3 py-2 bg-white border border-green-300 rounded font-mono text-sm text-gray-900 select-all break-all">
-                    {generatedApiKey}
+                    {sessionApiKey}
                   </code>
                   <button
                     type="button"
@@ -145,7 +148,7 @@ export function AuthTab({
             {/* Actions */}
             {isEditMode && (
               <div className="flex flex-wrap gap-2">
-                {!hasApiKey && !generatedApiKey && (
+                {!hasApiKey && !sessionApiKey && (
                   <button
                     type="button"
                     onClick={handleGenerateApiKey}
@@ -156,7 +159,7 @@ export function AuthTab({
                   </button>
                 )}
 
-                {(hasApiKey || generatedApiKey) && !showRegenerateConfirm && !showRemoveConfirm && (
+                {(hasApiKey || sessionApiKey) && !showRegenerateConfirm && !showRemoveConfirm && (
                   <>
                     <button
                       type="button"

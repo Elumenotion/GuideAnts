@@ -1,0 +1,99 @@
+---
+name: {{SkillName}}
+description: {{SkillDescription}}
+allowed-tools: Bash(python:*), Bash(python3:*), Read, Write
+argument-hint: "[what you want the guide to do]"
+---
+
+# {{GuideName}}
+
+Consults the GuideAnts published guide **{{GuideName}}** through its MCP endpoint.
+All inference runs on the GuideAnts server; this skill is a thin, cross-platform
+client. A single Python script (`scripts/guideants_mcp.py`, standard library
+only) handles every call — no bash, no curl. Use `python` or `python3`.
+
+## Setup (once)
+
+Credentials live in `.env` beside this file (`GUIDEANTS_API_BASE`,
+`GUIDEANTS_PUB_ID`, `GUIDEANTS_API_KEY`). Confirm everything is wired up:
+
+```bash
+python scripts/guideants_mcp.py doctor
+```
+
+Never print, echo, or commit the API key.
+
+## Primary workflow
+
+1. **(Optional) Discover assistants** — the guide plus its crew:
+
+```bash
+python scripts/guideants_mcp.py list-tools
+```
+
+The primary tool is **`{{PrimaryToolName}}`**. Prefer it; it delegates to crew
+members on its own.
+
+2. **Invoke** with the user's request as instructions. Pass `--save-dir` so any
+files the guide produces land in the user's workspace (defaults to the current
+directory):
+
+```bash
+python scripts/guideants_mcp.py invoke {{PrimaryToolName}} "YOUR INSTRUCTIONS" --save-dir .
+```
+
+3. **Continue the thread** with the returned `conversationId`:
+
+```bash
+python scripts/guideants_mcp.py invoke {{PrimaryToolName}} "FOLLOW-UP" --conversation-id CONVERSATION_ID --save-dir .
+```
+
+Every command prints one JSON object to stdout. The `invoke` result fields:
+
+| Field | What to do with it |
+|-------|--------------------|
+| `responseMarkdown` | Present this to the user as the primary answer. |
+| `conversationId` | Save it to continue the conversation. |
+| `displayImages` | Local image paths — **Read** each one and show it inline in chat. |
+| `deliverables` | Files the guide created (e.g. `.pptx`, `.csv`), already saved to `--save-dir`. Give the user each `localPath`. |
+| `artifactUrls` | Extra published URLs found in the answer. |
+
+## File handling contract
+
+- **Deliverables** (presentations, exports, documents the user asked for) are
+  downloaded to `--save-dir`, i.e. the workspace. Report their `localPath` to
+  the user. Do **not** leave them only inside this skill folder.
+- **Display images** are cached under this skill's `artifacts/` folder for
+  rendering. **Read** them and embed them in your reply; they are previews, not
+  the deliverable.
+- If `invoke` returns a `conversationId` but `deliverables` is empty while the
+  answer mentions a file, recover it explicitly:
+
+```bash
+python scripts/guideants_mcp.py recover CONVERSATION_ID --save-dir .
+```
+
+- To fetch one specific published URL:
+
+```bash
+python scripts/guideants_mcp.py download "<url>" --save-dir .
+```
+
+## Long-running work
+
+Generating slides, images, or media can take a minute. `invoke` waits up to
+`--timeout` seconds (default 300). If a call is interrupted, reuse the
+`conversationId` with `recover` to collect whatever the guide finished.
+
+See [reference.md](reference.md) for the tool roster, JSON-RPC shapes, and error codes.
+
+## Errors
+
+Each command exits non-zero and prints `{ "error": "<code>", "message": "..." }`.
+Common codes: `missing_config`, `api_key_placeholder`, `unauthorized`,
+`mcp_error`, `network_error`, `download_failed`. Fix `.env` for config/auth
+errors; surface other messages to the user.
+
+## User request
+
+$ARGUMENTS

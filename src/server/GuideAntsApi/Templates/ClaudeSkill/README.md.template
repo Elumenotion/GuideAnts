@@ -1,0 +1,47 @@
+# {{GuideName}} — Agent Skill
+
+Install this published GuideAnts guide as an Agent Skill. It works with any agent
+that supports the Agent Skills format (Claude Code, Cursor, and others).
+
+## Install
+
+Unzip into your agent's skills directory:
+
+| Agent | Personal | Project |
+|-------|----------|---------|
+| Claude Code | `~/.claude/skills/{{SkillDirectoryName}}/` | `.claude/skills/{{SkillDirectoryName}}/` |
+| Cursor | `~/.cursor/skills/{{SkillDirectoryName}}/` | `.cursor/skills/{{SkillDirectoryName}}/` |
+
+## Configure
+
+Edit `.env` (it is pre-filled when downloaded during an active API key session):
+
+```
+GUIDEANTS_API_BASE={{ApiBaseUrl}}
+GUIDEANTS_PUB_ID={{PubId}}
+GUIDEANTS_API_KEY=<your gak_ key>
+```
+
+Optional: set `GUIDEANTS_SAVE_DIR` to choose where deliverables are saved by
+default when a command runs without `--save-dir`.
+
+## Verify
+
+```bash
+cd {{SkillDirectoryName}}
+python scripts/guideants_mcp.py doctor
+```
+
+Requires Python 3.8+ and nothing else — no curl, no bash, no third-party
+packages. `python3` works too.
+
+## Use
+
+Invoke `/{{SkillName}}` (Claude Code or Cursor) or let the agent auto-load the
+skill when a request matches its description.
+
+## Security
+
+- **Do not commit `.env` or this folder to git** — it contains your API key.
+- The skill never prints the API key. If you rotate the key, update `.env` or
+  re-download the skill pack.
