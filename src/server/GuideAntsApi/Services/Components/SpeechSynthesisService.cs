@@ -81,7 +81,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         var providerId = ResolveSpeechSynthesisProviderId(mode.ProviderSection);
         var result = mode.ProviderSection switch
         {
-            LocalProviderSection => await SynthesizeViaLocalTtsAsync(ssml, outputPath, requestId, cancellationToken),
+            LocalProviderSection => await SynthesizeViaLocalTtsAsync(ssml, outputPath, requestId, mode, cancellationToken),
             AzureProviderSection => await SynthesizeViaAzureAsync(ssml, outputPath, requestId, cancellationToken),
             GoogleGeminiProviderSection => await SynthesizeViaGoogleAsync(ssml, outputPath, requestId, mode, cancellationToken),
             HuggingFaceProviderSection => await SynthesizeViaHuggingFaceAsync(ssml, outputPath, requestId, mode, cancellationToken),
@@ -663,6 +663,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         string ssml,
         string outputPath,
         string requestId,
+        ServiceMode mode,
         CancellationToken cancellationToken)
     {
         try
@@ -682,7 +683,16 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
             }
 
             var endpoint = $"{localHosts.SpeechSynthesisBaseUrl.TrimEnd('/')}/tts/synthesize";
-            var payload = JsonSerializer.Serialize(new { text = plainText });
+            var voiceName = ResolveLocalKokoroVoiceName(mode);
+            var languageCode = ResolveLocalKokoroLanguageCode(voiceName);
+            var speed = ResolveLocalKokoroSpeed();
+            var payload = JsonSerializer.Serialize(new
+            {
+                text = plainText,
+                voice = voiceName,
+                lang_code = languageCode,
+                speed
+            });
 
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
             {
@@ -695,10 +705,13 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
 
             var startedAt = DateTime.UtcNow;
             _logger.LogInformation(
-                "tts_api_request_start provider={Provider} requestId={RequestId} textLength={TextLength}",
+                "tts_api_request_start provider={Provider} requestId={RequestId} textLength={TextLength} voice={VoiceName} langCode={LanguageCode} speed={Speed}",
                 LocalProviderSection,
                 requestId,
-                plainText.Length);
+                plainText.Length,
+                voiceName,
+                languageCode,
+                speed);
 
             using var response = await _httpClient.SendAsync(request, timeoutCts.Token);
             var latencyMs = (int)(DateTime.UtcNow - startedAt).TotalMilliseconds;
@@ -797,6 +810,34 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
     }
 
     private static string? ResolveGoogleGeminiVoiceName(ServiceMode mode)
+        => ResolveServiceModePresetString(mode, "VoiceName");
+
+    private string ResolveLocalKokoroVoiceName(ServiceMode mode)
+    {
+        var voiceName = ResolveServiceModePresetString(mode, "VoiceName")
+            ?? _configuration["SpeechSynthesis:VoiceName"]
+            ?? _configuration["GA_TTS_VOICE"];
+        return string.IsNullOrWhiteSpace(voiceName) ? "af_heart" : voiceName.Trim();
+    }
+
+    private static string ResolveLocalKokoroLanguageCode(string voiceName)
+    {
+        return !string.IsNullOrWhiteSpace(voiceName) ? voiceName.Trim()[0].ToString().ToLowerInvariant() : "a";
+    }
+
+    private double ResolveLocalKokoroSpeed()
+    {
+        var raw = _configuration["SpeechSynthesis:Speed"]
+            ?? _configuration["GA_TTS_SPEED"];
+        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var speed) && speed > 0)
+        {
+            return Math.Clamp(speed, 0.25, 4.0);
+        }
+
+        return 1.0;
+    }
+
+    private static string? ResolveServiceModePresetString(ServiceMode mode, string fieldName)
     {
         if (string.IsNullOrWhiteSpace(mode.RequestPresetJson))
         {
@@ -806,10 +847,10 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         try
         {
             using var document = JsonDocument.Parse(mode.RequestPresetJson);
-            if (document.RootElement.TryGetProperty("VoiceName", out var voiceNameElement)
-                && voiceNameElement.ValueKind == JsonValueKind.String)
+            if (document.RootElement.TryGetProperty(fieldName, out var element)
+                && element.ValueKind == JsonValueKind.String)
             {
-                return voiceNameElement.GetString()?.Trim();
+                return element.GetString()?.Trim();
             }
         }
         catch (JsonException)

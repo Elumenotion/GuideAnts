@@ -77,8 +77,8 @@ Use the following exact choices in wizard:
 - `Qwen/Qwen3-ASR-0.6B`
 
 2. TTS model:
-- `microsoft/VibeVoice-1.5B`
-- Tokenizer repo (if required by form): `Qwen/Qwen2.5-1.5B`
+- `hexgrad/Kokoro-82M`
+- Kokoro voice: `af_heart`
 
 3. Embeddings model:
 - `microsoft/harrier-oss-v1-0.6b`
@@ -226,8 +226,8 @@ Actions:
 
 1. Confirm provider is fixed to `SpeechSynthesis.LocalTts.Http`.
 2. Set `TimeoutSeconds=300`.
-3. Download/install model `microsoft/VibeVoice-1.5B`.
-4. If tokenizer field exists, set `Qwen/Qwen2.5-1.5B`.
+3. Download/install the locked model `hexgrad/Kokoro-82M`.
+4. Keep Kokoro voice default `af_heart`; no language or speed fields should be shown.
 5. Load/select active model.
 6. Wait until readiness is ready.
 7. Click `Next`.

@@ -40,9 +40,10 @@ OpenRouter uses a single image model field (`ModelId`) for both text-to-image an
 
 ## Backend Notes
 
-- OpenRouter non-chat service calls include optional attribution headers when configured:
-  - `HTTP-Referer` from `OpenRouter:HttpReferer`
-  - `X-Title` from `OpenRouter:AppTitle`
+- OpenRouter chat and non-chat requests always include fixed OpenRouter app attribution headers:
+  - `HTTP-Referer`: https://www.guideants.ai
+  - `X-OpenRouter-Title` and legacy `X-Title`: GuideAnts
+  - `X-OpenRouter-Categories`: programming-app,cloud-agent,personal-agent,writing-assistant,general-chat,image-gen
 - OpenRouter embeddings accept `Dimensions` from request preset JSON when provided.
 - OpenRouter TTS keeps provider default voice behavior (`alloy`) and allows `VoiceName` override via service mode request preset.
 

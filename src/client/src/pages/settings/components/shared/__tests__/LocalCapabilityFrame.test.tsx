@@ -98,6 +98,28 @@ describe('LocalCapabilityFrame', () => {
     expect(screen.getByText('gateway timeout')).toBeInTheDocument();
   });
 
+  it('renders transport diagnostics for local runtime network errors', () => {
+    render(
+      <LocalCapabilityFrame
+        title="Embeddings"
+        phase="error"
+        errorMessage="Upstream request to http://guideants-ai:80/emb failed: connection refused"
+        upstream={{
+          upstreamTarget: 'http://guideants-ai:80/emb/ready',
+          upstreamStatus: 0,
+          upstreamStatusText: 'NetworkError',
+          upstreamContentType: '',
+          upstreamBody: "docker inspect guideants-ai --format '{{.State.Error}}'",
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/Upstream request to/)).toBeInTheDocument();
+    expect(screen.getByText('http://guideants-ai:80/emb/ready')).toBeInTheDocument();
+    expect(screen.getByText(/0 NetworkError/)).toBeInTheDocument();
+    expect(screen.getByText(/docker inspect guideants-ai/)).toBeInTheDocument();
+  });
+
   it('renders available children', () => {
     render(
       <LocalCapabilityFrame title="Embeddings" phase="available">
