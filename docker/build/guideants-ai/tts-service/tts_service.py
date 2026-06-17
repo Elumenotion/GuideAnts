@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 MODEL_PATH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+KOKORO_VOICE_RE = re.compile(r"^[a-z]{2}_[a-z0-9_]{1,64}$")
 
 
 def utc_now_iso() -> str:
@@ -217,36 +218,67 @@ def unload_model() -> dict[str, Any]:
     return {"wasLoaded": had_model, "previousModelRef": previous_ref}
 
 
-def resolve_model_target(request: LoadModelRequest) -> str:
+def resolve_local_model_path(model_path: str) -> str:
     model_dir = os.getenv("GA_TTS_MODEL_DIR", "/models-local/tts")
+    requested = model_path.strip()
+    if not MODEL_PATH_RE.fullmatch(requested):
+        raise ValueError("model_path must be a simple local model name (letters, digits, dot, underscore, hyphen).")
+
+    base_real = os.path.realpath(model_dir)
+    candidate = os.path.realpath(os.path.join(base_real, requested))
+    if not candidate.startswith(base_real + os.sep):
+        raise ValueError("resolved model_path escapes the permitted model directory.")
+    if os.path.exists(candidate):
+        return candidate
+    raise FileNotFoundError(
+        f"Configured model_path '{requested}' does not exist under GA_TTS_MODEL_DIR."
+    )
+
+
+def resolve_configured_local_model_path(model_path: str) -> str | None:
+    model_dir = os.getenv("GA_TTS_MODEL_DIR", "/models-local/tts")
+    requested = model_path.strip()
+    if not requested:
+        return None
+
+    base_real = os.path.realpath(model_dir)
+    if os.path.isabs(requested):
+        candidate = os.path.realpath(requested)
+        if not candidate.startswith(base_real + os.sep):
+            return None
+        return candidate if os.path.exists(candidate) else None
+
+    if not MODEL_PATH_RE.fullmatch(requested):
+        return None
+
+    candidate = os.path.realpath(os.path.join(base_real, requested))
+    if not candidate.startswith(base_real + os.sep):
+        return None
+    return candidate if os.path.exists(candidate) else None
+
+
+def resolve_model_reference(request: LoadModelRequest) -> tuple[str, str | None]:
     default_model_path = os.getenv("GA_TTS_DEFAULT_MODEL_PATH", "").strip()
     default_model_id = os.getenv("GA_TTS_DEFAULT_MODEL_ID", "hexgrad/Kokoro-82M").strip()
 
     if request.model_path:
-        requested = request.model_path.strip()
-        if not MODEL_PATH_RE.fullmatch(requested):
-            raise ValueError("model_path must be a simple local model name (letters, digits, dot, underscore, hyphen).")
-        base_real = os.path.realpath(model_dir)
-        candidate = os.path.realpath(os.path.join(base_real, requested))
-        if not candidate.startswith(base_real + os.sep):
-            raise ValueError("resolved model_path escapes the permitted model directory.")
-        if os.path.exists(candidate):
-            return candidate
-        raise FileNotFoundError(
-            f"Configured model_path '{requested}' does not exist under GA_TTS_MODEL_DIR."
-        )
+        local_path = resolve_local_model_path(request.model_path)
+        return local_path, local_path
 
     if request.model_id:
-        return request.model_id.strip()
+        return request.model_id.strip(), None
 
     if default_model_path:
-        candidate = default_model_path
-        if not os.path.isabs(candidate):
-            candidate = os.path.join(model_dir, candidate)
-        if os.path.exists(candidate):
-            return candidate
+        local_path = resolve_configured_local_model_path(default_model_path)
+        if local_path:
+            return local_path, local_path
 
-    return default_model_id
+    return default_model_id, None
+
+
+def resolve_model_target(request: LoadModelRequest) -> str:
+    target, _ = resolve_model_reference(request)
+    return target
 
 
 def resolve_tokenizer_target(request: LoadModelRequest) -> str | None:
@@ -427,7 +459,10 @@ def resolve_kokoro_lang_code(value: str | None, voice: str | None = None) -> str
 
 def resolve_kokoro_voice(value: str | None) -> str:
     voice = (value or os.getenv("GA_TTS_VOICE") or "af_heart").strip()
-    return voice or "af_heart"
+    voice = voice or "af_heart"
+    if not KOKORO_VOICE_RE.fullmatch(voice):
+        raise ValueError("voice must be a Kokoro voice id such as af_heart.")
+    return voice
 
 
 def resolve_kokoro_speed(value: float | str | None) -> float:
@@ -452,28 +487,47 @@ def resolve_device(requested_device_map: str) -> str:
 
 
 def find_local_kokoro_weight(model_dir: str) -> str:
+    model_dir = os.path.realpath(model_dir)
+    base_real = os.path.realpath(get_model_dir())
+    if not model_dir.startswith(base_real + os.sep):
+        raise ValueError("Kokoro model directory escapes the permitted model directory.")
+
     preferred = [
         "kokoro-v1_0.pth",
         "kokoro-v1_1-zh.pth",
         "model.pth",
     ]
     for name in preferred:
-        candidate = os.path.join(model_dir, name)
+        candidate = os.path.realpath(os.path.join(model_dir, name))
+        if not candidate.startswith(model_dir + os.sep):
+            continue
         if os.path.isfile(candidate):
             return candidate
 
     for name in sorted(os.listdir(model_dir)):
-        if name.lower().endswith(".pth"):
-            return os.path.join(model_dir, name)
+        if MODEL_PATH_RE.fullmatch(name) and name.lower().endswith(".pth"):
+            candidate = os.path.realpath(os.path.join(model_dir, name))
+            if candidate.startswith(model_dir + os.sep) and os.path.isfile(candidate):
+                return candidate
 
     raise FileNotFoundError(f"No Kokoro .pth model weight was found in '{model_dir}'.")
 
 
 def resolve_local_voice_path(local_model_dir: str | None, voice: str) -> str:
-    if voice.endswith(".pt") or os.path.isabs(voice):
-        return voice
+    voice = resolve_kokoro_voice(voice)
     if local_model_dir:
-        candidate = os.path.join(local_model_dir, "voices", f"{voice}.pt")
+        base_real = os.path.realpath(get_model_dir())
+        local_model_dir = os.path.realpath(local_model_dir)
+        if not local_model_dir.startswith(base_real + os.sep):
+            raise ValueError("Kokoro model directory escapes the permitted model directory.")
+
+        voices_dir = os.path.realpath(os.path.join(local_model_dir, "voices"))
+        if not voices_dir.startswith(local_model_dir + os.sep):
+            raise ValueError("Kokoro voice directory escapes the configured model directory.")
+
+        candidate = os.path.realpath(os.path.join(voices_dir, f"{voice}.pt"))
+        if not candidate.startswith(voices_dir + os.sep):
+            raise ValueError("Kokoro voice path escapes the configured voice directory.")
         if os.path.isfile(candidate):
             return candidate
     return voice
@@ -499,7 +553,7 @@ def load_model(request: LoadModelRequest) -> dict[str, Any]:
     if hf_token:
         os.environ["HF_TOKEN"] = hf_token
 
-    target = resolve_model_target(request)
+    target, local_model_dir = resolve_model_reference(request)
     tokenizer_target = resolve_tokenizer_target(request)
     dtype = resolve_dtype(request.dtype or os.getenv("GA_TTS_DTYPE"))
     requested_device_map = (request.device_map or os.getenv("GA_TTS_DEVICE_MAP") or "auto").strip() or "auto"
@@ -512,9 +566,10 @@ def load_model(request: LoadModelRequest) -> dict[str, Any]:
 
     started = time.perf_counter()
 
-    local_model_dir = target if os.path.isdir(target) else None
     if local_model_dir:
-        config_path = os.path.join(local_model_dir, "config.json")
+        config_path = os.path.realpath(os.path.join(local_model_dir, "config.json"))
+        if not config_path.startswith(local_model_dir + os.sep):
+            raise ValueError("Kokoro config path escapes the configured model directory.")
         if not os.path.isfile(config_path):
             raise FileNotFoundError(f"Configured Kokoro model path '{target}' is missing config.json.")
         weight_path = find_local_kokoro_weight(local_model_dir)
@@ -768,6 +823,8 @@ async def admin_download_status(operation_id: str) -> JSONResponse:
 async def admin_delete_model(model_ref: str) -> JSONResponse:
     if not model_ref:
         raise HTTPException(status_code=400, detail="model_ref is required")
+    if not MODEL_PATH_RE.fullmatch(model_ref):
+        raise HTTPException(status_code=400, detail="invalid model_ref")
 
     snapshot = STATE.snapshot()
     active_model = snapshot.get("modelRef")
@@ -777,9 +834,9 @@ async def admin_delete_model(model_ref: str) -> JSONResponse:
     if active_tokenizer and (active_tokenizer == model_ref or str(active_tokenizer).endswith(model_ref)):
         raise HTTPException(status_code=409, detail="cannot delete active tokenizer")
 
-    model_dir = os.path.abspath(get_model_dir())
-    target = os.path.abspath(os.path.join(model_dir, model_ref))
-    if not target.startswith(model_dir):
+    model_dir = os.path.realpath(get_model_dir())
+    target = os.path.realpath(os.path.join(model_dir, model_ref))
+    if not target.startswith(model_dir + os.sep):
         raise HTTPException(status_code=400, detail="invalid model_ref")
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="model not found")
@@ -840,12 +897,22 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
                 STATE.voice = voice
                 STATE.speed = speed
         except Exception as exc:
+            log_event(
+                "tts_language_switch_failed",
+                requestId=request_id,
+                traceparent=traceparent,
+                modelRef=model_ref,
+                voice=voice,
+                langCode=lang_code,
+                errorType=type(exc).__name__,
+                error=str(exc),
+            )
             return JSONResponse(
                 status_code=500,
                 content={
                     "requestId": request_id,
                     "error": "language_switch_failed",
-                    "message": str(exc),
+                    "message": "Speech synthesis language switch failed. Check service logs for details.",
                 },
             )
     else:
