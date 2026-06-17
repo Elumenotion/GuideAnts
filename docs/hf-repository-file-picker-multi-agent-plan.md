@@ -18,7 +18,7 @@ Use one lead/integration agent plus six implementation agents:
 3. `Shared Picker` extracts the llama picker into a reusable component and keeps llama-cpp behavior unchanged.
 4. `Image Generation` replaces the six free-text HF fields with three single-role picker instances and preserves paste-JSON as advanced mode.
 5. `ASR` converts the download dialog to a preview-only browse-first flow.
-6. `TTS` converts the download dialog to dual preview-only pickers with optional tokenizer repo support.
+6. `TTS` converts the download dialog to a locked Kokoro preview-only picker.
 7. `Embeddings` adds the optional HF preview/load flow while preserving the existing local-path/default-load behavior.
 
 A final `QA` pass can be done by the lead once the feature branches land, or split to a dedicated validation agent if extra capacity is available.
@@ -180,12 +180,10 @@ Depends on:
 
 Scope:
 
-- Replace free-text `modelId` and `tokenizerId` inputs with two preview-only pickers.
-- Keep tokenizer picker collapsed by default.
-- Allow empty tokenizer repo.
+- Replace free-text TTS model entry with one preview-only picker locked to `hexgrad/Kokoro-82M`.
 - Surface `voice` badges for `voices/`, `.npz`, `.pt`, and voice-named files.
 - Keep `revision` editable.
-- Submit unchanged payload `{ model_id, tokenizer_id?, revision? }`.
+- Submit payload `{ model_id, revision? }`; Kokoro TTS uses config and voice files from the model snapshot, not a separate tokenizer repo.
 
 Key constraints:
 

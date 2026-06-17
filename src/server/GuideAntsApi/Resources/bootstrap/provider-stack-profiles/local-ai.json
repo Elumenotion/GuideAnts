@@ -15,7 +15,8 @@
       "TimeoutSeconds": "{{local-transcription-timeout-seconds}}"
     },
     "SpeechSynthesis": {
-      "TimeoutSeconds": "{{local-synthesis-timeout-seconds}}"
+      "TimeoutSeconds": "{{local-synthesis-timeout-seconds}}",
+      "VoiceName": "af_heart"
     },
     "DocumentIntelligence": {
       "TimeoutSeconds": "{{local-doc-int-timeout-seconds}}",
@@ -116,7 +117,8 @@
       "providerId": "SpeechSynthesis.LocalTts.Http",
       "setAsDefault": true,
       "providerFields": {
-        "TimeoutSeconds": "{{local-synthesis-timeout-seconds}}"
+        "TimeoutSeconds": "{{local-synthesis-timeout-seconds}}",
+        "VoiceName": "af_heart"
       }
     },
     {

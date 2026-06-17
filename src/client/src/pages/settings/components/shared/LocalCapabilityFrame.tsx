@@ -117,6 +117,10 @@ function classifyUnavailableFailure(
       };
     }
 
+    if (upstream.upstreamBody?.trim()) {
+      return null;
+    }
+
     return {
       title: 'Local runtime unavailable',
       detail: 'The local service server is not reachable right now.',

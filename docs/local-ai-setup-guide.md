@@ -23,7 +23,7 @@ After completion, these local providers and values should be active:
 Deterministic model choices used in this flow:
 
 - ASR: `Qwen/Qwen3-ASR-0.6B`
-- TTS: `microsoft/VibeVoice-1.5B` with tokenizer `Qwen/Qwen2.5-1.5B`
+- TTS: `hexgrad/Kokoro-82M` with Kokoro voice `af_heart`
 - Embeddings: `microsoft/harrier-oss-v1-0.6b`
 - Image bundle:
   - Diffusion: `unsloth/FLUX.2-klein-4B-GGUF` + `flux-2-klein-4b-Q4_K_S.gguf`
@@ -72,7 +72,7 @@ Set `TimeoutSeconds=900`, keep output format `png`, install/activate the exact b
 
 ### 7. Speech Synthesis
 
-Confirm provider is Local TTS HTTP, `TimeoutSeconds=300`, model `microsoft/VibeVoice-1.5B`, tokenizer `Qwen/Qwen2.5-1.5B`, and readiness `Ready`.
+Confirm provider is Local Kokoro TTS, `TimeoutSeconds=300`, model `hexgrad/Kokoro-82M`, Kokoro voice `af_heart`, and readiness `Ready`. Local TTS infers language from the selected Kokoro voice.
 
 ![TTS ready](images/local-ai-wizard/wizard-07-tts-ready.png)
 

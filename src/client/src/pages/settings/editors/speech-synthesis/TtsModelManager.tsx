@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FaDownload, FaPlay, FaSpinner, FaStop, FaTimes, FaTrash } from 'react-icons/fa';
 import { ConfirmationDialog } from '../../../../components/common/ConfirmationDialog';
 import { api } from '../../../../services/api';
@@ -46,18 +46,21 @@ type TtsReadiness = {
   modelRef?: string | null;
   tokenizerRef?: string | null;
   loadedAtUtc?: string | null;
+  voice?: string | null;
+  langCode?: string | null;
+  speed?: number | null;
 };
 
 type DownloadOp = {
   operationId: string;
   modelId?: string;
-  tokenizerId?: string;
   modelRef?: string;
   status: string;
   error?: string | null;
 };
 
 const SERVICE_ID = 'SpeechSynthesis';
+const KOKORO_MODEL_ID = 'hexgrad/Kokoro-82M';
 
 interface TtsModelManagerProps {
   enabled: boolean;
@@ -208,12 +211,9 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
     });
   }, [enabled, errorMessage, onRuntimeReadinessChange, phase, readiness]);
 
-  const startDownload = async (values: { modelId: string; tokenizerId: string; revision: string }) => {
+  const startDownload = async (values: { modelId: string; revision: string }) => {
     setActionError(null);
     const body: Record<string, unknown> = { model_id: values.modelId.trim() };
-    if (values.tokenizerId.trim()) {
-      body.tokenizer_id = values.tokenizerId.trim();
-    }
     if (values.revision.trim()) {
       body.revision = values.revision.trim();
     }
@@ -514,9 +514,16 @@ function EngineStatusPanel({
               <span className="text-gray-700">
                 model <span className="font-mono">{readiness.modelRef ?? '—'}</span>
               </span>
-              <span className="text-gray-700">
-                tokenizer <span className="font-mono">{readiness.tokenizerRef ?? '—'}</span>
-              </span>
+              {readiness.voice ? (
+                <span className="text-gray-700">
+                  voice <span className="font-mono">{readiness.voice}</span>
+                </span>
+              ) : null}
+              {readiness.langCode ? (
+                <span className="text-gray-700">
+                  language <span className="font-mono">{readiness.langCode}</span>
+                </span>
+              ) : null}
             </>
           ) : (
             <span className="text-gray-500">No model loaded.</span>
@@ -593,54 +600,34 @@ function DownloadModelDialog({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (values: { modelId: string; tokenizerId: string; revision: string }) => Promise<void>;
+  onSubmit: (values: { modelId: string; revision: string }) => Promise<void>;
 }) {
-  const [modelId, setModelId] = useState('');
-  const [tokenizerId, setTokenizerId] = useState('');
+  const [modelId, setModelId] = useState(KOKORO_MODEL_ID);
   const [revision, setRevision] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [modelListing, setModelListing] = useState<HuggingFaceRepositoryListingDto | null>(null);
-  const [tokenizerListing, setTokenizerListing] = useState<HuggingFaceRepositoryListingDto | null>(null);
-  const [showTokenizer, setShowTokenizer] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      setModelId('');
-      setTokenizerId('');
+      setModelId(KOKORO_MODEL_ID);
       setRevision('');
       setErr(null);
       setSubmitting(false);
       setModelListing(null);
-      setTokenizerListing(null);
-      setShowTokenizer(false);
     }
   }, [isOpen]);
-
-  const tokenizerOk = useMemo(() => {
-    // Tokenizer is optional; it is "ready" either when unused entirely or
-    // when it has been browsed successfully.
-    if (!tokenizerId.trim()) {
-      return true;
-    }
-    return tokenizerListing !== null;
-  }, [tokenizerId, tokenizerListing]);
 
   const submit = async () => {
     if (!modelListing) {
       setErr('Browse the model repository first so the snapshot can be previewed.');
       return;
     }
-    if (!tokenizerOk) {
-      setErr('Browse the tokenizer repository or clear the tokenizer field.');
-      return;
-    }
     setSubmitting(true);
     setErr(null);
     try {
       await onSubmit({
-        modelId: modelListing.repository,
-        tokenizerId: tokenizerListing?.repository ?? '',
+        modelId: KOKORO_MODEL_ID,
         revision,
       });
     } catch (e) {
@@ -650,7 +637,7 @@ function DownloadModelDialog({
     }
   };
 
-  const disableSubmit = submitting || !modelListing || !tokenizerOk;
+  const disableSubmit = submitting || !modelListing;
   return (
     <SettingsModal
       isOpen={isOpen}
@@ -680,14 +667,15 @@ function DownloadModelDialog({
     >
       <div className="space-y-3 text-sm">
         <p className="text-xs text-gray-600">
-          Browse a TTS model repository to preview its snapshot before download. The tokenizer repo is optional — most
-          TTS models ship their own tokenizer inside the same snapshot.
+          Local TTS is fixed to Kokoro for now. Browse the locked Kokoro snapshot before download; voice selection is
+          handled by the Kokoro voice dropdown in the provider settings.
         </p>
 
         <RepositoryFilePicker
           repository={modelId}
           onRepositoryChange={(next) => {
-            setModelId(next);
+            void next;
+            setModelId(KOKORO_MODEL_ID);
             setModelListing(null);
           }}
           previewOnly
@@ -702,47 +690,12 @@ function DownloadModelDialog({
             }
           }}
           serviceOrigin="SpeechSynthesis.model"
-          repoInputLabel="TTS model repository"
-          repoInputPlaceholder="org/tts-model"
-          repoInputHint="Paste owner/repo or a Hugging Face model URL. Voice files inside voices/, .npz, .pt, and voice-named files are flagged with a voice badge."
+          repoInputLabel="Kokoro model repository"
+          repoInputPlaceholder="hexgrad/Kokoro-82M"
+          repoInputHint="Local TTS downloads only hexgrad/Kokoro-82M until TTS runtimes become pluggable."
+          repoInputReadOnly
           disabled={submitting}
         />
-
-        <div>
-          <button
-            type="button"
-            className="text-xs text-blue-700 hover:underline disabled:text-gray-400"
-            onClick={() => setShowTokenizer((previous) => !previous)}
-            disabled={submitting}
-          >
-            {showTokenizer ? 'Hide tokenizer repository' : 'Tokenizer repository (advanced)'}
-          </button>
-        </div>
-        {showTokenizer ? (
-          <RepositoryFilePicker
-            repository={tokenizerId}
-            onRepositoryChange={(next) => {
-              setTokenizerId(next);
-              setTokenizerListing(null);
-            }}
-            previewOnly
-            classifyPreview={snapshotPreviewClassifier}
-            onBrowseResolved={(listing) => {
-              setTokenizerListing(listing);
-              setErr(null);
-            }}
-            onBrowseError={(e) => {
-              if (e) {
-                setTokenizerListing(null);
-              }
-            }}
-            serviceOrigin="SpeechSynthesis.tokenizer"
-            repoInputLabel="Tokenizer repository (optional)"
-            repoInputPlaceholder="org/tokenizer-repo"
-            repoInputHint="Leave blank to use the tokenizer bundled with the model repo."
-            disabled={submitting}
-          />
-        ) : null}
 
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-gray-700">Revision (optional)</span>

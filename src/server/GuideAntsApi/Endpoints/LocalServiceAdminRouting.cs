@@ -193,7 +193,7 @@ public static class LocalServiceAdminRouting
                 UpstreamStatus: 0,
                 UpstreamStatusText: "NetworkError",
                 UpstreamContentType: string.Empty,
-                UpstreamBody: string.Empty);
+                UpstreamBody: BuildTransportFailureDiagnostic(upstreamTarget, ex));
             return Results.Json(envelope, statusCode: (int)HttpStatusCode.BadGateway);
         }
 
@@ -227,5 +227,27 @@ public static class LocalServiceAdminRouting
         {
             response.Dispose();
         }
+    }
+
+    private static string BuildTransportFailureDiagnostic(string upstreamTarget, HttpRequestException ex)
+    {
+        var builder = new StringBuilder()
+            .AppendLine($"Transport error: {ex.Message}")
+            .AppendLine()
+            .AppendLine("The local service did not accept the request. In a Docker compose stack this can happen when the guideants-ai container fails before its application entrypoint starts, leaving ordinary container logs empty.")
+            .AppendLine()
+            .AppendLine("Host-side checks:")
+            .AppendLine("  docker ps -a --filter name=guideants-ai")
+            .AppendLine("  docker inspect guideants-ai --format '{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}'")
+            .AppendLine("  docker compose -f docker/docker-compose.cuda.yml ps --all");
+
+        if (!string.IsNullOrWhiteSpace(upstreamTarget))
+        {
+            builder
+                .AppendLine()
+                .AppendLine($"Upstream target: {upstreamTarget}");
+        }
+
+        return builder.ToString().TrimEnd();
     }
 }

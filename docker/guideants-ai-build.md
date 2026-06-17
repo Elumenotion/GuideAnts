@@ -442,12 +442,13 @@ Default location inside the `ai_local_models` volume:
 
 Default expected subdirectories:
 
-- `VibeVoice-1.5B` (from `microsoft/VibeVoice-1.5B`)
-- `Qwen2.5-1.5B-tokenizer` (from `Qwen/Qwen2.5-1.5B`)
+- `Kokoro-82M` (from `hexgrad/Kokoro-82M`)
 
 If these files are missing, the `/tts/admin/load` and `/tts/synthesize`
 endpoints fail until artifacts are present. On a fresh host, either run
 the migration script or register the models through Settings → Speech.
+The Settings UI currently locks local TTS to `hexgrad/Kokoro-82M`; users
+choose from known Kokoro voices, and language is inferred from the voice.
 
 ## Local Embeddings Model Bootstrap (Pre-test, External Artifacts)
 
@@ -512,12 +513,15 @@ Startup loading behavior is configurable per service through environment variabl
   - `1`: run a TTS readiness monitor (`/tts/ready`) in background when autoload is enabled
   - `0`: skip TTS readiness monitoring on startup
 - `GA_TTS_READY_TIMEOUT_SECONDS` (default `1800`)
-- `GA_TTS_DEFAULT_MODEL_PATH` (default `VibeVoice-1.5B`)
-- `GA_TTS_DEFAULT_MODEL_ID` (default `microsoft/VibeVoice-1.5B`)
-- `GA_TTS_TOKENIZER_PATH` (default `Qwen2.5-1.5B-tokenizer`)
-- `GA_TTS_TOKENIZER_ID` (default `Qwen/Qwen2.5-1.5B`)
+- `GA_TTS_DEFAULT_MODEL_PATH` (default `Kokoro-82M`)
+- `GA_TTS_DEFAULT_MODEL_ID` (default `hexgrad/Kokoro-82M`)
 - `GA_TTS_DEVICE_MAP` (default `auto`)
-- `GA_TTS_DTYPE` (default `bfloat16`)
+- `GA_TTS_DTYPE` (default `float32`)
+- `GA_TTS_VOICE` (default `af_heart`)
+- `GA_TTS_LANG_CODE` (default `a`)
+- `GA_TTS_SPEED` (default `1.0`)
+  - These are runtime defaults for the Kokoro service. The product UI only
+    exposes Kokoro voice selection for local TTS.
 - `GA_EMB_AUTO_LOAD_ON_STARTUP` (`1`/`0`)
   - `1`: autoload embeddings model on startup
   - `0`: do not autoload embeddings model

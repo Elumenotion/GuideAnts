@@ -1,9 +1,9 @@
 param(
     [string]$ModelsDir,
-    [string]$ModelRepository = "microsoft/VibeVoice-1.5B",
-    [string]$ModelSubdirectory = "VibeVoice-1.5B",
-    [string]$TokenizerRepository = "Qwen/Qwen2.5-1.5B",
-    [string]$TokenizerSubdirectory = "Qwen2.5-1.5B-tokenizer"
+    [string]$ModelRepository = "hexgrad/Kokoro-82M",
+    [string]$ModelSubdirectory = "Kokoro-82M",
+    [string]$TokenizerRepository = "",
+    [string]$TokenizerSubdirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,10 +91,12 @@ if (-not (Test-Path $modelRoot)) {
 }
 
 $modelDestination = Join-Path $modelRoot $ModelSubdirectory
-$tokenizerDestination = Join-Path $modelRoot $TokenizerSubdirectory
 
 Download-RepositorySnapshot -Repository $ModelRepository -DestinationRoot $modelDestination
-Download-RepositorySnapshot -Repository $TokenizerRepository -DestinationRoot $tokenizerDestination
+if (-not [string]::IsNullOrWhiteSpace($TokenizerRepository)) {
+    $tokenizerDestination = Join-Path $modelRoot $TokenizerSubdirectory
+    Download-RepositorySnapshot -Repository $TokenizerRepository -DestinationRoot $tokenizerDestination
+}
 
 Write-Host ""
 Write-Host "TTS model assets ready at: $modelRoot" -ForegroundColor Green

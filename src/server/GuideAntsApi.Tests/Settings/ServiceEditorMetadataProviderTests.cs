@@ -14,6 +14,23 @@ namespace GuideAntsApi.Tests.Settings;
 public sealed class ServiceEditorMetadataProviderTests
 {
     [TestMethod]
+    public void GetProviderFields_LocalSpeechSynthesis_ExposesOnlyKokoroVoiceSelection()
+    {
+        var metadataProvider = new ServiceEditorMetadataProvider();
+
+        var fields = metadataProvider.GetProviderFields("SpeechSynthesis", "SpeechSynthesis.LocalTts.Http");
+
+        fields.Select(field => field.Name).Should().Equal("TimeoutSeconds", "VoiceName");
+        var voiceField = fields.Single(field => field.Name == "VoiceName");
+        voiceField.Kind.Should().Be("enum");
+        voiceField.EnumOptions.Should().Contain("af_heart");
+        voiceField.EnumOptions.Should().Contain("bf_alice");
+        voiceField.EnumOptions.Should().Contain("jm_kumo");
+        voiceField.EnumOptions.Should().Contain("zf_xiaobei");
+        fields.Should().NotContain(field => field.Name == "LanguageCode" || field.Name == "Speed");
+    }
+
+    [TestMethod]
     public async Task GetSchemaAndMetadata_AllProvidersHaveFieldMetadataAndConfigurationOwner()
     {
         await using var db = CreateDbContext();

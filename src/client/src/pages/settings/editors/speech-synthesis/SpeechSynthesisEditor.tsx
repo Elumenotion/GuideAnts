@@ -75,7 +75,7 @@ export function SpeechSynthesisEditor() {
                 </li>
                 <li>
                   Use <span className="font-mono">SpeechSynthesis:TimeoutSeconds</span> for the local HTTP client. Use the{' '}
-                  <span className="font-medium">Local TTS model</span> section above to load a model and tokenizer in-app.
+                  <span className="font-medium">Local TTS model</span> section above to download and load Kokoro voices in-app.
                 </li>
               </ul>
             )}

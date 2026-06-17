@@ -1,5 +1,4 @@
 import gc
-import inspect
 import io
 import json
 import logging
@@ -20,6 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 MODEL_PATH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+KOKORO_VOICE_RE = re.compile(r"^[a-z]{2}_[a-z0-9_]{1,64}$")
 
 
 def utc_now_iso() -> str:
@@ -98,20 +98,7 @@ def normalize_script_input(text: str) -> str:
     if not stripped:
         return ""
 
-    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
-    speaker_pattern = re.compile(r"^speaker\s+\d+\s*:", re.IGNORECASE)
-    if lines and all(speaker_pattern.match(line) for line in lines):
-        return "\n".join(lines)
-
-    compact = re.sub(r"\s+", " ", stripped)
-    return f"Speaker 1: {compact}"
-
-
-def build_default_voice_sample() -> tuple[np.ndarray, int]:
-    sample_rate = parse_positive_int(os.getenv("GA_TTS_SAMPLE_RATE"), 24_000)
-    seconds = parse_positive_float(os.getenv("GA_TTS_DEFAULT_VOICE_SECONDS"), 1.0)
-    frame_count = max(1, int(sample_rate * seconds))
-    return np.zeros(frame_count, dtype=np.float32), sample_rate
+    return re.sub(r"\s+", " ", stripped)
 
 
 class LoadModelRequest(BaseModel):
@@ -122,8 +109,8 @@ class LoadModelRequest(BaseModel):
     dtype: str | None = None
     device_map: str | None = None
     # Single, server-resolved Hugging Face token stamped in by the .NET web
-    # layer. Used when `model_id` / `tokenizer_id` trigger implicit HF
-    # downloads. Not read from env — the web API is the only source.
+    # layer. Used when `model_id` triggers implicit HF downloads. Not read
+    # from env — the web API is the only source.
     hf_token: str | None = None
 
 
@@ -144,6 +131,9 @@ class DownloadModelRequest(BaseModel):
 
 class SynthesizeRequest(BaseModel):
     text: str = Field(min_length=1)
+    voice: str | None = None
+    lang_code: str | None = None
+    speed: float | None = None
 
 
 class TtsRuntimeState:
@@ -159,12 +149,15 @@ class TtsRuntimeState:
         self.pipeline_task: str | None = None
         self.device: str | None = None
         self.max_new_tokens: int = 512
-        self.default_voice_sample: np.ndarray | None = None
         self.sampling_rate: int = 24_000
+        self.voice: str = "af_heart"
+        self.lang_code: str = "a"
+        self.speed: float = 1.0
+        self.local_model_dir: str | None = None
 
     def is_loaded(self) -> bool:
         with self.lock:
-            return self.model is not None and self.processor is not None
+            return self.model is not None
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -178,6 +171,9 @@ class TtsRuntimeState:
                 "pipelineTask": self.pipeline_task,
                 "device": self.device,
                 "maxNewTokens": self.max_new_tokens,
+                "voice": self.voice,
+                "langCode": self.lang_code,
+                "speed": self.speed,
             }
 
 
@@ -209,7 +205,10 @@ def unload_model() -> dict[str, Any]:
         STATE.device_map = None
         STATE.pipeline_task = None
         STATE.device = None
-        STATE.default_voice_sample = None
+        STATE.voice = "af_heart"
+        STATE.lang_code = "a"
+        STATE.speed = 1.0
+        STATE.local_model_dir = None
     gc.collect()
     try:
         if torch.cuda.is_available():
@@ -219,42 +218,73 @@ def unload_model() -> dict[str, Any]:
     return {"wasLoaded": had_model, "previousModelRef": previous_ref}
 
 
-def resolve_model_target(request: LoadModelRequest) -> str:
+def resolve_local_model_path(model_path: str) -> str:
     model_dir = os.getenv("GA_TTS_MODEL_DIR", "/models-local/tts")
+    requested = model_path.strip()
+    if not MODEL_PATH_RE.fullmatch(requested):
+        raise ValueError("model_path must be a simple local model name (letters, digits, dot, underscore, hyphen).")
+
+    base_real = os.path.realpath(model_dir)
+    candidate = os.path.realpath(os.path.join(base_real, requested))
+    if not candidate.startswith(base_real + os.sep):
+        raise ValueError("resolved model_path escapes the permitted model directory.")
+    if os.path.exists(candidate):
+        return candidate
+    raise FileNotFoundError(
+        f"Configured model_path '{requested}' does not exist under GA_TTS_MODEL_DIR."
+    )
+
+
+def resolve_configured_local_model_path(model_path: str) -> str | None:
+    model_dir = os.getenv("GA_TTS_MODEL_DIR", "/models-local/tts")
+    requested = model_path.strip()
+    if not requested:
+        return None
+
+    base_real = os.path.realpath(model_dir)
+    if os.path.isabs(requested):
+        candidate = os.path.realpath(requested)
+        if not candidate.startswith(base_real + os.sep):
+            return None
+        return candidate if os.path.exists(candidate) else None
+
+    if not MODEL_PATH_RE.fullmatch(requested):
+        return None
+
+    candidate = os.path.realpath(os.path.join(base_real, requested))
+    if not candidate.startswith(base_real + os.sep):
+        return None
+    return candidate if os.path.exists(candidate) else None
+
+
+def resolve_model_reference(request: LoadModelRequest) -> tuple[str, str | None]:
     default_model_path = os.getenv("GA_TTS_DEFAULT_MODEL_PATH", "").strip()
-    default_model_id = os.getenv("GA_TTS_DEFAULT_MODEL_ID", "microsoft/VibeVoice-1.5B").strip()
+    default_model_id = os.getenv("GA_TTS_DEFAULT_MODEL_ID", "hexgrad/Kokoro-82M").strip()
 
     if request.model_path:
-        requested = request.model_path.strip()
-        if not MODEL_PATH_RE.fullmatch(requested):
-            raise ValueError("model_path must be a simple local model name (letters, digits, dot, underscore, hyphen).")
-        base_real = os.path.realpath(model_dir)
-        candidate = os.path.realpath(os.path.join(base_real, requested))
-        if not candidate.startswith(base_real + os.sep):
-            raise ValueError("resolved model_path escapes the permitted model directory.")
-        if os.path.exists(candidate):
-            return candidate
-        raise FileNotFoundError(
-            f"Configured model_path '{requested}' does not exist under GA_TTS_MODEL_DIR."
-        )
+        local_path = resolve_local_model_path(request.model_path)
+        return local_path, local_path
 
     if request.model_id:
-        return request.model_id.strip()
+        return request.model_id.strip(), None
 
     if default_model_path:
-        candidate = default_model_path
-        if not os.path.isabs(candidate):
-            candidate = os.path.join(model_dir, candidate)
-        if os.path.exists(candidate):
-            return candidate
+        local_path = resolve_configured_local_model_path(default_model_path)
+        if local_path:
+            return local_path, local_path
 
-    return default_model_id
+    return default_model_id, None
+
+
+def resolve_model_target(request: LoadModelRequest) -> str:
+    target, _ = resolve_model_reference(request)
+    return target
 
 
 def resolve_tokenizer_target(request: LoadModelRequest) -> str | None:
     model_dir = os.getenv("GA_TTS_MODEL_DIR", "/models-local/tts")
     default_tokenizer_path = os.getenv("GA_TTS_TOKENIZER_PATH", "").strip()
-    default_tokenizer_id = os.getenv("GA_TTS_TOKENIZER_ID", "Qwen/Qwen2.5-1.5B").strip()
+    default_tokenizer_id = os.getenv("GA_TTS_TOKENIZER_ID", "").strip()
 
     tokenizer_path = request.tokenizer_path.strip() if request.tokenizer_path else ""
     if tokenizer_path:
@@ -386,79 +416,134 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
     return operation
 
 
-def ensure_vibevoice_registration() -> None:
-    from transformers import AutoConfig
-    from transformers.cache_utils import DynamicCache
-    from transformers.generation.utils import GenerationMixin
+def resolve_kokoro_lang_code(value: str | None, voice: str | None = None) -> str:
+    raw = (value or "").strip().lower()
+    aliases = {
+        "american": "a",
+        "american english": "a",
+        "en-us": "a",
+        "us": "a",
+        "british": "b",
+        "british english": "b",
+        "en-gb": "b",
+        "uk": "b",
+        "spanish": "e",
+        "es": "e",
+        "french": "f",
+        "fr": "f",
+        "fr-fr": "f",
+        "hindi": "h",
+        "hi": "h",
+        "italian": "i",
+        "it": "i",
+        "japanese": "j",
+        "ja": "j",
+        "portuguese": "p",
+        "brazilian portuguese": "p",
+        "pt-br": "p",
+        "mandarin": "z",
+        "chinese": "z",
+        "zh": "z",
+    }
+    if raw in aliases:
+        return aliases[raw]
+    if raw in {"a", "b", "e", "f", "h", "i", "j", "p", "z"}:
+        return raw
 
-    from vibevoice.modular.configuration_vibevoice import (
-        VibeVoiceAcousticTokenizerConfig,
-        VibeVoiceConfig,
-        VibeVoiceDiffusionHeadConfig,
-        VibeVoiceSemanticTokenizerConfig,
-    )
+    voice_prefix = (voice or "").strip().lower()[:1]
+    if voice_prefix in {"a", "b", "e", "f", "h", "i", "j", "p", "z"}:
+        return voice_prefix
 
-    import vibevoice.modular.modular_vibevoice_diffusion_head  # noqa: F401
-    import vibevoice.modular.modular_vibevoice_tokenizer  # noqa: F401
-    import vibevoice.modular.modeling_vibevoice_inference  # noqa: F401
-
-    for model_type, config_cls in [
-        ("vibevoice", VibeVoiceConfig),
-        ("vibevoice_acoustic_tokenizer", VibeVoiceAcousticTokenizerConfig),
-        ("vibevoice_semantic_tokenizer", VibeVoiceSemanticTokenizerConfig),
-        ("vibevoice_diffusion_head", VibeVoiceDiffusionHeadConfig),
-    ]:
-        try:
-            AutoConfig.register(model_type, config_cls)
-        except ValueError:
-            pass
-
-    if getattr(GenerationMixin, "_ga_vibevoice_cache_patch", False):
-        return
-
-    # vibevoice accesses legacy DynamicCache.key_cache/value_cache lists, while newer
-    # transformers exposes cache tensors via cache layers.
-    if not hasattr(DynamicCache, "key_cache"):
-        DynamicCache.key_cache = property(lambda self: [layer.keys for layer in self.layers])  # type: ignore[attr-defined]
-    if not hasattr(DynamicCache, "value_cache"):
-        DynamicCache.value_cache = property(lambda self: [layer.values for layer in self.layers])  # type: ignore[attr-defined]
-
-    original_prepare_cache = GenerationMixin._prepare_cache_for_generation
-    signature = inspect.signature(original_prepare_cache)
-
-    if len(signature.parameters) == 6:
-
-        def _compat_prepare_cache(self: Any, generation_config: Any, model_kwargs: Any, assistant_model: Any, batch_size: int, max_cache_length: int, *_args: Any, **_kwargs: Any) -> Any:
-            return original_prepare_cache(self, generation_config, model_kwargs, assistant_model, batch_size, max_cache_length)
-
-        GenerationMixin._prepare_cache_for_generation = _compat_prepare_cache
-
-    GenerationMixin._ga_vibevoice_cache_patch = True
+    return "a"
 
 
-def ensure_generation_compatibility(model: Any) -> None:
-    config = model.config
-    decoder_config = getattr(config, "decoder_config", None)
-    if decoder_config is None:
-        return
+def resolve_kokoro_voice(value: str | None) -> str:
+    voice = (value or os.getenv("GA_TTS_VOICE") or "af_heart").strip()
+    voice = voice or "af_heart"
+    if not KOKORO_VOICE_RE.fullmatch(voice):
+        raise ValueError("voice must be a Kokoro voice id such as af_heart.")
+    return voice
 
-    for field in [
-        "hidden_size",
-        "num_hidden_layers",
-        "num_attention_heads",
-        "num_key_value_heads",
-        "vocab_size",
-        "max_position_embeddings",
-    ]:
-        if not hasattr(config, field) and hasattr(decoder_config, field):
-            setattr(config, field, getattr(decoder_config, field))
+
+def resolve_kokoro_speed(value: float | str | None) -> float:
+    if value is None:
+        value = os.getenv("GA_TTS_SPEED")
+    try:
+        speed = float(value) if value is not None and str(value).strip() else 1.0
+    except (TypeError, ValueError):
+        return 1.0
+    return min(4.0, max(0.25, speed))
+
+
+def resolve_device(requested_device_map: str) -> str:
+    requested = requested_device_map.strip().lower()
+    if requested in {"cpu", "cuda", "mps"}:
+        return requested
+    if torch.cuda.is_available():
+        return "cuda"
+    if os.getenv("PYTORCH_ENABLE_MPS_FALLBACK") == "1" and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def find_local_kokoro_weight(model_dir: str) -> str:
+    model_dir = os.path.realpath(model_dir)
+    base_real = os.path.realpath(get_model_dir())
+    if not model_dir.startswith(base_real + os.sep):
+        raise ValueError("Kokoro model directory escapes the permitted model directory.")
+
+    preferred = [
+        "kokoro-v1_0.pth",
+        "kokoro-v1_1-zh.pth",
+        "model.pth",
+    ]
+    for name in preferred:
+        candidate = os.path.realpath(os.path.join(model_dir, name))
+        if not candidate.startswith(model_dir + os.sep):
+            continue
+        if os.path.isfile(candidate):
+            return candidate
+
+    for name in sorted(os.listdir(model_dir)):
+        if MODEL_PATH_RE.fullmatch(name) and name.lower().endswith(".pth"):
+            candidate = os.path.realpath(os.path.join(model_dir, name))
+            if candidate.startswith(model_dir + os.sep) and os.path.isfile(candidate):
+                return candidate
+
+    raise FileNotFoundError(f"No Kokoro .pth model weight was found in '{model_dir}'.")
+
+
+def resolve_local_voice_path(local_model_dir: str | None, voice: str) -> str:
+    voice = resolve_kokoro_voice(voice)
+    if local_model_dir:
+        base_real = os.path.realpath(get_model_dir())
+        local_model_dir = os.path.realpath(local_model_dir)
+        if not local_model_dir.startswith(base_real + os.sep):
+            raise ValueError("Kokoro model directory escapes the permitted model directory.")
+
+        voices_dir = os.path.realpath(os.path.join(local_model_dir, "voices"))
+        if not voices_dir.startswith(local_model_dir + os.sep):
+            raise ValueError("Kokoro voice directory escapes the configured model directory.")
+
+        candidate = os.path.realpath(os.path.join(voices_dir, f"{voice}.pt"))
+        if not candidate.startswith(voices_dir + os.sep):
+            raise ValueError("Kokoro voice path escapes the configured voice directory.")
+        if os.path.isfile(candidate):
+            return candidate
+    return voice
+
+
+def retarget_kokoro_pipeline_lang(pipeline: Any, lang_code: str) -> Any:
+    from kokoro import KPipeline
+
+    model = getattr(pipeline, "model", None)
+    if model is None:
+        raise RuntimeError("Loaded Kokoro pipeline does not expose a reusable model for language switching.")
+    return KPipeline(lang_code=lang_code, repo_id="hexgrad/Kokoro-82M", model=model)
 
 
 def load_model(request: LoadModelRequest) -> dict[str, Any]:
-    from transformers import AutoModelForCausalLM
-    from vibevoice.processor.vibevoice_processor import VibeVoiceProcessor
-
-    ensure_vibevoice_registration()
+    from kokoro import KModel, KPipeline
 
     # transformers / huggingface_hub pick up the HF token from the process
     # environment. When the .NET layer resolved a token for this request we
@@ -468,49 +553,68 @@ def load_model(request: LoadModelRequest) -> dict[str, Any]:
     if hf_token:
         os.environ["HF_TOKEN"] = hf_token
 
-    target = resolve_model_target(request)
+    target, local_model_dir = resolve_model_reference(request)
     tokenizer_target = resolve_tokenizer_target(request)
     dtype = resolve_dtype(request.dtype or os.getenv("GA_TTS_DTYPE"))
     requested_device_map = (request.device_map or os.getenv("GA_TTS_DEVICE_MAP") or "auto").strip() or "auto"
     max_new_tokens = parse_positive_int(os.getenv("GA_TTS_MAX_NEW_TOKENS"), 512)
+    default_voice = resolve_kokoro_voice(None)
+    lang_code = resolve_kokoro_lang_code(os.getenv("GA_TTS_LANG_CODE"), default_voice)
+    speed = resolve_kokoro_speed(None)
+    device = resolve_device(requested_device_map)
+    sample_rate = parse_positive_int(os.getenv("GA_TTS_SAMPLE_RATE"), 24_000)
 
     started = time.perf_counter()
 
-    model = AutoModelForCausalLM.from_pretrained(target, torch_dtype=dtype)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    model.eval()
-    ensure_generation_compatibility(model)
+    if local_model_dir:
+        config_path = os.path.realpath(os.path.join(local_model_dir, "config.json"))
+        if not config_path.startswith(local_model_dir + os.sep):
+            raise ValueError("Kokoro config path escapes the configured model directory.")
+        if not os.path.isfile(config_path):
+            raise FileNotFoundError(f"Configured Kokoro model path '{target}' is missing config.json.")
+        weight_path = find_local_kokoro_weight(local_model_dir)
+        model = KModel(repo_id="hexgrad/Kokoro-82M", config=config_path, model=weight_path)
+        if dtype != torch.float32:
+            model = model.to(device=device, dtype=dtype)
+        else:
+            model = model.to(device)
+        model.eval()
+        pipeline = KPipeline(lang_code=lang_code, repo_id="hexgrad/Kokoro-82M", model=model)
+    else:
+        pipeline = KPipeline(lang_code=lang_code, repo_id=target, device=device)
+        model = getattr(pipeline, "model", None)
+        if model is not None and dtype != torch.float32:
+            model.to(dtype=dtype)
 
-    processor_kwargs: dict[str, Any] = {}
-    if tokenizer_target:
-        processor_kwargs["language_model_pretrained_name"] = tokenizer_target
-
-    processor = VibeVoiceProcessor.from_pretrained(target, **processor_kwargs)
-    default_voice_sample, sample_rate = build_default_voice_sample()
+    # Warm the default voice during load so readiness reflects the selected
+    # voice pack as well as the model weights.
+    pipeline.load_voice(resolve_local_voice_path(local_model_dir, default_voice))
 
     load_latency_ms = int((time.perf_counter() - started) * 1000)
 
     with STATE.lock:
-        STATE.model = model
-        STATE.processor = processor
+        STATE.model = pipeline
+        STATE.processor = None
         STATE.model_ref = target
         STATE.tokenizer_ref = tokenizer_target
         STATE.loaded_at_utc = utc_now_iso()
         STATE.dtype = str(dtype)
         STATE.device_map = requested_device_map
-        STATE.pipeline_task = "vibevoice-generate"
+        STATE.pipeline_task = "kokoro-generate"
         STATE.device = str(device)
         STATE.max_new_tokens = max_new_tokens
-        STATE.default_voice_sample = default_voice_sample
         STATE.sampling_rate = sample_rate
+        STATE.voice = default_voice
+        STATE.lang_code = lang_code
+        STATE.speed = speed
+        STATE.local_model_dir = local_model_dir
 
     if requested_device_map == "auto":
         log_event(
             "tts_device_map_auto_accepted",
             requestedDeviceMap=requested_device_map,
             effectiveDevice=str(device),
-            note="VibeVoice runtime currently executes on a single selected device.",
+            note="Kokoro runtime currently executes on a single selected device.",
         )
 
     return {
@@ -520,59 +624,48 @@ def load_model(request: LoadModelRequest) -> dict[str, Any]:
         "loadLatencyMs": load_latency_ms,
         "dtype": str(dtype),
         "deviceMap": requested_device_map,
-        "pipelineTask": "vibevoice-generate",
+        "pipelineTask": "kokoro-generate",
         "device": str(device),
         "maxNewTokens": max_new_tokens,
         "sampleRate": sample_rate,
+        "voice": default_voice,
+        "langCode": lang_code,
+        "speed": speed,
     }
 
 
-def synthesize_wav_bytes(model: Any, processor: Any, script_text: str, default_voice_sample: np.ndarray, sample_rate: int, max_new_tokens: int) -> tuple[bytes, float, int]:
-    device = next(model.parameters()).device
-
-    inputs = processor(
-        text=script_text,
-        voice_samples=[default_voice_sample],
-        return_tensors="pt",
-    )
-
-    for key, value in list(inputs.items()):
-        if torch.is_tensor(value):
-            inputs[key] = value.to(device)
+def synthesize_wav_bytes(pipeline: Any, script_text: str, voice: str, speed: float, sample_rate: int, local_model_dir: str | None) -> tuple[bytes, float, int]:
+    voice_ref = resolve_local_voice_path(local_model_dir, voice)
+    chunks: list[np.ndarray] = []
+    pause = np.zeros(max(1, int(sample_rate * 0.08)), dtype=np.float32)
 
     with torch.no_grad():
-        generation_output = model.generate(
-            **inputs,
-            tokenizer=processor.tokenizer,
-            max_new_tokens=max_new_tokens,
-        )
+        for _, _, audio in pipeline(script_text, voice=voice_ref, speed=speed, split_pattern=r"\n+"):
+            if audio is None:
+                continue
+            if isinstance(audio, torch.Tensor):
+                waveform = audio.detach().float().cpu().numpy()
+            else:
+                waveform = np.asarray(audio)
 
-    speech_outputs = getattr(generation_output, "speech_outputs", None)
-    if not speech_outputs:
-        raise RuntimeError("VibeVoice generate returned no speech outputs.")
+            if waveform.ndim == 2:
+                if waveform.shape[0] == 1:
+                    waveform = waveform[0]
+                elif waveform.shape[1] == 1:
+                    waveform = waveform[:, 0]
 
-    audio_tensor = speech_outputs[0]
-    if audio_tensor is None:
-        raise RuntimeError("VibeVoice generate produced an empty speech output for the first sample.")
+            if waveform.ndim != 1:
+                raise RuntimeError(f"Unexpected waveform rank {waveform.ndim}; expected mono output.")
 
-    if isinstance(audio_tensor, torch.Tensor):
-        waveform = audio_tensor.detach().float().cpu().numpy()
-    else:
-        waveform = np.asarray(audio_tensor)
+            if waveform.size > 0:
+                if chunks:
+                    chunks.append(pause)
+                chunks.append(waveform.astype(np.float32))
 
-    if waveform.ndim == 2:
-        if waveform.shape[0] == 1:
-            waveform = waveform[0]
-        elif waveform.shape[1] == 1:
-            waveform = waveform[:, 0]
+    if not chunks:
+        raise RuntimeError("Kokoro generated no speech outputs.")
 
-    if waveform.ndim != 1:
-        raise RuntimeError(f"Unexpected waveform rank {waveform.ndim}; expected mono output.")
-
-    if waveform.size == 0:
-        raise RuntimeError("Generated waveform is empty.")
-
-    clipped = np.clip(waveform.astype(np.float32), -1.0, 1.0)
+    clipped = np.clip(np.concatenate(chunks), -1.0, 1.0)
     duration_seconds = float(clipped.shape[0]) / float(sample_rate)
 
     buffer = io.BytesIO()
@@ -730,6 +823,8 @@ async def admin_download_status(operation_id: str) -> JSONResponse:
 async def admin_delete_model(model_ref: str) -> JSONResponse:
     if not model_ref:
         raise HTTPException(status_code=400, detail="model_ref is required")
+    if not MODEL_PATH_RE.fullmatch(model_ref):
+        raise HTTPException(status_code=400, detail="invalid model_ref")
 
     snapshot = STATE.snapshot()
     active_model = snapshot.get("modelRef")
@@ -739,9 +834,9 @@ async def admin_delete_model(model_ref: str) -> JSONResponse:
     if active_tokenizer and (active_tokenizer == model_ref or str(active_tokenizer).endswith(model_ref)):
         raise HTTPException(status_code=409, detail="cannot delete active tokenizer")
 
-    model_dir = os.path.abspath(get_model_dir())
-    target = os.path.abspath(os.path.join(model_dir, model_ref))
-    if not target.startswith(model_dir):
+    model_dir = os.path.realpath(get_model_dir())
+    target = os.path.realpath(os.path.join(model_dir, model_ref))
+    if not target.startswith(model_dir + os.sep):
         raise HTTPException(status_code=400, detail="invalid model_ref")
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="model not found")
@@ -785,17 +880,45 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
 
     started = time.perf_counter()
     with STATE.lock:
-        model = STATE.model
-        processor = STATE.processor
+        pipeline = STATE.model
         model_ref = STATE.model_ref
-        max_new_tokens = STATE.max_new_tokens
-        default_voice_sample = STATE.default_voice_sample
         sample_rate = STATE.sampling_rate
+        voice = resolve_kokoro_voice(payload.voice or STATE.voice)
+        lang_code = resolve_kokoro_lang_code(payload.lang_code, voice)
+        speed = resolve_kokoro_speed(payload.speed if payload.speed is not None else STATE.speed)
+        local_model_dir = STATE.local_model_dir
 
-        if default_voice_sample is None:
-            default_voice_sample, sample_rate = build_default_voice_sample()
-            STATE.default_voice_sample = default_voice_sample
-            STATE.sampling_rate = sample_rate
+    if getattr(pipeline, "lang_code", None) != lang_code:
+        try:
+            with STATE.lock:
+                pipeline = retarget_kokoro_pipeline_lang(pipeline, lang_code)
+                STATE.model = pipeline
+                STATE.lang_code = lang_code
+                STATE.voice = voice
+                STATE.speed = speed
+        except Exception as exc:
+            log_event(
+                "tts_language_switch_failed",
+                requestId=request_id,
+                traceparent=traceparent,
+                modelRef=model_ref,
+                voice=voice,
+                langCode=lang_code,
+                errorType=type(exc).__name__,
+                error=str(exc),
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "requestId": request_id,
+                    "error": "language_switch_failed",
+                    "message": "Speech synthesis language switch failed. Check service logs for details.",
+                },
+            )
+    else:
+        with STATE.lock:
+            STATE.voice = voice
+            STATE.speed = speed
 
     log_event(
         "tts_synthesize_start",
@@ -803,18 +926,20 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
         traceparent=traceparent,
         textLength=len(script_text),
         modelRef=model_ref,
-        maxNewTokens=max_new_tokens,
+        voice=voice,
+        langCode=lang_code,
+        speed=speed,
     )
 
     try:
         with STATE.lock:
             wav_bytes, duration_seconds, sampling_rate = synthesize_wav_bytes(
-                model=model,
-                processor=processor,
+                pipeline=pipeline,
                 script_text=script_text,
-                default_voice_sample=default_voice_sample,
+                voice=voice,
+                speed=speed,
                 sample_rate=sample_rate,
-                max_new_tokens=max_new_tokens,
+                local_model_dir=local_model_dir,
             )
 
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -832,6 +957,9 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
             latencyMs=latency_ms,
             textLength=len(script_text),
             modelRef=model_ref,
+            voice=voice,
+            langCode=lang_code,
+            speed=speed,
             durationSeconds=duration_seconds,
             samplingRate=sampling_rate,
             outputBytes=len(wav_bytes),

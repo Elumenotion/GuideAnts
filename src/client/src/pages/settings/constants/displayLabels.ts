@@ -22,7 +22,7 @@ const SERVICE_PROVIDER_LABELS: Record<string, string> = {
   'Embeddings.AzureOpenAI.Embedding': 'Microsoft Foundry Embeddings',
   'DocumentIntelligence.Azure.DocumentIntelligence': 'Microsoft Foundry Document Intelligence',
   'SpeechTranscription.LocalAsr.Http': 'Local ASR HTTP',
-  'SpeechSynthesis.LocalTts.Http': 'Local TTS HTTP',
+  'SpeechSynthesis.LocalTts.Http': 'Local Kokoro TTS',
   'ImageGeneration.LocalSd.Http': 'Local Stable Diffusion HTTP',
   'Embeddings.LocalEmb.Http': 'Local Embedding HTTP',
   'DocumentIntelligence.LocalDocling.Http': 'Local Docling HTTP',
@@ -71,6 +71,7 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   EditModelDeployment: 'Edit Model Deployment',
   LocalMinIntervalMs: 'Local Min Interval (ms)',
   LocalOutputFormat: 'Default output format',
+  LanguageCode: 'Language Code',
   MaxAudioBytes: 'Max Audio Bytes',
   MaxConcurrentConversions: 'Max Concurrent Conversions',
   MaxRetries: 'Max Retries',
@@ -78,6 +79,7 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   RequestPresetJson: 'Request Preset JSON',
   TimeoutSeconds: 'Timeout Seconds',
   VoiceName: 'Voice Name',
+  Speed: 'Speed',
   language: 'Language',
   modelHint: 'Model Hint',
   modelId: 'Model',
@@ -97,6 +99,7 @@ const PROVIDER_FIELD_LABEL_OVERRIDES: Record<string, Record<string, string>> = {
   'SpeechTranscription.HuggingFace.Inference': { ModelId: 'ASR Model ID' },
   'SpeechTranscription.OpenRouter.Audio': { ModelId: 'Transcription Model ID' },
   'SpeechSynthesis.Google.TextToSpeech': { ModelId: 'TTS Model ID' },
+  'SpeechSynthesis.LocalTts.Http': { VoiceName: 'Kokoro Voice' },
   'SpeechSynthesis.HuggingFace.Inference': { ModelId: 'TTS Model ID' },
   'SpeechSynthesis.OpenRouter.Tts': { ModelId: 'TTS Model ID' },
   'SpeechTranscription.OpenAI.Audio': { ModelId: 'Transcription Model ID' },
@@ -121,6 +124,14 @@ const COMMON_FIELD_HELP_TEXT: Record<string, string> = {
   ModelId: 'Provider model id routed through this mode.',
   TimeoutSeconds: 'Request timeout in seconds.',
   VoiceName: 'Voice identifier used for synthesis.',
+  LanguageCode: 'Language code used for synthesis.',
+  Speed: 'Speech speed multiplier.',
+};
+
+const PROVIDER_FIELD_HELP_OVERRIDES: Record<string, Record<string, string>> = {
+  'SpeechSynthesis.LocalTts.Http': {
+    VoiceName: 'Local TTS uses Kokoro. The language is inferred from the selected voice.',
+  },
 };
 
 const RUNTIME_DEPENDENCY_LABELS: Record<string, string> = {
@@ -179,8 +190,11 @@ export function getProviderFieldLabel(providerId: string, fieldName: string): st
 }
 
 export function getProviderFieldHelpText(providerId: string, fieldName: string): string {
-  void providerId;
-  return COMMON_FIELD_HELP_TEXT[fieldName] ?? '';
+  return (
+    PROVIDER_FIELD_HELP_OVERRIDES[providerId]?.[fieldName]
+    ?? COMMON_FIELD_HELP_TEXT[fieldName]
+    ?? ''
+  );
 }
 
 export function getRuntimeDependencyDisplayName(key: string): string {

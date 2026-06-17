@@ -116,7 +116,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libopenblas-dev liblapack-dev libboost-python-dev \
         gdal-bin libgdal-dev \
         libgeos-dev libproj-dev \
-        ffmpeg \
+        ffmpeg espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3.11 -m venv $VIRTUAL_ENV
@@ -133,17 +133,19 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         --index-url https://download.pytorch.org/whl/cpu \
     && pip install -r /tmp/asr-requirements.txt \
     && pip install -r /tmp/tts-requirements.txt \
-    && pip install vibevoice==0.0.1 \
     && pip install accelerate==1.12.0 transformers==4.57.6 tokenizers==0.22.2 \
     && pip install -r /tmp/emb-requirements.txt \
     && pip install -r /tmp/requirements.txt \
+    && pip uninstall -y jupyterlab-tensorboard-pro basemap basemap-data \
+    && pip install tornado==6.5.7 wheel==0.46.2 \
+    && pip check \
     && rm -f /tmp/asr-requirements.txt /tmp/tts-requirements.txt /tmp/emb-requirements.txt /tmp/requirements.txt
 
 FROM runtime-cpu-base AS deps-cpu
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
-        graphviz ffmpeg bash sqlite3 nginx util-linux passwd \
+        graphviz ffmpeg espeak-ng bash sqlite3 nginx util-linux passwd \
         libopenblas0-pthread liblapack3 \
         gdal-bin libgdal-dev \
         libgeos-dev libproj-dev \

@@ -298,6 +298,8 @@ public sealed class LocalServiceAdminRoutingTests
         root.GetProperty("upstreamStatus").GetInt32().Should().Be(0);
         root.GetProperty("upstreamStatusText").GetString().Should().Be("NetworkError");
         root.GetProperty("error").GetString().Should().Contain("connection refused");
+        root.GetProperty("upstreamBody").GetString().Should().Contain("docker inspect guideants-ai");
+        root.GetProperty("upstreamBody").GetString().Should().Contain("connection refused");
     }
 
     /// <summary>

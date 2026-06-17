@@ -69,6 +69,8 @@ export interface RepositoryFilePickerProps {
   repoInputPlaceholder?: string;
   /** Optional hint rendered under the repo input. */
   repoInputHint?: string;
+  /** Keep the repo input visible but fixed while still allowing browse. */
+  repoInputReadOnly?: boolean;
   /** Disable all inputs (e.g. when the parent is submitting). */
   disabled?: boolean;
 }
@@ -110,6 +112,7 @@ export function RepositoryFilePicker({
   repoInputLabel = '🤗 From Hugging Face',
   repoInputPlaceholder = DEFAULT_REPO_PLACEHOLDER,
   repoInputHint = DEFAULT_REPO_HINT,
+  repoInputReadOnly = false,
   disabled = false,
 }: RepositoryFilePickerProps) {
   const [listing, setListing] = useState<HuggingFaceRepositoryListingDto | null>(null);
@@ -295,13 +298,18 @@ export function RepositoryFilePicker({
         <input
           type="text"
           value={repository}
-          onChange={(event) => onRepositoryChange(event.target.value)}
+          onChange={(event) => {
+            if (!repoInputReadOnly) {
+              onRepositoryChange(event.target.value);
+            }
+          }}
           onKeyDown={handleRepoKey}
           placeholder={repoInputPlaceholder}
           disabled={disabled}
+          readOnly={repoInputReadOnly}
           autoComplete="off"
           spellCheck={false}
-          className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+          className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 read-only:bg-gray-100"
         />
         {repoInputHint ? <p className="text-[11px] text-gray-500">{repoInputHint}</p> : null}
       </div>
