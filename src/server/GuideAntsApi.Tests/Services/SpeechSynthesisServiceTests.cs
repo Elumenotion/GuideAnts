@@ -63,6 +63,9 @@ public sealed class SpeechSynthesisServiceTests
             handler.LastRequestUri!.ToString().Should().Be("http://guideants-ai/tts/synthesize");
             handler.LastRequestHeaders.Should().ContainKey("x-request-id");
             handler.LastRequestBody.Should().Contain("\"text\":\"Hello world\"");
+            handler.LastRequestBody.Should().Contain("\"voice\":\"af_heart\"");
+            handler.LastRequestBody.Should().Contain("\"lang_code\":\"a\"");
+            handler.LastRequestBody.Should().Contain("\"speed\":1");
         }
         finally
         {

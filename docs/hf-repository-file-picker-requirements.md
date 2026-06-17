@@ -14,7 +14,7 @@ The same bad UX still exists for every other Hugging-Face-backed service in the 
 |--------------------|----------------------------------------------------------------------------------------------------------------------------|
 | `ImageGeneration`  | Three `(repo, filename)` pairs (diffusion, vae, text_encoder) typed free-hand; `*`/`?` rejected server-side                |
 | `SpeechTranscription` (Whisper ASR) | `model_id` (repo only), optional `revision`; whole-snapshot download                                      |
-| `SpeechSynthesis` (Kokoro TTS)      | `model_id`, optional `tokenizer_id`, optional `revision`; whole-snapshot download                        |
+| `SpeechSynthesis` (Kokoro TTS)      | `model_id`, optional `revision`; whole-snapshot download                                                |
 | `Embeddings`        | `model_id` (or local `model_path`) on load; whole-snapshot download when `model_id` is set                                |
 
 This document specifies how the repository-browse pattern generalizes to those services, what varies per service, and what the acceptance criteria are.
@@ -22,7 +22,7 @@ This document specifies how the repository-browse pattern generalizes to those s
 ## 2. Definitions
 
 - **Repo ref** — the string `owner/repo` shown at the top of a Hugging Face model page, e.g. `unsloth/Qwen3.6-35B-A3B-GGUF`.
-- **Role** — a logical slot a given service needs to fill from one or more HF repos. Examples: `llamaCpp.model`, `llamaCpp.mmproj`, `sd.diffusion`, `sd.vae`, `sd.textEncoder`, `asr.snapshot`, `tts.snapshot`, `tts.tokenizer`, `embeddings.snapshot`.
+- **Role** — a logical slot a given service needs to fill from one or more HF repos. Examples: `llamaCpp.model`, `llamaCpp.mmproj`, `sd.diffusion`, `sd.vae`, `sd.textEncoder`, `asr.snapshot`, `tts.snapshot`, `embeddings.snapshot`.
 - **Selection shape** — how roles map to files:
   - **Per-file** — one specific filename inside the repo is picked (llama-cpp GGUF, SD weights).
   - **Whole-snapshot** — the whole repo (or HF-`huggingface_hub` snapshot) is downloaded; the UI is informational, not file-selective (ASR, TTS, Embeddings).
@@ -169,16 +169,16 @@ This is the highest-value next target: today operators type **six** free-text fi
 
 ### 5.4 SpeechSynthesis (Kokoro TTS)
 
-- Roles: `tts.snapshot` (primary, whole snapshot), `tts.tokenizer` (optional secondary snapshot).
-- Selection shape: whole-snapshot × (1 or 2 repos).
-- Picker: **two** `RepositoryFilePicker` instances in `previewOnly: true` mode — one for `model_id`, one for `tokenizer_id`. The tokenizer picker is collapsed by default and can be expanded when the operator needs to override; empty tokenizer repo is allowed.
+- Roles: `tts.snapshot` (primary, whole snapshot).
+- Selection shape: whole-snapshot.
+- Picker: one `RepositoryFilePicker` instance in `previewOnly: true` mode for `model_id`, locked to `hexgrad/Kokoro-82M`. Kokoro ships its config and voices in the model snapshot, so the UI no longer exposes a separate tokenizer repository or arbitrary local TTS model field.
 - Classifier (reused from §5.3) plus TTS-specific badges:
   - `voice` — files under `voices/`, `.npz`, `.pt`, or leaves containing `voice`. Surfaced as a badge so operators can see how many voice packs are present.
   - `weights`, `tokenizer`, `config`, `other` as for ASR.
-- Download unchanged: `POST /service-editors/SpeechSynthesis/local-models/downloads` with `{ model_id, tokenizer_id?, revision? }`.
+- Download: `POST /service-editors/SpeechSynthesis/local-models/downloads` with `{ model_id, revision? }`.
 - Acceptance:
-  1. Pasting `hexgrad/Kokoro-82M` lists voice files and weights with correct badges and allows the existing download flow to succeed.
-  2. Leaving `tokenizer_id` blank keeps the current behavior (service-side default tokenizer).
+  1. Browsing the locked `hexgrad/Kokoro-82M` repository lists voice files and weights with correct badges and allows the existing download flow to succeed.
+  2. The dialog does not ask for a tokenizer repository or allow free-form TTS repository entry.
 
 ### 5.5 Embeddings
 
@@ -261,7 +261,7 @@ Minimum-viable test set per service. All classifiers have unit tests; each integ
 - Playwright-CLI end-to-end per service
   - `ImageGeneration`: paste SDXL repo, pick three files, kick off download, assert operation appears in bundle list.
   - `SpeechTranscription`: paste `openai/whisper-large-v3`, preview renders, download completes.
-  - `SpeechSynthesis`: paste `hexgrad/Kokoro-82M`, preview renders + voices counted, download completes.
+  - `SpeechSynthesis`: browse the locked `hexgrad/Kokoro-82M` repo, preview renders + voices counted, download completes.
   - `Embeddings`: toggle between `model_path` and `model_id`; picker only shows in the `model_id` case.
 
 ## 10. Rollout order
@@ -272,7 +272,7 @@ Minimum-viable test set per service. All classifiers have unit tests; each integ
    - Add the `/api/settings/huggingface/...` alias; keep the `/llama/...` path functional.
 2. **Phase B — Image Generation bundle wizard.** Highest user-visible payoff; replaces the three-repo six-text-field form.
 3. **Phase C — SpeechTranscription.** Straightforward preview-only adoption.
-4. **Phase D — SpeechSynthesis.** Adds the `voice` badge and the optional tokenizer repo picker.
+4. **Phase D — SpeechSynthesis.** Adds the `voice` badge and locks local TTS downloads to the Kokoro snapshot.
 5. **Phase E — Embeddings.** Only the model_id branch; smallest change, last because the existing UX is already the least painful of the four.
 6. **Phase F — cleanup.** Remove the `/llama/...` legacy alias after all callers have switched, and remove any remaining free-text "paste JSON" escape hatches that duplicate the picker (unless operators still need them for out-of-app model sources — decide when Phase B lands).
 

@@ -17,6 +17,7 @@ describe('displayLabels', () => {
     expect(getServiceProviderDisplayName('SpeechTranscription.AzureSpeech.Batch')).toBe(
       'Microsoft Foundry Speech Services (Batch)'
     );
+    expect(getServiceProviderDisplayName('SpeechSynthesis.LocalTts.Http')).toBe('Local Kokoro TTS');
     expect(getRuntimeDependencyDisplayName('LocalServiceHosts:EmbeddingsBaseUrl')).toBe('Embeddings Base URL');
   });
 
@@ -43,8 +44,10 @@ describe('displayLabels', () => {
 
   it('returns provider field labels/help from client registry', () => {
     expect(getProviderFieldLabel('SpeechTranscription.HuggingFace.Inference', 'ModelId')).toBe('ASR Model ID');
+    expect(getProviderFieldLabel('SpeechSynthesis.LocalTts.Http', 'VoiceName')).toBe('Kokoro Voice');
     expect(getProviderFieldLabel('Unknown.Provider', 'TimeoutSeconds')).toBe('Timeout Seconds');
     expect(getProviderFieldHelpText('Unknown.Provider', 'TimeoutSeconds')).toContain('timeout');
+    expect(getProviderFieldHelpText('SpeechSynthesis.LocalTts.Http', 'VoiceName')).toContain('Kokoro');
     expect(getProviderFieldHelpText('Unknown.Provider', 'UnmappedField')).toBe('');
   });
 

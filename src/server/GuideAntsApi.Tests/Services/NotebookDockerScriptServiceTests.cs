@@ -70,4 +70,16 @@ public sealed class NotebookDockerScriptServiceTests
         client.DefaultRequestHeaders.Contains("X-Script-Agent-Token").Should().BeTrue();
         client.DefaultRequestHeaders.GetValues("X-Script-Agent-Token").Should().ContainSingle().Which.Should().Be("shared-token");
     }
+
+    [TestMethod]
+    public void BuildScriptAgentTransportFailureMessage_IncludesDockerInspectHint()
+    {
+        var message = NotebookDockerScriptService.BuildScriptAgentTransportFailureMessage(
+            "http://guideants-ai:80/sandbox",
+            new HttpRequestException("connection refused"));
+
+        message.Should().Contain("connection refused");
+        message.Should().Contain("http://guideants-ai:80/sandbox");
+        message.Should().Contain("docker inspect guideants-ai");
+    }
 }

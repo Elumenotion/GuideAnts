@@ -299,8 +299,26 @@ namespace GuideAntsApi.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "HTTP script execution failed");
-                return null;
+                return new ScriptExecutionResult
+                {
+                    StandardError = BuildScriptAgentTransportFailureMessage(scriptExecutionBaseUrl, ex)
+                };
             }
+        }
+
+        internal static string BuildScriptAgentTransportFailureMessage(string scriptExecutionBaseUrl, Exception ex)
+        {
+            var builder = new StringBuilder()
+                .AppendLine($"Script execution agent request failed: {ex.Message}")
+                .AppendLine()
+                .AppendLine($"Agent URL: {scriptExecutionBaseUrl}")
+                .AppendLine()
+                .AppendLine("If this is the local Docker compose runtime, the guideants-ai container may have failed before its application logs were available.")
+                .AppendLine("Run these host-side checks to see Docker's stored startup error:")
+                .AppendLine("  docker ps -a --filter name=guideants-ai")
+                .AppendLine("  docker inspect guideants-ai --format '{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}'");
+
+            return builder.ToString().TrimEnd();
         }
 
         private void AttachAgentAuthHeader(HttpClient client)

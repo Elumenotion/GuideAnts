@@ -29,8 +29,8 @@ vi.mock('../../common/localOperationPolling', async () => {
     startLocalOperationPoll: vi.fn(({ onUpdate, onTerminal }) => {
       const terminal = {
         operationId: 'op-1',
-        modelId: 'acme/tts',
-        modelRef: 'acme--tts',
+        modelId: 'hexgrad/Kokoro-82M',
+        modelRef: 'Kokoro-82M',
         status: 'completed',
         error: null,
       };
@@ -145,7 +145,7 @@ describe('TtsModelManager', () => {
         payload: { ready: false, loaded: false, modelRef: null, tokenizerRef: null },
       });
     (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/tts',
+      repository: 'hexgrad/Kokoro-82M',
       gated: false,
       tokenUsed: false,
       modelCardUrl: null,
@@ -153,7 +153,7 @@ describe('TtsModelManager', () => {
     });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-1',
-      modelId: 'acme/tts',
+      modelId: 'hexgrad/Kokoro-82M',
       status: 'queued',
       error: null,
     });
@@ -168,7 +168,6 @@ describe('TtsModelManager', () => {
     const downloadButton = screen.getByRole('button', { name: /Download snapshot/i });
     expect(downloadButton).toBeDisabled();
 
-    fireEvent.change(screen.getByPlaceholderText(/org\/tts-model/i), { target: { value: 'acme/tts' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
 
     await waitFor(() => {
@@ -178,7 +177,7 @@ describe('TtsModelManager', () => {
     fireEvent.click(downloadButton);
 
     await waitFor(() => {
-      expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('SpeechSynthesis', { model_id: 'acme/tts' });
+      expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('SpeechSynthesis', { model_id: 'hexgrad/Kokoro-82M' });
     });
   });
 
@@ -195,7 +194,7 @@ describe('TtsModelManager', () => {
       payload: { ready: false, loaded: false, modelRef: null, tokenizerRef: null },
     });
     (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/tts',
+      repository: 'hexgrad/Kokoro-82M',
       gated: false,
       tokenUsed: false,
       modelCardUrl: null,
@@ -203,8 +202,8 @@ describe('TtsModelManager', () => {
     });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-1',
-      modelId: 'acme/tts',
-      modelRef: 'acme--tts',
+      modelId: 'hexgrad/Kokoro-82M',
+      modelRef: 'Kokoro-82M',
       status: 'queued',
       error: null,
     });
@@ -216,7 +215,6 @@ describe('TtsModelManager', () => {
       expect(screen.getByText(/Add model/i)).toBeInTheDocument();
     });
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/org\/tts-model/i), { target: { value: 'acme/tts' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
 
     await waitFor(() => {
@@ -225,7 +223,7 @@ describe('TtsModelManager', () => {
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
-      expect(api.settings.localModels.load).toHaveBeenCalledWith('SpeechSynthesis', { model_path: 'acme--tts' });
+      expect(api.settings.localModels.load).toHaveBeenCalledWith('SpeechSynthesis', { model_path: 'Kokoro-82M' });
     });
   });
 
@@ -363,7 +361,7 @@ describe('TtsModelManager', () => {
     });
   });
 
-  it('exposes optional tokenizer repository controls in the add-model dialog', async () => {
+  it('shows Kokoro defaults in the add-model dialog without tokenizer controls', async () => {
     (api.settings.localModels.listOutcome as any).mockResolvedValue({
       kind: 'available',
       payload: { modelDir: '/models-local/tts', items: [] },
@@ -379,9 +377,10 @@ describe('TtsModelManager', () => {
       expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled();
     });
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Tokenizer repository/i }));
 
-    expect(screen.getByPlaceholderText(/org\/tokenizer-repo/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('hexgrad/Kokoro-82M')).toHaveAttribute('readonly');
+    expect(screen.getByText(/Local TTS is fixed to Kokoro/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Tokenizer repository/i })).not.toBeInTheDocument();
   });
 
   it('flags voice artifacts in browse preview', async () => {
@@ -404,7 +403,7 @@ describe('TtsModelManager', () => {
         payload: { ready: false, loaded: false, modelRef: null, tokenizerRef: null },
       });
     (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/tts',
+      repository: 'hexgrad/Kokoro-82M',
       gated: false,
       tokenUsed: false,
       modelCardUrl: null,
@@ -418,7 +417,6 @@ describe('TtsModelManager', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
 
-    fireEvent.change(screen.getByPlaceholderText(/org\/tts-model/i), { target: { value: 'acme/tts' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
 
     await waitFor(() => {
@@ -456,14 +454,14 @@ describe('TtsModelManager', () => {
     mockStartPoll.mockImplementationOnce(({ onUpdate }) => {
       onUpdate({
         operationId: 'op-cancel',
-        modelId: 'acme/tts',
+        modelId: 'hexgrad/Kokoro-82M',
         status: 'running',
         error: null,
       });
       return 1;
     });
     (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/tts',
+      repository: 'hexgrad/Kokoro-82M',
       gated: false,
       tokenUsed: false,
       modelCardUrl: null,
@@ -471,13 +469,13 @@ describe('TtsModelManager', () => {
     });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-cancel',
-      modelId: 'acme/tts',
+      modelId: 'hexgrad/Kokoro-82M',
       status: 'running',
       error: null,
     });
     (api.settings.localModels.cancelOperation as any).mockResolvedValueOnce({
       operationId: 'op-cancel',
-      modelId: 'acme/tts',
+      modelId: 'hexgrad/Kokoro-82M',
       status: 'cancelled',
       error: null,
     });
@@ -486,7 +484,6 @@ describe('TtsModelManager', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/org\/tts-model/i), { target: { value: 'acme/tts' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
@@ -503,7 +500,7 @@ describe('TtsModelManager', () => {
     mockAvailableList();
     mockAvailableReadiness();
     (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/tts',
+      repository: 'hexgrad/Kokoro-82M',
       gated: false,
       tokenUsed: false,
       modelCardUrl: null,
@@ -514,7 +511,6 @@ describe('TtsModelManager', () => {
     render(<TtsModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/org\/tts-model/i), { target: { value: 'acme/tts' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
@@ -525,11 +521,11 @@ describe('TtsModelManager', () => {
     mockAvailableList();
     mockAvailableReadiness();
     mockStartPoll.mockImplementationOnce(({ onUpdate }) => {
-      onUpdate({ operationId: 'op-2', modelId: 'acme/tts', status: 'running', error: null });
+      onUpdate({ operationId: 'op-2', modelId: 'hexgrad/Kokoro-82M', status: 'running', error: null });
       return 1;
     });
     (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/tts',
+      repository: 'hexgrad/Kokoro-82M',
       gated: false,
       tokenUsed: false,
       modelCardUrl: null,
@@ -537,7 +533,7 @@ describe('TtsModelManager', () => {
     });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-2',
-      modelId: 'acme/tts',
+      modelId: 'hexgrad/Kokoro-82M',
       status: 'running',
       error: null,
     });
@@ -546,7 +542,6 @@ describe('TtsModelManager', () => {
     render(<TtsModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/org\/tts-model/i), { target: { value: 'acme/tts' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
@@ -575,12 +570,12 @@ describe('TtsModelManager', () => {
     mockAvailableList();
     mockAvailableReadiness();
     mockStartPoll.mockImplementationOnce(({ onUpdate, onPollFailureThreshold }) => {
-      onUpdate({ operationId: 'op-3', modelId: 'acme/tts', status: 'running', error: null });
+      onUpdate({ operationId: 'op-3', modelId: 'hexgrad/Kokoro-82M', status: 'running', error: null });
       onPollFailureThreshold?.();
       return 1;
     });
     (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/tts',
+      repository: 'hexgrad/Kokoro-82M',
       gated: false,
       tokenUsed: false,
       modelCardUrl: null,
@@ -588,7 +583,7 @@ describe('TtsModelManager', () => {
     });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-3',
-      modelId: 'acme/tts',
+      modelId: 'hexgrad/Kokoro-82M',
       status: 'running',
       error: null,
     });
@@ -596,7 +591,6 @@ describe('TtsModelManager', () => {
     render(<TtsModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/org\/tts-model/i), { target: { value: 'acme/tts' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
@@ -606,32 +600,24 @@ describe('TtsModelManager', () => {
     });
   });
 
-  it('downloads with optional tokenizer and revision', async () => {
+  it('downloads Kokoro snapshot with optional revision', async () => {
     mockAvailableList([], '/models-local/tts');
     mockAvailableReadiness();
-    (api.settings.browseHuggingFaceRepository as any)
-      .mockResolvedValueOnce({
-        repository: 'acme/tts',
-        gated: false,
-        tokenUsed: false,
-        modelCardUrl: null,
-        files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
-      })
-      .mockResolvedValueOnce({
-        repository: 'acme/tokenizer',
-        gated: false,
-        tokenUsed: false,
-        modelCardUrl: null,
-        files: [{ path: 'tokenizer.json', size: 10, category: 'other', quantLabel: null, sharded: false }],
-      });
+    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
+      repository: 'hexgrad/Kokoro-82M',
+      gated: false,
+      tokenUsed: false,
+      modelCardUrl: null,
+      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
+    });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-tok',
-      modelId: 'acme/tts',
+      modelId: 'hexgrad/Kokoro-82M',
       status: 'queued',
       error: null,
     });
     mockStartPoll.mockImplementationOnce(({ onUpdate, onTerminal }) => {
-      const terminal = { operationId: 'op-tok', modelId: 'acme/tts', status: 'completed', error: null };
+      const terminal = { operationId: 'op-tok', modelId: 'hexgrad/Kokoro-82M', status: 'completed', error: null };
       onUpdate(terminal);
       onTerminal?.(terminal);
       return 1;
@@ -640,38 +626,27 @@ describe('TtsModelManager', () => {
     render(<TtsModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/org\/tts-model/i), { target: { value: 'acme/tts' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
 
-    fireEvent.click(screen.getByRole('button', { name: /Tokenizer repository/i }));
-    fireEvent.change(screen.getByPlaceholderText(/org\/tokenizer-repo/i), { target: { value: 'acme/tokenizer' } });
-    const browseButtons = screen.getAllByRole('button', { name: /Browse repository/i });
-    fireEvent.click(browseButtons[browseButtons.length - 1]!);
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
     fireEvent.change(screen.getByLabelText(/Revision \(optional\)/i), { target: { value: 'release' } });
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
       expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('SpeechSynthesis', {
-        model_id: 'acme/tts',
-        tokenizer_id: 'acme/tokenizer',
+        model_id: 'hexgrad/Kokoro-82M',
         revision: 'release',
       });
     });
   });
 
-  it('hides tokenizer section and closes add-model dialog on cancel', async () => {
+  it('closes add-model dialog on cancel', async () => {
     mockAvailableList();
     mockAvailableReadiness();
 
     render(<TtsModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Tokenizer repository/i }));
-    expect(screen.getByPlaceholderText(/org\/tokenizer-repo/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Hide tokenizer repository/i }));
-    expect(screen.queryByPlaceholderText(/org\/tokenizer-repo/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole('button', { name: /^Cancel$/i })[0]!);
     await waitFor(() => {
@@ -688,11 +663,11 @@ describe('TtsModelManager', () => {
       message: 'readiness offline',
     });
     mockStartPoll.mockImplementationOnce(({ onUpdate }) => {
-      onUpdate({ operationId: 'op-4', modelId: 'acme/tts', status: 'running', error: null });
+      onUpdate({ operationId: 'op-4', modelId: 'hexgrad/Kokoro-82M', status: 'running', error: null });
       return 1;
     });
     (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/tts',
+      repository: 'hexgrad/Kokoro-82M',
       gated: false,
       tokenUsed: false,
       modelCardUrl: null,
@@ -700,7 +675,7 @@ describe('TtsModelManager', () => {
     });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-4',
-      modelId: 'acme/tts',
+      modelId: 'hexgrad/Kokoro-82M',
       status: 'running',
       error: null,
     });
@@ -721,7 +696,6 @@ describe('TtsModelManager', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/org\/tts-model/i), { target: { value: 'acme/tts' } });
     fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
@@ -751,3 +725,4 @@ describe('TtsModelManager', () => {
     await waitFor(() => expect(screen.getByText(/unload exploded/i)).toBeInTheDocument());
   });
 });
+

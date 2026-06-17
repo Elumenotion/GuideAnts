@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Components;
@@ -393,6 +394,41 @@ public sealed class SpeechSynthesisServiceTests
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("empty after SSML stripping");
+    }
+
+    [TestMethod]
+    public async Task SynthesizeToWavAsync_Local_InfersKokoroLanguageFromVoice()
+    {
+        var audio = Encoding.ASCII.GetBytes("RIFFfakeWAVE");
+        var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(audio)
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(
+            httpClient,
+            "LocalServiceHosts:SpeechSynthesisBaseUrl",
+            localServiceHostsOptions: new LocalServiceHostsOptions { SpeechSynthesisBaseUrl = "http://guideants-ai:80" },
+            configurationValues: new Dictionary<string, string?> { ["SpeechSynthesis:Speed"] = "1.25" },
+            modelId: "Kokoro-82M",
+            requestPresetJson: "{\"VoiceName\":\"bf_alice\",\"LanguageCode\":\"z\",\"Speed\":\"0.5\"}");
+        var outputPath = TempOutputPath();
+
+        try
+        {
+            var result = await service.SynthesizeToWavAsync("<speak>Hello Kokoro</speak>", outputPath);
+
+            result.Success.Should().BeTrue();
+            using var document = JsonDocument.Parse(handler.LastRequestBody);
+            var root = document.RootElement;
+            root.GetProperty("voice").GetString().Should().Be("bf_alice");
+            root.GetProperty("lang_code").GetString().Should().Be("b");
+            root.GetProperty("speed").GetDouble().Should().BeApproximately(1.25, 0.001);
+        }
+        finally
+        {
+            SafeDelete(outputPath);
+        }
     }
 
     private static string TempOutputPath() =>
