@@ -1631,6 +1631,23 @@ export const api = {
                     `/guides/${guideId}/publish/${pubId}/api-key`,
                     { method: 'DELETE' }
                 ),
+
+            downloadClaudeSkill: async (guideId: string, pubId: string): Promise<Blob> => {
+                const response = await fetchWithAuth(
+                    `${API_BASE_URL}/guides/${guideId}/publish/${pubId}/claude-skill`
+                );
+                if (!response.ok) {
+                    let message = 'Failed to download Claude skill pack';
+                    try {
+                        const error = await response.json();
+                        message = error.message || error.error || message;
+                    } catch {
+                        // ignore parse errors
+                    }
+                    throw new Error(message);
+                }
+                return response.blob();
+            },
         },
         assistants: {
             list: () => callApi<any[]>(`/assistants`),

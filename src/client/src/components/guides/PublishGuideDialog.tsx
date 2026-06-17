@@ -1,7 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { PublishedGuideDto, PublishGuideDto, UpdatePublishedGuideDto } from '../../types/guides';
 import { api } from '../../services/api';
+import {
+  patchClaudeSkillPackEnv,
+  sanitizeClaudeSkillDownloadFileName,
+  triggerBlobDownload,
+} from '../../utils/claudeSkillPackDownload';
 import { GeneralTab } from './configTabs/GeneralTab';
 import { InterfaceTab } from './configTabs/InterfaceTab';
 import { FeaturesTab } from './configTabs/FeaturesTab';
@@ -18,6 +23,7 @@ interface PublishGuideDialogProps {
   onDeactivate?: () => void;
   onReactivate?: () => void;
   onCancel: () => void;
+  onPublishedGuideUpdated?: (publishedGuide: PublishedGuideDto) => void;
 }
 
 type TabId = 'general' | 'interface' | 'features' | 'limits' | 'auth' | 'mcp';
@@ -30,7 +36,8 @@ export function PublishGuideDialog({
   onUpdate,
   onDeactivate,
   onReactivate,
-  onCancel 
+  onCancel,
+  onPublishedGuideUpdated,
 }: PublishGuideDialogProps) {
   const isEditMode = !!publishedGuide;
   const [activeTab, setActiveTab] = useState<TabId>('general');
@@ -71,13 +78,32 @@ export function PublishGuideDialog({
   // MCP
   const [mcpEnabled, setMcpEnabled] = useState(publishedGuide?.mcpEnabled || false);
   const [mcpDescription, setMcpDescription] = useState(publishedGuide?.mcpDescription || '');
+  const [sessionApiKey, setSessionApiKey] = useState<string | null>(null);
+  const [mcpPersisted, setMcpPersisted] = useState(
+    !!(publishedGuide?.mcpEnabled && publishedGuide?.hasApiKey)
+  );
 
   const isActive = publishedGuide?.active ?? true;
+  const prevPublishedIdRef = useRef<string | undefined>(publishedGuide?.id);
 
-  // MCP requires an API key — keep it disabled while none is configured
   useEffect(() => {
-    if (!hasApiKey) setMcpEnabled(false);
-  }, [hasApiKey]);
+    if (publishedGuide?.id && !prevPublishedIdRef.current) {
+      prevPublishedIdRef.current = publishedGuide.id;
+      if (mcpDescription.trim()) {
+        setActiveTab('mcp');
+      }
+    }
+  }, [publishedGuide?.id, mcpDescription]);
+
+  useEffect(() => {
+    setMcpPersisted(!!(publishedGuide?.mcpEnabled && publishedGuide?.hasApiKey));
+    if (publishedGuide?.mcpEnabled) {
+      setMcpEnabled(true);
+    }
+    if (publishedGuide?.hasApiKey) {
+      setHasApiKey(true);
+    }
+  }, [publishedGuide?.id, publishedGuide?.mcpEnabled, publishedGuide?.hasApiKey]);
 
   // Debounced friendly name validation
   const validateFriendlyName = useCallback(async (name: string) => {
@@ -177,12 +203,64 @@ export function PublishGuideDialog({
     setShowDeactivateConfirm(false);
   };
 
-  const handleGenerateApiKey = async (): Promise<string> => {
+  const handleEnableMcpAccess = async () => {
     const pubId = publishedGuide?.id;
-    if (!pubId) throw new Error('Guide must be published first');
-    const response = await api.guides.guides.generateApiKey(guideId, pubId);
-    setHasApiKey(true);
-    return response.apiKey;
+    if (!pubId) {
+      throw new Error('Publish the guide first');
+    }
+
+    let apiKey = sessionApiKey;
+    if (!hasApiKey) {
+      const response = await api.guides.guides.generateApiKey(guideId, pubId);
+      apiKey = response.apiKey;
+      setSessionApiKey(apiKey);
+      setHasApiKey(true);
+    }
+
+    const updated = await api.guides.guides.updatePublished(guideId, pubId, {
+      mcpEnabled: true,
+      mcpDescription: mcpDescription.trim() || undefined,
+    });
+
+    setMcpEnabled(true);
+    setMcpPersisted(true);
+    onPublishedGuideUpdated?.(updated);
+  };
+
+  const handleDownloadClaudeSkill = async () => {
+    const pubId = publishedGuide?.id;
+    if (!pubId) {
+      throw new Error('Guide must be published first');
+    }
+    if (!mcpPersisted) {
+      throw new Error('Enable MCP access before downloading the skill pack');
+    }
+
+    const zipBlob = await api.guides.guides.downloadClaudeSkill(guideId, pubId);
+    const patchedBlob = await patchClaudeSkillPackEnv(zipBlob, sessionApiKey);
+    const baseName = sanitizeClaudeSkillDownloadFileName(friendlyName.trim() || guideName);
+    triggerBlobDownload(patchedBlob, `${baseName}-claude-skill.zip`);
+  };
+
+  const handleSessionApiKeyChange = (apiKey: string | null) => {
+    setSessionApiKey(apiKey);
+    if (!apiKey && mcpPersisted) {
+      setMcpPersisted(false);
+      setMcpEnabled(false);
+    }
+  };
+
+  const handleApiKeyChange = async (nextHasKey: boolean) => {
+    setHasApiKey(nextHasKey);
+    const pubId = publishedGuide?.id;
+    if (!nextHasKey && pubId && mcpPersisted) {
+      const updated = await api.guides.guides.updatePublished(guideId, pubId, {
+        mcpEnabled: false,
+      });
+      setMcpEnabled(false);
+      setMcpPersisted(false);
+      onPublishedGuideUpdated?.(updated);
+    }
   };
 
   useEffect(() => {
@@ -211,13 +289,13 @@ export function PublishGuideDialog({
     { id: 'features', label: 'Features' },
     { id: 'limits', label: 'Limits' },
     { id: 'auth', label: 'Auth' },
-    { id: 'mcp', label: 'MCP' },
+    { id: 'mcp', label: 'MCP and Skills' },
   ];
 
   const dialogMarkup = (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div 
-        className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto flex flex-col"
+        className="bg-white rounded-lg shadow-xl w-full max-w-3xl lg:max-w-4xl mx-4 max-h-[90vh] overflow-y-auto flex flex-col"
         tabIndex={-1}
       >
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 z-10">
@@ -246,12 +324,12 @@ export function PublishGuideDialog({
           )}
         </div>
 
-        <div className="flex border-b border-gray-200 px-6">
+        <div className="flex border-b border-gray-200 px-6 overflow-x-auto">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`py-3 px-4 text-sm font-medium border-b-2 transition-colors ${
+              className={`py-3 px-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                 activeTab === tab.id
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -347,9 +425,11 @@ export function PublishGuideDialog({
                 setAuthWebhookTimeout={setAuthWebhookTimeout}
                 friendlyName={friendlyName}
                 hasApiKey={hasApiKey}
+                sessionApiKey={sessionApiKey}
                 guideId={guideId}
                 publishedGuideId={publishedGuide?.id}
-                onApiKeyChange={setHasApiKey}
+                onApiKeyChange={handleApiKeyChange}
+                onSessionApiKeyChange={handleSessionApiKeyChange}
               />
             )}
 
@@ -360,8 +440,11 @@ export function PublishGuideDialog({
                 mcpDescription={mcpDescription}
                 setMcpDescription={setMcpDescription}
                 hasApiKey={hasApiKey}
+                sessionApiKey={sessionApiKey}
                 publishedGuideId={publishedGuide?.id}
-                onGenerateApiKey={publishedGuide?.id ? handleGenerateApiKey : undefined}
+                mcpPersisted={mcpPersisted}
+                onEnableMcpAccess={publishedGuide?.id ? handleEnableMcpAccess : undefined}
+                onDownloadClaudeSkill={publishedGuide?.id ? handleDownloadClaudeSkill : undefined}
               />
             )}
           </fieldset>

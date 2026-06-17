@@ -1,0 +1,110 @@
+# {{GuideName}} — MCP reference
+
+## Connection
+
+| Setting | Value |
+|---------|-------|
+| MCP endpoint | `{{McpEndpointUrl}}` |
+| Auth header | `x-guideants-apikey: <from .env>` |
+| Published guide ID | `{{PubId}}` |
+| API base | `{{ApiBaseUrl}}` |
+
+## Assistants (MCP tools)
+
+{{ToolReferenceTable}}
+
+## Client CLI
+
+`scripts/guideants_mcp.py` — Python 3.8+, standard library only (no curl, no bash).
+
+| Command | Purpose |
+|---------|---------|
+| `doctor` | Validate `.env` and endpoint connectivity. |
+| `list-tools` | List assistant tools (`tools/list`). |
+| `invoke TOOL "INSTRUCTIONS" [--conversation-id ID] [--title T] [--timeout S] [--save-dir DIR] [--no-download]` | Call an assistant; saves display images + deliverables. |
+| `get-conversation CONVERSATION_ID` | Fetch conversation history (`conversation_get`). |
+| `recover CONVERSATION_ID [--save-dir DIR]` | Download files created in the latest turn. |
+| `download URL [--output PATH] [--save-dir DIR]` | Download a published artifact. |
+
+All commands print one JSON object to stdout; diagnostics go to stderr.
+`GUIDEANTS_SAVE_DIR` in `.env` sets the default deliverable directory when
+`--save-dir` is omitted (otherwise the current working directory is used).
+
+## JSON-RPC shapes
+
+List tools:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
+```
+
+Invoke assistant:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "{{PrimaryToolName}}",
+    "arguments": {
+      "instructions": "What you want the assistant to do",
+      "conversationId": "optional-uuid-to-continue-thread",
+      "title": "optional title for new conversations"
+    }
+  }
+}
+```
+
+Get conversation: `tools/call` with `name = conversation_get` and
+`arguments.conversationId`.
+
+## Invoke response shape
+
+`tools/call` returns `result.content[]`:
+
+1. **Text block** — JSON string: `{ assistantId, assistantName, conversationId, response }` where `response` is markdown/HTML.
+2. **Image blocks** (optional) — base64 PNG/JPEG/WebP/GIF from the run (up to 5 images, 16 MB each).
+
+`guideants_mcp.py invoke` normalizes this to
+`{ conversationId, assistantName, responseMarkdown, displayImages, deliverables, artifactUrls }`.
+
+## Artifact URLs
+
+Published file links look like:
+
+```
+{{ApiBaseUrl}}/published/projects/<projectId>/notebooks/<notebookId>/conversations/<conversationId>/files/content?path=<urlencoded>&pubId={{PubId}}
+```
+
+File GET is anonymous (guarded by conversationId + pubId); no API key required.
+The client resolves `<projectId>`/`<notebookId>` automatically from the guide's
+public metadata.
+
+## Error codes
+
+| Code | Meaning |
+|------|---------|
+| `missing_config` | A required `.env` value is absent. |
+| `api_key_placeholder` | API key is still `gak_REPLACE_ME`. |
+| `unauthorized` | API key rejected (HTTP 401). |
+| `mcp_error` | Server returned a JSON-RPC error (see `detail`). |
+| `network_error` | Endpoint unreachable. |
+| `download_failed` | Artifact GET returned a non-200 status. |
+| `guide_info_unavailable` | Could not resolve project/notebook for file URLs. |
+
+Guide-side error strings you may see inside `mcp_error.detail`:
+`missing_instructions`, `invalid_conversation_id`, `not_found`, `unknown_tool`,
+`client_tools_not_supported`, `invoke_failed`.
+
+## REST one-shot (reference only)
+
+A single-turn call without crew routing. The skill itself uses the Python
+client; this is documented for manual debugging only:
+
+```bash
+curl -sS -X POST "{{ApiBaseUrl}}/published/guides/{{PubId}}/invoke" \
+  -H "Content-Type: application/json" \
+  -H "x-guideants-apikey: $GUIDEANTS_API_KEY" \
+  -d '{"instructions":"Your question"}'
+```

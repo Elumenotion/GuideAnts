@@ -389,6 +389,7 @@ public static class StartupConfiguration
         services.AddScoped<McpPublishedGuideContext>();
         services.AddScoped<McpPublishedGuideInvokeService>();
         services.AddScoped<McpPublishedRunImageEmbedder>();
+        services.AddScoped<IClaudeSkillPackService, ClaudeSkillPackService>();
         services.AddMcpServer()
             .WithHttpTransport(options =>
             {

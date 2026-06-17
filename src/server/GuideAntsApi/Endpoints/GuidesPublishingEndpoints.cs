@@ -5,6 +5,7 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Auth;
+using GuideAntsApi.Services.Mcp;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -484,6 +485,66 @@ publishedGuide.Active = false;
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound);
 
+        // Download Claude Code skill pack for MCP-enabled published guide
+        group.MapGet("/{pubId:guid}/claude-skill", async (
+            HttpContext ctx,
+            Guid guideId,
+            Guid pubId,
+            [FromServices] ApplicationDbContext db,
+            [FromServices] IClaudeSkillPackService skillPackService) =>
+        {
+            var publishedGuide = await db.PublishedGuides
+                .AsNoTracking()
+                .Include(pg => pg.Guide)
+                .Where(pg => pg.Id == pubId && pg.GuideId == guideId && pg.Active)
+                .FirstOrDefaultAsync();
+
+            if (publishedGuide == null)
+                return Results.NotFound();
+
+            if (!publishedGuide.McpEnabled)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "mcp_not_enabled",
+                    message = "MCP must be enabled to download a Claude skill pack."
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(publishedGuide.ApiKeyHash))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "mcp_requires_api_key",
+                    message = "An API key must be configured before downloading a Claude skill pack."
+                });
+            }
+
+            var assistants = await McpPublishedAssistantCatalog.LoadAsync(
+                db,
+                publishedGuide.GuideId,
+                publishedGuide.McpDescription,
+                ctx.RequestAborted);
+
+            var apiBaseUrl = ResolveApiBaseUrl(ctx);
+            var buildRequest = new ClaudeSkillPackBuildRequest(
+                pubId,
+                publishedGuide.Guide?.Name ?? "Guide",
+                publishedGuide.FriendlyName,
+                publishedGuide.McpDescription,
+                apiBaseUrl,
+                assistants);
+
+            var result = await skillPackService.BuildAsync(buildRequest, ctx.RequestAborted);
+            return Results.File(result.ZipBytes, "application/zip", result.FileName);
+        })
+        .WithName("DownloadPublishedGuideClaudeSkill")
+        .Produces(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden)
+        .Produces(StatusCodes.Status404NotFound);
+
         // Remove API key from published guide
         group.MapDelete("/{pubId}/api-key", async (
             Guid guideId,
@@ -511,6 +572,22 @@ publishedGuide.ApiKeyHash = null;
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound);
+    }
+
+    private static string ResolveApiBaseUrl(HttpContext context)
+    {
+        var scheme = context.Request.Scheme?.Trim();
+        if (string.IsNullOrWhiteSpace(scheme))
+        {
+            throw new InvalidOperationException("Unable to resolve API base URL because request scheme is missing.");
+        }
+
+        if (!context.Request.Host.HasValue)
+        {
+            throw new InvalidOperationException("Unable to resolve API base URL because request host is missing.");
+        }
+
+        return $"{scheme}://{context.Request.Host.Value}/api".TrimEnd('/');
     }
 }
 
