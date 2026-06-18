@@ -1078,6 +1078,37 @@ using var scope = CreateDbScope();
                relativePath.Equals(".guideants", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static async Task EnsureNotRegisteredMountRootAsync(
+        ApplicationDbContext context,
+        Guid notebookId,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = relativePath.Replace('\\', '/').TrimEnd('/');
+        if (string.IsNullOrEmpty(normalized))
+        {
+            return;
+        }
+
+        var normalizedLower = normalized.ToLowerInvariant();
+        var isActiveMountRoot = await context.HostFolderMountLinks
+            .AsNoTracking()
+            .Where(l => l.NotebookId == notebookId
+                        && l.LinkRelativePath.ToLower() == normalizedLower)
+            .Join(
+                context.HostFolderMounts.AsNoTracking(),
+                link => link.HostFolderMountId,
+                mount => mount.Id,
+                (_, mount) => mount)
+            .AnyAsync(m => m.Status != HostFolderMountStatus.Removed, cancellationToken);
+
+        if (isActiveMountRoot)
+        {
+            throw new InvalidOperationException(
+                "This folder is a host folder mount root and cannot be deleted normally. Use Remove mapped folder to unlink it without deleting host contents.");
+        }
+    }
+
     public async Task<NotebookFolderTreeDto?> CreateFolderAsync(Guid projectId, Guid notebookId, string newFolderPath)
     {
 
@@ -1128,6 +1159,8 @@ using var scope = CreateDbScope();
 
         using var scope = CreateDbScope();
         var context = GetDbContext(scope);
+
+        await EnsureNotRegisteredMountRootAsync(context, notebookId, relativePath);
 
         var notebookRoot = GetNotebookRootPath(projectId, notebookId);
         if (!NotebookStoragePath.TryResolveUnderRoot(notebookRoot, relativePath, out var physicalPath))

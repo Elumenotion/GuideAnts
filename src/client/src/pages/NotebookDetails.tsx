@@ -1268,6 +1268,7 @@ function NotebookDetailsContent() {
                         onConversationsDeleted={handleConversationsDeleted}
                         activeConversationId={activeConversationId}
                         canEdit={canEdit()}
+                        isAdmin={isAuthenticatedAdmin}
                         homePageFileId={notebook?.homePageFileId}
                         onSetHomePage={handleSetHomePage}
                     />

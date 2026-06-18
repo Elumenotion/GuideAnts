@@ -137,6 +137,17 @@ using var scope = CreateDbScope();
 
         await context.SaveChangesAsync();
 
+        try
+        {
+            using var mountScope = CreateDbScope();
+            var mountService = mountScope.ServiceProvider.GetRequiredService<IHostFolderMountService>();
+            await mountService.ApplyProjectScopedMappingsToNewNotebookAsync(projectId, notebook.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to apply project-scoped host folder mounts to notebook {NotebookId}", notebook.Id);
+        }
+
         // Copy CodeInterpreter files from guide and its crew into notebook Resourcess and create Output/ symlinks
         try
         {

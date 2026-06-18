@@ -1171,6 +1171,145 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.ToTable("GuideMembers");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.HostFolderMount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContainerSourcePath")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<string>("CredentialRef")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("LeafName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("MountKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("NetworkDevice")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<string>("NetworkOptions")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<Guid?>("NotebookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RemovedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Scope")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SourceKind")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceSpec")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("MountKey")
+                        .IsUnique();
+
+                    b.HasIndex("NotebookId");
+
+                    b.HasIndex("ProjectId", "Status");
+
+                    b.ToTable("HostFolderMounts");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.HostFolderMountLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<Guid>("HostFolderMountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("LastCheckedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastLinkedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LinkPhysicalPath")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<string>("LinkRelativePath")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<Guid>("NotebookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HostFolderMountId", "NotebookId")
+                        .IsUnique();
+
+                    b.HasIndex("NotebookId", "LinkRelativePath")
+                        .IsUnique()
+                        .HasDatabaseName("IX_HostFolderMountLinks_NotebookId_LinkRelativePath_ActiveUnique")
+                        .HasFilter("[Status] IN (0, 1, 2)");
+
+                    b.ToTable("HostFolderMountLinks");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.JobQueue", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2906,6 +3045,51 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("Guide");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.HostFolderMount", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GuideAntsApi.DataModel.Models.Notebook", "Notebook")
+                        .WithMany()
+                        .HasForeignKey("NotebookId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("GuideAntsApi.DataModel.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Notebook");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.HostFolderMountLink", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.HostFolderMount", "HostFolderMount")
+                        .WithMany("Links")
+                        .HasForeignKey("HostFolderMountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("GuideAntsApi.DataModel.Models.Notebook", "Notebook")
+                        .WithMany()
+                        .HasForeignKey("NotebookId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HostFolderMount");
+
+                    b.Navigation("Notebook");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Link", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.Project", "Project")
@@ -3297,6 +3481,11 @@ namespace GuideAntsApi.DataModel.Migrations
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ConversationTurn", b =>
                 {
                     b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.HostFolderMount", b =>
+                {
+                    b.Navigation("Links");
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Link", b =>

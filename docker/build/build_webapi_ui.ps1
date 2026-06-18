@@ -17,66 +17,222 @@ $clientRoot = Join-Path $repoRoot 'src\client'
 $clientNodeModules = Join-Path $clientRoot 'node_modules'
 $clientDistBrowser = Join-Path $clientRoot 'dist-browser'
 
-function Get-RunningComposeFileArgs {
+function Get-DockerContainerLabels {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$DockerRoot,
-
-        [string]$ProjectName = 'guideants'
+        [string]$ContainerName
     )
 
-    $composeJson = docker compose ls --format json
-    if ($LASTEXITCODE -ne 0) {
-        throw "docker compose ls failed with exit code $LASTEXITCODE"
+    $labelJson = docker inspect -f '{{json .Config.Labels}}' $ContainerName 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($labelJson)) {
+        return $null
     }
 
-    $projects = @()
-    if (-not [string]::IsNullOrWhiteSpace($composeJson)) {
-        $parsed = $composeJson | ConvertFrom-Json
-        if ($parsed -is [System.Array]) {
-            $projects = @($parsed)
+    return ($labelJson | ConvertFrom-Json)
+}
+
+function Read-InstallerStateComposeFiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StateFilePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DockerRoot
+    )
+
+    if (-not (Test-Path $StateFilePath)) {
+        return @()
+    }
+
+    $composeFile = $null
+    $overrideFile = $null
+    $dockerDirectory = 'docker'
+
+    foreach ($line in Get-Content -LiteralPath $StateFilePath) {
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) {
+            continue
         }
-        elseif ($null -ne $parsed) {
-            $projects = @($parsed)
+
+        $separatorIndex = $trimmed.IndexOf('=')
+        if ($separatorIndex -lt 1) {
+            continue
+        }
+
+        $key = $trimmed.Substring(0, $separatorIndex).Trim()
+        $value = $trimmed.Substring($separatorIndex + 1).Trim()
+        switch ($key) {
+            'COMPOSE_FILE' { $composeFile = $value }
+            'HOST_MOUNT_OVERRIDE_FILE' { $overrideFile = $value }
+            'DOCKER_DIRECTORY' { $dockerDirectory = $value }
         }
     }
 
-    $project = $projects | Where-Object { $_.Name -eq $ProjectName -and $_.Status -match '^running' } | Select-Object -First 1
-    if ($null -eq $project) {
-        throw "No running Docker Compose project named '$ProjectName' was found. Start the stack before rebuilding with recreate enabled, or pass -NoRecreate."
+    if ([string]::IsNullOrWhiteSpace($composeFile)) {
+        return @()
     }
 
-    $configFiles = @()
-    if ($project.ConfigFiles) {
-        $configFiles = @($project.ConfigFiles -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $composeRoot = if ([System.IO.Path]::IsPathRooted($dockerDirectory)) {
+        $dockerDirectory
+    }
+    else {
+        Join-Path (Split-Path $StateFilePath -Parent) $dockerDirectory
     }
 
-    if ($configFiles.Count -eq 0) {
-        throw "Running Docker Compose project '$ProjectName' did not report any config files."
+    $paths = @((Join-Path $composeRoot $composeFile))
+    if (-not [string]::IsNullOrWhiteSpace($overrideFile)) {
+        $paths += (Join-Path $composeRoot $overrideFile)
     }
 
-    $args = @()
-    foreach ($configFile in $configFiles) {
-        $resolved = if ([System.IO.Path]::IsPathRooted($configFile)) {
+    return $paths
+}
+
+function Resolve-ExistingComposeConfigFiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$ConfigFilePaths,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DockerRoot
+    )
+
+    $resolved = @()
+    foreach ($configFile in $ConfigFilePaths) {
+        $path = if ([System.IO.Path]::IsPathRooted($configFile)) {
             $configFile
         }
         else {
             Join-Path $DockerRoot $configFile
         }
 
-        if (-not (Test-Path $resolved)) {
-            Write-Warning "Running compose project references missing config file '$resolved'; skipping it."
-            continue
+        if (Test-Path $path) {
+            $resolved += $path
+        }
+        else {
+            Write-Warning "Skipping missing compose file '$path'."
+        }
+    }
+
+    return $resolved
+}
+
+function Get-ComposeContextForContainer {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DockerRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot
+    )
+
+    $projectName = 'guideants'
+    $configPaths = @()
+    $labels = Get-DockerContainerLabels -ContainerName $ContainerName
+
+    if ($null -ne $labels) {
+        if ($labels.'com.docker.compose.project') {
+            $projectName = [string]$labels.'com.docker.compose.project'
         }
 
-        $args += @('-f', $resolved)
+        $configFilesLabel = $labels.'com.docker.compose.project.config_files'
+        if ($configFilesLabel) {
+            $configPaths = @([string]$configFilesLabel -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        }
     }
 
-    if ($args.Count -eq 0) {
-        throw "None of the config files for running Docker Compose project '$ProjectName' exist on disk."
+    if ($configPaths.Count -eq 0) {
+        $composeJson = docker compose ls --format json
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($composeJson)) {
+            $parsed = $composeJson | ConvertFrom-Json
+            $projects = if ($parsed -is [System.Array]) { @($parsed) } else { @($parsed) }
+            $project = $projects | Where-Object { $_.Name -eq $projectName } | Select-Object -First 1
+            if ($null -ne $project -and $project.ConfigFiles) {
+                $configPaths = @([string]$project.ConfigFiles -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            }
+        }
     }
 
-    return $args
+    if ($configPaths.Count -eq 0) {
+        $configPaths = Read-InstallerStateComposeFiles -StateFilePath (Join-Path $RepoRoot '.installer_state.env') -DockerRoot $dockerRoot
+    }
+
+    $resolved = Resolve-ExistingComposeConfigFiles -ConfigFilePaths $configPaths -DockerRoot $DockerRoot
+    if ($resolved.Count -eq 0) {
+        throw "Could not resolve any compose config files for container '$ContainerName'. Start the stack first or pass -NoRecreate."
+    }
+
+    return @{
+        ProjectName = $projectName
+        ConfigFiles = $resolved
+    }
+}
+
+function New-ImageOverrideComposeFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DockerRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ServiceName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ImageTag
+    )
+
+    $content = @"
+services:
+  ${ServiceName}:
+    image: ${ImageTag}
+    pull_policy: never
+"@
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($overridePath, $content, $utf8NoBom)
+    return $overridePath
+}
+
+function Invoke-RecreateComposeServiceWithImage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DockerRoot,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$ComposeContext,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ServiceName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ImageTag
+    )
+
+    $overridePath = New-ImageOverrideComposeFile -DockerRoot $DockerRoot -ServiceName $ServiceName -ImageTag $ImageTag
+    Push-Location $DockerRoot
+    try {
+        $composeArgs = @('compose', '-p', $ComposeContext.ProjectName)
+        foreach ($configFile in $ComposeContext.ConfigFiles) {
+            $composeArgs += @('-f', $configFile)
+        }
+        $composeArgs += @('-f', $overridePath, 'up', '-d', '--no-deps', '--force-recreate', '--pull', 'never', $ServiceName)
+        docker @composeArgs
+        return $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+        Remove-Item -LiteralPath $overridePath -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-DockerContainerExists {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName
+    )
+
+    docker inspect $ContainerName 2>$null | Out-Null
+    return $LASTEXITCODE -eq 0
 }
 
 function Set-DotEnvValue {
@@ -134,6 +290,7 @@ switch ($Flavor) {
         $imageEnvKey = 'GA_WEBAPI_UI_MSSQL_IMAGE'
         $composeFileName = 'docker-compose.mssql.yml'
         $serviceName = 'guideants-webapi-ui-mssql'
+        $containerName = 'guideants-webapi-ui-mssql'
         $useComposeFile = $true
     }
     default {
@@ -141,6 +298,7 @@ switch ($Flavor) {
         $imageRepository = 'guideants-webapi-ui'
         $imageEnvKey = 'GA_WEBAPI_UI_IMAGE'
         $serviceName = 'guideants-webapi-ui'
+        $containerName = 'guideants-webapi-ui'
         $composeFileName = $null
         $useRunningComposeStack = $true
     }
@@ -260,40 +418,49 @@ Write-Host ""
 $composeFile = if ($composeFileName) { Join-Path $dockerRoot $composeFileName } else { $null }
 
 if (-not $NoRecreate -and ($useRunningComposeStack -or ($composeFile -and (Test-Path $composeFile)))) {
-    Write-Host "Recreating $serviceName to apply the new image tag..." -ForegroundColor Cyan
-    Push-Location $dockerRoot
+    Write-Host "Recreating $containerName to apply image $latestImageTag..." -ForegroundColor Cyan
     try {
-        $composeArgs = @('compose')
         if ($useRunningComposeStack) {
-            $composeArgs += Get-RunningComposeFileArgs -DockerRoot $dockerRoot
-        }
-        elseif ($useComposeFile) {
-            $composeArgs += @('-f', $composeFileName)
-        }
-        $composeArgs += @('up', '-d', '--no-deps', '--force-recreate', $serviceName)
-        docker @composeArgs
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Failed to recreate $serviceName (exit code $LASTEXITCODE)."
-            if ($useRunningComposeStack) {
-                Write-Host "Use: rerun this script after confirming the 'guideants' compose stack is running and its config files exist." -ForegroundColor Yellow
+            if (-not (Test-DockerContainerExists -ContainerName $containerName)) {
+                throw "Container '$containerName' was not found. Start the stack before rebuilding with recreate enabled, or pass -NoRecreate."
             }
-            elseif ($useComposeFile) {
-                Write-Host "Use: docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+
+            $composeContext = Get-ComposeContextForContainer -ContainerName $containerName -DockerRoot $dockerRoot -RepoRoot $repoRoot
+            $exitCode = Invoke-RecreateComposeServiceWithImage `
+                -DockerRoot $dockerRoot `
+                -ComposeContext $composeContext `
+                -ServiceName $serviceName `
+                -ImageTag $latestImageTag
+        }
+        else {
+            $composeContext = @{
+                ProjectName = 'guideants'
+                ConfigFiles = @((Resolve-Path $composeFile).Path)
             }
-            exit 1
+            $exitCode = Invoke-RecreateComposeServiceWithImage `
+                -DockerRoot $dockerRoot `
+                -ComposeContext $composeContext `
+                -ServiceName $serviceName `
+                -ImageTag $latestImageTag
+        }
+
+        if ($exitCode -ne 0) {
+            throw "docker compose recreate exited with code $exitCode"
         }
     }
-    finally {
-        Pop-Location
+    catch {
+        Write-Warning "Failed to recreate $containerName ($($_.Exception.Message))"
+        Write-Host "Use: pass -NoRecreate to build only, or ensure container '$containerName' exists and compose config files are reachable." -ForegroundColor Yellow
+        exit 1
     }
 
-    Write-Host "Recreated $serviceName with image $latestImageTag" -ForegroundColor Green
+    Write-Host "Recreated $containerName with image $latestImageTag" -ForegroundColor Green
 }
 elseif ($NoRecreate) {
     Write-Host "Skipping compose service recreate (-NoRecreate)." -ForegroundColor Yellow
     Write-Host "To apply this image to an existing container, run:" -ForegroundColor Yellow
     if ($useRunningComposeStack) {
-        Write-Host "docker compose <running stack config files> up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow
+        Write-Host "Rebuild then recreate container guideants-webapi-ui (or pass -NoRecreate)." -ForegroundColor Yellow
     }
     elseif ($useComposeFile) {
         Write-Host "docker compose -f $composeFileName up -d --no-deps --force-recreate $serviceName" -ForegroundColor Yellow

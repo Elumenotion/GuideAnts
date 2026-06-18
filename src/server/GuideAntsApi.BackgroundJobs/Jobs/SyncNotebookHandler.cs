@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using GuideAntsApi.BackgroundJobs.Sync;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 
@@ -55,10 +56,12 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
             Directory.CreateDirectory(rootPath);
         }
 
-        var physicalFiles = Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories)
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}.guideants{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-            .Where(f => !IsTemporaryScriptFile(Path.GetFileName(f))) // Filter out temporary script files
-            .ToDictionary(f => NormalizeRelativePath(Path.GetRelativePath(rootPath, f)), StringComparer.OrdinalIgnoreCase);
+        var physicalFiles = NotebookSyncFileEnumerator
+            .EnumerateSyncableRelativePaths(rootPath, fileNameFilter: f => !IsTemporaryScriptFile(f))
+            .ToDictionary(
+                relativePath => relativePath,
+                relativePath => Path.Combine(rootPath, relativePath.Replace("/", Path.DirectorySeparatorChar.ToString())),
+                StringComparer.OrdinalIgnoreCase);
 
         var dbFiles = notebook.NotebookFiles.ToDictionary(nf => nf.RelativePath, StringComparer.OrdinalIgnoreCase);
 
@@ -117,6 +120,14 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
         {
             if (!physicalFiles.ContainsKey(dbFile.RelativePath))
             {
+                // Stale rows under a registered mount are DB-only cleanup; sync never deletes host content.
+                if (NotebookSyncFileEnumerator.IsUnderRegisteredMount(dbFile.RelativePath, rootPath))
+                {
+                    Logger.LogDebug(
+                        "Removing stale indexed row under registered mount during sync: {RelativePath}",
+                        LogValueSanitizer.Sanitize(dbFile.RelativePath));
+                }
+
                 // Match NotebookFileSyncService: never remove rows still referenced by chat attachments
                 // or content versions (rename keeps the same NotebookFile id; attachments stay valid).
                 var hasContentReferences = await context.ContentFileVersions

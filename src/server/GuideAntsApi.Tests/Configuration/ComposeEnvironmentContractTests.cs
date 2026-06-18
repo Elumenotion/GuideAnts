@@ -420,6 +420,11 @@ public sealed class ComposeEnvironmentContractTests
             return true;
         }
 
+        if (key.StartsWith("GuideAntsRuntime__", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         return false;
     }
 }

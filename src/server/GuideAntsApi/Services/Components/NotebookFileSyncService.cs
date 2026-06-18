@@ -1,5 +1,6 @@
 using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
+using GuideAntsApi.BackgroundJobs.Sync;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
@@ -115,10 +116,9 @@ public class NotebookFileSyncService : INotebookFileSyncService
             Directory.CreateDirectory(rootPath);
         }
 
-        // Get all physical files
-        var physicalFiles = Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories)
-            .Select(f => NormalizeRelativePath(Path.GetRelativePath(rootPath, f)))
-            .Where(f => !IsInGuideantsFolder(f))
+        // Mount-aware enumeration: registered mount roots are not descended into (D1 / plan §14).
+        var physicalFiles = NotebookSyncFileEnumerator
+            .EnumerateSyncableRelativePaths(rootPath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Sync each physical file individually with fresh queries
@@ -136,6 +136,14 @@ public class NotebookFileSyncService : INotebookFileSyncService
 		{
 			if (!physicalFiles.Contains(dbFile.RelativePath))
 			{
+                // Stale rows under a registered mount are DB-only cleanup; sync never deletes host content.
+                if (NotebookSyncFileEnumerator.IsUnderRegisteredMount(dbFile.RelativePath, rootPath))
+                {
+                    _logger.LogDebug(
+                        "Removing stale indexed row under registered mount during sync: {RelativePath}",
+                        dbFile.RelativePath);
+                }
+
 				// Do NOT delete notebook files that are still referenced anywhere.
 				// Preserve rows when referenced by content versions OR message attachments.
 				var hasContentReferences = await context.ContentFileVersions.AnyAsync(v => v.OriginNotebookFileId == dbFile.Id);
@@ -395,12 +403,6 @@ public class NotebookFileSyncService : INotebookFileSyncService
     private string GetNotebookRootPath(Guid projectId, Guid notebookId)
     {
         return _pathResolver.GetNotebookRootPath(projectId, notebookId);
-    }
-
-    private static bool IsInGuideantsFolder(string relativePath)
-    {
-        return relativePath.StartsWith(".guideants/", StringComparison.OrdinalIgnoreCase) ||
-               relativePath.Equals(".guideants", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeRelativePath(string path)

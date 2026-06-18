@@ -72,6 +72,8 @@ namespace GuideAntsApi.DataModel
         public DbSet<PublishedGuide> PublishedGuides { get; set; } = null!;
         public DbSet<ApplicationSetting> ApplicationSettings { get; set; } = null!;
         public DbSet<RuntimeProfile> RuntimeProfiles { get; set; } = null!;
+        public DbSet<HostFolderMount> HostFolderMounts { get; set; } = null!;
+        public DbSet<HostFolderMountLink> HostFolderMountLinks { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -1037,6 +1039,55 @@ namespace GuideAntsApi.DataModel
             modelBuilder.Entity<ConversationCurrentState>()
                 .ToView("ConversationCurrentState")
                 .HasNoKey();
+
+            // ------------------------------------------------------------
+            // Host folder mounts (metadata only — never cascade host content)
+            // ------------------------------------------------------------
+            modelBuilder.Entity<HostFolderMount>(b =>
+            {
+                b.Property(m => m.SourceSpec).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(m => m.Scope).HasConversion<int>();
+                b.Property(m => m.SourceKind).HasConversion<int>();
+                b.Property(m => m.Status).HasConversion<int>();
+                b.Property(m => m.CreatedUtc).HasDefaultValueSql("GETUTCDATE()");
+                b.Property(m => m.UpdatedUtc).HasDefaultValueSql("GETUTCDATE()");
+
+                b.HasOne(m => m.Project)
+                    .WithMany()
+                    .HasForeignKey(m => m.ProjectId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                b.HasOne(m => m.Notebook)
+                    .WithMany()
+                    .HasForeignKey(m => m.NotebookId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne(m => m.CreatedByUser)
+                    .WithMany()
+                    .HasForeignKey(m => m.CreatedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<HostFolderMountLink>(b =>
+            {
+                b.Property(l => l.Status).HasConversion<int>();
+
+                b.HasOne(l => l.HostFolderMount)
+                    .WithMany(m => m.Links)
+                    .HasForeignKey(l => l.HostFolderMountId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                b.HasOne(l => l.Notebook)
+                    .WithMany()
+                    .HasForeignKey(l => l.NotebookId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                // Plan §9: at most one active mapping per leaf per notebook.
+                b.HasIndex(l => new { l.NotebookId, l.LinkRelativePath })
+                    .IsUnique()
+                    .HasFilter("[Status] IN (0, 1, 2)")
+                    .HasDatabaseName("IX_HostFolderMountLinks_NotebookId_LinkRelativePath_ActiveUnique");
+            });
         }
 
         /// <summary>

@@ -281,6 +281,8 @@ public class Program
         app.MapPublishedSpeechEndpoints();
         app.MapNotebookEndpoints();
         app.MapProjectExternalAuthEndpoints();
+        app.MapHostFolderMountEndpoints();
+        app.MapHostFolderMountInternalEndpoints();
         app.MapNotebookFileMarkdownEndpoints();
         app.MapFileLineageEndpoints();
         app.MapUsageEndpoints();

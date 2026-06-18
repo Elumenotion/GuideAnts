@@ -104,6 +104,7 @@ public static class StartupConfiguration
         services.AddScoped<INotebookService, NotebookService>();
         services.AddScoped<IContentFileService, ContentFileService>();
         services.AddScoped<IProjectFolderService, ProjectFolderService>();
+        services.AddScoped<IHostFolderMountService, HostFolderMountService>();
         services.AddScoped<ISemiStructuredDataService, SemiStructuredDataService>();
         services.AddScoped<IConversationQueryService, ConversationQueryService>();
         services.AddScoped<IConversationCommandService, ConversationCommandService>();
@@ -210,6 +211,7 @@ public static class StartupConfiguration
         services.AddSingleton<IConversationBroadcastHub, ConversationBroadcastHub>();
         services.AddScoped<IDistributedConversationLock, DistributedConversationLockService>();
         services.AddHostedService<LockCleanupBackgroundService>();
+        services.AddHostedService<HostFolderMountStartupReconciliationService>();
 
         // LLM client abstraction (provider routing).
         //
@@ -710,6 +712,7 @@ public static class StartupConfiguration
         services.Configure<SettingsSecretsOptions>(configuration.GetSection(SettingsSecretsOptions.SectionName));
         services.Configure<LlamaModelManagementOptions>(configuration.GetSection(LlamaModelManagementOptions.SectionName));
         services.Configure<DocumentServerOptions>(configuration.GetSection(DocumentServerOptions.SectionName));
+        services.Configure<GuideAntsRuntimeOptions>(configuration.GetSection(GuideAntsRuntimeOptions.SectionName));
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
     }
 
