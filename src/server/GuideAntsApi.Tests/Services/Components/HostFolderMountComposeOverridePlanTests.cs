@@ -1,9 +1,7 @@
 using FluentAssertions;
-using GuideAntsApi.Configuration;
 using Microsoft.Extensions.Configuration;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Components;
-using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Tests.Services.Components;
 
@@ -32,10 +30,6 @@ public sealed class HostFolderMountComposeOverridePlanTests
         var service = new HostFolderMountService(
             scopeFactory: null!,
             pathResolver: null!,
-            Microsoft.Extensions.Options.Options.Create(new GuideAntsRuntimeOptions
-            {
-                AffectedMountServices = "guideants-webapi-ui;guideants-ai;plantuml"
-            }),
             configuration: new ConfigurationBuilder().Build());
 
         var plan = service.BuildComposeOverridePlan(mount);
@@ -73,7 +67,6 @@ public sealed class HostFolderMountComposeOverridePlanTests
         var service = new HostFolderMountService(
             scopeFactory: null!,
             pathResolver: null!,
-            Microsoft.Extensions.Options.Options.Create(new GuideAntsRuntimeOptions()),
             configuration: new ConfigurationBuilder().Build());
 
         var plan = service.BuildComposeOverridePlan(mount);

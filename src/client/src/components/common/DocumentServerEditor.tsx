@@ -21,8 +21,9 @@ declare global {
 interface DocumentServerEditorProps {
     scope: DocumentServerScope;
     projectId: string;
-    fileId: string;
+    fileId?: string;
     notebookId?: string;
+    relativePath?: string;
     canEdit: boolean;
     className?: string;
     showErrorDialogOnError?: boolean;
@@ -34,15 +35,17 @@ export default function DocumentServerEditor({
     projectId,
     fileId,
     notebookId,
+    relativePath,
     canEdit,
     className,
     showErrorDialogOnError = true,
     onError,
 }: DocumentServerEditorProps) {
     const instanceIdRef = useRef(Math.random().toString(36).slice(2));
+    const resourceIdentity = fileId || relativePath || 'unknown';
     const containerId = useMemo(
-        () => `documentserver-${scope}-${projectId}-${notebookId ?? 'project'}-${fileId}-${instanceIdRef.current}`.replace(/[^a-zA-Z0-9-_]/g, '-'),
-        [scope, projectId, notebookId, fileId]
+        () => `documentserver-${scope}-${projectId}-${notebookId ?? 'project'}-${resourceIdentity}-${instanceIdRef.current}`.replace(/[^a-zA-Z0-9-_]/g, '-'),
+        [scope, projectId, notebookId, resourceIdentity]
     );
     const editorRef = useRef<{ destroyEditor?: () => void } | null>(null);
     const readyTimeoutRef = useRef<number | null>(null);
@@ -93,6 +96,7 @@ export default function DocumentServerEditor({
                 projectId,
                 fileId,
                 notebookId,
+                relativePath,
                 canEdit,
             };
             console.info('[DocumentServer] editor mount start', request);
@@ -198,7 +202,7 @@ export default function DocumentServerEditor({
             }
             destroyEditor();
         };
-    }, [scope, projectId, fileId, notebookId, canEdit, containerId, reloadKey, reportEditorError]);
+    }, [scope, projectId, fileId, notebookId, relativePath, canEdit, containerId, reloadKey, reportEditorError]);
 
     return (
         <div className={className ? `${className} relative` : 'h-full w-full relative'} style={{ position: 'relative', overflow: 'hidden', isolation: 'isolate' }}>

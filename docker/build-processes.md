@@ -149,7 +149,7 @@ Script behavior:
 1. Builds timestamped tag `guideants-webapi-ui:<YYDDD>.<HHmm>`.
 2. By default, allows app-stage cache reuse for faster local iteration. Use `-NoAppBuildCache` when you need deterministic `api-build` stage rebuilds.
 3. Writes/repairs `GA_WEBAPI_UI_IMAGE` in `docker/.env`.
-4. Recreates `guideants-webapi-ui` container unless `-NoRecreate` is passed.
+4. Recreates the running `guideants-webapi-ui` container (by fixed container name) unless `-NoRecreate` is passed. Compose config is resolved from the container's labels, then `.installer_state.env`; a temporary override forces the freshly built local image with `pull_policy: never`.
 
 ## 5) Support Image Build (`build_support_images.ps1`)
 

@@ -783,6 +783,20 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
     e.preventDefault();
     e.stopPropagation();
     setDragOverFolder(null);
+
+    const linkedTarget = Boolean(
+      context?.getMountForPath(folder.relativePath || '') ||
+      context?.getEnclosingMount(folder.relativePath || '')
+    );
+    if (linkedTarget) {
+      return;
+    }
+
+    const isLinkedDrag = e.dataTransfer.getData('application/x-notebook-file-linked') === '1';
+    if (isLinkedDrag) {
+      return;
+    }
+
     const fileId = e.dataTransfer.getData('text/plain');
     const originFolderId = e.dataTransfer.getData('application/x-origin-folder');
     if (fileId && originFolderId !== folder.relativePath && canEdit) {
@@ -791,17 +805,24 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
       onMoveFile?.(fileId, destinationFolderId);
       try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
     }
-  }, [folder.relativePath, canEdit, onMoveFile, level]);
+  }, [folder.relativePath, canEdit, onMoveFile, level, context]);
 
   const handleFileDragStart = useCallback((e: React.DragEvent, file: NotebookFileDto) => {
     if (!e.dataTransfer) return;
+    const isLinked = Boolean(
+      file.isLinked ||
+      context?.getMountForPath(file.relativePath) ||
+      context?.getEnclosingMount(file.relativePath)
+    );
     e.dataTransfer.setData('text/plain', file.id);
     e.dataTransfer.setData('application/x-origin-folder', folder.relativePath || '');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('application/x-notebook-file-id', file.id);
     e.dataTransfer.setData('application/x-notebook-file-name', file.fileName);
+    e.dataTransfer.setData('application/x-notebook-file-relative-path', file.relativePath);
+    e.dataTransfer.setData('application/x-notebook-file-linked', isLinked ? '1' : '0');
     (e.currentTarget as HTMLElement).style.opacity = '0.5';
-  }, [folder.relativePath]);
+  }, [folder.relativePath, context]);
 
   const handleFileDragEnd = useCallback((e: React.DragEvent) => {
     (e.currentTarget as HTMLElement).style.opacity = '1';
@@ -812,6 +833,15 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   const isMountRoot = mountEntry != null;
   const enclosingMount = context?.getEnclosingMount(folder.relativePath || '') ?? null;
   const isInsideMount = enclosingMount != null;
+  const isLinkedFolder = isMountRoot || isInsideMount;
+  const isLinkedFile = useCallback((file?: NotebookFileDto | null) => Boolean(
+    file && (
+      file.isLinked ||
+      context?.getMountForPath(file.relativePath) ||
+      context?.getEnclosingMount(file.relativePath)
+    )),
+    [context]);
+  const selectedFileIsLinked = isLinkedFile(selectedContextFile);
 
   const renderHostMountMenuItems = () => {
     if (!context?.isAdmin) {
@@ -1002,11 +1032,11 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
 
       {showContextMenu && canEdit && createPortal(
         <div ref={menuRef} className="fixed bg-white shadow-lg rounded-lg py-1 z-[9999]" style={{ top: contextMenuPosition.y, left: contextMenuPosition.x }} onClick={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()} data-tour-id="notebook.folder.context-menu">
-          {onRenameFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
-          <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>
-          {onCreateFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setIsCreatingSubfolder(true); setShowContextMenu(false); }}>Create Subfolder</button>}
-          {onUploadToFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onUploadToFolder(folder.relativePath); }}>Upload Files</button>}
-          {onDeleteFolder && !isMountRoot && <button className={`block w-full text-left px-4 py-2 text-sm ${hasChildren ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-gray-100'}`} onClick={hasChildren ? undefined : handleDeleteFolder} disabled={hasChildren} title={hasChildren ? 'Cannot delete folder with contents' : 'Delete folder'}>Delete</button>}
+          {onRenameFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
+          {!isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>}
+          {onCreateFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setIsCreatingSubfolder(true); setShowContextMenu(false); }}>Create Subfolder</button>}
+          {onUploadToFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onUploadToFolder(folder.relativePath); }}>Upload Files</button>}
+          {onDeleteFolder && !isMountRoot && !isLinkedFolder && <button className={`block w-full text-left px-4 py-2 text-sm ${hasChildren ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-gray-100'}`} onClick={hasChildren ? undefined : handleDeleteFolder} disabled={hasChildren} title={hasChildren ? 'Cannot delete folder with contents' : 'Delete folder'}>Delete</button>}
           {renderHostMountMenuItems()}
         </div>,
         document.body
@@ -1018,16 +1048,24 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
               (() => {
                   const selectedItems = context.multiSelect.getSelectedItems();
                   const selectedFiles = selectedItems.filter(item => item.type === 'file');
+                  const selectedLinkedFiles = selectedFiles.filter(item => isLinkedFile(item.data as NotebookFileDto));
+                  const selectedEditableFiles = selectedFiles.filter(item => !isLinkedFile(item.data as NotebookFileDto));
                   const fileCount = selectedFiles.length;
+                  const editableFileCount = selectedEditableFiles.length;
+                  const editableFolderPaths = selectedItems
+                    .filter(item => item.type === 'folder')
+                    .map(item => item.id)
+                    .filter(path => !(context.getMountForPath(path) || context.getEnclosingMount(path)));
+                  const deletableItemCount = editableFileCount + editableFolderPaths.length;
                   return (
                   <>
-                      {canEdit && onPublishToProject && fileCount > 0 && (
+                      {canEdit && onPublishToProject && editableFileCount > 0 && (
                           <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => {
-                              const filesToPublish = selectedFiles.map(item => item.data as NotebookFileDto);
+                              const filesToPublish = selectedEditableFiles.map(item => item.data as NotebookFileDto);
                               onPublishToProject(filesToPublish);
                               setShowFileContextMenu(false);
                           }}>
-                              Publish {fileCount} File{fileCount > 1 ? 's' : ''} to Project
+                              Publish {editableFileCount} File{editableFileCount > 1 ? 's' : ''} to Project
                           </button>
                       )}
                       {fileCount > 0 && (
@@ -1038,12 +1076,17 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
                               Download {fileCount} File{fileCount > 1 ? 's' : ''}
                           </button>
                       )}
-                      {canEdit && onDeleteFile && (
+                      {canEdit && onDeleteFile && deletableItemCount > 0 && (
                       <button className="block w-full text-left px-4 py-1.5 text-sm text-red-600 hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={async () => {
                           if (!context) return;
                           const selectedItems = context.multiSelect.getSelectedItems();
-                          const fileIds = selectedItems.filter(i => i.type === 'file').map(i => i.id);
-                          const folderIds = selectedItems.filter(i => i.type === 'folder').map(i => i.id);
+                          const fileIds = selectedItems
+                            .filter(i => i.type === 'file' && !isLinkedFile(i.data as NotebookFileDto))
+                            .map(i => i.id);
+                          const folderIds = selectedItems
+                            .filter(i => i.type === 'folder')
+                            .map(i => i.id)
+                            .filter(path => !(context.getMountForPath(path) || context.getEnclosingMount(path)));
                           
                           // TODO: Handle folder delete if supported here or via parent
                           // Current props: onDeleteFile (single), onDeleteFolder (single)
@@ -1060,25 +1103,35 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
                           context.multiSelect.clearSelection();
                           setShowFileContextMenu(false);
                       }}>
-                          Delete {context.multiSelect.selectedCount} Items
+                          Delete {deletableItemCount} Item{deletableItemCount > 1 ? 's' : ''}
                       </button>
+                  )}
+                  {selectedLinkedFiles.length > 0 && (
+                    <div className="px-4 py-1.5 text-xs text-gray-500 whitespace-nowrap">
+                      Linked files are read-only here.
+                    </div>
                   )}
               </>
                   );
               })()
           ) : (
               <>
-                  {canEdit && isMarkdownFile(selectedContextFile) && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={openMarkdownEditor}>Edit</button>}
+                  {canEdit && !selectedFileIsLinked && isMarkdownFile(selectedContextFile) && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={openMarkdownEditor}>Edit</button>}
                   {onPreviewFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { if (selectedContextFile) onPreviewFile(selectedContextFile); setShowFileContextMenu(false); }}>Preview</button>}
-                  {canEdit && onPublishToProject && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { if (selectedContextFile) onPublishToProject([selectedContextFile]); setShowFileContextMenu(false); }}>Publish to Project</button>}
+                  {canEdit && !selectedFileIsLinked && onPublishToProject && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { if (selectedContextFile) onPublishToProject([selectedContextFile]); setShowFileContextMenu(false); }}>Publish to Project</button>}
                   <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDownloadFile}>Download</button>
-                  {canEdit && onRenameFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleStartFileRename}>Rename</button>}
-                  {canEdit && onSetHomePage && selectedContextFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleToggleHomePage}>{homePageFileId === selectedContextFile.id ? 'Clear as Home Page' : 'Set as Notebook Home Page'}</button>}
-                  {canEdit && <button className="block w-full text-left px-4 py-1.5 text-sm text-red-600 hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDeleteFile}>
+                  {canEdit && !selectedFileIsLinked && onRenameFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleStartFileRename}>Rename</button>}
+                  {canEdit && !selectedFileIsLinked && onSetHomePage && selectedContextFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleToggleHomePage}>{homePageFileId === selectedContextFile.id ? 'Clear as Home Page' : 'Set as Notebook Home Page'}</button>}
+                  {canEdit && !selectedFileIsLinked && <button className="block w-full text-left px-4 py-1.5 text-sm text-red-600 hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDeleteFile}>
                     {isInsideMount || (selectedContextFile && context?.getEnclosingMount(selectedContextFile.relativePath))
                       ? 'Delete on host'
                       : 'Delete'}
                   </button>}
+                  {selectedFileIsLinked && (
+                    <div className="px-4 py-1.5 text-xs text-gray-500 whitespace-nowrap">
+                      Linked files are read-only here.
+                    </div>
+                  )}
               </>
           )}
         </div>,
@@ -1563,8 +1616,17 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
         if (multiSelect.selectedCount === 0) return;
         
         const selectedItems = multiSelect.getSelectedItems();
-        const fileIds = selectedItems.filter(i => i.type === 'file').map(i => i.id);
-        const folderIds = selectedItems.filter(i => i.type === 'folder').map(i => i.id);
+        const fileIds = selectedItems
+          .filter(i => i.type === 'file')
+          .filter(i => {
+            const file = i.data as NotebookFileDto;
+            return !(file.isLinked || hostMounts.some(m => i.id === m.relativePath || isPathInsideHostMount(file.relativePath, m.relativePath)));
+          })
+          .map(i => i.id);
+        const folderIds = selectedItems
+          .filter(i => i.type === 'folder')
+          .map(i => i.id)
+          .filter(path => !hostMounts.some(m => path === m.relativePath || isPathInsideHostMount(path, m.relativePath)));
 
         if (fileIds.length > 0 && onDeleteFile) {
             for (const id of fileIds) await onDeleteFile(id);
@@ -1577,7 +1639,7 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
         try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
         multiSelect.clearSelection();
         setShowBatchDeleteConfirm(false);
-    }, [multiSelect, onDeleteFile, onDeleteFolder]);
+    }, [multiSelect, onDeleteFile, onDeleteFolder, hostMounts]);
 
   const handleDeleteSelected = useCallback(async () => {
         if (multiSelect.selectedCount === 0) return;
@@ -1594,7 +1656,14 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
         onRename: () => {
              if (multiSelect.selectedCount === 1) {
                  const item = multiSelect.getSelectedItems()[0];
-                 if ((item.type === 'file' && onRenameFile) || (item.type === 'folder' && onRenameFolder)) {
+                 const fileLinked = item.type === 'file' && Boolean(
+                   (item.data as NotebookFileDto).isLinked ||
+                   hostMounts.some(m => item.id === m.relativePath || isPathInsideHostMount((item.data as NotebookFileDto).relativePath, m.relativePath))
+                 );
+                 const folderLinked = item.type === 'folder' && hostMounts.some(
+                   (mount) => item.id === mount.relativePath || isPathInsideHostMount(item.id, mount.relativePath)
+                 );
+                 if (!fileLinked && !folderLinked && ((item.type === 'file' && onRenameFile) || (item.type === 'folder' && onRenameFolder))) {
                      setRenamingId(item.id);
                  }
              }

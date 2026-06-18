@@ -23,6 +23,11 @@ $RootDir = Split-Path -Parent $ScriptDir
 $StateFile = Join-Path $RootDir '.installer_state.env'
 $DefaultApiBase = 'http://localhost:5107'
 $ApiPlanPath = '/api/internal/host-folder-mounts'
+$AffectedMountServiceNames = @(
+    'guideants-webapi-ui',
+    'guideants-ai',
+    'plantuml'
+)
 
 function Write-Log {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -48,7 +53,6 @@ function Get-InstallerState {
         ComposeFile = $null
         HostMountOverrideFile = 'docker-compose.host-mounts.generated.yml'
         DockerDirectory = 'docker'
-        AffectedMountServices = 'guideants-webapi-ui;guideants-ai;plantuml'
     }
 
     foreach ($line in Get-Content -LiteralPath $StateFile) {
@@ -68,7 +72,6 @@ function Get-InstallerState {
             'COMPOSE_FILE' { $state.ComposeFile = $value }
             'HOST_MOUNT_OVERRIDE_FILE' { $state.HostMountOverrideFile = $value }
             'DOCKER_DIRECTORY' { $state.DockerDirectory = $value }
-            'AFFECTED_MOUNT_SERVICES' { $state.AffectedMountServices = $value }
         }
     }
 
@@ -156,6 +159,10 @@ function Resolve-ApplyPlan {
 
     $apiPlan = Get-ComposePlanFromApi -MountIdValue $MountIdValue
     if ($null -ne $apiPlan) {
+        if ([string]::IsNullOrWhiteSpace($apiPlan.HostPath)) {
+            Stop-WithError 'Compose plan host path is empty.'
+        }
+
         if (-not [string]::IsNullOrWhiteSpace($HostPathValue) -and $HostPathValue -ne $apiPlan.HostPath) {
             Stop-WithError 'Host path on the command line does not match the API mount plan.'
         }
@@ -231,6 +238,10 @@ function Write-LocalBindBlock {
         [Parameter(Mandatory = $true)][string]$HostPathValue
     )
 
+    if ([string]::IsNullOrWhiteSpace($HostPathValue)) {
+        Stop-WithError "Mount '$MountIdValue' has an empty host path; refusing to write an invalid compose override."
+    }
+
     "      # guideants-host-mount: mount-id=$MountIdValue mount-key=$MountKeyValue source-kind=LocalPath"
     '      - type: bind'
     "        source: $HostPathValue"
@@ -257,7 +268,7 @@ function Write-OverrideFile {
     $null = $lines.Add('')
     $null = $lines.Add('services:')
 
-    $services = @('guideants-webapi-ui', 'guideants-ai', 'plantuml')
+    $services = $Script:AffectedMountServiceNames
     foreach ($service in $services) {
         $null = $lines.Add("  $service`:")
         $null = $lines.Add('    volumes:')
@@ -331,7 +342,7 @@ function Restart-AffectedServices {
         $composeArgs += @('-f', $InstallerState.HostMountOverrideFile)
     }
 
-    $services = $InstallerState.AffectedMountServices -split ';' | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $services = $Script:AffectedMountServiceNames
     Write-Log "Restarting affected services (--no-deps): $($services -join ' ')"
     Push-Location (Join-Path $RootDir $InstallerState.DockerDirectory)
     try {

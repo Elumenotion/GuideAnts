@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
-import { MapHostFolderDialog } from './MapHostFolderDialog';
+import { MapHostFolderDialog } from '../MapHostFolderDialog';
 
-vi.mock('../../../utils/pickHostFolder', () => ({
+vi.mock('../../../../utils/pickHostFolder', () => ({
   canPickHostFolder: vi.fn(() => true),
   pickHostFolder: vi.fn(),
 }));
 
-import { canPickHostFolder, pickHostFolder } from '../../../utils/pickHostFolder';
+import { canPickHostFolder, pickHostFolder } from '../../../../utils/pickHostFolder';
 
 describe('MapHostFolderDialog', () => {
   const onClose = vi.fn();

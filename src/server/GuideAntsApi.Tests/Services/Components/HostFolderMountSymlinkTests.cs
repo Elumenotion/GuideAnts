@@ -194,7 +194,6 @@ public sealed class HostFolderMountSymlinkTests
         return new HostFolderMountService(
             new TestServiceScopeFactory(db, configuration),
             pathResolver.Object,
-            Microsoft.Extensions.Options.Options.Create(new GuideAntsRuntimeOptions()),
             configuration);
     }
 

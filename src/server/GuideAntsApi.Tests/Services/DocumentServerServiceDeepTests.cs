@@ -71,7 +71,7 @@ public sealed class DocumentServerServiceDeepTests
             new ContentFileContentDto { Content = bytes, ContentType = "application/pdf", FileName = "proposal.docx" });
         var service = CreateService(db, contentService, enabled: true, jwtEnabled: false);
 
-        var result = await service.GetDownloadAsync(null, "project", projectId, fileId, null, null, CancellationToken.None);
+        var result = await service.GetDownloadAsync(null, "project", projectId, fileId, null, null, null, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.FileName.Should().Be("proposal.docx");
@@ -84,7 +84,7 @@ public sealed class DocumentServerServiceDeepTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(null), enabled: false, jwtEnabled: false);
 
-        var act = async () => await service.GetDownloadAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null, null, CancellationToken.None);
+        var act = async () => await service.GetDownloadAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null, null, null, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*disabled*");
     }
@@ -95,7 +95,7 @@ public sealed class DocumentServerServiceDeepTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(null), enabled: true, jwtEnabled: false);
 
-        var act = async () => await service.GetDownloadAsync(null, null, Guid.NewGuid(), Guid.NewGuid(), null, null, CancellationToken.None);
+        var act = async () => await service.GetDownloadAsync(null, null, Guid.NewGuid(), Guid.NewGuid(), null, null, null, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*scope is missing*");
     }
@@ -106,7 +106,7 @@ public sealed class DocumentServerServiceDeepTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(null), enabled: true, jwtEnabled: false);
 
-        var act = async () => await service.GetDownloadAsync(null, "project", null, null, null, null, CancellationToken.None);
+        var act = async () => await service.GetDownloadAsync(null, "project", null, null, null, null, null, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*identity is missing*");
     }
@@ -117,7 +117,7 @@ public sealed class DocumentServerServiceDeepTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(null), enabled: true, jwtEnabled: false);
 
-        var result = await service.GetDownloadAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null, null, CancellationToken.None);
+        var result = await service.GetDownloadAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null, null, null, CancellationToken.None);
 
         result.Should().BeNull();
     }
@@ -129,7 +129,7 @@ public sealed class DocumentServerServiceDeepTests
         var fileId = Guid.NewGuid();
         var service = CreateService(db, new StubContentFileService(Details(fileId, "a.pdf", latestVersion: 1)), enabled: true, jwtEnabled: false);
 
-        var result = await service.GetDownloadAsync(null, "project", Guid.NewGuid(), fileId, null, null, CancellationToken.None);
+        var result = await service.GetDownloadAsync(null, "project", Guid.NewGuid(), fileId, null, null, null, CancellationToken.None);
 
         result.Should().BeNull();
     }
@@ -140,7 +140,7 @@ public sealed class DocumentServerServiceDeepTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(null), enabled: true, jwtEnabled: false);
 
-        var act = async () => await service.GetDownloadAsync(null, "bogus", Guid.NewGuid(), Guid.NewGuid(), null, null, CancellationToken.None);
+        var act = async () => await service.GetDownloadAsync(null, "bogus", Guid.NewGuid(), Guid.NewGuid(), null, null, null, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Unsupported DocumentServer scope*");
     }
@@ -151,7 +151,7 @@ public sealed class DocumentServerServiceDeepTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(null), enabled: true, jwtEnabled: false);
 
-        var act = async () => await service.GetDownloadAsync(null, "notebook", Guid.NewGuid(), Guid.NewGuid(), null, null, CancellationToken.None);
+        var act = async () => await service.GetDownloadAsync(null, "notebook", Guid.NewGuid(), Guid.NewGuid(), null, null, null, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*missing notebook identity*");
     }
@@ -169,7 +169,7 @@ public sealed class DocumentServerServiceDeepTests
         var service = CreateService(db, new StubContentFileService(null), enabled: true, jwtEnabled: false,
             notebookFileService: notebookFileService);
 
-        var result = await service.GetDownloadAsync(null, "notebook", Guid.NewGuid(), fileId, notebookId, null, CancellationToken.None);
+        var result = await service.GetDownloadAsync(null, "notebook", Guid.NewGuid(), fileId, notebookId, null, null, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.FileName.Should().Be("notes.txt");
@@ -270,7 +270,7 @@ public sealed class DocumentServerServiceDeepTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(null), enabled: false, jwtEnabled: false);
 
-        var act = async () => await service.HandleCallbackAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null,
+        var act = async () => await service.HandleCallbackAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null, null,
             new DocumentServerCallbackPayload(Status: 2, Url: "http://x/y"), CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*disabled*");
@@ -283,7 +283,7 @@ public sealed class DocumentServerServiceDeepTests
         var service = CreateService(db, new StubContentFileService(null), enabled: true, jwtEnabled: false,
             httpClientFactory: new StubHttpClientFactory(Encoding.UTF8.GetBytes("data")));
 
-        var act = async () => await service.HandleCallbackAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null,
+        var act = async () => await service.HandleCallbackAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null, null,
             new DocumentServerCallbackPayload(Status: 2, Url: "http://callback.local/file.docx"), CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Project file not found*");
@@ -296,7 +296,7 @@ public sealed class DocumentServerServiceDeepTests
         var service = CreateService(db, new StubContentFileService(null), enabled: true, jwtEnabled: false,
             httpClientFactory: new StubHttpClientFactory(Encoding.UTF8.GetBytes("data")));
 
-        var act = async () => await service.HandleCallbackAsync(null, "notebook", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+        var act = async () => await service.HandleCallbackAsync(null, "notebook", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null,
             new DocumentServerCallbackPayload(Status: 2, Url: "http://callback.local/file.docx"), CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Notebook file not found*");
@@ -308,7 +308,7 @@ public sealed class DocumentServerServiceDeepTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(null), enabled: true, jwtEnabled: false);
 
-        var act = async () => await service.HandleCallbackAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null,
+        var act = async () => await service.HandleCallbackAsync(null, "project", Guid.NewGuid(), Guid.NewGuid(), null, null,
             new DocumentServerCallbackPayload(Status: 2, Url: null), CancellationToken.None);
 
         await act.Should().NotThrowAsync();

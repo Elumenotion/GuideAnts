@@ -29,6 +29,22 @@ public sealed class HostFolderMountCommandTextBuilderTests
     }
 
     [TestMethod]
+    public void BuildApplyCommand_EmitsBothShells_RegardlessOfApiOperatingSystem()
+    {
+        var mountId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        var projectId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var command = HostFolderMountCommandTextBuilder.BuildApplyCommand(
+            mountId,
+            projectId,
+            @"D:\Data\Shared");
+
+        command.Should().Contain(mountId.ToString());
+        command.Should().Contain(projectId.ToString());
+        command.Should().Contain(@".\scripts\guideants-host-mount.ps1 apply");
+        command.Should().Contain("./scripts/guideants-host-mount.sh apply");
+    }
+
+    [TestMethod]
     public void BuildApplyCommand_DoesNotInlineUnquotedHostPath()
     {
         var mountId = Guid.Parse("11111111-2222-3333-4444-555555555555");
@@ -38,34 +54,19 @@ public sealed class HostFolderMountCommandTextBuilderTests
             projectId,
             @"D:\Data\Shared; rm -rf /");
 
-        command.Should().Contain(mountId.ToString());
-        command.Should().Contain(projectId.ToString());
-        if (OperatingSystem.IsWindows())
-        {
-            command.Should().StartWith(@".\scripts\guideants-host-mount.ps1 apply");
-            command.Should().Contain(@"-HostPath ""D:\Data\Shared; rm -rf /""");
-        }
-        else
-        {
-            command.Should().StartWith("./scripts/guideants-host-mount.sh apply");
-            command.Should().Contain("--host-path 'D:\\Data\\Shared; rm -rf /'");
-        }
+        // Both shells must keep the injection-bearing path fully quoted.
+        command.Should().Contain(@"-HostPath ""D:\Data\Shared; rm -rf /""");
+        command.Should().Contain("--host-path 'D:\\Data\\Shared; rm -rf /'");
     }
 
     [TestMethod]
-    public void BuildRemoveCommand_ContainsOnlyMountId()
+    public void BuildRemoveCommand_EmitsBothShellsWithMountIdOnly()
     {
         var mountId = Guid.Parse("11111111-2222-3333-4444-555555555555");
         var command = HostFolderMountCommandTextBuilder.BuildRemoveCommand(mountId);
 
         command.Should().Contain(mountId.ToString());
-        if (OperatingSystem.IsWindows())
-        {
-            command.Should().Be(@".\scripts\guideants-host-mount.ps1 remove -MountId ""11111111-2222-3333-4444-555555555555""");
-        }
-        else
-        {
-            command.Should().Be("./scripts/guideants-host-mount.sh remove --mount-id '11111111-2222-3333-4444-555555555555'");
-        }
+        command.Should().Contain(@".\scripts\guideants-host-mount.ps1 remove -MountId ""11111111-2222-3333-4444-555555555555""");
+        command.Should().Contain("./scripts/guideants-host-mount.sh remove --mount-id '11111111-2222-3333-4444-555555555555'");
     }
 }

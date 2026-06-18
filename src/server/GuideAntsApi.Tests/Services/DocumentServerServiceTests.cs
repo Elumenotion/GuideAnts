@@ -109,7 +109,7 @@ public sealed class DocumentServerServiceTests
         await using var db = CreateDbContext();
         var service = CreateService(db, new StubContentFileService(details: null), enabled: true);
 
-        var action = async () => await service.GetDownloadAsync("invalid-token", null, null, null, null, null, CancellationToken.None);
+        var action = async () => await service.GetDownloadAsync("invalid-token", null, null, null, null, null, null, CancellationToken.None);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*token payload is invalid*");
@@ -167,7 +167,7 @@ public sealed class DocumentServerServiceTests
         var downloadUrl = document["url"]!.ToString()!;
         var token = ExtractToken(downloadUrl);
 
-        var result = await service.GetDownloadAsync(token, null, null, null, null, null, CancellationToken.None);
+        var result = await service.GetDownloadAsync(token, null, null, null, null, null, null, CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.FileName.Should().Be("proposal.docx");
@@ -231,6 +231,7 @@ public sealed class DocumentServerServiceTests
             null,
             null,
             null,
+            null,
             new DocumentServerCallbackPayload(Status: 1, Url: null),
             CancellationToken.None);
 
@@ -287,6 +288,7 @@ public sealed class DocumentServerServiceTests
 
         await service.HandleCallbackAsync(
             token,
+            null,
             null,
             null,
             null,
@@ -354,6 +356,7 @@ public sealed class DocumentServerServiceTests
             null,
             null,
             null,
+            null,
             new DocumentServerCallbackPayload(Status: 2, Url: "http://localhost:5107/api/documentserver/ds/cache/files/edited.docx?token=abc"),
             CancellationToken.None);
 
@@ -412,6 +415,7 @@ public sealed class DocumentServerServiceTests
             null,
             null,
             null,
+            null,
             new DocumentServerCallbackPayload(Status: 2, Url: "cache/files/edited.docx?token=abc"),
             CancellationToken.None);
 
@@ -465,6 +469,7 @@ public sealed class DocumentServerServiceTests
 
         await service.HandleCallbackAsync(
             token,
+            null,
             null,
             null,
             null,

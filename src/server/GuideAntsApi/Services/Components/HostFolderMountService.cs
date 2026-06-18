@@ -1,9 +1,7 @@
-using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Services.Components;
 
@@ -12,9 +10,15 @@ public sealed class HostFolderMountService : IHostFolderMountService
     private const string UnlinkFailureRemediation =
         "Failed to remove one or more notebook symlinks. Resolve the reported link errors and retry remove, or run reconcile after fixing the notebook root.";
 
+    private static readonly string[] AffectedMountServices =
+    [
+        "guideants-webapi-ui",
+        "guideants-ai",
+        "plantuml"
+    ];
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IStoragePathResolver _pathResolver;
-    private readonly GuideAntsRuntimeOptions _runtimeOptions;
     private readonly string _hostMountsRoot;
     private readonly HostFolderMountLeafValidator _leafValidator = new();
     private readonly NotebookMountsRegistryWriter _registryWriter = new();
@@ -22,12 +26,10 @@ public sealed class HostFolderMountService : IHostFolderMountService
     public HostFolderMountService(
         IServiceScopeFactory scopeFactory,
         IStoragePathResolver pathResolver,
-        IOptions<GuideAntsRuntimeOptions> runtimeOptions,
         IConfiguration configuration)
     {
         _scopeFactory = scopeFactory;
         _pathResolver = pathResolver;
-        _runtimeOptions = runtimeOptions.Value;
         _hostMountsRoot = configuration["FileStorage:HostMountsRoot"]
             ?? HostFolderMountKeyDeriver.ContainerMountRoot;
     }
@@ -395,7 +397,7 @@ public sealed class HostFolderMountService : IHostFolderMountService
     {
         ArgumentNullException.ThrowIfNull(mount);
 
-        var affectedServices = ParseAffectedServices(_runtimeOptions.AffectedMountServices);
+        var affectedServices = AffectedMountServices;
         var containerTarget = mount.ContainerSourcePath;
 
         if (mount.SourceKind == SourceKind.LocalPath)
@@ -904,24 +906,6 @@ public sealed class HostFolderMountService : IHostFolderMountService
 
         var linkedCount = mount.Links.Count(l => l.Status == HostFolderMountLinkStatus.Linked);
         return $"Reconciled mount with {linkedCount}/{mount.Links.Count} links linked.";
-    }
-
-    private static IReadOnlyList<string> ParseAffectedServices(string? affectedMountServices)
-    {
-        if (string.IsNullOrWhiteSpace(affectedMountServices))
-        {
-            return
-            [
-                "guideants-webapi-ui",
-                "guideants-ai",
-                "plantuml"
-            ];
-        }
-
-        return affectedMountServices
-            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .ToList();
     }
 
     private static string SanitizeComposeVolumeName(string mountKey) =>

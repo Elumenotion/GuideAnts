@@ -5,13 +5,22 @@ using GuideAntsApi.Models;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Core;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 
 namespace GuideAntsApi.Services.Components;
 
 public class NotebookFileService : INotebookFileService
 {
+    private const int DefaultLinkedMountTreeMaxFiles = 5000;
+    private const int DefaultLinkedMountTreeMaxDepth = 3;
+    private const int DefaultLinkedMountTreeScanBudgetMs = 2500;
+    private const int DefaultLinkedMountTreeCacheSeconds = 15;
+
+    private static readonly ConcurrentDictionary<string, LinkedMountCacheEntry> LinkedMountTreeCache = new(StringComparer.Ordinal);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly string _storagePath;
     private readonly FileExtensionContentTypeProvider _contentTypeProvider = new();
@@ -21,6 +30,10 @@ public class NotebookFileService : INotebookFileService
     private readonly IContentFileService _contentFileService;
     private readonly IMarkdownExtractionService _markdownExtractionService;
     private readonly IStoragePathResolver _pathResolver;
+    private readonly int _linkedMountTreeMaxFiles;
+    private readonly int _linkedMountTreeMaxDepth;
+    private readonly TimeSpan _linkedMountTreeScanBudget;
+    private readonly TimeSpan _linkedMountTreeCacheTtl;
 
     public NotebookFileService(IServiceScopeFactory scopeFactory, IConfiguration configuration, INotebookFileSyncService syncService, ILogger<NotebookFileService> logger, IFileLineageService lineageService, IContentFileService contentFileService, IMarkdownExtractionService markdownExtractionService, IStoragePathResolver pathResolver)
     {
@@ -32,6 +45,26 @@ public class NotebookFileService : INotebookFileService
         _contentFileService = contentFileService;
         _markdownExtractionService = markdownExtractionService;
         _pathResolver = pathResolver;
+        _linkedMountTreeMaxFiles = ReadPositiveInt(
+            configuration["FileStorage:LinkedMountTreeMaxFiles"],
+            DefaultLinkedMountTreeMaxFiles,
+            min: 1,
+            max: 100000);
+        _linkedMountTreeMaxDepth = ReadPositiveInt(
+            configuration["FileStorage:LinkedMountTreeMaxDepth"],
+            DefaultLinkedMountTreeMaxDepth,
+            min: 1,
+            max: 32);
+        _linkedMountTreeScanBudget = TimeSpan.FromMilliseconds(ReadPositiveInt(
+            configuration["FileStorage:LinkedMountTreeScanBudgetMs"],
+            DefaultLinkedMountTreeScanBudgetMs,
+            min: 250,
+            max: 30000));
+        _linkedMountTreeCacheTtl = TimeSpan.FromSeconds(ReadPositiveInt(
+            configuration["FileStorage:LinkedMountTreeCacheSeconds"],
+            DefaultLinkedMountTreeCacheSeconds,
+            min: 1,
+            max: 300));
     }
 
     // Backward-compatible overload used by tests.
@@ -102,6 +135,22 @@ using var scope2 = CreateDbScope();
             .Where(f => !IsInGuideantsFolder(f.RelativePath))
             .Select(f => new NotebookFileDto(f.Id, Path.GetFileName(f.RelativePath), f.RelativePath, f.FileSize, f.LastModifiedUtc, f.FileHash, f.OriginContentFileVersionId, false, false))
             .ToList();
+
+        var linkedFileDtos = await BuildLinkedMountFileDtosAsync(context, notebookId);
+        if (linkedFileDtos.Count > 0)
+        {
+            var existingPaths = new HashSet<string>(
+                fileDtos.Select(f => f.RelativePath),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var linked in linkedFileDtos)
+            {
+                if (!existingPaths.Contains(linked.RelativePath))
+                {
+                    fileDtos.Add(linked);
+                }
+            }
+        }
         
         return BuildNotebookFolderTree(fileDtos);
     }
@@ -209,7 +258,20 @@ using var scope = CreateDbScope();
         var context = GetDbContext(scope);
 
         var (file, resolvedPath) = await FindNotebookFileByRelativePathAsync(context, notebookId, relativePath);
-        if (file == null) return null;
+        if (file == null)
+        {
+            var linkedPath = await ResolveLinkedMountPhysicalPathAsync(context, projectId, notebookId, relativePath);
+            if (linkedPath == null)
+            {
+                return null;
+            }
+
+            var linkedContentType = _contentTypeProvider.TryGetContentType(linkedPath.Value.ResolvedRelativePath, out var linkedCt)
+                ? linkedCt
+                : "application/octet-stream";
+            var linkedStream = new FileStream(linkedPath.Value.PhysicalPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            return (linkedStream, linkedContentType, Path.GetFileName(linkedPath.Value.ResolvedRelativePath));
+        }
 
         if (!TryResolveNotebookPath(projectId, notebookId, resolvedPath, out var physicalPath))
         {
@@ -233,7 +295,17 @@ using var scope = CreateDbScope();
 
         if (file == null)
         {
-            throw new FileNotFoundException("Database record not found for the specified file.", relativePath);
+            var linkedPath = await ResolveLinkedMountPhysicalPathAsync(context, projectId, notebookId, relativePath);
+            if (linkedPath == null)
+            {
+                throw new FileNotFoundException("File not found.", relativePath);
+            }
+
+            var linkedContentType = _contentTypeProvider.TryGetContentType(linkedPath.Value.ResolvedRelativePath, out var linkedCt)
+                ? linkedCt
+                : "application/octet-stream";
+            var linkedStream = new FileStream(linkedPath.Value.PhysicalPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            return (linkedStream, linkedContentType);
         }
 
         if (!TryResolveNotebookPath(projectId, notebookId, normalizedPath, out var physicalPath))
@@ -250,6 +322,315 @@ using var scope = CreateDbScope();
         var stream = new FileStream(physicalPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         return (stream, contentType);
     }
+
+    private async Task<(string ResolvedRelativePath, string PhysicalPath)?> ResolveLinkedMountPhysicalPathAsync(
+        ApplicationDbContext context,
+        Guid projectId,
+        Guid notebookId,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedPath = relativePath.Replace("\\", "/").TrimStart('/');
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return null;
+        }
+
+        var linkedMountRoots = await GetLinkedMountRootsAsync(context, notebookId, cancellationToken);
+        if (linkedMountRoots.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var candidateRaw in EnumerateAlternativeLinkedCandidates(normalizedPath))
+        {
+            var candidate = candidateRaw.Replace("\\", "/").TrimStart('/');
+            if (!IsUnderLinkedMountRoot(candidate, linkedMountRoots))
+            {
+                continue;
+            }
+
+            if (!TryResolveNotebookPath(projectId, notebookId, candidate, out var candidatePhysicalPath))
+            {
+                continue;
+            }
+
+            if (!File.Exists(candidatePhysicalPath))
+            {
+                continue;
+            }
+
+            return (candidate, candidatePhysicalPath);
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateAlternativeLinkedCandidates(string normalizedPath)
+    {
+        yield return normalizedPath;
+        foreach (var alternative in GetAlternativePaths(normalizedPath))
+        {
+            if (string.Equals(alternative, normalizedPath, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            yield return alternative;
+        }
+    }
+
+    private static bool IsUnderLinkedMountRoot(string candidateRelativePath, IReadOnlyCollection<LinkedMountRoot> linkedMountRoots)
+    {
+        var normalizedCandidate = candidateRelativePath.Replace("\\", "/").Trim('/');
+        if (string.IsNullOrEmpty(normalizedCandidate))
+        {
+            return false;
+        }
+
+        foreach (var root in linkedMountRoots)
+        {
+            if (normalizedCandidate.Equals(root.LinkRelativePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (normalizedCandidate.StartsWith(root.LinkRelativePath + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<List<LinkedMountRoot>> GetLinkedMountRootsAsync(
+        ApplicationDbContext context,
+        Guid notebookId,
+        CancellationToken cancellationToken = default)
+    {
+        var roots = await context.HostFolderMountLinks
+            .AsNoTracking()
+            .Where(link => link.NotebookId == notebookId && link.Status == HostFolderMountLinkStatus.Linked)
+            .Join(
+                context.HostFolderMounts.AsNoTracking(),
+                link => link.HostFolderMountId,
+                mount => mount.Id,
+                (link, mount) => new { Link = link, Mount = mount })
+            .Where(row => row.Mount.Status != HostFolderMountStatus.Removed)
+            .Select(row => new LinkedMountRoot(
+                row.Link.LinkRelativePath.Replace("\\", "/").Trim('/'),
+                row.Link.LinkPhysicalPath))
+            .ToListAsync(cancellationToken);
+
+        var deduped = new Dictionary<string, LinkedMountRoot>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in roots)
+        {
+            if (string.IsNullOrWhiteSpace(root.LinkRelativePath))
+            {
+                continue;
+            }
+
+            if (!deduped.ContainsKey(root.LinkRelativePath))
+            {
+                deduped[root.LinkRelativePath] = root;
+            }
+        }
+
+        return deduped.Values.ToList();
+    }
+
+    private async Task<List<NotebookFileDto>> BuildLinkedMountFileDtosAsync(
+        ApplicationDbContext context,
+        Guid notebookId,
+        CancellationToken cancellationToken = default)
+    {
+        var linkedMountRoots = await GetLinkedMountRootsAsync(context, notebookId, cancellationToken);
+        if (linkedMountRoots.Count == 0)
+        {
+            return [];
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        PruneExpiredLinkedMountCache(now);
+        var cacheKey = BuildLinkedMountCacheKey(notebookId, linkedMountRoots);
+        if (LinkedMountTreeCache.TryGetValue(cacheKey, out var cached)
+            && cached.ExpiresUtc > now)
+        {
+            return [.. cached.Files];
+        }
+
+        var results = new List<NotebookFileDto>();
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var truncated = false;
+        var scanDeadlineUtc = DateTimeOffset.UtcNow + _linkedMountTreeScanBudget;
+        var fileEnumerationOptions = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            ReturnSpecialDirectories = false,
+            MaxRecursionDepth = _linkedMountTreeMaxDepth
+        };
+
+        foreach (var root in linkedMountRoots)
+        {
+            if (DateTimeOffset.UtcNow >= scanDeadlineUtc || results.Count >= _linkedMountTreeMaxFiles)
+            {
+                truncated = true;
+                break;
+            }
+
+            if (string.IsNullOrWhiteSpace(root.LinkPhysicalPath) || !Directory.Exists(root.LinkPhysicalPath))
+            {
+                continue;
+            }
+
+            IEnumerable<string> physicalFiles;
+            try
+            {
+                physicalFiles = Directory.EnumerateFiles(root.LinkPhysicalPath, "*", fileEnumerationOptions);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Skipping linked mount file enumeration for mount root {MountRoot}",
+                    LogValueSanitizer.Sanitize(root.LinkRelativePath));
+                continue;
+            }
+
+            foreach (var physicalFile in physicalFiles)
+            {
+                if (DateTimeOffset.UtcNow >= scanDeadlineUtc || results.Count >= _linkedMountTreeMaxFiles)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                FileInfo fileInfo;
+                try
+                {
+                    fileInfo = new FileInfo(physicalFile);
+                    if (!fileInfo.Exists)
+                    {
+                        continue;
+                    }
+                }
+                catch
+                {
+                    continue;
+                }
+
+                var relativeWithinMount = Path.GetRelativePath(root.LinkPhysicalPath, physicalFile).Replace("\\", "/").TrimStart('/');
+                if (string.IsNullOrWhiteSpace(relativeWithinMount) || relativeWithinMount == ".")
+                {
+                    continue;
+                }
+
+                var notebookRelativePath = $"{root.LinkRelativePath}/{relativeWithinMount}".Replace("\\", "/");
+                var fileName = Path.GetFileName(notebookRelativePath);
+
+                if (IsTemporaryScriptFile(fileName)
+                    || IsInPycacheFolder(notebookRelativePath)
+                    || IsInResourcesFolder(notebookRelativePath)
+                    || IsInGuideantsFolder(notebookRelativePath))
+                {
+                    continue;
+                }
+
+                if (!seenPaths.Add(notebookRelativePath))
+                {
+                    continue;
+                }
+
+                results.Add(new NotebookFileDto(
+                    Id: CreateLinkedVirtualFileId(notebookRelativePath),
+                    FileName: fileName,
+                    RelativePath: notebookRelativePath,
+                    FileSize: fileInfo.Length,
+                    LastModifiedUtc: fileInfo.LastWriteTimeUtc,
+                    FileHash: BuildLinkedVirtualFileHash(fileInfo),
+                    OriginContentFileVersionId: null,
+                    Index: false,
+                    IsIndexed: false,
+                    IsLinked: true));
+            }
+        }
+
+        results.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.RelativePath, b.RelativePath));
+
+        if (truncated)
+        {
+            _logger.LogWarning(
+                "Linked mount tree enumeration was truncated for notebook {NotebookId} (roots={RootCount}, maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
+                notebookId,
+                linkedMountRoots.Count,
+                _linkedMountTreeMaxFiles,
+                _linkedMountTreeMaxDepth,
+                (int)_linkedMountTreeScanBudget.TotalMilliseconds);
+        }
+
+        LinkedMountTreeCache[cacheKey] = new LinkedMountCacheEntry(
+            ExpiresUtc: DateTimeOffset.UtcNow + _linkedMountTreeCacheTtl,
+            Files: [.. results]);
+
+        return results;
+    }
+
+    private static Guid CreateLinkedVirtualFileId(string relativePath)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes("linked:" + relativePath.ToLowerInvariant()));
+        var guidBytes = new byte[16];
+        Buffer.BlockCopy(digest, 0, guidBytes, 0, guidBytes.Length);
+        return new Guid(guidBytes);
+    }
+
+    private static string BuildLinkedVirtualFileHash(FileInfo fileInfo) =>
+        $"{fileInfo.Length:x}-{fileInfo.LastWriteTimeUtc.Ticks:x}";
+
+    private static int ReadPositiveInt(string? rawValue, int fallback, int min, int max)
+    {
+        if (!int.TryParse(rawValue, out var parsed))
+        {
+            return fallback;
+        }
+
+        if (parsed < min)
+        {
+            return min;
+        }
+
+        if (parsed > max)
+        {
+            return max;
+        }
+
+        return parsed;
+    }
+
+    private static string BuildLinkedMountCacheKey(Guid notebookId, IReadOnlyCollection<LinkedMountRoot> linkedMountRoots)
+    {
+        var parts = linkedMountRoots
+            .OrderBy(r => r.LinkRelativePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.LinkPhysicalPath, StringComparer.OrdinalIgnoreCase)
+            .Select(r => $"{r.LinkRelativePath}|{r.LinkPhysicalPath}");
+        return $"{notebookId:N}:{string.Join(";", parts)}";
+    }
+
+    private static void PruneExpiredLinkedMountCache(DateTimeOffset now)
+    {
+        foreach (var kvp in LinkedMountTreeCache)
+        {
+            if (kvp.Value.ExpiresUtc <= now)
+            {
+                LinkedMountTreeCache.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
+    private sealed record LinkedMountCacheEntry(DateTimeOffset ExpiresUtc, IReadOnlyList<NotebookFileDto> Files);
+
+    private sealed record LinkedMountRoot(string LinkRelativePath, string LinkPhysicalPath);
 
     private async Task<(NotebookFile? file, string normalizedPath)> FindNotebookFileByRelativePathAsync(
         ApplicationDbContext context,

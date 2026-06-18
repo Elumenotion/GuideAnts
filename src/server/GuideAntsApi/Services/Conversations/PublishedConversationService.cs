@@ -282,9 +282,14 @@ public class PublishedConversationService : IPublishedConversationService
                     cancellationToken);
                 foreach (var attachment in request.Attachments)
                 {
+                    if (!attachment.NotebookFileId.HasValue)
+                    {
+                        continue;
+                    }
+
                     var messages = await _attachmentContentService.CreateOpenAiMessagesFromNotebookFileAsync(
                         db,
-                        attachment.NotebookFileId,
+                        attachment.NotebookFileId.Value,
                         cancellationToken);
                     previousMessages.AddRange(messages);
                 }

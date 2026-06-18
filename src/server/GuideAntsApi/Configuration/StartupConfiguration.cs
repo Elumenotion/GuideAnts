@@ -712,7 +712,6 @@ public static class StartupConfiguration
         services.Configure<SettingsSecretsOptions>(configuration.GetSection(SettingsSecretsOptions.SectionName));
         services.Configure<LlamaModelManagementOptions>(configuration.GetSection(LlamaModelManagementOptions.SectionName));
         services.Configure<DocumentServerOptions>(configuration.GetSection(DocumentServerOptions.SectionName));
-        services.Configure<GuideAntsRuntimeOptions>(configuration.GetSection(GuideAntsRuntimeOptions.SectionName));
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
     }
 

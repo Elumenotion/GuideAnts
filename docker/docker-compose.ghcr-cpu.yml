@@ -172,7 +172,7 @@ services:
       # the cookie past the halfway point so active sessions never hard-expire.
       - Jwt__LifetimeMinutes=${GA_JWT_LIFETIME_MINUTES:-43200}
       - API_RUNTIME_CONTEXT=compose-ghcr-cpu
-      - GuideAntsRuntime__AffectedMountServices=guideants-webapi-ui;guideants-ai;plantuml
+
       - ConnectionStrings__DefaultConnection=Server=mssql-express,1433;Initial Catalog=${GA_DB_NAME:-guideants-dev};Persist Security Info=False;User ID=sa;Password=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd};MultipleActiveResultSets=True;Encrypt=False;TrustServerCertificate=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;
       - FileStorage__Path=/app/ContentFiles
       - Ui__RootPath=/app/ui

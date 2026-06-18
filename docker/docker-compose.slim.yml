@@ -76,7 +76,6 @@ services:
       # the cookie past the halfway point so active sessions never hard-expire.
       - Jwt__LifetimeMinutes=${GA_JWT_LIFETIME_MINUTES:-43200}
       - API_RUNTIME_CONTEXT=compose-slim
-      - GuideAntsRuntime__AffectedMountServices=guideants-webapi-ui;guideants-ai;plantuml
       - ALLOWED_ORIGINS=*
       - FileStorage__Path=/app/ContentFiles
       - Ui__RootPath=/app/ui

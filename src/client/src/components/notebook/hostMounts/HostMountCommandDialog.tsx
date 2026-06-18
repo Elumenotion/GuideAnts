@@ -46,7 +46,7 @@ export function HostMountCommandDialog({
           <textarea
             readOnly
             value={command}
-            rows={4}
+            rows={7}
             className="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-800"
             data-testid="host-mount-command-text"
           />

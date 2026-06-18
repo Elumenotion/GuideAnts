@@ -1,0 +1,95 @@
+@startuml guideants-cpu-compose-stack
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName Segoe UI
+skinparam ArrowColor #555555
+skinparam linetype ortho
+
+title GuideAnts CPU Compose Stack\n(docker-compose.cpu.yml)
+
+actor "User / Browser" as user #E8F4FD
+
+rectangle "Host (localhost)" as host {
+  together {
+    package "Core Application" #E3F2FD {
+      component "**guideants-webapi-ui**\nASP.NET API + Browser UI\n:5107 → :8080" as webapi #BBDEFB
+    }
+
+    package "Database" #FFF3E0 {
+      database "**mssql-express**\nSQL Server 2025 Express FTS\n:1434 → :1433" as mssql #FFE0B2
+      note bottom of mssql
+        Volumes: mssql_runtime_state,
+        mssql_data, mssql_ftdata, mssql_log
+      end note
+    }
+
+    package "AI Services" #F3E5F5 {
+      component "**guideants-ai**\nGateway + Script Agent\n:8110 → :80" as ai #E1BEE7
+      note right of ai
+        Routes: /llama-cpp, /asr, /sd,
+        /tts, /emb, /sandbox, /media
+        Volume: ai_local_models (8 GB shm)
+      end note
+    }
+
+    package "Document Services" #E8F5E9 {
+      component "**docling-serve**\nDocument Intelligence\n:5001" as docling #C8E6C9
+      component "**documentserver**\nONLYOFFICE\n127.0.0.1:8082 → :80" as docserver #A5D6A7
+    }
+
+    package "Search & Rendering" #FFFDE7 {
+      component "**searxng**\n(readweb-searxng)\nSearch + Browser Render\n127.0.0.1:8091 → :8080" as searxng #FFF9C4
+    }
+
+    package "Diagram Service" #FCE4EC {
+      component "**plantuml**\n:8111 → :80" as plantuml #F8BBD0
+    }
+  }
+}
+
+cloud "guideants-network\n(bridge)" as gnet #EEEEEE
+cloud "default network" as dnet #F5F5F5
+
+folder "ContentFiles\n(host bind: ./volumes/content-files)" as content #FFF8E1
+
+user --> webapi : HTTPS\n:5107
+
+webapi -down-> gnet
+ai -down-> gnet
+docling -down-> gnet
+docserver -down-> gnet
+searxng -down-> gnet
+plantuml -down-> gnet
+
+webapi -down-> dnet
+mssql -down-> dnet
+
+webapi --> mssql : SQL\n:1433 (depends_on: healthy)
+webapi --> ai : ASR, TTS, SD,\nembeddings, media,\nllama-cpp, sandbox
+webapi --> docling : Document\nIntelligence :5001
+webapi ..> docserver : ONLYOFFICE\n(when enabled)
+webapi --> searxng : Search +\nBrowser Render :8080
+webapi --> plantuml : Diagram\ngeneration :80
+
+content -[hidden]down- webapi
+content -[hidden]down- ai
+content -[hidden]down- plantuml
+webapi .. content : bind mount\n/app/ContentFiles
+ai .. content : bind mount\n/app/ContentFiles
+plantuml .. content : bind mount\n/app/ContentFiles
+
+legend right
+  |= Color |= Layer |
+  | <#BBDEFB> | Core Application |
+  | <#FFE0B2> | Database |
+  | <#E1BEE7> | AI Services |
+  | <#C8E6C9> | Document Services |
+  | <#FFF9C4> | Search & Rendering |
+  | <#F8BBD0> | Diagram Service |
+  --
+  **Startup order:** mssql (healthy) + guideants-ai (started) → webapi-ui
+endlegend
+
+@enduml

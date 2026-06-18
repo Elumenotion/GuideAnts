@@ -8,15 +8,27 @@ public static class HostFolderMountCommandTextBuilder
     private const string PowerShellScript = @".\scripts\guideants-host-mount.ps1";
     private const string BashScript = "./scripts/guideants-host-mount.sh";
 
+    // The API runs in a Linux container and cannot know the admin's host OS
+    // (the helper script reads .installer_state.env on the host, not in the
+    // container). Emit both commands so the admin runs the one for their shell.
     public static string BuildApplyCommand(Guid mountId, Guid projectId, string hostPath) =>
-        OperatingSystem.IsWindows()
-            ? BuildPowerShellApplyCommand(mountId, projectId, hostPath)
-            : BuildBashApplyCommand(mountId, projectId, hostPath);
+        CombineForBothShells(
+            BuildPowerShellApplyCommand(mountId, projectId, hostPath),
+            BuildBashApplyCommand(mountId, projectId, hostPath));
 
     public static string BuildRemoveCommand(Guid mountId) =>
-        OperatingSystem.IsWindows()
-            ? BuildPowerShellRemoveCommand(mountId)
-            : BuildBashRemoveCommand(mountId);
+        CombineForBothShells(
+            BuildPowerShellRemoveCommand(mountId),
+            BuildBashRemoveCommand(mountId));
+
+    private static string CombineForBothShells(string powerShellCommand, string bashCommand) =>
+        string.Join(
+            '\n',
+            "# Windows (PowerShell) — run from the repository root:",
+            powerShellCommand,
+            "",
+            "# Linux / macOS (bash) — run from the repository root:",
+            bashCommand);
 
     public static string QuoteForPowerShellArgument(string value) =>
         "\"" + value.Replace("\"", "\\\"") + "\"";

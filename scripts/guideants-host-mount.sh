@@ -7,6 +7,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 STATE_FILE="$ROOT_DIR/.installer_state.env"
 DEFAULT_API_BASE="http://localhost:5107"
 API_PLAN_PATH="/api/internal/host-folder-mounts"
+AFFECTED_MOUNT_SERVICE_NAMES=(guideants-webapi-ui guideants-ai plantuml)
 
 usage() {
   cat <<'EOF'
@@ -35,7 +36,6 @@ load_installer_state() {
   COMPOSE_FILE=""
   HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
   DOCKER_DIRECTORY="docker"
-  AFFECTED_MOUNT_SERVICES="guideants-webapi-ui;guideants-ai;plantuml"
 
   if [[ ! -f "$STATE_FILE" ]]; then
     fail "Missing $STATE_FILE. Run a start_* launcher first."
@@ -54,7 +54,6 @@ load_installer_state() {
       COMPOSE_FILE) COMPOSE_FILE="$value" ;;
       HOST_MOUNT_OVERRIDE_FILE) HOST_MOUNT_OVERRIDE_FILE="$value" ;;
       DOCKER_DIRECTORY) DOCKER_DIRECTORY="$value" ;;
-      AFFECTED_MOUNT_SERVICES) AFFECTED_MOUNT_SERVICES="$value" ;;
     esac
   done <"$STATE_FILE"
 
@@ -78,15 +77,45 @@ sanitize_mount_key() {
   printf '%s' "$key"
 }
 
+is_wsl() {
+  command -v wslpath >/dev/null 2>&1 && return 0
+  [[ -n "${WSL_DISTRO_NAME:-}" ]] && return 0
+  [[ -r /proc/version ]] && grep -qiE 'microsoft|wsl' /proc/version && return 0
+  return 1
+}
+
+# Produces a bind source the Docker daemon this script talks to can actually use.
+# This script runs in bash (WSL or native Linux), so a Windows drive path must
+# become a Linux path. Under WSL we use wslpath (e.g. D:\repos\GuideAnts ->
+# /mnt/d/repos/GuideAnts); on a non-WSL Linux host a drive path is unbindable.
 normalize_host_path_for_compose() {
   local path="$1"
-  if [[ "$path" =~ ^[A-Za-z]:\\ ]]; then
-    local drive="${path:0:1}"
-    local rest="${path:2}"
-    rest="${rest//\\//}"
-    printf '%s:/%s' "$drive" "${rest#/}"
+
+  # Already a POSIX absolute path (native Linux or pre-converted WSL path).
+  if [[ "$path" == /* ]]; then
+    printf '%s' "$path"
     return
   fi
+
+  # Windows drive path, e.g. D:\repos\GuideAnts or D:/repos/GuideAnts.
+  if [[ "$path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v wslpath >/dev/null 2>&1; then
+      local converted
+      converted="$(wslpath -u "$path")"
+      printf '%s' "$converted"
+      return
+    fi
+    if is_wsl; then
+      local drive rest
+      drive="$(printf '%s' "${path:0:1}" | tr '[:upper:]' '[:lower:]')"
+      rest="${path:2}"
+      rest="${rest//\\//}"
+      printf '/mnt/%s/%s' "$drive" "${rest#/}"
+      return
+    fi
+    fail "Host path '$path' is a Windows drive path, but this Docker host is not WSL/Docker Desktop. Provide a native Linux path (for example /srv/data) the daemon can bind."
+  fi
+
   printf '%s' "${path//\\//}"
 }
 
@@ -150,9 +179,19 @@ resolve_apply_plan() {
   local host_path="$2"
 
   if fetch_compose_plan_from_api "$mount_id"; then
-    if [[ -n "$host_path" && "$host_path" != "$PLAN_HOST_PATH" ]]; then
-      fail "Host path on the command line does not match the API mount plan."
+    local api_source
+    api_source="$(normalize_host_path_for_compose "$PLAN_HOST_PATH")"
+    if [[ -z "${api_source//[[:space:]]/}" ]]; then
+      fail "Compose plan host path is empty."
     fi
+    if [[ -n "$host_path" ]]; then
+      local cli_source
+      cli_source="$(normalize_host_path_for_compose "$host_path")"
+      if [[ "$cli_source" != "$api_source" ]]; then
+        fail "Host path on the command line does not match the API mount plan."
+      fi
+    fi
+    PLAN_HOST_PATH="$api_source"
     return 0
   fi
 
@@ -223,6 +262,9 @@ write_local_bind_block() {
   local mount_id="$1"
   local mount_key="$2"
   local host_path="$3"
+  if [[ -z "${host_path//[[:space:]]/}" ]]; then
+    fail "Mount '$mount_id' has an empty host path; refusing to write an invalid compose override."
+  fi
   printf '      # guideants-host-mount: mount-id=%s mount-key=%s source-kind=LocalPath\n' "$mount_id" "$mount_key"
   printf '      - type: bind\n'
   printf '        source: %s\n' "$host_path"
@@ -248,7 +290,7 @@ write_override_file() {
     printf '%s\n' "services:"
 
     local service
-    for service in guideants-webapi-ui guideants-ai plantuml; do
+    for service in "${AFFECTED_MOUNT_SERVICE_NAMES[@]}"; do
       printf '  %s:\n' "$service"
       printf '    volumes:\n'
       local key
@@ -313,16 +355,14 @@ remove_mount() {
 restart_affected_services() {
   local override_path="$ROOT_DIR/$DOCKER_DIRECTORY/$HOST_MOUNT_OVERRIDE_FILE"
   local compose_args=(-f "$COMPOSE_FILE")
-  local affected_services=()
-  IFS=';' read -r -a affected_services <<<"${AFFECTED_MOUNT_SERVICES// /}"
   if [[ -f "$override_path" ]]; then
     compose_args+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
   fi
 
-  log "Restarting affected services (--no-deps): ${affected_services[*]}"
+  log "Restarting affected services (--no-deps): ${AFFECTED_MOUNT_SERVICE_NAMES[*]}"
   (
     cd "$ROOT_DIR/$DOCKER_DIRECTORY"
-    docker compose "${compose_args[@]}" up -d --no-deps "${affected_services[@]}"
+    docker compose "${compose_args[@]}" up -d --no-deps "${AFFECTED_MOUNT_SERVICE_NAMES[@]}"
   )
 }
 

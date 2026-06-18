@@ -215,6 +215,7 @@ export interface NotebookFileDto {
   originContentFileVersionId?: string; // lineage tracking
   index: boolean;
   isIndexed: boolean;
+  isLinked?: boolean;
 }
 
 export interface NotebookFolderDto {
