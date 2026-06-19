@@ -1,4 +1,5 @@
 using AntRunner.Chat.Abstractions;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.LlamaCpp;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,6 +39,9 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
             services.RemoveAll<IRouterModelsConfigService>();
             services.AddSingleton<IRouterModelsConfigService>(RouterStub);
 
+            services.RemoveAll<ILocalAiStartupWarmupService>();
+            services.AddSingleton<ILocalAiStartupWarmupService, NoOpLocalAiStartupWarmupService>();
+
             // Restore production chat factory so chat resolver + validator
             // chain is observable in Phase G tests. The base factory installs
             // a fake to keep unrelated endpoint tests deterministic; we need
@@ -47,4 +51,14 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
         });
     }
 
+    private sealed class NoOpLocalAiStartupWarmupService : ILocalAiStartupWarmupService
+    {
+        public Task WarmupAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task EnsureAuxiliaryServicesLoadedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task UnloadAuxiliaryServicesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
 }

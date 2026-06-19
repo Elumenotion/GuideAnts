@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Routing;
 
 namespace GuideAntsApi.Services.LlamaCpp;
@@ -16,6 +17,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     private readonly IMemoryCache _cache;
     private readonly ILlamaRuntimeCoordinator _coordinator;
     private readonly IChatModelResolver _chatModelResolver;
+    private readonly ILocalAiStartupWarmupService _localAiWarmupService;
     private readonly ILogger<NotebookModelRuntimeService> _logger;
 
     // Singleton state for operations. In a multi-node deployment, this would need to be distributed.
@@ -32,6 +34,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         IMemoryCache cache,
         ILlamaRuntimeCoordinator coordinator,
         IChatModelResolver chatModelResolver,
+        ILocalAiStartupWarmupService localAiWarmupService,
         ILogger<NotebookModelRuntimeService> logger)
     {
         _context = context;
@@ -40,6 +43,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         _cache = cache;
         _coordinator = coordinator;
         _chatModelResolver = chatModelResolver;
+        _localAiWarmupService = localAiWarmupService;
         _logger = logger;
     }
 
@@ -253,10 +257,18 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
     private async Task ProcessLoadOperationAsync(ModelLoadOperationDto op, List<ModelDto> requiredModels)
     {
+        var auxiliaryServicesWereUnloaded = false;
+
         try
         {
             await _loadLock.WaitAsync();
             InvalidateRouterModelsCache();
+
+            // Guarantee LLM-first GPU ownership during model switches by
+            // draining non-chat local services before changing router aliases.
+            op.State = "unloading";
+            await _localAiWarmupService.UnloadAuxiliaryServicesAsync(CancellationToken.None).ConfigureAwait(false);
+            auxiliaryServicesWereUnloaded = true;
             
             var requiredRouterIds = requiredModels
                 .Where(m => m.RuntimeConfig != null)
@@ -331,6 +343,10 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 }
             }
 
+            // Keep ASR/Emb/TTS/SD hot after a successful LLM switch.
+            op.State = "loading";
+            await _localAiWarmupService.EnsureAuxiliaryServicesLoadedAsync(CancellationToken.None).ConfigureAwait(false);
+
             op.State = "ready";
             op.CompletedAt = DateTime.UtcNow;
         }
@@ -343,6 +359,25 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         }
         finally
         {
+            if (auxiliaryServicesWereUnloaded
+                && !string.Equals(op.State, "ready", StringComparison.Ordinal))
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Load operation {OperationId} failed after auxiliary unload; reloading auxiliary services.",
+                        op.OperationId);
+                    await _localAiWarmupService.EnsureAuxiliaryServicesLoadedAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception reloadEx)
+                {
+                    _logger.LogError(
+                        reloadEx,
+                        "Failed reloading auxiliary local services after operation {OperationId} failure.",
+                        op.OperationId);
+                }
+            }
+
             _loadLock.Release();
         }
     }

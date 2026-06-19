@@ -520,8 +520,20 @@ export default function DraftUserCell({
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     if (isReadOnly || isBusy) return;
     e.preventDefault();
+    const relativePath = e.dataTransfer.getData('application/x-notebook-file-relative-path');
+    const isLinked = e.dataTransfer.getData('application/x-notebook-file-linked') === '1';
     const fileId = e.dataTransfer.getData('application/x-notebook-file-id') || e.dataTransfer.getData('text/plain');
     const fileName = e.dataTransfer.getData('application/x-notebook-file-name');
+    if (fileName && isLinked && relativePath) {
+      addPendingAttachment({
+        notebookFileId: `path:${relativePath}`,
+        relativePath,
+        fileName,
+        uploadType: mapContentType(fileName),
+      });
+      return;
+    }
+
     if (fileId && fileName) {
       addPendingAttachment({
         notebookFileId: fileId,

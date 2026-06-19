@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using CliWrap;
 using CliWrap.Buffered;
+using ScriptExecutionAgent;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddLogging();
@@ -91,6 +92,7 @@ app.MapPost("/execute", async (HttpContext context, ILogger<Program> logger) =>
                 request.WorkingDirectory,
                 projectId,
                 notebookId,
+                PathAccessMode.Write,
                 out var authorizedWorkingDirectory,
                 out var notebookRoot,
                 out var rejectionReason))
@@ -184,6 +186,7 @@ app.MapGet("/files", async (HttpContext context, ILogger<Program> logger) =>
                 directory,
                 projectId,
                 notebookId,
+                PathAccessMode.Read,
                 out var authorizedDirectory,
                 out var notebookRoot,
                 out var rejectionReason))
@@ -643,220 +646,6 @@ file sealed record AgentSecurityOptions(
 
 file sealed record NotebookExecutionIdentity(string UserName, string GroupName, int Uid, int Gid);
 
-file static class PathGuard
-{
-    public static bool TryResolveAndAuthorizePath(
-        string storageRoot,
-        string candidatePath,
-        Guid projectId,
-        Guid notebookId,
-        out string authorizedPath,
-        out string notebookRoot,
-        out string rejectionReason)
-    {
-        authorizedPath = string.Empty;
-        notebookRoot = string.Empty;
-        rejectionReason = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(candidatePath))
-        {
-            rejectionReason = "path is missing";
-            return false;
-        }
-
-        string fullStorageRoot;
-        string fullTargetPath;
-        try
-        {
-            fullStorageRoot = Path.GetFullPath(storageRoot);
-            fullTargetPath = Path.GetFullPath(candidatePath);
-        }
-        catch (Exception ex)
-        {
-            rejectionReason = $"path normalization failed: {ex.Message}";
-            return false;
-        }
-
-        if (!IsStrictChildOrSamePath(fullStorageRoot, fullTargetPath))
-        {
-            rejectionReason = "path escapes FILE_STORAGE_ROOT";
-            return false;
-        }
-
-        if (!TryResolveNotebookRootFromMetadata(fullStorageRoot, fullTargetPath, projectId, notebookId, out var extractedNotebookRoot))
-        {
-            rejectionReason = "path is not notebook-scoped";
-            return false;
-        }
-
-        if (!IsStrictChildOrSamePath(fullStorageRoot, extractedNotebookRoot))
-        {
-            rejectionReason = "notebook root escapes FILE_STORAGE_ROOT";
-            return false;
-        }
-
-        if (!IsStrictChildOrSamePath(extractedNotebookRoot, fullTargetPath))
-        {
-            rejectionReason = "path escapes notebook root";
-            return false;
-        }
-
-        if (HasReparsePointBetween(fullStorageRoot, fullTargetPath, out var reparsePath))
-        {
-            rejectionReason = $"reparse point encountered at '{reparsePath}'";
-            return false;
-        }
-
-        authorizedPath = fullTargetPath;
-        notebookRoot = extractedNotebookRoot;
-        return true;
-    }
-
-    private static bool TryResolveNotebookRootFromMetadata(
-        string fullStorageRoot,
-        string fullPath,
-        Guid projectId,
-        Guid notebookId,
-        out string notebookRoot)
-    {
-        notebookRoot = string.Empty;
-
-        var current = Path.GetFullPath(fullPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var normalizedStorageRoot = Path.GetFullPath(fullStorageRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        while (IsStrictChildOrSamePath(normalizedStorageRoot, current))
-        {
-            var metadataPath = Path.Combine(current, ".guideants", "notebook.json");
-            if (TryReadNotebookAssociationMetadata(metadataPath, out var metadataProjectId, out var metadataNotebookId))
-            {
-                if (metadataProjectId == projectId && metadataNotebookId == notebookId)
-                {
-                    notebookRoot = current;
-                    return true;
-                }
-            }
-
-            if (string.Equals(current, normalizedStorageRoot, StringComparison.Ordinal))
-            {
-                break;
-            }
-
-            var parent = Path.GetDirectoryName(current);
-            if (string.IsNullOrWhiteSpace(parent))
-            {
-                break;
-            }
-
-            current = parent.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        }
-
-        return false;
-    }
-
-    private static bool TryReadNotebookAssociationMetadata(string metadataPath, out Guid projectId, out Guid notebookId)
-    {
-        projectId = Guid.Empty;
-        notebookId = Guid.Empty;
-
-        if (!File.Exists(metadataPath))
-        {
-            return false;
-        }
-
-        try
-        {
-            using var stream = File.OpenRead(metadataPath);
-            using var doc = JsonDocument.Parse(stream);
-            if (!doc.RootElement.TryGetProperty("ProjectId", out var projectIdElement) ||
-                !doc.RootElement.TryGetProperty("NotebookId", out var notebookIdElement))
-            {
-                return false;
-            }
-
-            if (!Guid.TryParse(projectIdElement.GetString(), out projectId) ||
-                !Guid.TryParse(notebookIdElement.GetString(), out notebookId))
-            {
-                return false;
-            }
-
-            return projectId != Guid.Empty && notebookId != Guid.Empty;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static bool HasReparsePointBetween(string root, string target, out string reparsePath)
-    {
-        reparsePath = string.Empty;
-        string fullRoot;
-        string fullTarget;
-        try
-        {
-            fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            fullTarget = Path.GetFullPath(target).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        }
-        catch
-        {
-            return true;
-        }
-
-        if (!IsStrictChildOrSamePath(fullRoot, fullTarget))
-        {
-            reparsePath = fullTarget;
-            return true;
-        }
-
-        var relative = Path.GetRelativePath(fullRoot, fullTarget);
-        if (string.IsNullOrWhiteSpace(relative) || relative == ".")
-        {
-            return false;
-        }
-
-        var segments = relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
-        var current = fullRoot;
-        foreach (var segment in segments)
-        {
-            current = Path.Combine(current, segment);
-            var exists = Directory.Exists(current) || File.Exists(current);
-            if (!exists)
-            {
-                break;
-            }
-
-            try
-            {
-                var attrs = File.GetAttributes(current);
-                if ((attrs & FileAttributes.ReparsePoint) != 0)
-                {
-                    reparsePath = current;
-                    return true;
-                }
-            }
-            catch
-            {
-                reparsePath = current;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsStrictChildOrSamePath(string root, string path)
-    {
-        root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        path = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (string.Equals(path, root, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal);
-    }
-}
-
 file static class StartupFilesystemHardening
 {
     public static async Task ApplyAsync(string fileStorageRoot, ILogger logger)
@@ -919,10 +708,13 @@ file static class NotebookExecutionIdentityProvider
         }
 
         var identity = await GetOrCreateIdentityAsync(projectId, notebookId, logger, cancellationToken);
+        var (mountRegistry, _, _) = NotebookMountsRegistry.TryLoad(notebookRoot);
+        mountRegistry ??= NotebookMountsRegistry.Empty;
+
         try
         {
-            await EnsureOwnedAndRestrictedAsync(notebookRoot, identity, cancellationToken);
-            await EnsureOwnedAndRestrictedAsync(authorizedWorkingDirectory, identity, cancellationToken);
+            await EnsureOwnedAndRestrictedAsync(notebookRoot, identity, mountRegistry, cancellationToken);
+            await EnsureOwnedAndRestrictedAsync(authorizedWorkingDirectory, identity, mountRegistry, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1027,14 +819,24 @@ file static class NotebookExecutionIdentityProvider
         throw new InvalidOperationException($"setpriv identity warm-up failed for uid={uid} gid={gid}");
     }
 
-    private static async Task EnsureOwnedAndRestrictedAsync(string path, NotebookExecutionIdentity identity, CancellationToken cancellationToken)
+    private static async Task EnsureOwnedAndRestrictedAsync(
+        string path,
+        NotebookExecutionIdentity identity,
+        NotebookMountsRegistry mountRegistry,
+        CancellationToken cancellationToken)
     {
         if (!Directory.Exists(path) && !File.Exists(path))
         {
             return;
         }
 
-        await RunCommandAsync("chown", new[] { "-R", $"{identity.Uid}:{identity.Gid}", path }, cancellationToken);
+        if (mountRegistry.IsUnderAnyContainerSourcePath(path))
+        {
+            return;
+        }
+
+        // -P: never traverse symlinks (registered mount links stay link-only; host trees are not walked).
+        await RunCommandAsync("chown", new[] { "-R", "-P", $"{identity.Uid}:{identity.Gid}", path }, cancellationToken);
         await RunCommandAsync("chmod", new[] { "700", path }, cancellationToken);
     }
 

@@ -1,0 +1,23 @@
+# Example only — copy to docker-compose.host-mounts.generated.yml for local gate checks.
+# Phase 4 owns real override generation; do not commit the generated file.
+services:
+  guideants-webapi-ui:
+    volumes:
+      - type: bind
+        source: ./volumes/host-mounts-example
+        target: /app/HostMounts/shared-data
+        read_only: false
+
+  guideants-ai:
+    volumes:
+      - type: bind
+        source: ./volumes/host-mounts-example
+        target: /app/HostMounts/shared-data
+        read_only: false
+
+  plantuml:
+    volumes:
+      - type: bind
+        source: ./volumes/host-mounts-example
+        target: /app/HostMounts/shared-data
+        read_only: false

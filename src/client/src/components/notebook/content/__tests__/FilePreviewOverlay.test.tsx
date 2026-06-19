@@ -154,17 +154,58 @@ describe('FilePreviewOverlay', () => {
     isIndexed: false,
   };
 
-  // Helper function to create a blob mock that properly handles text content
-  const createMockBlob = (content: string, type: string = 'text/plain') => {
-    const mockBlob = {
-      size: content.length,
-      type: type,
-      text: async () => content,
-      stream: () => {},
-      arrayBuffer: async () => new ArrayBuffer(0),
-      slice: () => mockBlob
+  const toBytes = (content: BlobPart): Uint8Array => {
+    if (typeof content === 'string') {
+      return new TextEncoder().encode(content);
+    }
+
+    if (content instanceof Uint8Array) {
+      return content;
+    }
+
+    if (content instanceof ArrayBuffer) {
+      return new Uint8Array(content);
+    }
+
+    if (ArrayBuffer.isView(content)) {
+      return new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
+    }
+
+    return new TextEncoder().encode(String(content));
+  };
+
+  const createMockBlob = (content: BlobPart, type: string = 'text/plain') => {
+    const createBlobLike = (bytes: Uint8Array): Blob => {
+      const decode = () => new TextDecoder().decode(bytes);
+      const arrayBuffer = async () => {
+        const copy = bytes.slice();
+        return copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength);
+      };
+      const slice = (start?: number, end?: number) => {
+        const normalizedStart = typeof start === 'number'
+          ? start < 0
+            ? Math.max(bytes.length + start, 0)
+            : Math.min(start, bytes.length)
+          : 0;
+        const normalizedEnd = typeof end === 'number'
+          ? end < 0
+            ? Math.max(bytes.length + end, 0)
+            : Math.min(end, bytes.length)
+          : bytes.length;
+        const safeEnd = Math.max(normalizedStart, normalizedEnd);
+        return createBlobLike(new Uint8Array(bytes.subarray(normalizedStart, safeEnd)));
+      };
+
+      return {
+        size: bytes.length,
+        type,
+        text: async () => decode(),
+        arrayBuffer,
+        slice,
+      } as Blob;
     };
-    return mockBlob as Blob;
+
+    return createBlobLike(toBytes(content));
   };
 
 
@@ -218,7 +259,7 @@ describe('FilePreviewOverlay', () => {
 
     it('applies correct modal classes for small content', async () => {
       (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
-        createMockBlob('data', 'application/octet-stream')
+        createMockBlob(new Uint8Array([0x00, 0xff, 0x7f, 0x10]), 'application/octet-stream')
       );
       const unknownFile = { ...mockFile, fileName: 'unknown.xyz' };
 
@@ -514,9 +555,23 @@ describe('FilePreviewOverlay', () => {
   });
 
   describe('Unsupported File Types', () => {
+    it('renders text preview for unknown textual files', async () => {
+      (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
+        createMockBlob('unknown file but plain text', 'application/octet-stream')
+      );
+      const unknownTextFile = { ...mockFile, fileName: 'unknown.xyz' };
+
+      render(<FilePreviewOverlay {...defaultProps} file={unknownTextFile} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('text-viewer')).toBeInTheDocument();
+        expect(screen.getByText('unknown file but plain text')).toBeInTheDocument();
+      });
+    });
+
     it('shows fallback for unsupported file types', async () => {
       (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
-        createMockBlob('binary-data', 'application/octet-stream')
+        createMockBlob(new Uint8Array([0x00, 0xff, 0x7f, 0x10]), 'application/octet-stream')
       );
       const unknownFile = { ...mockFile, fileName: 'unknown.xyz' };
 
@@ -531,7 +586,7 @@ describe('FilePreviewOverlay', () => {
 
     it('provides download link for unsupported files', async () => {
       (notebookFilesApi.getNotebookFileContent as Mock).mockResolvedValue(
-        createMockBlob('binary-data', 'application/octet-stream')
+        createMockBlob(new Uint8Array([0x00, 0xff, 0x7f, 0x10]), 'application/octet-stream')
       );
       const unknownFile = { ...mockFile, fileName: 'unknown.xyz' };
 
@@ -601,9 +656,9 @@ describe('FilePreviewOverlay', () => {
       { ext: 'mp4', type: 'video/mp4', viewer: 'video-player' },
       { ext: 'webm', type: 'video/webm', viewer: 'video-player' },
       { ext: 'py', type: 'text/x-python', viewer: 'text-viewer' },
-      { ext: 'js', type: 'application/javascript', viewer: 'unsupported' },
+      { ext: 'js', type: 'application/javascript', viewer: 'text-viewer' },
       { ext: 'css', type: 'text/css', viewer: 'text-viewer' },
-      { ext: 'xml', type: 'application/xml', viewer: 'unsupported' },
+      { ext: 'xml', type: 'application/xml', viewer: 'text-viewer' },
       { ext: 'csv', type: 'text/csv', viewer: 'text-viewer' },
       { ext: 'puml', type: 'text/plain', viewer: 'text-viewer' },
     ];

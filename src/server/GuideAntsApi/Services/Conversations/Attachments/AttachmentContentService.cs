@@ -60,21 +60,29 @@ public class AttachmentContentService : IAttachmentContentService
         for (int i = 0; i < attachments.Count; i++)
         {
             var attachment = attachments[i];
+            if (!attachment.NotebookFileId.HasValue)
+            {
+                _logger.LogDebug(
+                    "Skipping non-persisted path attachment for message {MessageId}: relativePath={RelativePath}",
+                    userMessageId,
+                    LogValueSanitizer.Sanitize(attachment.RelativePath));
+                continue;
+            }
 
             var notebookFile = await db.NotebookFiles
-                .FirstOrDefaultAsync(f => f.Id == attachment.NotebookFileId && f.NotebookId == notebookId, cancellationToken);
+                .FirstOrDefaultAsync(f => f.Id == attachment.NotebookFileId.Value && f.NotebookId == notebookId, cancellationToken);
 
             if (notebookFile == null)
             {
                 _logger.LogWarning("Attachment file {NotebookFileId} not found or doesn't belong to notebook {NotebookId}",
-                    attachment.NotebookFileId, notebookId);
+                    LogValueSanitizer.Sanitize(attachment.NotebookFileId), LogValueSanitizer.Sanitize(notebookId));
                 continue;
             }
 
             var messageAttachment = new MessageAttachment
             {
                 MessageId = userMessageId,
-                NotebookFileId = attachment.NotebookFileId,
+                NotebookFileId = attachment.NotebookFileId.Value,
                 Type = AttachmentType.Referenced,
                 OrderIndex = i,
                 Created = DateTime.UtcNow

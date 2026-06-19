@@ -3,6 +3,7 @@ using CliWrap;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
+using Microsoft.Extensions.Logging;
 
 namespace GuideAntsApi.Services.Components;
 
@@ -102,6 +103,17 @@ using var scope = CreateDbScope();
         context.Notebooks.Add(newNotebook);
         context.NotebookConversations.Add(newConversation);
         await context.SaveChangesAsync();
+
+        try
+        {
+            var mountService = scope.ServiceProvider.GetRequiredService<IHostFolderMountService>();
+            await mountService.ApplyProjectScopedMappingsToNewNotebookAsync(projectId, newNotebook.Id);
+        }
+        catch (Exception ex)
+        {
+            var logger = scope.ServiceProvider.GetRequiredService<ILogger<NotebookCopyService>>();
+            logger.LogError(ex, "Failed to apply project-scoped host folder mounts to copied notebook {NotebookId}", newNotebook.Id);
+        }
 
         // Copy notebook files (preserve relative paths) and recreate Output/ symlinks if present
         var sourceFiles = await context.NotebookFiles

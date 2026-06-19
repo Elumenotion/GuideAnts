@@ -82,6 +82,18 @@ public abstract class BaseEndpointTest : BaseIntegrationTest
               INNER JOIN Projects p ON pf.ProjectId = p.Id
               ;");
 
+        // Delete host folder mount links and mounts
+        await dbContext.Database.ExecuteSqlRawAsync(
+            @"DELETE hfl FROM HostFolderMountLinks hfl
+              INNER JOIN HostFolderMounts hfm ON hfl.HostFolderMountId = hfm.Id
+              INNER JOIN Projects p ON hfm.ProjectId = p.Id
+              ;");
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            @"DELETE hfm FROM HostFolderMounts hfm
+              INNER JOIN Projects p ON hfm.ProjectId = p.Id
+              ;");
+
         // Delete notebooks
         await dbContext.Database.ExecuteSqlRawAsync(
             @"DELETE n FROM Notebooks n 

@@ -95,19 +95,32 @@ def load_env() -> dict[str, str]:
     return env
 
 
+def _api_key_state(env: dict[str, str]) -> str:
+    """Classify API key configuration without exposing the secret value."""
+    value = env.get("GUIDEANTS_API_KEY", "")
+    if not value:
+        return "missing"
+    if value == API_KEY_PLACEHOLDER:
+        return "placeholder"
+    return "ok"
+
+
 def api_key_configured(env: dict[str, str]) -> bool:
     """Report whether a usable API key is present without exposing its value.
 
     Returning a plain boolean keeps the secret string out of any structure that
     later reaches stdout/stderr."""
-    value = env.get("GUIDEANTS_API_KEY", "")
-    return bool(value) and value != API_KEY_PLACEHOLDER
+    return _api_key_state(env) == "ok"
 
 
-def require_config(env: dict[str, str]) -> tuple[str, str, str]:
+def api_key_for_requests(env: dict[str, str]) -> str:
+    """Return the API key for outbound HTTP headers only (never for stdout)."""
+    return env.get("GUIDEANTS_API_KEY", "")
+
+
+def require_config(env: dict[str, str]) -> tuple[str, str]:
     base = env.get("GUIDEANTS_API_BASE", "").rstrip("/")
     pub = env.get("GUIDEANTS_PUB_ID", "")
-    key = env.get("GUIDEANTS_API_KEY", "")
 
     # Build the missing-name list from literals gated on presence so the secret
     # value never flows into the reported payload.
@@ -116,7 +129,8 @@ def require_config(env: dict[str, str]) -> tuple[str, str, str]:
         missing.append("GUIDEANTS_API_BASE")
     if not pub:
         missing.append("GUIDEANTS_PUB_ID")
-    if not key:
+    key_state = _api_key_state(env)
+    if key_state == "missing":
         missing.append("GUIDEANTS_API_KEY")
     if missing:
         fail(
@@ -124,12 +138,12 @@ def require_config(env: dict[str, str]) -> tuple[str, str, str]:
             "Missing required .env values: " + ", ".join(missing),
             missing=missing,
         )
-    if key == API_KEY_PLACEHOLDER:
+    if key_state == "placeholder":
         fail(
             "api_key_placeholder",
             "GUIDEANTS_API_KEY is still the placeholder. Set your gak_ key in .env.",
         )
-    return base, pub, key
+    return base, pub
 
 
 def resolve_save_dir(args: argparse.Namespace, env: dict[str, str]) -> Path:
@@ -203,7 +217,15 @@ def mcp_call(
 
     if rpc.get("error"):
         detail = rpc["error"]
-        fail("mcp_error", detail.get("message", "MCP returned an error."), detail=detail)
+        message = (
+            detail.get("message", "MCP returned an error.")
+            if isinstance(detail, dict)
+            else "MCP returned an error."
+        )
+        extra: dict[str, Any] = {}
+        if isinstance(detail, dict) and "code" in detail:
+            extra["code"] = detail["code"]
+        fail("mcp_error", message, **extra)
     return rpc.get("result") or {}
 
 
@@ -231,6 +253,30 @@ def parse_inner(content: list[dict[str, Any]]) -> dict[str, Any]:
             except json.JSONDecodeError:
                 return {}
     return {}
+
+
+def _conversation_for_output(conversation: dict[str, Any]) -> dict[str, Any]:
+    """Shape conversation_get JSON for stdout (matches server fields, nothing else)."""
+    messages_out: list[dict[str, Any]] = []
+    for message in conversation.get("messages") or []:
+        if not isinstance(message, dict):
+            continue
+        messages_out.append(
+            {
+                "role": message.get("role") or "",
+                "assistantName": message.get("assistantName") or "",
+                "content": message.get("content") or "",
+                "created": message.get("created"),
+                "turnIndex": message.get("turnIndex"),
+            }
+        )
+    return {
+        "conversationId": conversation.get("conversationId") or "",
+        "title": conversation.get("title") or "",
+        "currentAssistant": conversation.get("currentAssistant") or "",
+        "created": conversation.get("created"),
+        "messages": messages_out,
+    }
 
 
 def save_inline_images(content: list[dict[str, Any]]) -> list[str]:
@@ -321,18 +367,39 @@ def download_new_files(
 
 
 def cmd_list_tools(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
-    result = mcp_call(base, pub, key, "tools/list", {}, request_id=1, timeout=60)
-    tools = [
-        {"name": tool.get("name"), "description": tool.get("description", "")}
-        for tool in result.get("tools", [])
-    ]
+    base, pub = require_config(env)
+    tools = _list_tools(base, pub, env)
     emit({"tools": tools})
     return 0
 
 
+def _list_tools(base: str, pub: str, env: dict[str, str]) -> list[dict[str, str]]:
+    result = mcp_call(
+        base,
+        pub,
+        api_key_for_requests(env),
+        "tools/list",
+        {},
+        request_id=1,
+        timeout=60,
+    )
+    return [
+        {"name": tool.get("name"), "description": tool.get("description", "")}
+        for tool in result.get("tools", [])
+    ]
+
+
 def cmd_invoke(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
+    base, pub = require_config(env)
+    payload = _invoke_assistant(base, pub, env, args)
+    emit(payload)
+    return 0
+
+
+def _invoke_assistant(
+    base: str, pub: str, env: dict[str, str], args: argparse.Namespace
+) -> dict[str, Any]:
+    key = api_key_for_requests(env)
 
     arguments: dict[str, Any] = {"instructions": args.instructions}
     if args.conversation_id:
@@ -389,36 +456,55 @@ def cmd_invoke(args: argparse.Namespace, env: dict[str, str]) -> int:
                     resolve_save_dir(args, env),
                 )
 
-    emit(
-        {
-            "conversationId": conversation_id,
-            "assistantName": inner.get("assistantName") or "",
-            "responseMarkdown": response_md,
-            "displayImages": display_images,
-            "deliverables": deliverables,
-            "artifactUrls": artifact_urls,
-        }
-    )
-    return 0
+    return {
+        "conversationId": conversation_id,
+        "assistantName": inner.get("assistantName") or "",
+        "responseMarkdown": response_md,
+        "displayImages": display_images,
+        "deliverables": deliverables,
+        "artifactUrls": artifact_urls,
+    }
 
 
 def cmd_get_conversation(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
-    result = mcp_call(
-        base,
-        pub,
-        key,
-        "tools/call",
-        {"name": "conversation_get", "arguments": {"conversationId": args.conversation_id}},
-        request_id=3,
-        timeout=60,
-    )
-    emit(parse_inner(result.get("content") or []))
+    base, pub = require_config(env)
+    payload = _get_conversation(base, pub, env, args.conversation_id)
+    emit(payload)
     return 0
 
 
+def _get_conversation(
+    base: str, pub: str, env: dict[str, str], conversation_id: str
+) -> dict[str, Any]:
+    result = mcp_call(
+        base,
+        pub,
+        api_key_for_requests(env),
+        "tools/call",
+        {"name": "conversation_get", "arguments": {"conversationId": conversation_id}},
+        request_id=3,
+        timeout=60,
+    )
+    conversation = parse_inner(result.get("content") or [])
+    if conversation.get("error"):
+        fail(
+            str(conversation.get("error")),
+            str(conversation.get("message") or "Conversation request failed."),
+        )
+    return _conversation_for_output(conversation)
+
+
 def cmd_recover(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
+    base, pub = require_config(env)
+    payload = _recover_conversation(base, pub, env, args)
+    emit(payload)
+    return 0
+
+
+def _recover_conversation(
+    base: str, pub: str, env: dict[str, str], args: argparse.Namespace
+) -> dict[str, Any]:
+    key = api_key_for_requests(env)
 
     info = fetch_guide_info(base, pub)
     project_id = info.get("projectId")
@@ -446,12 +532,11 @@ def cmd_recover(args: argparse.Namespace, env: dict[str, str]) -> int:
         names,
         resolve_save_dir(args, env),
     )
-    emit({"conversationId": args.conversation_id, "deliverables": deliverables})
-    return 0
+    return {"conversationId": args.conversation_id, "deliverables": deliverables}
 
 
 def cmd_download(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
+    base, _pub = require_config(env)
 
     url = args.url
     if url.startswith("/api/"):
@@ -490,15 +575,17 @@ def cmd_doctor(args: argparse.Namespace, env: dict[str, str]) -> int:
     reachable = False
     tool_count = 0
     if all(c["ok"] for c in checks):
-        # Read the key only as a call argument used for the request header; it is
-        # never bound to a local that feeds the emitted checks payload.
-        ok, tool_count = _try_tools_list(base, pub, env.get("GUIDEANTS_API_KEY", ""))
-        reachable = ok
+        reachable, tool_count = _doctor_mcp_reachable(base, pub, env)
     checks.append({"check": "mcp_reachable", "ok": reachable, "toolCount": tool_count})
 
     overall = all(c["ok"] for c in checks)
     emit({"ok": overall, "checks": checks})
     return 0 if overall else 1
+
+
+def _doctor_mcp_reachable(base: str, pub: str, env: dict[str, str]) -> tuple[bool, int]:
+    """Probe MCP reachability; keep the API key confined to the HTTP header path."""
+    return _try_tools_list(base, pub, api_key_for_requests(env))
 
 
 def _try_tools_list(base: str, pub: str, key: str) -> tuple[bool, int]:

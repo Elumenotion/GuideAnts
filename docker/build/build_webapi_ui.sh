@@ -63,48 +63,114 @@ CLIENT_ROOT="$REPO_ROOT/src/client"
 CLIENT_NODE_MODULES="$CLIENT_ROOT/node_modules"
 CLIENT_DIST_BROWSER="$CLIENT_ROOT/dist-browser"
 
-get_running_compose_file_args() {
-  local docker_root="$1"
-  local project_name="${2:-guideants}"
-  local line name status config_files resolved
-  local found=false
+get_compose_context_for_container() {
+  local container_name="$1"
+  local docker_root="$2"
+  local repo_root="$3"
+  local project_name="guideants"
+  local config_files=""
+  local label_json cfg resolved state_file compose_file override_file docker_directory compose_root
+  local -a resolved_files=()
 
+  if ! docker inspect "$container_name" >/dev/null 2>&1; then
+    echo "Container '$container_name' was not found. Start the stack before rebuilding with recreate enabled, or pass --no-recreate." >&2
+    return 1
+  fi
+
+  project_name="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$container_name" 2>/dev/null || true)"
+  config_files="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$container_name" 2>/dev/null || true)"
+  if [[ -z "$project_name" ]]; then
+    project_name="guideants"
+  fi
+
+  if [[ -z "$config_files" ]]; then
+    while IFS='|' read -r name _status cfg; do
+      [[ "$name" == "$project_name" ]] || continue
+      config_files="$cfg"
+      break
+    done < <(docker compose ls --format '{{.Name}}|{{.Status}}|{{.ConfigFiles}}')
+  fi
+
+  if [[ -z "$config_files" ]]; then
+    state_file="$repo_root/.installer_state.env"
+    if [[ -f "$state_file" ]]; then
+      compose_file=""
+      override_file=""
+      docker_directory="docker"
+      while IFS= read -r line; do
+        line="${line%%$'\r'}"
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        case "$line" in
+          COMPOSE_FILE=*) compose_file="${line#COMPOSE_FILE=}" ;;
+          HOST_MOUNT_OVERRIDE_FILE=*) override_file="${line#HOST_MOUNT_OVERRIDE_FILE=}" ;;
+          DOCKER_DIRECTORY=*) docker_directory="${line#DOCKER_DIRECTORY=}" ;;
+        esac
+      done < "$state_file"
+      if [[ -n "$compose_file" ]]; then
+        if [[ "$docker_directory" = /* ]]; then
+          compose_root="$docker_directory"
+        else
+          compose_root="$repo_root/$docker_directory"
+        fi
+        config_files="$compose_root/$compose_file"
+        if [[ -n "$override_file" ]]; then
+          config_files="$config_files,$compose_root/$override_file"
+        fi
+      fi
+    fi
+  fi
+
+  IFS=',' read -ra files <<< "${config_files:-}"
+  for cfg in "${files[@]}"; do
+    cfg="$(echo "$cfg" | xargs)"
+    [[ -z "$cfg" ]] && continue
+    if [[ "$cfg" = /* ]]; then
+      resolved="$cfg"
+    else
+      resolved="$docker_root/$cfg"
+    fi
+    if [[ -f "$resolved" ]]; then
+      resolved_files+=("$resolved")
+    else
+      echo "Warning: Skipping missing compose file '$resolved'." >&2
+    fi
+  done
+
+  if [[ ${#resolved_files[@]} -eq 0 ]]; then
+    echo "Could not resolve any compose config files for container '$container_name'." >&2
+    return 1
+  fi
+
+  COMPOSE_PROJECT_NAME="$project_name"
   COMPOSE_FILE_ARGS=()
+  for resolved in "${resolved_files[@]}"; do
+    COMPOSE_FILE_ARGS+=(-f "$resolved")
+  done
+}
 
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    IFS='|' read -r name status config_files <<< "$line"
-    [[ "$name" == "$project_name" ]] || continue
-    [[ "$status" =~ ^running ]] || continue
-    found=true
+recreate_compose_service_with_image() {
+  local docker_root="$1"
+  local service_name="$2"
+  local image_tag="$3"
+  local override_path="$docker_root/.build-webapi-ui-image.override.yml"
 
-    IFS=',' read -ra files <<< "${config_files:-}"
-    for cfg in "${files[@]}"; do
-      cfg="$(echo "$cfg" | xargs)"
-      [[ -z "$cfg" ]] && continue
-      if [[ "$cfg" = /* ]]; then
-        resolved="$cfg"
-      else
-        resolved="$docker_root/$cfg"
-      fi
-      if [[ ! -f "$resolved" ]]; then
-        echo "Warning: Running compose project references missing config file '$resolved'; skipping it." >&2
-        continue
-      fi
-      COMPOSE_FILE_ARGS+=(-f "$resolved")
-    done
-    break
-  done < <(docker compose ls --format '{{.Name}}|{{.Status}}|{{.ConfigFiles}}')
+  cat > "$override_path" <<EOF
+services:
+  ${service_name}:
+    image: ${image_tag}
+    pull_policy: never
+EOF
 
-  if [[ "$found" != "true" ]]; then
-    echo "No running Docker Compose project named '$project_name' was found. Start the stack before rebuilding with recreate enabled, or pass --no-recreate." >&2
-    return 1
-  fi
-
-  if [[ ${#COMPOSE_FILE_ARGS[@]} -eq 0 ]]; then
-    echo "None of the config files for running Docker Compose project '$project_name' exist on disk." >&2
-    return 1
-  fi
+  (
+    cd "$docker_root"
+    compose_args=(compose -p "$COMPOSE_PROJECT_NAME")
+    compose_args+=("${COMPOSE_FILE_ARGS[@]}")
+    compose_args+=(-f "$override_path" up -d --no-deps --force-recreate --pull never "$service_name")
+    docker "${compose_args[@]}"
+  )
+  local exit_code=$?
+  rm -f "$override_path"
+  return "$exit_code"
 }
 
 case "$FLAVOR" in
@@ -114,6 +180,7 @@ case "$FLAVOR" in
     IMAGE_REPOSITORY="guideants-webapi-ui"
     IMAGE_ENV_KEY="GA_WEBAPI_UI_IMAGE"
     SERVICE_NAME="guideants-webapi-ui"
+    CONTAINER_NAME="guideants-webapi-ui"
     COMPOSE_FILE_NAME=""
     USE_RUNNING_COMPOSE_STACK=true
     USE_COMPOSE_FILE=false
@@ -134,6 +201,7 @@ case "$FLAVOR" in
     IMAGE_REPOSITORY="guideants-webapi-ui-mssql"
     IMAGE_ENV_KEY="GA_WEBAPI_UI_MSSQL_IMAGE"
     SERVICE_NAME="guideants-webapi-ui-mssql"
+    CONTAINER_NAME="guideants-webapi-ui-mssql"
     COMPOSE_FILE_NAME="docker-compose.mssql.yml"
     USE_RUNNING_COMPOSE_STACK=false
     USE_COMPOSE_FILE=true
@@ -231,36 +299,19 @@ if [[ -n "$COMPOSE_FILE_NAME" ]]; then
 fi
 
 if [[ "$NO_RECREATE" != "true" && ( "$USE_RUNNING_COMPOSE_STACK" == "true" || -f "$COMPOSE_FILE" ) ]]; then
-  echo "Recreating $SERVICE_NAME to apply the new image tag..."
-  (
-    cd "$DOCKER_ROOT"
-    compose_args=(compose)
-    if [[ "$USE_RUNNING_COMPOSE_STACK" == "true" ]]; then
-      get_running_compose_file_args "$DOCKER_ROOT" "guideants"
-      compose_args+=("${COMPOSE_FILE_ARGS[@]}")
-    elif [[ "$USE_COMPOSE_FILE" == "true" ]]; then
-      compose_args+=(-f "$COMPOSE_FILE_NAME")
-    fi
-    compose_args+=(up -d --no-deps --force-recreate "$SERVICE_NAME")
-    if ! docker "${compose_args[@]}"; then
-      echo "Failed to recreate $SERVICE_NAME." >&2
-      if [[ "$USE_RUNNING_COMPOSE_STACK" == "true" ]]; then
-        echo "Use: rerun this script after confirming the 'guideants' compose stack is running and its config files exist." >&2
-      elif [[ "$USE_COMPOSE_FILE" == "true" ]]; then
-        echo "Use: docker compose -f $COMPOSE_FILE_NAME up -d --no-deps --force-recreate $SERVICE_NAME" >&2
-      fi
-      exit 1
-    fi
-  )
-  echo "Recreated $SERVICE_NAME with image $IMAGE_TAG"
+  echo "Recreating ${CONTAINER_NAME:-$SERVICE_NAME} to apply image $LATEST_IMAGE_TAG..."
+  if [[ "$USE_RUNNING_COMPOSE_STACK" == "true" ]]; then
+    get_compose_context_for_container "$CONTAINER_NAME" "$DOCKER_ROOT" "$REPO_ROOT"
+    recreate_compose_service_with_image "$DOCKER_ROOT" "$SERVICE_NAME" "$LATEST_IMAGE_TAG"
+  else
+    COMPOSE_PROJECT_NAME="guideants"
+    COMPOSE_FILE_ARGS=(-f "$COMPOSE_FILE")
+    recreate_compose_service_with_image "$DOCKER_ROOT" "$SERVICE_NAME" "$LATEST_IMAGE_TAG"
+  fi
+  echo "Recreated ${CONTAINER_NAME:-$SERVICE_NAME} with image $LATEST_IMAGE_TAG"
 elif [[ "$NO_RECREATE" == "true" ]]; then
   echo "Skipping compose service recreate (--no-recreate)."
-  echo "To apply this image to an existing container, run:"
-  if [[ "$USE_RUNNING_COMPOSE_STACK" == "true" ]]; then
-    echo "docker compose <running stack config files> up -d --no-deps --force-recreate $SERVICE_NAME"
-  elif [[ "$USE_COMPOSE_FILE" == "true" ]]; then
-    echo "docker compose -f $COMPOSE_FILE_NAME up -d --no-deps --force-recreate $SERVICE_NAME"
-  fi
+  echo "To apply this image to an existing container, rerun without --no-recreate while container '${CONTAINER_NAME:-$SERVICE_NAME}' exists."
 else
   echo "Image was built but not applied to a compose service. The standalone guideants-webapi-ui-slim image is orthogonal to docker-compose.slim.yml."
 fi

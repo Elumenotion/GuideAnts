@@ -39,6 +39,15 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "Tests failed for $project (exit code $LASTEXITCODE)."
         }
+
+        if ($project -like '*IntegrationTests*') {
+            $repoRoot = (Resolve-Path -LiteralPath (Join-Path $ServerRoot '..' '..')).ProviderPath
+            $cleanScript = Join-Path $repoRoot 'scripts/clean-codeql-blocking-artifacts.ps1'
+            if (Test-Path -LiteralPath $cleanScript) {
+                Write-Host 'Cleaning integration-test docker volume artifacts for CodeQL compatibility...' -ForegroundColor Yellow
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $cleanScript -RepoRoot $repoRoot
+            }
+        }
     }
 
     $coverageFiles = Get-ChildItem -Path (Join-Path $ServerRoot 'TestResults') -Recurse -Filter 'coverage.cobertura.xml' -ErrorAction SilentlyContinue

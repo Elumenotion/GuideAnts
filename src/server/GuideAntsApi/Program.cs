@@ -31,7 +31,72 @@ public class Program
             return;
         }
 
+        // Startup phase timing. Each LogPhase call reports the delta since the previous phase and the
+        // cumulative time, so the slow step before the HTTP port opens is identifiable from container logs.
+        var startupStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        using var startupTimingLoggerFactory = LoggerFactory.Create(logging =>
+        {
+            logging.SetMinimumLevel(LogLevel.Information);
+            logging.AddSimpleConsole(o =>
+            {
+                o.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
+                o.SingleLine = true;
+            });
+        });
+        var startupTimingLogger = startupTimingLoggerFactory.CreateLogger("StartupTiming");
+        var lastPhaseElapsedMs = 0L;
+        void LogPhaseStart(string phase)
+        {
+            startupTimingLogger.LogInformation(
+                "Startup phase '{Phase}' starting at {TotalMs} ms",
+                phase,
+                startupStopwatch.ElapsedMilliseconds);
+        }
+        void LogPhase(string phase)
+        {
+            var nowMs = startupStopwatch.ElapsedMilliseconds;
+            startupTimingLogger.LogInformation(
+                "Startup phase '{Phase}' took {DeltaMs} ms (cumulative {TotalMs} ms)",
+                phase, nowMs - lastPhaseElapsedMs, nowMs);
+            lastPhaseElapsedMs = nowMs;
+        }
+
+        startupTimingLogger.LogInformation("Startup sequence started.");
+        var runningInContainer = string.Equals(
+            Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+        if (runningInContainer &&
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE")))
+        {
+            // Linux bind-mounted workspaces can make file watcher initialization inside
+            // WebApplication.CreateBuilder unexpectedly expensive. Keep hot-reload style
+            // config file watching opt-in in containers to reduce cold-start latency.
+            Environment.SetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE", "false");
+            startupTimingLogger.LogInformation(
+                "Startup optimization: set DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false for container startup.");
+        }
+
+        LogPhaseStart("WebApplication.CreateBuilder");
         var builder = WebApplication.CreateBuilder(args);
+        LogPhase("WebApplication.CreateBuilder");
+        startupTimingLogger.LogInformation(
+            "Startup context: env={EnvironmentName}, inContainer={InContainer}, reloadConfigOnChange={ReloadConfigOnChange}, contentRoot={ContentRoot}",
+            builder.Environment.EnvironmentName,
+            runningInContainer,
+            Environment.GetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE") ?? "(unset)",
+            builder.Environment.ContentRootPath);
+
+        if (builder.Configuration is IConfigurationRoot configurationRoot)
+        {
+            var providerNames = configurationRoot.Providers
+                .Select(provider => provider.GetType().Name)
+                .ToArray();
+            startupTimingLogger.LogInformation(
+                "Startup configuration providers ({ProviderCount}): {Providers}",
+                providerNames.Length,
+                string.Join(", ", providerNames));
+        }
 
         // Normalize file storage to an absolute path early so every service and options binding
         // resolves the same notebook root regardless of the current working directory.
@@ -42,11 +107,14 @@ public class Program
                 configuredFileStoragePath,
                 builder.Environment.ContentRootPath);
         }
+        LogPhase("Normalize FileStorage path");
 
         // Snapshot pre-DB configuration for bootstrap seeding.
         var bootstrapConfiguration = new ConfigurationBuilder()
             .AddConfiguration(builder.Configuration)
             .Build();
+        LogPhase("Build bootstrap configuration snapshot");
+
         var settingsSecrets = bootstrapConfiguration.GetSection(SettingsSecretsOptions.SectionName).Get<SettingsSecretsOptions>()
             ?? new SettingsSecretsOptions();
         var settingsSecretsErrors = ApplicationSettingsJson.ValidateSettingsSecrets(settingsSecrets);
@@ -55,11 +123,13 @@ public class Program
             throw new InvalidOperationException(
                 "Invalid SettingsSecrets configuration:\n - " + string.Join("\n - ", settingsSecretsErrors));
         }
+        LogPhase("Validate SettingsSecrets");
 
         // Connection string for catalog creation + migrations. DB-backed settings are registered only after
         // EnsureCatalogAndMigrate so no configuration access triggers ApplicationSettingsConfigurationProvider.Load
         // before dbo.ApplicationSettings exists.
         var defaultConnectionString = bootstrapConfiguration.GetConnectionString("DefaultConnection");
+        LogPhase("Read bootstrap connection string");
 
         // Configure FormOptions
         builder.Services.Configure<FormOptions>(options =>
@@ -77,9 +147,15 @@ public class Program
         {
             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
         });
+        LogPhase("Configure baseline service options");
 
         // Configure all services using StartupConfiguration
-        StartupConfiguration.ConfigureServices(builder);
+        LogPhaseStart("ConfigureServices");
+        StartupConfiguration.ConfigureServices(builder, LogPhase);
+        startupTimingLogger.LogInformation(
+            "Startup DI service descriptors registered: {DescriptorCount}",
+            builder.Services.Count);
+        LogPhase("ConfigureServices complete");
 
         if (!string.IsNullOrWhiteSpace(defaultConnectionString))
         {
@@ -94,6 +170,7 @@ public class Program
             });
             var dbInitLogger = dbInitLoggerFactory.CreateLogger("Database");
             SqlServerDatabaseInitializer.EnsureCatalogAndMigrate(defaultConnectionString, dbInitLogger);
+            LogPhase("EnsureCatalogAndMigrate");
         }
 
         // Add DB-backed settings after schema exists so Build() and later config reads can load this provider safely.
@@ -113,6 +190,7 @@ public class Program
         });
 
         var app = builder.Build();
+        LogPhase("builder.Build");
 
         var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
         ChatDiagnostics.Initialize(loggerFactory);
@@ -124,19 +202,47 @@ public class Program
         {
             var settingsService = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
             settingsService.BootstrapAsync(bootstrapConfiguration).GetAwaiter().GetResult();
+            LogPhase("Settings bootstrap");
             settingsService.ReloadConfiguration();
+            LogPhase("Settings reload");
 
             var requiredSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder>();
             requiredSeeder.SeedAsync().GetAwaiter().GetResult();
+            LogPhase("RequiredGuidesAssistantsSeeder");
 
             var runtimeProfileSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder>();
             runtimeProfileSeeder.SeedAsync().GetAwaiter().GetResult();
+            LogPhase("RuntimeProfileSeeder");
 
             var localServiceAutoSelector = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector>();
             localServiceAutoSelector.AutoSelectAsync().GetAwaiter().GetResult();
+            LogPhase("LocalServiceAutoSelector");
+
         }
 
         ServiceRoutingStartupValidator.Validate(app.Services.GetRequiredService<IConfiguration>());
+
+        // Run local AI warmup asynchronously after host startup so slow model loads
+        // (especially image generation) do not block API availability.
+        app.Lifetime.ApplicationStarted.Register(() =>
+        {
+            _ = Task.Run(async () =>
+            {
+                using var warmupScope = app.Services.CreateScope();
+                var localAiWarmup = warmupScope.ServiceProvider
+                    .GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService>();
+                try
+                {
+                    await localAiWarmup.WarmupAllAsync().ConfigureAwait(false);
+                    LogPhase("LocalAiStartupWarmup (background)");
+                }
+                catch (Exception ex)
+                {
+                    var startupLogger = warmupScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+                    startupLogger.LogWarning(ex, "Local AI startup warmup failed; continuing application startup.");
+                }
+            });
+        });
 
         // Resolve auth values from live configuration first, then env fallback.
         var providerConfigResolver = app.Services.GetRequiredService<IProviderConfigurationResolver>();
@@ -146,13 +252,19 @@ public class Program
         // This ensures that Azure OpenAI and other API configurations are available as environment variables
         // which are required by the AntRunner.Chat library
         var configuration = app.Services.GetRequiredService<IConfiguration>();
+        var environmentVariablesSet = 0;
         foreach (var setting in configuration.AsEnumerable())
         {
             if (!string.IsNullOrEmpty(setting.Value) && Environment.GetEnvironmentVariable(setting.Key) == null)
             {
                 Environment.SetEnvironmentVariable(setting.Key, setting.Value);
+                environmentVariablesSet++;
             }
         }
+        startupTimingLogger.LogInformation(
+            "Startup environment sync set {SetCount} variables from configuration.",
+            environmentVariablesSet);
+        LogPhase("Environment variable sync");
 
         // Initialize static service provider for NotebookDockerScriptService
         GuideAntsApi.Services.NotebookDockerScriptService.InitializeServiceProvider(app.Services);
@@ -180,6 +292,7 @@ public class Program
 
         // Initialize static service provider for Agent
         AntRunner.Chat.Agent.InitializeServiceProvider(app.Services);
+        LogPhase("Static service provider initialization");
 
         // Configure the HTTP request pipeline.
         if (app.Environment.IsDevelopment())
@@ -281,6 +394,8 @@ public class Program
         app.MapPublishedSpeechEndpoints();
         app.MapNotebookEndpoints();
         app.MapProjectExternalAuthEndpoints();
+        app.MapHostFolderMountEndpoints();
+        app.MapHostFolderMountInternalEndpoints();
         app.MapNotebookFileMarkdownEndpoints();
         app.MapFileLineageEndpoints();
         app.MapUsageEndpoints();
@@ -307,6 +422,12 @@ public class Program
             .RequireCors("PublicApiCors");
 
         app.UseGuideAntsUiPipeline(builder.Configuration);
+
+        LogPhase("Pipeline + endpoint mapping");
+        app.Lifetime.ApplicationStarted.Register(() =>
+            startupTimingLogger.LogInformation(
+                "Application started and listening on {Urls} after {TotalMs} ms total",
+                string.Join(", ", app.Urls), startupStopwatch.ElapsedMilliseconds));
 
         app.Run();
     }

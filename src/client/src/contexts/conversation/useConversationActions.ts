@@ -118,7 +118,7 @@ export function useConversationActions(
         created: new Date().toISOString(),
         isEdited: false,
         attachments: attList.map(a => ({
-          notebookFileId: a.notebookFileId,
+          notebookFileId: a.relativePath ? (a.relativePath || a.notebookFileId) : a.notebookFileId,
           fileName: a.fileName,
           fileType: a.uploadType as any,
           fileSize: 0,
@@ -147,7 +147,8 @@ export function useConversationActions(
             instructions: content,
             assistantName: state.selectedAssistant || (() => { throw new Error('No assistant selected when sending message'); })(),
             attachments: attList.map(a => ({
-              notebookFileId: a.notebookFileId,
+              notebookFileId: a.relativePath ? null : a.notebookFileId,
+              relativePath: a.relativePath ?? null,
               uploadType: uploadTypeToServer(a.uploadType),
             })),
           } as any,

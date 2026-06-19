@@ -237,6 +237,7 @@ export interface TurnBasedConversationState extends ConversationState {
 
 export interface PendingAttachment {
   notebookFileId: string;
+  relativePath?: string;
   fileName: string;
   uploadType: 'image' | 'audio' | 'text' | 'other';
 }

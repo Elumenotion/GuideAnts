@@ -210,6 +210,7 @@ export interface NotebookSidebarProps {
   
   // UI state
   canEdit: boolean;
+  isAdmin?: boolean;
     isCollapsed?: boolean;
   expandedSections: Set<NotebookSidebarSectionType>;
   selectedItem: NotebookSidebarSelectedItem | null;
@@ -240,6 +241,7 @@ function NotebookSidebarInner({
   homePageFileId,
   onSetHomePage,
   canEdit, 
+  isAdmin = false,
     isCollapsed = false,
   expandedSections,
   selectedItem,
@@ -946,6 +948,7 @@ function NotebookSidebarInner({
                 onSetHomePage={onSetHomePage}
                 activeSection={selectionCoordinator.activeSection || undefined}
                 onSectionActivate={selectionCoordinator.activateSection}
+                isAdmin={isAdmin}
               />
             )}
           </SidebarSection>
