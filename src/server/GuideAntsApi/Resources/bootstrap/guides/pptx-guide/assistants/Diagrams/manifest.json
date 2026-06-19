@@ -1,0 +1,18 @@
+{
+  "name": "Diagrams",
+  "description": "Draws PlantUml diagrams",
+  "tools": [
+    {
+      "type": "make_diagram"
+    },
+    {
+      "type": "search_notebook"
+    },
+    {
+      "type": "search_project"
+    },
+    {
+      "type": "set_user_context_options"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "Search",
+  "description": "I have tools to search the web for content and images and to find facts in files in this notebook.",
+  "tools": [
+    {
+      "type": "ReadWeb"
+    },
+    {
+      "type": "search_notebook"
+    },
+    {
+      "type": "search_project"
+    },
+    {
+      "type": "WebSearch"
+    }
+  ]
+}

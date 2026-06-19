@@ -1,0 +1,16 @@
+{
+  "name": "Media Creator",
+  "description": "I generate and edit images, podcasts, and videos to bring your ideas to visual and auditory life",
+  "invocation_evaluator": "ConversationUserProxy",
+  "tools": [
+    {
+      "type": "generate_image"
+    },
+    {
+      "type": "generate_podcast"
+    },
+    {
+      "type": "MakeImageFromImage"
+    }
+  ]
+}
