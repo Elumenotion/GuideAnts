@@ -56,6 +56,8 @@ services:
       - HF_TOKEN=${HF_TOKEN:-}
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION=false
+      - SCRIPT_EXECUTION_ALLOW_OWNERSHIP_FALLBACK=true
       # Router aliases live on the named volume (with GGUF trees), not a host bind.
       # GuideAnts API + llama-admin HTTP update this file; optional seed on first boot in entrypoint.sh.
       - GA_LLAMA_MODELS_PRESET=/models-local/router-models.ini
@@ -262,6 +264,8 @@ services:
       - FILE_STORAGE_ROOT=/app/ContentFiles
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION=false
+      - SCRIPT_EXECUTION_ALLOW_OWNERSHIP_FALLBACK=true
     ports:
       - "8111:80"
     volumes:

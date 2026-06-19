@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using ScriptExecutionAgent.Tests.Infrastructure;
 
@@ -209,6 +210,48 @@ public sealed class HostMountPathGuardEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await response.Content.ReadAsStringAsync()).Should().Contain("mounted-identity-ok");
         GetFileOwner(markerPath).Should().Be(markerOwnerBefore);
+    }
+
+    [TestMethod]
+    public async Task Execute_under_mount_with_identity_isolation_runs_in_compatibility_mode()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Inconclusive("Linux-only notebook identity isolation test.");
+        }
+
+        using var factory = new ScriptExecutionAgentWebApplicationFactory(
+            enableIdentityIsolation: true,
+            allowOwnershipFallback: false);
+        using (factory.CreateClient())
+        {
+            // Force host initialization.
+        }
+
+        var hostMountsRoot = MountTestHelper.CreateHostMountsRoot(factory.StorageRoot);
+        var mount = MountTestHelper.CreateRegisteredMount(factory.Notebook, hostMountsRoot, "Shared", "shared-compat", writable: true);
+        var workingDirectory = Path.Combine(mount.NotebookScopedPath, "Run");
+        Directory.CreateDirectory(workingDirectory);
+
+        using var client = factory.CreateAuthenticatedClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var body = new
+        {
+            script = "id -u",
+            scriptType = 0,
+            workingDirectory,
+            projectId = factory.Notebook.ProjectId.ToString(),
+            notebookId = factory.Notebook.NotebookId.ToString()
+        };
+
+        var response = await client.PostAsJsonAsync("/execute", body, cts.Token);
+        var payload = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, payload);
+        using var doc = JsonDocument.Parse(payload);
+        var standardOutput = doc.RootElement.GetProperty("standardOutput").GetString();
+        standardOutput.Should().NotBeNullOrWhiteSpace();
+        standardOutput!.Trim().Should().Be("0");
     }
 
     private static string GetFileOwner(string path)
