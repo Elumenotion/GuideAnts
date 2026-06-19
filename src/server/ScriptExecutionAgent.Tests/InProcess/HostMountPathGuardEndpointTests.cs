@@ -164,6 +164,12 @@ public sealed class HostMountPathGuardEndpointTests
             Assert.Inconclusive("Linux-only notebook identity isolation test.");
         }
 
+        if (!MountTestHelper.CanUseLinuxIdentityIsolation)
+        {
+            Assert.Inconclusive(
+                "Linux notebook identity isolation requires privileges to create system groups (groupadd/groupdel).");
+        }
+
         using var factory = new ScriptExecutionAgentWebApplicationFactory(
             enableIdentityIsolation: true,
             allowOwnershipFallback: false);

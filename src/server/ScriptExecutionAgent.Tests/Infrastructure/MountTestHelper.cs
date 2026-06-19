@@ -7,9 +7,12 @@ public static class MountTestHelper
 {
     public static bool CanCreateDirectoryLinks { get; }
 
+    public static bool CanUseLinuxIdentityIsolation { get; }
+
     static MountTestHelper()
     {
         CanCreateDirectoryLinks = TryCreateProbeLink();
+        CanUseLinuxIdentityIsolation = TryProbeLinuxIdentityIsolation();
     }
 
     public static string CreateHostMountsRoot(string parentDirectory)
@@ -120,6 +123,53 @@ public static class MountTestHelper
         var containerSourcePath = CreateContainerSource(hostMountsRoot, mountKey);
         var linkPath = Path.Combine(notebook.NotebookRoot, leafName);
         CreateDirectoryLink(linkPath, containerSourcePath);
+    }
+
+    private static bool TryProbeLinuxIdentityIsolation()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return false;
+        }
+
+        var groupName = $"ga-probe-{Guid.NewGuid():N}"[..16];
+        try
+        {
+            var add = new ProcessStartInfo
+            {
+                FileName = "groupadd",
+                Arguments = $"--system {groupName}",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+
+            using var addProcess = Process.Start(add)
+                ?? throw new InvalidOperationException("Failed to start groupadd probe.");
+            addProcess.WaitForExit(5_000);
+            if (addProcess.ExitCode != 0)
+            {
+                return false;
+            }
+
+            var del = new ProcessStartInfo
+            {
+                FileName = "groupdel",
+                Arguments = groupName,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+
+            using var delProcess = Process.Start(del)
+                ?? throw new InvalidOperationException("Failed to start groupdel probe cleanup.");
+            delProcess.WaitForExit(5_000);
+            return delProcess.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool TryCreateProbeLink()

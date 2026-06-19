@@ -7,6 +7,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.IntegrationTests.Infrastructure;
 using GuideAntsApi.Models;
+using GuideAntsApi.Services.Components;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -320,7 +321,7 @@ public sealed class HostFolderMountEndpointsTests : BaseEndpointTest
         body.ProjectId.Should().Be(_projectId);
         body.MountKey.Should().NotBeNullOrWhiteSpace();
         body.SourceKind.Should().Be(SourceKind.LocalPath.ToString());
-        body.HostPath.Should().Contain(":/");
+        body.HostPath.Should().Be(HostFolderMountCommandTextBuilder.FormatHostPathForCompose(hostPath));
     }
 
     private static string CreateTempHostPath()
