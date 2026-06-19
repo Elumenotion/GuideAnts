@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using ScriptExecutionAgent.Tests.Infrastructure;
 
@@ -211,6 +212,68 @@ public sealed class HostMountPathGuardEndpointTests
         GetFileOwner(markerPath).Should().Be(markerOwnerBefore);
     }
 
+    [TestMethod]
+    public async Task Execute_under_mount_with_identity_isolation_runs_in_compatibility_mode()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Inconclusive("Linux-only notebook identity isolation test.");
+        }
+
+        using var factory = new ScriptExecutionAgentWebApplicationFactory(
+            enableIdentityIsolation: true,
+            allowOwnershipFallback: false);
+        using (factory.CreateClient())
+        {
+            // Force host initialization.
+        }
+
+        var hostMountsRoot = MountTestHelper.CreateHostMountsRoot(factory.StorageRoot);
+        var mount = MountTestHelper.CreateRegisteredMount(factory.Notebook, hostMountsRoot, "Shared", "shared-compat", writable: true);
+        var workingDirectory = Path.Combine(mount.NotebookScopedPath, "Run");
+        Directory.CreateDirectory(workingDirectory);
+
+        using var client = factory.CreateAuthenticatedClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var body = new
+        {
+            script = "id -u",
+            scriptType = 0,
+            workingDirectory,
+            projectId = factory.Notebook.ProjectId.ToString(),
+            notebookId = factory.Notebook.NotebookId.ToString()
+        };
+
+        var response = await client.PostAsJsonAsync("/execute", body, cts.Token);
+        var payload = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, payload);
+        using var doc = JsonDocument.Parse(payload);
+        var standardOutput = ReadStandardOutput(doc.RootElement);
+        standardOutput.Should().NotBeNullOrWhiteSpace(payload);
+        standardOutput!.Trim().Should().Be(GetCurrentUserId());
+    }
+
+    private static string? ReadStandardOutput(JsonElement root)
+    {
+        if (root.TryGetProperty("standardOutput", out var camel))
+        {
+            return camel.GetString();
+        }
+
+        if (root.TryGetProperty("StandardOutput", out var pascal))
+        {
+            return pascal.GetString();
+        }
+
+        if (root.TryGetProperty("stdout", out var shortName))
+        {
+            return shortName.GetString();
+        }
+
+        return null;
+    }
+
     private static string GetFileOwner(string path)
     {
         var startInfo = new System.Diagnostics.ProcessStartInfo
@@ -224,6 +287,24 @@ public sealed class HostMountPathGuardEndpointTests
 
         using var process = System.Diagnostics.Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start stat.");
+        process.WaitForExit(5_000);
+        process.ExitCode.Should().Be(0, process.StandardError.ReadToEnd());
+        return process.StandardOutput.ReadToEnd().Trim();
+    }
+
+    private static string GetCurrentUserId()
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "id",
+            Arguments = "-u",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start id.");
         process.WaitForExit(5_000);
         process.ExitCode.Should().Be(0, process.StandardError.ReadToEnd());
         return process.StandardOutput.ReadToEnd().Trim();

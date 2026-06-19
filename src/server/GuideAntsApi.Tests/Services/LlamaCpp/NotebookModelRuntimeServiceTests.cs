@@ -329,6 +329,61 @@ public class NotebookModelRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task GetRuntimeStatusAsync_RequiredModelLoaded_DoesNotReportLoadingFromActiveOperation()
+    {
+        // Arrange
+        var notebookId = Guid.NewGuid();
+        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
+        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
+
+        _context.Assistants.Add(guide);
+        _context.Notebooks.Add(notebook);
+
+        var model = new Model
+        {
+            ModelId = "qwen-local",
+            Provider = "llama-cpp",
+            IsActive = true,
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+        };
+        _context.Models.Add(model);
+        await _context.SaveChangesAsync();
+
+        // Simulate an in-flight op that can lag behind true model readiness.
+        var operationsField = typeof(NotebookModelRuntimeService)
+            .GetField("_operations", BindingFlags.NonPublic | BindingFlags.Static);
+        if (operationsField?.GetValue(null) is ConcurrentDictionary<string, ModelLoadOperationDto> operations)
+        {
+            operations["stale-loading-op"] = new ModelLoadOperationDto
+            {
+                OperationId = "stale-loading-op",
+                State = "loading",
+                StartedAt = DateTime.UtcNow.AddMinutes(-5)
+            };
+        }
+        else
+        {
+            Assert.Fail("Unable to seed runtime operation state.");
+        }
+
+        _mockLlamaClient.Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaModelsResponse
+            {
+                Data = new List<LlamaModelData>
+                {
+                    new() { Id = "qwen-model", Status = new LlamaModelStatus { Value = "loaded" } }
+                }
+            });
+
+        // Act
+        var status = await _service.GetRuntimeStatusAsync(notebookId);
+
+        // Assert
+        Assert.AreEqual("ready", status.State);
+        Assert.IsNull(status.ActiveOperation);
+    }
+
+    [TestMethod]
     public async Task GetRuntimeStatusAsync_WithSizeLimitedCache_DoesNotThrowAndUsesFreshState()
     {
         // Arrange

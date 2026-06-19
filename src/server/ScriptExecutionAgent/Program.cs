@@ -707,9 +707,20 @@ file static class NotebookExecutionIdentityProvider
             return null;
         }
 
-        var identity = await GetOrCreateIdentityAsync(projectId, notebookId, logger, cancellationToken);
         var (mountRegistry, _, _) = NotebookMountsRegistry.TryLoad(notebookRoot);
         mountRegistry ??= NotebookMountsRegistry.Empty;
+
+        if (mountRegistry.Mounts.Count > 0)
+        {
+            logger.LogInformation(
+                "SECURITY: notebook has registered mounts; using compatibility execution mode. projectId={ProjectId} notebookId={NotebookId} mountCount={MountCount}",
+                projectId,
+                notebookId,
+                mountRegistry.Mounts.Count);
+            return null;
+        }
+
+        var identity = await GetOrCreateIdentityAsync(projectId, notebookId, logger, cancellationToken);
 
         try
         {
