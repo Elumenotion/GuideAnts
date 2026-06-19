@@ -1,0 +1,67 @@
+{
+  "theme": {
+    "name": "Elumenotion",
+    "description": "Vibrant theme inspired by innovation and friendly assistance - deep red, warm yellow-orange accents, and balanced grey tones"
+  },
+  "typography": {
+    "fonts": {
+      "title": "Calibri Light",
+      "body": "Calibri",
+      "code": "Consolas"
+    },
+    "sizes": {
+      "title": 54,
+      "subtitle": 32,
+      "body": 20,
+      "bullet": 20,
+      "code": 16,
+      "caption": 16
+    },
+    "spacing": {
+      "title_space_after": 12,
+      "body_space_after": 6,
+      "bullet_space_after": 8,
+      "line_spacing": 1.2
+    }
+  },
+  "colors": {
+    "primary": [139, 0, 0],
+    "secondary": [128, 128, 128],
+    "accent": [255, 200, 0],
+    "background": [255, 255, 255],
+    "light_bg": [250, 245, 245],
+    "code_bg": [248, 248, 248],
+    "code_border": [200, 200, 200]
+  },
+  "layout": {
+    "slide_dimensions": {
+      "width": 13.33,
+      "height": 7.5
+    },
+    "margins": {
+      "top": 0.5,
+      "bottom": 0.5,
+      "left": 1.0,
+      "right": 1.0
+    },
+    "spacing": {
+      "title_to_content": 0.75,
+      "paragraph_spacing": 0.25,
+      "bullet_spacing": 0.15,
+      "image_to_text": 0.5,
+      "bullet_indent_base": 0.5
+    },
+    "image": {
+      "max_width": 9.0,
+      "max_height": 4.5,
+      "default_max_height": 4.5
+    }
+  },
+  "content": {
+    "footer": {
+      "text": "Author: Doug Ware with assistance from GuideAnts AI",
+      "show_on_title_slide": true
+    }
+  }
+}
+

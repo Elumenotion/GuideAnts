@@ -1,0 +1,13 @@
+{
+  "name": "Code Executor",
+  "description": "I execute Python and Bash scripts to solve problems, analyze data, and automate tasks using files",
+  "invocation_evaluator": "ConversationUserProxy",
+  "tools": [
+    {
+      "type": "run_bash"
+    },
+    {
+      "type": "run_python"
+    }
+  ]
+}

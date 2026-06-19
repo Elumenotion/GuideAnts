@@ -1,19 +1,10 @@
 import type { LocalModelOnboardingDraft } from './contracts';
 import { buildLocalModelOnboardingRequest } from './buildCommand';
 
-export function validateLocalModelOnboardingDraft(
-  draft: LocalModelOnboardingDraft,
-  options?: {
-    defaultCatalogModelId?: string;
-    defaultCatalogDisplayName?: string;
-    defaultTargetDirectory?: string;
-  }
-): string[] {
+export function validateLocalModelOnboardingDraft(draft: LocalModelOnboardingDraft): string[] {
   try {
     buildLocalModelOnboardingRequest(draft, {
-      defaultCatalogModelId: options?.defaultCatalogModelId,
-      defaultCatalogDisplayName: options?.defaultCatalogDisplayName,
-      defaultTargetDirectory: options?.defaultTargetDirectory,
+      defaultCatalogIsActive: draft.catalogIsActive ?? true,
     });
     return [];
   } catch (error) {

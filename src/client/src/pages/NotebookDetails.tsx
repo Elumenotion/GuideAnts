@@ -242,6 +242,36 @@ function NotebookDetailsContent() {
             });
     }, [projectId, notebookId, assistants, applyRuntimeStatus, showToast]);
 
+    // While the modal shows requires_load, keep polling runtime status so startup
+    // warmup / external router loads flip the UI into loading mode without a duplicate load.
+    useEffect(() => {
+        if (!runtimeModalOpen || !projectId || !notebookId) return;
+        if (runtimeStatus?.state !== 'requires_load' || isPolling) return;
+
+        let cancelled = false;
+        const recheck = async () => {
+            try {
+                const status = await api.projects.notebooks.conversations.checkLlamaRuntime(
+                    projectId,
+                    notebookId,
+                    targetAssistantId
+                );
+                if (!cancelled) {
+                    applyRuntimeStatus(status, targetAssistantId);
+                }
+            } catch {
+                // Transient failures are expected while the AI container is still starting.
+            }
+        };
+
+        void recheck();
+        const interval = setInterval(() => { void recheck(); }, 2000);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [runtimeModalOpen, runtimeStatus?.state, isPolling, projectId, notebookId, targetAssistantId, applyRuntimeStatus]);
+
     useEffect(() => {
         const handleRequiresLoad = (e: Event) => {
             const customEvent = e as CustomEvent;
@@ -284,11 +314,25 @@ function NotebookDetailsContent() {
         if (isPolling && runtimeStatus?.activeOperation?.operationId && projectId && notebookId) {
             pollInterval = setInterval(async () => {
                 try {
-                    const op = await api.projects.notebooks.conversations.pollLlamaRuntimeOperation(
-                        projectId,
-                        notebookId,
-                        runtimeStatus.activeOperation.operationId
-                    );
+                    let op;
+                    try {
+                        op = await api.projects.notebooks.conversations.pollLlamaRuntimeOperation(
+                            projectId,
+                            notebookId,
+                            runtimeStatus.activeOperation.operationId
+                        );
+                    } catch (pollError: any) {
+                        if (pollError?.status !== 404) {
+                            throw pollError;
+                        }
+                        const status = await api.projects.notebooks.conversations.checkLlamaRuntime(
+                            projectId,
+                            notebookId,
+                            targetAssistantId
+                        );
+                        applyRuntimeStatus(status, targetAssistantId);
+                        return;
+                    }
                     
                     if (op.state === 'ready') {
                         setIsPolling(false);
@@ -330,7 +374,7 @@ function NotebookDetailsContent() {
         return () => {
             if (pollInterval) clearInterval(pollInterval);
         };
-    }, [isPolling, runtimeStatus?.activeOperation?.operationId, projectId, notebookId, showToast, refreshNotebookToolbar]);
+    }, [isPolling, runtimeStatus?.activeOperation?.operationId, projectId, notebookId, targetAssistantId, showToast, refreshNotebookToolbar, applyRuntimeStatus]);
 
     const handleStartLoad = async () => {
         if (!projectId || !notebookId) return;

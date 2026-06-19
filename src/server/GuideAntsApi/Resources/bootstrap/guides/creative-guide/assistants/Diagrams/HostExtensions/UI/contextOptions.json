@@ -1,0 +1,10 @@
+[
+  {
+    "key": "files",
+    "value": "[@files]"
+  },
+  {
+    "key": "system.currentDate",
+    "value": "[@currentDate]"
+  }
+]
