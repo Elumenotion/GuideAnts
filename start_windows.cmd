@@ -6,6 +6,9 @@ if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
 set "DOCKER_DIR=%ROOT_DIR%\docker"
 set "STATE_FILE=%ROOT_DIR%\.installer_state.env"
 set "HEALTH_URL=http://localhost:5107/"
+set "HOST_MOUNT_OVERRIDE_FILE=docker-compose.host-mounts.generated.yml"
+set "DOCKER_DIRECTORY=docker"
+set "START_COMMAND=start_windows.cmd"
 
 set "MODE=install"
 set "FIX_MODE=0"
@@ -76,7 +79,16 @@ if /I "%MODE%"=="doctor" (
 )
 
 pushd "%DOCKER_DIR%" || call :fail Could not open docker directory.
-docker compose -f "%COMPOSE_FILE%" up -d || (
+set "COMPOSE_ARGS=-f %COMPOSE_FILE%"
+if exist "%HOST_MOUNT_OVERRIDE_FILE%" (
+  docker compose -f "%COMPOSE_FILE%" -f "%HOST_MOUNT_OVERRIDE_FILE%" config >nul 2>nul
+  if errorlevel 1 (
+    call :warn Ignoring invalid host mount override docker\%HOST_MOUNT_OVERRIDE_FILE%. Recreate mounts to regenerate it.
+  ) else (
+    set "COMPOSE_ARGS=%COMPOSE_ARGS% -f %HOST_MOUNT_OVERRIDE_FILE%"
+  )
+)
+docker compose %COMPOSE_ARGS% up -d || (
   popd
   call :fail docker compose up failed.
 )
@@ -216,6 +228,10 @@ goto wait_loop
 (
   echo BACKEND=%SELECTED_BACKEND%
   echo COMPOSE_MODE=%COMPOSE_MODE%
+  echo COMPOSE_FILE=%COMPOSE_FILE%
+  echo HOST_MOUNT_OVERRIDE_FILE=%HOST_MOUNT_OVERRIDE_FILE%
+  echo DOCKER_DIRECTORY=%DOCKER_DIRECTORY%
+  echo START_COMMAND=%START_COMMAND%
   for /f %%i in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"') do echo LAST_RUN_EPOCH=%%i
 ) > "%STATE_FILE%"
 exit /b 0

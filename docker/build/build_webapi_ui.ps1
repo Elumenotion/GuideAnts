@@ -116,6 +116,54 @@ function Resolve-ExistingComposeConfigFiles {
     return $resolved
 }
 
+function Add-HostMountOverrideIfValid {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DockerRoot,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$ConfigFiles
+    )
+
+    # The host folder mount binds live only in this generated override. Recreating a
+    # single service without it silently drops the mount, so mirror start_windows.cmd:
+    # always re-include the current on-disk override (validated) regardless of whether
+    # the running container's labels/state happened to reference it.
+    $overrideFileName = 'docker-compose.host-mounts.generated.yml'
+    $overridePath = Join-Path $DockerRoot $overrideFileName
+    if (-not (Test-Path $overridePath)) {
+        return $ConfigFiles
+    }
+
+    foreach ($configFile in $ConfigFiles) {
+        if ([System.IO.Path]::GetFileName($configFile) -ieq $overrideFileName) {
+            return $ConfigFiles
+        }
+    }
+
+    Push-Location $DockerRoot
+    try {
+        $composeArgs = @('compose')
+        foreach ($configFile in $ConfigFiles) {
+            $composeArgs += @('-f', $configFile)
+        }
+        $composeArgs += @('-f', $overridePath, 'config')
+        docker @composeArgs *> $null
+        $overrideValid = ($LASTEXITCODE -eq 0)
+    }
+    finally {
+        Pop-Location
+    }
+
+    if (-not $overrideValid) {
+        Write-Warning "Ignoring invalid host mount override '$overridePath'. Recreate mounts to regenerate it."
+        return $ConfigFiles
+    }
+
+    return @($ConfigFiles + $overridePath)
+}
+
 function Get-ComposeContextForContainer {
     param(
         [Parameter(Mandatory = $true)]
@@ -164,6 +212,8 @@ function Get-ComposeContextForContainer {
         throw "Could not resolve any compose config files for container '$ContainerName'. Start the stack first or pass -NoRecreate."
     }
 
+    $resolved = Add-HostMountOverrideIfValid -DockerRoot $DockerRoot -ConfigFiles $resolved
+
     return @{
         ProjectName = $projectName
         ConfigFiles = $resolved
@@ -181,6 +231,10 @@ function New-ImageOverrideComposeFile {
         [Parameter(Mandatory = $true)]
         [string]$ImageTag
     )
+
+    $sanitizedServiceName = $ServiceName -replace '[^A-Za-z0-9._-]', '-'
+    $overrideFileName = ".compose.image-override.${sanitizedServiceName}.$([Guid]::NewGuid().ToString('N')).yml"
+    $overridePath = Join-Path $DockerRoot $overrideFileName
 
     $content = @"
 services:

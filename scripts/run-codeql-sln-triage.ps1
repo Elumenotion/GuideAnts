@@ -87,6 +87,17 @@ function Remove-IfExists {
     }
 }
 
+function Remove-CodeqlBlockingLocalArtifacts {
+    param([string]$RepoRoot)
+
+    $cleanScript = Join-Path $RepoRoot 'scripts/clean-codeql-blocking-artifacts.ps1'
+    if (-not (Test-Path -LiteralPath $cleanScript)) {
+        throw "Missing cleanup script: $cleanScript"
+    }
+
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $cleanScript -RepoRoot $RepoRoot
+}
+
 function Get-GitValue {
     param([string[]]$GitArgs)
 
@@ -220,13 +231,17 @@ function Invoke-CodeqlLanguageRun {
     }
 
     Invoke-CodeqlLogged -CodeqlExe $CodeqlExe -Arguments $createArgs
+    $createExit = $LASTEXITCODE
     $databaseYml = Join-Path $Config.DatabasePath "codeql-database.yml"
-    if ($LASTEXITCODE -ne 0) {
-        if (Test-Path -LiteralPath $databaseYml) {
-            Write-Warning "codeql database create exited $LASTEXITCODE but $databaseYml exists (often a Windows file-lock during cleanup); continuing with analyze."
+    if ($createExit -ne 0) {
+        if (-not (Test-Path -LiteralPath $databaseYml)) {
+            throw "codeql database create failed for $($Config.Language) (exit $createExit)."
         }
-        else {
-            throw "codeql database create failed for $($Config.Language) (exit $LASTEXITCODE)."
+
+        Write-Warning "codeql database create exited $createExit; attempting finalize before analyze..."
+        Invoke-CodeqlLogged -CodeqlExe $CodeqlExe -Arguments @("database", "finalize", $Config.DatabasePath)
+        if ($LASTEXITCODE -ne 0) {
+            throw "codeql database create failed for $($Config.Language) (exit $createExit) and finalize could not recover."
         }
     }
 
@@ -355,6 +370,10 @@ Write-Host "Git commit: $gitCommitShort ($gitCommit)"
 Write-Host "Git branch: $gitBranch"
 Write-Host "Languages: $($selected -join ', ')"
 Write-Host "C# build mode: $CSharpBuildMode (GitHub Code Scanning uses none)"
+
+if ($selected -contains "csharp") {
+    Remove-CodeqlBlockingLocalArtifacts -RepoRoot $repoRoot
+}
 
 $runResults = @()
 foreach ($lang in $selected) {
