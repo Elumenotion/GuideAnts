@@ -1,0 +1,14 @@
+[
+  {
+    "key": "files",
+    "value": "[@files]"
+  },
+  {
+    "key": "today",
+    "value": "[@currentDate]"
+  },
+  {
+    "key": "user",
+    "value": "[@userName]"
+  }
+]

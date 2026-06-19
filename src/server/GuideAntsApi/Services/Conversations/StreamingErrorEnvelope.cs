@@ -1,4 +1,5 @@
 using AntRunner.Chat;
+using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using System.Net;
@@ -47,6 +48,23 @@ internal static class StreamingErrorEnvelope
                 innerMessage = crash.UpstreamDetail,
                 innerType = crash.InnerException?.GetType().Name,
                 statusCode = crash.StatusCode.HasValue ? (int?)crash.StatusCode.Value : null,
+                timestamp = DateTime.UtcNow
+            };
+        }
+
+        // Context overflow that survived the engine's unwind/retry (e.g. the system prompt alone
+        // exceeds the window). Surface a distinct code so the UI can prompt for a smaller request.
+        var overflow = ex as ChatContextOverflowException ?? inner as ChatContextOverflowException;
+        if (overflow != null)
+        {
+            return new
+            {
+                code = "chat_context_overflow",
+                message = "The request was too large for the model's context window. Retry with a smaller message or a different approach.",
+                type = nameof(ChatContextOverflowException),
+                promptTokens = overflow.PromptTokens,
+                contextSize = overflow.ContextSize,
+                innerMessage = overflow.UpstreamDetail,
                 timestamp = DateTime.UtcNow
             };
         }

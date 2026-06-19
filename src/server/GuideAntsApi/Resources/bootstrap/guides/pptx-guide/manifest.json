@@ -1,0 +1,22 @@
+{
+  "name": "PPTX Guide",
+  "description": "I help you make nice PowerPoint decks",
+  "defaultAssistant": null,
+  "crew": [
+    {
+      "name": "Diagrams"
+    },
+    {
+      "name": "Media Creator"
+    },
+    {
+      "name": "Slide Shows"
+    },
+    {
+      "name": "Search"
+    },
+    {
+      "name": "Code Executor"
+    }
+  ]
+}

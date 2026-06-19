@@ -1744,8 +1744,24 @@ public class GuideExportImportService : IGuideExportImportService
             return;
         }
 
-        // Create markdown shadow records
-        foreach (var fileId in vectorStoreFiles)
+        // Only create missing shadow records so repeated imports/startup seeding stay idempotent.
+        var existingShadowFileIds = await context.AssistantFileMarkdownShadows
+            .Where(s => vectorStoreFiles.Contains(s.OriginalAssistantFileId))
+            .Select(s => s.OriginalAssistantFileId)
+            .ToListAsync();
+
+        var existingShadowFileIdSet = existingShadowFileIds.ToHashSet();
+        var fileIdsNeedingShadows = vectorStoreFiles
+            .Where(fileId => !existingShadowFileIdSet.Contains(fileId))
+            .ToList();
+
+        if (!fileIdsNeedingShadows.Any())
+        {
+            return;
+        }
+
+        // Create markdown shadow records for only missing files.
+        foreach (var fileId in fileIdsNeedingShadows)
         {
             var shadow = new AssistantFileMarkdownShadow
             {
@@ -1763,8 +1779,8 @@ public class GuideExportImportService : IGuideExportImportService
 
         await context.SaveChangesAsync();
 
-        // Enqueue extraction jobs (which will chain to indexing)
-        foreach (var fileId in vectorStoreFiles)
+        // Enqueue extraction jobs (which will chain to indexing) only for newly created shadows.
+        foreach (var fileId in fileIdsNeedingShadows)
         {
             await _jobQueue.EnqueueAsync(
                 jobType: "ExtractAssistantFileMarkdown",

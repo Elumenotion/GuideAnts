@@ -1103,7 +1103,7 @@ describe('NotebookDetails page', () => {
   });
 
   it('starts llama runtime load from modal and handles ready response', async () => {
-    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValueOnce({
+    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValue({
       state: 'requires_load',
     } as never);
     vi.mocked(api.projects.notebooks.conversations.loadLlamaRuntime).mockResolvedValueOnce({
@@ -1423,7 +1423,7 @@ describe('NotebookDetails page', () => {
   });
 
   it('shows toast when start load returns failed state', async () => {
-    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValueOnce({
+    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValue({
       state: 'requires_load',
     } as never);
     vi.mocked(api.projects.notebooks.conversations.loadLlamaRuntime).mockResolvedValueOnce({
@@ -1448,7 +1448,7 @@ describe('NotebookDetails page', () => {
 
   it('starts polling when start load returns loading state', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValueOnce({
+    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValue({
       state: 'requires_load',
     } as never);
     vi.mocked(api.projects.notebooks.conversations.loadLlamaRuntime).mockResolvedValueOnce({
@@ -1484,7 +1484,7 @@ describe('NotebookDetails page', () => {
   });
 
   it('shows toast when start load throws', async () => {
-    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValueOnce({
+    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValue({
       state: 'requires_load',
     } as never);
     vi.mocked(api.projects.notebooks.conversations.loadLlamaRuntime).mockRejectedValueOnce(
@@ -1507,7 +1507,7 @@ describe('NotebookDetails page', () => {
   });
 
   it('closes runtime modal when close is clicked and not polling', async () => {
-    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValueOnce({
+    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime).mockResolvedValue({
       state: 'requires_load',
     } as never);
 
@@ -1522,6 +1522,35 @@ describe('NotebookDetails page', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('llama-runtime-modal')).not.toBeInTheDocument();
     });
+  });
+
+  it('enters polling when requires_load recheck detects external startup loading', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime)
+      .mockResolvedValueOnce({ state: 'requires_load' } as never)
+      .mockResolvedValue({
+        state: 'loading',
+        activeOperation: { operationId: '__external_loading__', state: 'loading' },
+      } as never);
+    vi.mocked(api.projects.notebooks.conversations.pollLlamaRuntimeOperation).mockResolvedValue({
+      state: 'ready',
+      operationId: '__external_loading__',
+    } as never);
+
+    renderNotebook();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('llama-runtime-modal')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    await waitFor(() => {
+      expect(api.projects.notebooks.conversations.pollLlamaRuntimeOperation).toHaveBeenCalled();
+    });
+    vi.useRealTimers();
   });
 
   it('dismisses crash modal via onClose', async () => {

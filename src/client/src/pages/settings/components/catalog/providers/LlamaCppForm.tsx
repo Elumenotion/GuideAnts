@@ -386,9 +386,10 @@ export function LlamaCppAddForm({
                 className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 autoComplete="off"
                 spellCheck={false}
+                placeholder={value.llamaRouterModelId.trim() || '(same as router alias)'}
               />
               <p className="text-[11px] text-gray-500">
-                Folder under <span className="font-mono">/models-local/llama</span> where the files will be written. Typically matches the Router Alias.
+                Folder under <span className="font-mono">/models-local/llama</span> where the files will be written. Defaults to the router alias.
               </p>
             </div>
           </div>
