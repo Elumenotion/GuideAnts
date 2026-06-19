@@ -133,6 +133,10 @@ public class PublishedConversationService : IPublishedConversationService
             clientContext: null,
             cancellationToken);
 
+        var assistantDefForResume = await AssistantUtility.GetAssistantCreateRequest(assistantName)
+            ?? throw new InvalidOperationException($"Assistant definition not found for {assistantName}");
+        var resolvedResume = _chatModelResolver.Resolve(assistantDefForResume.Model);
+
         currentMessageSequence = await ExecuteDeferredServerToolsAsync(
             dbConversation,
             dbTurn,
@@ -144,10 +148,6 @@ public class PublishedConversationService : IPublishedConversationService
             hostUrl,
             currentMessageSequence,
             cancellationToken);
-
-        var assistantDefForResume = await AssistantUtility.GetAssistantCreateRequest(assistantName)
-            ?? throw new InvalidOperationException($"Assistant definition not found for {assistantName}");
-        var resolvedResume = _chatModelResolver.Resolve(assistantDefForResume.Model);
 
         var runContext = new ConversationStreamRunContext
         {

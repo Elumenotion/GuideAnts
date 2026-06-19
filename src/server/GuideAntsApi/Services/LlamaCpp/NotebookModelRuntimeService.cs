@@ -11,6 +11,12 @@ namespace GuideAntsApi.Services.LlamaCpp;
 
 public class NotebookModelRuntimeService : INotebookModelRuntimeService
 {
+    /// <summary>
+    /// Synthetic operation id returned when models are loading outside of
+    /// <see cref="_operations"/> (startup warmup or settings-UI load).
+    /// </summary>
+    public const string ExternalLoadingOperationId = "__external_loading__";
+
     private readonly ApplicationDbContext _context;
     private readonly ILlamaServerRuntimeClient _llamaClient;
     private readonly IRuntimeProfileResolver _runtimeProfileResolver;
@@ -119,6 +125,14 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             {
                 status.State = "ready";
             }
+            else if (IsExternalLoadInProgress(requiredRouterIds, routerState))
+            {
+                status.State = "loading";
+                status.ActiveOperation = CreateExternalLoadingOperation(
+                    _localAiWarmupService.IsWarmupInProgress
+                        ? "loading"
+                        : ResolveExternalLoadPhase(routerState, requiredRouterIds));
+            }
             else
             {
                 status.State = "requires_load";
@@ -172,10 +186,43 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         return op;
     }
 
-    public Task<ModelLoadOperationDto?> GetOperationStatusAsync(Guid notebookId, string operationId, CancellationToken cancellationToken = default)
+    public async Task<ModelLoadOperationDto?> GetOperationStatusAsync(Guid notebookId, string operationId, CancellationToken cancellationToken = default)
     {
-        _operations.TryGetValue(operationId, out var op);
-        return Task.FromResult(op);
+        if (_operations.TryGetValue(operationId, out var op))
+        {
+            return op;
+        }
+
+        if (!string.Equals(operationId, ExternalLoadingOperationId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var status = await GetRuntimeStatusAsync(notebookId, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (status.State == "ready")
+        {
+            return new ModelLoadOperationDto
+            {
+                OperationId = operationId,
+                State = "ready",
+                StartedAt = DateTime.UtcNow,
+                CompletedAt = DateTime.UtcNow
+            };
+        }
+
+        if (status.State == "loading" && status.ActiveOperation != null)
+        {
+            return status.ActiveOperation;
+        }
+
+        return new ModelLoadOperationDto
+        {
+            OperationId = operationId,
+            State = "failed",
+            StartedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow,
+            ErrorDetails = status.Conflicts.FirstOrDefault() ?? "External model load did not complete."
+        };
     }
 
     public async Task<ModelLoadOperationDto> StartUnloadForNotebookContextAsync(
@@ -504,6 +551,59 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         }
 
         return false;
+    }
+
+    private static bool IsRouterModelLoading(LlamaModelData model)
+    {
+        if (!string.IsNullOrWhiteSpace(model.Status?.Value))
+        {
+            return string.Equals(model.Status.Value, "loading", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.State))
+        {
+            return string.Equals(model.State, "loading", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private bool IsExternalLoadInProgress(HashSet<string> requiredRouterIds, LlamaModelsResponse routerState)
+    {
+        if (_localAiWarmupService.IsWarmupInProgress)
+        {
+            return true;
+        }
+
+        foreach (var id in requiredRouterIds)
+        {
+            if (_coordinator.IsAliasLocked(id))
+            {
+                return true;
+            }
+        }
+
+        return routerState.Data.Any(m =>
+            requiredRouterIds.Contains(NormalizeRouterModelId(m.Id))
+            && IsRouterModelLoading(m));
+    }
+
+    private static string ResolveExternalLoadPhase(LlamaModelsResponse routerState, HashSet<string> requiredRouterIds)
+    {
+        var hasLoading = routerState.Data.Any(m =>
+            requiredRouterIds.Contains(m.Id)
+            && IsRouterModelLoading(m));
+        return hasLoading ? "loading" : "queued";
+    }
+
+    private static ModelLoadOperationDto CreateExternalLoadingOperation(string phase)
+    {
+        return new ModelLoadOperationDto
+        {
+            OperationId = ExternalLoadingOperationId,
+            State = phase,
+            StartedAt = DateTime.UtcNow
+        };
     }
 
     private ModelRuntimeConfigDto ToLocalRuntimeDescriptor(string modelId, string runtimeConfigJson)

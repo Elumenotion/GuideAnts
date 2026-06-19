@@ -14,6 +14,13 @@ namespace GuideAntsApi.Services.Bootstrap;
 public interface ILocalAiStartupWarmupService
 {
     /// <summary>
+    /// True while <see cref="WarmupAllAsync"/> is running. Used by runtime status
+    /// checks so the UI can wait for startup model loads instead of issuing a
+    /// duplicate load request.
+    /// </summary>
+    bool IsWarmupInProgress { get; }
+
+    /// <summary>
     /// Ensures local AI services are loaded and ready in deterministic order:
     /// default llama-cpp chat target first, then non-chat local services.
     /// </summary>
@@ -38,6 +45,10 @@ public interface ILocalAiStartupWarmupService
 
 public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 {
+    private int _warmupInProgress;
+
+    public bool IsWarmupInProgress => Volatile.Read(ref _warmupInProgress) > 0;
+
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
     private static readonly string[] AuxiliaryServiceLoadOrder =
     {
@@ -76,12 +87,20 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
     public async Task WarmupAllAsync(CancellationToken cancellationToken = default)
     {
-        // Hard requirement: LLM gets first claim on GPU memory before auxiliary
-        // local services are loaded.
-        await EnsureDefaultLlamaLoadedAsync(cancellationToken).ConfigureAwait(false);
+        Interlocked.Increment(ref _warmupInProgress);
+        try
+        {
+            // Hard requirement: LLM gets first claim on GPU memory before auxiliary
+            // local services are loaded.
+            await EnsureDefaultLlamaLoadedAsync(cancellationToken).ConfigureAwait(false);
 
-        // Keep auxiliary services ready at startup for indexing/chat inputs.
-        await EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
+            // Keep auxiliary services ready at startup for indexing/chat inputs.
+            await EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _warmupInProgress);
+        }
     }
 
     public async Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default)
