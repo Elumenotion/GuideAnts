@@ -165,11 +165,14 @@ public class NotebookFileSyncEndpointsTests
         }));
         await Task.WhenAll(syncTasks);
 
-        // Assert: exactly one file in DB and list
+        // Assert: exactly one row for the concurrently-created file.
+        // Other notebook files may already exist (for example guide resource copies).
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        
-        int count = await db.NotebookFiles.CountAsync(nf => nf.NotebookId == notebook.Id);
+
+        int count = await db.NotebookFiles.CountAsync(nf =>
+            nf.NotebookId == notebook.Id &&
+            nf.RelativePath == "concurrent.txt");
         count.Should().Be(1);
     }
 

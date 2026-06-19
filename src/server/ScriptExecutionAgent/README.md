@@ -179,6 +179,7 @@ For Azure Container Apps deployment:
 - Paths are canonicalized and rejected if they escape `FILE_STORAGE_ROOT` or notebook scope.
 - Reparse-point (symlink/junction) pivots in the authorized path chain are rejected.
 - On Linux, script/listing operations run under notebook-scoped low-privilege identities via `setpriv`.
+- When a notebook has registered host-folder mounts (`.guideants/mounts.json`), execution automatically uses compatibility mode (no notebook identity isolation) to avoid host-mount permission drift.
 
 ## Troubleshooting
 

@@ -114,14 +114,11 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId))
                 .ToHashSet();
 
-            // Check if any active operation
-            var activeOp = _operations.Values.FirstOrDefault(o => o.State == "queued" || o.State == "unloading" || o.State == "loading" || o.State == "verifying");
-            if (activeOp != null)
-            {
-                status.State = "loading";
-                status.ActiveOperation = activeOp;
-            }
-            else if (requiredRouterIds.IsSubsetOf(loadedRouterIds))
+            // Treat "required models are already loaded" as the highest-priority truth.
+            // We intentionally prefer this over an in-flight operation marker because
+            // operation state can remain "loading" while auxiliary services are still
+            // warming up, and chat should not be blocked in that phase.
+            if (requiredRouterIds.IsSubsetOf(loadedRouterIds))
             {
                 status.State = "ready";
             }
@@ -135,7 +132,25 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             }
             else
             {
-                status.State = "requires_load";
+                // Check if any active operation
+                var activeOp = _operations.Values.FirstOrDefault(o => o.State == "queued" || o.State == "unloading" || o.State == "loading" || o.State == "verifying");
+                if (activeOp != null)
+                {
+                    status.State = "loading";
+                    status.ActiveOperation = activeOp;
+                }
+                else if (IsExternalLoadInProgress(requiredRouterIds, routerState))
+                {
+                    status.State = "loading";
+                    status.ActiveOperation = CreateExternalLoadingOperation(
+                        _localAiWarmupService.IsWarmupInProgress
+                            ? "loading"
+                            : ResolveExternalLoadPhase(routerState, requiredRouterIds));
+                }
+                else
+                {
+                    status.State = "requires_load";
+                }
             }
         }
         catch (Exception ex)
