@@ -249,7 +249,9 @@ public sealed class HostMountPathGuardEndpointTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, payload);
         using var doc = JsonDocument.Parse(payload);
-        var standardOutput = doc.RootElement.GetProperty("standardOutput").GetString();
+        var standardOutput = doc.RootElement.TryGetProperty("standardOutput", out var camel)
+            ? camel.GetString()
+            : doc.RootElement.GetProperty("StandardOutput").GetString();
         standardOutput.Should().NotBeNullOrWhiteSpace();
         standardOutput!.Trim().Should().Be("0");
     }
