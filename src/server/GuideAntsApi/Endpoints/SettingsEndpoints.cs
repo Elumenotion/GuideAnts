@@ -107,6 +107,8 @@ public static class SettingsEndpoints
         group.MapPut("/chat-defaults", async (
             [FromBody] UpdateChatDefaultsRequest request,
             IApplicationSettingsService settingsService,
+            GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService localAiWarmup,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             var update = new UpdateSettingsSectionRequest(request.RowVersion, BuildChatDefaultsPayload(request));
@@ -121,7 +123,25 @@ public static class SettingsEndpoints
                 return Results.BadRequest(new { errors = result.ValidationErrors });
             }
 
-            return result.Section is null ? Results.NotFound() : Results.Ok(MapChatDefaults(result.Section));
+            if (result.Section is null)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                await localAiWarmup.UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
+                await localAiWarmup.EnsureDefaultLlamaLoadedAsync(cancellationToken).ConfigureAwait(false);
+                await localAiWarmup.EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                loggerFactory
+                    .CreateLogger("ChatDefaultsRuntimeReload")
+                    .LogWarning(ex, "Failed to reload default local llama model after chat-defaults update.");
+            }
+
+            return Results.Ok(MapChatDefaults(result.Section));
         })
         .WithName("UpdateChatDefaults")
         .Produces<ChatDefaultsDto>(StatusCodes.Status200OK)
@@ -1215,6 +1235,7 @@ public static class SettingsEndpoints
             IConfiguration configuration,
             ILlamaServerRuntimeClient llamaClient,
             ILlamaRuntimeCoordinator coordinator,
+            GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService localAiWarmup,
             CancellationToken cancellationToken) =>
         {
             if (!HasConfiguredLlamaRuntime(configuration))
@@ -1244,13 +1265,31 @@ public static class SettingsEndpoints
             }
 
             await using var _ = handle;
+            var auxiliaryServicesWereUnloaded = false;
             try
             {
+                await localAiWarmup.UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
+                auxiliaryServicesWereUnloaded = true;
+
                 await llamaClient.LoadModelAsync(request.RouterModelId, loadParams: null, cancellationToken);
+
+                await localAiWarmup.EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
                 return Results.Ok();
             }
             catch (Exception ex)
             {
+                if (auxiliaryServicesWereUnloaded)
+                {
+                    try
+                    {
+                        await localAiWarmup.EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Preserve the original runtime load failure.
+                    }
+                }
+
                 return Results.Problem(ex.Message);
             }
         })

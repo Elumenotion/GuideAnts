@@ -9,7 +9,8 @@ public record NotebookFileDto(
     string FileHash,
     Guid? OriginContentFileVersionId,
     bool Index,
-    bool IsIndexed
+    bool IsIndexed,
+    bool IsLinked = false
 );
 
 public record NotebookFolderTreeDto(

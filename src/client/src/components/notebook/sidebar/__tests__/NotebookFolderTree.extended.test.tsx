@@ -816,6 +816,12 @@ describe('NotebookFolderTree extended coverage', () => {
         .mockRejectedValueOnce(new Error('fail'));
 
       renderTree();
+      const docsRow = screen.getByText('Docs').closest('.group');
+      const docsToggle = docsRow?.querySelector('button');
+      expect(docsToggle).toBeInTheDocument();
+      if (docsToggle) {
+        await user.click(docsToggle);
+      }
       fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
       fireEvent.contextMenu(screen.getByText('readme.txt'));
       await user.click(await findPortalButton(/Download \d+ File/));

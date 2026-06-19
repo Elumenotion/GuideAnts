@@ -97,6 +97,7 @@ public enum ContentUploadType
 } 
 
 public record AttachmentDto(
-    Guid NotebookFileId,
-    ContentUploadType UploadType
+    Guid? NotebookFileId,
+    ContentUploadType UploadType,
+    string? RelativePath = null
 ); 

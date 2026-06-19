@@ -175,10 +175,56 @@ public static class NotebookConversationsEndpoints
             var runtimeStatus = await runtimeService.GetRuntimeStatusAsync(notebookId, targetAssistantId, CancellationToken.None);
             if (runtimeStatus.State != "ready" && runtimeStatus.RequiredModels.Any(m => m.RuntimeConfig != null))
             {
-                return Results.Conflict(new { 
-                    error = "Local models are not ready.",
-                    runtimeStatus
-                });
+                // Auto-reload on model switching: if the required local llama
+                // model is not loaded, start (or join) the notebook runtime load
+                // operation and wait for completion before streaming.
+                var loadOperation = await runtimeService
+                    .StartLoadOperationAsync(notebookId, targetAssistantId, CancellationToken.None);
+
+                if (!string.Equals(loadOperation.State, "ready", StringComparison.OrdinalIgnoreCase))
+                {
+                    var timeoutAt = DateTime.UtcNow.AddMinutes(15);
+                    while (DateTime.UtcNow < timeoutAt)
+                    {
+                        var current = await runtimeService.GetOperationStatusAsync(
+                            notebookId,
+                            loadOperation.OperationId,
+                            CancellationToken.None);
+
+                        if (current is not null)
+                        {
+                            loadOperation = current;
+                        }
+
+                        if (string.Equals(loadOperation.State, "ready", StringComparison.OrdinalIgnoreCase))
+                        {
+                            break;
+                        }
+
+                        if (IsTerminalFailedState(loadOperation.State))
+                        {
+                            return Results.Conflict(new
+                            {
+                                error = "Local model load failed.",
+                                runtimeStatus,
+                                operation = loadOperation
+                            });
+                        }
+
+                        await Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None);
+                    }
+                }
+
+                runtimeStatus = await runtimeService.GetRuntimeStatusAsync(notebookId, targetAssistantId, CancellationToken.None);
+                if (runtimeStatus.State != "ready")
+                {
+                    return Results.Conflict(new
+                    {
+                        error = "Local models are not ready.",
+                        runtimeStatus,
+                        operation = loadOperation
+                    });
+                }
             }
 
             ctx.Response.Headers["Content-Type"] = "text/event-stream";
@@ -375,6 +421,12 @@ public static class NotebookConversationsEndpoints
     public record CreateConversationRequest(string Title);
     public record RenameConversationRequest(string Title);
     public record EditMessageRequest(string Content);
+
+    private static bool IsTerminalFailedState(string? state)
+    {
+        return string.Equals(state, "failed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state, "invalid", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string ConvertConversationToMarkdown(NotebookConversationWithMessagesDto conversation)
     {

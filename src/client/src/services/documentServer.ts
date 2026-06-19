@@ -14,8 +14,9 @@ export interface DocumentServerCapabilities {
 export interface DocumentServerEditorConfigRequest {
     scope: DocumentServerScope;
     projectId: string;
-    fileId: string;
+    fileId?: string;
     notebookId?: string;
+    relativePath?: string;
     canEdit: boolean;
     userId?: string;
     userName?: string;
@@ -90,6 +91,7 @@ export async function createDocumentServerEditorConfig(
         projectId: request.projectId,
         notebookId: request.notebookId,
         fileId: request.fileId,
+        relativePath: request.relativePath,
         canEdit: request.canEdit,
     });
     const response = await fetchWithTimeout(
@@ -111,6 +113,7 @@ export async function createDocumentServerEditorConfig(
             message,
             scope: request.scope,
             fileId: request.fileId,
+            relativePath: request.relativePath,
         });
         throw new Error(message);
     }
@@ -119,6 +122,7 @@ export async function createDocumentServerEditorConfig(
     console.info('[DocumentServer] editor-config request success', {
         scope: request.scope,
         fileId: request.fileId,
+        relativePath: request.relativePath,
         documentServerUrl: payload.documentServerUrl,
     });
     return payload;

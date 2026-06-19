@@ -18,6 +18,7 @@ public interface IDocumentServerService
         Guid? projectId,
         Guid? fileId,
         Guid? notebookId,
+        string? relativePath,
         int? versionNumber,
         CancellationToken cancellationToken);
 
@@ -27,6 +28,7 @@ public interface IDocumentServerService
         Guid? projectId,
         Guid? fileId,
         Guid? notebookId,
+        string? relativePath,
         DocumentServerCallbackPayload payload,
         CancellationToken cancellationToken);
 }
@@ -34,11 +36,12 @@ public interface IDocumentServerService
 public sealed record DocumentServerEditorConfigRequest(
     string Scope,
     Guid ProjectId,
-    Guid FileId,
+    Guid? FileId,
     Guid? NotebookId,
     bool CanEdit,
     string? UserId,
-    string? UserName);
+    string? UserName,
+    string? RelativePath = null);
 
 public sealed record DocumentServerEditorConfigResult(
     string DocumentServerUrl,

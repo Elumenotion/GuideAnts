@@ -45,7 +45,7 @@ describe('FileContents DocumentServer gating', () => {
   it('does not request DocumentServer capabilities for non-office content', async () => {
     isDocumentServerSupportedByContentTypeMock.mockReturnValue(false);
     getContentFileContentMock.mockResolvedValue({
-      blob: new Blob(['binary'], { type: 'application/octet-stream' }),
+      blob: new Blob([new Uint8Array([0x00, 0xff, 0x7f, 0x10])], { type: 'application/octet-stream' }),
       contentType: 'application/octet-stream',
       fileName: 'archive.bin',
     });

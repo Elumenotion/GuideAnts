@@ -261,15 +261,18 @@ try
         fileGroup.MapPost("/upload", async (
             Guid projectId,
             Guid notebookId,
-            [FromForm] IFormFileCollection files,
-            [FromForm] string targetRelativePath,
-            [FromForm] bool index,
+            HttpContext ctx,
             INotebookFileService fsService) =>
         {
-            if (files == null || files.Count == 0)
+            if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
             {
                 return Results.BadRequest("No files were provided for upload.");
             }
+
+            var targetRelativePath = ctx.Request.Form["targetRelativePath"].ToString();
+            var index = ctx.Request.Form.ContainsKey("index") && bool.TryParse(ctx.Request.Form["index"], out var indexValue) && indexValue;
+            var files = ctx.Request.Form.Files;
+
             try
             {
                 var result = await fsService.UploadFilesAsync(projectId, notebookId, files, targetRelativePath, index);

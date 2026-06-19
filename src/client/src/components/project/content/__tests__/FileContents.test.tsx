@@ -140,13 +140,40 @@ describe('FileContents', () => {
     });
 
     it('shows fallback for unsupported content type', async () => {
-        const blob = new Blob([], { type: 'application/octet-stream' });
+        const blob = new Blob([new Uint8Array([0x00, 0xff, 0x7f, 0x10])], { type: 'application/octet-stream' });
         getContentFileContent().mockResolvedValueOnce({ blob, contentType: 'application/octet-stream', fileName: 'test.bin' });
 
         render(<FileContents projectId="p1" fileId="f1" contentType="application/octet-stream" />);
 
         await waitFor(() => {
             expect(screen.getByText('Preview not available for this file type (application/octet-stream)')).toBeInTheDocument();
+        });
+    });
+
+    it('renders text preview for unknown textual content type', async () => {
+        const encoder = new TextEncoder();
+        const decoder = new TextDecoder();
+        const createBlobLike = (bytes: Uint8Array): Blob => ({
+            size: bytes.length,
+            type: 'application/octet-stream',
+            text: async () => decoder.decode(bytes),
+            arrayBuffer: async () => {
+                const copy = bytes.slice();
+                return copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength);
+            },
+            slice: (start?: number, end?: number) => {
+                const s = typeof start === 'number' ? Math.max(0, start) : 0;
+                const e = typeof end === 'number' ? Math.max(s, end) : bytes.length;
+                return createBlobLike(new Uint8Array(bytes.subarray(s, e)));
+            },
+        } as unknown as Blob);
+        const blob = createBlobLike(encoder.encode('plain text payload'));
+        getContentFileContent().mockResolvedValueOnce({ blob, contentType: 'application/octet-stream', fileName: 'notes.unknown' });
+
+        render(<FileContents projectId="p1" fileId="f1" contentType="application/octet-stream" />);
+
+        await waitFor(() => {
+            expect(screen.getByText('plain text payload')).toBeInTheDocument();
         });
     });
 });

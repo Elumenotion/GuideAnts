@@ -3,9 +3,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using FluentAssertions;
 using Moq;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Core;
 using GuideAnts.Usage;
@@ -23,9 +25,17 @@ public class NotebookFileServiceTests
         return new ApplicationDbContext(options);
     }
 
-    private static IConfiguration CreateConfig(string storagePath)
+    private static IConfiguration CreateConfig(string storagePath, IReadOnlyDictionary<string, string?>? overrides = null)
     {
         var dict = new Dictionary<string, string?> { ["FileStorage:Path"] = storagePath };
+        if (overrides != null)
+        {
+            foreach (var kvp in overrides)
+            {
+                dict[kvp.Key] = kvp.Value;
+            }
+        }
+
         return new ConfigurationBuilder().AddInMemoryCollection(dict!).Build();
     }
 
@@ -49,10 +59,11 @@ public class NotebookFileServiceTests
     private static NotebookFileService CreateService(
         ApplicationDbContext ctx,
         string storagePath,
-        IMarkdownExtractionService? markdownExtractionService = null)
+        IMarkdownExtractionService? markdownExtractionService = null,
+        IReadOnlyDictionary<string, string?>? configOverrides = null)
     {
         var scopeFactory = CreateScopeFactory(ctx);
-        var config = CreateConfig(storagePath);
+        var config = CreateConfig(storagePath, configOverrides);
         markdownExtractionService ??= Mock.Of<IMarkdownExtractionService>();
 
         var sync = new NotebookFileSyncService(
@@ -72,6 +83,22 @@ public class NotebookFileServiceTests
             CreateLineageMock(),
             CreateContentFileServiceMock(),
             markdownExtractionService);
+    }
+
+    private static IEnumerable<NotebookFileDto> EnumerateFilesRecursively(NotebookFolderTreeDto node)
+    {
+        foreach (var file in node.Files)
+        {
+            yield return file;
+        }
+
+        foreach (var folder in node.SubFolders)
+        {
+            foreach (var file in EnumerateFilesRecursively(folder))
+            {
+                yield return file;
+            }
+        }
     }
 
     [TestMethod]
@@ -371,6 +398,206 @@ public class NotebookFileServiceTests
             using var reader = new StreamReader(result.stream);
             var content = await reader.ReadToEndAsync();
             Assert.AreEqual("hello", content);
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetFolderTreeAsync_IncludesLinkedMountFilesWithoutDbRows()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+
+            var mountId = Guid.NewGuid();
+            var mountKey = HostFolderMountKeyDeriver.DeriveMountKey(mountId);
+            var notebookRoot = Path.Combine(tmpDir, project.Id.ToString(), "notebooks", notebook.Id.ToString());
+            var linkRoot = Path.Combine(notebookRoot, "LinkedRoot");
+            Directory.CreateDirectory(Path.Combine(linkRoot, "docs"));
+            await File.WriteAllTextAsync(Path.Combine(linkRoot, "docs", "guide.txt"), "hello from linked");
+
+            ctx.HostFolderMounts.Add(new HostFolderMount
+            {
+                Id = mountId,
+                ProjectId = project.Id,
+                Scope = HostFolderMountScope.Notebook,
+                NotebookId = notebook.Id,
+                SourceKind = SourceKind.LocalPath,
+                DisplayName = "LinkedRoot",
+                LeafName = "LinkedRoot",
+                MountKey = mountKey,
+                SourceSpec = @"D:\linked\root",
+                ContainerSourcePath = HostFolderMountKeyDeriver.DeriveContainerSourcePath(mountKey),
+                Status = HostFolderMountStatus.Active,
+                CreatedByUserId = Guid.NewGuid(),
+                Links =
+                [
+                    new HostFolderMountLink
+                    {
+                        NotebookId = notebook.Id,
+                        LinkRelativePath = "LinkedRoot",
+                        LinkPhysicalPath = linkRoot,
+                        Status = HostFolderMountLinkStatus.Linked
+                    }
+                ]
+            });
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, tmpDir);
+            var tree = await svc.GetFolderTreeAsync(project.Id, notebook.Id);
+
+            tree.Should().NotBeNull();
+            var linkedFolder = tree!.SubFolders.SingleOrDefault(f => f.RelativePath == "LinkedRoot");
+            linkedFolder.Should().NotBeNull();
+            linkedFolder!.SubFolders.Should().ContainSingle(f => f.RelativePath == "LinkedRoot/docs");
+            linkedFolder.SubFolders.Single().Files.Should().ContainSingle(f =>
+                f.RelativePath == "LinkedRoot/docs/guide.txt" && f.IsLinked);
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetFolderTreeAsync_LinkedMountEnumeration_RespectsConfiguredMaxFiles()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+
+            var mountId = Guid.NewGuid();
+            var mountKey = HostFolderMountKeyDeriver.DeriveMountKey(mountId);
+            var notebookRoot = Path.Combine(tmpDir, project.Id.ToString(), "notebooks", notebook.Id.ToString());
+            var linkRoot = Path.Combine(notebookRoot, "LinkedRoot");
+            Directory.CreateDirectory(Path.Combine(linkRoot, "docs"));
+            await File.WriteAllTextAsync(Path.Combine(linkRoot, "docs", "a.txt"), "a");
+            await File.WriteAllTextAsync(Path.Combine(linkRoot, "docs", "b.txt"), "b");
+            await File.WriteAllTextAsync(Path.Combine(linkRoot, "docs", "c.txt"), "c");
+
+            ctx.HostFolderMounts.Add(new HostFolderMount
+            {
+                Id = mountId,
+                ProjectId = project.Id,
+                Scope = HostFolderMountScope.Notebook,
+                NotebookId = notebook.Id,
+                SourceKind = SourceKind.LocalPath,
+                DisplayName = "LinkedRoot",
+                LeafName = "LinkedRoot",
+                MountKey = mountKey,
+                SourceSpec = @"D:\linked\root",
+                ContainerSourcePath = HostFolderMountKeyDeriver.DeriveContainerSourcePath(mountKey),
+                Status = HostFolderMountStatus.Active,
+                CreatedByUserId = Guid.NewGuid(),
+                Links =
+                [
+                    new HostFolderMountLink
+                    {
+                        NotebookId = notebook.Id,
+                        LinkRelativePath = "LinkedRoot",
+                        LinkPhysicalPath = linkRoot,
+                        Status = HostFolderMountLinkStatus.Linked
+                    }
+                ]
+            });
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(
+                ctx,
+                tmpDir,
+                configOverrides: new Dictionary<string, string?>
+                {
+                    ["FileStorage:LinkedMountTreeMaxFiles"] = "2",
+                    ["FileStorage:LinkedMountTreeMaxDepth"] = "8",
+                    ["FileStorage:LinkedMountTreeScanBudgetMs"] = "10000",
+                    ["FileStorage:LinkedMountTreeCacheSeconds"] = "1"
+                });
+            var tree = await svc.GetFolderTreeAsync(project.Id, notebook.Id);
+
+            tree.Should().NotBeNull();
+            var linkedFiles = EnumerateFilesRecursively(tree!)
+                .Where(f => f.IsLinked && f.RelativePath.StartsWith("LinkedRoot/", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            linkedFiles.Should().HaveCount(2);
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetFileContentStreamAsync_ReturnsLinkedMountFile_WhenNoDbRecordExists()
+    {
+        var tmpDir = Path.Combine(Path.GetTempPath(), "wf_tests_" + Guid.NewGuid());
+        Directory.CreateDirectory(tmpDir);
+
+        try
+        {
+            await using var ctx = CreateContext();
+            var project = new Project { Id = Guid.NewGuid(), Title = "P" };
+            var notebook = new Notebook { Id = Guid.NewGuid(), ProjectId = project.Id, Title = "NB", NotebookTemplateId = Guid.NewGuid() };
+            ctx.Projects.Add(project);
+            ctx.Notebooks.Add(notebook);
+
+            var mountId = Guid.NewGuid();
+            var mountKey = HostFolderMountKeyDeriver.DeriveMountKey(mountId);
+            var notebookRoot = Path.Combine(tmpDir, project.Id.ToString(), "notebooks", notebook.Id.ToString());
+            var linkRoot = Path.Combine(notebookRoot, "LinkedRoot");
+            Directory.CreateDirectory(Path.Combine(linkRoot, "docs"));
+            await File.WriteAllTextAsync(Path.Combine(linkRoot, "docs", "guide.txt"), "hello from linked");
+
+            ctx.HostFolderMounts.Add(new HostFolderMount
+            {
+                Id = mountId,
+                ProjectId = project.Id,
+                Scope = HostFolderMountScope.Notebook,
+                NotebookId = notebook.Id,
+                SourceKind = SourceKind.LocalPath,
+                DisplayName = "LinkedRoot",
+                LeafName = "LinkedRoot",
+                MountKey = mountKey,
+                SourceSpec = @"D:\linked\root",
+                ContainerSourcePath = HostFolderMountKeyDeriver.DeriveContainerSourcePath(mountKey),
+                Status = HostFolderMountStatus.Active,
+                CreatedByUserId = Guid.NewGuid(),
+                Links =
+                [
+                    new HostFolderMountLink
+                    {
+                        NotebookId = notebook.Id,
+                        LinkRelativePath = "LinkedRoot",
+                        LinkPhysicalPath = linkRoot,
+                        Status = HostFolderMountLinkStatus.Linked
+                    }
+                ]
+            });
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, tmpDir);
+            var result = await svc.GetFileContentStreamAsync(project.Id, notebook.Id, "LinkedRoot/docs/guide.txt");
+
+            result.contentType.Should().Be("text/plain");
+            using var reader = new StreamReader(result.stream);
+            (await reader.ReadToEndAsync()).Should().Be("hello from linked");
         }
         finally
         {

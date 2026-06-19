@@ -167,6 +167,7 @@ public static class DocumentServerEndpoints
             [FromQuery] Guid? projectId,
             [FromQuery] Guid? fileId,
             [FromQuery] Guid? notebookId,
+            [FromQuery] string? relativePath,
             [FromQuery] int? versionNumber,
             HttpContext httpContext,
             IDocumentServerService service,
@@ -175,16 +176,17 @@ public static class DocumentServerEndpoints
         {
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             logger.LogInformation(
-                "DocumentServer download requested. tokenLength={TokenLength} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} versionNumber={VersionNumber}",
+                "DocumentServer download requested. tokenLength={TokenLength} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} relativePath={RelativePath} versionNumber={VersionNumber}",
                 token?.Length ?? 0,
                 LogValueSanitizer.Sanitize(scope),
                 LogValueSanitizer.Sanitize(projectId),
                 LogValueSanitizer.Sanitize(fileId),
                 LogValueSanitizer.Sanitize(notebookId),
+                LogValueSanitizer.Sanitize(relativePath),
                 versionNumber);
             try
             {
-                var result = await service.GetDownloadAsync(token, scope, projectId, fileId, notebookId, versionNumber, cancellationToken);
+                var result = await service.GetDownloadAsync(token, scope, projectId, fileId, notebookId, relativePath, versionNumber, cancellationToken);
                 if (result == null)
                 {
                     logger.LogWarning("DocumentServer download target not found.");
@@ -211,6 +213,7 @@ public static class DocumentServerEndpoints
             [FromQuery] Guid? projectId,
             [FromQuery] Guid? fileId,
             [FromQuery] Guid? notebookId,
+            [FromQuery] string? relativePath,
             [FromBody] DocumentServerCallbackPayload payload,
             HttpContext httpContext,
             IDocumentServerService service,
@@ -219,13 +222,18 @@ public static class DocumentServerEndpoints
         {
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             logger.LogInformation(
-                "DocumentServer callback requested. status={Status} hasUrl={HasUrl} tokenLength={TokenLength}",
+                "DocumentServer callback requested. status={Status} hasUrl={HasUrl} tokenLength={TokenLength} scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} relativePath={RelativePath}",
                 LogValueSanitizer.Sanitize(payload.Status),
                 !string.IsNullOrWhiteSpace(payload.Url),
-                token?.Length ?? 0);
+                token?.Length ?? 0,
+                LogValueSanitizer.Sanitize(scope),
+                LogValueSanitizer.Sanitize(projectId),
+                LogValueSanitizer.Sanitize(fileId),
+                LogValueSanitizer.Sanitize(notebookId),
+                LogValueSanitizer.Sanitize(relativePath));
             try
             {
-                await service.HandleCallbackAsync(token, scope, projectId, fileId, notebookId, payload, cancellationToken);
+                await service.HandleCallbackAsync(token, scope, projectId, fileId, notebookId, relativePath, payload, cancellationToken);
                 return Results.Ok(new { error = 0 });
             }
             catch (InvalidOperationException ex)

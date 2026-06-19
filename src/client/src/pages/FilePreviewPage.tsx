@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { notebookFilesApi } from '../services/notebookFiles';
-import { NotebookFileDto } from '../types/notebook';
+import { NotebookFileDto, NotebookFolderTreeDto } from '../types/notebook';
 import { FilePreviewOverlay } from '../components/notebook/content/FilePreviewOverlay';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -22,6 +22,12 @@ const FilePreviewPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const flattenTreeFiles = (node: NotebookFolderTreeDto | null): NotebookFileDto[] => {
+      if (!node) return [];
+      const nested = node.subFolders.flatMap(flattenTreeFiles);
+      return [...node.files, ...nested];
+    };
+
     const fetchFile = async () => {
       if (!projectId || !notebookId || !path) {
         setError('Missing required parameters');
@@ -31,9 +37,8 @@ const FilePreviewPage: React.FC = () => {
 
       try {
         setLoading(true);
-        // We need the file DTO. Currently we fetch all files and find the one matching the path.
-        // This is not ideal for huge notebooks but works with existing API.
-        const files = await notebookFilesApi.listFiles(projectId, notebookId);
+        const folderTree = await notebookFilesApi.getFolderTree(projectId, notebookId);
+        const files = flattenTreeFiles(folderTree);
         setAllFiles(files);
         const foundFile = files.find(f => f.relativePath === path || f.id === path); // Check ID too just in case
         

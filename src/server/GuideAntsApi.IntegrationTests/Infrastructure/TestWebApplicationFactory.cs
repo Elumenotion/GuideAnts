@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Auth;
+using GuideAntsApi.Services.Bootstrap;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using AntRunner.Chat.Abstractions;
@@ -92,6 +93,11 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
             services.RemoveAll<IChatCompletionClientFactory>();
             services.AddSingleton<IChatCompletionClientFactory, FakeChatCompletionClientFactory>();
 
+            // Integration tests should not block on local AI auxiliary service
+            // warmup/load-unload polling when calling settings endpoints.
+            services.RemoveAll<ILocalAiStartupWarmupService>();
+            services.AddSingleton<ILocalAiStartupWarmupService, NoOpLocalAiStartupWarmupService>();
+
             services
                 .AddAuthentication(options =>
                 {
@@ -144,4 +150,15 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
     {
         await base.DisposeAsync();
     }
-} 
+
+    private sealed class NoOpLocalAiStartupWarmupService : ILocalAiStartupWarmupService
+    {
+        public Task WarmupAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task EnsureAuxiliaryServicesLoadedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task UnloadAuxiliaryServicesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+}

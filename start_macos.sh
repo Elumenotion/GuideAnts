@@ -10,6 +10,9 @@ FIX_MODE="0"            # 0 | 1
 BACKEND_OVERRIDE=""     # cpu | cuda13 | rocm | slim
 COMPOSE_MODE="ghcr"     # ghcr | local
 HEALTH_URL="http://localhost:5107/"
+HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
+DOCKER_DIRECTORY="docker"
+START_COMMAND="start_macos.sh"
 
 usage() {
   cat <<'EOF'
@@ -32,6 +35,10 @@ save_state() {
   cat >"$STATE_FILE" <<EOF
 BACKEND=${SELECTED_BACKEND:-}
 COMPOSE_MODE=${COMPOSE_MODE}
+COMPOSE_FILE=${COMPOSE_FILE}
+HOST_MOUNT_OVERRIDE_FILE=${HOST_MOUNT_OVERRIDE_FILE}
+DOCKER_DIRECTORY=${DOCKER_DIRECTORY}
+START_COMMAND=${START_COMMAND}
 LAST_RUN_EPOCH=$(date +%s)
 EOF
 }
@@ -152,7 +159,15 @@ if [[ "$(uname -m)" == "arm64" ]]; then
 fi
 
 pushd "$DOCKER_DIR" >/dev/null
-docker compose -f "$COMPOSE_FILE" up -d
+compose_args=(-f "$COMPOSE_FILE")
+if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
+  if docker compose -f "$COMPOSE_FILE" -f "$HOST_MOUNT_OVERRIDE_FILE" config >/dev/null 2>&1; then
+    compose_args+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
+  else
+    warn "Ignoring invalid host mount override docker/$HOST_MOUNT_OVERRIDE_FILE. Recreate mounts to regenerate it."
+  fi
+fi
+docker compose "${compose_args[@]}" up -d
 popd >/dev/null
 
 if wait_for_health; then

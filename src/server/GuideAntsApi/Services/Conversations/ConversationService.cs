@@ -6,6 +6,7 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using System.Runtime.CompilerServices;
 using GuideAntsApi.Services.Auth;
+using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.Conversations.Attachments;
 using GuideAntsApi.Services.Conversations.Commands;
@@ -13,6 +14,7 @@ using GuideAntsApi.Services.Conversations.Mapping;
 using GuideAntsApi.Services.Conversations.Queries;
 using GuideAntsApi.Services.Conversations.Streaming;
 using GuideAntsApi.Services.Conversations.Persistence;
+using GuideAntsApi.Services.Components;
 
 namespace GuideAntsApi.Services.Conversations;
 
@@ -25,6 +27,7 @@ public class ConversationService : IConversationService
     private readonly IConversationCommandService _commandService;
     private readonly IConversationHistoryBuilder _historyBuilder;
     private readonly IAttachmentContentService _attachmentContentService;
+    private readonly INotebookFileService? _notebookFileService;
     private readonly IConversationUndoService _undoService;
     private readonly PrivateConversationStreamPolicy _streamPolicy;
     private readonly IConversationStreamEngine _streamEngine;
@@ -39,6 +42,7 @@ public class ConversationService : IConversationService
         IConversationCommandService commandService,
         IConversationHistoryBuilder historyBuilder,
         IAttachmentContentService attachmentContentService,
+        INotebookFileService? notebookFileService,
         IConversationUndoService undoService,
         PrivateConversationStreamPolicy streamPolicy,
         IConversationStreamEngine streamEngine,
@@ -52,6 +56,7 @@ public class ConversationService : IConversationService
         _commandService = commandService;
         _historyBuilder = historyBuilder;
         _attachmentContentService = attachmentContentService;
+        _notebookFileService = notebookFileService;
         _undoService = undoService;
         _streamPolicy = streamPolicy;
         _streamEngine = streamEngine;
@@ -275,20 +280,72 @@ public class ConversationService : IConversationService
             return;
         }
 
-        await _attachmentContentService.AddAttachmentsToUserMessageAsync(
-            ctx.UserMessage!.Id,
-            ctx.Conversation.NotebookId,
-            ctx.Request.Attachments,
-            ct);
-
         foreach (var attachment in ctx.Request.Attachments)
         {
-            var messages = await _attachmentContentService.CreateOpenAiMessagesFromNotebookFileAsync(attachment.NotebookFileId, ct);
-            foreach (var message in messages)
+            if (attachment.NotebookFileId.HasValue)
             {
-                ctx.PreviousMessages.Add(message);
+                await _attachmentContentService.AddAttachmentsToUserMessageAsync(
+                    ctx.UserMessage!.Id,
+                    ctx.Conversation.NotebookId,
+                    [attachment],
+                    ct);
+
+                var messages = await _attachmentContentService.CreateOpenAiMessagesFromNotebookFileAsync(attachment.NotebookFileId.Value, ct);
+                foreach (var message in messages)
+                {
+                    ctx.PreviousMessages.Add(message);
+                }
+                continue;
             }
+
+            if (string.IsNullOrWhiteSpace(attachment.RelativePath))
+            {
+                continue;
+            }
+
+            if (_notebookFileService == null)
+            {
+                _logger.LogWarning(
+                    "Skipping path attachment because notebook file service is unavailable. relativePath={RelativePath}",
+                    LogValueSanitizer.Sanitize(attachment.RelativePath));
+                continue;
+            }
+
+            var normalizedPath = attachment.RelativePath.Replace("\\", "/").TrimStart('/');
+            var file = await _notebookFileService.GetFileAsync(
+                ctx.Conversation.Notebook.ProjectId,
+                ctx.Conversation.NotebookId,
+                normalizedPath);
+            if (file == null)
+            {
+                _logger.LogWarning(
+                    "Path attachment file not found for conversation send. notebookId={NotebookId} relativePath={RelativePath}",
+                    ctx.Conversation.NotebookId,
+                    LogValueSanitizer.Sanitize(normalizedPath));
+                continue;
+            }
+
+            await file.Value.Stream.DisposeAsync();
+            var attachmentPath = BuildAttachmentPathForChat(normalizedPath);
+            ctx.PreviousMessages.Add(new ChatMessage(AntRunner.Chat.Abstractions.ChatRole.User, $"Attachment: {attachmentPath}"));
         }
+    }
+
+    private static string BuildAttachmentPathForChat(string relativePath)
+    {
+        if (relativePath.StartsWith("Output/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("Output\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.GetFileName(relativePath);
+        }
+
+        if (relativePath.StartsWith("Runs/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("Runs\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.GetFileName(relativePath);
+        }
+
+        return $"../{relativePath.Replace("\\", "/").TrimStart('/')}";
     }
 
     private static ConversationStreamRunContext BuildRunContext(

@@ -7,6 +7,8 @@
     <Nullable>enable</Nullable>
     <VSTestLogger>trx</VSTestLogger>
     <VSTestResultsDirectory>$(MSBuildThisFileDirectory)/TestResults</VSTestResultsDirectory>
+    <!-- Runtime test volume trees (incl. container-path symlinks) must not participate in default globs. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);docker/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

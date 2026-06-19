@@ -112,6 +112,7 @@ internal static class ConversationTestServices
             commandService,
             historyBuilder,
             attachmentService,
+            Mock.Of<INotebookFileService>(),
             undoService,
             streamPolicy,
             streamEngine,

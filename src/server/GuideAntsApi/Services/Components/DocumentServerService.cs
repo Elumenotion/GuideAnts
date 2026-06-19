@@ -110,6 +110,7 @@ public sealed class DocumentServerService : IDocumentServerService
                 ProjectId: request.ProjectId,
                 FileId: request.FileId,
                 NotebookId: request.NotebookId,
+                RelativePath: request.RelativePath,
                 VersionNumber: context.VersionNumber),
                 "download",
                 TimeSpan.FromMinutes(10));
@@ -118,7 +119,8 @@ public sealed class DocumentServerService : IDocumentServerService
                 Scope: request.Scope,
                 ProjectId: request.ProjectId,
                 FileId: request.FileId,
-                NotebookId: request.NotebookId),
+                NotebookId: request.NotebookId,
+                RelativePath: request.RelativePath),
                 "callback",
                 TimeSpan.FromHours(1));
 
@@ -129,15 +131,20 @@ public sealed class DocumentServerService : IDocumentServerService
         {
             var queryScope = Uri.EscapeDataString(request.Scope);
             var queryProjectId = Uri.EscapeDataString(request.ProjectId.ToString("D"));
-            var queryFileId = Uri.EscapeDataString(request.FileId.ToString("D"));
+            var queryFileId = request.FileId.HasValue
+                ? $"&fileId={Uri.EscapeDataString(request.FileId.Value.ToString("D"))}"
+                : string.Empty;
             var notebookSegment = request.NotebookId.HasValue
                 ? $"&notebookId={Uri.EscapeDataString(request.NotebookId.Value.ToString("D"))}"
+                : string.Empty;
+            var relativePathSegment = !string.IsNullOrWhiteSpace(request.RelativePath)
+                ? $"&relativePath={Uri.EscapeDataString(request.RelativePath)}"
                 : string.Empty;
             var versionSegment = context.VersionNumber.HasValue
                 ? $"&versionNumber={context.VersionNumber.Value.ToString(CultureInfo.InvariantCulture)}"
                 : string.Empty;
-            downloadUrl = $"{apiBaseUrl}/api/documentserver/download?scope={queryScope}&projectId={queryProjectId}&fileId={queryFileId}{notebookSegment}{versionSegment}";
-            callbackUrl = $"{apiBaseUrl}/api/documentserver/callback?scope={queryScope}&projectId={queryProjectId}&fileId={queryFileId}{notebookSegment}";
+            downloadUrl = $"{apiBaseUrl}/api/documentserver/download?scope={queryScope}&projectId={queryProjectId}{queryFileId}{notebookSegment}{relativePathSegment}{versionSegment}";
+            callbackUrl = $"{apiBaseUrl}/api/documentserver/callback?scope={queryScope}&projectId={queryProjectId}{queryFileId}{notebookSegment}{relativePathSegment}";
         }
         var documentType = GetDocumentType(context.FileName);
         var key = BuildDocumentKey(context);
@@ -146,11 +153,12 @@ public sealed class DocumentServerService : IDocumentServerService
         var userName = string.IsNullOrWhiteSpace(request.UserName) ? "GuideAnts User" : request.UserName;
         var userId = string.IsNullOrWhiteSpace(request.UserId) ? "guideants-user" : request.UserId;
         _logger.LogInformation(
-            "DocumentServer editor-config built. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} fileName={FileName} documentType={DocumentType} key={DocumentKey} apiBaseUrl={ApiBaseUrl} downloadUrl={DownloadUrl} callbackUrl={CallbackUrl}",
+            "DocumentServer editor-config built. scope={Scope} projectId={ProjectId} fileId={FileId} notebookId={NotebookId} relativePath={RelativePath} fileName={FileName} documentType={DocumentType} key={DocumentKey} apiBaseUrl={ApiBaseUrl} downloadUrl={DownloadUrl} callbackUrl={CallbackUrl}",
             LogValueSanitizer.Sanitize(request.Scope),
             LogValueSanitizer.Sanitize(request.ProjectId),
             LogValueSanitizer.Sanitize(request.FileId),
             LogValueSanitizer.Sanitize(request.NotebookId),
+            LogValueSanitizer.Sanitize(request.RelativePath),
             LogValueSanitizer.Sanitize(context.FileName),
             LogValueSanitizer.Sanitize(documentType),
             LogValueSanitizer.Sanitize(key),
@@ -207,6 +215,7 @@ public sealed class DocumentServerService : IDocumentServerService
         Guid? projectId,
         Guid? fileId,
         Guid? notebookId,
+        string? relativePath,
         int? versionNumber,
         CancellationToken cancellationToken)
     {
@@ -214,27 +223,32 @@ public sealed class DocumentServerService : IDocumentServerService
         {
             throw new InvalidOperationException("DocumentServer is disabled.");
         }
-        var payload = ResolveRequestContext(token, scope, projectId, fileId, notebookId, versionNumber, "download");
+        var payload = ResolveRequestContext(token, scope, projectId, fileId, notebookId, relativePath, versionNumber, "download");
 
         if (payload.Scope.Equals("project", StringComparison.OrdinalIgnoreCase))
         {
-            var details = await _contentFileService.GetAsync(payload.ProjectId, payload.FileId);
+            if (!payload.FileId.HasValue)
+            {
+                throw new InvalidOperationException("Project download token is missing file identity.");
+            }
+
+            var details = await _contentFileService.GetAsync(payload.ProjectId, payload.FileId.Value);
             if (details == null)
             {
                 _logger.LogWarning("DocumentServer download target project file was not found. projectId={ProjectId} fileId={FileId}",
-                    payload.ProjectId, payload.FileId);
+                    LogValueSanitizer.Sanitize(payload.ProjectId), LogValueSanitizer.Sanitize(payload.FileId));
                 return null;
             }
 
             var requestedVersion = payload.VersionNumber ?? details.LatestVersion;
-            var content = await _contentFileService.GetVersionContentAsync(payload.ProjectId, payload.FileId, requestedVersion);
+            var content = await _contentFileService.GetVersionContentAsync(payload.ProjectId, payload.FileId.Value, requestedVersion);
             if (content == null)
             {
                 _logger.LogWarning(
                     "DocumentServer download content missing for project file. projectId={ProjectId} fileId={FileId} versionNumber={VersionNumber}",
-                    payload.ProjectId,
-                    payload.FileId,
-                    requestedVersion);
+                    LogValueSanitizer.Sanitize(payload.ProjectId),
+                    LogValueSanitizer.Sanitize(payload.FileId),
+                    LogValueSanitizer.Sanitize(requestedVersion));
                 return null;
             }
 
@@ -254,7 +268,33 @@ public sealed class DocumentServerService : IDocumentServerService
             throw new InvalidOperationException("Notebook download token is missing notebook identity.");
         }
 
-        var notebookContent = await _notebookFileService.GetFileContentStreamAsync(payload.FileId, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(payload.RelativePath))
+        {
+            var notebookFile = await _notebookFileService.GetFileAsync(
+                payload.ProjectId,
+                payload.NotebookId.Value,
+                payload.RelativePath);
+            if (notebookFile == null)
+            {
+                _logger.LogWarning(
+                    "DocumentServer download target notebook path was not found. notebookId={NotebookId} relativePath={RelativePath}",
+                    LogValueSanitizer.Sanitize(payload.NotebookId),
+                    LogValueSanitizer.Sanitize(payload.RelativePath));
+                return null;
+            }
+
+            return new DocumentServerDownloadResult(
+                Stream: notebookFile.Value.Stream,
+                ContentType: notebookFile.Value.ContentType,
+                FileName: notebookFile.Value.FileName);
+        }
+
+        if (!payload.FileId.HasValue)
+        {
+            throw new InvalidOperationException("Notebook download token is missing file identity.");
+        }
+
+        var notebookContent = await _notebookFileService.GetFileContentStreamAsync(payload.FileId.Value, cancellationToken);
         if (notebookContent == null)
         {
             _logger.LogWarning(
@@ -276,6 +316,7 @@ public sealed class DocumentServerService : IDocumentServerService
         Guid? projectId,
         Guid? fileId,
         Guid? notebookId,
+        string? relativePath,
         DocumentServerCallbackPayload payload,
         CancellationToken cancellationToken)
     {
@@ -284,17 +325,17 @@ public sealed class DocumentServerService : IDocumentServerService
             throw new InvalidOperationException("DocumentServer is disabled.");
         }
 
-        var callbackContext = ResolveRequestContext(token, scope, projectId, fileId, notebookId, null, "callback");
+        var callbackContext = ResolveRequestContext(token, scope, projectId, fileId, notebookId, relativePath, null, "callback");
         var isSaveCallback = payload.Status is 2 or 6;
         if (!isSaveCallback || string.IsNullOrWhiteSpace(payload.Url))
         {
             _logger.LogInformation(
-                "DocumentServer callback ignored due to non-save status/url. status={Status} hasUrl={HasUrl} scope={Scope} projectId={ProjectId} fileId={FileId}",
-                payload.Status,
-                !string.IsNullOrWhiteSpace(payload.Url),
-                LogValueSanitizer.Sanitize(callbackContext.Scope),
-                LogValueSanitizer.Sanitize(callbackContext.ProjectId),
-                LogValueSanitizer.Sanitize(callbackContext.FileId));
+            "DocumentServer callback ignored due to non-save status/url. status={Status} hasUrl={HasUrl} scope={Scope} projectId={ProjectId} fileId={FileId}",
+            payload.Status,
+            !string.IsNullOrWhiteSpace(payload.Url),
+            LogValueSanitizer.Sanitize(callbackContext.Scope),
+            LogValueSanitizer.Sanitize(callbackContext.ProjectId),
+            LogValueSanitizer.Sanitize(callbackContext.FileId));
             return;
         }
 
@@ -323,7 +364,12 @@ public sealed class DocumentServerService : IDocumentServerService
 
         if (callbackContext.Scope.Equals("project", StringComparison.OrdinalIgnoreCase))
         {
-            var file = await _contentFileService.GetAsync(callbackContext.ProjectId, callbackContext.FileId);
+            if (!callbackContext.FileId.HasValue)
+            {
+                throw new InvalidOperationException("Project callback is missing file identity.");
+            }
+
+            var file = await _contentFileService.GetAsync(callbackContext.ProjectId, callbackContext.FileId.Value);
             if (file == null)
             {
                 throw new InvalidOperationException("Project file not found for callback.");
@@ -339,9 +385,9 @@ public sealed class DocumentServerService : IDocumentServerService
             await _contentFileService.UploadFileAsync(callbackContext.ProjectId, formFile, false, file.FolderId);
             _logger.LogInformation(
                 "DocumentServer callback uploaded project file version. projectId={ProjectId} fileId={FileId} fileName={FileName} byteLength={ByteLength}",
-                callbackContext.ProjectId,
-                callbackContext.FileId,
-                file.FileName,
+                LogValueSanitizer.Sanitize(callbackContext.ProjectId),
+                LogValueSanitizer.Sanitize(callbackContext.FileId),
+                LogValueSanitizer.Sanitize(file.FileName),
                 memory.Length);
             return;
         }
@@ -356,17 +402,54 @@ public sealed class DocumentServerService : IDocumentServerService
             throw new InvalidOperationException("Notebook callback is missing notebook identity.");
         }
 
+        string targetPath;
+        if (!string.IsNullOrWhiteSpace(callbackContext.RelativePath))
+        {
+            targetPath = callbackContext.RelativePath.Replace("\\", "/").TrimStart('/');
+            var linkedFile = await _notebookFileService.GetFileAsync(
+                callbackContext.ProjectId,
+                callbackContext.NotebookId.Value,
+                targetPath);
+            if (linkedFile == null)
+            {
+                throw new InvalidOperationException("Notebook file not found for callback.");
+            }
+
+            var targetPhysicalPath = (linkedFile.Value.Stream as FileStream)?.Name;
+            await linkedFile.Value.Stream.DisposeAsync();
+            if (string.IsNullOrWhiteSpace(targetPhysicalPath))
+            {
+                throw new InvalidOperationException("Notebook callback could not resolve target path.");
+            }
+
+            _logger.LogInformation(
+                "DocumentServer callback writing linked notebook file by relative path. projectId={ProjectId} notebookId={NotebookId} relativePath={RelativePath} byteLength={ByteLength}",
+                callbackContext.ProjectId,
+                callbackContext.NotebookId.Value,
+                targetPath,
+                memory.Length);
+            memory.Position = 0;
+            await using var destination = new FileStream(targetPhysicalPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+            await memory.CopyToAsync(destination, cancellationToken);
+            return;
+        }
+
+        if (!callbackContext.FileId.HasValue)
+        {
+            throw new InvalidOperationException("Notebook callback is missing file identity.");
+        }
+
         var notebookFile = await _dbContext.NotebookFiles
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                nf => nf.Id == callbackContext.FileId && nf.NotebookId == callbackContext.NotebookId.Value,
+                nf => nf.Id == callbackContext.FileId.Value && nf.NotebookId == callbackContext.NotebookId.Value,
                 cancellationToken);
         if (notebookFile == null)
         {
             throw new InvalidOperationException("Notebook file not found for callback.");
         }
 
-        var targetPath = notebookFile.RelativePath;
+        targetPath = notebookFile.RelativePath;
         var targetFolder = Path.GetDirectoryName(targetPath.Replace('\\', '/'))?.Replace('\\', '/') ?? string.Empty;
         var fileName = Path.GetFileName(targetPath);
         var formFileNotebook = new FormFile(memory, 0, memory.Length, "files", fileName)
@@ -377,12 +460,12 @@ public sealed class DocumentServerService : IDocumentServerService
 
         _logger.LogInformation(
             "DocumentServer callback uploading notebook file. projectId={ProjectId} notebookId={NotebookId} fileId={FileId} relativePath={RelativePath} targetFolder={TargetFolder} fileName={FileName} byteLength={ByteLength}",
-            callbackContext.ProjectId,
-            callbackContext.NotebookId.Value,
-            callbackContext.FileId,
-            targetPath,
-            targetFolder,
-            fileName,
+            LogValueSanitizer.Sanitize(callbackContext.ProjectId),
+            LogValueSanitizer.Sanitize(callbackContext.NotebookId.Value),
+            LogValueSanitizer.Sanitize(callbackContext.FileId),
+            LogValueSanitizer.Sanitize(targetPath),
+            LogValueSanitizer.Sanitize(targetFolder),
+            LogValueSanitizer.Sanitize(fileName),
             memory.Length);
         var files = new FormFileCollection { formFileNotebook };
         await _notebookFileService.UploadFilesAsync(
@@ -400,7 +483,12 @@ public sealed class DocumentServerService : IDocumentServerService
     {
         if (request.Scope.Equals("project", StringComparison.OrdinalIgnoreCase))
         {
-            var file = await _contentFileService.GetAsync(request.ProjectId, request.FileId);
+            if (!request.FileId.HasValue)
+            {
+                throw new InvalidOperationException("Project scope requires fileId.");
+            }
+
+            var file = await _contentFileService.GetAsync(request.ProjectId, request.FileId.Value);
             if (file == null)
             {
                 throw new InvalidOperationException("Project file was not found.");
@@ -411,6 +499,7 @@ public sealed class DocumentServerService : IDocumentServerService
                 ProjectId: request.ProjectId,
                 FileId: request.FileId,
                 NotebookId: null,
+                RelativePath: null,
                 FileName: file.FileName,
                 ContentType: file.ContentType,
                 VersionNumber: file.LatestVersion,
@@ -427,10 +516,41 @@ public sealed class DocumentServerService : IDocumentServerService
             throw new InvalidOperationException("Notebook scope requires notebookId.");
         }
 
+        if (!string.IsNullOrWhiteSpace(request.RelativePath))
+        {
+            var normalizedRelativePath = request.RelativePath.Replace("\\", "/").TrimStart('/');
+            var file = await _notebookFileService.GetFileAsync(
+                request.ProjectId,
+                request.NotebookId.Value,
+                normalizedRelativePath);
+            if (file == null)
+            {
+                throw new InvalidOperationException("Notebook file was not found.");
+            }
+
+            await file.Value.Stream.DisposeAsync();
+
+            return new DocumentServerFileContext(
+                Scope: request.Scope,
+                ProjectId: request.ProjectId,
+                FileId: null,
+                NotebookId: request.NotebookId,
+                RelativePath: normalizedRelativePath,
+                FileName: file.Value.FileName,
+                ContentType: file.Value.ContentType,
+                VersionNumber: null,
+                KeyMaterial: $"path:{normalizedRelativePath}:{DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        if (!request.FileId.HasValue)
+        {
+            throw new InvalidOperationException("Notebook scope requires fileId or relativePath.");
+        }
+
         var notebookFile = await _dbContext.NotebookFiles
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                nf => nf.Id == request.FileId && nf.NotebookId == request.NotebookId.Value,
+                nf => nf.Id == request.FileId.Value && nf.NotebookId == request.NotebookId.Value,
                 cancellationToken);
         if (notebookFile == null)
         {
@@ -448,6 +568,7 @@ public sealed class DocumentServerService : IDocumentServerService
             ProjectId: request.ProjectId,
             FileId: request.FileId,
             NotebookId: request.NotebookId,
+            RelativePath: null,
             FileName: fileName,
             ContentType: contentType,
             VersionNumber: null,
@@ -653,6 +774,7 @@ public sealed class DocumentServerService : IDocumentServerService
         Guid? projectId,
         Guid? fileId,
         Guid? notebookId,
+        string? relativePath,
         int? versionNumber,
         string purpose)
     {
@@ -666,11 +788,11 @@ public sealed class DocumentServerService : IDocumentServerService
             if (purpose.Equals("download", StringComparison.OrdinalIgnoreCase))
             {
                 var download = ValidateTokenOrThrow<DownloadTokenPayload>(token, purpose);
-                return new RequestContext(download.Scope, download.ProjectId, download.FileId, download.NotebookId, download.VersionNumber);
+                return new RequestContext(download.Scope, download.ProjectId, download.FileId, download.NotebookId, download.RelativePath, download.VersionNumber);
             }
 
             var callback = ValidateTokenOrThrow<CallbackTokenPayload>(token, purpose);
-            return new RequestContext(callback.Scope, callback.ProjectId, callback.FileId, callback.NotebookId, null);
+            return new RequestContext(callback.Scope, callback.ProjectId, callback.FileId, callback.NotebookId, callback.RelativePath, null);
         }
 
         if (string.IsNullOrWhiteSpace(scope))
@@ -678,7 +800,14 @@ public sealed class DocumentServerService : IDocumentServerService
             throw new InvalidOperationException($"DocumentServer {purpose} scope is missing.");
         }
 
-        if (!projectId.HasValue || !fileId.HasValue)
+        if (!projectId.HasValue)
+        {
+            throw new InvalidOperationException($"DocumentServer {purpose} identity is missing.");
+        }
+
+        var hasFileId = fileId.HasValue;
+        var hasRelativePath = !string.IsNullOrWhiteSpace(relativePath);
+        if (!hasFileId && !hasRelativePath)
         {
             throw new InvalidOperationException($"DocumentServer {purpose} identity is missing.");
         }
@@ -686,8 +815,9 @@ public sealed class DocumentServerService : IDocumentServerService
         return new RequestContext(
             Scope: scope,
             ProjectId: projectId.Value,
-            FileId: fileId.Value,
+            FileId: fileId,
             NotebookId: notebookId,
+            RelativePath: relativePath,
             VersionNumber: versionNumber);
     }
 
@@ -716,8 +846,9 @@ public sealed class DocumentServerService : IDocumentServerService
     private sealed record DocumentServerFileContext(
         string Scope,
         Guid ProjectId,
-        Guid FileId,
+        Guid? FileId,
         Guid? NotebookId,
+        string? RelativePath,
         string FileName,
         string ContentType,
         int? VersionNumber,
@@ -726,15 +857,17 @@ public sealed class DocumentServerService : IDocumentServerService
     private sealed record DownloadTokenPayload(
         string Scope,
         Guid ProjectId,
-        Guid FileId,
+        Guid? FileId,
         Guid? NotebookId,
+        string? RelativePath,
         int? VersionNumber);
 
     private sealed record CallbackTokenPayload(
         string Scope,
         Guid ProjectId,
-        Guid FileId,
-        Guid? NotebookId);
+        Guid? FileId,
+        Guid? NotebookId,
+        string? RelativePath);
 
     private sealed record TokenEnvelope<T>(
         T Payload,
@@ -744,8 +877,9 @@ public sealed class DocumentServerService : IDocumentServerService
     private sealed record RequestContext(
         string Scope,
         Guid ProjectId,
-        Guid FileId,
+        Guid? FileId,
         Guid? NotebookId,
+        string? RelativePath,
         int? VersionNumber);
 
 }
