@@ -251,7 +251,7 @@ public sealed class HostMountPathGuardEndpointTests
         using var doc = JsonDocument.Parse(payload);
         var standardOutput = ReadStandardOutput(doc.RootElement);
         standardOutput.Should().NotBeNullOrWhiteSpace(payload);
-        standardOutput!.Trim().Should().Be("0");
+        standardOutput!.Trim().Should().Be(GetCurrentUserId());
     }
 
     private static string? ReadStandardOutput(JsonElement root)
@@ -287,6 +287,24 @@ public sealed class HostMountPathGuardEndpointTests
 
         using var process = System.Diagnostics.Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start stat.");
+        process.WaitForExit(5_000);
+        process.ExitCode.Should().Be(0, process.StandardError.ReadToEnd());
+        return process.StandardOutput.ReadToEnd().Trim();
+    }
+
+    private static string GetCurrentUserId()
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "id",
+            Arguments = "-u",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start id.");
         process.WaitForExit(5_000);
         process.ExitCode.Should().Be(0, process.StandardError.ReadToEnd());
         return process.StandardOutput.ReadToEnd().Trim();
