@@ -1,0 +1,409 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Worm Commander Tools",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "client://worm-commander-client"
+    }
+  ],
+  "paths": {
+    "WormCommander.Start": {
+      "post": {
+        "operationId": "Start",
+        "summary": "Start the game. Optionally restart if already running or game-over.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "restart": {
+                    "type": "boolean",
+                    "description": "If true, restart the run from a fresh state."
+                  }
+                },
+                "required": ["restart"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ToolResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "WormCommander.Pause": {
+      "post": {
+        "operationId": "Pause",
+        "summary": "Pause the game (idempotent).",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ToolResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "WormCommander.Resume": {
+      "post": {
+        "operationId": "Resume",
+        "summary": "Resume the game if paused (idempotent).",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ToolResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "WormCommander.Turn": {
+      "post": {
+        "operationId": "Turn",
+        "summary": "Nudge turn the worm by a discrete number of degrees.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "direction": {
+                    "type": "string",
+                    "enum": ["left", "right"]
+                  },
+                  "degrees": {
+                    "type": "integer",
+                    "enum": [30, 60, 90, 120, 150],
+                    "description": "Discrete turn amount in degrees."
+                  }
+                },
+                "required": ["direction", "degrees"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ToolResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "WormCommander.HoldTurn": {
+      "post": {
+        "operationId": "HoldTurn",
+        "summary": "Hold a turn direction for a duration. The client is responsible for safety caps and collision-aware stopping.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "direction": {
+                    "type": "string",
+                    "enum": ["left", "right"]
+                  },
+                  "duration_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000
+                  }
+                },
+                "required": ["direction", "duration_ms"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ToolResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "WormCommander.ExecuteIntent": {
+      "post": {
+        "operationId": "ExecuteIntent",
+        "summary": "Execute a high-level intent using the client autopilot, based on current senses data.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "intent": {
+                    "type": "string",
+                    "enum": ["eat", "survive", "escape", "avoid", "hunt", "intercept"]
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["none", "nearest_food", "food_id", "snake_id", "bearing"]
+                      },
+                      "id": {
+                        "type": "string",
+                        "description": "Food or snake identifier when type is food_id or snake_id."
+                      },
+                      "bearing_deg": {
+                        "type": "number",
+                        "description": "Relative bearing (deg) when type is bearing. 0=forward, +=right, -=left."
+                      }
+                    },
+                    "required": ["type"],
+                    "additionalProperties": false
+                  },
+                  "constraints": {
+                    "type": "object",
+                    "properties": {
+                      "risk": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"]
+                      },
+                      "avoid_snakes": { "type": "boolean" },
+                      "avoid_self": { "type": "boolean" },
+                      "prefer_food": { "type": "boolean" },
+                      "min_clearance": {
+                        "type": "number",
+                        "description": "Preferred minimum clearance in world px (soft constraint)."
+                      }
+                    },
+                    "required": ["risk", "avoid_snakes", "avoid_self", "prefer_food"],
+                    "additionalProperties": false
+                  },
+                  "ttl_ms": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 300000,
+                    "description": "How long the client should run this intent before returning."
+                  }
+                },
+                "required": ["intent", "target", "constraints", "ttl_ms"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ToolResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "WormCommander.SetAutopilot": {
+      "post": {
+        "operationId": "SetAutopilot",
+        "summary": "Enable or disable client autopilot mode.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "type": "boolean" }
+                },
+                "required": ["enabled"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ToolResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "WormCommander.Status": {
+      "post": {
+        "operationId": "Status",
+        "summary": "Return current status (running/paused/score/highScore) along with updated senses.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ToolResponse" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "running": { "type": "boolean" },
+                        "paused": { "type": "boolean" },
+                        "score": { "type": "integer" },
+                        "highScore": { "type": "integer" }
+                      },
+                      "required": ["running", "paused", "score", "highScore"]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "WormCommander.EnableMusic": {
+      "post": {
+        "operationId": "EnableMusic",
+        "summary": "Enable or disable the background music.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "If true, enable background music. If false, disable it."
+                  }
+                },
+                "required": ["enabled"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/ToolResponse" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "musicEnabled": { "type": "boolean" }
+                      },
+                      "required": ["musicEnabled"]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ToolResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "'ok' on success, 'error' on failure."
+          },
+          "message": {
+            "type": "string",
+            "description": "Optional human-readable message."
+          },
+          "senses": {
+            "type": "object",
+            "description": "Updated senses data snapshot after the tool executes."
+          },
+          "code": {
+            "type": "string",
+            "description": "Error code (only present on error)."
+          },
+          "retryable": {
+            "type": "boolean",
+            "description": "Whether retrying with different arguments may succeed."
+          },
+          "context": {
+            "type": "object",
+            "description": "Optional retry/debug context."
+          }
+        },
+        "required": ["status", "senses"]
+      }
+    }
+  }
+}
+

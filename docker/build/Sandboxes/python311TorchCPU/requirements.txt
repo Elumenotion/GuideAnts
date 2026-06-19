@@ -74,7 +74,7 @@ isodate==0.7.2
 itsdangerous==2.2.0
 jax==0.2.28
 jsonpickle==4.0.2
-jupyter-server==2.18.0
+jupyter-server>=2.20.0
 jupyterlab-pygments==0.2.2
 jupyterlab-tensorboard-pro==0.7.2
 keras==3.13.2

@@ -3,6 +3,46 @@ import { createEmptyAddModelWizardState, buildAddModelRequest as buildSettingsAd
 import { buildLocalAiModelRequest } from '../utils';
 
 describe('local onboarding cross-UI parity', () => {
+  it('builds identical payloads for minimal huggingface intent with blank optional fields', () => {
+    const settings = createEmptyAddModelWizardState('llama-cpp');
+    settings.llamaInstallSource = 'huggingface';
+    settings.runtimeProfileId = 'gemma4';
+    settings.llamaRouterModelId = 'gemma-4-12B-it-qat-GGUF';
+    settings.llamaHuggingFaceRepository = 'unsloth/gemma-4-12B-it-qat-GGUF';
+    settings.llamaHuggingFaceQuantIncludePattern = 'gemma-4-12B-it-qat-UD-Q4_K_XL.gguf';
+    settings.llamaHuggingFaceMmprojIncludePattern = 'mmproj-BF16.gguf';
+
+    const wizard = {
+      localId: 'draft-minimal',
+      persisted: false,
+      asyncOperationId: null,
+      asyncStatus: 'submitted' as const,
+      asyncProgress: null,
+      asyncError: null,
+      setAsGlobalDefault: false,
+      installSource: 'huggingface' as const,
+      routerModelId: 'gemma-4-12B-it-qat-GGUF',
+      runtimeProfileId: 'gemma4',
+      huggingFaceRepository: 'unsloth/gemma-4-12B-it-qat-GGUF',
+      huggingFaceQuantIncludePattern: 'gemma-4-12B-it-qat-UD-Q4_K_XL.gguf',
+      huggingFaceMmprojIncludePattern: 'mmproj-BF16.gguf',
+      huggingFaceTargetDirectory: '',
+      existingAliasRouterModelId: '',
+      routerContextSize: '',
+      routerCacheRamMib: '',
+      catalogModelId: '',
+      catalogDisplayName: '',
+    };
+
+    const fromSettings = buildSettingsAddModelRequest(settings);
+    const fromWizard = buildLocalAiModelRequest(wizard);
+
+    expect(fromSettings).toEqual({
+      ...fromWizard,
+      providerConfig: { onboardingUi: 'settings' },
+    });
+  });
+
   it('builds identical payloads for equivalent huggingface intent', () => {
     const settings = createEmptyAddModelWizardState('llama-cpp');
     settings.catalogModelId = 'qwen3.6-local';

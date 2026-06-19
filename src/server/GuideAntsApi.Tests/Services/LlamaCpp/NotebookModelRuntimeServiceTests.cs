@@ -55,6 +55,9 @@ public class NotebookModelRuntimeServiceTests
         _mockLocalAiWarmupService
             .Setup(s => s.EnsureAuxiliaryServicesLoadedAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        _mockLocalAiWarmupService
+            .Setup(s => s.IsWarmupInProgress)
+            .Returns(false);
         _mockLogger = new Mock<ILogger<NotebookModelRuntimeService>>();
         _cache = new MemoryCache(new MemoryCacheOptions());
 
@@ -185,6 +188,104 @@ public class NotebookModelRuntimeServiceTests
         Assert.AreEqual("ready", status.State);
         Assert.AreEqual(1, status.RequiredModels.Count);
         Assert.AreEqual(1, status.LoadedModels.Count);
+    }
+
+    [TestMethod]
+    public async Task GetRuntimeStatusAsync_RouterModelLoading_ReturnsLoadingWithExternalOperation()
+    {
+        var notebookId = Guid.NewGuid();
+        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
+        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
+
+        _context.Assistants.Add(guide);
+        _context.Notebooks.Add(notebook);
+
+        var model = new Model
+        {
+            ModelId = "qwen-local",
+            Provider = "llama-cpp",
+            IsActive = true,
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+        };
+        _context.Models.Add(model);
+        await _context.SaveChangesAsync();
+
+        _mockLlamaClient.Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaModelsResponse
+            {
+                Data = new List<LlamaModelData>
+                {
+                    new() { Id = "qwen-model", Status = new LlamaModelStatus { Value = "loading" } }
+                }
+            });
+
+        var status = await _service.GetRuntimeStatusAsync(notebookId);
+
+        Assert.AreEqual("loading", status.State);
+        Assert.IsNotNull(status.ActiveOperation);
+        Assert.AreEqual(NotebookModelRuntimeService.ExternalLoadingOperationId, status.ActiveOperation!.OperationId);
+        Assert.AreEqual("loading", status.ActiveOperation.State);
+    }
+
+    [TestMethod]
+    public async Task GetRuntimeStatusAsync_StartupWarmupInProgress_ReturnsLoadingWithExternalOperation()
+    {
+        var notebookId = Guid.NewGuid();
+        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
+        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
+
+        _context.Assistants.Add(guide);
+        _context.Notebooks.Add(notebook);
+
+        var model = new Model
+        {
+            ModelId = "qwen-local",
+            Provider = "llama-cpp",
+            IsActive = true,
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+        };
+        _context.Models.Add(model);
+        await _context.SaveChangesAsync();
+
+        _mockLocalAiWarmupService.Setup(s => s.IsWarmupInProgress).Returns(true);
+        _mockLlamaClient.Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaModelsResponse { Data = new List<LlamaModelData>() });
+
+        var status = await _service.GetRuntimeStatusAsync(notebookId);
+
+        Assert.AreEqual("loading", status.State);
+        Assert.AreEqual(NotebookModelRuntimeService.ExternalLoadingOperationId, status.ActiveOperation?.OperationId);
+    }
+
+    [TestMethod]
+    public async Task StartLoadOperationAsync_WhenExternalLoadInProgress_ReturnsExistingOperation()
+    {
+        var notebookId = Guid.NewGuid();
+        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
+        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
+
+        _context.Assistants.Add(guide);
+        _context.Notebooks.Add(notebook);
+
+        var model = new Model
+        {
+            ModelId = "qwen-local",
+            Provider = "llama-cpp",
+            IsActive = true,
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+        };
+        _context.Models.Add(model);
+        await _context.SaveChangesAsync();
+
+        _mockLocalAiWarmupService.Setup(s => s.IsWarmupInProgress).Returns(true);
+        _mockLlamaClient.Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaModelsResponse { Data = new List<LlamaModelData>() });
+
+        var op = await _service.StartLoadOperationAsync(notebookId);
+
+        Assert.AreEqual("loading", op.State);
+        Assert.AreEqual(NotebookModelRuntimeService.ExternalLoadingOperationId, op.OperationId);
+        _mockLocalAiWarmupService.Verify(s => s.UnloadAuxiliaryServicesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [TestMethod]

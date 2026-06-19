@@ -73,8 +73,8 @@ import type {
   OptionalServiceKey,
   WizardLoadSnapshot,
 } from './types';
-import { buildLocalModelOnboardingRequest } from '../../../features/localModelOnboarding/buildCommand';
-import { validateLocalModelOnboardingDraft } from '../../../features/localModelOnboarding/validateDraft';
+import { buildLocalModelAddModelRequest } from '../../../features/localModelOnboarding/buildCommand';
+import { mapLocalAiModelDraftToOnboardingDraft } from '../../../features/localModelOnboarding/mapDraft';
 
 export function mapProviderLabelToModelProviderId(value: FoundryModelProviderLabel): string {
   return MODEL_PROVIDER_LABEL_TO_ID[value];
@@ -824,44 +824,7 @@ export function toExistingLocalModels(models: SettingsModelDto[]): SettingsModel
 }
 
 export function buildLocalAiModelRequest(draft: LocalAiModelDraft): AddModelRequest {
-  const onboardingDraft = {
-    installSource: draft.installSource,
-    runtimeProfileId: draft.runtimeProfileId,
-    routerModelId: draft.routerModelId,
-    huggingFaceRepository: draft.huggingFaceRepository,
-    huggingFaceQuantIncludePattern: draft.huggingFaceQuantIncludePattern,
-    huggingFaceMmprojIncludePattern: draft.huggingFaceMmprojIncludePattern,
-    huggingFaceTargetDirectory: draft.huggingFaceTargetDirectory,
-    existingAliasRouterModelId: draft.existingAliasRouterModelId,
-    routerContextSize: draft.routerContextSize,
-    routerCacheRamMib: draft.routerCacheRamMib,
-    catalogModelId: draft.catalogModelId,
-    catalogDisplayName: draft.catalogDisplayName,
-    catalogIsActive: true,
-  } as const;
-  const validationErrors = validateLocalModelOnboardingDraft(onboardingDraft, {
-    defaultCatalogModelId: draft.installSource === 'existingAlias'
-      ? draft.existingAliasRouterModelId
-      : draft.routerModelId,
-    defaultCatalogDisplayName: draft.installSource === 'existingAlias'
-      ? draft.existingAliasRouterModelId
-      : draft.routerModelId,
-    defaultTargetDirectory: draft.routerModelId,
-  });
-  if (validationErrors.length > 0) {
-    throw new Error(validationErrors[0]);
-  }
-  return buildLocalModelOnboardingRequest(onboardingDraft, {
-    onboardingUi: 'wizard',
-    defaultCatalogModelId: draft.installSource === 'existingAlias'
-      ? draft.existingAliasRouterModelId
-      : draft.routerModelId,
-    defaultCatalogDisplayName: draft.installSource === 'existingAlias'
-      ? draft.existingAliasRouterModelId
-      : draft.routerModelId,
-    defaultTargetDirectory: draft.routerModelId,
-    defaultCatalogIsActive: true,
-  });
+  return buildLocalModelAddModelRequest(mapLocalAiModelDraftToOnboardingDraft(draft), 'wizard');
 }
 
 function localAiOptionalServiceStatus(

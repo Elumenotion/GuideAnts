@@ -1,0 +1,21 @@
+{
+  "name": "Word Wizard",
+  "description": "I demonstrate how an agent using python can make styled and formatted Word documents. It\u0027s easy to make a guide like me and use it in your own web apps!",
+  "defaultAssistant": null,
+  "tools": [
+    {
+      "type": "ReadWeb"
+    },
+    {
+      "type": "run_bash"
+    },
+    {
+      "type": "run_python"
+    }
+  ],
+  "crew": [
+    {
+      "name": "Search"
+    }
+  ]
+}
