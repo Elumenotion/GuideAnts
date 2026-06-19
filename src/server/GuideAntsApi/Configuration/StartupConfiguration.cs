@@ -45,24 +45,36 @@ namespace GuideAntsApi.Configuration;
 
 public static class StartupConfiguration
 {
-    public static void ConfigureServices(WebApplicationBuilder builder)
+    public static void ConfigureServices(WebApplicationBuilder builder, Action<string>? phaseLogger = null)
     {
-        ConfigureServices(builder.Services, builder.Configuration);
+        ConfigureServices(builder.Services, builder.Configuration, phaseLogger);
 
         ConfigureSwagger(builder);
+        phaseLogger?.Invoke("ConfigureServices.ConfigureSwagger");
     }
 
-    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration)
+    public static void ConfigureServices(IServiceCollection services, IConfiguration configuration, Action<string>? phaseLogger = null)
     {
         ConfigureDatabase(services, configuration);
+        phaseLogger?.Invoke("ConfigureServices.ConfigureDatabase");
+
         ConfigureAuthentication(services, configuration);
+        phaseLogger?.Invoke("ConfigureServices.ConfigureAuthentication");
+
         ConfigureCors(services, configuration);
+        phaseLogger?.Invoke("ConfigureServices.ConfigureCors");
+
         ConfigureMemoryCache(services);
+        phaseLogger?.Invoke("ConfigureServices.ConfigureMemoryCache");
+
         ConfigureOptions(services, configuration);
-        RegisterServices(services, configuration);
+        phaseLogger?.Invoke("ConfigureServices.ConfigureOptions");
+
+        RegisterServices(services, configuration, phaseLogger);
+        phaseLogger?.Invoke("ConfigureServices.RegisterServices");
     }
 
-    private static void RegisterServices(IServiceCollection services, IConfiguration configuration)
+    private static void RegisterServices(IServiceCollection services, IConfiguration configuration, Action<string>? phaseLogger = null)
     {
         // Default HttpClient used by CreateClient() (e.g. published conversation stream) — 300s timeout for long-running LLM/tool calls
         services.AddHttpClient(Microsoft.Extensions.Options.Options.DefaultName).ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(300));
@@ -92,8 +104,9 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder, GuideAntsApi.Services.Bootstrap.RuntimeProfileSeeder>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();
+        phaseLogger?.Invoke("ConfigureServices.RegisterServices.CoreServices");
 
-        
+ 
         // Guides Services
         services.AddScoped<GuideAntsApi.Services.Guides.ICatalogService, GuideAntsApi.Services.Guides.CatalogService>();
         services.AddScoped<GuideAntsApi.Services.Guides.IGuidesService, GuideAntsApi.Services.Guides.GuidesService>();
@@ -200,6 +213,7 @@ public static class StartupConfiguration
 
             throw new InvalidOperationException("SearXngSearch:BaseUrl must be an absolute URI.");
         });
+        phaseLogger?.Invoke("ConfigureServices.RegisterServices.LocalRuntimeAndSearch");
 
 
         // Usage Queries
@@ -213,6 +227,7 @@ public static class StartupConfiguration
         services.AddScoped<IDistributedConversationLock, DistributedConversationLockService>();
         services.AddHostedService<LockCleanupBackgroundService>();
         services.AddHostedService<HostFolderMountStartupReconciliationService>();
+        phaseLogger?.Invoke("ConfigureServices.RegisterServices.ConversationAndHosted");
 
         // LLM client abstraction (provider routing).
         //
@@ -320,6 +335,7 @@ public static class StartupConfiguration
         services.AddScoped<IInfrastructureProbeService, InfrastructureProbeService>();
 
         services.AddSingleton<IChatCompletionClientFactory, RoutingChatCompletionClientFactory>();
+        phaseLogger?.Invoke("ConfigureServices.RegisterServices.ChatFactoriesAndRouting");
 
         services.AddScoped<IConversationManager, ConversationManager>();
         services.AddScoped<INotebookHeaderToolbarService, NotebookHeaderToolbarService>();
@@ -349,6 +365,7 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.BackgroundJobs.Services.ITranscriptionAdapter, SpeechTranscriptionAdapter>();
         services.AddScoped<IMarkdownExtractionService, MarkdownExtractionService>();
         services.AddScoped<MarkdownExtractionService>();  // Also register concrete type for GuidesService
+        phaseLogger?.Invoke("ConfigureServices.RegisterServices.NotebookAndMedia");
         
         // Background Jobs - replaces individual hosted services with queue-based processing
         services.AddBackgroundJobs(configuration);
@@ -374,6 +391,7 @@ public static class StartupConfiguration
         // Retention cleanup scheduler
         services.Configure<GuideAntsApi.BackgroundJobs.Options.RetentionCleanupOptions>(configuration.GetSection(GuideAntsApi.BackgroundJobs.Options.RetentionCleanupOptions.SectionName));
         services.AddHostedService<GuideAntsApi.BackgroundJobs.Services.RetentionCleanupScheduler>();
+        phaseLogger?.Invoke("ConfigureServices.RegisterServices.BackgroundJobs");
         
         // Keep existing services but they will now enqueue jobs instead of direct processing
         // services.AddHostedService<MarkdownExtractionBackgroundService>(); // Replaced by background jobs
@@ -400,6 +418,7 @@ public static class StartupConfiguration
             })
             .WithListToolsHandler(McpPublishedGuideToolHandlers.ListToolsAsync)
             .WithCallToolHandler(McpPublishedGuideToolHandlers.CallToolAsync);
+        phaseLogger?.Invoke("ConfigureServices.RegisterServices.PodcastAndMcp");
 
     }
 

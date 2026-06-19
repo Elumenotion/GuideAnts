@@ -56,44 +56,19 @@ ARTIFACT_URL_PATTERNS = (
     re.compile(r"/api/published/[^)\s\"']+"),
 )
 
-_SENSITIVE_KEY_RE = re.compile(
-    r"(password|passwd|secret|token|api[_-]?key|authorization|credential)",
-    re.IGNORECASE,
-)
-_API_KEY_VALUE_RE = re.compile(r"^gak_[A-Za-z0-9_-]+$")
-_REDACTED = "<redacted>"
-
-
-def _redact_for_output(value: Any) -> Any:
-    """Strip credential-shaped values before writing JSON to stdout."""
-    if isinstance(value, dict):
-        return {
-            key: (
-                _REDACTED
-                if _SENSITIVE_KEY_RE.search(str(key))
-                else _redact_for_output(item)
-            )
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_for_output(item) for item in value]
-    if isinstance(value, str) and _API_KEY_VALUE_RE.match(value):
-        return _REDACTED
-    return value
-
 
 def log(message: str) -> None:
     print(message, file=sys.stderr)
 
 
 def emit(payload: dict[str, Any]) -> None:
-    print(json.dumps(_redact_for_output(payload), ensure_ascii=False, indent=2))
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def fail(code: str, message: str, **extra: Any) -> "None":
     payload: dict[str, Any] = {"error": code, "message": message}
     payload.update(extra)
-    print(json.dumps(_redact_for_output(payload), ensure_ascii=False), flush=True)
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
     raise SystemExit(1)
 
 
@@ -242,7 +217,15 @@ def mcp_call(
 
     if rpc.get("error"):
         detail = rpc["error"]
-        fail("mcp_error", detail.get("message", "MCP returned an error."), detail=detail)
+        message = (
+            detail.get("message", "MCP returned an error.")
+            if isinstance(detail, dict)
+            else "MCP returned an error."
+        )
+        extra: dict[str, Any] = {}
+        if isinstance(detail, dict) and "code" in detail:
+            extra["code"] = detail["code"]
+        fail("mcp_error", message, **extra)
     return rpc.get("result") or {}
 
 
@@ -270,6 +253,30 @@ def parse_inner(content: list[dict[str, Any]]) -> dict[str, Any]:
             except json.JSONDecodeError:
                 return {}
     return {}
+
+
+def _conversation_for_output(conversation: dict[str, Any]) -> dict[str, Any]:
+    """Shape conversation_get JSON for stdout (matches server fields, nothing else)."""
+    messages_out: list[dict[str, Any]] = []
+    for message in conversation.get("messages") or []:
+        if not isinstance(message, dict):
+            continue
+        messages_out.append(
+            {
+                "role": message.get("role") or "",
+                "assistantName": message.get("assistantName") or "",
+                "content": message.get("content") or "",
+                "created": message.get("created"),
+                "turnIndex": message.get("turnIndex"),
+            }
+        )
+    return {
+        "conversationId": conversation.get("conversationId") or "",
+        "title": conversation.get("title") or "",
+        "currentAssistant": conversation.get("currentAssistant") or "",
+        "created": conversation.get("created"),
+        "messages": messages_out,
+    }
 
 
 def save_inline_images(content: list[dict[str, Any]]) -> list[str]:
@@ -478,7 +485,13 @@ def _get_conversation(
         request_id=3,
         timeout=60,
     )
-    return parse_inner(result.get("content") or [])
+    conversation = parse_inner(result.get("content") or [])
+    if conversation.get("error"):
+        fail(
+            str(conversation.get("error")),
+            str(conversation.get("message") or "Conversation request failed."),
+        )
+    return _conversation_for_output(conversation)
 
 
 def cmd_recover(args: argparse.Namespace, env: dict[str, str]) -> int:
