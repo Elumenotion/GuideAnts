@@ -303,7 +303,8 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
     return null;
   }
 
-  const isExpanded = context?.expandedIds.has(folder.relativePath || 'ROOT') ?? true;
+  const hasActiveSearch = Boolean(searchTerm?.trim());
+  const isExpanded = hasActiveSearch || (context?.expandedIds.has(folder.relativePath || 'ROOT') ?? true);
   const toggleExpand = () => context?.toggleExpansion(folder.relativePath || 'ROOT');
 
   const [isEditing, setIsEditing] = useState(false);
@@ -356,6 +357,13 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   const displayFiles = filteredFiles;
   const hasChildren = displaySubFolders.length > 0 || displayFiles.length > 0;
   const paddingLeft = level === 0 ? 0 : level * 20 + 8;
+  const openCreateSubfolderInput = useCallback(() => {
+    if (!isExpanded) {
+      toggleExpand();
+    }
+    setIsCreatingSubfolder(true);
+    setShowContextMenu(false);
+  }, [isExpanded, toggleExpand]);
 
   const handleToggleExpand = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -969,7 +977,7 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
           {mountEntry && <HostMountStateBadge state={mountEntry.displayState} className="ml-2 flex-shrink-0" />}
           {canEdit && (
             <div className="opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
-              {onCreateFolder && <button onClick={(e) => { e.stopPropagation(); setIsCreatingSubfolder(true); }} className="p-1 text-gray-400 hover:text-blue-600" title="Create subfolder"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>}
+              {onCreateFolder && <button onClick={(e) => { e.stopPropagation(); openCreateSubfolderInput(); }} className="p-1 text-gray-400 hover:text-blue-600" title="Create subfolder"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>}
               {onUploadToFolder && <button onClick={(e) => { e.stopPropagation(); onUploadToFolder(folder.relativePath); }} className="p-1 text-gray-400 hover:text-green-600" title="Upload to this folder"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg></button>}
             </div>
           )}
@@ -1034,7 +1042,7 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
         <div ref={menuRef} className="fixed bg-white shadow-lg rounded-lg py-1 z-[9999]" style={{ top: contextMenuPosition.y, left: contextMenuPosition.x }} onClick={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()} data-tour-id="notebook.folder.context-menu">
           {onRenameFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
           {!isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>}
-          {onCreateFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setIsCreatingSubfolder(true); setShowContextMenu(false); }}>Create Subfolder</button>}
+          {onCreateFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={openCreateSubfolderInput}>Create Subfolder</button>}
           {onUploadToFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onUploadToFolder(folder.relativePath); }}>Upload Files</button>}
           {onDeleteFolder && !isMountRoot && !isLinkedFolder && <button className={`block w-full text-left px-4 py-2 text-sm ${hasChildren ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-gray-100'}`} onClick={hasChildren ? undefined : handleDeleteFolder} disabled={hasChildren} title={hasChildren ? 'Cannot delete folder with contents' : 'Delete folder'}>Delete</button>}
           {renderHostMountMenuItems()}
@@ -1342,34 +1350,8 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
       setIsMountActionLoading(false);
     }
   }, [projectId, mountIdPendingRemoval, refreshHostMounts, showToast]);
-  // Helper to collect all folder paths recursively for initial expansion
-  const collectAllFolderPaths = useCallback((node: NotebookFolderTreeDto): string[] => {
-    const paths: string[] = [node.relativePath || 'ROOT'];
-    for (const subFolder of node.subFolders) {
-      paths.push(...collectAllFolderPaths(subFolder));
-    }
-    return paths;
-  }, []);
-
-  // Shared state - initialize with all folders expanded on first load only
-  // We use a ref to track if this is the initial mount
-  const isInitialMount = useRef(true);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
-    if (tree) {
-      return new Set(collectAllFolderPaths(tree));
-    }
-    return new Set(['ROOT']);
-  });
-  
-  // Only expand all folders on initial mount when tree first becomes available
-  // After that, preserve user's collapse/expand state across refreshes
-  useEffect(() => {
-    if (tree && isInitialMount.current) {
-      const allPaths = collectAllFolderPaths(tree);
-      setExpandedIds(new Set(allPaths));
-      isInitialMount.current = false;
-    }
-  }, [tree, collectAllFolderPaths]);
+  // Start with only the notebook root expanded and let users opt into deeper expansion.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set(['ROOT']));
 
   const toggleExpansion = useCallback((id: string) => {
       setExpandedIds(prev => {
@@ -1525,14 +1507,15 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
 
   const getVisibleItems = useCallback((node: NotebookFolderTreeDto): TreeItem[] => {
       let results: TreeItem[] = [];
+      const normalizedSearchTerm = searchTerm?.trim().toLowerCase() ?? '';
+      const hasActiveSearch = normalizedSearchTerm.length > 0;
       const hasMatchingDescendants = (n: NotebookFolderTreeDto, term: string): boolean => {
-           const lower = term.toLowerCase();
-           if (n.files.some(f => f.fileName.toLowerCase().includes(lower))) return true;
-           return n.subFolders.some(sub => sub.name.toLowerCase().includes(lower) || hasMatchingDescendants(sub, term));
+           if (n.files.some(f => f.fileName.toLowerCase().includes(term))) return true;
+           return n.subFolders.some(sub => sub.name.toLowerCase().includes(term) || hasMatchingDescendants(sub, term));
       };
       
       const processNode = (n: NotebookFolderTreeDto) => {
-          const showMe = !searchTerm?.trim() || n.name.toLowerCase().includes(searchTerm.toLowerCase()) || hasMatchingDescendants(n, searchTerm);
+          const showMe = !hasActiveSearch || n.name.toLowerCase().includes(normalizedSearchTerm) || hasMatchingDescendants(n, normalizedSearchTerm);
           if (!showMe) return;
 
           // Add folder itself if not root
@@ -1540,14 +1523,14 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
                results.push({ type: 'folder', data: n, id: n.relativePath });
           }
 
-          if (expandedIds.has(n.relativePath || 'ROOT')) {
+          if (hasActiveSearch || expandedIds.has(n.relativePath || 'ROOT')) {
               [...n.subFolders]
                   .sort((a, b) => a.name.localeCompare(b.name))
                   .forEach(sub => processNode(sub));
               [...n.files]
                   .sort((a, b) => a.fileName.localeCompare(b.fileName))
                   .forEach(f => {
-                      if (!searchTerm?.trim() || f.fileName.toLowerCase().includes(searchTerm.toLowerCase())) {
+                      if (!hasActiveSearch || f.fileName.toLowerCase().includes(normalizedSearchTerm)) {
                           results.push({ type: 'file', data: f, id: f.id });
                       }
                   });
@@ -1557,14 +1540,14 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
       if (node) {
           // Process children of root?
           // If node is root, we usually start inside.
-          if (expandedIds.has(node.relativePath || 'ROOT')) {
+          if (hasActiveSearch || expandedIds.has(node.relativePath || 'ROOT')) {
              [...node.subFolders]
                   .sort((a, b) => a.name.localeCompare(b.name))
                   .forEach(sub => processNode(sub));
              [...node.files]
                   .sort((a, b) => a.fileName.localeCompare(b.fileName))
                   .forEach(f => {
-                      if (!searchTerm?.trim() || f.fileName.toLowerCase().includes(searchTerm.toLowerCase())) {
+                      if (!hasActiveSearch || f.fileName.toLowerCase().includes(normalizedSearchTerm)) {
                           results.push({ type: 'file', data: f, id: f.id });
                       }
                   });

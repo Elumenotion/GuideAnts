@@ -708,10 +708,13 @@ file static class NotebookExecutionIdentityProvider
         }
 
         var identity = await GetOrCreateIdentityAsync(projectId, notebookId, logger, cancellationToken);
+        var (mountRegistry, _, _) = NotebookMountsRegistry.TryLoad(notebookRoot);
+        mountRegistry ??= NotebookMountsRegistry.Empty;
+
         try
         {
-            await EnsureOwnedAndRestrictedAsync(notebookRoot, identity, cancellationToken);
-            await EnsureOwnedAndRestrictedAsync(authorizedWorkingDirectory, identity, cancellationToken);
+            await EnsureOwnedAndRestrictedAsync(notebookRoot, identity, mountRegistry, cancellationToken);
+            await EnsureOwnedAndRestrictedAsync(authorizedWorkingDirectory, identity, mountRegistry, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -816,14 +819,24 @@ file static class NotebookExecutionIdentityProvider
         throw new InvalidOperationException($"setpriv identity warm-up failed for uid={uid} gid={gid}");
     }
 
-    private static async Task EnsureOwnedAndRestrictedAsync(string path, NotebookExecutionIdentity identity, CancellationToken cancellationToken)
+    private static async Task EnsureOwnedAndRestrictedAsync(
+        string path,
+        NotebookExecutionIdentity identity,
+        NotebookMountsRegistry mountRegistry,
+        CancellationToken cancellationToken)
     {
         if (!Directory.Exists(path) && !File.Exists(path))
         {
             return;
         }
 
-        await RunCommandAsync("chown", new[] { "-R", $"{identity.Uid}:{identity.Gid}", path }, cancellationToken);
+        if (mountRegistry.IsUnderAnyContainerSourcePath(path))
+        {
+            return;
+        }
+
+        // -P: never traverse symlinks (registered mount links stay link-only; host trees are not walked).
+        await RunCommandAsync("chown", new[] { "-R", "-P", $"{identity.Uid}:{identity.Gid}", path }, cancellationToken);
         await RunCommandAsync("chmod", new[] { "700", path }, cancellationToken);
     }
 

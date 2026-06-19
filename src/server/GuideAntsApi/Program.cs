@@ -31,6 +31,29 @@ public class Program
             return;
         }
 
+        // Startup phase timing. Each LogPhase call reports the delta since the previous phase and the
+        // cumulative time, so the slow step before the HTTP port opens is identifiable from container logs.
+        var startupStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        using var startupTimingLoggerFactory = LoggerFactory.Create(logging =>
+        {
+            logging.SetMinimumLevel(LogLevel.Information);
+            logging.AddSimpleConsole(o =>
+            {
+                o.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
+                o.SingleLine = true;
+            });
+        });
+        var startupTimingLogger = startupTimingLoggerFactory.CreateLogger("StartupTiming");
+        var lastPhaseElapsedMs = 0L;
+        void LogPhase(string phase)
+        {
+            var nowMs = startupStopwatch.ElapsedMilliseconds;
+            startupTimingLogger.LogInformation(
+                "Startup phase '{Phase}' took {DeltaMs} ms (cumulative {TotalMs} ms)",
+                phase, nowMs - lastPhaseElapsedMs, nowMs);
+            lastPhaseElapsedMs = nowMs;
+        }
+
         var builder = WebApplication.CreateBuilder(args);
 
         // Normalize file storage to an absolute path early so every service and options binding
@@ -80,6 +103,7 @@ public class Program
 
         // Configure all services using StartupConfiguration
         StartupConfiguration.ConfigureServices(builder);
+        LogPhase("ConfigureServices");
 
         if (!string.IsNullOrWhiteSpace(defaultConnectionString))
         {
@@ -94,6 +118,7 @@ public class Program
             });
             var dbInitLogger = dbInitLoggerFactory.CreateLogger("Database");
             SqlServerDatabaseInitializer.EnsureCatalogAndMigrate(defaultConnectionString, dbInitLogger);
+            LogPhase("EnsureCatalogAndMigrate");
         }
 
         // Add DB-backed settings after schema exists so Build() and later config reads can load this provider safely.
@@ -113,6 +138,7 @@ public class Program
         });
 
         var app = builder.Build();
+        LogPhase("builder.Build");
 
         var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
         ChatDiagnostics.Initialize(loggerFactory);
@@ -125,15 +151,31 @@ public class Program
             var settingsService = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
             settingsService.BootstrapAsync(bootstrapConfiguration).GetAwaiter().GetResult();
             settingsService.ReloadConfiguration();
+            LogPhase("Settings bootstrap + reload");
 
             var requiredSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder>();
             requiredSeeder.SeedAsync().GetAwaiter().GetResult();
+            LogPhase("RequiredGuidesAssistantsSeeder");
 
             var runtimeProfileSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder>();
             runtimeProfileSeeder.SeedAsync().GetAwaiter().GetResult();
+            LogPhase("RuntimeProfileSeeder");
 
             var localServiceAutoSelector = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector>();
             localServiceAutoSelector.AutoSelectAsync().GetAwaiter().GetResult();
+            LogPhase("LocalServiceAutoSelector");
+
+            var localAiWarmup = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService>();
+            try
+            {
+                localAiWarmup.WarmupAllAsync().GetAwaiter().GetResult();
+                LogPhase("LocalAiStartupWarmup");
+            }
+            catch (Exception ex)
+            {
+                var startupLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+                startupLogger.LogWarning(ex, "Local AI startup warmup failed; continuing application startup.");
+            }
         }
 
         ServiceRoutingStartupValidator.Validate(app.Services.GetRequiredService<IConfiguration>());
@@ -180,6 +222,7 @@ public class Program
 
         // Initialize static service provider for Agent
         AntRunner.Chat.Agent.InitializeServiceProvider(app.Services);
+        LogPhase("Post-build init (env vars + static providers)");
 
         // Configure the HTTP request pipeline.
         if (app.Environment.IsDevelopment())
@@ -309,6 +352,12 @@ public class Program
             .RequireCors("PublicApiCors");
 
         app.UseGuideAntsUiPipeline(builder.Configuration);
+
+        LogPhase("Pipeline + endpoint mapping");
+        app.Lifetime.ApplicationStarted.Register(() =>
+            startupTimingLogger.LogInformation(
+                "Application started and listening on {Urls} after {TotalMs} ms total",
+                string.Join(", ", app.Urls), startupStopwatch.ElapsedMilliseconds));
 
         app.Run();
     }

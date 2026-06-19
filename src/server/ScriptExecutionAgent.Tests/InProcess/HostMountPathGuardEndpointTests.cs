@@ -155,4 +155,71 @@ public sealed class HostMountPathGuardEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await response.Content.ReadAsStringAsync()).Should().Contain("mounts registry");
     }
+
+    [TestMethod]
+    public async Task Execute_under_mount_with_identity_isolation_completes_without_chowning_mount_tree()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Inconclusive("Linux-only notebook identity isolation test.");
+        }
+
+        using var factory = new ScriptExecutionAgentWebApplicationFactory(
+            enableIdentityIsolation: true,
+            allowOwnershipFallback: false);
+        using (factory.CreateClient())
+        {
+            // Force host initialization.
+        }
+
+        var hostMountsRoot = MountTestHelper.CreateHostMountsRoot(factory.StorageRoot);
+        var mount = MountTestHelper.CreateRegisteredMount(factory.Notebook, hostMountsRoot, "Shared", "shared-identity", writable: true);
+        var workingDirectory = Path.Combine(mount.NotebookScopedPath, "Run");
+        Directory.CreateDirectory(workingDirectory);
+
+        var markerPath = Path.Combine(mount.ContainerSourcePath, "marker.txt");
+        File.WriteAllText(markerPath, "seed");
+        var markerOwnerBefore = GetFileOwner(markerPath);
+
+        for (var index = 0; index < 200; index++)
+        {
+            Directory.CreateDirectory(Path.Combine(mount.ContainerSourcePath, $"bulk-{index:D3}"));
+            File.WriteAllText(Path.Combine(mount.ContainerSourcePath, $"bulk-{index:D3}", "file.txt"), "x");
+        }
+
+        using var client = factory.CreateAuthenticatedClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var body = new
+        {
+            script = "echo mounted-identity-ok",
+            scriptType = 0,
+            workingDirectory,
+            projectId = factory.Notebook.ProjectId.ToString(),
+            notebookId = factory.Notebook.NotebookId.ToString()
+        };
+
+        var response = await client.PostAsJsonAsync("/execute", body, cts.Token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("mounted-identity-ok");
+        GetFileOwner(markerPath).Should().Be(markerOwnerBefore);
+    }
+
+    private static string GetFileOwner(string path)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "stat",
+            Arguments = $"-c %u:%g {path}",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start stat.");
+        process.WaitForExit(5_000);
+        process.ExitCode.Should().Be(0, process.StandardError.ReadToEnd());
+        return process.StandardOutput.ReadToEnd().Trim();
+    }
 }

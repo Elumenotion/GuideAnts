@@ -236,7 +236,7 @@ public sealed class DocumentServerService : IDocumentServerService
             if (details == null)
             {
                 _logger.LogWarning("DocumentServer download target project file was not found. projectId={ProjectId} fileId={FileId}",
-                    payload.ProjectId, payload.FileId);
+                    LogValueSanitizer.Sanitize(payload.ProjectId), LogValueSanitizer.Sanitize(payload.FileId));
                 return null;
             }
 
@@ -246,9 +246,9 @@ public sealed class DocumentServerService : IDocumentServerService
             {
                 _logger.LogWarning(
                     "DocumentServer download content missing for project file. projectId={ProjectId} fileId={FileId} versionNumber={VersionNumber}",
-                    payload.ProjectId,
-                    payload.FileId,
-                    requestedVersion);
+                    LogValueSanitizer.Sanitize(payload.ProjectId),
+                    LogValueSanitizer.Sanitize(payload.FileId),
+                    LogValueSanitizer.Sanitize(requestedVersion));
                 return null;
             }
 
@@ -385,9 +385,9 @@ public sealed class DocumentServerService : IDocumentServerService
             await _contentFileService.UploadFileAsync(callbackContext.ProjectId, formFile, false, file.FolderId);
             _logger.LogInformation(
                 "DocumentServer callback uploaded project file version. projectId={ProjectId} fileId={FileId} fileName={FileName} byteLength={ByteLength}",
-                callbackContext.ProjectId,
-                callbackContext.FileId,
-                file.FileName,
+                LogValueSanitizer.Sanitize(callbackContext.ProjectId),
+                LogValueSanitizer.Sanitize(callbackContext.FileId),
+                LogValueSanitizer.Sanitize(file.FileName),
                 memory.Length);
             return;
         }
@@ -460,12 +460,12 @@ public sealed class DocumentServerService : IDocumentServerService
 
         _logger.LogInformation(
             "DocumentServer callback uploading notebook file. projectId={ProjectId} notebookId={NotebookId} fileId={FileId} relativePath={RelativePath} targetFolder={TargetFolder} fileName={FileName} byteLength={ByteLength}",
-            callbackContext.ProjectId,
-            callbackContext.NotebookId.Value,
-            callbackContext.FileId,
-            targetPath,
-            targetFolder,
-            fileName,
+            LogValueSanitizer.Sanitize(callbackContext.ProjectId),
+            LogValueSanitizer.Sanitize(callbackContext.NotebookId.Value),
+            LogValueSanitizer.Sanitize(callbackContext.FileId),
+            LogValueSanitizer.Sanitize(targetPath),
+            LogValueSanitizer.Sanitize(targetFolder),
+            LogValueSanitizer.Sanitize(fileName),
             memory.Length);
         var files = new FormFileCollection { formFileNotebook };
         await _notebookFileService.UploadFilesAsync(

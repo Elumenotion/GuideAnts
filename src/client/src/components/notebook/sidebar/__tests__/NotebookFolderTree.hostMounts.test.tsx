@@ -195,14 +195,27 @@ describe('NotebookFolderTree host mounts', () => {
     expect(localStorage.getItem('hostCommand')).toBeNull();
   });
 
-  it('signposts delete inside a mapped folder as a host operation', async () => {
+  it('marks files inside mapped folders as read-only in the context menu', async () => {
     const user = userEvent.setup();
     renderTree({ onDeleteFile: vi.fn() });
 
-    fireEvent.contextMenu(screen.getByTitle('host.txt'));
-    await user.click(screen.getByText('Delete on host'));
+    const sharedRow = screen.getByTitle('Shared').closest('.group');
+    const sharedToggle = sharedRow?.querySelector('button');
+    expect(sharedToggle).toBeInTheDocument();
+    if (sharedToggle) {
+      await user.click(sharedToggle);
+    }
 
-    expect(screen.getByText(/real operation against the mapped host folder/i)).toBeInTheDocument();
+    const innerRow = await screen.findByTitle('inner');
+    const innerToggle = innerRow.closest('.group')?.querySelector('button');
+    expect(innerToggle).toBeInTheDocument();
+    if (innerToggle) {
+      await user.click(innerToggle);
+    }
+
+    fireEvent.contextMenu(screen.getByTitle('host.txt'));
+    expect(screen.getByText('Linked files are read-only here.')).toBeInTheDocument();
+    expect(screen.queryByText('Delete on host')).not.toBeInTheDocument();
   });
 
   it('opens copyable apply command dialog from mount folder menu', async () => {

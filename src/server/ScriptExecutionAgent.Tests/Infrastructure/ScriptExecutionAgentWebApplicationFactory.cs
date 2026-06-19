@@ -18,6 +18,18 @@ public sealed class ScriptExecutionAgentWebApplicationFactory : WebApplicationFa
 
     public NotebookStorageFixture Notebook { get; private set; } = null!;
 
+    public bool EnableIdentityIsolation { get; }
+
+    public bool AllowOwnershipFallback { get; }
+
+    public ScriptExecutionAgentWebApplicationFactory(
+        bool enableIdentityIsolation = false,
+        bool allowOwnershipFallback = true)
+    {
+        EnableIdentityIsolation = enableIdentityIsolation;
+        AllowOwnershipFallback = allowOwnershipFallback;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         Directory.CreateDirectory(StorageRoot);
@@ -26,8 +38,12 @@ public sealed class ScriptExecutionAgentWebApplicationFactory : WebApplicationFa
         Environment.SetEnvironmentVariable("FILE_STORAGE_ROOT", StorageRoot);
         Environment.SetEnvironmentVariable("SCRIPT_EXECUTION_REQUIRE_TOKEN", "true");
         Environment.SetEnvironmentVariable("SCRIPT_EXECUTION_AGENT_TOKEN", AgentToken);
-        Environment.SetEnvironmentVariable("SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION", "false");
-        Environment.SetEnvironmentVariable("SCRIPT_EXECUTION_ALLOW_OWNERSHIP_FALLBACK", "true");
+        Environment.SetEnvironmentVariable(
+            "SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION",
+            EnableIdentityIsolation ? "true" : "false");
+        Environment.SetEnvironmentVariable(
+            "SCRIPT_EXECUTION_ALLOW_OWNERSHIP_FALLBACK",
+            AllowOwnershipFallback ? "true" : "false");
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
 
         builder.UseEnvironment("Development");

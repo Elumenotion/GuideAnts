@@ -106,7 +106,26 @@ public static class AttachmentMessageBuilder
             else if (uploadType == ContentUploadType.TextFile && !shouldHaveMarkdownShadow && IsKnownTextExtension(Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant()))
             {
                 string text = System.Text.Encoding.UTF8.GetString(bytes);
-                messages.Add(new ChatMessage(ChatMessageRole.User, $"The {fileName} file contains:\n\n---\n{text}"));
+                var userText = BuildTextAttachmentUserText(
+                    text,
+                    fileName,
+                    attachmentPath,
+                    maxInlineMarkdownCharacters,
+                    attachmentMarkdownLogger,
+                    notebookFile.Id);
+                messages.Add(new ChatMessage(ChatMessageRole.User, userText));
+            }
+            // Rule 5: For unknown extensions, inline only if the payload reliably decodes as text.
+            else if (uploadType == ContentUploadType.SandboxFile && TryDecodeUnknownText(bytes, out var inferredText))
+            {
+                var userText = BuildTextAttachmentUserText(
+                    inferredText,
+                    fileName,
+                    attachmentPath,
+                    maxInlineMarkdownCharacters,
+                    attachmentMarkdownLogger,
+                    notebookFile.Id);
+                messages.Add(new ChatMessage(ChatMessageRole.User, userText));
             }
 
             return messages;
@@ -201,7 +220,26 @@ public static class AttachmentMessageBuilder
             else if (uploadType == ContentUploadType.TextFile && !shouldHaveMarkdownShadow && IsKnownTextExtension(Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant()))
             {
                 string text = System.Text.Encoding.UTF8.GetString(bytes);
-                contents.Add(new ChatContent($"The {fileName} file contains:\n\n---\n{text}"));
+                var userText = BuildTextAttachmentUserText(
+                    text,
+                    fileName,
+                    attachmentPath,
+                    maxInlineMarkdownCharacters,
+                    attachmentMarkdownLogger,
+                    notebookFile.Id);
+                contents.Add(new ChatContent(userText));
+            }
+            // Rule 5: For unknown extensions, inline only if the payload reliably decodes as text.
+            else if (uploadType == ContentUploadType.SandboxFile && TryDecodeUnknownText(bytes, out var inferredText))
+            {
+                var userText = BuildTextAttachmentUserText(
+                    inferredText,
+                    fileName,
+                    attachmentPath,
+                    maxInlineMarkdownCharacters,
+                    attachmentMarkdownLogger,
+                    notebookFile.Id);
+                contents.Add(new ChatContent(userText));
             }
 
             return contents;
@@ -274,6 +312,158 @@ public static class AttachmentMessageBuilder
             ".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"
         };
         return supportedExtensions.Contains(extension);
+    }
+
+    private static string BuildTextAttachmentUserText(
+        string text,
+        string fileName,
+        string attachmentPath,
+        int maxInlineCharacters,
+        ILogger? logger,
+        Guid? notebookFileId = null)
+    {
+        if (text.Length > maxInlineCharacters)
+        {
+            logger?.LogInformation(
+                "Attachment text too large to inline for {FileName} (NotebookFileId: {NotebookFileId}): {TextLength} chars (max {MaxInlineCharacters}); using path reference only",
+                fileName, notebookFileId, text.Length, maxInlineCharacters);
+
+            return
+                $"Text content of {fileName} is too large to include inline ({text.Length} characters; limit {maxInlineCharacters}). " +
+                $"Use the file at `{attachmentPath}` (see the Attachment line above).";
+        }
+
+        return $"The {fileName} file contains:\n\n---\n{text}";
+    }
+
+    private static bool TryDecodeUnknownText(byte[] bytes, out string text)
+    {
+        text = string.Empty;
+        if (bytes.Length == 0)
+        {
+            return true;
+        }
+
+        if (TryDecodeByBom(bytes, out text))
+        {
+            return IsMostlyText(text);
+        }
+
+        // For unknown files without BOM, a null byte is a strong binary signal.
+        if (Array.IndexOf(bytes, (byte)0) >= 0)
+        {
+            return false;
+        }
+
+        var utf8Strict = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        if (!TryDecodeWithEncoding(bytes, 0, utf8Strict, out text))
+        {
+            return false;
+        }
+
+        return IsMostlyText(text);
+    }
+
+    private static bool TryDecodeByBom(byte[] bytes, out string text)
+    {
+        // UTF-8 BOM
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+        {
+            return TryDecodeWithEncoding(
+                bytes,
+                3,
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
+                out text);
+        }
+
+        // UTF-32 LE BOM
+        if (bytes.Length >= 4 && bytes[0] == 0xFF && bytes[1] == 0xFE && bytes[2] == 0x00 && bytes[3] == 0x00)
+        {
+            return TryDecodeWithEncoding(
+                bytes,
+                4,
+                new System.Text.UTF32Encoding(bigEndian: false, byteOrderMark: true, throwOnInvalidCharacters: true),
+                out text);
+        }
+
+        // UTF-32 BE BOM
+        if (bytes.Length >= 4 && bytes[0] == 0x00 && bytes[1] == 0x00 && bytes[2] == 0xFE && bytes[3] == 0xFF)
+        {
+            return TryDecodeWithEncoding(
+                bytes,
+                4,
+                new System.Text.UTF32Encoding(bigEndian: true, byteOrderMark: true, throwOnInvalidCharacters: true),
+                out text);
+        }
+
+        // UTF-16 LE BOM
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+        {
+            return TryDecodeWithEncoding(
+                bytes,
+                2,
+                new System.Text.UnicodeEncoding(bigEndian: false, byteOrderMark: true, throwOnInvalidBytes: true),
+                out text);
+        }
+
+        // UTF-16 BE BOM
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+        {
+            return TryDecodeWithEncoding(
+                bytes,
+                2,
+                new System.Text.UnicodeEncoding(bigEndian: true, byteOrderMark: true, throwOnInvalidBytes: true),
+                out text);
+        }
+
+        text = string.Empty;
+        return false;
+    }
+
+    private static bool TryDecodeWithEncoding(byte[] bytes, int offset, System.Text.Encoding encoding, out string text)
+    {
+        try
+        {
+            var count = Math.Max(0, bytes.Length - offset);
+            text = encoding.GetString(bytes, offset, count);
+            return true;
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+            text = string.Empty;
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            text = string.Empty;
+            return false;
+        }
+    }
+
+    private static bool IsMostlyText(string text)
+    {
+        if (text.Length == 0)
+        {
+            return true;
+        }
+
+        var disallowedControlCount = 0;
+        foreach (var ch in text)
+        {
+            // Replacement char signals decoding uncertainty.
+            if (ch == '\uFFFD')
+            {
+                return false;
+            }
+
+            if (char.IsControl(ch) && ch != '\t' && ch != '\n' && ch != '\r')
+            {
+                disallowedControlCount++;
+            }
+        }
+
+        var disallowedRatio = (double)disallowedControlCount / text.Length;
+        return disallowedRatio <= 0.01d;
     }
 
     private static async Task<byte[]> StreamToBytesAsync(Stream s, CancellationToken ct)

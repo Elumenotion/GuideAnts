@@ -81,12 +81,19 @@ describe('NotebookFolderTree', () => {
       expect(screen.getByText('Documents')).toBeInTheDocument();
       expect(screen.getByText('Images')).toBeInTheDocument();
       expect(screen.getByText('test.txt')).toBeInTheDocument();
-      expect(screen.getByText('document.pdf')).toBeInTheDocument();
+      expect(screen.queryByText('document.pdf')).not.toBeInTheDocument();
     });
 
-    it('shows file sizes', () => {
+    it('shows file sizes', async () => {
+        const user = userEvent.setup();
         render(<NotebookFolderTree {...defaultProps} />);
         expect(screen.getByText('1 KB')).toBeInTheDocument();
+        const documentsFolder = screen.getByText('Documents').closest('.group');
+        const expandButton = documentsFolder?.querySelector('button');
+        expect(expandButton).toBeInTheDocument();
+        if (expandButton) {
+          await user.click(expandButton);
+        }
         expect(screen.getByText('2 KB')).toBeInTheDocument();
       });
   
@@ -95,8 +102,15 @@ describe('NotebookFolderTree', () => {
       expect(screen.getByText('No files available')).toBeInTheDocument();
     });
 
-    it('shows indexing indicator for indexed files', () => {
+    it('shows indexing indicator for indexed files', async () => {
+      const user = userEvent.setup();
       render(<NotebookFolderTree {...defaultProps} />);
+      const documentsFolder = screen.getByText('Documents').closest('.group');
+      const expandButton = documentsFolder?.querySelector('button');
+      expect(expandButton).toBeInTheDocument();
+      if (expandButton) {
+        await user.click(expandButton);
+      }
       const indexedFileElement = screen.getByText('document.pdf').closest('div');
       expect(indexedFileElement?.querySelector('svg')).toBeInTheDocument();
     });
@@ -117,12 +131,20 @@ describe('NotebookFolderTree', () => {
       render(<NotebookFolderTree {...defaultProps} />);
       
       const documentsFolder = screen.getByText('Documents').closest('.group');
-      const collapseButton = documentsFolder?.querySelector('button');
+      const toggleButton = documentsFolder?.querySelector('button');
+      expect(toggleButton).toBeInTheDocument();
+      expect(screen.queryByText('document.pdf')).not.toBeInTheDocument();
 
-      expect(screen.getByText('document.pdf')).toBeInTheDocument();
+      if (toggleButton) {
+        await user.click(toggleButton);
+      }
 
-      if (collapseButton) {
-        await user.click(collapseButton);
+      await waitFor(() => {
+        expect(screen.getByText('document.pdf')).toBeInTheDocument();
+      });
+
+      if (toggleButton) {
+        await user.click(toggleButton);
       }
       
       await waitFor(() => {

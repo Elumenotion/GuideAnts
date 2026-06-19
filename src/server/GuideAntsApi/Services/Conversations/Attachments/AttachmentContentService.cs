@@ -75,7 +75,7 @@ public class AttachmentContentService : IAttachmentContentService
             if (notebookFile == null)
             {
                 _logger.LogWarning("Attachment file {NotebookFileId} not found or doesn't belong to notebook {NotebookId}",
-                    attachment.NotebookFileId, notebookId);
+                    LogValueSanitizer.Sanitize(attachment.NotebookFileId), LogValueSanitizer.Sanitize(notebookId));
                 continue;
             }
 

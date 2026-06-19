@@ -23,6 +23,7 @@ import {
   looksLikeDocumentServerFile,
   DocumentServerCapabilities,
 } from '../../../services/documentServer';
+import { sniffBlobAsText } from '../../../utils/textSniff';
 // CsvViewer and CodeViewer will be added back if found.
 
 interface FilePreviewOverlayProps {
@@ -84,6 +85,7 @@ const getContentTypeFromFileName = (fileName: string): string => {
 export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, projectId, notebookId, onClose, isStandalone, isEmbedded, onNavigate, fileExists, canEdit = false }) => {
   const [content, setContent] = useState<Blob | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
+  const [isDetectedTextContent, setIsDetectedTextContent] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingText, setIsLoadingText] = useState(false);
   const [documentServerCapabilities, setDocumentServerCapabilities] = useState<DocumentServerCapabilities | null>(null);
@@ -275,6 +277,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     setShowOriginalContentErrorDialog(false);
     lastDialogErrorRef.current = null;
     setHasAutoSwitched(false);
+    setIsDetectedTextContent(false);
   }, [file.id]);
 
   const showOriginalPreviewError = useCallback((message: string) => {
@@ -366,6 +369,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
         setError(null);
         setOriginalContentError(null);
         setTextContent(null);
+        setIsDetectedTextContent(false);
         setHtmlContent(null);
         const blob = await notebookFilesApi.getNotebookFileContent(projectId, notebookId, file.relativePath, file.fileHash);
         if (isDisposed || requestSeq !== contentRequestSeqRef.current) {
@@ -429,26 +433,6 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     return () => clearInterval(pollInterval);
   }, [documentServerActive, supportsMarkdownExtraction, refreshMarkdownShadow]);
 
-  // Separate effect for loading text content (matching project view)
-  useEffect(() => {
-    const loadTextContent = async () => {
-      if (content && (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/typescript')) {
-        try {
-          setIsLoadingText(true);
-          const text = await content.text();
-          setTextContent(text);
-        } catch (error) {
-          console.error('Failed to read text content:', error);
-          showOriginalPreviewError('Failed to read text content. Please try again.');
-        } finally {
-          setIsLoadingText(false);
-        }
-      }
-    };
-
-    loadTextContent();
-  }, [content, contentType, showOriginalPreviewError]);
-
   // Markdown detection (matching project view)
   const isMarkdown = 
     contentType === 'text/markdown' ||
@@ -456,11 +440,87 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     file.fileName.toLowerCase().endsWith('.md') ||
     file.fileName.toLowerCase().endsWith('.markdown');
 
+  const hasKnownTextHandler =
+    contentType.startsWith('text/') ||
+    contentType === 'application/json' ||
+    contentType === 'application/typescript';
+
+  const hasExplicitNonTextHandler =
+    contentType.startsWith('image/') ||
+    contentType.startsWith('application/pdf') ||
+    contentType.startsWith('audio/') ||
+    contentType.startsWith('video/') ||
+    isMarkdown ||
+    documentServerActive;
+
+  const shouldTrySniffingUnknownText = !hasKnownTextHandler && !hasExplicitNonTextHandler;
+  const shouldRenderAsText = hasKnownTextHandler || isDetectedTextContent;
+
+  // Separate effect for loading text content (matching project view)
+  useEffect(() => {
+    let isDisposed = false;
+
+    const loadTextContent = async () => {
+      if (!content) {
+        return;
+      }
+
+      if (hasKnownTextHandler) {
+        try {
+          setIsLoadingText(true);
+          const text = await content.text();
+          if (isDisposed) return;
+          setTextContent(text);
+          setIsDetectedTextContent(false);
+        } catch (error) {
+          if (isDisposed) return;
+          console.error('Failed to read text content:', error);
+          setIsDetectedTextContent(false);
+          showOriginalPreviewError('Failed to read text content. Please try again.');
+        } finally {
+          if (!isDisposed) {
+            setIsLoadingText(false);
+          }
+        }
+        return;
+      }
+
+      if (!shouldTrySniffingUnknownText) {
+        setIsLoadingText(false);
+        setIsDetectedTextContent(false);
+        return;
+      }
+
+      try {
+        setIsLoadingText(true);
+        const sniffedText = await sniffBlobAsText(content);
+        if (isDisposed) return;
+        if (sniffedText !== null) {
+          setTextContent(sniffedText);
+          setIsDetectedTextContent(true);
+        } else {
+          setTextContent(null);
+          setIsDetectedTextContent(false);
+        }
+      } catch (error) {
+        if (isDisposed) return;
+        console.error('Failed to inspect unknown file content:', error);
+        setIsDetectedTextContent(false);
+      } finally {
+        if (!isDisposed) {
+          setIsLoadingText(false);
+        }
+      }
+    };
+
+    loadTextContent();
+    return () => {
+      isDisposed = true;
+    };
+  }, [content, hasKnownTextHandler, shouldTrySniffingUnknownText, showOriginalPreviewError]);
+
   // Check if content is text-based and should use append mode
-  const isTextBasedContent = contentType.startsWith('text/') || 
-                              contentType === 'application/json' || 
-                              contentType === 'application/typescript' ||
-                              isMarkdown;
+  const isTextBasedContent = shouldRenderAsText || isMarkdown;
 
   const openMarkdownEditorFromPreview = async () => {
     if (!isMarkdown) return;
@@ -517,10 +577,8 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     }
 
     // Check if the original file type can't be previewed
-    const isPreviewable = 
-      contentType.startsWith('text/') ||
-      contentType === 'application/json' ||
-      contentType === 'application/typescript' ||
+    const isPreviewable =
+      shouldRenderAsText ||
       contentType.startsWith('image/') ||
       contentType.startsWith('application/pdf') ||
       contentType.startsWith('audio/') ||
@@ -533,7 +591,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
       setActiveTab('markdown');
       setHasAutoSwitched(true);
     }
-  }, [markdownShadow, activeTab, hasAutoSwitched, contentType, isMarkdown, documentServerCandidate, documentServerCapabilities?.enabled]);
+  }, [markdownShadow, activeTab, hasAutoSwitched, contentType, isMarkdown, shouldRenderAsText, documentServerCandidate, documentServerCapabilities?.enabled]);
 
   // Fetch markdown content when switching to markdown tab
   const fetchMarkdownContent = useCallback(async () => {
@@ -807,13 +865,11 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     // HTML files need large modal for best viewing
     if (contentType === 'text/html' || contentType === 'application/xhtml+xml') return true;
     
-    return contentType.startsWith('image/') || 
+    return contentType.startsWith('image/') ||
            contentType.startsWith('video/') || 
            contentType.startsWith('audio/') ||
            contentType.startsWith('application/pdf') ||
-           contentType.startsWith('text/') ||
-           contentType === 'application/json' ||
-           contentType === 'application/typescript';
+           shouldRenderAsText;
   };
 
   const getModalClasses = () => {
@@ -987,7 +1043,7 @@ export const FilePreviewOverlay: React.FC<FilePreviewOverlayProps> = ({ file, pr
     }
 
     // Handle text files (including code, JSON, and CSV) (matching project view)
-    if (contentType.startsWith('text/') || contentType === 'application/json' || contentType === 'application/typescript') {
+    if (shouldRenderAsText) {
       if (isLoadingText || textContent === null) {
         return <div className="flex items-center justify-center h-full"><p>Processing text content...</p></div>;
       }

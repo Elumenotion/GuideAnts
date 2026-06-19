@@ -221,3 +221,21 @@ Typical work splits into one of three lanes:
 - frontend/product work in `src/client`
 - API/domain/runtime work in `src/server`
 - local infrastructure/runtime work in `docker`
+
+## Big Thanks To Upstream Projects
+
+GuideAnts is built on top of excellent open source work. Huge thanks to the teams and contributors behind these projects:
+
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) for local LLM inference/runtime foundations.
+- [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) for the local image-generation engine used in `guideants-ai`.
+- [Transformers](https://github.com/huggingface/transformers) for model loading and inference integration across local services.
+- [sentence-transformers](https://github.com/UKPLab/sentence-transformers) for local embeddings support.
+- [Hugging Face Hub](https://github.com/huggingface/huggingface_hub) for model download and management workflows.
+- [PyTorch](https://github.com/pytorch/pytorch) for tensor/runtime acceleration across ASR, TTS, and embeddings.
+- [FastAPI](https://github.com/fastapi/fastapi) and [Uvicorn](https://github.com/encode/uvicorn) for the local Python service APIs.
+- [FFmpeg](https://github.com/FFmpeg/FFmpeg) for media extraction/transcoding.
+- [Playwright](https://github.com/microsoft/playwright-python) for browser automation used in local service workflows.
+- [Docling](https://github.com/docling-project/docling) for document intelligence and markdown extraction (`docling-serve`).
+- [SearXNG](https://github.com/searxng/searxng) for metasearch and web retrieval.
+- [PlantUML](https://github.com/plantuml/plantuml) and [Graphviz](https://gitlab.com/graphviz/graphviz) for diagram rendering.
+- [Euro-Office DocumentServer](https://github.com/Euro-Office/DocumentServer) and [ONLYOFFICE DocumentServer](https://github.com/ONLYOFFICE/DocumentServer) as compatible `GA_DOCUMENTSERVER_IMAGE` targets for full in-app Office document display and editing capabilities.

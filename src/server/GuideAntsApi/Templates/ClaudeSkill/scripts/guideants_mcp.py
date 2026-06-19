@@ -56,19 +56,44 @@ ARTIFACT_URL_PATTERNS = (
     re.compile(r"/api/published/[^)\s\"']+"),
 )
 
+_SENSITIVE_KEY_RE = re.compile(
+    r"(password|passwd|secret|token|api[_-]?key|authorization|credential)",
+    re.IGNORECASE,
+)
+_API_KEY_VALUE_RE = re.compile(r"^gak_[A-Za-z0-9_-]+$")
+_REDACTED = "<redacted>"
+
+
+def _redact_for_output(value: Any) -> Any:
+    """Strip credential-shaped values before writing JSON to stdout."""
+    if isinstance(value, dict):
+        return {
+            key: (
+                _REDACTED
+                if _SENSITIVE_KEY_RE.search(str(key))
+                else _redact_for_output(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_for_output(item) for item in value]
+    if isinstance(value, str) and _API_KEY_VALUE_RE.match(value):
+        return _REDACTED
+    return value
+
 
 def log(message: str) -> None:
     print(message, file=sys.stderr)
 
 
 def emit(payload: dict[str, Any]) -> None:
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(json.dumps(_redact_for_output(payload), ensure_ascii=False, indent=2))
 
 
 def fail(code: str, message: str, **extra: Any) -> "None":
     payload: dict[str, Any] = {"error": code, "message": message}
     payload.update(extra)
-    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    print(json.dumps(_redact_for_output(payload), ensure_ascii=False), flush=True)
     raise SystemExit(1)
 
 
@@ -95,19 +120,32 @@ def load_env() -> dict[str, str]:
     return env
 
 
+def _api_key_state(env: dict[str, str]) -> str:
+    """Classify API key configuration without exposing the secret value."""
+    value = env.get("GUIDEANTS_API_KEY", "")
+    if not value:
+        return "missing"
+    if value == API_KEY_PLACEHOLDER:
+        return "placeholder"
+    return "ok"
+
+
 def api_key_configured(env: dict[str, str]) -> bool:
     """Report whether a usable API key is present without exposing its value.
 
     Returning a plain boolean keeps the secret string out of any structure that
     later reaches stdout/stderr."""
-    value = env.get("GUIDEANTS_API_KEY", "")
-    return bool(value) and value != API_KEY_PLACEHOLDER
+    return _api_key_state(env) == "ok"
 
 
-def require_config(env: dict[str, str]) -> tuple[str, str, str]:
+def api_key_for_requests(env: dict[str, str]) -> str:
+    """Return the API key for outbound HTTP headers only (never for stdout)."""
+    return env.get("GUIDEANTS_API_KEY", "")
+
+
+def require_config(env: dict[str, str]) -> tuple[str, str]:
     base = env.get("GUIDEANTS_API_BASE", "").rstrip("/")
     pub = env.get("GUIDEANTS_PUB_ID", "")
-    key = env.get("GUIDEANTS_API_KEY", "")
 
     # Build the missing-name list from literals gated on presence so the secret
     # value never flows into the reported payload.
@@ -116,7 +154,8 @@ def require_config(env: dict[str, str]) -> tuple[str, str, str]:
         missing.append("GUIDEANTS_API_BASE")
     if not pub:
         missing.append("GUIDEANTS_PUB_ID")
-    if not key:
+    key_state = _api_key_state(env)
+    if key_state == "missing":
         missing.append("GUIDEANTS_API_KEY")
     if missing:
         fail(
@@ -124,12 +163,12 @@ def require_config(env: dict[str, str]) -> tuple[str, str, str]:
             "Missing required .env values: " + ", ".join(missing),
             missing=missing,
         )
-    if key == API_KEY_PLACEHOLDER:
+    if key_state == "placeholder":
         fail(
             "api_key_placeholder",
             "GUIDEANTS_API_KEY is still the placeholder. Set your gak_ key in .env.",
         )
-    return base, pub, key
+    return base, pub
 
 
 def resolve_save_dir(args: argparse.Namespace, env: dict[str, str]) -> Path:
@@ -321,18 +360,39 @@ def download_new_files(
 
 
 def cmd_list_tools(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
-    result = mcp_call(base, pub, key, "tools/list", {}, request_id=1, timeout=60)
-    tools = [
-        {"name": tool.get("name"), "description": tool.get("description", "")}
-        for tool in result.get("tools", [])
-    ]
+    base, pub = require_config(env)
+    tools = _list_tools(base, pub, env)
     emit({"tools": tools})
     return 0
 
 
+def _list_tools(base: str, pub: str, env: dict[str, str]) -> list[dict[str, str]]:
+    result = mcp_call(
+        base,
+        pub,
+        api_key_for_requests(env),
+        "tools/list",
+        {},
+        request_id=1,
+        timeout=60,
+    )
+    return [
+        {"name": tool.get("name"), "description": tool.get("description", "")}
+        for tool in result.get("tools", [])
+    ]
+
+
 def cmd_invoke(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
+    base, pub = require_config(env)
+    payload = _invoke_assistant(base, pub, env, args)
+    emit(payload)
+    return 0
+
+
+def _invoke_assistant(
+    base: str, pub: str, env: dict[str, str], args: argparse.Namespace
+) -> dict[str, Any]:
+    key = api_key_for_requests(env)
 
     arguments: dict[str, Any] = {"instructions": args.instructions}
     if args.conversation_id:
@@ -389,36 +449,49 @@ def cmd_invoke(args: argparse.Namespace, env: dict[str, str]) -> int:
                     resolve_save_dir(args, env),
                 )
 
-    emit(
-        {
-            "conversationId": conversation_id,
-            "assistantName": inner.get("assistantName") or "",
-            "responseMarkdown": response_md,
-            "displayImages": display_images,
-            "deliverables": deliverables,
-            "artifactUrls": artifact_urls,
-        }
-    )
-    return 0
+    return {
+        "conversationId": conversation_id,
+        "assistantName": inner.get("assistantName") or "",
+        "responseMarkdown": response_md,
+        "displayImages": display_images,
+        "deliverables": deliverables,
+        "artifactUrls": artifact_urls,
+    }
 
 
 def cmd_get_conversation(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
-    result = mcp_call(
-        base,
-        pub,
-        key,
-        "tools/call",
-        {"name": "conversation_get", "arguments": {"conversationId": args.conversation_id}},
-        request_id=3,
-        timeout=60,
-    )
-    emit(parse_inner(result.get("content") or []))
+    base, pub = require_config(env)
+    payload = _get_conversation(base, pub, env, args.conversation_id)
+    emit(payload)
     return 0
 
 
+def _get_conversation(
+    base: str, pub: str, env: dict[str, str], conversation_id: str
+) -> dict[str, Any]:
+    result = mcp_call(
+        base,
+        pub,
+        api_key_for_requests(env),
+        "tools/call",
+        {"name": "conversation_get", "arguments": {"conversationId": conversation_id}},
+        request_id=3,
+        timeout=60,
+    )
+    return parse_inner(result.get("content") or [])
+
+
 def cmd_recover(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
+    base, pub = require_config(env)
+    payload = _recover_conversation(base, pub, env, args)
+    emit(payload)
+    return 0
+
+
+def _recover_conversation(
+    base: str, pub: str, env: dict[str, str], args: argparse.Namespace
+) -> dict[str, Any]:
+    key = api_key_for_requests(env)
 
     info = fetch_guide_info(base, pub)
     project_id = info.get("projectId")
@@ -446,12 +519,11 @@ def cmd_recover(args: argparse.Namespace, env: dict[str, str]) -> int:
         names,
         resolve_save_dir(args, env),
     )
-    emit({"conversationId": args.conversation_id, "deliverables": deliverables})
-    return 0
+    return {"conversationId": args.conversation_id, "deliverables": deliverables}
 
 
 def cmd_download(args: argparse.Namespace, env: dict[str, str]) -> int:
-    base, pub, key = require_config(env)
+    base, _pub = require_config(env)
 
     url = args.url
     if url.startswith("/api/"):
@@ -490,15 +562,17 @@ def cmd_doctor(args: argparse.Namespace, env: dict[str, str]) -> int:
     reachable = False
     tool_count = 0
     if all(c["ok"] for c in checks):
-        # Read the key only as a call argument used for the request header; it is
-        # never bound to a local that feeds the emitted checks payload.
-        ok, tool_count = _try_tools_list(base, pub, env.get("GUIDEANTS_API_KEY", ""))
-        reachable = ok
+        reachable, tool_count = _doctor_mcp_reachable(base, pub, env)
     checks.append({"check": "mcp_reachable", "ok": reachable, "toolCount": tool_count})
 
     overall = all(c["ok"] for c in checks)
     emit({"ok": overall, "checks": checks})
     return 0 if overall else 1
+
+
+def _doctor_mcp_reachable(base: str, pub: str, env: dict[str, str]) -> tuple[bool, int]:
+    """Probe MCP reachability; keep the API key confined to the HTTP header path."""
+    return _try_tools_list(base, pub, api_key_for_requests(env))
 
 
 def _try_tools_list(base: str, pub: str, key: str) -> tuple[bool, int]:

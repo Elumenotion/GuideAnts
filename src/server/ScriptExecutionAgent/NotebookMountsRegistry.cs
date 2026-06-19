@@ -40,6 +40,60 @@ internal sealed class NotebookMountsRegistry
         return null;
     }
 
+    /// <summary>
+    /// True when <paramref name="candidatePath"/> resolves under a registered host-mount source root.
+    /// Ownership prep must not run on bind-mounted host folders.
+    /// </summary>
+    public bool IsUnderAnyContainerSourcePath(string candidatePath)
+    {
+        string normalizedCandidate;
+        try
+        {
+            normalizedCandidate = NormalizeDirectoryPath(candidatePath);
+        }
+        catch
+        {
+            return false;
+        }
+
+        foreach (var mount in Mounts)
+        {
+            string normalizedSource;
+            try
+            {
+                normalizedSource = NormalizeDirectoryPath(mount.ContainerSourcePath);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (IsStrictChildOrSamePath(normalizedSource, normalizedCandidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string NormalizeDirectoryPath(string path)
+    {
+        return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static bool IsStrictChildOrSamePath(string root, string path)
+    {
+        root = NormalizeDirectoryPath(root);
+        path = NormalizeDirectoryPath(path);
+        if (string.Equals(path, root, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
     public static (NotebookMountsRegistry? Registry, MountsRegistryLoadStatus Status, string? Error) TryLoad(string notebookRoot)
     {
         var registryPath = Path.Combine(notebookRoot, ".guideants", "mounts.json");

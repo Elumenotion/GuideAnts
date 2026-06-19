@@ -11,6 +11,7 @@ import AudioPlayer from '@/components/common/AudioPlayer';
 import VideoPlayer from '@/components/common/VideoPlayer';
 import { FileLoadingErrorBoundary } from '@/components/common/FileLoadingErrorBoundary';
 import { resolveHtmlResources, cleanupBlobUrls } from '@/utils/htmlResourceResolver';
+import { sniffBlobAsText } from '@/utils/textSniff';
 import DocumentServerEditor from '@/components/common/DocumentServerEditor';
 import {
     getDocumentServerCapabilities,
@@ -35,6 +36,7 @@ interface FileContentsProps {
 function FileContentsComponent({ projectId, fileId, fileName, contentType, version, inlineMode = false, resolveProjectFilePath, onEditMarkdown, canEdit = false }: FileContentsProps) {
     const [content, setContent] = useState<{ blob: Blob; contentType: string; fileName: string } | null>(null);
     const [textContent, setTextContent] = useState<string | null>(null);
+    const [isDetectedTextContent, setIsDetectedTextContent] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [documentServerCapabilities, setDocumentServerCapabilities] = useState<DocumentServerCapabilities | null>(null);
@@ -74,6 +76,18 @@ function FileContentsComponent({ projectId, fileId, fileName, contentType, versi
         isDocumentServerSupportedByContentType(contentType, documentServerCapabilities) ||
         isDocumentServerSupportedByExtension(documentServerFileName, documentServerCapabilities);
     const documentServerCandidate = looksLikeDocumentServerFile(documentServerFileName, contentType);
+    const hasKnownTextHandler =
+        contentType.startsWith('text/') ||
+        contentType === 'application/json' ||
+        contentType === 'application/typescript';
+    const hasExplicitNonTextHandler =
+        contentType.startsWith('image/') ||
+        contentType.startsWith('application/pdf') ||
+        contentType.startsWith('audio/') ||
+        contentType.startsWith('video/') ||
+        documentServerActive;
+    const shouldTrySniffingUnknownText = !hasKnownTextHandler && !hasExplicitNonTextHandler;
+    const shouldRenderAsText = hasKnownTextHandler || isDetectedTextContent;
 
     useEffect(() => {
         if (!documentServerCandidate) {
@@ -145,6 +159,7 @@ function FileContentsComponent({ projectId, fileId, fileName, contentType, versi
             if (documentServerActive) {
                 setContent(null);
                 setTextContent(null);
+                setIsDetectedTextContent(false);
                 setError(null);
                 setIsLoading(false);
                 return;
@@ -166,6 +181,7 @@ function FileContentsComponent({ projectId, fileId, fileName, contentType, versi
                 setIsLoading(true);
                 setError(null);
                 setTextContent(null);
+                setIsDetectedTextContent(false);
                 
                 console.log('[TELEMETRY] ContentFile API call initiated', { 
                     fileIdKey,
@@ -218,46 +234,119 @@ function FileContentsComponent({ projectId, fileId, fileName, contentType, versi
     }, [projectId, fileId, version, contentType, documentServerActive]);
 
     useEffect(() => {
+        let isDisposed = false;
+
         const loadTextContent = async () => {
-            if (content?.blob && (contentType.startsWith('text/') || contentType === 'application/json')) {
-                const startTime = Date.now();
-                const fileIdKey = `${projectId}:${fileId}:${version || 'latest'}`;
-                
-                console.log('[TELEMETRY] Text processing started', { 
+            if (!content?.blob) {
+                return;
+            }
+
+            const startTime = Date.now();
+            const fileIdKey = `${projectId}:${fileId}:${version || 'latest'}`;
+
+            if (hasKnownTextHandler) {
+                console.log('[TELEMETRY] Text processing started', {
                     fileIdKey,
                     contentType,
                     blobSize: content.blob.size,
-                    timestamp: startTime 
+                    timestamp: startTime
                 });
-                
+
                 try {
                     const text = await content.blob.text();
-                    
-                    console.log('[TELEMETRY] Text processing completed', { 
+                    if (isDisposed) {
+                        return;
+                    }
+
+                    console.log('[TELEMETRY] Text processing completed', {
                         fileIdKey,
                         textLength: text?.length,
                         processingTime: Date.now() - startTime,
-                        timestamp: Date.now() 
+                        timestamp: Date.now()
                     });
-                    
+
                     setTextContent(text);
+                    setIsDetectedTextContent(false);
                 } catch (error) {
-                    console.log('[TELEMETRY] Text processing failed', { 
+                    if (isDisposed) {
+                        return;
+                    }
+
+                    console.log('[TELEMETRY] Text processing failed', {
                         fileIdKey,
                         error: error instanceof Error ? error.message : 'Unknown error',
                         errorType: error instanceof Error ? error.constructor.name : 'Unknown',
                         processingTime: Date.now() - startTime,
-                        timestamp: Date.now() 
+                        timestamp: Date.now()
                     });
-                    
+
                     console.error('Failed to read text content:', error);
+                    setIsDetectedTextContent(false);
                     setError('Failed to read text content. Please try again.');
                 }
+                return;
+            }
+
+            if (!shouldTrySniffingUnknownText) {
+                setIsDetectedTextContent(false);
+                return;
+            }
+
+            console.log('[TELEMETRY] Unknown text sniff started', {
+                fileIdKey,
+                contentType,
+                blobSize: content.blob.size,
+                timestamp: startTime
+            });
+
+            try {
+                const sniffedText = await sniffBlobAsText(content.blob);
+                if (isDisposed) {
+                    return;
+                }
+
+                if (sniffedText !== null) {
+                    console.log('[TELEMETRY] Unknown text sniff classified as text', {
+                        fileIdKey,
+                        textLength: sniffedText.length,
+                        processingTime: Date.now() - startTime,
+                        timestamp: Date.now()
+                    });
+                    setTextContent(sniffedText);
+                    setIsDetectedTextContent(true);
+                } else {
+                    console.log('[TELEMETRY] Unknown text sniff classified as binary', {
+                        fileIdKey,
+                        processingTime: Date.now() - startTime,
+                        timestamp: Date.now()
+                    });
+                    setTextContent(null);
+                    setIsDetectedTextContent(false);
+                }
+            } catch (error) {
+                if (isDisposed) {
+                    return;
+                }
+
+                console.log('[TELEMETRY] Unknown text sniff failed', {
+                    fileIdKey,
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    errorType: error instanceof Error ? error.constructor.name : 'Unknown',
+                    processingTime: Date.now() - startTime,
+                    timestamp: Date.now()
+                });
+
+                console.error('Failed to inspect unknown file content:', error);
+                setIsDetectedTextContent(false);
             }
         };
 
         loadTextContent();
-    }, [content, contentType, projectId, fileId, version]);
+
+        return () => {
+            isDisposed = true;
+        };
+    }, [content, contentType, hasKnownTextHandler, shouldTrySniffingUnknownText, projectId, fileId, version]);
 
     // Resolve HTML resources (images, stylesheets, scripts, etc.)
     useEffect(() => {
@@ -451,7 +540,7 @@ function FileContentsComponent({ projectId, fileId, fileName, contentType, versi
     }
 
     // Handle text files (including code and JSON)
-    if (contentType.startsWith('text/') || contentType === 'application/json') {
+    if (shouldRenderAsText) {
         if (textContent === null) {
             return (
                 <div className="h-full w-full flex items-center justify-center">
