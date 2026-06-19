@@ -89,4 +89,5 @@ jobs:
       - name: Run API integration tests
         env:
           GA_INTEGRATION_TEST_MSSQL_IMAGE: ghcr.io/${{ env.OWNER_LC }}/mssql2025-express-fts:latest
+          GA_ENABLE_RUNTIME_LOAD_TESTS: '0'
         run: dotnet test GuideAntsApi.IntegrationTests/GuideAntsApi.IntegrationTests.csproj --configuration Release --verbosity minimal

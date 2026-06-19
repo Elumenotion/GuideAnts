@@ -50,8 +50,8 @@ public sealed class HostFolderMountLeafValidator
                 "Leaf name must not be '.' or '..'.");
         }
 
-        if (leafName.Contains(Path.DirectorySeparatorChar, StringComparison.Ordinal)
-            || leafName.Contains(Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
+        if (leafName.Contains('/', StringComparison.Ordinal)
+            || leafName.Contains('\\', StringComparison.Ordinal))
         {
             return HostFolderMountValidationResult.Fail(
                 "leaf_path_separator",

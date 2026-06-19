@@ -786,10 +786,21 @@ public sealed class HostFolderMountService : IHostFolderMountService
         link.LinkPhysicalPath = linkPath;
         link.LinkRelativePath = mount.LeafName;
 
-        if (Directory.Exists(linkPath) || File.Exists(linkPath))
+        if (!TryResolvePhysicalSourcePath(mount, out var physicalSourcePath))
         {
             link.Status = HostFolderMountLinkStatus.LinkError;
-            link.ErrorMessage = IsDirectorySymlinkPointingAt(linkPath, mount.ContainerSourcePath)
+            link.ErrorMessage =
+                $"Mount source path '{mount.ContainerSourcePath}' is not under the configured host-mount root.";
+            return;
+        }
+
+        if (PathExists(linkPath))
+        {
+            link.Status = HostFolderMountLinkStatus.LinkError;
+            link.ErrorMessage = IsDirectorySymlinkPointingAtAny(
+                linkPath,
+                physicalSourcePath,
+                mount.ContainerSourcePath)
                 ? "Missing source"
                 : $"Cannot link mount because '{mount.LeafName}' already exists in the notebook root.";
             return;
@@ -836,10 +847,7 @@ public sealed class HostFolderMountService : IHostFolderMountService
     }
 
     private bool IsMountSourcePresent(HostFolderMount mount) =>
-        HostMountSourcePath.TryResolvePhysicalSourcePath(
-            _hostMountsRoot,
-            mount.ContainerSourcePath,
-            out var physicalSourcePath)
+        TryResolvePhysicalSourcePath(mount, out var physicalSourcePath)
         && Directory.Exists(physicalSourcePath);
 
     private static void UpdateMountStatusFromLinks(HostFolderMount mount, bool sourcePresent)
@@ -932,10 +940,7 @@ public sealed class HostFolderMountService : IHostFolderMountService
                 $"Mount link path for leaf '{mount.LeafName}' is not under notebook root.");
         }
 
-        if (!HostMountSourcePath.TryResolvePhysicalSourcePath(
-                _hostMountsRoot,
-                mount.ContainerSourcePath,
-                out var physicalSourcePath))
+        if (!TryResolvePhysicalSourcePath(mount, out var physicalSourcePath))
         {
             throw new InvalidOperationException(
                 $"Mount source path '{mount.ContainerSourcePath}' is not under the configured host-mount root.");
@@ -947,9 +952,12 @@ public sealed class HostFolderMountService : IHostFolderMountService
                 $"Mount source is not present at '{mount.ContainerSourcePath}'.");
         }
 
-        if (Directory.Exists(linkPath) || File.Exists(linkPath))
+        if (PathExists(linkPath))
         {
-            if (!IsDirectorySymlinkPointingAt(linkPath, mount.ContainerSourcePath))
+            if (!IsDirectorySymlinkPointingAtAny(
+                    linkPath,
+                    physicalSourcePath,
+                    mount.ContainerSourcePath))
             {
                 throw new InvalidOperationException(
                     $"Cannot create mount link because '{mount.LeafName}' already exists in the notebook root.");
@@ -960,10 +968,16 @@ public sealed class HostFolderMountService : IHostFolderMountService
             return;
         }
 
-        Directory.CreateSymbolicLink(linkPath, mount.ContainerSourcePath);
+        Directory.CreateSymbolicLink(linkPath, physicalSourcePath);
         link.LinkPhysicalPath = linkPath;
         link.LinkRelativePath = mount.LeafName;
     }
+
+    private bool TryResolvePhysicalSourcePath(HostFolderMount mount, out string physicalSourcePath) =>
+        HostMountSourcePath.TryResolvePhysicalSourcePath(
+            _hostMountsRoot,
+            mount.ContainerSourcePath,
+            out physicalSourcePath);
 
     private async Task<bool> TryUnlinkAllMountLinksAsync(
         ApplicationDbContext db,
@@ -1032,9 +1046,42 @@ public sealed class HostFolderMountService : IHostFolderMountService
         }
     }
 
+    private static bool PathExists(string path)
+    {
+        if (Directory.Exists(path) || File.Exists(path))
+        {
+            return true;
+        }
+
+        try
+        {
+            _ = File.GetAttributes(path);
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    private static bool IsDirectorySymlinkPointingAtAny(string linkPath, params string[] expectedTargets) =>
+        expectedTargets.Any(expectedTarget => IsDirectorySymlinkPointingAt(linkPath, expectedTarget));
+
     private static bool IsDirectorySymlinkPointingAt(string linkPath, string expectedTarget)
     {
-        if (!Directory.Exists(linkPath) && !File.Exists(linkPath))
+        if (!PathExists(linkPath))
         {
             return false;
         }
