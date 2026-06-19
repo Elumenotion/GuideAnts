@@ -50,6 +50,22 @@ describe('buildAddModelRequest', () => {
     expect(state.catalogIsActive).toBe(true);
   });
 
+  it('builds llama-cpp huggingface request with defaulted target directory', () => {
+    const state = createEmptyAddModelWizardState('llama-cpp');
+    state.llamaInstallSource = 'huggingface';
+    state.runtimeProfileId = 'gemma4';
+    state.llamaRouterModelId = 'gemma-4-12B-it-qat-GGUF';
+    state.llamaHuggingFaceRepository = 'unsloth/gemma-4-12B-it-qat-GGUF';
+    state.llamaHuggingFaceQuantIncludePattern = 'gemma-4-12B-it-qat-UD-Q4_K_XL.gguf';
+    state.llamaHuggingFaceMmprojIncludePattern = 'mmproj-BF16.gguf';
+
+    const request = buildAddModelRequest(state);
+
+    expect(request.catalog.modelId).toBe('gemma-4-12B-it-qat-GGUF');
+    expect(request.catalog.displayName).toBe('gemma-4-12B-it-qat-GGUF');
+    expect(request.install?.huggingFace?.targetDirectory).toBe('gemma-4-12B-it-qat-GGUF');
+  });
+
   it('builds llama-cpp huggingface request', () => {
     const state = createEmptyAddModelWizardState('llama-cpp');
     state.catalogModelId = 'qwen3.5-local';

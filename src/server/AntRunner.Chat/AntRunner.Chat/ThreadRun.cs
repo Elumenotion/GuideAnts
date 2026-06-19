@@ -280,6 +280,10 @@ namespace AntRunner.Chat
             var accumulatedNewFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var accumulatedModifiedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            // Messages already replaced by an abort notice after a context-overflow rejection.
+            // Tracked so each retry targets a different (next-largest) message and the loop converges.
+            var unwoundMessages = new HashSet<ChatMessage>();
+
             try
             {
                 while (continueChat)
@@ -293,13 +297,21 @@ namespace AntRunner.Chat
                         samplingParameters: samplingParams);
 
                     ChatCompletionResponse response;
-                    if (onStream != null)
+                    try
                     {
-                        response = await GetCompletionAndStreamAsync(api, chatRequest, onStream, token);
+                        response = await InvokeCompletionAsync(api, chatRequest, onStream, token);
                     }
-                    else
+                    catch (ChatContextOverflowException overflowEx)
                     {
-                        response = await api.GetCompletionAsync(chatRequest, token);
+                        // Unwind the largest offending message in this turn, replace it with a short
+                        // abort notice, and retry. If nothing can be unwound the request is
+                        // irreducible (e.g. the system prompt alone overflows) so we rethrow.
+                        if (TryUnwindOversizedMessage(messages, unwoundMessages, overflowEx, onMessage))
+                        {
+                            continue;
+                        }
+
+                        throw;
                     }
 
                     messages.Add(response.FirstChoice!.Message);
@@ -644,6 +656,130 @@ namespace AntRunner.Chat
             }
 
             return response;
+        }
+
+        /// <summary>
+        /// Single provider-agnostic chokepoint for issuing a completion. Normalizes any provider's
+        /// "context window exceeded" failure into <see cref="ChatContextOverflowException"/> so the
+        /// engine's unwind/retry path is identical regardless of which chat provider is in use.
+        /// Raw-HTTP clients that strip their body (e.g. llama-server) already throw the typed
+        /// exception; SDK-based clients (OpenAI, Anthropic) surface the marker text in their thrown
+        /// exception and are translated here.
+        /// </summary>
+        private static async Task<ChatCompletionResponse> InvokeCompletionAsync(
+            IChatCompletionClient api,
+            ChatCompletionRequest chatRequest,
+            StreamingMessageProgressEventHandler? onStream,
+            CancellationToken token)
+        {
+            try
+            {
+                return onStream != null
+                    ? await GetCompletionAndStreamAsync(api, chatRequest, onStream, token)
+                    : await api.GetCompletionAsync(chatRequest, token);
+            }
+            catch (ChatContextOverflowException)
+            {
+                // Already classified at the source (e.g. llama client) — let it flow to the unwinder.
+                throw;
+            }
+            catch (Exception ex) when (ChatContextOverflowClassifier.Matches(ex))
+            {
+                throw new ChatContextOverflowException(
+                    "The request exceeded the model's context window.",
+                    upstreamDetail: ChatContextOverflowClassifier.Excerpt(ex),
+                    innerException: ex);
+            }
+        }
+
+        /// <summary>
+        /// Replaces the largest non-system message in the turn with a short "aborted for size" notice
+        /// after a context-overflow rejection, preserving tool-call pairing so the retried request
+        /// stays structurally valid. Returns false when there is nothing left to unwind.
+        /// </summary>
+        private static bool TryUnwindOversizedMessage(
+            List<ChatMessage> messages,
+            HashSet<ChatMessage> alreadyUnwound,
+            ChatContextOverflowException overflowEx,
+            MessageAddedEventHandler? onMessage)
+        {
+            var targetIndex = -1;
+            var targetLength = -1;
+            for (var i = 0; i < messages.Count; i++)
+            {
+                var candidate = messages[i];
+                if (candidate.Role == ChatRole.System || candidate.Role == ChatRole.Developer)
+                {
+                    continue;
+                }
+
+                if (alreadyUnwound.Contains(candidate))
+                {
+                    continue;
+                }
+
+                var length = candidate.GetText().Length;
+                if (length > targetLength)
+                {
+                    targetLength = length;
+                    targetIndex = i;
+                }
+            }
+
+            if (targetIndex < 0)
+            {
+                return false;
+            }
+
+            var original = messages[targetIndex];
+            var notice = BuildContextOverflowNotice(overflowEx);
+            var replacement = BuildAbortReplacement(original, notice);
+            messages[targetIndex] = replacement;
+            alreadyUnwound.Add(replacement);
+
+            Logger.LogWarning(
+                "Chat request exceeded the model context window; unwound oversized {Role} message at index {Index} ({OriginalChars} chars) and retrying. PromptTokens={PromptTokens}, ContextSize={ContextSize}.",
+                original.Role,
+                targetIndex,
+                targetLength,
+                overflowEx.PromptTokens,
+                overflowEx.ContextSize);
+
+            // Surface the substitution so the abort notice is persisted in place of the dropped content.
+            onMessage?.Invoke(null, new MessageAddedEventArgs(
+                replacement.Role.ToString(),
+                replacement.GetText(),
+                replacement.ToolCallId,
+                replacement.FunctionName,
+                null));
+
+            return true;
+        }
+
+        private static ChatMessage BuildAbortReplacement(ChatMessage original, string notice)
+        {
+            var content = new List<ChatContent> { new(notice) };
+
+            if (original.Role == ChatRole.Tool)
+            {
+                // Preserve tool_call_id / name so the assistant tool_call ↔ tool result pairing holds.
+                return new ChatMessage(original.ToolCallId ?? string.Empty, original.FunctionName ?? string.Empty, content);
+            }
+
+            // Preserve any tool_calls on an assistant message so following tool results stay valid.
+            return new ChatMessage(original.Role, content, original.ToolCalls, original.ThinkingBlocks);
+        }
+
+        private static string BuildContextOverflowNotice(ChatContextOverflowException overflowEx)
+        {
+            var detail = overflowEx.PromptTokens.HasValue && overflowEx.ContextSize.HasValue
+                ? $" (prompt was ~{overflowEx.PromptTokens.Value:N0} tokens vs the {overflowEx.ContextSize.Value:N0} token limit)"
+                : string.Empty;
+
+            return
+                $"[Message aborted due to size restrictions{detail}. The original content was too large for the model " +
+                "context window and has been removed. Retry with a different approach that limits the message size — " +
+                "for example, write large output to a file and return only a short summary instead of the full content.]";
         }
 
         private static ChatRunOutput? BuildRunResults(List<ChatMessage> messages, ChatCompletionResponse response)
@@ -1002,7 +1138,17 @@ namespace AntRunner.Chat
                     if (!toolCall.IsFunction) continue;
                     var id = toolCall.Id;
                     var toolOutput = toolOutputs.FirstOrDefault(to => to.ToolCallId == id) ?? throw new Exception("No match");
-                    messages.Add(new ChatMessage(id, toolCall.Function.Name, [new ChatContent(toolOutput.Output!)]));
+                    var truncation = ToolOutputTruncator.Truncate(toolOutput.Output);
+                    if (truncation.WasTruncated)
+                    {
+                        Logger.LogWarning(
+                            "Tool output truncated before sending to model. Function={Function}, ToolCallId={ToolCallId}, OriginalChars={OriginalChars}, LimitChars={LimitChars}.",
+                            toolCall.Function.Name,
+                            toolCall.Id,
+                            truncation.OriginalLength,
+                            ToolOutputTruncator.MaxCharacters);
+                    }
+                    messages.Add(new ChatMessage(id, toolCall.Function.Name, [new ChatContent(truncation.Output ?? string.Empty)]));
                     messageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText(), toolCall.Id, toolCall.Function.Name, toolCall.Function.Arguments.ToString()));
                 }
 

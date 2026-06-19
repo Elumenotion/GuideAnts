@@ -203,7 +203,6 @@ export function LocalAiModelsStep({
   };
 
   const handleInstall = async () => {
-    const effectiveCatalogModelId = catalogModelId.trim() || (installSource === 'existingAlias' ? existingAlias : routerModelId);
     const formData: LocalAiInstallFormData = {
       installSource,
       routerModelId: installSource === 'existingAlias' ? existingAlias : routerModelId,
@@ -211,12 +210,12 @@ export function LocalAiModelsStep({
       huggingFaceRepository: repository,
       huggingFaceQuantIncludePattern: quantPattern,
       huggingFaceMmprojIncludePattern: mmprojPattern,
-      huggingFaceTargetDirectory: targetDirectory || routerModelId,
+      huggingFaceTargetDirectory: targetDirectory,
       existingAliasRouterModelId: existingAlias,
       routerContextSize: contextSize,
       routerCacheRamMib: cacheRam,
-      catalogModelId: effectiveCatalogModelId,
-      catalogDisplayName: catalogDisplayName.trim() || effectiveCatalogModelId,
+      catalogModelId,
+      catalogDisplayName,
       setAsGlobalDefault: isFirstModel || setAsGlobalDefault,
     };
 

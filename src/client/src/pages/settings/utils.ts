@@ -13,8 +13,10 @@ import {
 } from '../../types/settings';
 import { AddModelWizardState, CanonicalLocalRuntimeConfig, CatalogEditState, ProfileFormState } from './types';
 import { getServiceProviderDisplayName } from './constants/displayLabels';
-import { buildLocalModelOnboardingRequest } from '../../features/localModelOnboarding/buildCommand';
-import { validateLocalModelOnboardingDraft } from '../../features/localModelOnboarding/validateDraft';
+import {
+  buildLocalModelAddModelRequest,
+} from '../../features/localModelOnboarding/buildCommand';
+import { mapSettingsAddModelStateToOnboardingDraft } from '../../features/localModelOnboarding/mapDraft';
 
 export const SECRET_MASK = '********';
 
@@ -432,38 +434,18 @@ export function buildAddModelRequest(state: AddModelWizardState): AddModelReques
     throw new Error('Pick a provider in Step 1.');
   }
   const modelId = state.catalogModelId.trim();
+  const displayName = state.catalogDisplayName.trim();
+  if (provider === 'llama-cpp') {
+    return buildLocalModelAddModelRequest(
+      mapSettingsAddModelStateToOnboardingDraft(state),
+      'settings'
+    );
+  }
   if (!modelId) {
     throw new Error('Catalog Model ID is required.');
   }
-  const displayName = state.catalogDisplayName.trim();
   if (!displayName) {
     throw new Error('Catalog display name is required.');
-  }
-  if (provider === 'llama-cpp') {
-    const draft = {
-      installSource: state.llamaInstallSource,
-      runtimeProfileId: state.runtimeProfileId,
-      routerModelId: state.llamaRouterModelId,
-      huggingFaceRepository: state.llamaHuggingFaceRepository,
-      huggingFaceQuantIncludePattern: state.llamaHuggingFaceQuantIncludePattern,
-      huggingFaceMmprojIncludePattern: state.llamaHuggingFaceMmprojIncludePattern,
-      huggingFaceTargetDirectory: state.llamaHuggingFaceTargetDirectory,
-      existingAliasRouterModelId: state.llamaExistingAliasRouterModelId,
-      routerContextSize: state.llamaRouterContextSize,
-      routerCacheRamMib: state.llamaRouterCacheRamMib,
-      catalogModelId: state.catalogModelId,
-      catalogDisplayName: state.catalogDisplayName,
-      catalogDescription: state.catalogDescription,
-      catalogDisplayOrder: state.catalogDisplayOrder,
-      catalogIsActive: state.catalogIsActive,
-    } as const;
-    const validationErrors = validateLocalModelOnboardingDraft(draft);
-    if (validationErrors.length > 0) {
-      throw new Error(validationErrors[0]);
-    }
-    return buildLocalModelOnboardingRequest(draft, {
-      onboardingUi: 'settings',
-    });
   }
   let providerConfig: Record<string, unknown> | undefined;
   if (state.runtimeProfileId.trim()) {

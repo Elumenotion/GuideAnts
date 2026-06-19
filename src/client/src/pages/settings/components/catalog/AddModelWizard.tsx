@@ -269,13 +269,16 @@ export function AddModelWizard({
 
   const canContinueFromProvider = value.provider.trim().length > 0;
   const canContinueFromCatalog = useMemo(() => {
+    if (value.provider === 'llama-cpp') {
+      return !modelIdError && !checkingModelId;
+    }
     return (
       value.catalogModelId.trim().length > 0 &&
       value.catalogDisplayName.trim().length > 0 &&
       !modelIdError &&
       !checkingModelId
     );
-  }, [checkingModelId, modelIdError, value.catalogDisplayName, value.catalogModelId]);
+  }, [checkingModelId, modelIdError, value.catalogDisplayName, value.catalogModelId, value.provider]);
 
   const validateModelId = async () => {
     const candidate = value.catalogModelId.trim();

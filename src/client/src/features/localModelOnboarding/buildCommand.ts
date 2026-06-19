@@ -1,6 +1,42 @@
 import type { AddModelRequest } from '../../types/settings';
 import type { LocalModelOnboardingDraft } from './contracts';
 
+export interface LocalModelOnboardingDefaultOptions {
+  defaultCatalogModelId: string;
+  defaultCatalogDisplayName: string;
+  defaultTargetDirectory: string;
+}
+
+export function resolveLocalModelOnboardingDefaults(
+  draft: LocalModelOnboardingDraft
+): LocalModelOnboardingDefaultOptions {
+  if (draft.installSource === 'existingAlias') {
+    const alias = draft.existingAliasRouterModelId.trim();
+    return {
+      defaultCatalogModelId: alias,
+      defaultCatalogDisplayName: alias,
+      defaultTargetDirectory: '',
+    };
+  }
+
+  const routerModelId = draft.routerModelId.trim();
+  return {
+    defaultCatalogModelId: routerModelId,
+    defaultCatalogDisplayName: routerModelId,
+    defaultTargetDirectory: routerModelId,
+  };
+}
+
+export function buildLocalModelAddModelRequest(
+  draft: LocalModelOnboardingDraft,
+  onboardingUi: 'settings' | 'wizard'
+): AddModelRequest {
+  return buildLocalModelOnboardingRequest(draft, {
+    onboardingUi,
+    defaultCatalogIsActive: draft.catalogIsActive ?? true,
+  });
+}
+
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const trimmed = (value ?? '').trim();
   return trimmed.length > 0 ? trimmed : undefined;
@@ -70,13 +106,18 @@ export function buildLocalModelOnboardingRequest(
   }
 
   const source = draft.installSource;
-  const fallbackCatalogModelId = (options?.defaultCatalogModelId ?? '').trim();
+  const resolvedDefaults = resolveLocalModelOnboardingDefaults(draft);
+  const fallbackCatalogModelId = (
+    options?.defaultCatalogModelId ?? resolvedDefaults.defaultCatalogModelId
+  ).trim();
   const catalogModelId = draft.catalogModelId.trim() || fallbackCatalogModelId;
   if (!catalogModelId) {
     throw new Error('Catalog Model ID is required.');
   }
 
-  const fallbackCatalogDisplayName = (options?.defaultCatalogDisplayName ?? fallbackCatalogModelId).trim();
+  const fallbackCatalogDisplayName = (
+    options?.defaultCatalogDisplayName ?? resolvedDefaults.defaultCatalogDisplayName ?? fallbackCatalogModelId
+  ).trim();
   const catalogDisplayName = draft.catalogDisplayName.trim() || fallbackCatalogDisplayName || catalogModelId;
   if (!catalogDisplayName) {
     throw new Error('Catalog display name is required.');
@@ -122,11 +163,19 @@ export function buildLocalModelOnboardingRequest(
   const repository = draft.huggingFaceRepository.trim();
   const quantPattern = draft.huggingFaceQuantIncludePattern.trim();
   const mmprojPattern = draft.huggingFaceMmprojIncludePattern.trim();
-  const fallbackTargetDirectory = (options?.defaultTargetDirectory ?? '').trim();
+  const fallbackTargetDirectory = (
+    options?.defaultTargetDirectory ?? resolvedDefaults.defaultTargetDirectory
+  ).trim();
   const targetDirectory = draft.huggingFaceTargetDirectory.trim() || fallbackTargetDirectory;
 
-  if (!repository || !quantPattern || !targetDirectory) {
-    throw new Error('Repository, quant pattern, and target directory are required. mmproj pattern is optional.');
+  if (!repository) {
+    throw new Error('Hugging Face repository is required.');
+  }
+  if (!quantPattern) {
+    throw new Error('Model file (GGUF) is required. Browse the repository and select a quant file.');
+  }
+  if (!targetDirectory) {
+    throw new Error('Target directory is required. It defaults to the router alias when left blank.');
   }
 
   request.install = {

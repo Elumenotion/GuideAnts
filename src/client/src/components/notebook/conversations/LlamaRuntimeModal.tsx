@@ -41,6 +41,11 @@ export const LlamaRuntimeModal: React.FC<LlamaRuntimeModalProps> = ({
             {isPolling && 'Please wait while the required models are loaded into the local runtime.'}
             {!isPolling && !isFailed && !isInvalid && 'The selected assistant requires local models that are not currently loaded.'}
           </p>
+          {isPolling && status.activeOperation?.operationId === '__external_loading__' && (
+            <p className="text-sm text-slate-500 mt-1">
+              Models are already loading from startup or another session — no action needed.
+            </p>
+          )}
         </div>
 
         <div className="px-6 pb-6">
