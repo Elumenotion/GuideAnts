@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildLocalModelOnboardingRequest } from '../buildCommand';
+import { buildLocalModelAddModelRequest, buildLocalModelOnboardingRequest } from '../buildCommand';
 import { selectAttachableAliases } from '../selectors';
 import { isLocalModelOnboardingInFlight, normalizeLocalModelOnboardingStatus } from '../status';
 
@@ -23,14 +23,8 @@ describe('buildLocalModelOnboardingRequest', () => {
       catalogIsActive: true,
     };
 
-    const fromSettings = buildLocalModelOnboardingRequest(base, { onboardingUi: 'settings' });
-    const fromWizard = buildLocalModelOnboardingRequest(base, {
-      onboardingUi: 'wizard',
-      defaultCatalogModelId: base.routerModelId,
-      defaultCatalogDisplayName: base.routerModelId,
-      defaultTargetDirectory: base.routerModelId,
-      defaultCatalogIsActive: true,
-    });
+    const fromSettings = buildLocalModelAddModelRequest(base, 'settings');
+    const fromWizard = buildLocalModelAddModelRequest(base, 'wizard');
 
     const { providerConfig: settingsProviderConfig, ...settingsWithoutUi } = fromSettings;
     const { providerConfig: wizardProviderConfig, ...wizardWithoutUi } = fromWizard;
@@ -38,6 +32,28 @@ describe('buildLocalModelOnboardingRequest', () => {
     expect(settingsProviderConfig).toEqual({ onboardingUi: 'settings' });
     expect(wizardProviderConfig).toEqual({ onboardingUi: 'wizard' });
     expect(settingsWithoutUi).toEqual(wizardWithoutUi);
+  });
+
+  it('defaults catalog and target directory from router alias when blank', () => {
+    const request = buildLocalModelOnboardingRequest({
+      installSource: 'huggingface',
+      runtimeProfileId: 'gemma4',
+      routerModelId: 'gemma-4-12B-it-qat-GGUF',
+      huggingFaceRepository: 'unsloth/gemma-4-12B-it-qat-GGUF',
+      huggingFaceQuantIncludePattern: 'gemma-4-12B-it-qat-UD-Q4_K_XL.gguf',
+      huggingFaceMmprojIncludePattern: 'mmproj-BF16.gguf',
+      huggingFaceTargetDirectory: '',
+      existingAliasRouterModelId: '',
+      routerContextSize: '',
+      routerCacheRamMib: '',
+      catalogModelId: '',
+      catalogDisplayName: '',
+      catalogIsActive: true,
+    });
+
+    expect(request.catalog.modelId).toBe('gemma-4-12B-it-qat-GGUF');
+    expect(request.catalog.displayName).toBe('gemma-4-12B-it-qat-GGUF');
+    expect(request.install?.huggingFace?.targetDirectory).toBe('gemma-4-12B-it-qat-GGUF');
   });
 
   it('allows text-only huggingface install without mmproj pattern', () => {

@@ -299,6 +299,19 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
                 upstreamExcerpt);
         }
 
+        // Prompt exceeds the loaded model's context window. This is a request-shaping problem, not a
+        // caller bug or crash, so it gets the recoverable exception type the execution engine catches
+        // to unwind the oversized message and retry. llama-server strips its (huge) body from the
+        // thrown message, so this client must classify at the source — see ChatContextOverflowClassifier.
+        if (ChatContextOverflowClassifier.TryClassifyBody((int)response.StatusCode, responseBody, out var promptTokens, out var contextSize))
+        {
+            throw new ChatContextOverflowException(
+                "The request exceeded the local model's context window.",
+                promptTokens,
+                contextSize,
+                upstreamExcerpt);
+        }
+
         throw new HttpRequestException(
             $"llama.cpp chat completion failed with HTTP {(int)response.StatusCode} ({response.ReasonPhrase ?? "<none>"}).",
             null,
@@ -334,6 +347,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
 
         return false;
     }
+
 
     // CUDA / llama.cpp OOM markers observed across upstream builds. Matching is case-insensitive
     // and the body is already capped to ~8KB by the diagnostic path above, so this is safe to run

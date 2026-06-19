@@ -153,6 +153,8 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
 
     private sealed class NoOpLocalAiStartupWarmupService : ILocalAiStartupWarmupService
     {
+        public bool IsWarmupInProgress => false;
+
         public Task WarmupAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
