@@ -160,10 +160,29 @@ public sealed class ScriptExecutionAgentEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var payload = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(payload);
-        var output = doc.RootElement.TryGetProperty("standardOutput", out var camel)
-            ? camel.GetString()
-            : doc.RootElement.GetProperty("StandardOutput").GetString();
+        var output = ReadStandardOutput(doc.RootElement);
+        output.Should().NotBeNullOrWhiteSpace(payload);
         output.Should().Contain("agent-ok");
+    }
+
+    private static string? ReadStandardOutput(JsonElement root)
+    {
+        if (root.TryGetProperty("standardOutput", out var camel))
+        {
+            return camel.GetString();
+        }
+
+        if (root.TryGetProperty("StandardOutput", out var pascal))
+        {
+            return pascal.GetString();
+        }
+
+        if (root.TryGetProperty("stdout", out var shortName))
+        {
+            return shortName.GetString();
+        }
+
+        return null;
     }
 
     [TestMethod]

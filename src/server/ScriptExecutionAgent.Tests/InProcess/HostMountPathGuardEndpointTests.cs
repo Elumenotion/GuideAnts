@@ -249,11 +249,29 @@ public sealed class HostMountPathGuardEndpointTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, payload);
         using var doc = JsonDocument.Parse(payload);
-        var standardOutput = doc.RootElement.TryGetProperty("standardOutput", out var camel)
-            ? camel.GetString()
-            : doc.RootElement.GetProperty("StandardOutput").GetString();
-        standardOutput.Should().NotBeNullOrWhiteSpace();
+        var standardOutput = ReadStandardOutput(doc.RootElement);
+        standardOutput.Should().NotBeNullOrWhiteSpace(payload);
         standardOutput!.Trim().Should().Be("0");
+    }
+
+    private static string? ReadStandardOutput(JsonElement root)
+    {
+        if (root.TryGetProperty("standardOutput", out var camel))
+        {
+            return camel.GetString();
+        }
+
+        if (root.TryGetProperty("StandardOutput", out var pascal))
+        {
+            return pascal.GetString();
+        }
+
+        if (root.TryGetProperty("stdout", out var shortName))
+        {
+            return shortName.GetString();
+        }
+
+        return null;
     }
 
     private static string GetFileOwner(string path)
