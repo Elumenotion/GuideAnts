@@ -1,6 +1,7 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Tests.BackgroundJobs;
@@ -79,6 +80,34 @@ public sealed class GuidesServiceTests
 
         (await service.DeleteAssistantAsync(created.Id)).Should().BeTrue();
         (await service.GetAssistantAsync(created.Id)).Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task Guide_environment_is_scoped_by_project()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"guide-env-project-{Guid.NewGuid():N}");
+        await using var context = new ApplicationDbContext(options);
+        var projectA = new Project { Title = "Project A", Slug = "project-a" };
+        var projectB = new Project { Title = "Project B", Slug = "project-b" };
+        context.Projects.AddRange(projectA, projectB);
+        await context.SaveChangesAsync();
+
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
+        var created = await service.CreateGuideAsync(MinimalCreateGuideDto("Env Guide") with
+        {
+            ProjectId = projectA.Id,
+            EnvironmentVariables = [new EnvironmentVariableDto("API_MODE", "project-a", false)]
+        });
+
+        var projectADetails = await service.GetGuideAsync(created.Id, projectA.Id);
+        var projectBDetails = await service.GetGuideAsync(created.Id, projectB.Id);
+        var unscopedDetails = await service.GetGuideAsync(created.Id);
+
+        projectADetails!.EnvironmentVariables.Should()
+            .ContainSingle()
+            .Which.Should().BeEquivalentTo(new EnvironmentVariableDto("API_MODE", "project-a", false));
+        projectBDetails!.EnvironmentVariables.Should().BeNull();
+        unscopedDetails!.EnvironmentVariables.Should().BeNull();
     }
 
     [TestMethod]

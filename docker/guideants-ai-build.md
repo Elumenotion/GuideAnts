@@ -297,19 +297,30 @@ docker compose --profile docling-cuda up
 Recommended image pin variables in `docker/.env`:
 
 ```dotenv
-DOCLING_SERVE_CPU_IMAGE=quay.io/docling-project/docling-serve-cpu:v1.16.1
-DOCLING_SERVE_CUDA_IMAGE=quay.io/docling-project/docling-serve-cu130:v1.16.1
+DOCLING_SERVE_CPU_IMAGE=quay.io/docling-project/docling-serve-cpu:v1.21.0
+DOCLING_SERVE_CUDA_IMAGE=quay.io/docling-project/docling-serve-cu130:v1.21.0
 DOCLING_SERVE_MAX_SYNC_WAIT=600
+DOCLING_SERVE_MAX_FILE_SIZE=524288000
+DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2
+DOCLING_NUM_THREADS=4
+# Optional shared secret for docling-serve (see docker/docling-serve.env.example — do not set empty)
+# DOCLING_SERVE_API_KEY=your-secret-here
+# GA_DOCLING_CUDA_VISIBLE_DEVICES=
 ```
 
-`DOCLING_SERVE_MAX_SYNC_WAIT` is in seconds and only affects Docling synchronous endpoints.
-GuideAnts markdown extraction now uses Docling async endpoints.
+See `docker/docling-serve.env.example` for the full server-side variable list (logging, OTEL, GPU device, optional model artifacts path).
 
-`guideants-webapi-ui` should keep `DocumentIntelligence__LocalDoclingBaseUrl=http://docling-serve:5001` so either profile resolves through the shared `docling-serve` network alias.
+`DOCLING_SERVE_MAX_SYNC_WAIT` is in seconds and only affects Docling synchronous endpoints.
+GuideAnts markdown extraction uses Docling async endpoints.
+
+`guideants-webapi-ui` resolves Docling through `LocalServiceHosts__DocumentIntelligenceBaseUrl=http://docling-serve:5001`.
+When `DOCLING_SERVE_API_KEY` is configured with a non-empty value, add it to the `docling-serve` service environment and set `DocumentIntelligence__DoclingApiKey` on `guideants-webapi-ui` to the same value so the API sends `X-Api-Key` on submit/poll/result calls. Do not pass an empty `DOCLING_SERVE_API_KEY` — docling-serve v1.21+ fails startup validation.
+
+Infrastructure probes for `LocalServiceHosts:DocumentIntelligenceBaseUrl` hit `{baseUrl}/version`.
 
 ### Docling Models Included by `docling-serve` Images
 
-For `quay.io/docling-project/docling-serve-*:v1.16.1`, model artifacts are baked into the image under:
+For `quay.io/docling-project/docling-serve-*:v1.21.0`, model artifacts are baked into the image under:
 
 `/opt/app-root/src/.cache/docling/models`
 
@@ -324,13 +335,14 @@ Included model families/artifacts:
   - RapidOCR PP-OCRv4 artifacts (`onnx` + `torch` bundles)
   - EasyOCR artifacts (`craft_mlt_25k.pth`, `english_g2.pth`, `latin_g2.pth`)
 
-### Docling Defaults Used by Current GuideAnts Integration
+### Docling conversion options (GuideAnts Settings → Document Intelligence)
 
-`GuideAntsApi` now submits file content + `to_formats=md` to `/v1/convert/file/async`,
-polls `/v1/status/poll/{task_id}`, then fetches `/v1/result/{task_id}`.
-No explicit OCR/layout/table preset override is sent.
+`GuideAntsApi` submits `/v1/convert/file/async` multipart requests with `to_formats=md`
+plus any configured `DocumentIntelligence:Docling*` fields (OCR, table mode, PDF backend,
+image export mode, pipeline, enrichment flags, picture-description preset). It polls
+`/v1/status/poll/{task_id}` and fetches `/v1/result/{task_id}`.
 
-With Docling defaults in `v1.16.1`, this means:
+When unset, Docling server defaults apply. With v1.21.0 that typically means:
 
 - OCR preset: `auto` (engine selected by Docling at runtime)
 - Layout preset/kind: default (`docling_layout_default`, which uses Heron)

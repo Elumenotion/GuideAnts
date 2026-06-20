@@ -1,13 +1,17 @@
 import { useCallback, useMemo, useState } from 'react';
 import { FaCheck, FaRedo, FaSearch, FaPlug } from 'react-icons/fa';
 import { api } from '../../../../services/api';
-import type { CustomToolDto } from '../../../../types/guides';
+import type { CustomToolDto, EnvironmentVariableDto } from '../../../../types/guides';
 import {
   applyMcpDiscoveryToSpec,
+  buildResolvedMcpConnectionPayload,
   diffStateChipClassName,
   diffStateLabel,
   extractExistingMcpToolStates,
+  headersContainUnresolvedSecrets,
+  mcpHeaderRowsToHeaders,
   parseMcpConnectionSettings,
+  parseMcpHeaderRows,
   validateMcpConnectionSettings,
   buildMcpBridgeServerUrl,
 } from './mcpToolSource';
@@ -15,17 +19,28 @@ import type {
   McpConnectionPanelState,
   McpConnectionSettings,
   McpDiscoveredToolRow,
+  McpHeaderRow,
   McpTransport,
 } from './mcpToolSourceTypes';
+import { EnvironmentSecretRefField } from '../EnvironmentSecretRefField';
 
 export interface McpConnectionPanelProps {
   tool: CustomToolDto;
+  environmentVariables: EnvironmentVariableDto[];
+  onEnvironmentVariablesChange: (variables: EnvironmentVariableDto[]) => void;
   onUpdate: (updates: Partial<CustomToolDto>) => void;
   onDirty?: () => void;
   inputRef?: (el: HTMLInputElement | null) => void;
 }
 
-export function McpConnectionPanel({ tool, onUpdate, onDirty, inputRef }: McpConnectionPanelProps) {
+export function McpConnectionPanel({
+  tool,
+  environmentVariables,
+  onEnvironmentVariablesChange,
+  onUpdate,
+  onDirty,
+  inputRef,
+}: McpConnectionPanelProps) {
   const initialSettings = useMemo(() => parseMcpConnectionSettings(tool.openApiSpec), [tool.openApiSpec]);
   const [settings, setSettings] = useState<McpConnectionSettings>(initialSettings);
   const [panelState, setPanelState] = useState<McpConnectionPanelState>('idle');
@@ -33,8 +48,8 @@ export function McpConnectionPanel({ tool, onUpdate, onDirty, inputRef }: McpCon
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [discoveredTools, setDiscoveredTools] = useState<McpDiscoveredToolRow[]>([]);
   const [pendingDiscovery, setPendingDiscovery] = useState<McpDiscoveredToolRow[] | null>(null);
-  const [headerRows, setHeaderRows] = useState<Array<{ key: string; value: string }>>(() =>
-    Object.entries(initialSettings.headers).map(([key, value]) => ({ key, value }))
+  const [headerRows, setHeaderRows] = useState<McpHeaderRow[]>(() =>
+    parseMcpHeaderRows(initialSettings.headers)
   );
 
   const validationError = validateMcpConnectionSettings(settings);
@@ -74,24 +89,31 @@ export function McpConnectionPanel({ tool, onUpdate, onDirty, inputRef }: McpCon
     syncSettingsToSpec(next);
   };
 
-  const updateHeaders = (rows: Array<{ key: string; value: string }>) => {
+  const updateHeaders = (rows: McpHeaderRow[]) => {
     setHeaderRows(rows);
-    const headers: Record<string, string> = {};
-    for (const row of rows) {
-      if (row.key.trim()) {
-        headers[row.key.trim()] = row.value;
-      }
-    }
-    updateSettings({ headers });
+    updateSettings({ headers: mcpHeaderRowsToHeaders(rows) });
   };
 
-  const buildConnectionPayload = () => ({
-    transport: settings.transport,
-    url: settings.transport === 'streamable_http' ? settings.url : undefined,
-    bridgeId: settings.bridgeId,
-    headers: settings.headers,
-    toolNamePrefix: settings.toolNamePrefix,
-  });
+  const buildConnectionPayload = () => {
+    const resolved = buildResolvedMcpConnectionPayload(settings, environmentVariables);
+    return {
+      transport: resolved.transport,
+      url: resolved.url,
+      bridgeId: resolved.bridgeId,
+      headers: resolved.headers,
+      toolNamePrefix: resolved.toolNamePrefix,
+      missingSecretRefs: resolved.missingSecretRefs,
+    };
+  };
+
+  const ensureResolvableSecrets = (): string | null => {
+    const missing = headersContainUnresolvedSecrets(settings.headers, environmentVariables);
+    if (missing.length === 0) {
+      return null;
+    }
+
+    return `Missing or unavailable guide secrets: ${missing.join(', ')}. Select an existing secret, create one here, or re-enter the value on the Environment tab.`;
+  };
 
   const handleTestConnection = async () => {
     setErrorMessage(null);
@@ -102,10 +124,24 @@ export function McpConnectionPanel({ tool, onUpdate, onDirty, inputRef }: McpCon
       return;
     }
 
+    const secretError = ensureResolvableSecrets();
+    if (secretError) {
+      setErrorMessage(secretError);
+      setPanelState('discovery-failed');
+      return;
+    }
+
+    const payload = buildConnectionPayload();
     setPanelState('testing');
     try {
       const result = await api.guides.guides.mcpToolSources.testConnection({
-        connection: buildConnectionPayload(),
+        connection: {
+          transport: payload.transport,
+          url: payload.url,
+          bridgeId: payload.bridgeId,
+          headers: payload.headers,
+          toolNamePrefix: payload.toolNamePrefix,
+        },
       });
       if (result.connected) {
         setPanelState('connected');
@@ -133,11 +169,25 @@ export function McpConnectionPanel({ tool, onUpdate, onDirty, inputRef }: McpCon
       return;
     }
 
+    const secretError = ensureResolvableSecrets();
+    if (secretError) {
+      setErrorMessage(secretError);
+      setPanelState('discovery-failed');
+      return;
+    }
+
+    const payload = buildConnectionPayload();
     setPanelState('discovering');
     try {
       const existingTools = extractExistingMcpToolStates(tool.openApiSpec);
       const result = await api.guides.guides.mcpToolSources.discover({
-        connection: buildConnectionPayload(),
+        connection: {
+          transport: payload.transport,
+          url: payload.url,
+          bridgeId: payload.bridgeId,
+          headers: payload.headers,
+          toolNamePrefix: payload.toolNamePrefix,
+        },
         existingTools,
       });
 
@@ -257,41 +307,101 @@ export function McpConnectionPanel({ tool, onUpdate, onDirty, inputRef }: McpCon
             <label className="block text-xs font-medium text-gray-700">HTTP headers (optional)</label>
             <button
               type="button"
-              onClick={() => updateHeaders([...headerRows, { key: '', value: '' }])}
+              onClick={() =>
+                updateHeaders([
+                  ...headerRows,
+                  { key: '', secretRefName: '', literalValue: '', useLiteral: false },
+                ])
+              }
               className="text-xs text-blue-600 hover:underline"
             >
               Add header
             </button>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
+            {headerRows.length === 0 && (
+              <p className="text-xs text-gray-500">
+                Use headers such as <code className="font-mono">Authorization</code> with a guide secret for API keys.
+              </p>
+            )}
             {headerRows.map((row, index) => (
-              <div key={index} className="flex gap-2">
-                <input
-                  type="text"
-                  value={row.key}
-                  placeholder="Header name"
-                  onChange={(e) => {
-                    const rows = [...headerRows];
-                    rows[index] = { ...row, key: e.target.value };
-                    updateHeaders(rows);
-                  }}
-                  className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md font-mono"
-                />
-                <input
-                  type="password"
-                  value={row.value}
-                  placeholder="Value"
-                  onChange={(e) => {
-                    const rows = [...headerRows];
-                    rows[index] = { ...row, value: e.target.value };
-                    updateHeaders(rows);
-                  }}
-                  className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md font-mono"
-                />
+              <div key={index} className="rounded-md border border-gray-200 bg-white p-3 space-y-3">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={row.key}
+                    placeholder="Header name"
+                    onChange={(e) => {
+                      const rows = [...headerRows];
+                      rows[index] = { ...row, key: e.target.value };
+                      updateHeaders(rows);
+                    }}
+                    className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded-md font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => updateHeaders(headerRows.filter((_, i) => i !== index))}
+                    className="text-xs text-red-600 hover:underline"
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                {row.useLiteral ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={row.literalValue}
+                      placeholder="Literal header value"
+                      onChange={(e) => {
+                        const rows = [...headerRows];
+                        rows[index] = { ...row, literalValue: e.target.value };
+                        updateHeaders(rows);
+                      }}
+                      className="w-full px-2 py-1 text-xs border border-gray-300 rounded-md font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rows = [...headerRows];
+                        rows[index] = { ...row, useLiteral: false, literalValue: '' };
+                        updateHeaders(rows);
+                      }}
+                      className="text-xs text-blue-600 hover:underline"
+                    >
+                      Use guide secret instead
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <EnvironmentSecretRefField
+                      label="Guide secret"
+                      selectedVariableName={row.secretRefName}
+                      variables={environmentVariables}
+                      onVariablesChange={onEnvironmentVariablesChange}
+                      onSelectedVariableNameChange={(name) => {
+                        const rows = [...headerRows];
+                        rows[index] = { ...row, secretRefName: name };
+                        updateHeaders(rows);
+                      }}
+                      hint="Stored as {{secret:NAME}} in the tool source descriptor."
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rows = [...headerRows];
+                        rows[index] = { ...row, useLiteral: true, secretRefName: '' };
+                        updateHeaders(rows);
+                      }}
+                      className="text-xs text-gray-600 hover:underline"
+                    >
+                      Use literal value instead
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
-          <p className="text-xs text-gray-500 mt-1">Header values are never returned in API responses after save.</p>
         </div>
       )}
 

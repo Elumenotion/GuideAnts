@@ -1,14 +1,16 @@
 import { useSearchParams } from 'react-router-dom';
 import { ToolsSelector } from './ToolsSelector';
 import { OpenApiSchemas } from './OpenApiSchemas';
-import { CustomToolDto, ContextOptionDto } from '../../../types/guides';
+import { CustomToolDto, ContextOptionDto, EnvironmentVariableDto } from '../../../types/guides';
 
 interface ToolsTabProps {
   selectedToolIds: string[];
   customTools: CustomToolDto[];
   contextOptions: ContextOptionDto[];
+  environmentVariables: EnvironmentVariableDto[];
   onSelectedToolIdsChange: (ids: string[]) => void;
   onCustomToolsChange: (tools: CustomToolDto[]) => void;
+  onEnvironmentVariablesChange: (variables: EnvironmentVariableDto[]) => void;
   onValidationChange?: (hasErrors: boolean) => void;
   onDirtyChange?: () => void;
 }
@@ -17,8 +19,10 @@ export function ToolsTab({
   selectedToolIds,
   customTools,
   contextOptions,
+  environmentVariables,
   onSelectedToolIdsChange,
   onCustomToolsChange,
+  onEnvironmentVariablesChange,
   onValidationChange,
   onDirtyChange,
 }: ToolsTabProps) {
@@ -77,7 +81,9 @@ export function ToolsTab({
           <div data-tour-id="guide.tools.openapi.section">
           <OpenApiSchemas
             customTools={customTools}
+            environmentVariables={environmentVariables}
             onCustomToolsChange={onCustomToolsChange}
+            onEnvironmentVariablesChange={onEnvironmentVariablesChange}
             onValidationChange={onValidationChange}
             onDirtyChange={onDirtyChange}
           />

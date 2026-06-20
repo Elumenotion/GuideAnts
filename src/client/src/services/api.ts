@@ -475,7 +475,7 @@ export const api = {
                 method: 'PUT',
                 body: JSON.stringify(project),
             }),
-        
+
         deleteProject: (projectId: string) => 
             callApi<void>(`/projects/${projectId}`, {
                 method: 'DELETE',
@@ -1559,7 +1559,8 @@ export const api = {
     guides: {
         guides: {
             list: () => callApi<any[]>(`/guides`),
-            get: (guideId: string) => callApi<any>(`/guides/${guideId}`),
+            get: (guideId: string, projectId?: string) =>
+                callApi<any>(`/guides/${guideId}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
             create: (dto: any) => callApi<any>(`/guides`, { method: 'POST', body: JSON.stringify(dto) }),
             update: (guideId: string, dto: any) => callApi<any>(`/guides/${guideId}`, { method: 'PUT', body: JSON.stringify(dto) }),
             delete: (guideId: string) => callApi<void>(`/guides/${guideId}`, { method: 'DELETE' }),
@@ -1663,7 +1664,8 @@ export const api = {
         },
         assistants: {
             list: () => callApi<any[]>(`/assistants`),
-            get: (assistantId: string) => callApi<any>(`/assistants/${assistantId}`),
+            get: (assistantId: string, projectId?: string) =>
+                callApi<any>(`/assistants/${assistantId}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
             create: (dto: any) => callApi<any>(`/assistants`, { method: 'POST', body: JSON.stringify(dto) }),
             update: (assistantId: string, dto: any) => callApi<any>(`/assistants/${assistantId}`, { method: 'PUT', body: JSON.stringify(dto) }),
             delete: (assistantId: string) => callApi<void>(`/assistants/${assistantId}`, { method: 'DELETE' }),

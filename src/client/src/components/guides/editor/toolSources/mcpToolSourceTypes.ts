@@ -33,6 +33,13 @@ export interface McpConnectionSettings {
   headers: Record<string, string>;
 }
 
+export interface McpHeaderRow {
+  key: string;
+  secretRefName: string;
+  literalValue: string;
+  useLiteral: boolean;
+}
+
 export interface McpDiscoveredToolRow {
   backingToolId: string;
   name: string;

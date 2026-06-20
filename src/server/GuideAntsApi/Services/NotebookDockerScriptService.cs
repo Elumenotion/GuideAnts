@@ -3,9 +3,13 @@ using AntRunner.ToolCalling;
 using System.Text;
 using System.Text.Json;
 using GuideAntsApi.Configuration;
-using GuideAntsApi.Services.Components;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.EnvironmentVariables;
+using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Services
 {
@@ -24,17 +28,20 @@ namespace GuideAntsApi.Services
         private readonly ILogger<NotebookDockerScriptService> _logger;
         private readonly IServiceProvider _serviceProvider;
         private readonly IConfiguration _configuration;
+        private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptions;
 
         public NotebookDockerScriptService(
             IHttpClientFactory httpClientFactory,
             ILogger<NotebookDockerScriptService> logger,
             IServiceProvider serviceProvider,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions)
         {
             _httpClientFactory = httpClientFactory;
             _logger = logger;
             _serviceProvider = serviceProvider;
             _configuration = configuration;
+            _settingsSecretsOptions = settingsSecretsOptions;
         }
 
         /// <summary>
@@ -364,13 +371,52 @@ namespace GuideAntsApi.Services
                 $"Unable to resolve GuideId scope for ProjectId={context.ProjectId} NotebookId={context.NotebookId}.");
         }
 
-        private Task<IReadOnlyDictionary<string, string>?> ResolveExecutionEnvironmentAsync(
+        private async Task<IReadOnlyDictionary<string, string>?> ResolveExecutionEnvironmentAsync(
             InvocationContext context,
             Guid guideScopeId)
         {
             // Credential persistence is intentionally owned by the API tier. The script
             // agent receives only per-run environment values and never reads a credential store.
-            return Task.FromResult<IReadOnlyDictionary<string, string>?>(null);
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetService<ApplicationDbContext>();
+            if (db is null)
+            {
+                return null;
+            }
+
+            var guideAndCrewIds = await db.GuideMembers
+                .AsNoTracking()
+                .Where(member => member.GuideId == guideScopeId)
+                .OrderBy(member => member.DisplayOrder ?? int.MaxValue)
+                .ThenBy(member => member.Assistant.Name)
+                .Select(member => member.AssistantId)
+                .ToListAsync();
+
+            guideAndCrewIds.Insert(0, guideScopeId);
+
+            var environmentManifests = await db.ProjectAssistantEnvironments
+                .AsNoTracking()
+                .Where(environment => environment.ProjectId == context.ProjectId
+                    && guideAndCrewIds.Contains(environment.AssistantId))
+                .Select(environment => new
+                {
+                    environment.AssistantId,
+                    environment.EnvironmentConfigJson
+                })
+                .ToListAsync();
+
+            var manifestByAssistantId = environmentManifests
+                .ToDictionary(environment => environment.AssistantId, environment => environment.EnvironmentConfigJson);
+            var orderedManifests = guideAndCrewIds
+                .Select(assistantId => manifestByAssistantId.TryGetValue(assistantId, out var manifest) ? manifest : null)
+                .Where(manifest => !string.IsNullOrWhiteSpace(manifest))
+                .ToArray();
+
+            var environment = EnvironmentVariableConfigSerializer.DeserializeForExecution(
+                _settingsSecretsOptions.CurrentValue,
+                orderedManifests);
+
+            return environment.Count == 0 ? null : environment;
         }
 
         internal static string BuildScriptAgentTransportFailureMessage(string scriptExecutionBaseUrl, Exception ex)

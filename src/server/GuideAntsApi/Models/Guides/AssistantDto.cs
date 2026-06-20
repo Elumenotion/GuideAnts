@@ -1,3 +1,5 @@
+using GuideAntsApi.Models;
+
 namespace GuideAntsApi.Models.Guides;
 
 // Summary view for assistant list
@@ -26,7 +28,7 @@ public record AssistantDetailsDto(
     List<CustomToolDto> CustomTools,
     List<FileDto> Files,
     List<ConversationStarterDto> ConversationStarters
-);
+) { public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; } }
 
 // Create assistant request
 public record CreateAssistantDto(
@@ -45,7 +47,10 @@ public record CreateAssistantDto(
     List<ContextOptionDto>? ContextOptions,
     List<FileUploadDto>? Files,
     List<string>? ConversationStarters
-);
+) {
+    public Guid? ProjectId { get; init; }
+    public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+}
 
 // Update assistant request
 public record UpdateAssistantDto(
@@ -65,4 +70,7 @@ public record UpdateAssistantDto(
     List<Guid>? FileIdsToKeep,  // IDs of existing files to keep (omitted files are deleted)
     List<FileUploadDto>? FilesToAdd,  // New files to upload
     List<string>? ConversationStarters
-);
+) {
+    public Guid? ProjectId { get; init; }
+    public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+}

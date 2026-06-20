@@ -18,8 +18,10 @@ describe('ToolsTab', () => {
         selectedToolIds={[]}
         customTools={[]}
         contextOptions={[]}
+        environmentVariables={[]}
         onSelectedToolIdsChange={() => {}}
         onCustomToolsChange={() => {}}
+        onEnvironmentVariablesChange={() => {}}
       />
     );
 
@@ -34,8 +36,10 @@ describe('ToolsTab', () => {
         selectedToolIds={[]}
         customTools={[]}
         contextOptions={[]}
+        environmentVariables={[]}
         onSelectedToolIdsChange={() => {}}
         onCustomToolsChange={() => {}}
+        onEnvironmentVariablesChange={() => {}}
       />
     );
 

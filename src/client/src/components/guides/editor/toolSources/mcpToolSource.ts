@@ -1,6 +1,14 @@
+import type { EnvironmentVariableDto } from '../../../../types/guides';
+import {
+  formatSecretRef,
+  normalizeHeaderValueForStorage,
+  parseSecretRef,
+  resolveHeaderValues,
+} from './environmentVariableRefs';
 import type {
   McpConnectionSettings,
   McpDiscoveredToolRow,
+  McpHeaderRow,
   McpToolDiffState,
   McpToolOperationMetadata,
   McpToolSourceMetadata,
@@ -47,6 +55,41 @@ export function parseMcpToolSourceMetadata(spec: string): McpToolSourceMetadata 
   } catch {
     return null;
   }
+}
+
+export function parseMcpHeaderRows(headers: Record<string, string>): McpHeaderRow[] {
+  return Object.entries(headers).map(([key, value]) => {
+    const secretRefName = parseSecretRef(value);
+    if (secretRefName) {
+      return { key, secretRefName, literalValue: '', useLiteral: false };
+    }
+
+    if (value === '***') {
+      return { key, secretRefName: '', literalValue: '', useLiteral: false };
+    }
+
+    return { key, secretRefName: '', literalValue: value, useLiteral: true };
+  });
+}
+
+export function mcpHeaderRowsToHeaders(rows: McpHeaderRow[]): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) continue;
+
+    if (row.useLiteral) {
+      if (row.literalValue) {
+        headers[key] = row.literalValue;
+      }
+      continue;
+    }
+
+    if (row.secretRefName.trim()) {
+      headers[key] = formatSecretRef(row.secretRefName);
+    }
+  }
+  return headers;
 }
 
 export function parseMcpConnectionSettings(spec: string): McpConnectionSettings {
@@ -113,6 +156,28 @@ export function extractExistingMcpToolStates(spec: string): Array<{
   }
 }
 
+export function buildResolvedMcpConnectionPayload(
+  settings: McpConnectionSettings,
+  environmentVariables: EnvironmentVariableDto[]
+): {
+  transport: McpConnectionSettings['transport'];
+  url?: string;
+  bridgeId: string;
+  headers: Record<string, string>;
+  toolNamePrefix: string;
+  missingSecretRefs: string[];
+} {
+  const { resolved, missingRefs } = resolveHeaderValues(settings.headers, environmentVariables);
+  return {
+    transport: settings.transport,
+    url: settings.transport === 'streamable_http' ? settings.url : undefined,
+    bridgeId: settings.bridgeId,
+    headers: resolved,
+    toolNamePrefix: settings.toolNamePrefix,
+    missingSecretRefs: missingRefs,
+  };
+}
+
 export function applyMcpDiscoveryToSpec(
   spec: string,
   settings: McpConnectionSettings,
@@ -129,7 +194,14 @@ export function applyMcpDiscoveryToSpec(
     toolNamePrefix: settings.toolNamePrefix || undefined,
     ...(settings.transport === 'streamable_http' && settings.url ? { url: settings.url } : {}),
     ...(Object.keys(settings.headers).length > 0
-      ? { headers: redactHeadersForStorage(settings.headers) }
+      ? {
+          headers: Object.fromEntries(
+            Object.entries(settings.headers).map(([key, value]) => [
+              key,
+              normalizeHeaderValueForStorage(value),
+            ])
+          ),
+        }
       : {}),
   };
 
@@ -161,12 +233,11 @@ export function applyMcpDiscoveryToSpec(
   return JSON.stringify(parsed, null, 2);
 }
 
-export function redactHeadersForStorage(headers: Record<string, string>): Record<string, string> {
-  const redacted: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    redacted[key] = value ? '***' : value;
-  }
-  return redacted;
+export function headersContainUnresolvedSecrets(
+  headers: Record<string, string>,
+  environmentVariables: EnvironmentVariableDto[]
+): string[] {
+  return resolveHeaderValues(headers, environmentVariables).missingRefs;
 }
 
 export function diffStateChipClassName(state: McpToolDiffState | string): string {

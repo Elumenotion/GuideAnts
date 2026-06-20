@@ -149,6 +149,41 @@ public sealed class InfrastructureProbeServiceTests
     }
 
     [TestMethod]
+    public async Task ProbeAsync_DoclingBaseUrl_UsesVersionEndpoint()
+    {
+        var requestsSeen = new List<string>();
+        var handler = new StaticResponseHandler(request =>
+        {
+            requestsSeen.Add(request.RequestUri?.ToString() ?? string.Empty);
+            request.Method.Should().Be(HttpMethod.Get);
+            request.Headers.Range.Should().NotBeNull();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        var service = CreateService(handler);
+
+        var batch = await service.ProbeAsync(new[]
+        {
+            new InfrastructureProbeRequestItemDto(
+                "LocalServiceHosts:DocumentIntelligenceBaseUrl",
+                "url",
+                "http://docling-serve:5001"),
+        });
+
+        requestsSeen.Should().ContainSingle()
+            .Which.Should().Be("http://docling-serve:5001/version");
+        batch.Results.Single().Reachable.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void ToDoclingVersionProbeUri_AppendsVersionSegment()
+    {
+        InfrastructureProbeService.ToDoclingVersionProbeUri(new Uri("http://docling-serve:5001"))
+            .Should().Be(new Uri("http://docling-serve:5001/version"));
+        InfrastructureProbeService.ToDoclingVersionProbeUri(new Uri("http://docling-serve:5001/"))
+            .Should().Be(new Uri("http://docling-serve:5001/version"));
+    }
+
+    [TestMethod]
     public async Task ProbeAsync_PathExistingDirectory_ReturnsExistsAndWritable()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "guideants-probe-" + Guid.NewGuid().ToString("N"));

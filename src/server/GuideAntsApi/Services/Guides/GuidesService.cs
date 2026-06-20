@@ -2,11 +2,15 @@ using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.EnvironmentVariables;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Settings;
 using AntRunner.ToolCalling.Functions;
 using AntRunner.Chat;
+using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Services.Guides;
 
@@ -14,11 +18,13 @@ public class GuidesService(
     ApplicationDbContext context,
     MarkdownExtractionService markdownExtractionService,
     IRuntimeProfileResolver runtimeProfileResolver,
+    IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions,
     ILogger<GuidesService> logger) : IGuidesService
 {
     private readonly ApplicationDbContext _context = context;
     private readonly MarkdownExtractionService _markdownExtractionService = markdownExtractionService;
     private readonly IRuntimeProfileResolver _runtimeProfileResolver = runtimeProfileResolver;
+    private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptions = settingsSecretsOptions;
     private readonly ILogger<GuidesService> _logger = logger;
 
     private static readonly JsonSerializerOptions JsonCaseInsensitiveOptions = new()
@@ -58,7 +64,7 @@ public class GuidesService(
             .ToListAsync();
     }
 
-    public async Task<GuideDetailsDto?> GetGuideAsync(Guid guideId)
+    public async Task<GuideDetailsDto?> GetGuideAsync(Guid guideId, Guid? projectId = null)
     {
         var guide = await _context.Assistants
             .Include(a => a.Model)
@@ -226,6 +232,8 @@ public class GuidesService(
             }
         }
 
+        var environmentVariables = await GetProjectEnvironmentForClientAsync(projectId, guide.Id);
+
         return new GuideDetailsDto(
             guideDto,
             guide.Instructions,
@@ -240,7 +248,10 @@ public class GuidesService(
             files,
             conversationStarters,
             crews
-        );
+        )
+        {
+            EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null
+        };
     }
 
     // Internal class for deserializing AuthConfigJson
@@ -278,6 +289,73 @@ public class GuidesService(
             })]
         };
         return JsonSerializer.Serialize(manifest, JsonCamelCaseOptions);
+    }
+
+    private async Task<List<EnvironmentVariableDto>> GetProjectEnvironmentForClientAsync(Guid? projectId, Guid assistantId)
+    {
+        if (!projectId.HasValue || projectId.Value == Guid.Empty)
+        {
+            return [];
+        }
+
+        var environmentJson = await _context.ProjectAssistantEnvironments
+            .AsNoTracking()
+            .Where(environment => environment.ProjectId == projectId.Value && environment.AssistantId == assistantId)
+            .Select(environment => environment.EnvironmentConfigJson)
+            .FirstOrDefaultAsync();
+
+        return EnvironmentVariableConfigSerializer.DeserializeForClient(environmentJson);
+    }
+
+    private async Task SaveProjectEnvironmentAsync(
+        Guid? projectId,
+        Guid assistantId,
+        IReadOnlyCollection<EnvironmentVariableDto>? variables)
+    {
+        if (!projectId.HasValue || projectId.Value == Guid.Empty)
+        {
+            return;
+        }
+
+        var projectExists = await _context.Projects
+            .AnyAsync(project => project.Id == projectId.Value && !project.Deleted);
+        if (!projectExists)
+        {
+            throw new InvalidOperationException($"Project '{projectId.Value}' was not found.");
+        }
+
+        var existing = await _context.ProjectAssistantEnvironments
+            .FirstOrDefaultAsync(environment => environment.ProjectId == projectId.Value && environment.AssistantId == assistantId);
+
+        var serialized = EnvironmentVariableConfigSerializer.SerializeFromClient(
+            variables,
+            existing?.EnvironmentConfigJson,
+            _settingsSecretsOptions.CurrentValue);
+
+        if (serialized is null)
+        {
+            if (existing is not null)
+            {
+                _context.ProjectAssistantEnvironments.Remove(existing);
+            }
+
+            return;
+        }
+
+        if (existing is null)
+        {
+            _context.ProjectAssistantEnvironments.Add(new ProjectAssistantEnvironment
+            {
+                ProjectId = projectId.Value,
+                AssistantId = assistantId,
+                EnvironmentConfigJson = serialized,
+                Created = DateTime.UtcNow
+            });
+            return;
+        }
+
+        existing.EnvironmentConfigJson = serialized;
+        existing.Updated = DateTime.UtcNow;
     }
 
     public async Task<GuideDto> CreateGuideAsync(CreateGuideDto dto)
@@ -336,8 +414,8 @@ public class GuidesService(
         {
             guide.AuthConfigJson = SerializeAuthProviders(dto.AuthProviders);
         }
-
         _context.Assistants.Add(guide);
+        await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
 
         // Create markdown shadows for vector store files
@@ -429,6 +507,7 @@ public class GuidesService(
         guide.AuthConfigJson = dto.AuthProviders is { Count: > 0 }
             ? SerializeAuthProviders(dto.AuthProviders)
             : null;
+        await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
 
         return new GuideDto(
@@ -504,7 +583,7 @@ public class GuidesService(
             .ToListAsync();
     }
 
-    public async Task<AssistantDetailsDto?> GetAssistantAsync(Guid assistantId)
+    public async Task<AssistantDetailsDto?> GetAssistantAsync(Guid assistantId, Guid? projectId = null)
     {
         var assistant = await _context.Assistants
             .Include(a => a.Model)
@@ -631,6 +710,8 @@ public class GuidesService(
                 cs.OrderIndex
             )).ToList();
 
+        var environmentVariables = await GetProjectEnvironmentForClientAsync(projectId, assistant.Id);
+
         return new AssistantDetailsDto(
             assistantDto,
             assistant.Instructions,
@@ -642,7 +723,10 @@ public class GuidesService(
             customTools,
             files,
             conversationStarters
-        );
+        )
+        {
+            EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null
+        };
     }
 
     public async Task<AssistantDto> CreateAssistantAsync(CreateAssistantDto dto)
@@ -674,8 +758,8 @@ public class GuidesService(
             dto.ConversationStarters,
             null  // crewMemberIds - assistants don't have crews
         );
-
         _context.Assistants.Add(assistant);
+        await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
 
         // Create markdown shadows for vector store files
@@ -775,6 +859,8 @@ public class GuidesService(
             dto.ConversationStarters,
             null  // crewMemberIds - assistants don't have crews
         );
+        await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
+        await _context.SaveChangesAsync();
 
         return new AssistantDto(
             assistant.Id,

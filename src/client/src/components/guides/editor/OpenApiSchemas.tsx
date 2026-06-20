@@ -1,6 +1,6 @@
 import { useState, useEffect, useId, useRef } from 'react';
 import { FaEdit, FaTrash, FaPlus, FaChevronRight, FaFile } from 'react-icons/fa';
-import { CustomToolDto, OpenApiOperation } from '../../../types/guides';
+import { CustomToolDto, OpenApiOperation, EnvironmentVariableDto } from '../../../types/guides';
 import { api } from '../../../services/api';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
 import {
@@ -33,14 +33,18 @@ import { buildFragmentJsonFromModel } from './toolSources/operationFragmentBuild
 
 interface OpenApiSchemasProps {
   customTools: CustomToolDto[];
+  environmentVariables: EnvironmentVariableDto[];
   onCustomToolsChange: (tools: CustomToolDto[]) => void;
+  onEnvironmentVariablesChange: (variables: EnvironmentVariableDto[]) => void;
   onValidationChange?: (hasErrors: boolean) => void;
   onDirtyChange?: () => void;
 }
 
 export function OpenApiSchemas({
   customTools,
+  environmentVariables,
   onCustomToolsChange,
+  onEnvironmentVariablesChange,
   onValidationChange,
   onDirtyChange,
 }: OpenApiSchemasProps) {
@@ -608,6 +612,8 @@ export function OpenApiSchemas({
                        {cardVm.sourceKind === 'mcp-connection' && (
                          <McpConnectionPanel
                            tool={tool}
+                           environmentVariables={environmentVariables}
+                           onEnvironmentVariablesChange={onEnvironmentVariablesChange}
                            onUpdate={(updates) => handleUpdate(index, updates)}
                            onDirty={onDirtyChange}
                            inputRef={(el) => { connectionInputRefs.current[`${index}-mcp-bridge-id`] = el; }}

@@ -23,6 +23,7 @@ export interface GuideDetailsDto {
   tools: ToolAssignmentDto[];
   contextOptions: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   customTools: CustomToolDto[];
   files: FileDto[];
   conversationStarters: ConversationStarterDto[];
@@ -30,6 +31,7 @@ export interface GuideDetailsDto {
 }
 
 export interface CreateGuideDto {
+  projectId?: string;
   name: string;
   description: string;
   instructions?: string;
@@ -45,12 +47,14 @@ export interface CreateGuideDto {
   customTools?: CustomToolDto[];
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   files?: FileUploadDto[];
   conversationStarters?: string[];
   crewMemberIds?: string[];
 }
 
 export interface UpdateGuideDto {
+  projectId?: string;
   name: string;
   description: string;
   instructions?: string;
@@ -66,6 +70,7 @@ export interface UpdateGuideDto {
   customTools?: CustomToolDto[];
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   fileIdsToKeep?: string[]; // IDs of existing files to keep (omitted files are deleted)
   filesToAdd?: FileUploadDto[]; // New files to upload
   conversationStarters?: string[];
@@ -93,12 +98,14 @@ export interface AssistantDetailsDto {
   reasoningEffort?: string;
   tools: ToolAssignmentDto[];
   contextOptions: ContextOptionDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   customTools: CustomToolDto[];
   files: FileDto[];
   conversationStarters: ConversationStarterDto[];
 }
 
 export interface CreateAssistantDto {
+  projectId?: string;
   name: string;
   description: string;
   instructions?: string;
@@ -113,11 +120,13 @@ export interface CreateAssistantDto {
   customTools?: CustomToolDto[];
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   files?: FileUploadDto[];
   conversationStarters?: string[];
 }
 
 export interface UpdateAssistantDto {
+  projectId?: string;
   name: string;
   description: string;
   instructions?: string;
@@ -132,6 +141,7 @@ export interface UpdateAssistantDto {
   customTools?: CustomToolDto[];
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   fileIdsToKeep?: string[]; // IDs of existing files to keep (omitted files are deleted)
   filesToAdd?: FileUploadDto[]; // New files to upload
   conversationStarters?: string[];
@@ -260,6 +270,12 @@ export interface AuthProviderDto {
   valueTemplate?: string;
   userConfigPolicy?: string;
   scopes?: string[];
+}
+
+export interface EnvironmentVariableDto {
+  name: string;
+  value?: string | null;
+  isSecret: boolean;
 }
 
 export enum MarkdownExtractionStatus {

@@ -28,9 +28,9 @@ public static class GuidesEndpoints
         .Produces(StatusCodes.Status403Forbidden);
 
         // Get single guide
-        group.MapGet("/{guideId}", async (Guid guideId, IGuidesService guidesService) =>
+        group.MapGet("/{guideId}", async (Guid guideId, Guid? projectId, IGuidesService guidesService) =>
         {
-            var guide = await guidesService.GetGuideAsync(guideId);
+            var guide = await guidesService.GetGuideAsync(guideId, projectId);
             if (guide == null)
                 return Results.NotFound();
 

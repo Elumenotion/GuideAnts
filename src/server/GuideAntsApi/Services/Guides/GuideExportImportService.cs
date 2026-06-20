@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
@@ -274,12 +275,15 @@ public class GuideExportImportService : IGuideExportImportService
             }).ToList()
         };
         
-        var manifestJson = JsonSerializer.Serialize(assistantDef, new JsonSerializerOptions 
+        var manifestOptions = new JsonSerializerOptions
         { 
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-        });
-        await WriteTextFileAsync(archive, NormalizePath(basePath, "manifest.json"), manifestJson);
+        };
+        var manifestNode = JsonSerializer.SerializeToNode(assistantDef, manifestOptions)?.AsObject()
+            ?? new JsonObject();
+
+        await WriteTextFileAsync(archive, NormalizePath(basePath, "manifest.json"), manifestNode.ToJsonString(manifestOptions));
 
         // Instructions
         await WriteTextFileAsync(archive, NormalizePath(basePath, "instructions.md"), assistant.Instructions);
@@ -1233,6 +1237,7 @@ public class GuideExportImportService : IGuideExportImportService
     {
         // Normalize the JSON to convert numeric reasoning_effort to string format
         var normalizedJson = NormalizeManifestJson(manifestJson);
+        var normalizedManifest = JsonSerializer.Deserialize<JsonElement>(normalizedJson);
         
         // Now deserialize to AssistantDefinition (all fields will work properly)
         var assistantDef = JsonSerializer.Deserialize<AntRunner.ToolCalling.AssistantDefinitions.AssistantDefinition>(normalizedJson);

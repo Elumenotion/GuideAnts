@@ -6,7 +6,7 @@ public interface IGuidesService
 {
     // Guides (TeamAssistant where Kind=Guide)
     Task<IEnumerable<GuideDto>> GetGuidesAsync();
-    Task<GuideDetailsDto?> GetGuideAsync(Guid guideId);
+    Task<GuideDetailsDto?> GetGuideAsync(Guid guideId, Guid? projectId = null);
     Task<GuideDto> CreateGuideAsync(CreateGuideDto dto);
     Task<GuideDto> UpdateGuideAsync(Guid guideId, UpdateGuideDto dto);
     Task<bool> DeleteGuideAsync(Guid guideId);
@@ -15,7 +15,7 @@ public interface IGuidesService
     
     // Assistants (TeamAssistant where Kind=Assistant)
     Task<IEnumerable<AssistantDto>> GetAssistantsAsync();
-    Task<AssistantDetailsDto?> GetAssistantAsync(Guid assistantId);
+    Task<AssistantDetailsDto?> GetAssistantAsync(Guid assistantId, Guid? projectId = null);
     Task<AssistantDto> CreateAssistantAsync(CreateAssistantDto dto);
     Task<AssistantDto> UpdateAssistantAsync(Guid assistantId, UpdateAssistantDto dto);
     Task<bool> DeleteAssistantAsync(Guid assistantId);

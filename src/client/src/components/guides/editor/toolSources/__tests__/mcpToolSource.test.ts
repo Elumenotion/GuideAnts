@@ -71,6 +71,17 @@ describe('mcpToolSource', () => {
     expect(states[0].backingToolId).toBe('search');
   });
 
+  it('applyMcpDiscoveryToSpec stores secret refs in headers', () => {
+    const spec = buildEmptyOpenApiDescriptor('mcp-connection');
+    const settings = {
+      ...parseMcpConnectionSettings(spec),
+      headers: { Authorization: '{{secret:MCP_API_KEY}}' },
+    };
+    const next = applyMcpDiscoveryToSpec(spec, settings, []);
+    const parsed = JSON.parse(next);
+    expect(parsed['x-guideants-tool-source'].headers.Authorization).toBe('{{secret:MCP_API_KEY}}');
+  });
+
   it('validateMcpConnectionSettings enforces transport rules', () => {
     expect(
       validateMcpConnectionSettings({
