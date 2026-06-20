@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.Guides;
+using GuideAntsApi.Services.Mcp;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -200,6 +201,38 @@ public static class GuidesEndpoints
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden);
 
+        // MCP tool source discovery (authoring only — not the published-guide MCP server)
+        var mcpToolSourceGroup = app.MapGroup("/api/guides/tool-sources/mcp")
+            .WithTags("MCP Tool Sources")
+            .RequireAuthorization("RequireAdmin")
+            .WithOpenApi();
+
+        mcpToolSourceGroup.MapPost("/test-connection", async (
+            McpTestConnectionRequest request,
+            IMcpToolSourceDiscoveryService discoveryService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await discoveryService.TestConnectionAsync(request, cancellationToken);
+            return Results.Ok(result);
+        })
+        .WithName("TestMcpToolSourceConnection")
+        .Produces<McpTestConnectionResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        mcpToolSourceGroup.MapPost("/discover", async (
+            McpDiscoverToolsRequest request,
+            IMcpToolSourceDiscoveryService discoveryService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await discoveryService.DiscoverToolsAsync(request, cancellationToken);
+            return Results.Ok(result);
+        })
+        .WithName("DiscoverMcpToolSourceTools")
+        .Produces<McpDiscoverToolsResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
         // OpenAPI Operations endpoints
         var operationsGroup = app.MapGroup("/api/operations")
             .WithTags("OpenAPI Operations")
@@ -250,8 +283,8 @@ public static class GuidesEndpoints
         {
             try
             {
-                var toolDefinition = await guidesService.PreviewToolDefinitionAsync(dto);
-                return Results.Ok(new { toolDefinition });
+                var preview = await guidesService.PreviewToolDefinitionAsync(dto);
+                return Results.Ok(preview);
             }
             catch (InvalidOperationException ex)
             {
@@ -259,7 +292,7 @@ public static class GuidesEndpoints
             }
         })
         .WithName("PreviewToolDefinition")
-        .Produces(StatusCodes.Status200OK)
+        .Produces<ToolDefinitionPreviewResultDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden);

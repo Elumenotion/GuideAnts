@@ -103,7 +103,8 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder, GuideAntsApi.Services.Bootstrap.RequiredGuidesAssistantsSeeder>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder, GuideAntsApi.Services.Bootstrap.RuntimeProfileSeeder>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
-        services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();
+        services.AddHostedService<GuideAntsApi.Services.Bootstrap.LocalAiRuntimeWatchdogHostedService>();
         phaseLogger?.Invoke("ConfigureServices.RegisterServices.CoreServices");
 
  
@@ -411,6 +412,7 @@ public static class StartupConfiguration
         services.AddScoped<McpPublishedGuideInvokeService>();
         services.AddScoped<McpPublishedRunImageEmbedder>();
         services.AddScoped<IClaudeSkillPackService, ClaudeSkillPackService>();
+        services.AddScoped<IMcpToolSourceDiscoveryService, McpToolSourceDiscoveryService>();
         services.AddMcpServer()
             .WithHttpTransport(options =>
             {

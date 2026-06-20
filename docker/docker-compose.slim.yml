@@ -4,9 +4,12 @@ services:
   guideants-ai:
     image: ${GA_AI_SLIM_IMAGE:-guideants-ai:slim-latest}
     container_name: guideants-ai
+    cap_drop:
+      - SYS_PTRACE
     ports:
       - "8110:80"
     volumes:
+      - script_agent_admin_state:/var/lib/guideants/script-agent-admin
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
@@ -15,6 +18,9 @@ services:
       - GA_MEDIA_HOST=127.0.0.1
       - GA_MEDIA_PORT=8087
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
+      - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
     networks:
       - guideants-network
@@ -145,6 +151,8 @@ services:
 
 volumes:
   guideants_slim_runtime_state:
+
+  script_agent_admin_state:
 
 networks:
   guideants-network:

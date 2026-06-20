@@ -1565,6 +1565,18 @@ export const api = {
             delete: (guideId: string) => callApi<void>(`/guides/${guideId}`, { method: 'DELETE' }),
             duplicate: (guideId: string) => callApi<any>(`/guides/${guideId}/duplicate`, { method: 'POST' }),
             validateRuntime: (dto: any) => callApi<any>(`/guides/runtime/validate`, { method: 'POST', body: JSON.stringify(dto) }),
+            mcpToolSources: {
+                testConnection: (dto: import('../types/guides').McpTestConnectionRequest) =>
+                    callApi<import('../types/guides').McpTestConnectionResponse>(
+                        `/guides/tool-sources/mcp/test-connection`,
+                        { method: 'POST', body: JSON.stringify(dto) }
+                    ),
+                discover: (dto: import('../types/guides').McpDiscoverToolsRequest) =>
+                    callApi<import('../types/guides').McpDiscoverToolsResponse>(
+                        `/guides/tool-sources/mcp/discover`,
+                        { method: 'POST', body: JSON.stringify(dto) }
+                    ),
+            },
             export: async (guideId: string): Promise<Blob> => {
                 const response = await fetchWithAuth(`${API_BASE_URL}/guides/${guideId}/export`);
                 if (!response.ok) {
@@ -1721,7 +1733,8 @@ export const api = {
         operations: {
             get: (operationId: string) => callApi<any>(`/operations/${operationId}`),
             update: (operationId: string, dto: any) => callApi<any>(`/operations/${operationId}`, { method: 'PUT', body: JSON.stringify(dto) }),
-            preview: (dto: any) => callApi<{ toolDefinition: string }>(`/operations/preview`, { method: 'POST', body: JSON.stringify(dto) }),
+            preview: (dto: import('../types/guides').PreviewToolDefinitionDto) =>
+                callApi<import('../types/guides').ToolDefinitionPreviewResult>(`/operations/preview`, { method: 'POST', body: JSON.stringify(dto) }),
         },
     },
     notebooks: {

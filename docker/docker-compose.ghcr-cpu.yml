@@ -28,9 +28,12 @@ services:
     platform: linux/amd64
     pull_policy: always
     container_name: guideants-ai
+    cap_drop:
+      - SYS_PTRACE
     shm_size: "8gb"
     volumes:
       - ai_local_models-new:/models-local
+      - script_agent_admin_state:/var/lib/guideants/script-agent-admin
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
@@ -38,6 +41,9 @@ services:
       - FILE_STORAGE_ROOT=/app/ContentFiles
       - HF_TOKEN=${HF_TOKEN:-}
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
+      - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
       - GA_LLAMA_MODELS_PRESET=/models-local/router-models.ini
       - GA_LLAMA_MODEL_DIR=/models-local/llama
@@ -249,6 +255,8 @@ volumes:
   mssql_ftdata:
   mssql_log:
   ai_local_models-new:
+
+  script_agent_admin_state:
 
 networks:
   guideants-network:

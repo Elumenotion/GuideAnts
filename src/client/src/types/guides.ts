@@ -172,6 +172,66 @@ export interface PreviewToolDefinitionDto {
   openApiSpecJson: string;
 }
 
+export type ToolSourceValidationSeverity = 'error' | 'warning';
+
+export interface ToolSourceValidationMessage {
+  code: string;
+  message: string;
+  field?: string;
+  severity: ToolSourceValidationSeverity;
+}
+
+export interface ToolDefinitionPreviewResult {
+  sourceKind: string;
+  actionType: string;
+  toolDefinition: string;
+  hiddenParameters: string[];
+  responseSchemas?: Record<string, unknown>;
+  validationMessages: ToolSourceValidationMessage[];
+}
+
+export type {
+  McpTransport,
+  McpConnectionPanelState,
+  McpToolDiffState,
+  McpToolSourceMetadata,
+  McpConnectionSettings,
+  McpDiscoveredToolRow,
+  McpDiscoverDiffSummary,
+  McpDiscoverToolsResponse,
+  McpTestConnectionResponse,
+} from '../components/guides/editor/toolSources/mcpToolSourceTypes';
+
+export interface McpToolSourceConnectionDto {
+  transport: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpTransport;
+  url?: string;
+  bridgeId?: string;
+  headers?: Record<string, string>;
+  toolNamePrefix?: string;
+}
+
+export interface McpExistingToolStateDto {
+  backingToolId: string;
+  schemaHash?: string;
+  enabled: boolean;
+  operationId?: string;
+}
+
+export interface McpTestConnectionRequest {
+  connection: McpToolSourceConnectionDto;
+}
+
+export interface McpDiscoverToolsRequest {
+  connection: McpToolSourceConnectionDto;
+  existingTools?: McpExistingToolStateDto[];
+  bridgeTools?: Array<{
+    name: string;
+    title?: string;
+    description?: string;
+    inputSchema?: unknown;
+  }>;
+}
+
 export interface OpenApiAuthConfig {
   authType: 'oauth' | 'service_http' | 'service_query';
   // OAuth fields

@@ -25,7 +25,7 @@ public interface IGuidesService
     // OpenAPI Operations
     Task<OpenApiOperationDto?> GetOperationAsync(Guid operationId);
     Task<OpenApiOperationDto> UpdateOperationAsync(Guid operationId, UpdateOperationDto dto);
-    Task<string> PreviewToolDefinitionAsync(PreviewToolDefinitionDto dto);
+    Task<ToolDefinitionPreviewResultDto> PreviewToolDefinitionAsync(PreviewToolDefinitionDto dto);
 
     // Validation
     Task<GuideRuntimeValidationDto> ValidateRuntimeCompatibilityAsync(GuideRuntimeValidationRequest request);

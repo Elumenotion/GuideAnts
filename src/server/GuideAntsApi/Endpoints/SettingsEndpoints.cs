@@ -130,15 +130,13 @@ public static class SettingsEndpoints
 
             try
             {
-                await localAiWarmup.UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
-                await localAiWarmup.EnsureDefaultLlamaLoadedAsync(cancellationToken).ConfigureAwait(false);
-                await localAiWarmup.EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
+                await localAiWarmup.WarmupAllAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 loggerFactory
                     .CreateLogger("ChatDefaultsRuntimeReload")
-                    .LogWarning(ex, "Failed to reload default local llama model after chat-defaults update.");
+                    .LogWarning(ex, "Failed to reload local AI stack after chat-defaults update.");
             }
 
             return Results.Ok(MapChatDefaults(result.Section));

@@ -49,7 +49,8 @@ public sealed class HostMountPathGuardEndpointTests
             scriptType = OperatingSystem.IsWindows() ? 1 : 0,
             workingDirectory,
             projectId = _factory.Notebook.ProjectId.ToString(),
-            notebookId = _factory.Notebook.NotebookId.ToString()
+            notebookId = _factory.Notebook.NotebookId.ToString(),
+            guideId = _factory.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -89,7 +90,8 @@ public sealed class HostMountPathGuardEndpointTests
             scriptType = 0,
             workingDirectory,
             projectId = _factory.Notebook.ProjectId.ToString(),
-            notebookId = _factory.Notebook.NotebookId.ToString()
+            notebookId = _factory.Notebook.NotebookId.ToString(),
+            guideId = _factory.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -126,7 +128,8 @@ public sealed class HostMountPathGuardEndpointTests
             scriptType = 0,
             workingDirectory,
             projectId = _factory.Notebook.ProjectId.ToString(),
-            notebookId = _factory.Notebook.NotebookId.ToString()
+            notebookId = _factory.Notebook.NotebookId.ToString(),
+            guideId = _factory.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -148,7 +151,8 @@ public sealed class HostMountPathGuardEndpointTests
             scriptType = 0,
             workingDirectory = mount.NotebookScopedPath,
             projectId = _factory.Notebook.ProjectId.ToString(),
-            notebookId = _factory.Notebook.NotebookId.ToString()
+            notebookId = _factory.Notebook.NotebookId.ToString(),
+            guideId = _factory.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -202,7 +206,8 @@ public sealed class HostMountPathGuardEndpointTests
             scriptType = 0,
             workingDirectory,
             projectId = factory.Notebook.ProjectId.ToString(),
-            notebookId = factory.Notebook.NotebookId.ToString()
+            notebookId = factory.Notebook.NotebookId.ToString(),
+            guideId = factory.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body, cts.Token);
@@ -241,7 +246,8 @@ public sealed class HostMountPathGuardEndpointTests
             scriptType = 0,
             workingDirectory,
             projectId = factory.Notebook.ProjectId.ToString(),
-            notebookId = factory.Notebook.NotebookId.ToString()
+            notebookId = factory.Notebook.NotebookId.ToString(),
+            guideId = factory.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body, cts.Token);

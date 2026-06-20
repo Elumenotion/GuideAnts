@@ -125,10 +125,27 @@ public sealed class GuidesServiceTests
             }
             """;
 
-        var json = await service.PreviewToolDefinitionAsync(new PreviewToolDefinitionDto(fragment, "{}"));
+        var result = await service.PreviewToolDefinitionAsync(new PreviewToolDefinitionDto(fragment, WebApiSpec()));
 
-        json.Should().Contain("listItems");
+        result.ToolDefinition.Should().Contain("listItems");
     }
+
+    private static string WebApiSpec() => """
+        {
+          "openapi": "3.0.0",
+          "info": { "title": "Web API", "version": "1.0.0" },
+          "servers": [{ "url": "https://api.example.com" }],
+          "paths": {
+            "/items": {
+              "get": {
+                "operationId": "listItems",
+                "summary": "List items",
+                "responses": { "200": { "description": "ok" } }
+              }
+            }
+          }
+        }
+        """;
 
     [TestMethod]
     public async Task PreviewToolDefinitionAsync_Throws_for_invalid_fragment()
@@ -208,6 +225,7 @@ public sealed class GuidesServiceTests
         const string openApiSpec = """
             {
               "openapi": "3.0.0",
+              "info": { "title": "Example API", "version": "1.0.0" },
               "servers": [{ "url": "https://api.example.com" }],
               "paths": {
                 "/items": {

@@ -24,6 +24,8 @@ services:
   guideants-ai:
     image: ${GA_AI_CPU_IMAGE:-ghcr.io/elumenotion/guideants-ai-cpu:latest}
     container_name: guideants-ai
+    cap_drop:
+      - SYS_PTRACE
     shm_size: "8gb"
     volumes:
       # Single named volume backs every local AI model (llama GGUFs,
@@ -33,12 +35,16 @@ services:
       # docker/scripts/migrate-local-models-to-single-volume.ps1 before
       # the stack is started for the first time on this host.
       - ai_local_models:/models-local
+      - script_agent_admin_state:/var/lib/guideants/script-agent-admin
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
     environment:
       - FILE_STORAGE_ROOT=/app/ContentFiles
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
+      - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
       # Optional: host .env HF_TOKEN for docker exec / scripted hf downloads (download-*.ps1). Not used by llama inference.
       - HF_TOKEN=${HF_TOKEN:-}
@@ -257,6 +263,8 @@ volumes:
   mssql_ftdata:
   mssql_log:
   ai_local_models:
+
+  script_agent_admin_state:
 
 networks:
   guideants-network:

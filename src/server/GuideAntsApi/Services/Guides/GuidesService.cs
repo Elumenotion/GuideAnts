@@ -878,22 +878,12 @@ public class GuidesService(
                 ? descEl.GetString()
                 : operation.Summary;
 
-            // Build a minimal OpenAPI spec to generate tool definition
-            var tempSpec = new
-            {
-                openapi = "3.0.0",
-                info = new { title = "Temp", version = "1.0.0" },
-                servers = new[] { new { url = "https://temp.example.com" } },
-                paths = new Dictionary<string, object>
-                {
-                    [path] = new Dictionary<string, object>
-                    {
-                        [method.ToLower()] = JsonDocument.Parse(operationElement.GetRawText()).RootElement
-                    }
-                }
-            };
-
-            var tempSpecJson = JsonSerializer.Serialize(tempSpec);
+            // Build OpenAPI spec using the parent schema server URL (not a hardcoded placeholder)
+            var tempSpecJson = ToolSourceValidator.BuildSingleOperationOpenApiSpec(
+                operation.Schema.SpecificationJson,
+                path,
+                method,
+                operationElement);
             var toolDefinitions = OpenApiHelper.GetToolDefinitionsFromJson(tempSpecJson);
 
             var toolDef = toolDefinitions.FirstOrDefault() ?? throw new InvalidOperationException("Failed to generate tool definition from schema fragment");
@@ -925,45 +915,14 @@ public class GuidesService(
         }
     }
 
-    public async Task<string> PreviewToolDefinitionAsync(PreviewToolDefinitionDto dto)
+    public Task<ToolDefinitionPreviewResultDto> PreviewToolDefinitionAsync(PreviewToolDefinitionDto dto)
     {
-        // Preview doesn't require owner checks, just authentication
-        // The endpoint is protected by RequireAuthorization()
-        await Task.CompletedTask; // Satisfy async signature
-
         try
         {
-            var fragment = JsonDocument.Parse(dto.SchemaFragmentJson);
-            var root = fragment.RootElement;
-
-            var path = root.GetProperty("path").GetString() ?? "/";
-            var method = root.GetProperty("method").GetString()?.ToLower() ?? "get";
-            var operationElement = root.GetProperty("operation");
-
-            // Build a minimal OpenAPI spec
-            var tempSpec = new
-            {
-                openapi = "3.0.0",
-                info = new { title = "Preview", version = "1.0.0" },
-                servers = new[] { new { url = "https://preview.example.com" } },
-                paths = new Dictionary<string, object>
-                {
-                    [path] = new Dictionary<string, object>
-                    {
-                        [method] = JsonDocument.Parse(operationElement.GetRawText()).RootElement
-                    }
-                }
-            };
-
-            var tempSpecJson = JsonSerializer.Serialize(tempSpec);
-            var toolDefinitions = OpenApiHelper.GetToolDefinitionsFromJson(tempSpecJson);
-
-            var toolDef = toolDefinitions.FirstOrDefault()
-                ?? throw new InvalidOperationException("Failed to generate tool definition");
-
-            return JsonSerializer.Serialize(toolDef, JsonIndentedOptions);
+            var result = ToolSourceValidator.PreviewOperation(dto.SchemaFragmentJson, dto.OpenApiSpecJson);
+            return Task.FromResult(result);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException)
         {
             throw new InvalidOperationException($"Failed to preview tool definition: {ex.Message}", ex);
         }
@@ -1366,6 +1325,8 @@ public class GuidesService(
                 if (string.IsNullOrWhiteSpace(customTool.OpenApiSpec))
                     throw new ArgumentException($"OpenAPI specification is required for custom tool '{customTool.Name}'.");
 
+                ToolSourceValidator.EnsurePublishableOrThrow(customTool.OpenApiSpec, customTool.Name);
+
                 var schema = new AssistantOpenApiSchema
                 {
                     Id = Guid.NewGuid(),
@@ -1722,6 +1683,8 @@ public class GuidesService(
                     throw new ArgumentException($"API Host is required for custom tool '{customTool.Name}'.");
                 if (string.IsNullOrWhiteSpace(customTool.OpenApiSpec))
                     throw new ArgumentException($"OpenAPI specification is required for custom tool '{customTool.Name}'.");
+
+                ToolSourceValidator.EnsurePublishableOrThrow(customTool.OpenApiSpec, customTool.Name);
 
                 var schema = new AssistantOpenApiSchema
                 {

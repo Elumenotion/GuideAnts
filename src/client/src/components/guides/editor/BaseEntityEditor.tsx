@@ -298,7 +298,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
   useRegisterTour('guideBuilder.tools', [
     {
       target: '[data-tour-id="guide.tabs.tools"]',
-      content: 'Tools: enable globals or add custom web connectors.',
+      content: 'Tools: enable globals or add custom tool sources.',
       placement: 'bottom'
     },
     {
@@ -317,7 +317,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     },
     {
       target: '[data-tour-id="guide.tools.subtab.connectors"]',
-      content: 'Web Connectors: upload OpenAPI and manage operations.',
+      content: 'Tool Sources: configure web APIs, client actions, sandbox modules, and operations.',
       placement: 'bottom',
       onHighlight: () => {
         const el = document.querySelector('[data-tour-id=\'guide.tools.subtab.connectors\']') as HTMLElement | null;
