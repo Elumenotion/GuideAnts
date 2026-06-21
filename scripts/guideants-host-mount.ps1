@@ -356,33 +356,6 @@ function Restart-AffectedServices {
     }
 }
 
-function Invoke-ReconcileCallback {
-    param(
-        [Parameter(Mandatory = $true)][string]$MountIdValue,
-        [string]$ProjectIdValue
-    )
-
-    $apiBase = Get-ApiBaseUrl
-    if (-not [string]::IsNullOrWhiteSpace($ProjectIdValue)) {
-        $uri = "$apiBase/api/projects/$ProjectIdValue/host-folder-mounts/$MountIdValue/reconcile"
-    }
-    else {
-        $uri = "$apiBase$ApiPlanPath/$MountIdValue/reconcile"
-    }
-
-    $headers = @{}
-    if (-not [string]::IsNullOrWhiteSpace($env:GUIDEANTS_MOUNT_API_TOKEN)) {
-        $headers.Authorization = "Bearer $($env:GUIDEANTS_MOUNT_API_TOKEN)"
-    }
-
-    try {
-        Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ErrorAction Stop | Out-Null
-    }
-    catch {
-        Write-Warn 'Post-restart reconcile callback failed (best-effort; startup reconciliation is authoritative).'
-    }
-}
-
 $installerState = Get-InstallerState
 $plan = $null
 
@@ -391,12 +364,10 @@ switch ($Verb) {
         $plan = Resolve-ApplyPlan -MountIdValue $MountId -HostPathValue $HostPath -ProjectIdValue $ProjectId
         Invoke-ApplyMount -InstallerState $installerState -Plan $plan
         Restart-AffectedServices -InstallerState $installerState
-        Invoke-ReconcileCallback -MountIdValue $MountId -ProjectIdValue $plan.ProjectId
     }
     'remove' {
         Invoke-RemoveMount -InstallerState $installerState -MountIdValue $MountId
         Restart-AffectedServices -InstallerState $installerState
-        Invoke-ReconcileCallback -MountIdValue $MountId -ProjectIdValue $ProjectId
     }
 }
 

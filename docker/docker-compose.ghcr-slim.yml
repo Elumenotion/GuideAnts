@@ -140,6 +140,7 @@ services:
       - FILE_STORAGE_ROOT=/app/ContentFiles
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - PLANTUML_LIMIT_SIZE=8192
     volumes:
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
