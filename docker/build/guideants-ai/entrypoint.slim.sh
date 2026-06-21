@@ -19,7 +19,23 @@ if [ "$SCRIPT_EXECUTION_REQUIRE_TOKEN" != "true" ] && [ "$SCRIPT_EXECUTION_REQUI
     exit 1
 fi
 
-echo "ScriptExecutionAgent hardening config: token_required=${SCRIPT_EXECUTION_REQUIRE_TOKEN} token_configured=$([ -n \"${SCRIPT_EXECUTION_AGENT_TOKEN:-}\" ] && echo true || echo false) identity_isolation=${SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION} storage_root_configured=true"
+SCRIPT_EXECUTION_ADMIN_API_ENABLED="${SCRIPT_EXECUTION_ADMIN_API_ENABLED:-false}"
+SCRIPT_EXECUTION_ADMIN_STATE_DIR="${SCRIPT_EXECUTION_ADMIN_STATE_DIR:-/var/lib/guideants/script-agent-admin}"
+SCRIPT_EXECUTION_SCOPE_STATE_ROOT="${SCRIPT_EXECUTION_SCOPE_STATE_ROOT:-${SCRIPT_EXECUTION_ADMIN_STATE_DIR}/scopes}"
+
+if [ "$SCRIPT_EXECUTION_ADMIN_API_ENABLED" = "true" ] && [ -z "${SCRIPT_EXECUTION_ADMIN_TOKEN:-}" ]; then
+    echo "ERROR: SCRIPT_EXECUTION_ADMIN_TOKEN must be configured when SCRIPT_EXECUTION_ADMIN_API_ENABLED=true." >&2
+    exit 1
+fi
+
+if [ "$SCRIPT_EXECUTION_ADMIN_API_ENABLED" = "true" ] && [ -x /opt/guideants/script-agent-admin/reconcile.sh ]; then
+    /opt/guideants/script-agent-admin/reconcile.sh
+fi
+
+export SCRIPT_EXECUTION_ADMIN_STATE_DIR
+export SCRIPT_EXECUTION_SCOPE_STATE_ROOT
+
+echo "ScriptExecutionAgent hardening config: token_required=${SCRIPT_EXECUTION_REQUIRE_TOKEN} token_configured=$([ -n \"${SCRIPT_EXECUTION_AGENT_TOKEN:-}\" ] && echo true || echo false) identity_isolation=${SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION} storage_root_configured=true admin_api_enabled=${SCRIPT_EXECUTION_ADMIN_API_ENABLED} admin_token_configured=$([ -n \"${SCRIPT_EXECUTION_ADMIN_TOKEN:-}\" ] && echo true || echo false)"
 
 env \
     ASPNETCORE_URLS="http://127.0.0.1:8081" \

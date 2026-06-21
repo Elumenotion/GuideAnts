@@ -22,7 +22,7 @@ public interface ILocalAiStartupWarmupService
 
     /// <summary>
     /// Ensures local AI services are loaded and ready in deterministic order:
-    /// default llama-cpp chat target first, then non-chat local services.
+    /// unload auxiliary services, default llama-cpp chat target, then non-chat local services.
     /// </summary>
     Task WarmupAllAsync(CancellationToken cancellationToken = default);
 
@@ -87,14 +87,18 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
     public async Task WarmupAllAsync(CancellationToken cancellationToken = default)
     {
-        Interlocked.Increment(ref _warmupInProgress);
+        if (Interlocked.CompareExchange(ref _warmupInProgress, 1, 0) != 0)
+        {
+            _logger.LogDebug("Skipping duplicate local AI warmup; another warmup is already in progress.");
+            return;
+        }
+
         try
         {
-            // Hard requirement: LLM gets first claim on GPU memory before auxiliary
-            // local services are loaded.
+            // Drain GPU/RAM from auxiliary services (including any container autoload)
+            // before the LLM claims memory, then reload the full stack in order.
+            await UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
             await EnsureDefaultLlamaLoadedAsync(cancellationToken).ConfigureAwait(false);
-
-            // Keep auxiliary services ready at startup for indexing/chat inputs.
             await EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -523,7 +527,13 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                         return processAlive.Value && healthy.Value;
                     }
 
-                    return true;
+                    if (processAlive.HasValue)
+                    {
+                        return processAlive.Value;
+                    }
+
+                    var status = root?["status"]?.GetValue<string>();
+                    return string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase);
                 }
                 catch
                 {

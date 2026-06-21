@@ -18,6 +18,10 @@ namespace GuideAntsApi.Services.Infrastructure;
 /// (gateway: <c>/llama-cpp/health</c>), not the bare OpenAI-compatible base — the
 /// base path alone can redirect, stall, or omit a fast ranged response.
 /// </para>
+/// <para>
+/// Items with id <c>LocalServiceHosts:DocumentIntelligenceBaseUrl</c> are probed at
+/// <c>{BaseUrl}/version</c> so the Infrastructure tab validates docling-serve readiness.
+/// </para>
 /// <para>Individual item failures are captured per-row — this service never
 /// throws, consistent with the non-fatal probe contract on
 /// <see cref="IInfrastructureProbeService"/>.</para>
@@ -122,6 +126,10 @@ public sealed class InfrastructureProbeService : IInfrastructureProbeService
         {
             uri = ToLlamaCppHealthProbeUri(uri);
         }
+        else if (string.Equals(item.Id, ServiceRoutingContracts.DocumentIntelligenceBaseUrlKey, StringComparison.OrdinalIgnoreCase))
+        {
+            uri = ToDoclingVersionProbeUri(uri);
+        }
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linkedCts.CancelAfter(ProbeTimeout);
@@ -196,6 +204,25 @@ public sealed class InfrastructureProbeService : IInfrastructureProbeService
 
         var trimmed = path.TrimEnd('/');
         builder.Path = trimmed + "/health";
+        return builder.Uri;
+    }
+
+    /// <summary>
+    /// Maps the configured docling-serve base (e.g. <c>http://docling-serve:5001</c>)
+    /// to the version endpoint (<c>.../version</c>).
+    /// </summary>
+    internal static Uri ToDoclingVersionProbeUri(Uri configuredBase)
+    {
+        var builder = new UriBuilder(configuredBase);
+        var path = builder.Path;
+        if (string.IsNullOrEmpty(path) || path == "/")
+        {
+            builder.Path = ServiceRoutingContracts.DoclingVersionPath;
+            return builder.Uri;
+        }
+
+        var trimmed = path.TrimEnd('/');
+        builder.Path = trimmed + ServiceRoutingContracts.DoclingVersionPath;
         return builder.Uri;
     }
 

@@ -165,6 +165,14 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                     Field("DoclingTableMode", "text", false, operative: true),
                     Field("DoclingTableCellMatching", "text", false, operative: true),
                     Field("DoclingImageExportMode", "text", false, operative: true),
+                    Field("DoclingOcrLang", "text", false, operative: true),
+                    Field("DoclingPipeline", "text", false, operative: true),
+                    Field("DoclingDoCodeEnrichment", "enum", false, enumOptions: ["true", "false"], operative: true),
+                    Field("DoclingDoFormulaEnrichment", "enum", false, enumOptions: ["true", "false"], operative: true),
+                    Field("DoclingDoPictureClassification", "enum", false, enumOptions: ["true", "false"], operative: true),
+                    Field("DoclingDoPictureDescription", "enum", false, enumOptions: ["true", "false"], operative: true),
+                    Field("DoclingPictureDescriptionPreset", "text", false, operative: true),
+                    Field("DoclingApiKey", "secret", false, operative: true),
                 ]
             },
             [RoutedServiceNames.SpeechTranscription] = new Dictionary<string, IReadOnlyList<ProviderFieldMetadataDto>>(StringComparer.Ordinal)

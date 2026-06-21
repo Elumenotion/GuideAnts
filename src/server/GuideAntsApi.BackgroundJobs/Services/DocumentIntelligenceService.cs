@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Azure;
@@ -335,7 +335,6 @@ internal sealed class DoclingServeDocumentIntelligenceExtractor(
     ILogger<DoclingServeDocumentIntelligenceExtractor> logger) : IDocumentIntelligenceExtractor
 {
     private const int MinAsyncPollIntervalMs = 250;
-    private const int PerRequestTimeoutSeconds = 60;
 
     private readonly HttpClient _client = client;
     private readonly IOptionsMonitor<DocumentIntelligenceOptions> _optionsMonitor = optionsMonitor;
@@ -372,6 +371,7 @@ internal sealed class DoclingServeDocumentIntelligenceExtractor(
                 baseUrl: baseUrl,
                 content: content,
                 fileName: fileName,
+                options: options,
                 operationToken: operationToken);
 
             var pollIntervalMs = Math.Max(MinAsyncPollIntervalMs, options.AsyncStatusPollIntervalMs);
@@ -381,7 +381,7 @@ internal sealed class DoclingServeDocumentIntelligenceExtractor(
             {
                 try
                 {
-                    latestStatus = await PollTaskStatusAsync(baseUrl, taskId, operationToken);
+                    latestStatus = await PollTaskStatusAsync(baseUrl, taskId, options, operationToken);
                     lastSuccessfulPollAtUtc = DateTime.UtcNow;
                 }
                 catch (OperationCanceledException) when (!operationToken.IsCancellationRequested)
@@ -417,7 +417,7 @@ internal sealed class DoclingServeDocumentIntelligenceExtractor(
                 await Task.Delay(TimeSpan.FromMilliseconds(pollIntervalMs), operationToken);
             }
 
-            var resultBody = await FetchTaskResultAsync(baseUrl, taskId, operationToken);
+            var resultBody = await FetchTaskResultAsync(baseUrl, taskId, options, operationToken);
             var markdown = ParseMarkdown(resultBody);
             _logger.LogInformation(
                 "Extracted {Length} chars of markdown from {FileName} via docling-serve async API (task {TaskId})",
@@ -440,29 +440,22 @@ internal sealed class DoclingServeDocumentIntelligenceExtractor(
         string baseUrl,
         Stream content,
         string fileName,
+        DocumentIntelligenceOptions options,
         CancellationToken operationToken)
     {
         var endpoint = $"{baseUrl}/v1/convert/file/async";
+        var perRequestTimeoutSeconds = DoclingServeFormContentBuilder.ResolvePerRequestTimeoutSeconds(options);
 
-        if (content.CanSeek)
-        {
-            content.Position = 0;
-        }
-
-        using var multipart = new MultipartFormDataContent();
-        multipart.Add(new StringContent("md"), "to_formats");
-
-        var streamContent = new StreamContent(content);
-        streamContent.Headers.ContentType = new MediaTypeHeaderValue(GetContentType(fileName));
-        multipart.Add(streamContent, "files", Path.GetFileName(fileName));
+        using var multipart = DoclingServeFormContentBuilder.BuildConversionForm(content, fileName, options);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = multipart
         };
+        DoclingServeFormContentBuilder.ApplyAuthHeaders(request, options);
 
         using var requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
-        requestTimeoutCts.CancelAfter(TimeSpan.FromSeconds(PerRequestTimeoutSeconds));
+        requestTimeoutCts.CancelAfter(TimeSpan.FromSeconds(perRequestTimeoutSeconds));
 
         using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestTimeoutCts.Token);
         var responseBody = await response.Content.ReadAsStringAsync(operationToken);
@@ -480,13 +473,19 @@ internal sealed class DoclingServeDocumentIntelligenceExtractor(
     private async Task<DoclingTaskStatus> PollTaskStatusAsync(
         string baseUrl,
         string taskId,
+        DocumentIntelligenceOptions options,
         CancellationToken operationToken)
     {
         var endpoint = $"{baseUrl}/v1/status/poll/{taskId}";
-        using var requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
-        requestTimeoutCts.CancelAfter(TimeSpan.FromSeconds(PerRequestTimeoutSeconds));
+        var perRequestTimeoutSeconds = DoclingServeFormContentBuilder.ResolvePerRequestTimeoutSeconds(options);
 
-        using var response = await _client.GetAsync(endpoint, requestTimeoutCts.Token);
+        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        DoclingServeFormContentBuilder.ApplyAuthHeaders(request, options);
+
+        using var requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
+        requestTimeoutCts.CancelAfter(TimeSpan.FromSeconds(perRequestTimeoutSeconds));
+
+        using var response = await _client.SendAsync(request, requestTimeoutCts.Token);
         var responseBody = await response.Content.ReadAsStringAsync(operationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -500,13 +499,19 @@ internal sealed class DoclingServeDocumentIntelligenceExtractor(
     private async Task<string> FetchTaskResultAsync(
         string baseUrl,
         string taskId,
+        DocumentIntelligenceOptions options,
         CancellationToken operationToken)
     {
         var endpoint = $"{baseUrl}/v1/result/{taskId}";
-        using var requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
-        requestTimeoutCts.CancelAfter(TimeSpan.FromSeconds(PerRequestTimeoutSeconds));
+        var perRequestTimeoutSeconds = DoclingServeFormContentBuilder.ResolvePerRequestTimeoutSeconds(options);
 
-        using var response = await _client.GetAsync(endpoint, requestTimeoutCts.Token);
+        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        DoclingServeFormContentBuilder.ApplyAuthHeaders(request, options);
+
+        using var requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
+        requestTimeoutCts.CancelAfter(TimeSpan.FromSeconds(perRequestTimeoutSeconds));
+
+        using var response = await _client.SendAsync(request, requestTimeoutCts.Token);
         var responseBody = await response.Content.ReadAsStringAsync(operationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -692,25 +697,6 @@ internal sealed class DoclingServeDocumentIntelligenceExtractor(
         }
 
         return false;
-    }
-
-    private static string GetContentType(string fileName)
-    {
-        var extension = Path.GetExtension(fileName).ToLowerInvariant();
-        return extension switch
-        {
-            ".pdf" => "application/pdf",
-            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".png" => "image/png",
-            ".bmp" => "image/bmp",
-            ".tiff" => "image/tiff",
-            ".heif" => "image/heif",
-            ".html" or ".htm" => "text/html",
-            _ => "application/octet-stream"
-        };
     }
 
     private static string TruncateForLog(string value)

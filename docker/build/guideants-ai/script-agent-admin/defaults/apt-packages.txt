@@ -1,0 +1,2 @@
+# Admin-managed apt packages.
+# Example smoke-test package: jq

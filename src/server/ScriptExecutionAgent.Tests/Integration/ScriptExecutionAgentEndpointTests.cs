@@ -93,7 +93,8 @@ public sealed class ScriptExecutionAgentEndpointTests
             scriptType = (int)ScriptType.Bash,
             workingDirectory = _host.Notebook.WorkingDirectory,
             projectId = "not-a-guid",
-            notebookId = _host.Notebook.NotebookId.ToString()
+            notebookId = _host.Notebook.NotebookId.ToString(),
+            guideId = _host.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -128,7 +129,8 @@ public sealed class ScriptExecutionAgentEndpointTests
             scriptType = (int)ScriptType.Bash,
             workingDirectory = _host.Notebook.WorkingDirectory,
             projectId = _host.Notebook.ProjectId.ToString(),
-            notebookId = wrongNotebookId.ToString()
+            notebookId = wrongNotebookId.ToString(),
+            guideId = _host.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -152,7 +154,8 @@ public sealed class ScriptExecutionAgentEndpointTests
             scriptType = (int)ScriptType.Python,
             workingDirectory = _host.Notebook.WorkingDirectory,
             projectId = _host.Notebook.ProjectId.ToString(),
-            notebookId = _host.Notebook.NotebookId.ToString()
+            notebookId = _host.Notebook.NotebookId.ToString(),
+            guideId = _host.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -239,7 +242,8 @@ public sealed class ScriptExecutionAgentEndpointTests
             scriptType = (int)ScriptType.Bash,
             workingDirectory = workingDirectory ?? notebook.WorkingDirectory,
             projectId = notebook.ProjectId.ToString(),
-            notebookId = notebook.NotebookId.ToString()
+            notebookId = notebook.NotebookId.ToString(),
+            guideId = notebook.GuideId.ToString()
         };
 
     private static bool IsInterpreterAvailable(string command)

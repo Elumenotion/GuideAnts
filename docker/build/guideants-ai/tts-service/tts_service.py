@@ -162,7 +162,8 @@ class TtsRuntimeState:
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
             return {
-                "loaded": self.model is not None and self.processor is not None,
+                # Kokoro stores the pipeline on STATE.model; processor stays None.
+                "loaded": self.model is not None,
                 "modelRef": self.model_ref,
                 "tokenizerRef": self.tokenizer_ref,
                 "loadedAtUtc": self.loaded_at_utc,

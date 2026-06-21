@@ -21,6 +21,7 @@ namespace GuideAntsApi.DataModel
         public DbSet<User> Users { get; set; } = null!;
         public DbSet<UserRole> UserRoles { get; set; } = null!;
         public DbSet<Project> Projects { get; set; } = null!;
+        public DbSet<ProjectAssistantEnvironment> ProjectAssistantEnvironments { get; set; } = null!;
         
         public DbSet<NotebookTemplate> NotebookTemplates { get; set; } = null!;
         public DbSet<Notebook> Notebooks { get; set; } = null!;
@@ -673,6 +674,23 @@ namespace GuideAntsApi.DataModel
                 b.HasOne(x => x.AssistantAuthProvider)
                  .WithMany(p => p.Scopes)
                  .HasForeignKey(x => x.AssistantAuthProviderId)
+                 .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<ProjectAssistantEnvironment>(b =>
+            {
+                b.HasKey(x => new { x.ProjectId, x.AssistantId });
+                b.HasIndex(x => x.AssistantId);
+                b.Property(x => x.EnvironmentConfigJson).HasColumnType("nvarchar(max)");
+
+                b.HasOne(x => x.Project)
+                 .WithMany(p => p.AssistantEnvironments)
+                 .HasForeignKey(x => x.ProjectId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                b.HasOne(x => x.Assistant)
+                 .WithMany()
+                 .HasForeignKey(x => x.AssistantId)
                  .OnDelete(DeleteBehavior.Cascade);
             });
 
