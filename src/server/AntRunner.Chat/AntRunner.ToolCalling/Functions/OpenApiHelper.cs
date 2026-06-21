@@ -303,10 +303,7 @@ namespace AntRunner.ToolCalling.Functions
                                         propertyDefinition.Items = itemsDef;
                                     }
 
-                                    // If this parameter has a default value OR a single enum value, we will auto-inject it at runtime,
-                                    // so we hide it from the schema the LLM sees.
-                                    bool shouldHide = propertyDefinition.Default != null || (propertyDefinition.Enum != null && propertyDefinition.Enum.Count == 1);
-                                    if (shouldHide)
+                                    if (ShouldAutoInjectRequestBodyProperty(propertyDefinition))
                                     {
                                         hiddenParameters.Add(property.Name);
                                         continue; // do not expose to LLM
@@ -470,5 +467,65 @@ namespace AntRunner.ToolCalling.Functions
 
             return GetToolDefinitionsFromSchema(spec);
         }
+
+        /// <summary>
+        /// Returns request-body property names that are auto-injected at runtime (default or single enum value)
+        /// and therefore hidden from the LLM-facing tool schema.
+        /// </summary>
+        public static List<string> GetAutoInjectedRequestBodyParameterNames(JsonElement operationObj)
+        {
+            var hidden = new List<string>();
+            if (!operationObj.TryGetProperty("requestBody", out var requestBody))
+            {
+                return hidden;
+            }
+
+            if (!requestBody.TryGetProperty("content", out var content))
+            {
+                return hidden;
+            }
+
+            var mediaType = content.EnumerateObject().FirstOrDefault();
+            if (mediaType.Value.ValueKind == JsonValueKind.Undefined
+                || !mediaType.Value.TryGetProperty("schema", out var schema))
+            {
+                return hidden;
+            }
+
+            if (!string.Equals(GetSchemaType(schema), "object", StringComparison.OrdinalIgnoreCase)
+                || !schema.TryGetProperty("properties", out var propertiesElement))
+            {
+                return hidden;
+            }
+
+            foreach (var property in propertiesElement.EnumerateObject())
+            {
+                var propertyDefinition = new PropertyDefinition
+                {
+                    Type = GetSchemaType(property.Value),
+                    Default = property.Value.TryGetProperty("default", out var defaultElement)
+                        ? (defaultElement.ValueKind == JsonValueKind.String
+                            ? defaultElement.GetString()
+                            : defaultElement.ValueKind == JsonValueKind.Null
+                                ? null
+                                : defaultElement.GetRawText())
+                        : null,
+                    Enum = (property.Value.TryGetProperty("enum", out var enumElement)
+                        ? GetOptionalEnumArray(enumElement)
+                        : null)!,
+                };
+
+                if (ShouldAutoInjectRequestBodyProperty(propertyDefinition))
+                {
+                    hidden.Add(property.Name);
+                }
+            }
+
+            return hidden;
+        }
+
+        private static bool ShouldAutoInjectRequestBodyProperty(PropertyDefinition propertyDefinition) =>
+            propertyDefinition.Default != null
+            || (propertyDefinition.Enum != null && propertyDefinition.Enum.Count == 1);
     }
 }

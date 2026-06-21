@@ -194,10 +194,29 @@ public sealed class GuidesServiceDeepTests2
         var service = GuidesServiceTestHelper.CreateGuidesService(context);
 
         var result = await service.PreviewToolDefinitionAsync(
-            new PreviewToolDefinitionDto(OperationFragment, "{}"));
+            new PreviewToolDefinitionDto(OperationFragment, WebApiSpec()));
 
-        result.Should().Contain("listItems");
+        result.ToolDefinition.Should().Contain("listItems");
+        result.SourceKind.Should().Be("web-api");
+        result.ActionType.Should().Be("WebApi");
     }
+
+    private static string WebApiSpec() => """
+        {
+          "openapi": "3.0.0",
+          "info": { "title": "Web API", "version": "1.0.0" },
+          "servers": [{ "url": "https://api.example.com" }],
+          "paths": {
+            "/items": {
+              "get": {
+                "operationId": "listItems",
+                "summary": "List items",
+                "responses": { "200": { "description": "ok" } }
+              }
+            }
+          }
+        }
+        """;
 
     [TestMethod]
     public async Task PreviewToolDefinitionAsync_Throws_for_invalid_fragment()

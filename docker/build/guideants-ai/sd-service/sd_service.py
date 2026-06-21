@@ -1490,6 +1490,14 @@ def run_startup_autoload_flow() -> None:
     (engine autoload + optional warmup) without blocking FastAPI startup.
     """
     try:
+        if not env_flag("GA_SD_AUTO_LOAD_ON_STARTUP", False):
+            log_event(
+                "sd_service_startup_unloaded",
+                reason="autoload_disabled",
+                modelDir=STATE.model_dir,
+            )
+            return
+
         # Auto-start the engine if an active bundle exists, but never take the
         # control plane down on failure: operators still need /admin/bundles
         # and /admin/load to recover.
@@ -1928,6 +1936,11 @@ async def admin_unload() -> JSONResponse:
         )
     try:
         if not is_engine_process_alive():
+            log_event(
+                "sd_engine_unload",
+                action="noop-already-unloaded",
+                bundleId=STATE.loaded_bundle_id,
+            )
             return JSONResponse(
                 status_code=200,
                 content={
@@ -1936,7 +1949,13 @@ async def admin_unload() -> JSONResponse:
                     "engine": engine_state_dict(),
                 },
             )
+        unloaded_bundle_id = STATE.loaded_bundle_id
         stop_engine()
+        log_event(
+            "sd_engine_unload",
+            action="unloaded",
+            bundleId=unloaded_bundle_id,
+        )
         return JSONResponse(
             status_code=200,
             content={

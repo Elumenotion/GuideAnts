@@ -85,7 +85,7 @@ pwsh .\run\test-openai-chat.ps1
   - `GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS`
   - `GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP=1|0` (when `1`, startup warmup failure is non-fatal; use `/sd/admin/warmup` to retry)
   - `GA_SD_WAIT_FOR_READY_ON_STARTUP=1|0`, `GA_SD_READY_TIMEOUT_SECONDS`
-  - Default behavior is SD-first startup warmup, then ASR and embeddings autoload; TTS autoload remains off by default.
+  - Default behavior: the web API orchestrates startup warmup (LLM first, then ASR, embeddings, TTS, and SD). Container-side autoload flags default to off; do not enable `GA_SD_AUTO_LOAD_ON_STARTUP` unless you intentionally bypass web API orchestration.
 - llama health endpoint via gateway: `http://localhost:8110/llama-cpp/health`
 - embeddings health endpoint via gateway: `http://localhost:8110/emb/health`
 - SD warmup retry endpoint via gateway: `http://localhost:8110/sd/admin/warmup` (`POST`)

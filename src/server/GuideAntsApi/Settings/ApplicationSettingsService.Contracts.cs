@@ -418,7 +418,15 @@ public sealed partial class ApplicationSettingsService
                 "DoclingPdfBackend",
                 "DoclingTableMode",
                 "DoclingTableCellMatching",
-                "DoclingImageExportMode"
+                "DoclingImageExportMode",
+                "DoclingOcrLang",
+                "DoclingPipeline",
+                "DoclingDoCodeEnrichment",
+                "DoclingDoFormulaEnrichment",
+                "DoclingDoPictureClassification",
+                "DoclingDoPictureDescription",
+                "DoclingPictureDescriptionPreset",
+                "DoclingApiKey"
             ],
             Providers:
             [
@@ -448,7 +456,8 @@ public sealed partial class ApplicationSettingsService
             [
                 "AzureDocumentIntelligence:Endpoint",
                 "AzureDocumentIntelligence:ApiKey",
-                "LocalServiceHosts:DocumentIntelligenceBaseUrl"
+                "LocalServiceHosts:DocumentIntelligenceBaseUrl",
+                "DocumentIntelligence:DoclingApiKey"
             ])
     ];
 }

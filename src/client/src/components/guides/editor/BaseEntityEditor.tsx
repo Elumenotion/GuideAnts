@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../common/Toast';
 import { api } from '../../../services/api';
-import { GuideDetailsDto, AssistantDetailsDto, CreateGuideDto, UpdateGuideDto, CreateAssistantDto, UpdateAssistantDto, ContextOptionDto, CustomToolDto, FileUploadDto, FileDto, AuthProviderDto, ModelDto } from '../../../types/guides';
+import { GuideDetailsDto, AssistantDetailsDto, CreateGuideDto, UpdateGuideDto, CreateAssistantDto, UpdateAssistantDto, ContextOptionDto, CustomToolDto, FileUploadDto, FileDto, AuthProviderDto, ModelDto, EnvironmentVariableDto } from '../../../types/guides';
 import LoadingSpinner from '../../LoadingSpinner';
 import { API_BASE_URL, getApiOrigin } from '../../../config/apiConfig';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
@@ -15,6 +15,7 @@ import { ToolsTab } from './ToolsTab';
 import { FilesTab } from './FilesTab';
 import { CrewTab } from './CrewTab';
 import { AuthConfig } from './AuthConfig';
+import { EnvironmentConfig } from './EnvironmentConfig';
 import { MarkdownPreviewModal } from './MarkdownPreviewModal';
 import { useRegisterTour } from '../../../tour/useRegisterTour';
 import {
@@ -51,6 +52,7 @@ interface FormData {
   customTools: CustomToolDto[];
   contextOptions: ContextOptionDto[];
   authProviders: AuthProviderDto[]; // Only used for guides
+  environmentVariables: EnvironmentVariableDto[];
   existingFiles: FileDto[]; // Files already on the server
   newFiles: FileUploadDto[]; // New files to be uploaded
   conversationStarters: string[];
@@ -70,6 +72,7 @@ const defaultFormData: FormData = {
   customTools: [],
   contextOptions: [],
   authProviders: [],
+  environmentVariables: [],
   existingFiles: [],
   newFiles: [],
   conversationStarters: [],
@@ -114,7 +117,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
   const isGuide = entityType === 'guide';
 
   // Persist active tab in URL for navigation stability
-  const activeTab = (searchParams.get('tab') || 'general') as 'general' | 'configuration' | 'tools' | 'files' | 'crew' | 'auth';
+  const activeTab = (searchParams.get('tab') || 'general') as 'general' | 'configuration' | 'tools' | 'files' | 'environment' | 'crew' | 'auth';
 
   const [formData, setFormData] = useState<FormData>(defaultFormData);
   const [isDirty, setIsDirty] = useState(false);
@@ -298,7 +301,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
   useRegisterTour('guideBuilder.tools', [
     {
       target: '[data-tour-id="guide.tabs.tools"]',
-      content: 'Tools: enable globals or add custom web connectors.',
+      content: 'Tools: enable globals or add custom tool sources.',
       placement: 'bottom'
     },
     {
@@ -317,7 +320,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     },
     {
       target: '[data-tour-id="guide.tools.subtab.connectors"]',
-      content: 'Web Connectors: upload OpenAPI and manage operations.',
+      content: 'Tool Sources: configure web APIs, client actions, sandbox modules, and operations.',
       placement: 'bottom',
       onHighlight: () => {
         const el = document.querySelector('[data-tour-id=\'guide.tools.subtab.connectors\']') as HTMLElement | null;
@@ -403,7 +406,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     }
   ]);
 
-  const setActiveTab = useCallback((tab: 'general' | 'configuration' | 'tools' | 'files' | 'crew' | 'auth') => {
+  const setActiveTab = useCallback((tab: 'general' | 'configuration' | 'tools' | 'files' | 'environment' | 'crew' | 'auth') => {
     setSearchParams((prev) => {
       const newParams = new URLSearchParams(prev);
       newParams.set('tab', tab);
@@ -445,8 +448,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     const intervalId = setInterval(async () => {
       try {
         const data = isGuide
-          ? await api.guides.guides.get(entityId)
-          : await api.guides.assistants.get(entityId);
+          ? await api.guides.guides.get(entityId, projectId)
+          : await api.guides.assistants.get(entityId, projectId);
 
         // Check if any files are being processed
         const hasProcessingFiles = (data.files || []).some(
@@ -497,7 +500,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
   const loadEntity = async (id: string) => {
     try {
       if (isGuide) {
-        const data: GuideDetailsDto = await api.guides.guides.get(id);
+        const data: GuideDetailsDto = await api.guides.guides.get(id, projectId);
         
         setFormData({
           name: data.guide.name,
@@ -513,6 +516,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           customTools: data.customTools,
           contextOptions: data.contextOptions,
           authProviders: data.authProviders || [],
+          environmentVariables: data.environmentVariables || [],
           existingFiles: data.files || [],
           newFiles: [],
           conversationStarters: data.conversationStarters.map((cs) => cs.prompt),
@@ -524,7 +528,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           loadAvatar(data.guide.avatarUrl);
         }
       } else {
-        const data: AssistantDetailsDto = await api.guides.assistants.get(id);
+        const data: AssistantDetailsDto = await api.guides.assistants.get(id, projectId);
         
         setFormData({
           name: data.assistant.name,
@@ -541,6 +545,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           customTools: data.customTools,
           contextOptions: data.contextOptions,
           authProviders: [],
+          environmentVariables: data.environmentVariables || [],
           existingFiles: data.files || [],
           newFiles: [],
           conversationStarters: data.conversationStarters.map((cs) => cs.prompt),
@@ -674,6 +679,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
         // Update existing entity
         if (isGuide) {
           const updateDto: UpdateGuideDto = {
+            projectId,
             name: formData.name,
             description: formData.description,
             instructions,
@@ -694,6 +700,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             customTools: formData.customTools,
             contextOptions: contextOptionsToSave,
             authProviders: formData.authProviders,
+            environmentVariables: formData.environmentVariables,
             fileIdsToKeep,
             filesToAdd,
             conversationStarters: formData.conversationStarters,
@@ -704,6 +711,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           showToast({ type: 'success', title: 'Guide updated successfully' });
         } else {
           const updateDto: UpdateAssistantDto = {
+            projectId,
             name: formData.name,
             description: formData.description,
             instructions,
@@ -737,6 +745,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
         // Create new entity
         if (isGuide) {
           const createDto: CreateGuideDto = {
+            projectId,
             name: formData.name,
             description: formData.description,
             instructions,
@@ -757,6 +766,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             customTools: formData.customTools,
             contextOptions: contextOptionsToSave,
             authProviders: formData.authProviders,
+            environmentVariables: formData.environmentVariables,
             files: formData.newFiles.length > 0 ? formData.newFiles : undefined,
             conversationStarters: formData.conversationStarters,
             crewMemberIds: formData.crewMemberIds,
@@ -768,6 +778,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           return;
         } else {
           const createDto: CreateAssistantDto = {
+            projectId,
             name: formData.name,
             description: formData.description,
             instructions,
@@ -953,7 +964,12 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
         tourScreenId={`guideBuilder.${activeTab}`}
       />
 
-      <EditorTabs activeTab={activeTab} showCrew={isGuide} showAuth={isGuide} onTabChange={setActiveTab} />
+      <EditorTabs
+        activeTab={activeTab}
+        showCrew={isGuide}
+        showAuth={isGuide}
+        onTabChange={setActiveTab}
+      />
 
       <div className="flex-1 overflow-auto bg-gray-50 px-8">
         <div className="max-w-7xl mx-auto py-6 space-y-6">
@@ -1008,8 +1024,10 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               selectedToolIds={formData.selectedToolIds}
               customTools={formData.customTools}
               contextOptions={formData.contextOptions}
+              environmentVariables={formData.environmentVariables}
               onSelectedToolIdsChange={(selectedToolIds) => updateForm({ selectedToolIds })}
               onCustomToolsChange={(customTools) => updateForm({ customTools })}
+              onEnvironmentVariablesChange={(environmentVariables) => updateForm({ environmentVariables })}
               onValidationChange={setHasValidationErrors}
               onDirtyChange={() => setIsDirty(true)}
             />
@@ -1023,6 +1041,14 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               onNewFilesChange={(newFiles) => updateForm({ newFiles })}
               onPreviewMarkdown={handlePreviewMarkdown}
               onDownloadFile={handleDownloadFile}
+            />
+          )}
+
+          {activeTab === 'environment' && (
+            <EnvironmentConfig
+              entityLabel={isGuide ? 'guide' : 'assistant'}
+              variables={formData.environmentVariables}
+              onChange={(environmentVariables) => updateForm({ environmentVariables })}
             />
           )}
 

@@ -25,9 +25,9 @@ public static class AssistantsEndpoints
         .Produces(StatusCodes.Status403Forbidden);
 
         // Get single assistant
-        group.MapGet("/{assistantId}", async (Guid assistantId, IGuidesService guidesService) =>
+        group.MapGet("/{assistantId}", async (Guid assistantId, Guid? projectId, IGuidesService guidesService) =>
         {
-            var assistant = await guidesService.GetAssistantAsync(assistantId);
+            var assistant = await guidesService.GetAssistantAsync(assistantId, projectId);
             if (assistant == null)
                 return Results.NotFound();
 

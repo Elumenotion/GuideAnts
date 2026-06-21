@@ -14,6 +14,7 @@ public sealed class GuidesServiceDeepTests
     private const string OpenApiSpec = """
         {
           "openapi": "3.0.0",
+          "info": { "title": "Example API", "version": "1.0.0" },
           "servers": [{ "url": "https://api.example.com" }],
           "paths": {
             "/items": {

@@ -2,11 +2,15 @@ using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.EnvironmentVariables;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Settings;
 using AntRunner.ToolCalling.Functions;
 using AntRunner.Chat;
+using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Services.Guides;
 
@@ -14,11 +18,13 @@ public class GuidesService(
     ApplicationDbContext context,
     MarkdownExtractionService markdownExtractionService,
     IRuntimeProfileResolver runtimeProfileResolver,
+    IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions,
     ILogger<GuidesService> logger) : IGuidesService
 {
     private readonly ApplicationDbContext _context = context;
     private readonly MarkdownExtractionService _markdownExtractionService = markdownExtractionService;
     private readonly IRuntimeProfileResolver _runtimeProfileResolver = runtimeProfileResolver;
+    private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptions = settingsSecretsOptions;
     private readonly ILogger<GuidesService> _logger = logger;
 
     private static readonly JsonSerializerOptions JsonCaseInsensitiveOptions = new()
@@ -58,7 +64,7 @@ public class GuidesService(
             .ToListAsync();
     }
 
-    public async Task<GuideDetailsDto?> GetGuideAsync(Guid guideId)
+    public async Task<GuideDetailsDto?> GetGuideAsync(Guid guideId, Guid? projectId = null)
     {
         var guide = await _context.Assistants
             .Include(a => a.Model)
@@ -226,6 +232,8 @@ public class GuidesService(
             }
         }
 
+        var environmentVariables = await GetProjectEnvironmentForClientAsync(projectId, guide.Id);
+
         return new GuideDetailsDto(
             guideDto,
             guide.Instructions,
@@ -240,7 +248,10 @@ public class GuidesService(
             files,
             conversationStarters,
             crews
-        );
+        )
+        {
+            EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null
+        };
     }
 
     // Internal class for deserializing AuthConfigJson
@@ -278,6 +289,73 @@ public class GuidesService(
             })]
         };
         return JsonSerializer.Serialize(manifest, JsonCamelCaseOptions);
+    }
+
+    private async Task<List<EnvironmentVariableDto>> GetProjectEnvironmentForClientAsync(Guid? projectId, Guid assistantId)
+    {
+        if (!projectId.HasValue || projectId.Value == Guid.Empty)
+        {
+            return [];
+        }
+
+        var environmentJson = await _context.ProjectAssistantEnvironments
+            .AsNoTracking()
+            .Where(environment => environment.ProjectId == projectId.Value && environment.AssistantId == assistantId)
+            .Select(environment => environment.EnvironmentConfigJson)
+            .FirstOrDefaultAsync();
+
+        return EnvironmentVariableConfigSerializer.DeserializeForClient(environmentJson);
+    }
+
+    private async Task SaveProjectEnvironmentAsync(
+        Guid? projectId,
+        Guid assistantId,
+        IReadOnlyCollection<EnvironmentVariableDto>? variables)
+    {
+        if (!projectId.HasValue || projectId.Value == Guid.Empty)
+        {
+            return;
+        }
+
+        var projectExists = await _context.Projects
+            .AnyAsync(project => project.Id == projectId.Value && !project.Deleted);
+        if (!projectExists)
+        {
+            throw new InvalidOperationException($"Project '{projectId.Value}' was not found.");
+        }
+
+        var existing = await _context.ProjectAssistantEnvironments
+            .FirstOrDefaultAsync(environment => environment.ProjectId == projectId.Value && environment.AssistantId == assistantId);
+
+        var serialized = EnvironmentVariableConfigSerializer.SerializeFromClient(
+            variables,
+            existing?.EnvironmentConfigJson,
+            _settingsSecretsOptions.CurrentValue);
+
+        if (serialized is null)
+        {
+            if (existing is not null)
+            {
+                _context.ProjectAssistantEnvironments.Remove(existing);
+            }
+
+            return;
+        }
+
+        if (existing is null)
+        {
+            _context.ProjectAssistantEnvironments.Add(new ProjectAssistantEnvironment
+            {
+                ProjectId = projectId.Value,
+                AssistantId = assistantId,
+                EnvironmentConfigJson = serialized,
+                Created = DateTime.UtcNow
+            });
+            return;
+        }
+
+        existing.EnvironmentConfigJson = serialized;
+        existing.Updated = DateTime.UtcNow;
     }
 
     public async Task<GuideDto> CreateGuideAsync(CreateGuideDto dto)
@@ -336,8 +414,8 @@ public class GuidesService(
         {
             guide.AuthConfigJson = SerializeAuthProviders(dto.AuthProviders);
         }
-
         _context.Assistants.Add(guide);
+        await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
 
         // Create markdown shadows for vector store files
@@ -429,6 +507,7 @@ public class GuidesService(
         guide.AuthConfigJson = dto.AuthProviders is { Count: > 0 }
             ? SerializeAuthProviders(dto.AuthProviders)
             : null;
+        await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
 
         return new GuideDto(
@@ -504,7 +583,7 @@ public class GuidesService(
             .ToListAsync();
     }
 
-    public async Task<AssistantDetailsDto?> GetAssistantAsync(Guid assistantId)
+    public async Task<AssistantDetailsDto?> GetAssistantAsync(Guid assistantId, Guid? projectId = null)
     {
         var assistant = await _context.Assistants
             .Include(a => a.Model)
@@ -631,6 +710,8 @@ public class GuidesService(
                 cs.OrderIndex
             )).ToList();
 
+        var environmentVariables = await GetProjectEnvironmentForClientAsync(projectId, assistant.Id);
+
         return new AssistantDetailsDto(
             assistantDto,
             assistant.Instructions,
@@ -642,7 +723,10 @@ public class GuidesService(
             customTools,
             files,
             conversationStarters
-        );
+        )
+        {
+            EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null
+        };
     }
 
     public async Task<AssistantDto> CreateAssistantAsync(CreateAssistantDto dto)
@@ -674,8 +758,8 @@ public class GuidesService(
             dto.ConversationStarters,
             null  // crewMemberIds - assistants don't have crews
         );
-
         _context.Assistants.Add(assistant);
+        await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
 
         // Create markdown shadows for vector store files
@@ -775,6 +859,8 @@ public class GuidesService(
             dto.ConversationStarters,
             null  // crewMemberIds - assistants don't have crews
         );
+        await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
+        await _context.SaveChangesAsync();
 
         return new AssistantDto(
             assistant.Id,
@@ -878,22 +964,12 @@ public class GuidesService(
                 ? descEl.GetString()
                 : operation.Summary;
 
-            // Build a minimal OpenAPI spec to generate tool definition
-            var tempSpec = new
-            {
-                openapi = "3.0.0",
-                info = new { title = "Temp", version = "1.0.0" },
-                servers = new[] { new { url = "https://temp.example.com" } },
-                paths = new Dictionary<string, object>
-                {
-                    [path] = new Dictionary<string, object>
-                    {
-                        [method.ToLower()] = JsonDocument.Parse(operationElement.GetRawText()).RootElement
-                    }
-                }
-            };
-
-            var tempSpecJson = JsonSerializer.Serialize(tempSpec);
+            // Build OpenAPI spec using the parent schema server URL (not a hardcoded placeholder)
+            var tempSpecJson = ToolSourceValidator.BuildSingleOperationOpenApiSpec(
+                operation.Schema.SpecificationJson,
+                path,
+                method,
+                operationElement);
             var toolDefinitions = OpenApiHelper.GetToolDefinitionsFromJson(tempSpecJson);
 
             var toolDef = toolDefinitions.FirstOrDefault() ?? throw new InvalidOperationException("Failed to generate tool definition from schema fragment");
@@ -925,45 +1001,14 @@ public class GuidesService(
         }
     }
 
-    public async Task<string> PreviewToolDefinitionAsync(PreviewToolDefinitionDto dto)
+    public Task<ToolDefinitionPreviewResultDto> PreviewToolDefinitionAsync(PreviewToolDefinitionDto dto)
     {
-        // Preview doesn't require owner checks, just authentication
-        // The endpoint is protected by RequireAuthorization()
-        await Task.CompletedTask; // Satisfy async signature
-
         try
         {
-            var fragment = JsonDocument.Parse(dto.SchemaFragmentJson);
-            var root = fragment.RootElement;
-
-            var path = root.GetProperty("path").GetString() ?? "/";
-            var method = root.GetProperty("method").GetString()?.ToLower() ?? "get";
-            var operationElement = root.GetProperty("operation");
-
-            // Build a minimal OpenAPI spec
-            var tempSpec = new
-            {
-                openapi = "3.0.0",
-                info = new { title = "Preview", version = "1.0.0" },
-                servers = new[] { new { url = "https://preview.example.com" } },
-                paths = new Dictionary<string, object>
-                {
-                    [path] = new Dictionary<string, object>
-                    {
-                        [method] = JsonDocument.Parse(operationElement.GetRawText()).RootElement
-                    }
-                }
-            };
-
-            var tempSpecJson = JsonSerializer.Serialize(tempSpec);
-            var toolDefinitions = OpenApiHelper.GetToolDefinitionsFromJson(tempSpecJson);
-
-            var toolDef = toolDefinitions.FirstOrDefault()
-                ?? throw new InvalidOperationException("Failed to generate tool definition");
-
-            return JsonSerializer.Serialize(toolDef, JsonIndentedOptions);
+            var result = ToolSourceValidator.PreviewOperation(dto.SchemaFragmentJson, dto.OpenApiSpecJson);
+            return Task.FromResult(result);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException)
         {
             throw new InvalidOperationException($"Failed to preview tool definition: {ex.Message}", ex);
         }
@@ -1366,6 +1411,8 @@ public class GuidesService(
                 if (string.IsNullOrWhiteSpace(customTool.OpenApiSpec))
                     throw new ArgumentException($"OpenAPI specification is required for custom tool '{customTool.Name}'.");
 
+                ToolSourceValidator.EnsurePublishableOrThrow(customTool.OpenApiSpec, customTool.Name);
+
                 var schema = new AssistantOpenApiSchema
                 {
                     Id = Guid.NewGuid(),
@@ -1722,6 +1769,8 @@ public class GuidesService(
                     throw new ArgumentException($"API Host is required for custom tool '{customTool.Name}'.");
                 if (string.IsNullOrWhiteSpace(customTool.OpenApiSpec))
                     throw new ArgumentException($"OpenAPI specification is required for custom tool '{customTool.Name}'.");
+
+                ToolSourceValidator.EnsurePublishableOrThrow(customTool.OpenApiSpec, customTool.Name);
 
                 var schema = new AssistantOpenApiSchema
                 {
