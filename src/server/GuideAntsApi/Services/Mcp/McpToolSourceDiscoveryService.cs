@@ -43,7 +43,10 @@ public sealed class McpToolSourceDiscoveryService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "MCP connection test failed for transport {Transport}", request.Connection.Transport);
+            logger.LogWarning(
+                ex,
+                "MCP connection test failed for transport {Transport}",
+                LogValueSanitizer.Sanitize(request.Connection.Transport));
             return new McpTestConnectionResponse(false, "Failed to connect to MCP server.", null, null);
         }
     }
@@ -92,7 +95,10 @@ public sealed class McpToolSourceDiscoveryService(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "MCP tool discovery failed for transport {Transport}", request.Connection.Transport);
+                logger.LogWarning(
+                    ex,
+                    "MCP tool discovery failed for transport {Transport}",
+                    LogValueSanitizer.Sanitize(request.Connection.Transport));
                 return EmptyDiscoverResponse(false, "MCP tool discovery failed. Check connection settings and retry.");
             }
         }
