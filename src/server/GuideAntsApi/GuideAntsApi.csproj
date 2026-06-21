@@ -51,7 +51,7 @@
     <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.Abstractions\AntRunner.Chat.Abstractions.csproj">
       <Private>True</Private>
     </ProjectReference>
-    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.GoogleVertex\AntRunner.Chat.GoogleGemini.csproj">
+    <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.GoogleGemini\AntRunner.Chat.GoogleGemini.csproj">
       <Private>True</Private>
     </ProjectReference>
     <ProjectReference Include="..\AntRunner.Chat\AntRunner.Chat.HuggingFace\AntRunner.Chat.HuggingFace.csproj">

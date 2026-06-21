@@ -1526,31 +1526,38 @@ describe('NotebookDetails page', () => {
 
   it('enters polling when requires_load recheck detects external startup loading', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime)
-      .mockResolvedValueOnce({ state: 'requires_load' } as never)
-      .mockResolvedValue({
-        state: 'loading',
-        activeOperation: { operationId: '__external_loading__', state: 'loading' },
+    try {
+      vi.mocked(api.projects.notebooks.conversations.checkLlamaRuntime)
+        .mockResolvedValueOnce({ state: 'requires_load' } as never)
+        .mockResolvedValue({
+          state: 'loading',
+          activeOperation: { operationId: '__external_loading__', state: 'loading' },
+        } as never);
+      vi.mocked(api.projects.notebooks.conversations.pollLlamaRuntimeOperation).mockResolvedValue({
+        state: 'ready',
+        operationId: '__external_loading__',
       } as never);
-    vi.mocked(api.projects.notebooks.conversations.pollLlamaRuntimeOperation).mockResolvedValue({
-      state: 'ready',
-      operationId: '__external_loading__',
-    } as never);
 
-    renderNotebook();
+      renderNotebook();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('llama-runtime-modal')).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(screen.getByTestId('llama-runtime-modal')).toBeInTheDocument();
+      });
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
-    });
+      await waitFor(() => {
+        expect(api.projects.notebooks.conversations.checkLlamaRuntime.mock.calls.length).toBeGreaterThanOrEqual(2);
+      });
 
-    await waitFor(() => {
-      expect(api.projects.notebooks.conversations.pollLlamaRuntimeOperation).toHaveBeenCalled();
-    });
-    vi.useRealTimers();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+
+      await waitFor(() => {
+        expect(api.projects.notebooks.conversations.pollLlamaRuntimeOperation).toHaveBeenCalled();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('dismisses crash modal via onClose', async () => {

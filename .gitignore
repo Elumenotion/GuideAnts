@@ -418,6 +418,7 @@ FodyWeavers.xsd
 /docker/.buildx-cache
 /docker/.build-state
 /docker/.buildx-cache-deps-new
+/docker/docker-compose.host-mounts.generated.yml
 /_hf_test
 /.codeql
 /scan-recs
