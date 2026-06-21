@@ -69,6 +69,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILlamaRuntimeCoordinator _coordinator;
+    private readonly IServiceModeResolver _serviceModeResolver;
     private readonly ILogger<LocalAiStartupWarmupService> _logger;
 
     public LocalAiStartupWarmupService(
@@ -76,12 +77,14 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         IServiceScopeFactory scopeFactory,
         IHttpClientFactory httpClientFactory,
         ILlamaRuntimeCoordinator coordinator,
+        IServiceModeResolver serviceModeResolver,
         ILogger<LocalAiStartupWarmupService> logger)
     {
         _configuration = configuration;
         _scopeFactory = scopeFactory;
         _httpClientFactory = httpClientFactory;
         _coordinator = coordinator;
+        _serviceModeResolver = serviceModeResolver;
         _logger = logger;
     }
 
@@ -302,6 +305,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
     private async Task EnsureLocalServiceLoadedAndReadyAsync(string serviceId, CancellationToken cancellationToken)
     {
+        if (!await ShouldWarmLocalServiceAsync(serviceId, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
         if (string.IsNullOrWhiteSpace(adminBase))
         {
@@ -339,6 +347,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
     private async Task EnsureLocalServiceUnloadedAsync(string serviceId, CancellationToken cancellationToken)
     {
+        if (!await ShouldWarmLocalServiceAsync(serviceId, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
         if (string.IsNullOrWhiteSpace(adminBase))
         {
@@ -733,6 +746,51 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         }
 
         return false;
+    }
+
+    private async Task<bool> ShouldWarmLocalServiceAsync(string serviceId, CancellationToken cancellationToken)
+    {
+        var expectedLocalProviderSection = serviceId switch
+        {
+            RoutedServiceNames.SpeechTranscription => "LocalServiceHosts:SpeechTranscriptionBaseUrl",
+            RoutedServiceNames.Embeddings => "LocalServiceHosts:EmbeddingsBaseUrl",
+            RoutedServiceNames.SpeechSynthesis => "LocalServiceHosts:SpeechSynthesisBaseUrl",
+            RoutedServiceNames.ImageGeneration => "LocalServiceHosts:ImageGenerationBaseUrl",
+            _ => null
+        };
+
+        if (expectedLocalProviderSection is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            var mode = await _serviceModeResolver
+                .ResolveAsync(serviceId, modeId: null, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (string.Equals(mode.ProviderSection, expectedLocalProviderSection, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            _logger.LogInformation(
+                "Skipping local {ServiceId} warmup: default mode '{ModeId}' routes to provider section '{ProviderSection}', not local '{LocalProviderSection}'.",
+                serviceId,
+                mode.ModeId,
+                mode.ProviderSection,
+                expectedLocalProviderSection);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not resolve routing mode for {ServiceId}; continuing with local warmup as fallback behavior.",
+                serviceId);
+            return true;
+        }
     }
 
     private static string Truncate(string? value, int maxChars)

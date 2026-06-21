@@ -179,7 +179,7 @@ ASP.NET Core 8 solution with multiple projects.
 - `GuideAntsApi.DataModel` (+ tests) — EF Core models, `DbContext`, migrations
 - `GuideAntsApi.BackgroundJobs` — extraction / transcription / indexing / embeddings / retention
 - `GuideAnts.Usage` — usage & cost tracking
-- `AntRunner.Chat` family (Abstractions, OpenAI, Anthropic, GoogleVertex, HuggingFace, LlamaCpp, OpenRouter, ToolCalling) — provider-routed chat runtime
+- `AntRunner.Chat` family (Abstractions, OpenAI, Anthropic, GoogleGemini, HuggingFace, LlamaCpp, OpenRouter, ToolCalling) — provider-routed chat runtime
 - `HtmlAgilityPackExtensions` — HTML utilities
 - `ScriptExecutionAgent` — staged into the AI image during build
 - `GuideAntsApi.Tests`, `GuideAntsApi.IntegrationTests`

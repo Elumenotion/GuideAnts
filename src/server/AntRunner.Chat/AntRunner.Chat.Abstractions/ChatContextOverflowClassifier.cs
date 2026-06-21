@@ -29,7 +29,7 @@ public static class ChatContextOverflowClassifier
         "prompt is too long",
         "exceed context limit",
         "input length and max_tokens exceed context limit",
-        // Google Gemini / Vertex
+        // Google Gemini
         "exceeds the maximum number of tokens",
         "input token count",
         "the input token count",

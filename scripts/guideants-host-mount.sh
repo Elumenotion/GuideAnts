@@ -366,27 +366,6 @@ restart_affected_services() {
   )
 }
 
-request_reconcile_callback() {
-  local mount_id="$1"
-  local api_base url
-  api_base="$(api_base_url)"
-
-  if [[ -n "${PLAN_PROJECT_ID:-}" ]]; then
-    url="${api_base%/}/api/projects/${PLAN_PROJECT_ID}/host-folder-mounts/${mount_id}/reconcile"
-  else
-    url="${api_base%/}${API_PLAN_PATH}/${mount_id}/reconcile"
-  fi
-
-  local curl_args=(-fsS -X POST)
-  if [[ -n "${GUIDEANTS_MOUNT_API_TOKEN:-}" ]]; then
-    curl_args+=(-H "Authorization: Bearer ${GUIDEANTS_MOUNT_API_TOKEN}")
-  fi
-
-  if ! curl "${curl_args[@]}" "$url" >/dev/null 2>&1; then
-    warn "Post-restart reconcile callback failed (best-effort; startup reconciliation is authoritative)."
-  fi
-}
-
 VERB=""
 MOUNT_ID=""
 HOST_PATH=""
@@ -432,12 +411,10 @@ case "$VERB" in
   apply)
     apply_mount "$MOUNT_ID" "$HOST_PATH"
     restart_affected_services
-    request_reconcile_callback "$MOUNT_ID"
     ;;
   remove)
     remove_mount "$MOUNT_ID"
     restart_affected_services
-    request_reconcile_callback "$MOUNT_ID"
     ;;
 esac
 
