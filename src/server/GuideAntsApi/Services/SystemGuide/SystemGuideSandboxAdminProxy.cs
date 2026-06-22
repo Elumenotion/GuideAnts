@@ -1,5 +1,8 @@
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
+using GuideAnts.Logging;
 using GuideAntsApi.Configuration;
 using Microsoft.AspNetCore.Http;
 
@@ -12,6 +15,11 @@ public sealed class SystemGuideSandboxAdminProxy(
 {
     private const string AdminTokenHeaderName = "X-Script-Agent-Admin-Token";
     private const string AdminTokenConfigKey = "ScriptExecution:AdminToken";
+    private static readonly HashSet<string> AllowedRequestContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "text/plain",
+        "application/json"
+    };
 
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IConfiguration _configuration = configuration;
@@ -63,7 +71,7 @@ public sealed class SystemGuideSandboxAdminProxy(
         request.Headers.TryAddWithoutValidation(AdminTokenHeaderName, adminToken);
         if (body != null)
         {
-            request.Content = new StringContent(body, Encoding.UTF8, contentType ?? "application/json");
+            request.Content = CreateUpstreamRequestContent(body, contentType);
         }
 
         HttpResponseMessage response;
@@ -77,7 +85,7 @@ public sealed class SystemGuideSandboxAdminProxy(
                 ex,
                 "Sandbox admin proxy request failed. method={Method} path={Path}",
                 method.Method,
-                adminPath);
+                LogValueSanitizer.Sanitize(adminPath));
             return Results.Problem(
                 title: "Sandbox admin proxy failure",
                 detail: ex.Message,
@@ -93,10 +101,17 @@ public sealed class SystemGuideSandboxAdminProxy(
                 return Results.StatusCode((int)response.StatusCode);
             }
 
-            var responseContentType = response.Content.Headers.ContentType?.ToString();
+            var responseContentType = ResolveSafeResponseContentType(
+                response.Content.Headers.ContentType?.ToString());
+            if (responseContentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+            {
+                using var document = JsonDocument.Parse(responseBody);
+                return Results.Json(document.RootElement.Clone(), statusCode: (int)response.StatusCode);
+            }
+
             return Results.Content(
                 responseBody,
-                string.IsNullOrWhiteSpace(responseContentType) ? "application/json" : responseContentType,
+                responseContentType,
                 Encoding.UTF8,
                 (int)response.StatusCode);
         }
@@ -104,5 +119,46 @@ public sealed class SystemGuideSandboxAdminProxy(
         {
             response.Dispose();
         }
+    }
+
+    private static HttpContent CreateUpstreamRequestContent(string body, string? contentType)
+    {
+        var mediaType = string.IsNullOrWhiteSpace(contentType) ? "application/json" : contentType;
+        if (!AllowedRequestContentTypes.Contains(mediaType))
+        {
+            throw new InvalidOperationException(
+                $"Sandbox admin proxy only supports request content types: {string.Join(", ", AllowedRequestContentTypes)}.");
+        }
+
+        var content = mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+            ? new ByteArrayContent(CanonicalizeJsonUtf8(body))
+            : new ByteArrayContent(Encoding.UTF8.GetBytes(body));
+        content.Headers.ContentType = new MediaTypeHeaderValue(mediaType)
+        {
+            CharSet = "utf-8"
+        };
+        return content;
+    }
+
+    private static string ResolveSafeResponseContentType(string? upstreamContentType)
+    {
+        if (string.IsNullOrWhiteSpace(upstreamContentType))
+        {
+            return "application/json";
+        }
+
+        if (upstreamContentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase)
+            || upstreamContentType.StartsWith("text/plain", StringComparison.OrdinalIgnoreCase))
+        {
+            return upstreamContentType;
+        }
+
+        return "application/json";
+    }
+
+    private static byte[] CanonicalizeJsonUtf8(string body)
+    {
+        using var document = JsonDocument.Parse(body);
+        return Encoding.UTF8.GetBytes(JsonSerializer.Serialize(document.RootElement));
     }
 }
