@@ -130,6 +130,26 @@ describe('GuideAntsGuideFlyout', () => {
     expect(chat.setContextProvider).toHaveBeenCalled();
   });
 
+  it('injects notebook route context into the chat context provider', async () => {
+    const user = userEvent.setup();
+    renderGuideShell('/projects/project-1/notebooks/notebook-2');
+
+    await user.click(screen.getByRole('button', { name: 'GuideAnts Guide' }));
+    const chat = await waitFor(() => {
+      const element = document.querySelector('guideants-chat') as MockGuideantsChat | null;
+      expect(element).not.toBeNull();
+      return element as MockGuideantsChat;
+    });
+
+    const contextProvider = chat.setContextProvider.mock.calls.at(-1)?.[0] as (() => string) | undefined;
+    expect(contextProvider).toBeDefined();
+    const context = JSON.parse(contextProvider!()) as Record<string, unknown>;
+
+    expect(context.projectId).toBe('project-1');
+    expect(context.notebookId).toBe('notebook-2');
+    expect(context.guideId).toBeUndefined();
+  });
+
   it('shows the Admin badge for admin sessions', async () => {
     mockedGetSession.mockResolvedValueOnce({
       publishedGuideId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
@@ -147,5 +167,30 @@ describe('GuideAntsGuideFlyout', () => {
 
     await user.click(screen.getByRole('button', { name: 'GuideAnts Guide' }));
     expect(await screen.findByText('Admin')).toBeInTheDocument();
+  });
+
+  it('respects commandMode from guide session configuration', async () => {
+    mockedGetSession.mockResolvedValueOnce({
+      publishedGuideId: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+      projectId: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+      notebookId: '11111111-2222-3333-4444-555555555555',
+      guideId: '66666666-7777-8888-9999-000000000000',
+      guideName: 'GuideAnts Guide',
+      clientBridgeId: 'guideants-app',
+      isAdminGuide: false,
+      commandMode: false,
+    });
+
+    const user = userEvent.setup();
+    renderGuideShell('/projects/p1');
+
+    await user.click(screen.getByRole('button', { name: 'GuideAnts Guide' }));
+    const chat = await waitFor(() => {
+      const element = document.querySelector('guideants-chat') as MockGuideantsChat | null;
+      expect(element).not.toBeNull();
+      return element as MockGuideantsChat;
+    });
+
+    expect(chat.getAttribute('command-mode')).toBe('false');
   });
 });

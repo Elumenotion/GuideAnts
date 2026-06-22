@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useLocation } from 'react-router-dom';
+import { matchPath, useLocation } from 'react-router-dom';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/api';
@@ -25,6 +25,35 @@ interface GuideAntsGuideContextValue {
 }
 
 const GuideAntsGuideContext = createContext<GuideAntsGuideContextValue | undefined>(undefined);
+
+function buildRouteContext(pathname: string): Pick<AppGuideContext, 'projectId' | 'notebookId' | 'guideId'> {
+  const notebookMatch = matchPath(
+    { path: '/projects/:projectId/notebooks/:notebookId/*', end: false },
+    pathname,
+  );
+  if (notebookMatch?.params.projectId && notebookMatch.params.notebookId) {
+    return {
+      projectId: notebookMatch.params.projectId,
+      notebookId: notebookMatch.params.notebookId,
+    };
+  }
+
+  const guideMatch = matchPath(
+    { path: '/projects/:projectId/guides/guide/:guideId/*', end: false },
+    pathname,
+  );
+  if (guideMatch?.params.projectId) {
+    const guideId = guideMatch.params.guideId?.toLowerCase() === 'new'
+      ? undefined
+      : guideMatch.params.guideId;
+    return {
+      projectId: guideMatch.params.projectId,
+      guideId,
+    };
+  }
+
+  return {};
+}
 
 export function useGuideAntsGuide(): GuideAntsGuideContextValue {
   const context = useContext(GuideAntsGuideContext);
@@ -46,11 +75,15 @@ export function GuideAntsGuideProvider({ children }: { children: ReactNode }) {
     if (!user || !role) {
       throw new Error('Guide context requires an authenticated user');
     }
+    const routeContext = buildRouteContext(location.pathname);
     return {
       route: location.pathname,
       role,
       userId: user.id,
       displayName: user.name,
+      projectId: routeContext.projectId,
+      notebookId: routeContext.notebookId,
+      guideId: routeContext.guideId,
     };
   }, [location.pathname, role, user]);
 

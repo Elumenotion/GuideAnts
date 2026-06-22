@@ -13,7 +13,7 @@
     "GuideAntsApp.AppEcho": {
       "post": {
         "operationId": "AppEcho",
-        "summary": "Echo a message and optional context from the GuideAnts client (stub in phase 1).",
+        "summary": "Echo a message and optional context from the GuideAnts client (debug helper).",
         "requestBody": {
           "required": true,
           "content": {
@@ -31,7 +31,9 @@
                     "additionalProperties": true
                   }
                 },
-                "required": ["message"],
+                "required": [
+                  "message"
+                ],
                 "additionalProperties": false
               }
             }
@@ -51,10 +53,10 @@
         }
       }
     },
-    "GuideAntsApp.AppOpenSettings": {
+    "GuideAntsApp.SandboxAdminGetHealth": {
       "post": {
-        "operationId": "AppOpenSettings",
-        "summary": "Open GuideAnts settings (future — not wired in phase 1).",
+        "operationId": "SandboxAdminGetHealth",
+        "summary": "Call GET /api/system-guide/sandbox-admin/health.",
         "requestBody": {
           "required": false,
           "content": {
@@ -72,7 +74,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ToolStubResponse"
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
                 }
               }
             }
@@ -80,10 +82,66 @@
         }
       }
     },
-    "GuideAntsApp.AppListUsers": {
+    "GuideAntsApp.SandboxAdminGetRequirements": {
       "post": {
-        "operationId": "AppListUsers",
-        "summary": "List GuideAnts users (future — not wired in phase 1).",
+        "operationId": "SandboxAdminGetRequirements",
+        "summary": "Call GET /api/system-guide/sandbox-admin/requirements. Scope from context or pass projectId + notebookId / guideId.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxAdminScopedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.SandboxAdminSetRequirements": {
+      "post": {
+        "operationId": "SandboxAdminSetRequirements",
+        "summary": "Call PUT /api/system-guide/sandbox-admin/requirements with plain-text pip requirements. Use this for Python package installs (venv). Scope from context or pass projectId + notebookId / guideId.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxAdminSetTextRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.SandboxAdminGetAptPackages": {
+      "post": {
+        "operationId": "SandboxAdminGetAptPackages",
+        "summary": "Call GET /api/system-guide/sandbox-admin/apt-packages.",
         "requestBody": {
           "required": false,
           "content": {
@@ -101,7 +159,175 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ToolStubResponse"
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.SandboxAdminSetAptPackages": {
+      "post": {
+        "operationId": "SandboxAdminSetAptPackages",
+        "summary": "Call PUT /api/system-guide/sandbox-admin/apt-packages with plain-text OS package lines. Use only for system/apt packages, not Python libraries.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxAdminSetTextRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.SandboxAdminGetSetupStatus": {
+      "post": {
+        "operationId": "SandboxAdminGetSetupStatus",
+        "summary": "Call GET /api/system-guide/sandbox-admin/setup-status. Returns overall setup state, pending work, per install-script step status, active/last apply job, and errors.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxAdminScopedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.SandboxAdminGetInstallScripts": {
+      "post": {
+        "operationId": "SandboxAdminGetInstallScripts",
+        "summary": "Call GET /api/system-guide/sandbox-admin/install-scripts for the scoped venv.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxAdminScopedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.SandboxAdminSetInstallScripts": {
+      "post": {
+        "operationId": "SandboxAdminSetInstallScripts",
+        "summary": "Call PUT /api/system-guide/sandbox-admin/install-scripts with JSON install script document. Scripts are persisted and replayed in order during apply after pip requirements.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxAdminSetInstallScriptsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.SandboxAdminApply": {
+      "post": {
+        "operationId": "SandboxAdminApply",
+        "summary": "Start POST /api/system-guide/sandbox-admin/apply after staging requirements/apt. Runs preflight synchronously (fail fast on invalid packages). On success returns jobId with status running; poll SandboxAdminGetApplyJob until succeeded or failed.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxAdminScopedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.SandboxAdminGetApplyJob": {
+      "post": {
+        "operationId": "SandboxAdminGetApplyJob",
+        "summary": "Poll GET /api/system-guide/sandbox-admin/apply/jobs/{jobId} for async apply status.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxAdminApplyJobRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxAdminToolResponse"
                 }
               }
             }
@@ -117,7 +343,9 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["ok"]
+            "enum": [
+              "ok"
+            ]
           },
           "message": {
             "type": "string"
@@ -127,9 +355,12 @@
             "additionalProperties": true
           }
         },
-        "required": ["status", "message"]
+        "required": [
+          "status",
+          "message"
+        ]
       },
-      "ToolStubResponse": {
+      "SandboxAdminToolResponse": {
         "type": "object",
         "properties": {
           "status": {
@@ -137,9 +368,112 @@
           },
           "message": {
             "type": "string"
+          },
+          "httpStatus": {
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "data": {
+            "description": "Parsed JSON payload from the sandbox admin endpoint when available."
+          },
+          "content": {
+            "type": "string",
+            "description": "Text payload from the sandbox admin endpoint."
           }
         },
-        "required": ["status"]
+        "required": [
+          "status",
+          "endpoint"
+        ]
+      },
+      "SandboxAdminScopedRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project scope. Provide with either guideId or notebookId.",
+            "format": "uuid"
+          },
+          "guideId": {
+            "type": "string",
+            "description": "Guide scope. Mutually exclusive with notebookId.",
+            "format": "uuid"
+          },
+          "notebookId": {
+            "type": "string",
+            "description": "Notebook scope. Mutually exclusive with guideId. API resolves guide for venv scope.",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SandboxAdminSetTextRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project scope. Provide with either guideId or notebookId.",
+            "format": "uuid"
+          },
+          "guideId": {
+            "type": "string",
+            "description": "Guide scope. Mutually exclusive with notebookId.",
+            "format": "uuid"
+          },
+          "notebookId": {
+            "type": "string",
+            "description": "Notebook scope. Mutually exclusive with guideId. API resolves guide for venv scope.",
+            "format": "uuid"
+          },
+          "content": {
+            "type": "string",
+            "description": "Plain text content written to the target admin file endpoint. For requirements, use pip-style package lines. For apt-packages, use apt package lines."
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "SandboxAdminApplyJobRequest": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "description": "Apply job id returned by SandboxAdminApply."
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "additionalProperties": false
+      },
+      "SandboxAdminSetInstallScriptsRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "guideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "notebookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "content": {
+            "type": "string",
+            "description": "JSON document: { \"version\": 1, \"scripts\": [{ \"name\": \"...\", \"scriptType\": \"Python|Bash\", \"script\": \"...\" }] }"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
       }
     }
   }

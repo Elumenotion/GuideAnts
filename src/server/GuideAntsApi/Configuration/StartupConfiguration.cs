@@ -106,6 +106,7 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemProjectAccessGuard, GuideAntsApi.Services.SystemGuide.SystemProjectAccessGuard>();
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSessionService, GuideAntsApi.Services.SystemGuide.SystemGuideSessionService>();
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideCatalogFilter, GuideAntsApi.Services.SystemGuide.SystemGuideCatalogFilter>();
+        services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSandboxAdminProxy, GuideAntsApi.Services.SystemGuide.SystemGuideSandboxAdminProxy>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder, GuideAntsApi.Services.Bootstrap.RuntimeProfileSeeder>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();

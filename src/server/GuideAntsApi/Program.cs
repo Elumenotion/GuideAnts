@@ -3,6 +3,7 @@ using GuideAntsApi.Database;
 using GuideAntsApi.Services.Migrations;
 using GuideAntsApi.Services.Mcp;
 using GuideAntsApi.Endpoints;
+using GuideAntsApi.Endpoints.Settings;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;

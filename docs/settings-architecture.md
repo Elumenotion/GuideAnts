@@ -56,7 +56,7 @@ Settings is not:
 - Typed API wrapper: `src/client/src/services/api.ts` (`api.settings.*`)
 
 3. HTTP endpoints
-- Minimal API mapping: `src/server/GuideAntsApi/Endpoints/SettingsEndpoints.cs`
+- Minimal API mapping: `src/server/GuideAntsApi/Endpoints/Settings/`
 
 4. Settings domain service
 - Application settings domain logic: `src/server/GuideAntsApi/Settings/ApplicationSettingsService*.cs`
@@ -181,9 +181,30 @@ Key groups:
 
 ## 4) API and endpoint architecture
 
-Endpoint mapper: `src/server/GuideAntsApi/Endpoints/SettingsEndpoints.cs`.
+Endpoint registration is orchestrated from
+`src/server/GuideAntsApi/Endpoints/Settings/SettingsEndpoints.cs`, which
+delegates to domain-aligned modules under `Endpoints/Settings/`:
 
-This file defines transport groups:
+| Module | Routes |
+|--------|--------|
+| `SettingsCoreEndpoints.cs` | sections, schema, readiness, chat-defaults, embeddings rebuild |
+| `SettingsModelsEndpoints.cs` | model catalog CRUD and `models:add` onboarding |
+| `SettingsRuntimeProfilesEndpoints.cs` | runtime profile CRUD |
+| `SettingsServiceEditorEndpoints.cs` | service editor state and provider fields |
+| `SettingsServiceLocalModelsEndpoints.cs` | local-models proxy (download/load/unload/select) |
+| `SettingsRoutingEndpoints.cs` | chat-target routing and readiness probes |
+| `SettingsOverviewEndpoints.cs` | settings overview composite |
+| `SettingsInfrastructureEndpoints.cs` | connections usage, infrastructure dependencies and probes |
+| `SettingsLlamaEndpoints.cs` | llama runtime inventory/load/unload, downloads, router delete |
+| `SettingsHuggingFaceEndpoints.cs` | Hugging Face repository file browse |
+
+Shared non-route helpers live alongside the modules (`SettingsChatDefaultsMapper`,
+`SettingsModelOnboardingSupport`, `SettingsLlamaRouterDeleteHandler`,
+`SettingsRoutingProbeSupport`, `ServiceLocalModelDownloadValidator`,
+`SettingsGroupFactory`). Existing cross-cutting helpers remain at
+`Endpoints/LocalServiceAdminRouting.cs` and `Endpoints/HuggingFaceBrowseHandler.cs`.
+
+Transport groups (unchanged URL prefixes):
 
 - Core settings group: `/api/settings`
 - Services editor subgroup: `/api/settings/services`
@@ -442,7 +463,7 @@ This is where settings decisions become runtime behavior.
 ```text
 Settings UI/Wizard
   -> PUT /api/settings/sections/{section}
-     -> SettingsEndpoints
+     -> SettingsEndpoints (orchestrator) / Settings*Endpoints modules
         -> ApplicationSettingsService.UpdateSectionAsync
            -> SettingsSectionRegistry (contract)
            -> ApplicationSettings row load + rowVersion check
@@ -459,7 +480,7 @@ Settings UI/Wizard
 ```text
 OverviewTab / ChatToolbarPanel
   -> PUT /api/settings/chat-defaults
-     -> SettingsEndpoints maps typed DTO -> section payload
+     -> SettingsCoreEndpoints maps typed DTO -> section payload
         -> ApplicationSettingsService.UpdateSectionAsync("ChatDefaults", ...)
            -> validation includes reasoning vs default model checks
            -> persist + reload
@@ -523,7 +544,7 @@ When adding a new settings capability:
 
 1. Add or update section/provider contract in `SettingsSectionRegistry`
 2. Add validation and write/read logic in `ApplicationSettingsService` partials
-3. Add/adjust endpoint mapping in `SettingsEndpoints`
+3. Add/adjust endpoint mapping in the appropriate `Endpoints/Settings/*Endpoints.cs` module
 4. Update `SettingsDtos` contracts if transport changes
 5. Wire UI surface(s) via `api.settings.*`
 6. Add service + endpoint tests (validation, concurrency, readiness, projection)

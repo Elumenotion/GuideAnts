@@ -163,6 +163,36 @@ public sealed class SystemGuideEndpointsTests : BaseEndpointTest
         workspace.ProjectSlug.Should().Be(SystemProjectSlug);
     }
 
+    [TestMethod]
+    public async Task GetSandboxAdminRequirements_notebook_without_guide_returns_bad_request()
+    {
+        SetupAuthentication(Role.Admin);
+
+        Guid notebookId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var notebook = new Notebook
+            {
+                Title = $"Unscoped notebook {Guid.NewGuid():N}",
+                Slug = $"unscoped-nb-{Guid.NewGuid():N}",
+                ProjectId = _fixture.ProjectId,
+                GuideId = null
+            };
+            db.Notebooks.Add(notebook);
+            await db.SaveChangesAsync();
+            notebookId = notebook.Id;
+        }
+
+        var response = await Client!.GetAsync(
+            $"/api/system-guide/sandbox-admin/requirements?projectId={_fixture.ProjectId:D}&notebookId={notebookId:D}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.ToLowerInvariant().Should().Contain("not associated with a guide");
+        body.ToLowerInvariant().Should().NotContain("nullable object must have a value");
+    }
+
     private async Task<SystemGuideFixture> SeedSystemGuideFixtureAsync()
     {
         using var scope = SharedFactory!.Services.CreateScope();

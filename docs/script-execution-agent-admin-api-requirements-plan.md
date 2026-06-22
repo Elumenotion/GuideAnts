@@ -1,6 +1,6 @@
 # ScriptExecutionAgent Admin API Requirements And Plan
 
-Status: implemented for admin/config runtime, scoped venvs, and API-owned per-run environment hydration  
+Status: implemented for admin runtime, scoped venvs, and API-owned per-run environment hydration  
 Date: 2026-06-19  
 Last updated: 2026-06-20
 
@@ -8,8 +8,8 @@ Last updated: 2026-06-20
 
 1. Add an admin API for ScriptExecutionAgent configuration management.
 2. The mechanism must be baked into the container image (not ad-hoc runtime patching).
-3. Config must be persisted in a Docker volume.
-4. Startup must validate persisted config and apply it when needed.
+3. Admin state files must be persisted in a Docker volume.
+4. Startup must validate persisted admin state and apply it when needed.
 5. Credential persistence must be API-owned; ScriptExecutionAgent receives only per-run environment values and does not persist credentials.
 6. Admin API must be disabled by default for all images that embed ScriptExecutionAgent.
 7. Admin API is enabled only for GuideAnts AI images via image definition.
@@ -28,7 +28,7 @@ Last updated: 2026-06-20
 4. ScriptExecutionAgent accepts validated per-run environment values from the API and injects them into only the launched child process.
 5. Admin API endpoints (`/admin/*`) are mapped only when `SCRIPT_EXECUTION_ADMIN_API_ENABLED=true`.
 6. Admin API auth uses separate `X-Script-Agent-Admin-Token` / `SCRIPT_EXECUTION_ADMIN_TOKEN`.
-7. Startup admin state initialization validates `config.json`, `requirements.txt`, and `apt-packages.txt`, seeds missing defaults, and applies changed packages/requirements.
+7. Startup admin state initialization validates `requirements.txt` and `apt-packages.txt`, seeds missing defaults, and applies changed packages/requirements.
 8. AI Dockerfiles copy baked admin assets and enable the admin API at image-definition level.
 9. Compose variants mount a dedicated `script_agent_admin_state` volume for `guideants-ai` only.
 10. Tests cover admin route disabled behavior, admin auth, requirement validation, per-run environment injection, and blocked inherited agent token leakage.
@@ -53,7 +53,6 @@ Last updated: 2026-06-20
 
 ### Persisted State (Volume-Backed)
 
-- `config.json`
 - `requirements.txt`
 - `apt-packages.txt`
 - `applied-state.json` (hashes, timestamps, last apply result)
@@ -72,8 +71,6 @@ Last updated: 2026-06-20
 ### Admin API Surface (only when enabled)
 
 - `GET /admin/health`
-- `GET /admin/config`
-- `PUT /admin/config`
 - `GET /admin/requirements`
 - `PUT /admin/requirements`
 - `GET /admin/apt-packages`
@@ -127,10 +124,8 @@ Status: complete
 
 1. Add image-baked admin assets under `docker/build/guideants-ai/script-agent-admin/`:
    - `reconcile.sh`
-   - `config.schema.json`
    - default seed files
 2. Reconcile behavior:
-   - Validate `config.json` against schema.
    - Validate `requirements.txt` policy (blocked patterns, optional pinning rules).
    - Validate `apt-packages.txt` package names only.
    - Apply `apt-get install` only when apt package hash changes.
@@ -198,7 +193,7 @@ Status: complete for agent and compose validation
 
 1. Non-AI images with ScriptExecutionAgent do not expose `/admin/*` unless explicitly enabled.
 2. GuideAnts AI images expose `/admin/*` only when admin token is configured.
-3. Config, apt packages, and Python requirements persist across `down/up` without `-v`.
+3. Apt packages and Python requirements persist across `down/up` without `-v`.
 4. Startup enforces validation and deterministic apply behavior.
 5. Python execution for notebooks sharing the same `(projectId, guideId)` uses the same scoped venv while retaining imports from the base image venv.
 6. Environment variables and secrets are resolved by the API from the project-bounded notebook guide scope, including crew member configurations, and sent only as per-run environment values.

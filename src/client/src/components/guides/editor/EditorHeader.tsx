@@ -43,7 +43,7 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
             {isEditing && showExport && (
               <button
                 onClick={onExport}
-                className="px-3 py-1 text-sm text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                className="inline-flex h-10 items-center px-3 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                 data-tour-id="guide.header.export"
               >
                 Export
@@ -51,7 +51,7 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
             )}
             <button
               onClick={onCancel}
-              className="px-3 py-1 text-sm text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+              className="inline-flex h-10 items-center px-3 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
               data-tour-id="guide.header.cancel"
             >
               Cancel
@@ -59,7 +59,7 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
             <button
               onClick={onSave}
               disabled={saving || hasValidationErrors}
-              className="px-3 py-1 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex h-10 items-center px-3 text-sm text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title={hasValidationErrors ? 'Fix validation errors before saving' : undefined}
               data-tour-id="guide.header.save"
             >

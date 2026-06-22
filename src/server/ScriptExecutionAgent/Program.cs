@@ -280,6 +280,8 @@ app.MapGet("/files", async (HttpContext context, ILogger<Program> logger) =>
 
 if (adminOptions.Enabled)
 {
+    var adminApiJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
     app.MapGet("/admin/health", async (HttpContext context, ILogger<Program> logger) =>
     {
         if (!AuthorizeAdminRequest(context, adminOptions, logger))
@@ -296,42 +298,6 @@ if (adminOptions.Enabled)
             adminStateDir = adminOptions.StateDirectoryPath,
             scopeStateRoot = scopeOptions.StateRootPath
         }));
-    });
-
-    app.MapGet("/admin/config", async (HttpContext context, ILogger<Program> logger) =>
-    {
-        if (!AuthorizeAdminRequest(context, adminOptions, logger))
-        {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsync("Unauthorized");
-            return;
-        }
-
-        var config = await AdminStateRuntime.ReadConfigAsync(adminOptions, context.RequestAborted);
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(config);
-    });
-
-    app.MapPut("/admin/config", async (HttpContext context, ILogger<Program> logger) =>
-    {
-        if (!AuthorizeAdminRequest(context, adminOptions, logger))
-        {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsync("Unauthorized");
-            return;
-        }
-
-        var body = await ReadRequestBodyAsync(context);
-        var validation = AdminStateRuntime.ValidateConfig(body);
-        if (!validation.IsValid)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsync(validation.ErrorMessage);
-            return;
-        }
-
-        await AdminStateRuntime.WriteConfigAsync(adminOptions, body, context.RequestAborted);
-        context.Response.StatusCode = StatusCodes.Status204NoContent;
     });
 
     app.MapGet("/admin/requirements", async (HttpContext context, ILogger<Program> logger) =>
@@ -426,6 +392,88 @@ if (adminOptions.Enabled)
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     });
 
+    app.MapGet("/admin/setup-status", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var hasScope = TryResolveAdminScope(context, scopeOptions, out var scope, out var error);
+        if (!string.IsNullOrEmpty(error))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(error);
+            return;
+        }
+
+        var status = await AdminSetupStatusRuntime.BuildAsync(
+            hasScope,
+            hasScope ? scope : null,
+            scopeOptions,
+            adminOptions,
+            context.RequestAborted);
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(status, adminApiJsonOptions));
+    });
+
+    app.MapGet("/admin/install-scripts", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        if (!TryResolveAdminScope(context, scopeOptions, out var scope, out var error))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(string.IsNullOrEmpty(error)
+                ? "projectId and guideId are required for install scripts."
+                : error);
+            return;
+        }
+
+        var document = AdminInstallScriptsRuntime.ReadDocument(scope);
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(document, adminApiJsonOptions));
+    });
+
+    app.MapPut("/admin/install-scripts", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        if (!TryResolveAdminScope(context, scopeOptions, out var scope, out var error))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(string.IsNullOrEmpty(error)
+                ? "projectId and guideId are required for install scripts."
+                : error);
+            return;
+        }
+
+        var body = await ReadRequestBodyAsync(context);
+        try
+        {
+            var document = await AdminInstallScriptsRuntime.ParseAndValidateSubmitAsync(body, context.RequestAborted);
+            await AdminInstallScriptsRuntime.PersistDocumentAsync(scope, document, context.RequestAborted);
+            context.Response.StatusCode = StatusCodes.Status204NoContent;
+        }
+        catch (InvalidOperationException ex)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(ex.Message);
+        }
+    });
+
     app.MapPost("/admin/apply", async (HttpContext context, ILogger<Program> logger) =>
     {
         if (!AuthorizeAdminRequest(context, adminOptions, logger))
@@ -443,19 +491,71 @@ if (adminOptions.Enabled)
             return;
         }
 
-        AdminApplyResult result;
-        if (hasScope)
+        try
         {
-            result = await ScriptExecutionScopeRuntime.ApplyScopeRequirementsAsync(scope, scopeOptions, adminOptions, logger, context.RequestAborted);
+            var accepted = await AdminApplyJobRuntime.StartApplyAsync(
+                hasScope,
+                hasScope ? scope : null,
+                scopeOptions,
+                adminOptions,
+                logger,
+                context.RequestAborted);
+
+            context.Response.StatusCode = StatusCodes.Status202Accepted;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(accepted, adminApiJsonOptions));
         }
-        else
+        catch (InvalidOperationException ex)
         {
-            await AdminStateRuntime.ApplyGlobalAptPackagesAsync(adminOptions, logger, context.RequestAborted);
-            result = await AdminStateRuntime.ApplyAllKnownScopesAsync(scopeOptions, adminOptions, logger, context.RequestAborted);
+            logger.LogWarning(ex, "Admin apply preflight rejected.");
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(ex.Message);
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+            await context.Response.WriteAsync("Apply preflight was canceled.");
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogWarning("Admin apply preflight timed out.");
+            context.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
+            await context.Response.WriteAsync(
+                $"Apply preflight timed out after {AdminApplyJobRuntime.PreflightTimeout.TotalSeconds:0} seconds.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Admin apply preflight failed.");
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsync("Failed to start sandbox admin apply.");
+        }
+    });
+
+    app.MapGet("/admin/apply/jobs/{jobId}", async (HttpContext context, string jobId, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("jobId is required.");
+            return;
+        }
+
+        if (!AdminApplyJobRuntime.TryGetStatus(jobId, adminOptions, out var status) || status is null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Apply job was not found.");
+            return;
         }
 
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result));
+        await context.Response.WriteAsync(JsonSerializer.Serialize(status, adminApiJsonOptions));
     });
 
 }
@@ -1062,31 +1162,39 @@ static (string FileName, string[] Arguments) GetScriptCommand(
     _ => throw new ArgumentOutOfRangeException(nameof(scriptType), scriptType, null)
 };
 
-file sealed record ScriptExecutionScopeOptions(
+internal sealed record ScriptExecutionScopeOptions(
     string StateRootPath,
     string? PythonVenvRelativePath,
     string? PythonBootstrapCommand,
     bool RequireScopedPythonVenv,
     string? BasePythonVenvPath);
 
-file sealed record AdminApiOptions(
+internal sealed record AdminApiOptions(
     bool Enabled,
     string? AdminToken,
     string StateDirectoryPath,
     bool FailOpen);
 
-file sealed record AdminApplyResult(
+internal sealed record AdminApplyResult(
     string Status,
     int ScopesApplied,
     int ScopesSkipped,
+    string[] Errors,
+    AdminApplyResultDetails? Apt = null,
+    AdminInstallScriptsApplyDetails? InstallScripts = null);
+
+internal sealed record AdminApplyResultDetails(
+    string Status,
+    int Applied,
+    int Skipped,
     string[] Errors);
 
-file sealed record ScriptProcessResult(
+internal sealed record ScriptProcessResult(
     int ExitCode,
     string StandardOutput,
     string StandardError);
 
-file sealed record ScriptExecutionScope(
+internal sealed record ScriptExecutionScope(
     Guid ProjectId,
     Guid GuideScopeId,
     string ScopeRootPath,
@@ -1100,10 +1208,18 @@ file sealed record ScriptExecutionScope(
             : Path.Combine(PythonVenvPath, "bin", "python");
 }
 
-file static class ScriptExecutionScopeRuntime
+internal static class ScriptExecutionScopeRuntime
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> VenvLocks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Regex EnvironmentVariableNamePattern = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex RequirementsPackageNamePattern = new("^[A-Za-z0-9][A-Za-z0-9._-]*", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex NormalizedPythonPackageSeparatorPattern = new("[-_.]+", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly HashSet<string> ProtectedTopLevelPythonPackages = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "pip",
+        "setuptools",
+        "wheel"
+    };
     private static readonly HashSet<string> ReservedEnvironmentKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "SCRIPT_EXECUTION_SCOPE_ROOT",
@@ -1176,7 +1292,7 @@ file static class ScriptExecutionScopeRuntime
     public static void EnsureScopeDirectory(ScriptExecutionScope scope)
     {
         Directory.CreateDirectory(scope.ScopeRootPath);
-        foreach (var filePath in new[] { scope.RequirementsFilePath, scope.AppliedStateFilePath })
+        foreach (var filePath in new[] { scope.RequirementsFilePath, scope.AppliedStateFilePath, AdminInstallScriptsRuntime.GetInstallScriptsPath(scope) })
         {
             var directory = Path.GetDirectoryName(filePath);
             if (!string.IsNullOrWhiteSpace(directory))
@@ -1325,19 +1441,32 @@ file static class ScriptExecutionScopeRuntime
             throw new InvalidOperationException(validation.ErrorMessage);
         }
 
+        var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
         var requirementsHash = ComputeSha256(requirementsText);
-        var previousHash = ReadAppliedRequirementsHash(scope.AppliedStateFilePath);
-        if (requirementsHash == previousHash)
+        var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
+        var unmanagedPackagesBeforeInstall = await GetUnmanagedTopLevelPackagesAsync(
+            scope.PythonExecutablePath,
+            desiredTopLevelPackages,
+            cancellationToken);
+        var installScriptsDocument = AdminInstallScriptsRuntime.ReadDocument(scope);
+        var installScriptsHash = AdminInstallScriptsRuntime.ComputeDocumentHash(installScriptsDocument);
+        var requirementsNeedsApply = requirementsHash != appliedState.RequirementsHash || unmanagedPackagesBeforeInstall.Count > 0;
+        var scriptsNeedApply = AdminInstallScriptsRuntime.NeedsApply(
+            installScriptsHash,
+            appliedState.InstallScriptsHash,
+            installScriptsDocument.Scripts.Count);
+        if (!requirementsNeedsApply && !scriptsNeedApply)
         {
             return new AdminApplyResult("skipped", 0, 1, Array.Empty<string>());
         }
 
-        if (!string.IsNullOrWhiteSpace(requirementsText))
+        if (requirementsNeedsApply && requirementsHash != appliedState.RequirementsHash && !string.IsNullOrWhiteSpace(requirementsText))
         {
             var result = await Cli.Wrap(scope.PythonExecutablePath)
                 .WithArguments(args => args
                     .Add("-m")
                     .Add("pip")
+                    .Add("--disable-pip-version-check")
                     .Add("install")
                     .Add("-r")
                     .Add(requirementsPath))
@@ -1346,17 +1475,253 @@ file static class ScriptExecutionScopeRuntime
 
             if (result.ExitCode != 0)
             {
-                throw new InvalidOperationException($"pip install failed with exit code {result.ExitCode}: {result.StandardError}");
+                throw new InvalidOperationException(FormatPipFailure(result));
             }
         }
 
-        await WriteAppliedStateAsync(scope, requirementsHash, requirementsPath, cancellationToken);
+        if (requirementsNeedsApply)
+        {
+            await PruneUnmanagedTopLevelPackagesAsync(
+                scope.PythonExecutablePath,
+                desiredTopLevelPackages,
+                cancellationToken);
+        }
+
+        AdminInstallScriptsApplyDetails? installScriptsDetails = null;
+        IReadOnlyList<AdminInstallScriptStepResult> installScriptStepResults = appliedState.InstallScriptStepResults;
+        if (scriptsNeedApply)
+        {
+            installScriptsDetails = await ApplyScopeInstallScriptsAsync(
+                scope,
+                installScriptsDocument,
+                logger,
+                cancellationToken);
+            installScriptStepResults = installScriptsDetails.StepResults;
+        }
+
+        await AdminScopeAppliedStateRuntime.WriteAsync(
+            scope,
+            requirementsHash,
+            requirementsPath,
+            desiredTopLevelPackages,
+            installScriptsHash,
+            installScriptStepResults,
+            cancellationToken);
         logger.LogInformation(
-            "Applied scoped Python requirements for project={ProjectId} guide={GuideId}. hash={Hash}",
+            "Applied scoped sandbox setup for project={ProjectId} guide={GuideId}. requirementsApplied={RequirementsApplied} installScriptsApplied={InstallScriptsApplied}",
             scope.ProjectId,
             scope.GuideScopeId,
-            requirementsHash);
-        return new AdminApplyResult("applied", 1, 0, Array.Empty<string>());
+            requirementsNeedsApply,
+            scriptsNeedApply);
+        return new AdminApplyResult("applied", 1, 0, Array.Empty<string>(), InstallScripts: installScriptsDetails);
+    }
+
+    public static async Task<AdminInstallScriptsApplyDetails> ApplyScopeInstallScriptsAsync(
+        ScriptExecutionScope scope,
+        AdminInstallScriptsDocument document,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (document.Scripts.Count == 0)
+        {
+            return new AdminInstallScriptsApplyDetails("skipped", 0, 0, 0, Array.Empty<AdminInstallScriptStepResult>());
+        }
+
+        var workDirectory = Path.Combine(scope.ScopeRootPath, "install-scripts-work");
+        Directory.CreateDirectory(workDirectory);
+        var environment = BuildScriptEnvironment(scope, null, workDirectory, logger);
+        var stepResults = new List<AdminInstallScriptStepResult>();
+
+        foreach (var step in document.Scripts.OrderBy(static script => script.Order))
+        {
+            if (!Enum.TryParse<ScriptType>(step.ScriptType, ignoreCase: true, out var scriptType)
+                || scriptType is not (ScriptType.Python or ScriptType.Bash))
+            {
+                throw new InvalidOperationException($"install script '{step.Id}' has invalid scriptType.");
+            }
+
+            var extension = scriptType == ScriptType.Python ? ".py" : ".sh";
+            var scriptPath = Path.Combine(workDirectory, $"{step.Order:000}-{step.Id}{extension}");
+            await File.WriteAllTextAsync(scriptPath, step.Script, cancellationToken);
+
+            var commandFile = scriptType == ScriptType.Python
+                ? (File.Exists(scope.PythonExecutablePath) ? scope.PythonExecutablePath : "python3")
+                : "bash";
+            var commandArgs = new[] { scriptPath };
+            (commandFile, commandArgs) = ApplyInstallScriptPrivacyWrapper(commandFile, commandArgs);
+            var run = await ExecuteInstallScriptProcessAsync(commandFile, commandArgs, environment, workDirectory, cancellationToken);
+            if (run.ExitCode != 0)
+            {
+                var error = string.IsNullOrWhiteSpace(run.StandardError) ? run.StandardOutput : run.StandardError;
+                var failedResult = new AdminInstallScriptStepResult(
+                    step.Id,
+                    step.Order,
+                    step.Name,
+                    "failed",
+                    run.ExitCode,
+                    error.Trim(),
+                    DateTimeOffset.UtcNow);
+                stepResults.Add(failedResult);
+                throw new InvalidOperationException(
+                    $"install script '{step.Id}' failed with exit code {run.ExitCode}: {failedResult.Error}");
+            }
+
+            stepResults.Add(new AdminInstallScriptStepResult(
+                step.Id,
+                step.Order,
+                step.Name,
+                "succeeded",
+                0,
+                null,
+                DateTimeOffset.UtcNow));
+            logger.LogInformation(
+                "Applied install script for project={ProjectId} guide={GuideId} scriptId={ScriptId} order={Order}",
+                scope.ProjectId,
+                scope.GuideScopeId,
+                step.Id,
+                step.Order);
+        }
+
+        return new AdminInstallScriptsApplyDetails("applied", stepResults.Count, 0, 0, stepResults);
+    }
+
+    private static (string FileName, string[] Arguments) ApplyInstallScriptPrivacyWrapper(string commandFile, string[] commandArgs)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return (commandFile, commandArgs);
+        }
+
+        var wrapper = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_PRIVACY_WRAPPER");
+        if (string.IsNullOrWhiteSpace(wrapper))
+        {
+            wrapper = "/usr/local/bin/ga-script-exec";
+        }
+
+        if (!File.Exists(wrapper))
+        {
+            return (commandFile, commandArgs);
+        }
+
+        var wrappedArgs = new List<string> { commandFile };
+        wrappedArgs.AddRange(commandArgs);
+        return (wrapper, wrappedArgs.ToArray());
+    }
+
+    private static async Task<ScriptProcessResult> ExecuteInstallScriptProcessAsync(
+        string commandFile,
+        string[] commandArgs,
+        IReadOnlyDictionary<string, string?> environmentVariables,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = commandFile,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        foreach (var commandArg in commandArgs)
+        {
+            startInfo.ArgumentList.Add(commandArg);
+        }
+
+        startInfo.Environment.Clear();
+        foreach (var pair in environmentVariables)
+        {
+            if (pair.Value is not null)
+            {
+                startInfo.Environment[pair.Key] = pair.Value;
+            }
+        }
+
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException($"Failed to start process '{commandFile}'.");
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        return new ScriptProcessResult(
+            process.ExitCode,
+            await stdoutTask,
+            await stderrTask);
+    }
+
+    public static async Task PreflightScopeRequirementsAsync(
+        ScriptExecutionScope scope,
+        ScriptExecutionScopeOptions scopeOptions,
+        AdminApiOptions adminOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        EnsureScopeDirectory(scope);
+        await EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
+
+        var requirementsPath = File.Exists(scope.RequirementsFilePath)
+            ? scope.RequirementsFilePath
+            : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
+        var requirementsText = File.Exists(requirementsPath)
+            ? await File.ReadAllTextAsync(requirementsPath, cancellationToken)
+            : string.Empty;
+        var validation = ValidateRequirements(requirementsText);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException(validation.ErrorMessage);
+        }
+
+        var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
+        var requirementsHash = ComputeSha256(requirementsText);
+        var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
+        var unmanagedPackagesBeforeInstall = await GetUnmanagedTopLevelPackagesAsync(
+            scope.PythonExecutablePath,
+            desiredTopLevelPackages,
+            cancellationToken);
+        if (requirementsHash != appliedState.RequirementsHash || unmanagedPackagesBeforeInstall.Count > 0)
+        {
+            if (requirementsHash != appliedState.RequirementsHash && !string.IsNullOrWhiteSpace(requirementsText))
+            {
+                var result = await Cli.Wrap(scope.PythonExecutablePath)
+                    .WithArguments(args => args
+                        .Add("-m")
+                        .Add("pip")
+                        .Add("--disable-pip-version-check")
+                        .Add("install")
+                        .Add("--dry-run")
+                        .Add("-r")
+                        .Add(requirementsPath))
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync(cancellationToken);
+
+                if (result.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(FormatPipFailure(result));
+                }
+            }
+        }
+
+        var installScriptsDocument = AdminInstallScriptsRuntime.ReadDocument(scope);
+        await AdminInstallScriptsRuntime.PreflightSyntaxAsync(
+            scope,
+            scopeOptions,
+            installScriptsDocument,
+            logger,
+            cancellationToken);
+    }
+
+    private static string FormatPipFailure(BufferedCommandResult result)
+    {
+        var stderr = result.StandardError?.Trim();
+        var stdout = result.StandardOutput?.Trim();
+        var detail = !string.IsNullOrWhiteSpace(stderr) ? stderr : stdout;
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            return $"pip install failed with exit code {result.ExitCode}.";
+        }
+
+        return $"pip install failed with exit code {result.ExitCode}: {detail}";
     }
 
     public static IReadOnlyDictionary<string, string?> BuildScriptEnvironment(
@@ -1433,8 +1798,7 @@ file static class ScriptExecutionScopeRuntime
                 continue;
             }
 
-            if (line.StartsWith("-e", StringComparison.OrdinalIgnoreCase)
-                || line.StartsWith("--", StringComparison.OrdinalIgnoreCase)
+            if (line.StartsWith("-", StringComparison.OrdinalIgnoreCase)
                 || line.Contains("://", StringComparison.OrdinalIgnoreCase)
                 || line.Contains("git+", StringComparison.OrdinalIgnoreCase)
                 || line.StartsWith(".", StringComparison.Ordinal)
@@ -1520,43 +1884,149 @@ file static class ScriptExecutionScopeRuntime
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    private static string? ReadAppliedRequirementsHash(string appliedStatePath)
+    private static IReadOnlySet<string> ParseTopLevelRequirementPackageNames(string requirementsText)
     {
-        if (!File.Exists(appliedStatePath))
+        var packageNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rawLine in requirementsText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
         {
-            return null;
+            var line = rawLine.Split('#', 2)[0].Trim();
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var match = RequirementsPackageNamePattern.Match(line);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            packageNames.Add(NormalizePythonPackageName(match.Value));
         }
 
-        try
-        {
-            using var document = JsonDocument.Parse(File.ReadAllText(appliedStatePath));
-            return document.RootElement.TryGetProperty("requirementsHash", out var hash)
-                ? hash.GetString()
-                : null;
-        }
-        catch
-        {
-            return null;
-        }
+        return packageNames;
     }
 
-    private static Task WriteAppliedStateAsync(
-        ScriptExecutionScope scope,
-        string requirementsHash,
-        string requirementsPath,
+    private static async Task<IReadOnlyList<string>> GetUnmanagedTopLevelPackagesAsync(
+        string pythonExecutablePath,
+        IReadOnlySet<string> desiredTopLevelPackages,
         CancellationToken cancellationToken)
     {
-        var json = JsonSerializer.Serialize(new
-        {
-            version = 1,
-            projectId = scope.ProjectId,
-            guideId = scope.GuideScopeId,
-            requirementsHash,
-            requirementsPath,
-            appliedAt = DateTimeOffset.UtcNow
-        }, new JsonSerializerOptions { WriteIndented = true });
-        return AtomicFile.WriteAllTextAsync(scope.AppliedStateFilePath, json, cancellationToken);
+        var installedTopLevelPackages = await GetInstalledTopLevelPackagesAsync(pythonExecutablePath, cancellationToken);
+        return installedTopLevelPackages
+            .Where(packageName =>
+                !ProtectedTopLevelPythonPackages.Contains(packageName)
+                && !desiredTopLevelPackages.Contains(packageName))
+            .OrderBy(static packageName => packageName, StringComparer.Ordinal)
+            .ToArray();
     }
+
+    private static async Task<IReadOnlyList<string>> PruneUnmanagedTopLevelPackagesAsync(
+        string pythonExecutablePath,
+        IReadOnlySet<string> desiredTopLevelPackages,
+        CancellationToken cancellationToken)
+    {
+        var removedPackages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var iteration = 0; iteration < 8; iteration++)
+        {
+            var toRemove = await GetUnmanagedTopLevelPackagesAsync(
+                pythonExecutablePath,
+                desiredTopLevelPackages,
+                cancellationToken);
+            if (toRemove.Count == 0)
+            {
+                break;
+            }
+
+            var uninstall = await Cli.Wrap(pythonExecutablePath)
+                .WithArguments(args =>
+                {
+                    args.Add("-m")
+                        .Add("pip")
+                        .Add("--disable-pip-version-check")
+                        .Add("uninstall")
+                        .Add("-y");
+                    foreach (var packageName in toRemove)
+                    {
+                        args.Add(packageName);
+                    }
+                })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(cancellationToken);
+
+            if (uninstall.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"pip uninstall failed with exit code {uninstall.ExitCode} for packages [{string.Join(", ", toRemove)}]: {uninstall.StandardError}");
+            }
+
+            foreach (var packageName in toRemove)
+            {
+                removedPackages.Add(packageName);
+            }
+        }
+
+        return removedPackages
+            .OrderBy(static packageName => packageName, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static async Task<IReadOnlySet<string>> GetInstalledTopLevelPackagesAsync(
+        string pythonExecutablePath,
+        CancellationToken cancellationToken)
+    {
+        var listResult = await Cli.Wrap(pythonExecutablePath)
+            .WithArguments(args => args
+                .Add("-m")
+                .Add("pip")
+                .Add("--disable-pip-version-check")
+                .Add("list")
+                .Add("--not-required")
+                .Add("--format=json"))
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+
+        if (listResult.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"pip list --not-required failed with exit code {listResult.ExitCode}: {listResult.StandardError}");
+        }
+
+        var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var output = listResult.StandardOutput;
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return packages;
+        }
+
+        using var document = JsonDocument.Parse(output);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return packages;
+        }
+
+        foreach (var package in document.RootElement.EnumerateArray())
+        {
+            if (!package.TryGetProperty("name", out var nameElement))
+            {
+                continue;
+            }
+
+            var name = nameElement.GetString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            packages.Add(NormalizePythonPackageName(name));
+        }
+
+        return packages;
+    }
+
+    private static string NormalizePythonPackageName(string packageName) =>
+        NormalizedPythonPackageSeparatorPattern.Replace(packageName.Trim().ToLowerInvariant(), "-");
 
     private static string NormalizeRelativePath(string? candidate, string fallback)
     {
@@ -1642,7 +2112,7 @@ file static class ScriptExecutionScopeRuntime
     }
 }
 
-file static class AdminStateRuntime
+internal static class AdminStateRuntime
 {
     public static async Task InitializeAsync(
         AdminApiOptions adminOptions,
@@ -1654,15 +2124,6 @@ file static class AdminStateRuntime
         {
             Directory.CreateDirectory(adminOptions.StateDirectoryPath);
 
-            var configPath = GetConfigPath(adminOptions);
-            if (!File.Exists(configPath))
-            {
-                await AtomicFile.WriteAllTextAsync(
-                    configPath,
-                    JsonSerializer.Serialize(new { version = 1 }, new JsonSerializerOptions { WriteIndented = true }),
-                    cancellationToken);
-            }
-
             var requirementsPath = GetGlobalRequirementsPath(adminOptions);
             if (!File.Exists(requirementsPath))
             {
@@ -1673,12 +2134,6 @@ file static class AdminStateRuntime
             if (!File.Exists(aptPackagesPath))
             {
                 await AtomicFile.WriteAllTextAsync(aptPackagesPath, string.Empty, cancellationToken);
-            }
-
-            var configValidation = ValidateConfig(await File.ReadAllTextAsync(configPath, cancellationToken));
-            if (!configValidation.IsValid)
-            {
-                throw new InvalidOperationException(configValidation.ErrorMessage);
             }
 
             var requirementsValidation = ScriptExecutionScopeRuntime.ValidateRequirements(
@@ -1714,8 +2169,6 @@ file static class AdminStateRuntime
         }
     }
 
-    public static string GetConfigPath(AdminApiOptions options) => Path.Combine(options.StateDirectoryPath, "config.json");
-
     public static string GetGlobalRequirementsPath(AdminApiOptions options) => Path.Combine(options.StateDirectoryPath, "requirements.txt");
 
     public static string GetAptPackagesPath(AdminApiOptions options) => Path.Combine(options.StateDirectoryPath, "apt-packages.txt");
@@ -1724,39 +2177,6 @@ file static class AdminStateRuntime
 
     public static string GetRequirementsPath(AdminApiOptions options, ScriptExecutionScope? scope) =>
         scope is null ? GetGlobalRequirementsPath(options) : scope.RequirementsFilePath;
-
-    public static async Task<string> ReadConfigAsync(AdminApiOptions options, CancellationToken cancellationToken)
-    {
-        var path = GetConfigPath(options);
-        return File.Exists(path) ? await File.ReadAllTextAsync(path, cancellationToken) : "{}";
-    }
-
-    public static Task WriteConfigAsync(AdminApiOptions options, string json, CancellationToken cancellationToken) =>
-        AtomicFile.WriteAllTextAsync(GetConfigPath(options), json, cancellationToken);
-
-    public static ValidationResult ValidateConfig(string json)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return ValidationResult.Failure("config.json must contain a JSON object.");
-            }
-
-            if (document.RootElement.TryGetProperty("version", out var version)
-                && version.ValueKind != JsonValueKind.Number)
-            {
-                return ValidationResult.Failure("config.json property 'version' must be a number when provided.");
-            }
-
-            return ValidationResult.Success();
-        }
-        catch (JsonException ex)
-        {
-            return ValidationResult.Failure($"config.json is invalid JSON: {ex.Message}");
-        }
-    }
 
     public static ValidationResult ValidateAptPackages(string packageText)
     {
@@ -1780,6 +2200,98 @@ file static class AdminStateRuntime
         return ValidationResult.Success();
     }
 
+    public static async Task PreflightGlobalApplyAsync(
+        ScriptExecutionScopeOptions scopeOptions,
+        AdminApiOptions adminOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        await PreflightGlobalAptPackagesAsync(adminOptions, cancellationToken);
+
+        foreach (var scope in ScriptExecutionScopeRuntime.EnumerateExistingScopes(scopeOptions))
+        {
+            await ScriptExecutionScopeRuntime.PreflightScopeRequirementsAsync(
+                scope,
+                scopeOptions,
+                adminOptions,
+                logger,
+                cancellationToken);
+        }
+    }
+
+    public static async Task PreflightGlobalAptPackagesAsync(
+        AdminApiOptions adminOptions,
+        CancellationToken cancellationToken)
+    {
+        var aptPackagesPath = GetAptPackagesPath(adminOptions);
+        var packageText = File.Exists(aptPackagesPath)
+            ? await File.ReadAllTextAsync(aptPackagesPath, cancellationToken)
+            : string.Empty;
+        var validation = ValidateAptPackages(packageText);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException(validation.ErrorMessage);
+        }
+
+        var desiredPackages = ParseAptPackages(packageText)
+            .Select(NormalizeAptPackageName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static package => package, StringComparer.Ordinal)
+            .ToArray();
+        var hash = ComputeSha256(packageText);
+        var appliedState = ReadGlobalAppliedState(adminOptions);
+        var previouslyManagedPackages = ReadManagedAptPackages(appliedState);
+        var packagesToRemove = previouslyManagedPackages
+            .Except(desiredPackages, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static package => package, StringComparer.Ordinal)
+            .ToArray();
+
+        if (appliedState.TryGetValue("aptPackagesHash", out var previousHash)
+            && string.Equals(previousHash, hash, StringComparison.Ordinal)
+            && packagesToRemove.Length == 0)
+        {
+            return;
+        }
+
+        if (desiredPackages.Length == 0 && packagesToRemove.Length == 0)
+        {
+            return;
+        }
+
+        if (!OperatingSystem.IsLinux())
+        {
+            throw new InvalidOperationException("apt package apply is supported only on Linux containers.");
+        }
+
+        if (desiredPackages.Length > 0)
+        {
+            var update = await Cli.Wrap("apt-get")
+                .WithArguments(args => args.Add("update"))
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(cancellationToken);
+            if (update.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"apt-get update failed with exit code {update.ExitCode}: {update.StandardError}");
+            }
+
+            var dryRun = await Cli.Wrap("apt-get")
+                .WithArguments(args =>
+                {
+                    args.Add("install").Add("--dry-run").Add("-y").Add("--no-install-recommends");
+                    foreach (var package in desiredPackages)
+                    {
+                        args.Add(package);
+                    }
+                })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(cancellationToken);
+            if (dryRun.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"apt-get install dry-run failed with exit code {dryRun.ExitCode}: {dryRun.StandardError}");
+            }
+        }
+    }
+
     public static async Task<AdminApplyResult> ApplyGlobalAptPackagesAsync(
         AdminApiOptions adminOptions,
         ILogger logger,
@@ -1795,52 +2307,91 @@ file static class AdminStateRuntime
             throw new InvalidOperationException(validation.ErrorMessage);
         }
 
+        var desiredPackages = ParseAptPackages(packageText)
+            .Select(NormalizeAptPackageName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static package => package, StringComparer.Ordinal)
+            .ToArray();
         var hash = ComputeSha256(packageText);
         var appliedState = ReadGlobalAppliedState(adminOptions);
-        if (appliedState.TryGetValue("aptPackagesHash", out var previousHash) && string.Equals(previousHash, hash, StringComparison.Ordinal))
+        var previouslyManagedPackages = ReadManagedAptPackages(appliedState);
+        var packagesToRemove = previouslyManagedPackages
+            .Except(desiredPackages, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static package => package, StringComparer.Ordinal)
+            .ToArray();
+
+        if (appliedState.TryGetValue("aptPackagesHash", out var previousHash)
+            && string.Equals(previousHash, hash, StringComparison.Ordinal)
+            && packagesToRemove.Length == 0)
         {
             return new AdminApplyResult("skipped", 0, 1, Array.Empty<string>());
         }
 
-        var packages = ParseAptPackages(packageText).ToArray();
-        if (packages.Length > 0)
+        if (desiredPackages.Length > 0 || packagesToRemove.Length > 0)
         {
             if (!OperatingSystem.IsLinux())
             {
                 throw new InvalidOperationException("apt package apply is supported only on Linux containers.");
             }
 
-            var update = await Cli.Wrap("apt-get")
-                .WithArguments(args => args.Add("update"))
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(cancellationToken);
-            if (update.ExitCode != 0)
+            if (packagesToRemove.Length > 0)
             {
-                throw new InvalidOperationException($"apt-get update failed with exit code {update.ExitCode}: {update.StandardError}");
+                var remove = await Cli.Wrap("apt-get")
+                    .WithArguments(args =>
+                    {
+                        args.Add("remove").Add("-y");
+                        foreach (var package in packagesToRemove)
+                        {
+                            args.Add(package);
+                        }
+                    })
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync(cancellationToken);
+                if (remove.ExitCode != 0)
+                {
+                    throw new InvalidOperationException($"apt-get remove failed with exit code {remove.ExitCode}: {remove.StandardError}");
+                }
             }
 
-            var install = await Cli.Wrap("apt-get")
-                .WithArguments(args =>
-                {
-                    args.Add("install").Add("-y").Add("--no-install-recommends");
-                    foreach (var package in packages)
-                    {
-                        args.Add(package);
-                    }
-                })
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(cancellationToken);
-            if (install.ExitCode != 0)
+            if (desiredPackages.Length > 0)
             {
-                throw new InvalidOperationException($"apt-get install failed with exit code {install.ExitCode}: {install.StandardError}");
+                var update = await Cli.Wrap("apt-get")
+                    .WithArguments(args => args.Add("update"))
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync(cancellationToken);
+                if (update.ExitCode != 0)
+                {
+                    throw new InvalidOperationException($"apt-get update failed with exit code {update.ExitCode}: {update.StandardError}");
+                }
+
+                var install = await Cli.Wrap("apt-get")
+                    .WithArguments(args =>
+                    {
+                        args.Add("install").Add("-y").Add("--no-install-recommends");
+                        foreach (var package in desiredPackages)
+                        {
+                            args.Add(package);
+                        }
+                    })
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync(cancellationToken);
+                if (install.ExitCode != 0)
+                {
+                    throw new InvalidOperationException($"apt-get install failed with exit code {install.ExitCode}: {install.StandardError}");
+                }
             }
         }
 
         appliedState["version"] = "1";
         appliedState["aptPackagesHash"] = hash;
+        appliedState["aptManagedPackages"] = string.Join('\n', desiredPackages);
         appliedState["aptPackagesAppliedAt"] = DateTimeOffset.UtcNow.ToString("O");
         await WriteGlobalAppliedStateAsync(adminOptions, appliedState, cancellationToken);
-        logger.LogInformation("Applied admin apt packages. packageCount={Count} hash={Hash}", packages.Length, hash);
+        logger.LogInformation(
+            "Applied admin apt packages. installedCount={InstalledCount} removedCount={RemovedCount} hash={Hash}",
+            desiredPackages.Length,
+            packagesToRemove.Length,
+            hash);
         return new AdminApplyResult("applied", 1, 0, Array.Empty<string>());
     }
 
@@ -1892,7 +2443,21 @@ file static class AdminStateRuntime
             .Select(line => line.Split('#', 2)[0].Trim())
             .Where(line => !string.IsNullOrWhiteSpace(line));
 
-    private static Dictionary<string, string> ReadGlobalAppliedState(AdminApiOptions options)
+    private static IReadOnlySet<string> ReadManagedAptPackages(IReadOnlyDictionary<string, string> state)
+    {
+        if (!state.TryGetValue("aptManagedPackages", out var serialized) || string.IsNullOrWhiteSpace(serialized))
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return ParseAptPackages(serialized)
+            .Select(NormalizeAptPackageName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeAptPackageName(string packageName) => packageName.Trim().ToLowerInvariant();
+
+    internal static Dictionary<string, string> ReadGlobalAppliedState(AdminApiOptions options)
     {
         var path = GetGlobalAppliedStatePath(options);
         if (!File.Exists(path))
@@ -1927,7 +2492,7 @@ file static class AdminStateRuntime
     }
 }
 
-file static class AtomicFile
+internal static class AtomicFile
 {
     public static async Task WriteAllTextAsync(string path, string content, CancellationToken cancellationToken)
     {

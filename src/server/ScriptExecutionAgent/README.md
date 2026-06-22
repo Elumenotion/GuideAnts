@@ -60,13 +60,19 @@ The admin API is disabled by default. Images that opt in expose it under `/admin
 All admin requests require `X-Script-Agent-Admin-Token`.
 
 - `GET /admin/health`
-- `GET /admin/config`
-- `PUT /admin/config`
 - `GET /admin/requirements`
 - `PUT /admin/requirements`
 - `GET /admin/apt-packages`
 - `PUT /admin/apt-packages`
+- `GET /admin/setup-status`
+- `GET /admin/install-scripts`
+- `PUT /admin/install-scripts`
 - `POST /admin/apply`
+- `GET /admin/apply/jobs/{jobId}`
+
+Scoped `install-scripts.json` stores ordered setup scripts (`Python` or `Bash`) that run after pip requirements during apply and on replay. Each script's last status is recorded in `applied-state.json`.
+
+`POST /admin/apply` runs synchronous preflight (requirements/apt validation plus pip/apt dry-run when installs are needed) and returns `400` on preflight failure. When preflight passes it returns `202 Accepted` with a `jobId` and starts background apply work detached from the HTTP request (default timeout: 60 minutes via `SCRIPT_EXECUTION_ADMIN_APPLY_TIMEOUT_MINUTES`). Poll `GET /admin/apply/jobs/{jobId}` for `queued`, `running`, `succeeded`, or `failed` status. Preflight timeout defaults to 120 seconds (`SCRIPT_EXECUTION_ADMIN_APPLY_PREFLIGHT_TIMEOUT_SECONDS`).
 
 `GET`/`PUT /admin/requirements` and `POST /admin/apply` operate on global state unless both `projectId` and `guideId` query parameters are provided. Scoped requests affect the shared `project + guide` Python venv used by all matching notebooks.
 
@@ -133,7 +139,6 @@ In the compose stacks, `guideants-ai` mounts `script_agent_admin_state` at:
 
 That volume stores:
 
-- `config.json`
 - global `requirements.txt`
 - global `apt-packages.txt`
 - global `applied-state.json`
@@ -209,6 +214,8 @@ services:
 | `SCRIPT_EXECUTION_ADMIN_TOKEN` | _(required when admin API enabled)_ | Shared token expected in `X-Script-Agent-Admin-Token` |
 | `SCRIPT_EXECUTION_ADMIN_STATE_DIR` | `/var/lib/guideants/script-agent-admin` on Linux | Volume-backed admin state root |
 | `SCRIPT_EXECUTION_ADMIN_FAIL_OPEN` | `false` | Continue startup after admin reconcile failure |
+| `SCRIPT_EXECUTION_ADMIN_APPLY_TIMEOUT_MINUTES` | `60` | Background apply job timeout |
+| `SCRIPT_EXECUTION_ADMIN_APPLY_PREFLIGHT_TIMEOUT_SECONDS` | `120` | Synchronous preflight timeout for `POST /admin/apply` |
 
 ## Supported Script Types
 
@@ -290,7 +297,7 @@ For Azure Container Apps deployment:
 - In GuideAnts AI images, script launches go through `ga-script-exec`, which sets `PR_SET_DUMPABLE=0` before exec to reduce `/proc/<pid>/environ` exposure between sibling processes.
 - Compose drops `SYS_PTRACE` from `guideants-ai` to reduce debugger-style process inspection.
 - `requirements.txt` is validated for blocked install sources/options before it is applied to a scoped venv.
-- `apt-packages.txt` is validated as package names only before startup/admin apply installs packages with `apt-get`.
+- `apt-packages.txt` is validated as package names only; admin apply reconciles the managed set by removing packages no longer listed and installing listed packages via `apt-get`.
 - Paths are canonicalized and rejected if they escape `FILE_STORAGE_ROOT` or notebook scope.
 - Reparse-point (symlink/junction) pivots in the authorized path chain are rejected.
 - On Linux, script/listing operations run under notebook-scoped low-privilege identities via `setpriv`.

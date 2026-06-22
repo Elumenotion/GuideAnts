@@ -75,7 +75,7 @@ export function GuideAntsGuideFlyout() {
     element.className = 'theme-guideants h-full min-h-0';
     element.setAttribute('pub-id', publishedGuideId!);
     element.setAttribute('api-base-url', resolveGuideAntsApiBaseUrl());
-    element.setAttribute('command-mode', 'true');
+    element.setAttribute('command-mode', session?.commandMode ? 'true' : 'false');
     element.setAttribute('speech-to-text-enabled', 'true');
 
     chatRef.current = element;
@@ -95,7 +95,15 @@ export function GuideAntsGuideFlyout() {
       window.clearTimeout(readyTimer);
       element.removeEventListener('wf-stream-start', onReady);
     };
-  }, [bridgeRegistered, canRenderChat, publishedGuideId, wireChatElement]);
+  }, [bridgeRegistered, canRenderChat, publishedGuideId, session?.commandMode, wireChatElement]);
+
+  useEffect(() => {
+    if (!chatRef.current) {
+      return;
+    }
+
+    chatRef.current.setAttribute('command-mode', session?.commandMode ? 'true' : 'false');
+  }, [session?.commandMode]);
 
   useEffect(() => {
     if (!isOpen || !bridgeRegistered || !chatRef.current) {

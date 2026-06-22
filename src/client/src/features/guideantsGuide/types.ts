@@ -5,4 +5,7 @@ export interface AppGuideContext {
   role: AppRole;
   userId: string;
   displayName: string;
+  projectId?: string;
+  notebookId?: string;
+  guideId?: string;
 }
