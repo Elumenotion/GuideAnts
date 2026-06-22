@@ -7,6 +7,8 @@ import type {
   GuideUsageSummaryDto,
   DailyUsageBucketDto,
   ConversationUsageSummaryDto,
+  GuideApiUsageReportDto,
+  GuideUsageSourceFilter,
 } from '../types/usage';
 import { ConversationDetailPanel } from '../components/usage/ConversationDetailPanel';
 import type { GuideDto, AssistantDto } from '../types/guides';
@@ -40,9 +42,13 @@ export default function GuideUsagePage() {
   const [loadingCharts, setLoadingCharts] = useState(false);
   const [loadingCrew, setLoadingCrew] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(false);
+  const [loadingApiUsage, setLoadingApiUsage] = useState(false);
   const [chartsError, setChartsError] = useState<string | null>(null);
   const [crewError, setCrewError] = useState<string | null>(null);
   const [conversationsError, setConversationsError] = useState<string | null>(null);
+  const [apiUsageError, setApiUsageError] = useState<string | null>(null);
+  const [apiUsageSource, setApiUsageSource] = useState<GuideUsageSourceFilter>('all');
+  const [apiUsageReport, setApiUsageReport] = useState<GuideApiUsageReportDto | null>(null);
   const [conversationPage, setConversationPage] = useState(1);
   const [conversationPageSize] = useState(100);
   const [conversationTotalCount, setConversationTotalCount] = useState(0);
@@ -145,6 +151,8 @@ export default function GuideUsagePage() {
       setChartsError(null);
       setCrewError(null);
       setConversationsError(null);
+      setApiUsageError(null);
+      setApiUsageReport(null);
       setConversationPage(1);
       setConversationTotalCount(0);
       try {
@@ -226,6 +234,40 @@ export default function GuideUsagePage() {
     return () => { cancelled = true; };
   }, [projectId, entityId, isAssistant, from, to]);
 
+  useEffect(() => {
+    if (!projectId || !entityId) return;
+    const currentProjectId = projectId;
+    const currentEntityId = entityId;
+
+    let cancelled = false;
+
+    async function loadApiUsage() {
+      setLoadingApiUsage(true);
+      setApiUsageError(null);
+      try {
+        const next = isAssistant
+          ? await guideUsageApi.getAssistantApiUsage(currentProjectId, currentEntityId, from, to, apiUsageSource)
+          : await guideUsageApi.getGuideApiUsage(currentProjectId, currentEntityId, from, to, apiUsageSource);
+        if (!cancelled) {
+          setApiUsageReport(next);
+        }
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setApiUsageError(e instanceof Error ? e.message : 'Failed to load API usage');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingApiUsage(false);
+        }
+      }
+    }
+
+    loadApiUsage();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, entityId, isAssistant, from, to, apiUsageSource]);
+
   function mapSummaryToReport(summary: GuideUsageSummaryDto): GuideUsageReportDto {
     return {
       ...summary,
@@ -279,6 +321,21 @@ export default function GuideUsagePage() {
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
+  };
+
+  const formatSourceLabel = (value: string) => {
+    switch (value) {
+      case 'conversation':
+        return 'Conversation';
+      case 'published_chat':
+        return 'Published Chat';
+      case 'mcp':
+        return 'MCP';
+      case 'wire_api':
+        return 'Wire API';
+      default:
+        return value;
+    }
   };
 
   // Prepare chart data
@@ -851,6 +908,73 @@ export default function GuideUsagePage() {
                 </div>
               </div>
             )}
+
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-900">API Usage</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Grouped by source channel, endpoint, alias, provider mode, and status.
+                  </p>
+                </div>
+                <select
+                  className="border border-gray-300 rounded px-2 py-1 text-xs bg-white"
+                  value={apiUsageSource}
+                  onChange={(e) => setApiUsageSource(e.target.value as GuideUsageSourceFilter)}
+                >
+                  <option value="all">All Sources</option>
+                  <option value="conversation">Conversation</option>
+                  <option value="published_chat">Published Chat</option>
+                  <option value="mcp">MCP</option>
+                  <option value="wire_api">Wire API</option>
+                </select>
+              </div>
+              {apiUsageError && (
+                <div className="px-4 py-3 text-sm text-red-700 border-b border-red-100 bg-red-50">
+                  {apiUsageError}
+                </div>
+              )}
+              {loadingApiUsage ? (
+                <div className="p-6 text-sm text-gray-500">Loading API usage...</div>
+              ) : apiUsageReport && apiUsageReport.rows.length > 0 ? (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Endpoint</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alias</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider Mode</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Events</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Charge</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {apiUsageReport.rows.map((row, idx) => (
+                          <tr key={`${row.sourceChannel}-${row.endpoint}-${row.alias}-${row.providerServiceMode}-${row.statusFamily}-${idx}`} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-800">{formatSourceLabel(row.sourceChannel)}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-800 font-mono">{row.endpoint}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 font-mono">{row.alias}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 font-mono">{row.providerServiceMode}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{row.statusFamily}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">{row.events}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">{formatCurrency(row.chargeUsd)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 text-xs text-gray-600 flex items-center justify-end gap-4">
+                    <span>Total events: <strong>{apiUsageReport.totalEvents}</strong></span>
+                    <span>Total charge: <strong>{formatCurrency(apiUsageReport.totalChargeUsd)}</strong></span>
+                  </div>
+                </>
+              ) : (
+                <div className="p-6 text-sm text-gray-500">No API usage found for this filter.</div>
+              )}
+            </div>
 
             {/* Conversations Table */}
             {report.conversations.length > 0 && (

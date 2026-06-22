@@ -1,5 +1,6 @@
 using FluentAssertions;
 using GuideAnts.Usage;
+using DataModelUsageCategory = GuideAntsApi.DataModel.Models.UsageCategory;
 
 namespace GuideAntsApi.Tests.Usage;
 
@@ -20,6 +21,7 @@ public sealed class UsageRecorderExtensionsTests
         await recorder.RecordSttAsync(projectId, notebookId, null, null, durationSeconds: 60);
         await recorder.RecordTtsAsync(projectId, notebookId, null, characterCount: 500, conversationId: conversationId);
         await recorder.RecordDocExtractionAsync(projectId, notebookId, null, null, pages: 3);
+        await recorder.RecordEmbeddingsAsync(projectId, notebookId, "Embeddings.OpenAI.Embedding", inputCount: 123);
 
         recorder.Calls.Select(c => c.Category).Should().Equal(
             UsageCategory.ChatCompletion,
@@ -27,10 +29,20 @@ public sealed class UsageRecorderExtensionsTests
             UsageCategory.ImageGeneration,
             UsageCategory.SpeechTranscription,
             UsageCategory.SpeechSynthesis,
-            UsageCategory.DocumentExtraction);
+            UsageCategory.DocumentExtraction,
+            UsageCategory.Embeddings);
         recorder.Calls[0].Operation.Should().Be("chat");
         recorder.Calls[1].Operation.Should().Be("search");
         recorder.Calls[5].Metrics.ValueOther.Should().Be(3);
+        recorder.Calls[6].Operation.Should().Be("embeddings");
+    }
+
+    [TestMethod]
+    public void UsageCategory_Embeddings_value_matches_data_model()
+    {
+        ((int)UsageCategory.Embeddings).Should().Be(9);
+        ((int)DataModelUsageCategory.Embeddings).Should().Be(9);
+        ((int)UsageCategory.Embeddings).Should().Be((int)DataModelUsageCategory.Embeddings);
     }
 
     private sealed class CapturingUsageRecorder : IUsageRecorder
@@ -53,7 +65,11 @@ public sealed class UsageRecorderExtensionsTests
             Guid? assistantId = null,
             Guid? agentInvocationId = null,
             Guid? notebookConversationMessageId = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            Guid? publishedGuideId = null,
+            string? sourceChannel = null,
+            string? externalRequestId = null,
+            string? externalUserIdentity = null)
         {
             Calls.Add((category, operation, metrics));
             return Task.CompletedTask;

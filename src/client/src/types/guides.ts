@@ -434,6 +434,7 @@ export interface PublishedGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  wireApiConfig?: PublishedWireApiConfigDto;
   /** Indicates whether an API key is configured (the key itself is never returned) */
   hasApiKey?: boolean;
   /** Whether MCP (Model Context Protocol) access is enabled */
@@ -466,6 +467,7 @@ export interface PublishGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  wireApiConfig?: PublishedWireApiConfigDto;
   mcpEnabled?: boolean;
   mcpDescription?: string;
 }
@@ -485,6 +487,34 @@ export interface UpdatePublishedGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  wireApiConfig?: PublishedWireApiConfigDto;
   mcpEnabled?: boolean;
   mcpDescription?: string;
+}
+
+export interface PublishedWireApiConfigDto {
+  enabled?: boolean;
+  profile?: string;
+  endpointFlags?: PublishedWireApiEndpointFlagsDto;
+  aliasMap?: Record<string, string>;
+  maxRequestSizes?: PublishedWireApiMaxRequestSizesDto;
+}
+
+export interface PublishedWireApiEndpointFlagsDto {
+  models?: boolean;
+  chatCompletions?: boolean;
+  responses?: boolean;
+  embeddings?: boolean;
+  imageGenerations?: boolean;
+  audioTranscriptions?: boolean;
+  audioSpeech?: boolean;
+}
+
+export interface PublishedWireApiMaxRequestSizesDto {
+  chatCompletionsBytes?: number;
+  responsesBytes?: number;
+  embeddingsBytes?: number;
+  imageGenerationsBytes?: number;
+  audioTranscriptionsBytes?: number;
+  audioSpeechBytes?: number;
 }

@@ -89,7 +89,7 @@ export function AuthTab({
       {friendlyName.trim() && (
          <div className="p-4 bg-blue-50 border border-blue-100 rounded-md mb-4 text-sm text-blue-800">
            <p><strong>Note:</strong> You have a Public URL configured ("{friendlyName}").</p>
-           <p className="mt-1">Authentication options are still available for the Public URL.</p>
+           <p className="mt-1">Public URL mode is anonymous. Remove the friendly name before saving if you want API key or webhook auth.</p>
          </div>
       )}
 
@@ -301,7 +301,6 @@ export function AuthTab({
     </div>
   );
 }
-
 
 
 

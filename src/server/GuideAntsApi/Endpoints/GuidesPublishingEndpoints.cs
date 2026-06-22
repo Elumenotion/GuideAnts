@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
@@ -11,6 +13,12 @@ namespace GuideAntsApi.Endpoints;
 
 public static class GuidesPublishingEndpoints
 {
+    private static readonly JsonSerializerOptions WireApiJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
     /// <summary>
     /// Maps a PublishedGuide entity to a PublishedGuideDto.
     /// </summary>
@@ -39,6 +47,7 @@ public static class GuidesPublishingEndpoints
             Collapsible = pg.Collapsible,
             ShowConversationStarters = pg.ShowConversationStarters,
             ShowAttachments = pg.ShowAttachments,
+            WireApiConfig = DeserializeWireApiConfig(pg.WireApiConfigJson),
             HasApiKey = !string.IsNullOrWhiteSpace(pg.ApiKeyHash),
             McpEnabled = pg.McpEnabled,
             McpDescription = pg.McpDescription
@@ -164,7 +173,7 @@ var guide = await db.Assistants
             }
             if (dto.BillingPeriodChargeLimitUsd.HasValue && dto.BillingPeriodChargeLimitUsd.Value < 0m)
             {
-                return Results.BadRequest(new { error = "Billing period cost limit must be >= 0", field = "billingPeriodChargeLimitUsd" });
+                return Results.BadRequest(new { error = "Monthly cost limit must be >= 0", field = "billingPeriodChargeLimitUsd" });
             }
 
             // Check if already published (same guide + project)
@@ -207,6 +216,7 @@ var guide = await db.Assistants
                 Collapsible = dto.Collapsible,
                 ShowConversationStarters = dto.ShowConversationStarters,
                 ShowAttachments = dto.ShowAttachments,
+                WireApiConfigJson = SerializeWireApiConfig(dto.WireApiConfig),
                 McpEnabled = dto.McpEnabled,
                 McpDescription = dto.McpDescription
             };
@@ -326,7 +336,7 @@ var publishedGuide = await db.PublishedGuides
             }
             if (dto.BillingPeriodChargeLimitUsd.HasValue && dto.BillingPeriodChargeLimitUsd.Value < 0m)
             {
-                return Results.BadRequest(new { error = "Billing period cost limit must be >= 0", field = "billingPeriodChargeLimitUsd" });
+                return Results.BadRequest(new { error = "Monthly cost limit must be >= 0", field = "billingPeriodChargeLimitUsd" });
             }
 
             // McpEnabled requires an API key to be configured
@@ -353,6 +363,7 @@ var publishedGuide = await db.PublishedGuides
             publishedGuide.Collapsible = dto.Collapsible;
             publishedGuide.ShowConversationStarters = dto.ShowConversationStarters;
             publishedGuide.ShowAttachments = dto.ShowAttachments;
+            publishedGuide.WireApiConfigJson = SerializeWireApiConfig(dto.WireApiConfig);
             publishedGuide.McpEnabled = dto.McpEnabled;
             publishedGuide.McpDescription = dto.McpDescription;
 
@@ -589,5 +600,26 @@ publishedGuide.ApiKeyHash = null;
 
         return $"{scheme}://{context.Request.Host.Value}/api".TrimEnd('/');
     }
-}
 
+    private static string? SerializeWireApiConfig(PublishedWireApiConfigDto? config)
+    {
+        return config == null ? null : JsonSerializer.Serialize(config, WireApiJsonOptions);
+    }
+
+    private static PublishedWireApiConfigDto? DeserializeWireApiConfig(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<PublishedWireApiConfigDto>(json, WireApiJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
