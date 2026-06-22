@@ -1,5 +1,6 @@
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.Guides;
+using GuideAntsApi.Services.SystemGuide;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -11,6 +12,7 @@ public static class GuideUsageEndpoints
         var guideUsageGroup = app.MapGroup("/api/projects/{projectId}/guides/{guideId}/usage")
             .WithTags("Guide Usage")
             .RequireAuthorization("RequireAdmin")
+            .WithSystemProjectAccessGuard()
             .WithOpenApi();
 
         guideUsageGroup.MapGet("/summary", async (
@@ -154,6 +156,7 @@ public static class GuideUsageEndpoints
         var assistantUsageGroup = app.MapGroup("/api/projects/{projectId}/assistants/{assistantId}/usage")
             .WithTags("Assistant Usage")
             .RequireAuthorization("RequireAdmin")
+            .WithSystemProjectAccessGuard()
             .WithOpenApi();
 
         assistantUsageGroup.MapGet("/summary", async (

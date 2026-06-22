@@ -1558,7 +1558,8 @@ export const api = {
     },
     guides: {
         guides: {
-            list: () => callApi<any[]>(`/guides`),
+            list: (projectId?: string) =>
+                callApi<any[]>(`/guides${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
             get: (guideId: string, projectId?: string) =>
                 callApi<any>(`/guides/${guideId}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
             create: (dto: any) => callApi<any>(`/guides`, { method: 'POST', body: JSON.stringify(dto) }),
@@ -1752,6 +1753,10 @@ export const api = {
             const suffix = query.toString();
             return callApi<NotebookChatReadinessDto>(`/notebooks/${notebookId}/header-toolbar/chat-readiness${suffix ? `?${suffix}` : ''}`);
         },
+    },
+    systemGuide: {
+        getSession: () => callApi<import('../types/systemGuide').SystemGuideSessionDto>('/system-guide/session'),
+        getWorkspace: () => callApi<import('../types/systemGuide').SystemGuideWorkspaceDto>('/system-guide/workspace'),
     },
     conversations: {
         getUserConversations: (query?: import('../types/conversation').UserConversationsQuery) => {

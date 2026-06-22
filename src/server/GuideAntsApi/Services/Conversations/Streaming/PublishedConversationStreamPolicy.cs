@@ -21,8 +21,27 @@ public sealed class PublishedConversationStreamPolicy : IConversationStreamPolic
 
     public bool UsesProgressThrottling => false;
 
-    public Task<StreamUserIdentity> ResolveUserIdentityAsync(string? externalUserIdentity, CancellationToken ct) =>
-        Task.FromResult(new StreamUserIdentity(null, "User", externalUserIdentity));
+    public async Task<StreamUserIdentity> ResolveUserIdentityAsync(Guid? internalUserId, string? externalUserIdentity, CancellationToken ct)
+    {
+        if (internalUserId.HasValue)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var user = await db.Users
+                .AsNoTracking()
+                .Where(u => u.Id == internalUserId.Value)
+                .Select(u => new { u.Name, u.Email })
+                .FirstOrDefaultAsync(ct);
+
+            var displayName = !string.IsNullOrWhiteSpace(user?.Name)
+                ? user!.Name
+                : user?.Email ?? "User";
+
+            return new StreamUserIdentity(internalUserId, displayName, externalUserIdentity);
+        }
+
+        return new StreamUserIdentity(null, "User", externalUserIdentity);
+    }
 
     public ConversationFileUrlContext BuildFileUrlContext(
         NotebookConversation conversation,

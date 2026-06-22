@@ -76,6 +76,7 @@ public sealed class PublishedWireUsageRecorderTests
             WireApiConfig: new PublishedWireApiConfigDto(),
             AuthMode: PublishedApiAuthMode.ApiKey,
             ExternalUserIdentity: "ext-user",
+            InternalUserId: null,
             SourceChannel: "wire_api",
             ExternalRequestId: "req_abc123",
             EndpointName: "embeddings");

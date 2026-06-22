@@ -76,6 +76,7 @@ public sealed class McpPublishedGuideInvokeService
                            request,
                            mcpContext.PubId.ToString(),
                            mcpContext.UserIdentity,
+                           internalUserId: null,
                            cancellationToken))
         {
             switch (ev.EventType)

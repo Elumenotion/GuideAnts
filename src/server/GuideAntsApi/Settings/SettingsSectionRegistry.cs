@@ -450,6 +450,24 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
                 new("ReasoningEffort", "ChatDefaults:ReasoningEffort"),
                 new("SamplingParametersJson", "ChatDefaults:SamplingParametersJson")
             ]
+        },
+        new()
+        {
+            SectionName = GuideAntsSystemSettings.SectionName,
+            Properties =
+            [
+                new("projectId", "GuideAntsSystem:ProjectId"),
+                new("userGuideId", "GuideAntsSystem:UserGuideId"),
+                new("adminGuideId", "GuideAntsSystem:AdminGuideId"),
+                new("userNotebookId", "GuideAntsSystem:UserNotebookId"),
+                new("adminNotebookId", "GuideAntsSystem:AdminNotebookId"),
+                new("userPublishedGuideId", "GuideAntsSystem:UserPublishedGuideId"),
+                new("adminPublishedGuideId", "GuideAntsSystem:AdminPublishedGuideId"),
+                new(
+                    "clientBridgeId",
+                    "GuideAntsSystem:ClientBridgeId",
+                    DefaultValue: GuideAntsSystemSettings.DefaultClientBridgeId)
+            ]
         }
     ];
 

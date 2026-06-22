@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import ErrorScreen from '../components/ErrorScreen';
@@ -305,6 +306,7 @@ const Projects = () => {
             </div>
           </div>
           <HeaderActionsBar>
+            <GuideAntsGuideButton />
             <HomeButton />
             <SettingsButton />
             <TourStartButton screenId="projects-list" inline />

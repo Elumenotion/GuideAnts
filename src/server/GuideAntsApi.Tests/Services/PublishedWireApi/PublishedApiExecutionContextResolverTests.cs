@@ -95,18 +95,20 @@ public sealed class PublishedApiExecutionContextResolverTests
     }
 
     [TestMethod]
-    public async Task ResolveAsync_Prefers_authenticated_app_identity_without_external_auth_headers()
+    public async Task ResolveAsync_Validates_app_identity_when_auth_mode_is_app_identity()
     {
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"wire-api-appid-{Guid.NewGuid():N}");
         var pubId = Guid.NewGuid();
         await SeedPublishedGuideAsync(
             options,
             pubId,
-            apiKeyHash: PublishedGuideAuthService.HashApiKey("gak_test"),
-            webhookUrl: null);
+            authMode: PublishedGuideAuthMode.AppIdentity);
 
         await using var db = new ApplicationDbContext(options);
-        var auth = new FakePublishedGuideAuthService();
+        var auth = new FakePublishedGuideAuthService
+        {
+            NextResult = new AuthValidationResult { IsValid = true, UserIdentity = "user-123" }
+        };
         var limits = new FakePublishedGuideCostLimitService(allowed: true);
         var resolver = new PublishedApiExecutionContextResolver(db, auth, limits, NullLogger<PublishedApiExecutionContextResolver>.Instance);
         var ctx = new DefaultHttpContext
@@ -122,7 +124,7 @@ public sealed class PublishedApiExecutionContextResolverTests
         result.Success.Should().BeTrue();
         result.Context!.AuthMode.Should().Be(PublishedApiAuthMode.AppIdentity);
         result.Context.ExternalUserIdentity.Should().Be("user-123");
-        auth.CallCount.Should().Be(0);
+        auth.CallCount.Should().Be(1);
     }
 
     [TestMethod]
@@ -193,13 +195,15 @@ public sealed class PublishedApiExecutionContextResolverTests
     private static async Task<(Guid ProjectId, Guid NotebookId)> SeedPublishedGuideAsync(
         DbContextOptions<ApplicationDbContext> options,
         Guid pubId,
-        string? apiKeyHash,
-        string? webhookUrl,
+        string? apiKeyHash = null,
+        string? webhookUrl = null,
+        PublishedGuideAuthMode? authMode = null,
         PublishedWireApiConfigDto? wireApiConfig = null)
     {
         await using var context = new ApplicationDbContext(options);
         var (projectId, notebookId) = await BackgroundJobTestHelpers.SeedProjectNotebookAsync(context);
         wireApiConfig ??= new PublishedWireApiConfigDto { Enabled = true };
+        var resolvedAuthMode = authMode ?? ResolveAuthModeForSeed(apiKeyHash, webhookUrl);
 
         context.PublishedGuides.Add(new PublishedGuide
         {
@@ -207,12 +211,28 @@ public sealed class PublishedApiExecutionContextResolverTests
             GuideId = Guid.NewGuid(),
             NotebookId = notebookId,
             Active = true,
+            AuthMode = resolvedAuthMode,
             ApiKeyHash = apiKeyHash,
             AuthValidationWebhookUrl = webhookUrl,
             WireApiConfigJson = JsonSerializer.Serialize(wireApiConfig)
         });
         await context.SaveChangesAsync();
         return (projectId, notebookId);
+    }
+
+    private static PublishedGuideAuthMode ResolveAuthModeForSeed(string? apiKeyHash, string? webhookUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(apiKeyHash))
+        {
+            return PublishedGuideAuthMode.ApiKey;
+        }
+
+        if (!string.IsNullOrWhiteSpace(webhookUrl))
+        {
+            return PublishedGuideAuthMode.Webhook;
+        }
+
+        return PublishedGuideAuthMode.Anonymous;
     }
 
     private static async Task<(int StatusCode, string Body)> ExecuteResultAsync(IResult result)
@@ -244,7 +264,8 @@ public sealed class PublishedApiExecutionContextResolverTests
             Guid projectId,
             Guid notebookId,
             CancellationToken ct = default,
-            string? apiKeyHeader = null)
+            string? apiKeyHeader = null,
+            string? appAuthCookieToken = null)
         {
             CallCount++;
             LastAuthorizationHeader = authorizationHeader;

@@ -7,5 +7,7 @@ alwaysApply: true
 
 - Never run `git commit` in any form.
 - Never run `git commit --amend`.
+- Never run `git push` unless the user explicitly asks in the current message (see `git-branch-and-push-safety.mdc`).
 - Stage files and propose a commit message when helpful, then stop and ask the user to run the commit.
 - If asked to commit, explain that commits are user-owned in this project and hand off the exact command/message for the user to run.
+- If asked to push, verify `git branch -vv` shows upstream `origin/<same-branch>`, not `origin/main`, before handing off the push command.

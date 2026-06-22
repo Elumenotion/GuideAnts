@@ -196,9 +196,11 @@ public sealed class ComposeEnvironmentContractTests
 
             var apiKeys = ReadComposeEnvironmentKeys(composePath, apiServiceName);
             apiKeys.Should().Contain("ScriptExecution__AgentToken", $"{composeFile} must provide API->agent shared token");
+            apiKeys.Should().Contain("ScriptExecution__AdminToken", $"{composeFile} must provide API->agent admin token");
 
             var aiKeys = ReadComposeEnvironmentKeys(composePath, "guideants-ai");
             aiKeys.Should().Contain("SCRIPT_EXECUTION_AGENT_TOKEN", $"{composeFile} must provide script-agent shared token");
+            aiKeys.Should().Contain("SCRIPT_EXECUTION_ADMIN_TOKEN", $"{composeFile} must provide script-agent admin token");
             aiKeys.Should().Contain("SCRIPT_EXECUTION_REQUIRE_TOKEN", $"{composeFile} must enforce script-agent token requirement");
 
             var plantumlKeys = ReadComposeEnvironmentKeys(composePath, "plantuml");

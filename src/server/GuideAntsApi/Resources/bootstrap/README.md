@@ -1,7 +1,13 @@
 Bootstrap resources seeded on first startup.
 
-All seeding is idempotent: if the entity already exists in the database
-the seed is skipped. User modifications are never overwritten.
+Seeding is idempotent for most entities: if the entity already exists in the
+database the seed is skipped and user modifications are not overwritten.
+
+**Exception — GuideAnts system guides** (`guideants-guide`, `guideants-guide-admin`):
+`GuideAntsSystemSeeder` re-imports bootstrap content on every startup so
+instructions, OpenAPI tools, and related guide files stay aligned with the
+repo. Published-guide interface settings for these rows are also repaired to
+the canonical in-app defaults on each seed.
 
 ## Folders
 

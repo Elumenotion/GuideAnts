@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Services.SystemGuide;
 
 namespace GuideAntsApi.Tests.TestUtils;
 
@@ -64,8 +65,26 @@ internal sealed class TestServiceProvider : IServiceProvider
             return _configuration;
         }
 
+        if (serviceType == typeof(ISystemGuideCatalogFilter))
+        {
+            return EmptySystemGuideCatalogFilter.Instance;
+        }
+
         return null;
     }
+}
+
+internal sealed class EmptySystemGuideCatalogFilter : ISystemGuideCatalogFilter
+{
+    public static readonly EmptySystemGuideCatalogFilter Instance = new();
+
+    public Task<IReadOnlySet<Guid>> GetHiddenGuideIdsAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlySet<Guid>>(new HashSet<Guid>());
+
+    public Task<IReadOnlySet<Guid>> GetHiddenGuideIdsForCatalogAsync(
+        Guid? projectId,
+        CancellationToken cancellationToken = default) =>
+        GetHiddenGuideIdsAsync(cancellationToken);
 }
 
 

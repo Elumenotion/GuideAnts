@@ -4,6 +4,7 @@ using GuideAntsApi.Services.Components;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Services.SystemGuide;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -14,6 +15,7 @@ public static class ProjectContentFileEndpoints
         var group = app.MapGroup("/api/projects/{projectId}/files")
             .WithTags("Project Content Files")
             .RequireAuthorization("RequireApprovedUser")
+            .WithSystemProjectAccessGuard()
             .WithOpenApi();
 
         // Get all content files for a project

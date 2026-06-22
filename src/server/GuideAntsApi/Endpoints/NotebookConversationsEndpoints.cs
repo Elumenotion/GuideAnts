@@ -7,6 +7,7 @@ using GuideAntsApi.Services.Auth;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Utils;
+using GuideAntsApi.Services.SystemGuide;
 using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
 
@@ -18,7 +19,8 @@ public static class NotebookConversationsEndpoints
     {
         var group = app.MapGroup("/api/projects/{projectId:guid}/notebooks/{notebookId:guid}/conversations")
             .WithTags("NotebookConversations")
-            .RequireAuthorization("RequireApprovedUser");
+            .RequireAuthorization("RequireApprovedUser")
+            .WithSystemProjectAccessGuard();
 
         // List
         group.MapGet("/", async ([FromServices] IConversationService svc, Guid notebookId) =>

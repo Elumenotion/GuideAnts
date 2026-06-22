@@ -14,6 +14,7 @@ import OAuthCallback from './pages/OAuthCallback';
 import { UrlCorrector } from './components/common/UrlCorrector';
 import { AuthProvider } from './contexts/AuthContext';
 import AuthExpiredHandler from './components/AuthExpiredHandler';
+import { GuideAntsGuideProvider } from './features/guideantsGuide/GuideAntsGuideProvider';
 
 function App() {
   useAppPort();
@@ -50,10 +51,12 @@ function App() {
             <StartupGate enabled={routerType === 'browser'}>
               <Router>
                 <AuthProvider>
-                  <AuthExpiredHandler />
-                  <UrlCorrector />
-                  {isElectron() && <ZoomControl />}
-                  <AppContent />
+                  <GuideAntsGuideProvider>
+                    <AuthExpiredHandler />
+                    <UrlCorrector />
+                    {isElectron() && <ZoomControl />}
+                    <AppContent />
+                  </GuideAntsGuideProvider>
                 </AuthProvider>
               </Router>
             </StartupGate>

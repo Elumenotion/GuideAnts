@@ -101,6 +101,12 @@ public static class StartupConfiguration
         services.AddScoped<IApplicationSettingsService, ApplicationSettingsService>();
         services.AddScoped<IEmbeddingsRebuildService, EmbeddingsRebuildService>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder, GuideAntsApi.Services.Bootstrap.RequiredGuidesAssistantsSeeder>();
+        services.AddScoped<GuideAntsApi.Services.Bootstrap.IGuideAntsSystemSeeder, GuideAntsApi.Services.Bootstrap.GuideAntsSystemSeeder>();
+        services.AddScoped<GuideAntsApi.Settings.IGuideAntsSystemSettingsStore, GuideAntsApi.Settings.GuideAntsSystemSettingsStore>();
+        services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemProjectAccessGuard, GuideAntsApi.Services.SystemGuide.SystemProjectAccessGuard>();
+        services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSessionService, GuideAntsApi.Services.SystemGuide.SystemGuideSessionService>();
+        services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideCatalogFilter, GuideAntsApi.Services.SystemGuide.SystemGuideCatalogFilter>();
+        services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSandboxAdminProxy, GuideAntsApi.Services.SystemGuide.SystemGuideSandboxAdminProxy>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder, GuideAntsApi.Services.Bootstrap.RuntimeProfileSeeder>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();
@@ -509,16 +515,17 @@ public static class StartupConfiguration
 
         // Capture a single immutable snapshot so token issuance and bearer validation
         // cannot drift if runtime configuration providers reload Jwt settings later.
-        services.AddSingleton<IJwtTokenService>(_ => new JwtTokenService(Microsoft.Extensions.Options.Options.Create(new JwtOptions
+        var jwtOptionsSnapshot = new JwtOptions
         {
             Issuer = jwtOptions.Issuer,
             Audience = jwtOptions.Audience,
             SigningKey = jwtOptions.SigningKey,
             LifetimeMinutes = jwtOptions.LifetimeMinutes
-        })));
+        };
+        services.AddSingleton<IJwtTokenService>(_ => new JwtTokenService(Microsoft.Extensions.Options.Options.Create(jwtOptionsSnapshot)));
+        services.AddSingleton<IAppJwtValidator>(_ => new AppJwtValidator(Microsoft.Extensions.Options.Options.Create(jwtOptionsSnapshot)));
         services.AddSingleton<IAuthCookieService, AuthCookieService>();
 
-        var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SigningKey));
         services
             .AddAuthentication(options =>
             {
@@ -528,19 +535,7 @@ public static class StartupConfiguration
             .AddJwtBearer(options =>
             {
                 options.RequireHttpsMetadata = false;
-                options.TokenValidationParameters = new TokenValidationParameters
-                {
-                    ValidateIssuer = true,
-                    ValidIssuer = jwtOptions.Issuer,
-                    ValidateAudience = true,
-                    ValidAudience = jwtOptions.Audience,
-                    ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = signingKey,
-                    ValidateLifetime = true,
-                    ClockSkew = TimeSpan.Zero,
-                    NameClaimType = ClaimTypes.Name,
-                    RoleClaimType = ClaimTypes.Role
-                };
+                options.TokenValidationParameters = JwtTokenValidation.CreateParameters(jwtOptionsSnapshot);
                 options.Events = new JwtBearerEvents
                 {
                     OnMessageReceived = context =>

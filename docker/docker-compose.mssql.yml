@@ -43,6 +43,8 @@ services:
       DocumentServer__JwtHeader: "${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}"
       DocumentServer__JwtInBody: "${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}"
       ScriptExecution__AgentToken: ${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      ScriptExecution__AdminToken: ${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+
       SettingsSecrets__ActiveKeyId: local-dev
       "SettingsSecrets__Keys__local-dev": MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
       LlamaCpp__BaseUrl: http://127.0.0.1:9/llama-cpp
@@ -52,3 +54,4 @@ services:
 volumes:
   guideants_mssql_runtime_state:
   guideants_mssql_content_files:
+

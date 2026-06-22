@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using GuideAntsApi.DataModel.Models;
 
 namespace GuideAntsApi.Models.Guides;
 
@@ -26,6 +27,7 @@ public class PublishedGuideDto
     public PublishedWireApiConfigDto? WireApiConfig { get; set; }
     public decimal? DailyChargeLimitUsd { get; set; }
     public decimal? BillingPeriodChargeLimitUsd { get; set; }
+    public PublishedGuideAuthMode AuthMode { get; set; } = PublishedGuideAuthMode.Anonymous;
     /// <summary>
     /// Indicates whether an API key is configured for this published guide.
     /// The actual key is never returned - only shown once at creation/regeneration.
@@ -51,6 +53,7 @@ public class PublishGuideDto
     public int? MaxTurns { get; set; }
     public decimal? DailyChargeLimitUsd { get; set; }
     public decimal? BillingPeriodChargeLimitUsd { get; set; }
+    public PublishedGuideAuthMode? AuthMode { get; set; }
     [StringLength(2048)]
     public string? AuthValidationWebhookUrl { get; set; }
     public int? AuthWebhookTimeoutSeconds { get; set; }
@@ -76,6 +79,7 @@ public class UpdatePublishedGuideDto
     public int? MaxTurns { get; set; }
     public decimal? DailyChargeLimitUsd { get; set; }
     public decimal? BillingPeriodChargeLimitUsd { get; set; }
+    public PublishedGuideAuthMode? AuthMode { get; set; }
     [StringLength(2048)]
     public string? AuthValidationWebhookUrl { get; set; }
     public int? AuthWebhookTimeoutSeconds { get; set; }

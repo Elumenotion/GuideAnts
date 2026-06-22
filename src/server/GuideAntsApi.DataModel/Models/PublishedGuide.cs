@@ -40,6 +40,16 @@ namespace GuideAntsApi.DataModel.Models
         public bool Active { get; set; } = true;
 
         /// <summary>
+        /// Explicit authentication mode for this published guide. Exactly one mode
+        /// applies (mutually exclusive). Defaults to <see cref="PublishedGuideAuthMode.Anonymous"/>.
+        /// Legacy columns (<see cref="ApiKeyHash"/>, <see cref="AuthValidationWebhookUrl"/>)
+        /// still back the <see cref="PublishedGuideAuthMode.ApiKey"/> /
+        /// <see cref="PublishedGuideAuthMode.Webhook"/> modes.
+        /// </summary>
+        [Required]
+        public PublishedGuideAuthMode AuthMode { get; set; } = PublishedGuideAuthMode.Anonymous;
+
+        /// <summary>
         /// Optional retention period in days for conversations created from this published guide.
         /// If specified, conversations older than this period may be automatically archived or deleted.
         /// </summary>

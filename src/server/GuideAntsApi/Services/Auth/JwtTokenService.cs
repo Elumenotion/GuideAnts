@@ -54,31 +54,5 @@ public sealed class JwtTokenService : IJwtTokenService
         return new IssuedJwtToken(new JwtSecurityTokenHandler().WriteToken(token), expiresUtc);
     }
 
-    private static void ValidateOptions(JwtOptions options)
-    {
-        if (string.IsNullOrWhiteSpace(options.Issuer))
-        {
-            throw new InvalidOperationException("Jwt:Issuer is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(options.Audience))
-        {
-            throw new InvalidOperationException("Jwt:Audience is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(options.SigningKey))
-        {
-            throw new InvalidOperationException("Jwt:SigningKey is required.");
-        }
-
-        if (options.SigningKey.Length < 32)
-        {
-            throw new InvalidOperationException("Jwt:SigningKey must be at least 32 characters.");
-        }
-
-        if (options.LifetimeMinutes <= 0)
-        {
-            throw new InvalidOperationException("Jwt:LifetimeMinutes must be greater than 0.");
-        }
-    }
+    private static void ValidateOptions(JwtOptions options) => JwtTokenValidation.ValidateOptions(options);
 }

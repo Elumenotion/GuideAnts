@@ -1,0 +1,6 @@
+{
+  "name": "GuideAnts Guide Admin",
+  "description": "In-app assistant for GuideAnts administrators, including sandbox administration tools.",
+  "defaultAssistant": null,
+  "crew": []
+}

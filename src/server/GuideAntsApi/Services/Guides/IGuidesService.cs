@@ -5,7 +5,7 @@ namespace GuideAntsApi.Services.Guides;
 public interface IGuidesService
 {
     // Guides (TeamAssistant where Kind=Guide)
-    Task<IEnumerable<GuideDto>> GetGuidesAsync();
+    Task<IEnumerable<GuideDto>> GetGuidesAsync(Guid? projectId = null);
     Task<GuideDetailsDto?> GetGuideAsync(Guid guideId, Guid? projectId = null);
     Task<GuideDto> CreateGuideAsync(CreateGuideDto dto);
     Task<GuideDto> UpdateGuideAsync(Guid guideId, UpdateGuideDto dto);

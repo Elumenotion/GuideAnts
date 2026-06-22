@@ -1,5 +1,6 @@
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Core;
+using GuideAntsApi.Services.SystemGuide;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -10,6 +11,7 @@ public static class ProjectEndpoints
         var group = app.MapGroup("/api/projects")
             .WithTags("Projects")
             .RequireAuthorization("RequireApprovedUser")
+            .WithSystemProjectAccessGuard()
             .WithOpenApi();
 
         // Create a new project
@@ -77,8 +79,17 @@ public static class ProjectEndpoints
         .Produces(StatusCodes.Status401Unauthorized);
 
         // Delete a project
-        group.MapDelete("/{projectId}", async (Guid projectId, IProjectService projectService) =>
+        group.MapDelete("/{projectId}", async (
+            Guid projectId,
+            IProjectService projectService,
+            ISystemProjectAccessGuard systemProjectAccessGuard) =>
         {
+            var deleteBlocked = await systemProjectAccessGuard.EnsureDeleteAllowedAsync(projectId);
+            if (deleteBlocked != null)
+            {
+                return deleteBlocked;
+            }
+
             var result = await projectService.DeleteProjectAsync(projectId);
             if (!result)
                 return Results.NotFound();

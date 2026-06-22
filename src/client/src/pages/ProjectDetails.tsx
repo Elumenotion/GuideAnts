@@ -29,10 +29,11 @@ import { useRegisterTour } from '../tour/useRegisterTour';
 
 
 export default function ProjectDetails() {
-    const { projectId } = useParams<{ projectId: string }>();
+    const { projectId: routeProjectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
     const location = useLocation();
     const {
+        projectId: contextProjectId,
         project,
         error,
         isLoading,
@@ -46,6 +47,7 @@ export default function ProjectDetails() {
         isOwner,
 
     } = useProject();
+    const projectId = routeProjectId ?? contextProjectId;
 
     const { showToast } = useToast();
 

@@ -1,5 +1,6 @@
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.SystemGuide;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -20,6 +21,7 @@ public static class LinkEndpoints
         var group = app.MapGroup("/api/projects/{projectId}/links")
             .WithTags("Links")
             .RequireAuthorization("RequireApprovedUser")
+            .WithSystemProjectAccessGuard()
             .WithOpenApi();
 
         // Create a new link

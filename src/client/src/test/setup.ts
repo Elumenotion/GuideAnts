@@ -2,6 +2,10 @@ import '@testing-library/jest-dom';
 import { vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 
+vi.mock('../features/guideantsGuide/GuideAntsGuideButton', () => ({
+  GuideAntsGuideButton: () => null,
+}));
+
 // Clean up after each test
 afterEach(() => {
   cleanup();

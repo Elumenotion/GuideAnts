@@ -269,6 +269,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             WireApiConfig: wireApiConfig ?? new PublishedWireApiConfigDto { Enabled = true },
             AuthMode: PublishedApiAuthMode.Anonymous,
             ExternalUserIdentity: "user",
+            InternalUserId: null,
             SourceChannel: PublishedApiExecutionContextResolver.WireApiSourceChannel,
             ExternalRequestId: "req-123",
             EndpointName: "models");

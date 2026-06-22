@@ -32,7 +32,13 @@ const enabledCapabilities: DocumentServerCapabilities = {
   ],
 };
 
-describe('documentServer PDF exclusions', () => {
+const htmlCapabilities: DocumentServerCapabilities = {
+  ...enabledCapabilities,
+  supportedExtensions: ['html', 'htm', 'docx'],
+  supportedContentTypes: ['text/html', 'application/xhtml+xml', ...enabledCapabilities.supportedContentTypes],
+};
+
+describe('documentServer preview exclusions', () => {
   it('does not route PDF by extension to DocumentServer', () => {
     expect(isDocumentServerSupportedByExtension('sample.pdf', enabledCapabilities)).toBe(false);
     expect(isDocumentServerSupportedByExtension('sample.docx', enabledCapabilities)).toBe(true);
@@ -56,6 +62,28 @@ describe('documentServer PDF exclusions', () => {
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       )
     ).toBe(true);
+  });
+
+  it('does not route HTML by extension to DocumentServer', () => {
+    expect(isDocumentServerSupportedByExtension('index.html', htmlCapabilities)).toBe(false);
+    expect(isDocumentServerSupportedByExtension('page.htm', htmlCapabilities)).toBe(false);
+    expect(isDocumentServerSupportedByExtension('sample.docx', htmlCapabilities)).toBe(true);
+  });
+
+  it('does not route HTML by content type to DocumentServer', () => {
+    expect(isDocumentServerSupportedByContentType('text/html', htmlCapabilities)).toBe(false);
+    expect(isDocumentServerSupportedByContentType('application/xhtml+xml', htmlCapabilities)).toBe(false);
+    expect(
+      isDocumentServerSupportedByContentType(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        htmlCapabilities
+      )
+    ).toBe(true);
+  });
+
+  it('does not classify HTML as a DocumentServer candidate', () => {
+    expect(looksLikeDocumentServerFile('index.html', 'text/html')).toBe(false);
+    expect(looksLikeDocumentServerFile('page.htm', 'text/html')).toBe(false);
   });
 
   it('returns false when capabilities are disabled or missing', () => {

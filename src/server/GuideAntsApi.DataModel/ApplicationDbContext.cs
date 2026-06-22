@@ -132,6 +132,10 @@ namespace GuideAntsApi.DataModel
                 .IsUnique()
                 .HasDatabaseName("IX_Projects_Slug_Unique");
 
+            modelBuilder.Entity<Project>()
+                .Property(p => p.IsSystemProject)
+                .HasDefaultValue(false);
+
             modelBuilder.Entity<Notebook>()
                 .HasIndex(n => new { n.ProjectId, n.Slug })
                 .IsUnique()
@@ -731,6 +735,12 @@ namespace GuideAntsApi.DataModel
             // ------------------------------------------------------------
             modelBuilder.Entity<PublishedGuide>(b =>
             {
+                // Explicit auth mode (int column, not null, default Anonymous = 0)
+                b.Property(x => x.AuthMode)
+                 .HasConversion<int>()
+                 .IsRequired()
+                 .HasDefaultValue(PublishedGuideAuthMode.Anonymous);
+
                 // Index for looking up all published guides for a specific guide
                 b.HasIndex(x => x.GuideId);
                 

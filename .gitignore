@@ -424,3 +424,5 @@ FodyWeavers.xsd
 /scan-recs
 /.playwright-mcp
 /src/server/docker/volumes/content-files
+/tmp
+/scan-results.txt
