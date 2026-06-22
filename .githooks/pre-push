@@ -1,0 +1,28 @@
+#!/bin/sh
+# Block pushing a non-main branch to origin/main (or master).
+# Install: scripts/install-git-hooks.ps1
+
+protected_refs="refs/heads/main refs/heads/master"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "$local_ref" ] || continue
+
+  for protected in $protected_refs; do
+    [ "$remote_ref" = "$protected" ] || continue
+
+    branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+    case "$branch" in
+      main|master)
+        # On main/master locally — allow push to matching protected ref only.
+        ;;
+      *)
+        echo "pre-push: BLOCKED — refusing to push branch '$branch' to $remote_ref" >&2
+        echo "pre-push: Push the feature branch instead, e.g. git push -u origin HEAD" >&2
+        echo "pre-push: Merges to main must go through a pull request." >&2
+        exit 1
+        ;;
+    esac
+  done
+done
+
+exit 0
