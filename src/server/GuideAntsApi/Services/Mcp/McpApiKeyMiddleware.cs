@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.PublishedGuides;
+using GuideAntsApi.Services.Usage;
 
 namespace GuideAntsApi.Services.Mcp;
 
@@ -113,6 +114,14 @@ public class McpApiKeyMiddleware
             publishedGuide.GuideId,
             publishedGuide.McpDescription,
             context.RequestAborted);
+
+        UsageAttributionHttpContext.Set(
+            context,
+            new UsageAttributionContext(
+                PublishedGuideId: pubId,
+                SourceChannel: "mcp",
+                ExternalRequestId: UsageAttributionHttpContext.ResolveExternalRequestId(context),
+                ExternalUserIdentity: mcpContext.UserIdentity));
 
         await _next(context);
     }

@@ -46,6 +46,16 @@ public interface IGuideUsageService
         int pageSize);
 
     /// <summary>
+    /// Gets grouped API usage for source-channel attributed events.
+    /// </summary>
+    Task<GuideApiUsageReportDto?> GetGuideApiUsageReportAsync(
+        Guid projectId,
+        Guid guideId,
+        DateTime from,
+        DateTime to,
+        string? sourceFilter = null);
+
+    /// <summary>
     /// Gets a single invocation with its full message history.
     /// Supports both AgentInvocation IDs and NotebookConversation IDs.
     /// </summary>

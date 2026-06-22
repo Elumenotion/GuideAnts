@@ -23,7 +23,9 @@ public enum UsageCategory
     /// <summary>System-generated storage bytes.</summary>
     StorageSystemGenerated = 7,
     /// <summary>Function/tool call counts.</summary>
-    ToolCall = 8
+    ToolCall = 8,
+    /// <summary>Embedding generation usage events.</summary>
+    Embeddings = 9
 }
 
 /// <summary>
@@ -66,6 +68,10 @@ public interface IUsageRecorder
     /// <param name="agentInvocationId">Optional agent invocation if this usage came from an invocation.</param>
     /// <param name="notebookConversationMessageId">Optional notebook conversation message ID.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="publishedGuideId">Optional published guide ID attribution.</param>
+    /// <param name="sourceChannel">Optional source channel attribution (for example, wire_api).</param>
+    /// <param name="externalRequestId">Optional external request identifier.</param>
+    /// <param name="externalUserIdentity">Optional external user identity attribution.</param>
     Task RecordAsync(
         Guid           projectId,
         Guid           notebookId,
@@ -82,7 +88,11 @@ public interface IUsageRecorder
         Guid?          assistantId       = null,
         Guid?          agentInvocationId = null,
         Guid?          notebookConversationMessageId = null,
-        CancellationToken ct             = default);
+        CancellationToken ct             = default,
+        Guid?          publishedGuideId  = null,
+        string?        sourceChannel     = null,
+        string?        externalRequestId = null,
+        string?        externalUserIdentity = null);
 }
 
 /// <summary>
@@ -109,7 +119,11 @@ public interface IUsageRecorderSync
         string? metadataJson = null,
         Guid? assistantId = null,
         Guid? agentInvocationId = null,
-        Guid? notebookConversationMessageId = null);
+        Guid? notebookConversationMessageId = null,
+        Guid? publishedGuideId = null,
+        string? sourceChannel = null,
+        string? externalRequestId = null,
+        string? externalUserIdentity = null);
 }
 
 /// <summary>
@@ -134,8 +148,12 @@ public static class UsageRecorderExtensions
         Guid? assistantId = null,
         Guid? agentInvocationId = null,
         Guid? notebookConversationMessageId = null,
-        CancellationToken ct = default) =>
-        recorder.RecordAsync(projectId, notebookId, UsageCategory.ChatCompletion, service, "chat", metrics, costUsd, conversationId, null, null, modelDeploymentId, metadataJson, assistantId, agentInvocationId, notebookConversationMessageId, ct);
+        CancellationToken ct = default,
+        Guid? publishedGuideId = null,
+        string? sourceChannel = null,
+        string? externalRequestId = null,
+        string? externalUserIdentity = null) =>
+        recorder.RecordAsync(projectId, notebookId, UsageCategory.ChatCompletion, service, "chat", metrics, costUsd, conversationId, null, null, modelDeploymentId, metadataJson, assistantId, agentInvocationId, notebookConversationMessageId, ct, publishedGuideId, sourceChannel, externalRequestId, externalUserIdentity);
 
     /// <summary>
     /// Convenience wrapper for tool call events.
@@ -152,8 +170,12 @@ public static class UsageRecorderExtensions
         Guid? assistantId = null,
         Guid? agentInvocationId = null,
         Guid? notebookConversationMessageId = null,
-        CancellationToken ct = default) =>
-        recorder.RecordAsync(projectId, notebookId, UsageCategory.ToolCall, "ToolCall", functionName, new UsageMetrics(ValueOther: 1), costUsd, conversationId, null, null, null, metadataJson, assistantId, agentInvocationId, notebookConversationMessageId, ct);
+        CancellationToken ct = default,
+        Guid? publishedGuideId = null,
+        string? sourceChannel = null,
+        string? externalRequestId = null,
+        string? externalUserIdentity = null) =>
+        recorder.RecordAsync(projectId, notebookId, UsageCategory.ToolCall, "ToolCall", functionName, new UsageMetrics(ValueOther: 1), costUsd, conversationId, null, null, null, metadataJson, assistantId, agentInvocationId, notebookConversationMessageId, ct, publishedGuideId, sourceChannel, externalRequestId, externalUserIdentity);
 
     /// <summary>
     /// Records an image generation event.
@@ -245,4 +267,41 @@ public static class UsageRecorderExtensions
             service, operation,
             new UsageMetrics(ValueOther: pages), costUsd, null, contentFileId, notebookFileId,
             null, metadataJson, assistantId, agentInvocationId, null, ct);
+
+    /// <summary>
+    /// Records an embeddings event.
+    /// </summary>
+    /// <inheritdoc cref="IUsageRecorder.RecordAsync"/>
+    public static Task RecordEmbeddingsAsync(
+        this IUsageRecorder recorder,
+        Guid projectId,
+        Guid notebookId,
+        string service,
+        long inputCount,
+        long outputCount = 0,
+        decimal costUsd = 0m,
+        Guid? conversationId = null,
+        string? modelDeploymentId = null,
+        string? metadataJson = null,
+        Guid? assistantId = null,
+        Guid? agentInvocationId = null,
+        Guid? notebookConversationMessageId = null,
+        CancellationToken ct = default)
+        => recorder.RecordAsync(
+            projectId: projectId,
+            notebookId: notebookId,
+            category: UsageCategory.Embeddings,
+            service: service,
+            operation: "embeddings",
+            metrics: new UsageMetrics(ValueInput: inputCount, ValueOutput: outputCount),
+            costUsd: costUsd,
+            conversationId: conversationId,
+            contentFileId: null,
+            notebookFileId: null,
+            modelDeploymentId: modelDeploymentId,
+            metadataJson: metadataJson,
+            assistantId: assistantId,
+            agentInvocationId: agentInvocationId,
+            notebookConversationMessageId: notebookConversationMessageId,
+            ct: ct);
 }

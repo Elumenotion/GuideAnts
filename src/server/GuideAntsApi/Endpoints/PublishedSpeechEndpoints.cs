@@ -1,10 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Speech;
-using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Core;
-using GuideAntsApi.Services.PublishedGuides;
+using GuideAntsApi.Services.PublishedWireApi;
+using GuideAnts.Usage;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -20,10 +18,9 @@ public static class PublishedSpeechEndpoints
         // POST /api/published/speech/transcribe?pubId={pubId} - Transcribe audio for published guides
         group.MapPost("/transcribe", async (
             HttpContext ctx,
-            [FromServices] ApplicationDbContext db,
             [FromServices] ISpeechTranscriptionService transcriptionService,
-            [FromServices] IPublishedGuideAuthService authService,
-            [FromServices] IPublishedGuideCostLimitService costLimits,
+            [FromServices] IPublishedApiExecutionContextResolver executionContextResolver,
+            [FromServices] IPublishedWireUsageRecorder wireUsageRecorder,
             [FromQuery] Guid? pubId,
             [FromQuery] string? language) =>
         {
@@ -33,62 +30,14 @@ public static class PublishedSpeechEndpoints
                 return Results.BadRequest(new { error = "Missing 'pubId' query parameter." });
             }
 
-            // Look up the published guide to get project/notebook IDs
-            var publishedGuide = await db.PublishedGuides
-                .AsNoTracking()
-                .Include(pg => pg.Notebook)
-                .Where(pg => pg.Id == pubId.Value && pg.Active)
-                .FirstOrDefaultAsync(ctx.RequestAborted);
-
-            if (publishedGuide == null)
+            var resolution = await executionContextResolver.ResolveAsync(
+                ctx,
+                pubId.Value,
+                endpointName: "audio.transcriptions",
+                ct: ctx.RequestAborted);
+            if (!resolution.Success)
             {
-                return Results.NotFound(new { error = "Published guide not found or inactive." });
-            }
-
-            var projectId = publishedGuide.Notebook.ProjectId;
-            var notebookId = publishedGuide.NotebookId;
-
-            // Validate authentication if required
-            var authHeader = ctx.Request.Headers["X-Published-Auth"].ToString();
-            var apiKeyHeader = ctx.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
-            var authResult = await authService.ValidateAsync(
-                pubId.Value, 
-                authHeader, 
-                projectId, 
-                notebookId, 
-                ctx.RequestAborted, 
-                apiKeyHeader);
-
-            if (!authResult.IsValid)
-            {
-                var statusCode = authResult.ErrorCode switch
-                {
-                    "authentication_required" or "api_key_required" => StatusCodes.Status401Unauthorized,
-                    "invalid_token" or "invalid_api_key" => StatusCodes.Status401Unauthorized,
-                    _ => StatusCodes.Status503ServiceUnavailable
-                };
-
-                return Results.Json(
-                    new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
-                    statusCode: statusCode);
-            }
-
-            var limitResult = await costLimits.EnsureWithinLimitsAsync(notebookId, ctx.RequestAborted);
-            if (!limitResult.Allowed)
-            {
-                return Results.Json(new
-                {
-                    error = "published_guide_cost_limit_exceeded",
-                    reason = limitResult.Reason,
-                    dailyLimitUsd = limitResult.DailyLimitUsd,
-                    dailyChargeUsd = limitResult.DailyChargeUsd,
-                    dailyWindowStartUtc = limitResult.DailyWindowStartUtc,
-                    dailyWindowEndUtc = limitResult.DailyWindowEndUtc,
-                    billingPeriodLimitUsd = limitResult.BillingPeriodLimitUsd,
-                    billingPeriodChargeUsd = limitResult.BillingPeriodChargeUsd,
-                    billingPeriodStartUtc = limitResult.BillingPeriodStartUtc,
-                    billingPeriodEndUtc = limitResult.BillingPeriodEndUtc
-                }, statusCode: StatusCodes.Status403Forbidden);
+                return resolution.ErrorResult!;
             }
 
             // Validate form data
@@ -128,6 +77,30 @@ public static class PublishedSpeechEndpoints
                     contentType, 
                     enableDiarization: false,
                     ctx.RequestAborted);
+                var executionContext = resolution.Context!;
+                var alias = executionContext.WireApiConfig.AliasMap?
+                    .Where(kvp => string.Equals(kvp.Key, "transcription", StringComparison.OrdinalIgnoreCase))
+                    .Select(kvp => kvp.Value)
+                    .FirstOrDefault()
+                    ?? "transcription";
+                await wireUsageRecorder.RecordAsync(
+                    context: executionContext,
+                    category: UsageCategory.SpeechTranscription,
+                    service: "SpeechTranscription",
+                    operation: "audio.transcriptions",
+                    metrics: new UsageMetrics(
+                        ValueInput: result.DurationSeconds,
+                        ValueOutput: result.Text.Length,
+                        ValueOther: result.DurationSeconds),
+                    endpoint: "audio.transcriptions",
+                    status: "success",
+                    alias: alias,
+                    providerModel: null,
+                    providerServiceMode: executionContext.WireApiConfig.Profile,
+                    requestBytes: audioFile.Length,
+                    inputCount: result.DurationSeconds,
+                    outputCount: result.Text.Length,
+                    ct: ctx.RequestAborted);
 
                 return Results.Ok(new TranscriptionResponseDto
                 {
@@ -151,6 +124,12 @@ public static class PublishedSpeechEndpoints
                     new { error = "transcription_failed", message = ex.Message },
                     statusCode: StatusCodes.Status500InternalServerError);
             }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new { error = "usage_recording_failed", message = ex.Message },
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
         })
         .Produces<TranscriptionResponseDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
@@ -162,4 +141,3 @@ public static class PublishedSpeechEndpoints
         .DisableAntiforgery(); // Required for multipart/form-data from external clients
     }
 }
-

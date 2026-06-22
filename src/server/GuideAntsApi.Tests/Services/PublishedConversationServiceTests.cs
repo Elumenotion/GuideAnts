@@ -13,6 +13,7 @@ using GuideAnts.Usage;
 using GuideAntsApi.Tests.BackgroundJobs;
 using AntRunner.Chat.Abstractions;
 using GuideAntsApi.Tests.TestUtils;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -482,6 +483,7 @@ public sealed class PublishedConversationServiceTests
         services.AddScoped<IConversationHistoryBuilder, ConversationHistoryBuilder>();
         services.AddScoped<IConversationPersistence, ConversationPersistence>();
         services.AddScoped<IConversationUsageReporter, ConversationUsageReporter>();
+        services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
         services.AddSingleton<IUsageRecorder>(Mock.Of<IUsageRecorder>());
         services.AddSingleton<IContextOptionsService>(Mock.Of<IContextOptionsService>());
         services.AddSingleton<IChatModelResolver>(Mock.Of<IChatModelResolver>());

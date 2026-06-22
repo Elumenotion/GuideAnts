@@ -12,6 +12,7 @@ using GuideAnts.Usage;
 using GuideAntsApi.Services.Conversations.Queries;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Routing;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -62,6 +63,7 @@ internal static class ConversationTestServices
         var usageReporter = new ConversationUsageReporter(
             scopeFactory,
             recorder,
+            Mock.Of<IHttpContextAccessor>(),
             Mock.Of<ILogger<ConversationUsageReporter>>());
         return (persistence, usageReporter);
     }

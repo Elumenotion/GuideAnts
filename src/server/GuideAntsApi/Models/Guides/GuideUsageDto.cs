@@ -40,6 +40,33 @@ public record GuideUsageConversationsPageDto(
 );
 
 /// <summary>
+/// Aggregated API usage row grouped by source, endpoint, alias, provider mode, and status family.
+/// </summary>
+public record GuideApiUsageRowDto(
+    string SourceChannel,
+    string Endpoint,
+    string Alias,
+    string ProviderServiceMode,
+    string StatusFamily,
+    int Events,
+    decimal ChargeUsd
+);
+
+/// <summary>
+/// API usage report section for non-conversation and attributed conversation API traffic.
+/// </summary>
+public record GuideApiUsageReportDto(
+    Guid GuideId,
+    string GuideName,
+    DateTime FromDate,
+    DateTime ToDate,
+    string SourceFilter,
+    int TotalEvents,
+    decimal TotalChargeUsd,
+    List<GuideApiUsageRowDto> Rows
+);
+
+/// <summary>
 /// Usage report for a Guide/Assistant showing crew member and tool call statistics.
 /// </summary>
 public record GuideUsageReportDto(
