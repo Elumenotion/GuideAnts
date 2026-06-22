@@ -915,7 +915,7 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
             try
             {
                 await ScriptExecutionScopeRuntime.EnsurePythonVenvAsync(scope, scopeOptions, logger, CancellationToken.None);
-                await ScriptExecutionScopeRuntime.ApplyScopeRequirementsAsync(scope, scopeOptions, adminOptions, logger, CancellationToken.None);
+                await ScriptExecutionScopeRuntime.EnsureScopeRequirementsForExecutionAsync(scope, scopeOptions, adminOptions, logger, CancellationToken.None);
             }
             catch (Exception ex) when (!scopeOptions.RequireScopedPythonVenv)
             {
@@ -1417,6 +1417,74 @@ internal static class ScriptExecutionScopeRuntime
             scope.ProjectId,
             scope.GuideScopeId,
             LogValueSanitizer.Sanitize(options.BasePythonVenvPath));
+    }
+
+    public static async Task EnsureScopeRequirementsForExecutionAsync(
+        ScriptExecutionScope scope,
+        ScriptExecutionScopeOptions scopeOptions,
+        AdminApiOptions adminOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        EnsureScopeDirectory(scope);
+        await EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
+
+        var requirementsPath = File.Exists(scope.RequirementsFilePath)
+            ? scope.RequirementsFilePath
+            : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
+        var requirementsText = File.Exists(requirementsPath)
+            ? await File.ReadAllTextAsync(requirementsPath, cancellationToken)
+            : string.Empty;
+        var validation = ValidateRequirements(requirementsText);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException(validation.ErrorMessage);
+        }
+
+        var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
+        var requirementsHash = ComputeSha256(requirementsText);
+        var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
+        if (requirementsHash == appliedState.RequirementsHash)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requirementsText))
+        {
+            var result = await Cli.Wrap(scope.PythonExecutablePath)
+                .WithArguments(args => args
+                    .Add("-m")
+                    .Add("pip")
+                    .Add("--disable-pip-version-check")
+                    .Add("install")
+                    .Add("-r")
+                    .Add(requirementsPath))
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(cancellationToken);
+
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(FormatPipFailure(result));
+            }
+        }
+
+        await PruneUnmanagedTopLevelPackagesAsync(
+            scope.PythonExecutablePath,
+            desiredTopLevelPackages,
+            cancellationToken);
+
+        await AdminScopeAppliedStateRuntime.WriteAsync(
+            scope,
+            requirementsHash,
+            requirementsPath,
+            desiredTopLevelPackages,
+            appliedState.InstallScriptsHash,
+            appliedState.InstallScriptStepResults,
+            cancellationToken);
+        logger.LogInformation(
+            "Synced scoped Python requirements for execution on project={ProjectId} guide={GuideId}.",
+            scope.ProjectId,
+            scope.GuideScopeId);
     }
 
     public static async Task<AdminApplyResult> ApplyScopeRequirementsAsync(
