@@ -57,16 +57,12 @@ public static class PublishedSpeechEndpoints
                 projectId, 
                 notebookId, 
                 ctx.RequestAborted, 
-                apiKeyHeader);
+                apiKeyHeader,
+                PublishedGuideAuthService.ReadAppAuthCookie(ctx.Request));
 
             if (!authResult.IsValid)
             {
-                var statusCode = authResult.ErrorCode switch
-                {
-                    "authentication_required" or "api_key_required" => StatusCodes.Status401Unauthorized,
-                    "invalid_token" or "invalid_api_key" => StatusCodes.Status401Unauthorized,
-                    _ => StatusCodes.Status503ServiceUnavailable
-                };
+                var statusCode = PublishedGuideAuthService.MapValidationFailureStatusCode(authResult.ErrorCode);
 
                 return Results.Json(
                     new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },

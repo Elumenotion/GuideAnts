@@ -10,10 +10,17 @@ public interface IPublishedConversationService
 	/// <param name="conversationId">Target conversation</param>
 	/// <param name="request">Send message request</param>
 	/// <param name="publisherId">Optional opaque publisher correlation id</param>
-	/// <param name="externalUserIdentity">External user identity from webhook validation</param>
+	/// <param name="externalUserIdentity">External user identity from auth validation</param>
+	/// <param name="internalUserId">Internal Users.Id for AppIdentity-mode published guides</param>
 	/// <param name="cancellationToken">Cancellation token</param>
 	/// <returns>Streaming events compatible with main client SSE event types</returns>
-	IAsyncEnumerable<StreamingEvent> SendMessageStreamAsync(Guid conversationId, SendMessageRequest request, string? publisherId, string? externalUserIdentity, CancellationToken cancellationToken = default);
+	IAsyncEnumerable<StreamingEvent> SendMessageStreamAsync(
+        Guid conversationId,
+        SendMessageRequest request,
+        string? publisherId,
+        string? externalUserIdentity,
+        Guid? internalUserId = null,
+        CancellationToken cancellationToken = default);
 
 	/// <summary>
 	/// Resumes a published conversation after external (client-handled) tool results are posted.
@@ -21,10 +28,16 @@ public interface IPublishedConversationService
 	/// </summary>
 	/// <param name="conversationId">Target conversation</param>
 	/// <param name="publisherId">Optional opaque publisher correlation id</param>
-	/// <param name="externalUserIdentity">External user identity from webhook validation</param>
+	/// <param name="externalUserIdentity">External user identity from auth validation</param>
+	/// <param name="internalUserId">Internal Users.Id for AppIdentity-mode published guides</param>
 	/// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Streaming events compatible with main client SSE event types</returns>
-    IAsyncEnumerable<StreamingEvent> ResumeAfterExternalToolResultsStreamAsync(Guid conversationId, string? publisherId, string? externalUserIdentity, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<StreamingEvent> ResumeAfterExternalToolResultsStreamAsync(
+        Guid conversationId,
+        string? publisherId,
+        string? externalUserIdentity,
+        Guid? internalUserId = null,
+        CancellationToken cancellationToken = default);
 
     Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title);
     Task<NotebookConversationWithMessagesDto?> GetConversationWithMessagesAsync(Guid conversationId);

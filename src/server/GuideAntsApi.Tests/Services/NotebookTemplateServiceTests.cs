@@ -5,6 +5,9 @@ using Moq;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;
+using GuideAntsApi.Services.SystemGuide;
+using GuideAntsApi.Settings;
+using GuideAntsApi.Tests.TestUtils;
 
 namespace GuideAntsApi.Tests.Services;
 
@@ -25,7 +28,8 @@ public class NotebookTemplateServiceTests
 
         _loggerMock = new Mock<ILogger<NotebookTemplateService>>();
         var scopeFactory = new GuideAntsApi.Tests.TestUtils.TestServiceScopeFactory(_context);
-        _service = new NotebookTemplateService(scopeFactory, _loggerMock.Object);
+        var catalogFilter = EmptySystemGuideCatalogFilter.Instance;
+        _service = new NotebookTemplateService(scopeFactory, catalogFilter, _loggerMock.Object);
     }
 
     [TestCleanup]
@@ -104,5 +108,43 @@ public class NotebookTemplateServiceTests
         var templates = (await _service.GetTemplatesAsync()).ToList();
 
         templates.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task GetTemplateSummariesAsync_Excludes_system_guide_ids_from_settings()
+    {
+        var systemGuideId = Guid.NewGuid();
+        _context.Assistants.AddRange(
+            new Assistant
+            {
+                Id = systemGuideId,
+                Name = "GuideAnts Guide",
+                Kind = AssistantKind.Guide,
+                IsActive = true,
+                IsGlobal = true
+            },
+            new Assistant
+            {
+                Name = "Visible Template",
+                Kind = AssistantKind.Guide,
+                IsActive = true,
+                IsGlobal = true
+            });
+        await _context.SaveChangesAsync();
+
+        var store = new Mock<IGuideAntsSystemSettingsStore>();
+        store.Setup(s => s.GetAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GuideAntsSystemSettings { UserGuideId = systemGuideId });
+
+        var scopeFactory = new TestServiceScopeFactory(_context);
+        var service = new NotebookTemplateService(
+            scopeFactory,
+            new SystemGuideCatalogFilter(store.Object, _context),
+            _loggerMock.Object);
+
+        var templates = (await service.GetTemplateSummariesAsync()).ToList();
+
+        templates.Should().ContainSingle();
+        templates[0].TemplateName.Should().Be("Visible Template");
     }
 }

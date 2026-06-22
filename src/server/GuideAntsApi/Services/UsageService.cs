@@ -92,7 +92,7 @@ public sealed class UsageQueryService(IServiceScopeFactory scopeFactory) : IUsag
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var ownerProjectIds = db.Projects.Select(p => p.Id);
+        var ownerProjectIds = db.Projects.Where(p => !p.IsSystemProject).Select(p => p.Id);
 
         var q = db.UsageEvents.AsNoTracking()
             .Where(e => e.Created >= from && e.Created <= to && e.ProjectId != null && ownerProjectIds.Contains(e.ProjectId.Value));
@@ -253,7 +253,7 @@ using var scope = _scopeFactory.CreateScope();
         
         // Step 1: Project IDs this user owns
         var ownerProjectIds = await db.Projects
-            .Where(p => true)
+            .Where(p => !p.IsSystemProject)
             .Select(p => p.Id)
             .ToListAsync();
 

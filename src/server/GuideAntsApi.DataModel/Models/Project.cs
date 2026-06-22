@@ -22,6 +22,13 @@ namespace GuideAntsApi.DataModel.Models
 
         public bool Deleted { get; set; }
 
+        /// <summary>
+        /// Marks the hidden, system-owned project (slug <c>guideants-system</c>).
+        /// Exactly one row carries this flag; it is excluded from normal listings
+        /// and guarded so non-admins cannot read or mutate it. Defaults to <c>false</c>.
+        /// </summary>
+        public bool IsSystemProject { get; set; }
+
         public Guid? HomePageContentFileId { get; set; }
         public ContentFile? HomePageContentFile { get; set; }
         public ICollection<Notebook> Notebooks { get; set; } = [];

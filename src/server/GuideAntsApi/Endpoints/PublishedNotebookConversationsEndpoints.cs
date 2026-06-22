@@ -35,16 +35,11 @@ public static class PublishedNotebookConversationsEndpoints
                 // Use a custom header for published-guide authentication.
                 var authHeader = ctx.Request.Headers["X-Published-Auth"].ToString();
                 var apiKeyHeader = ctx.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
-                var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader);
+                var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader, PublishedGuideAuthService.ReadAppAuthCookie(ctx.Request));
 
                 if (!authResult.IsValid)
                 {
-                    var statusCode = authResult.ErrorCode switch
-                    {
-                        "authentication_required" or "api_key_required" => StatusCodes.Status401Unauthorized,
-                        "invalid_token" or "invalid_api_key" => StatusCodes.Status401Unauthorized,
-                        _ => StatusCodes.Status503ServiceUnavailable
-                    };
+                    var statusCode = PublishedGuideAuthService.MapValidationFailureStatusCode(authResult.ErrorCode);
 
                     return Results.Json(
                         new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
@@ -92,16 +87,11 @@ public static class PublishedNotebookConversationsEndpoints
             {
                 var authHeader = ctx.Request.Headers["X-Published-Auth"].ToString();
                 var apiKeyHeader = ctx.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
-                var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader);
+                var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader, PublishedGuideAuthService.ReadAppAuthCookie(ctx.Request));
 
                 if (!authResult.IsValid)
                 {
-                    var statusCode = authResult.ErrorCode switch
-                    {
-                        "authentication_required" or "api_key_required" => StatusCodes.Status401Unauthorized,
-                        "invalid_token" or "invalid_api_key" => StatusCodes.Status401Unauthorized,
-                        _ => StatusCodes.Status503ServiceUnavailable
-                    };
+                    var statusCode = PublishedGuideAuthService.MapValidationFailureStatusCode(authResult.ErrorCode);
 
                     return Results.Json(
                         new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
@@ -161,16 +151,11 @@ public static class PublishedNotebookConversationsEndpoints
 			// Validate authentication from the custom published-guide auth header.
 			var authHeader = ctx.Request.Headers["X-Published-Auth"].ToString();
 			var apiKeyHeader = ctx.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
-			var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader);
+			var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader, PublishedGuideAuthService.ReadAppAuthCookie(ctx.Request));
 
 			if (!authResult.IsValid)
 			{
-				var statusCode = authResult.ErrorCode switch
-				{
-					"authentication_required" or "api_key_required" => StatusCodes.Status401Unauthorized,
-					"invalid_token" or "invalid_api_key" => StatusCodes.Status401Unauthorized,
-					_ => StatusCodes.Status503ServiceUnavailable
-				};
+				var statusCode = PublishedGuideAuthService.MapValidationFailureStatusCode(authResult.ErrorCode);
 
 				return Results.Json(
 					new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
@@ -197,7 +182,7 @@ public static class PublishedNotebookConversationsEndpoints
 
 			ctx.Response.Headers["Content-Type"] = "text/event-stream";
 
-			await foreach (var ev in publishedService.SendMessageStreamAsync(convoId, request, pubId, authResult.UserIdentity, ctx.RequestAborted))
+			await foreach (var ev in publishedService.SendMessageStreamAsync(convoId, request, pubId, authResult.UserIdentity, authResult.InternalUserId, ctx.RequestAborted))
             {
                 await ctx.Response.WriteSseEventAsync(ev.EventType, ev.Payload, ctx.RequestAborted);
             }
@@ -275,15 +260,10 @@ public static class PublishedNotebookConversationsEndpoints
 
             var authHeader = ctx.Request.Headers["X-Published-Auth"].ToString();
             var apiKeyHeader = ctx.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
-            var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader);
+            var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader, PublishedGuideAuthService.ReadAppAuthCookie(ctx.Request));
             if (!authResult.IsValid)
             {
-                var statusCode = authResult.ErrorCode switch
-                {
-                    "authentication_required" or "api_key_required" => StatusCodes.Status401Unauthorized,
-                    "invalid_token" or "invalid_api_key" => StatusCodes.Status401Unauthorized,
-                    _ => StatusCodes.Status503ServiceUnavailable
-                };
+                var statusCode = PublishedGuideAuthService.MapValidationFailureStatusCode(authResult.ErrorCode);
 
                 return Results.Json(
                     new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
@@ -440,16 +420,11 @@ public static class PublishedNotebookConversationsEndpoints
             {
                 var authHeader = ctx.Request.Headers["X-Published-Auth"].ToString();
                 var apiKeyHeader = ctx.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
-                var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader);
+                var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader, PublishedGuideAuthService.ReadAppAuthCookie(ctx.Request));
 
                 if (!authResult.IsValid)
                 {
-                    var statusCode = authResult.ErrorCode switch
-                    {
-                        "authentication_required" or "api_key_required" => StatusCodes.Status401Unauthorized,
-                        "invalid_token" or "invalid_api_key" => StatusCodes.Status401Unauthorized,
-                        _ => StatusCodes.Status503ServiceUnavailable
-                    };
+                    var statusCode = PublishedGuideAuthService.MapValidationFailureStatusCode(authResult.ErrorCode);
 
                     return Results.Json(
                         new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
@@ -503,15 +478,10 @@ public static class PublishedNotebookConversationsEndpoints
 
             var authHeader = ctx.Request.Headers["X-Published-Auth"].ToString();
             var apiKeyHeader = ctx.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
-            var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader);
+            var authResult = await authService.ValidateAsync(pubGuid, authHeader, projectId, notebookId, ctx.RequestAborted, apiKeyHeader, PublishedGuideAuthService.ReadAppAuthCookie(ctx.Request));
             if (!authResult.IsValid)
             {
-                var statusCode = authResult.ErrorCode switch
-                {
-                    "authentication_required" or "api_key_required" => StatusCodes.Status401Unauthorized,
-                    "invalid_token" or "invalid_api_key" => StatusCodes.Status401Unauthorized,
-                    _ => StatusCodes.Status503ServiceUnavailable
-                };
+                var statusCode = PublishedGuideAuthService.MapValidationFailureStatusCode(authResult.ErrorCode);
 
                 return Results.Json(
                     new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
@@ -591,7 +561,7 @@ public static class PublishedNotebookConversationsEndpoints
             if (resume == true)
             {
                 ctx.Response.Headers["Content-Type"] = "text/event-stream";
-                await foreach (var ev in publishedService.ResumeAfterExternalToolResultsStreamAsync(convoId, pubId, authResult.UserIdentity, ctx.RequestAborted))
+                await foreach (var ev in publishedService.ResumeAfterExternalToolResultsStreamAsync(convoId, pubId, authResult.UserIdentity, authResult.InternalUserId, ctx.RequestAborted))
                 {
                     await ctx.Response.WriteSseEventAsync(ev.EventType, ev.Payload, ctx.RequestAborted);
                 }

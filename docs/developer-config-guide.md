@@ -398,3 +398,21 @@ A few items worth confirming explicitly before onboarding a new dev:
 | **Client dev** | Node 20+/22+, npm, `.env.*` files, a running API | Electron 41 (desktop), ANALYZE=true tooling |
 | **Server dev** | .NET 8 SDK, PowerShell 7+ (cross-platform), `appsettings*.json`, SQL Server (containerized) | EF CLI tools for migrations, Azure Speech key (if testing Azure speech path), local/admin test accounts for role-gated endpoint checks |
 | **Docker builds** | All of the above + BuildKit, GPU runtime for CUDA/ROCm image builds, dotnet publish for ScriptExecutionAgent | GHCR write access (only for publish workflows) |
+
+---
+
+## 7. System Guide (GuideAnts Guide)
+
+The **System Guide** is a seeded, admin-managed in-app assistant exposed via the header flyout
+(GuideAnts Guide button). It is **not** a normal user project.
+
+| Topic | Detail |
+|---|---|
+| **What it is** | Two bootstrap guides (user + admin) in a hidden **system project**, each published with **App Identity** auth so signed-in GuideAnts users chat without API keys or webhooks. |
+| **Visibility** | The system project is excluded from Home/Projects listings. Non-admins receive **404** on direct project URLs; admins reach it via **Settings → System Guides** (`/settings/system-guides`). |
+| **Auth** | Published guides use `AuthMode = AppIdentity`. The flyout sends the same-host `GuideAnts.Auth` session cookie — **no token is minted or stored client-side**. |
+| **Admin editing** | Admins open **Settings → System Guides** to edit guide instructions, publish settings (Auth tab is read-only App Identity), and workspace content. |
+| **Seeding** | On startup, `GuideAntsSystemSeeder` creates one system project, two guides, two AppIdentity published rows, and persists IDs in the `GuideAntsSystem` settings section. Re-runs are idempotent. |
+
+For implementation and acceptance details, see `docs/guideants-guide-implementation-plan.md` and
+`docs/guideants-guide/STATUS.md`.

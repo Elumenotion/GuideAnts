@@ -303,7 +303,9 @@ public class ConversationQueryService : IConversationQueryService
             .Distinct();
 
         var queryable = db.NotebookConversations
-            .Where(c => userConversationIds.Contains(c.Id) && !c.Notebook.Project.Deleted)
+            .Where(c => userConversationIds.Contains(c.Id)
+                        && !c.Notebook.Project.Deleted
+                        && !c.Notebook.Project.IsSystemProject)
             .Select(c => new
             {
                 c.Id,

@@ -5,6 +5,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Core;
+using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Endpoints;
 
 namespace GuideAntsApi.Services.Components;
@@ -107,6 +108,15 @@ using var scope = CreateDbScope();
             .FirstOrDefaultAsync();
         
         if (project == null) throw new ArgumentException("Project not found");
+
+        var catalogFilter = scope.ServiceProvider.GetRequiredService<ISystemGuideCatalogFilter>();
+        var hiddenGuideIds = await catalogFilter.GetHiddenGuideIdsForCatalogAsync(projectId);
+        if (hiddenGuideIds.Contains(requestedGuideId.Value))
+        {
+            throw new ArgumentException(
+                $"Guide with ID {requestedGuideId.Value} is not available for this project",
+                nameof(createDto));
+        }
 
         // Verify that requestedGuideId is a valid guide ID (owner-scoped or global)
         var guide = await context.Assistants

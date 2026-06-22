@@ -166,6 +166,8 @@ export function PublishGuideDialog({
       return;
     }
 
+    const isAppIdentityAuth = publishedGuide?.authMode === 'AppIdentity';
+
     const config = {
       friendlyName: friendlyName.trim() || undefined,
       displayMode,
@@ -179,8 +181,12 @@ export function PublishGuideDialog({
       retentionPeriod: retentionPeriod ?? undefined,
       dailyChargeLimitUsd: dailyChargeLimitUsd ?? undefined,
       billingPeriodChargeLimitUsd: billingPeriodChargeLimitUsd ?? undefined,
-      authValidationWebhookUrl: authWebhookUrl.trim() || undefined,
-      authWebhookTimeoutSeconds: authWebhookUrl.trim() ? authWebhookTimeout : undefined,
+      ...(isAppIdentityAuth
+        ? {}
+        : {
+            authValidationWebhookUrl: authWebhookUrl.trim() || undefined,
+            authWebhookTimeoutSeconds: authWebhookUrl.trim() ? authWebhookTimeout : undefined,
+          }),
       mcpEnabled,
       mcpDescription: mcpDescription.trim() || undefined,
     };
@@ -428,6 +434,7 @@ export function PublishGuideDialog({
                 sessionApiKey={sessionApiKey}
                 guideId={guideId}
                 publishedGuideId={publishedGuide?.id}
+                authMode={publishedGuide?.authMode}
                 onApiKeyChange={handleApiKeyChange}
                 onSessionApiKeyChange={handleSessionApiKeyChange}
               />

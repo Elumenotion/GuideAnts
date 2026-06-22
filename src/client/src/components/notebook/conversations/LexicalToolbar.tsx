@@ -25,6 +25,7 @@ import { $createAudioNode } from './AudioNode';
 import { $createVideoNode } from './VideoNode';
 import { ToolbarConfig } from './LexicalEditor';
 import { HeaderActionsBar } from '../../common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../../../features/guideantsGuide/GuideAntsGuideButton';
 
 interface LexicalToolbarProps {
   config: ToolbarConfig;
@@ -714,6 +715,7 @@ export default function LexicalToolbar({
     <>
       <div className={`lexical-toolbar flex items-center gap-1 p-1.5 md:p-2 border-b border-gray-200 bg-gray-50 ${className}`} data-tour-id="guide.content.instructions.toolbar">
         <HeaderActionsBar align="start" variant="toolbar" className="flex-1 min-w-0">
+          <GuideAntsGuideButton />
           {/* When in HTML preview mode (not source), show indicator and hide formatting buttons */}
           {isHtmlPreviewMode && !isSourceMode && (
             <span className="text-sm text-gray-500 px-2">HTML Preview (read-only)</span>

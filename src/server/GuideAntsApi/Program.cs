@@ -210,6 +210,10 @@ public class Program
             requiredSeeder.SeedAsync().GetAwaiter().GetResult();
             LogPhase("RequiredGuidesAssistantsSeeder");
 
+            var guideAntsSystemSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IGuideAntsSystemSeeder>();
+            guideAntsSystemSeeder.SeedAsync().GetAwaiter().GetResult();
+            LogPhase("GuideAntsSystemSeeder");
+
             var runtimeProfileSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder>();
             runtimeProfileSeeder.SeedAsync().GetAwaiter().GetResult();
             LogPhase("RuntimeProfileSeeder");
@@ -371,6 +375,7 @@ public class Program
             .AllowAnonymous();
         
         app.MapProjectEndpoints();
+        app.MapSystemGuideEndpoints();
         app.MapGuidesMarkdownEndpoints();
         app.MapCatalogEndpoints();
         app.MapGuidesEndpoints();

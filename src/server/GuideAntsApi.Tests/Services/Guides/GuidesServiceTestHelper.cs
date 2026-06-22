@@ -5,8 +5,9 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Guides;
 using GuideAntsApi.Services.LlamaCpp;
-using GuideAntsApi.Settings;
+using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Tests.TestUtils;
+using GuideAntsApi.Settings;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -18,12 +19,14 @@ internal static class GuidesServiceTestHelper
 {
     internal static GuidesService CreateGuidesService(
         ApplicationDbContext context,
-        IRuntimeProfileResolver? runtimeProfileResolver = null) =>
+        IRuntimeProfileResolver? runtimeProfileResolver = null,
+        ISystemGuideCatalogFilter? catalogFilter = null) =>
         new(
             context,
             CreateMarkdownExtractionService(),
             runtimeProfileResolver ?? Mock.Of<IRuntimeProfileResolver>(),
             new StaticOptionsMonitor<SettingsSecretsOptions>(CreateSecretsOptions()),
+            catalogFilter ?? EmptySystemGuideCatalogFilter.Instance,
             NullLogger<GuidesService>.Instance);
 
     internal static GuideExportImportService CreateExportImportService(ApplicationDbContext context, DbContextOptions<ApplicationDbContext> options) =>

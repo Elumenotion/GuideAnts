@@ -7,6 +7,7 @@ using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.EnvironmentVariables;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Settings;
 using AntRunner.ToolCalling.Functions;
 using AntRunner.Chat;
@@ -19,12 +20,14 @@ public class GuidesService(
     MarkdownExtractionService markdownExtractionService,
     IRuntimeProfileResolver runtimeProfileResolver,
     IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions,
+    ISystemGuideCatalogFilter systemGuideCatalogFilter,
     ILogger<GuidesService> logger) : IGuidesService
 {
     private readonly ApplicationDbContext _context = context;
     private readonly MarkdownExtractionService _markdownExtractionService = markdownExtractionService;
     private readonly IRuntimeProfileResolver _runtimeProfileResolver = runtimeProfileResolver;
     private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptions = settingsSecretsOptions;
+    private readonly ISystemGuideCatalogFilter _systemGuideCatalogFilter = systemGuideCatalogFilter;
     private readonly ILogger<GuidesService> _logger = logger;
 
     private static readonly JsonSerializerOptions JsonCaseInsensitiveOptions = new()
@@ -44,10 +47,12 @@ public class GuidesService(
 
     #region Guides
 
-    public async Task<IEnumerable<GuideDto>> GetGuidesAsync()
+    public async Task<IEnumerable<GuideDto>> GetGuidesAsync(Guid? projectId = null)
     {
+        var hiddenGuideIds = await _systemGuideCatalogFilter.GetHiddenGuideIdsForCatalogAsync(projectId);
+
         return await _context.Assistants
-            .Where(a => a.Kind == AssistantKind.Guide)
+            .Where(a => a.Kind == AssistantKind.Guide && !hiddenGuideIds.Contains(a.Id))
             .OrderBy(a => a.Created)
             .Select(a => new GuideDto(
                 a.Id,

@@ -152,6 +152,38 @@ describe('ProjectContext', () => {
     expect(result.current.isLoading).toBe(false);
   });
 
+  it('blocks direct navigation to a hidden system project for contributors', async () => {
+    mockedUseAuth.mockReturnValue({
+      user: {
+        id: 'u2',
+        name: 'Contributor',
+        email: 'contrib@example.com',
+        role: 'Contributor',
+        mustChangePassword: false,
+        lastLoginAt: null,
+      },
+      role: 'Contributor',
+      status: 'authenticated',
+      isAuthenticated: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      changePassword: vi.fn(),
+      refresh: vi.fn(),
+      logout: vi.fn(),
+    });
+    mockApi.projects.getProjectDetails.mockRejectedValueOnce(new Error('Project not found'));
+
+    const systemProjectWrapper = ({ children }: { children: React.ReactNode }) => (
+      <ProjectProvider projectId="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee">{children}</ProjectProvider>
+    );
+    const { result } = renderHook(() => useProject(), { wrapper: systemProjectWrapper });
+
+    await waitFor(() => {
+      expect(result.current.error).toBe('Project not found');
+    });
+    expect(result.current.project).toBeNull();
+  });
+
   it('renames a content file through the API', async () => {
     mockApi.projects.renameContentFile.mockResolvedValueOnce(undefined);
     const { result } = renderHook(() => useProject(), { wrapper });

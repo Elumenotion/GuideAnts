@@ -40,6 +40,7 @@ public static class GuidesPublishingEndpoints
             ShowConversationStarters = pg.ShowConversationStarters,
             ShowAttachments = pg.ShowAttachments,
             HasApiKey = !string.IsNullOrWhiteSpace(pg.ApiKeyHash),
+            AuthMode = pg.AuthMode,
             McpEnabled = pg.McpEnabled,
             McpDescription = pg.McpDescription
         };
@@ -117,6 +118,11 @@ var guide = await db.Assistants
 
             if (guide == null)
                 return Results.NotFound(new { error = "Guide not found or you do not own this guide" });
+
+            if (dto.AuthMode == PublishedGuideAuthMode.AppIdentity)
+            {
+                return Results.BadRequest(new { error = "app_identity_auth_not_configurable_via_api" });
+            }
 
             // Validate friendly name if provided
             if (!string.IsNullOrWhiteSpace(dto.FriendlyName))
@@ -267,6 +273,18 @@ var publishedGuide = await db.PublishedGuides
 
             if (publishedGuide == null)
                 return Results.NotFound();
+
+            if (dto.AuthMode == PublishedGuideAuthMode.AppIdentity)
+            {
+                return Results.BadRequest(new { error = "app_identity_auth_not_configurable_via_api" });
+            }
+
+            if (publishedGuide.AuthMode == PublishedGuideAuthMode.AppIdentity &&
+                dto.AuthMode.HasValue &&
+                dto.AuthMode.Value != PublishedGuideAuthMode.AppIdentity)
+            {
+                return Results.BadRequest(new { error = "app_identity_auth_not_configurable_via_api" });
+            }
 
             // Verify project access
 

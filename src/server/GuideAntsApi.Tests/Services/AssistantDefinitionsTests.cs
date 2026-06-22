@@ -70,8 +70,9 @@ public class AssistantDefinitionsTests
 
         var svc = new NotebookTemplateService(
             scopeFactoryMock2.Object,
+            GuideAntsApi.Tests.TestUtils.EmptySystemGuideCatalogFilter.Instance,
             NullLogger<NotebookTemplateService>.Instance);
-        var crew = await svc.GetAssistantsAsync(template.Id, owner.Id);
+        var crew = await svc.GetAssistantsAsync(template.Id, userId: owner.Id);
         Assert.AreEqual(2, crew.Count);
         var pythonAntsDto = crew.Single(a => a.Name == "Python Ants");
         Assert.IsTrue(pythonAntsDto.AvatarUrl.Contains("/api/assistants/avatar/Python%20Ants"));

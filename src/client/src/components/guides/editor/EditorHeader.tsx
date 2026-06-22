@@ -13,6 +13,7 @@ interface EditorHeaderProps {
 
 import { TourStartButton } from '../../../tour/TourStartButton';
 import { HeaderActionsBar } from '../../common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../../../features/guideantsGuide/GuideAntsGuideButton';
 import { HomeButton } from '../../common/HomeButton';
 import { SettingsButton } from '../../common/SettingsButton';
 
@@ -38,6 +39,7 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
             </h1>
           </div>
           <HeaderActionsBar>
+            <GuideAntsGuideButton />
             {isEditing && showExport && (
               <button
                 onClick={onExport}
