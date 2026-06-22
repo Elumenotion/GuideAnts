@@ -65,6 +65,7 @@ On first load you'll be sent to `/register`; the first account becomes **Admin**
 |---------|--------------|
 | `./guideants.sh --doctor` | Run all checks, change nothing. |
 | `./guideants.sh --backend slim` | Skip the backend prompt. |
+| `./guideants.sh --mount /path/to/folder` | Mount a host folder into a project on startup. Requires prior login. |
 | `./guideants.sh --reconfigure` | Re-prompt for backend even if one was previously saved. |
 | `./guideants.sh --yes` | Accept prompts automatically. |
 | `./guideants.sh --help` | Full help. |

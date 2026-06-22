@@ -16,6 +16,7 @@
 # Flags:
 #   --doctor                 Run checks only; change nothing.
 #   --backend <cpu|cuda13|rocm|slim>   Skip the backend prompt.
+#   --mount <path>           Mount a host folder into a project (requires prior login).
 #   --reconfigure            Re-prompt for backend even if one was saved.
 #   --yes                    Assume "yes" for prompts (auto-accept updates).
 #   --help                   Show this help.
@@ -34,6 +35,7 @@ MODE="install"            # install | doctor
 BACKEND_OVERRIDE=""       # cpu | cuda13 | rocm | slim
 ASSUME_YES="0"            # 0 | 1
 RECONFIGURE="0"           # 0 | 1
+MOUNT_PATH=""             # host folder to bind-mount
 
 # --- logging helpers ---------------------------------------------------------
 log()  { printf '[guideants] %s\n' "$*"; }
@@ -42,7 +44,7 @@ fail() { printf '[guideants][error] %s\n' "$*" >&2; exit 1; }
 hr()   { printf '%s\n' "----------------------------------------------------------------"; }
 
 usage() {
-  sed -n '3,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # --- argument parsing --------------------------------------------------------
@@ -54,6 +56,9 @@ while [[ $# -gt 0 ]]; do
     --backend)
       [[ $# -ge 2 ]] || fail "Missing value for --backend"
       BACKEND_OVERRIDE="$2"; shift ;;
+    --mount)
+      [[ $# -ge 2 ]] || fail "Missing value for --mount"
+      MOUNT_PATH="$2"; shift ;;
     --help|-h) usage; exit 0 ;;
     *) fail "Unknown option: $1 (try --help)" ;;
   esac
@@ -465,6 +470,206 @@ detect_prior_install() {
 }
 
 # =============================================================================
+# 5b. Post-startup host folder mount (--mount flag)
+# =============================================================================
+API_BASE="http://localhost:5107"
+CLI_TOKEN_FILE="$DOCKER_DIR/volumes/content-files/.cli-auth-token"
+
+json_extract() {
+  local json="$1" field="$2"
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then python_cmd=python3
+  elif command -v python >/dev/null 2>&1; then python_cmd=python
+  else fail "Python is required for --mount."; fi
+  "$python_cmd" -c "
+import json,sys
+data = json.loads(sys.argv[1])
+val = data.get(sys.argv[2])
+if val is not None: print(val)
+" "$json" "$field"
+}
+
+json_extract_list() {
+  local json="$1"
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then python_cmd=python3
+  elif command -v python >/dev/null 2>&1; then python_cmd=python
+  else fail "Python is required for --mount."; fi
+  "$python_cmd" -c "
+import json,sys
+items = json.loads(sys.argv[1])
+if not isinstance(items, list) or len(items) == 0:
+    sys.exit(1)
+for item in items:
+    print(item.get('id','') + '|' + item.get('title',''))
+" "$json"
+}
+
+acquire_token() {
+  # Try saved token first
+  if [[ -f "$CLI_TOKEN_FILE" ]]; then
+    local saved_token
+    saved_token="$(cat "$CLI_TOKEN_FILE")"
+    if [[ -n "$saved_token" ]]; then
+      local check_code
+      check_code="$(curl -sS -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer $saved_token" "$API_BASE/api/auth/me" 2>/dev/null || echo "000")"
+      if [[ "$check_code" == "200" ]]; then
+        log "Using saved login."
+        AUTH_TOKEN="$saved_token"
+        return 0
+      fi
+    fi
+  fi
+
+  # Prompt for credentials
+  hr
+  log "Login required to mount a host folder."
+  local email password
+  read -r -p "Email: " email || fail "Login cancelled."
+  [[ -n "$email" ]] || fail "Email is required."
+  read -r -s -p "Password: " password || fail "Login cancelled."
+  printf '\n'
+  [[ -n "$password" ]] || fail "Password is required."
+
+  local tmp_cookie tmp_body login_http_code
+  tmp_cookie="$(mktemp)"
+  tmp_body="$(mktemp)"
+
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then python_cmd=python3
+  elif command -v python >/dev/null 2>&1; then python_cmd=python
+  else fail "Python is required for --mount."; fi
+
+  local login_json
+  login_json="$("$python_cmd" -c "import json,sys; print(json.dumps({'email':sys.argv[1],'password':sys.argv[2]}))" "$email" "$password")"
+
+  login_http_code="$(curl -sS -o "$tmp_body" -w "%{http_code}" \
+    -c "$tmp_cookie" \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -d "$login_json" \
+    "$API_BASE/api/auth/login" 2>/dev/null || echo "000")"
+
+  if [[ "$login_http_code" != "200" ]]; then
+    local err_msg
+    err_msg="$(json_extract "$(cat "$tmp_body")" "message" 2>/dev/null || echo "Invalid credentials.")"
+    rm -f "$tmp_cookie" "$tmp_body"
+    fail "Login failed (HTTP $login_http_code): $err_msg"
+  fi
+
+  local cookie_token
+  cookie_token="$(awk '/GuideAnts.Auth/{print $NF}' "$tmp_cookie" 2>/dev/null || true)"
+  rm -f "$tmp_cookie" "$tmp_body"
+
+  if [[ -z "$cookie_token" ]]; then
+    fail "Login succeeded but could not extract auth token."
+  fi
+
+  AUTH_TOKEN="$cookie_token"
+
+  # Save for future runs
+  mkdir -p "$(dirname "$CLI_TOKEN_FILE")"
+  printf '%s' "$AUTH_TOKEN" > "$CLI_TOKEN_FILE"
+  log "Login successful. Token saved for future runs."
+}
+
+apply_host_mount() {
+  [[ -z "$MOUNT_PATH" ]] && return 0
+
+  if [[ "$MOUNT_PATH" != /* && ! "$MOUNT_PATH" =~ ^[A-Za-z]:[\\/] ]]; then
+    MOUNT_PATH="$(cd "$MOUNT_PATH" 2>/dev/null && pwd)" || fail "Directory not found: $MOUNT_PATH"
+  fi
+  if [[ ! -d "$MOUNT_PATH" ]]; then
+    fail "Mount path does not exist or is not a directory: $MOUNT_PATH"
+  fi
+
+  acquire_token
+
+  hr
+  log "Fetching projects..."
+  local projects_response projects_http_code projects_body
+  projects_response="$(curl -sS -w "\n%{http_code}" -H "Authorization: Bearer $AUTH_TOKEN" "$API_BASE/api/projects" 2>/dev/null || true)"
+  projects_http_code="$(echo "$projects_response" | tail -n1)"
+  projects_body="$(echo "$projects_response" | sed '$d')"
+
+  if [[ "$projects_http_code" != "200" ]]; then
+    fail "Failed to fetch projects (HTTP $projects_http_code)."
+  fi
+
+  local -a project_ids=() project_titles=()
+  while IFS='|' read -r pid ptitle; do
+    [[ -n "$pid" ]] || continue
+    project_ids+=("$pid")
+    project_titles+=("$ptitle")
+  done < <(json_extract_list "$projects_body")
+
+  if [[ ${#project_ids[@]} -eq 0 ]]; then
+    fail "No projects found. Create a project in GuideAnts first."
+  fi
+
+  printf '\n  Select a project to mount "%s" into:\n' "$MOUNT_PATH"
+  local i
+  for i in $(seq 0 $((${#project_ids[@]}-1))); do
+    printf '    %d) %s\n' "$((i+1))" "${project_titles[$i]}"
+  done
+  printf '\n'
+
+  local selected_project_id
+  if [[ ${#project_ids[@]} -eq 1 ]]; then
+    if [[ "$ASSUME_YES" == "1" ]]; then
+      selected_project_id="${project_ids[0]}"
+      log "Auto-selecting only project: ${project_titles[0]}"
+    else
+      local choice
+      read -r -p "Enter 1 or press Enter for [${project_titles[0]}]: " choice || choice=""
+      selected_project_id="${project_ids[0]}"
+    fi
+  else
+    local choice
+    read -r -p "Enter 1-${#project_ids[@]}: " choice || choice=""
+    if [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le "${#project_ids[@]}" ]]; then
+      selected_project_id="${project_ids[$((choice-1))]}"
+    else
+      fail "Invalid selection."
+    fi
+  fi
+
+  log "Creating host mount..."
+  local create_body create_response create_http_code create_result
+  create_body="{\"scope\":\"Project\",\"hostPath\":\"$MOUNT_PATH\"}"
+  create_response="$(curl -sS -w "\n%{http_code}" \
+    -X POST \
+    -H "Authorization: Bearer $AUTH_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$create_body" \
+    "$API_BASE/api/projects/$selected_project_id/host-folder-mounts" 2>/dev/null || true)"
+  create_http_code="$(echo "$create_response" | tail -n1)"
+  create_result="$(echo "$create_response" | sed '$d')"
+
+  if [[ "$create_http_code" != "201" ]]; then
+    local err_msg
+    err_msg="$(json_extract "$create_result" "message" 2>/dev/null || echo "$create_result")"
+    fail "Failed to create mount (HTTP $create_http_code): $err_msg"
+  fi
+
+  local mount_id apply_command
+  mount_id="$(json_extract "$create_result" "mountId")"
+  apply_command="$(json_extract "$create_result" "applyCommand")"
+
+  log "Mount created (id: $mount_id). Applying..."
+
+  local mount_script="$ROOT_DIR/scripts/guideants-host-mount.sh"
+  if [[ -f "$mount_script" ]]; then
+    bash "$mount_script" apply --mount-id "$mount_id" --host-path "$MOUNT_PATH" --project-id "$selected_project_id"
+  else
+    warn "Host mount script not found. Run manually: $apply_command"
+  fi
+
+  log "Host folder mounted successfully."
+}
+
+# =============================================================================
 # 6. Compose up, health, browser
 # =============================================================================
 wait_for_health() {
@@ -558,8 +763,12 @@ if wait_for_health; then
   hr
   log "GuideAnts is up: $HEALTH_URL"
   open_browser
+  apply_host_mount
 else
   warn "Health check timed out. Inspect with: docker compose -f docker/$COMPOSE_FILE ps"
+  if [[ -n "$MOUNT_PATH" ]]; then
+    warn "Skipping --mount because the health check failed."
+  fi
 fi
 
 save_state
