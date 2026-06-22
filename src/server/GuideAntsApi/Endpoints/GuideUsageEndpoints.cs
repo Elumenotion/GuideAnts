@@ -123,6 +123,35 @@ public static class GuideUsageEndpoints
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden);
 
+        guideUsageGroup.MapGet("/api", async (
+            Guid projectId,
+            Guid guideId,
+            DateTime from,
+            DateTime to,
+            string? source,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var report = await usageService.GetGuideApiUsageReportAsync(projectId, guideId, from, to, source);
+                if (report == null)
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.Ok(report);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GetGuideApiUsage")
+        .Produces<GuideApiUsageReportDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
         // Assistant usage report endpoint (same service, different route for assistants)
         var assistantUsageGroup = app.MapGroup("/api/projects/{projectId}/assistants/{assistantId}/usage")
             .WithTags("Assistant Usage")
@@ -234,6 +263,35 @@ public static class GuideUsageEndpoints
         })
         .WithName("GetAssistantUsageConversations")
         .Produces<GuideUsageConversationsPageDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
+
+        assistantUsageGroup.MapGet("/api", async (
+            Guid projectId,
+            Guid assistantId,
+            DateTime from,
+            DateTime to,
+            string? source,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var report = await usageService.GetGuideApiUsageReportAsync(projectId, assistantId, from, to, source);
+                if (report == null)
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.Ok(report);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GetAssistantApiUsage")
+        .Produces<GuideApiUsageReportDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden);

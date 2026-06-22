@@ -41,7 +41,11 @@ public sealed class EfUsageRecorder : IUsageRecorder
         Guid? assistantId = null,
         Guid? agentInvocationId = null,
         Guid? notebookConversationMessageId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        Guid? publishedGuideId = null,
+        string? sourceChannel = null,
+        string? externalRequestId = null,
+        string? externalUserIdentity = null)
     {
         // Validation – throw early, never silently swallow mistakes.
         // NotebookId is optional - project-level operations can use Guid.Empty
@@ -173,6 +177,10 @@ public sealed class EfUsageRecorder : IUsageRecorder
             ConversationId = conversationId,
             ContentFileId = contentFileId,
             NotebookFileId = notebookFileId,
+            PublishedGuideId = publishedGuideId,
+            SourceChannel = sourceChannel,
+            ExternalRequestId = externalRequestId,
+            ExternalUserIdentity = externalUserIdentity,
             AssistantId = assistantId,
             InvokingAssistantId = agentInvocationId.HasValue ? resolvedInvokingAssistantId : null,
             AgentInvocationId = agentInvocationId,
@@ -230,9 +238,33 @@ public sealed class BlockingUsageRecorder : IUsageRecorderSync
         string? metadataJson = null,
         Guid? assistantId = null,
         Guid? agentInvocationId = null,
-        Guid? notebookConversationMessageId = null)
+        Guid? notebookConversationMessageId = null,
+        Guid? publishedGuideId = null,
+        string? sourceChannel = null,
+        string? externalRequestId = null,
+        string? externalUserIdentity = null)
     {
-        _inner.RecordAsync(projectId, notebookId, category, service, operation, metrics, costUsd, conversationId, contentFileId, notebookFileId, modelDeploymentId, metadataJson, assistantId, agentInvocationId, notebookConversationMessageId)
+        _inner.RecordAsync(
+            projectId,
+            notebookId,
+            category,
+            service,
+            operation,
+            metrics,
+            costUsd,
+            conversationId,
+            contentFileId,
+            notebookFileId,
+            modelDeploymentId,
+            metadataJson,
+            assistantId,
+            agentInvocationId,
+            notebookConversationMessageId,
+            CancellationToken.None,
+            publishedGuideId,
+            sourceChannel,
+            externalRequestId,
+            externalUserIdentity)
               .GetAwaiter()
               .GetResult();
     }

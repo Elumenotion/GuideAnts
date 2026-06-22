@@ -140,6 +140,32 @@ public sealed class EfUsageRecorderTests
     }
 
     [TestMethod]
+    public async Task RecordAsync_Persists_published_wire_attribution_fields()
+    {
+        var recorder = CreateRecorder(out var options);
+        var publishedGuideId = Guid.NewGuid();
+
+        await recorder.RecordAsync(
+            projectId: Guid.NewGuid(),
+            notebookId: Guid.NewGuid(),
+            category: UsageCategory.Embeddings,
+            service: "Embeddings.OpenAI.Embedding",
+            operation: "embeddings",
+            metrics: new UsageMetrics(ValueInput: 42, ValueOutput: 42),
+            publishedGuideId: publishedGuideId,
+            sourceChannel: "wire_api",
+            externalRequestId: "req_123",
+            externalUserIdentity: "external-user");
+
+        await using var verify = new ApplicationDbContext(options);
+        var evt = await verify.UsageEvents.SingleAsync();
+        evt.PublishedGuideId.Should().Be(publishedGuideId);
+        evt.SourceChannel.Should().Be("wire_api");
+        evt.ExternalRequestId.Should().Be("req_123");
+        evt.ExternalUserIdentity.Should().Be("external-user");
+    }
+
+    [TestMethod]
     public void BlockingUsageRecorder_Delegates_to_inner_recorder()
     {
         var inner = new FakeUsageRecorder();
@@ -186,7 +212,11 @@ public sealed class EfUsageRecorderTests
             Guid? assistantId = null,
             Guid? agentInvocationId = null,
             Guid? notebookConversationMessageId = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            Guid? publishedGuideId = null,
+            string? sourceChannel = null,
+            string? externalRequestId = null,
+            string? externalUserIdentity = null)
         {
             CallCount++;
             return Task.CompletedTask;

@@ -65,7 +65,11 @@ public sealed class UsageRecorderExtensionsTests
             Guid? assistantId = null,
             Guid? agentInvocationId = null,
             Guid? notebookConversationMessageId = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            Guid? publishedGuideId = null,
+            string? sourceChannel = null,
+            string? externalRequestId = null,
+            string? externalUserIdentity = null)
         {
             Category = category;
             Service = service;

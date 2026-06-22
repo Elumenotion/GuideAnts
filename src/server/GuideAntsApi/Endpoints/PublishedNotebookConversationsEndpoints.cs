@@ -7,6 +7,7 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.PublishedGuides;
 using GuideAntsApi.Services;
+using GuideAntsApi.Services.Usage;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -45,6 +46,8 @@ public static class PublishedNotebookConversationsEndpoints
                         new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
                         statusCode: statusCode);
                 }
+
+                SetPublishedChatUsageAttribution(ctx, pubGuid, authResult.UserIdentity);
             }
 
             var limitResult = await costLimits.EnsureWithinLimitsAsync(notebookId, ctx.RequestAborted);
@@ -97,6 +100,8 @@ public static class PublishedNotebookConversationsEndpoints
                         new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
                         statusCode: statusCode);
                 }
+
+                SetPublishedChatUsageAttribution(ctx, pubGuid, authResult.UserIdentity);
             }
 
             var limitResult = await costLimits.EnsureWithinLimitsAsync(notebookId, ctx.RequestAborted);
@@ -161,6 +166,8 @@ public static class PublishedNotebookConversationsEndpoints
 					new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
 					statusCode: statusCode);
 			}
+
+            SetPublishedChatUsageAttribution(ctx, pubGuid, authResult.UserIdentity);
 
 			var limitResult = await costLimits.EnsureWithinLimitsAsync(notebookId, ctx.RequestAborted);
 			if (!limitResult.Allowed)
@@ -269,6 +276,8 @@ public static class PublishedNotebookConversationsEndpoints
                     new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
                     statusCode: statusCode);
             }
+
+            SetPublishedChatUsageAttribution(ctx, pubGuid, authResult.UserIdentity);
 
             var limitResult = await costLimits.EnsureWithinLimitsAsync(notebookId, ctx.RequestAborted);
             if (!limitResult.Allowed)
@@ -430,6 +439,8 @@ public static class PublishedNotebookConversationsEndpoints
                         new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
                         statusCode: statusCode);
                 }
+
+                SetPublishedChatUsageAttribution(ctx, pubGuid, authResult.UserIdentity);
             }
 
             var limitResult = await costLimits.EnsureWithinLimitsAsync(notebookId, ctx.RequestAborted);
@@ -487,6 +498,8 @@ public static class PublishedNotebookConversationsEndpoints
                     new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
                     statusCode: statusCode);
             }
+
+            SetPublishedChatUsageAttribution(ctx, pubGuid, authResult.UserIdentity);
 
             var limitResult = await costLimits.EnsureWithinLimitsAsync(notebookId, ctx.RequestAborted);
             if (!limitResult.Allowed)
@@ -595,6 +608,16 @@ public static class PublishedNotebookConversationsEndpoints
             _ => "SandboxFile"
         };
     }
-}
 
+    private static void SetPublishedChatUsageAttribution(HttpContext httpContext, Guid publishedGuideId, string? externalUserIdentity)
+    {
+        UsageAttributionHttpContext.Set(
+            httpContext,
+            new UsageAttributionContext(
+                PublishedGuideId: publishedGuideId,
+                SourceChannel: "published_chat",
+                ExternalRequestId: UsageAttributionHttpContext.ResolveExternalRequestId(httpContext),
+                ExternalUserIdentity: externalUserIdentity));
+    }
+}
 

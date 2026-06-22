@@ -140,6 +140,8 @@ public static class StartupConfiguration
         services.AddScoped<IConversationService, ConversationService>();
         services.AddScoped<IPublishedConversationService, PublishedConversationService>();
         services.AddScoped<GuideAntsApi.Services.Auth.IPublishedGuideAuthService, GuideAntsApi.Services.Auth.PublishedGuideAuthService>();
+        services.AddScoped<GuideAntsApi.Services.PublishedWireApi.IPublishedApiExecutionContextResolver, GuideAntsApi.Services.PublishedWireApi.PublishedApiExecutionContextResolver>();
+        services.AddScoped<GuideAntsApi.Services.PublishedWireApi.IPublishedWireUsageRecorder, GuideAntsApi.Services.PublishedWireApi.PublishedWireUsageRecorder>();
         services.AddScoped<IContextOptionsService, ContextOptionsService>();
         
         services.AddHttpClient<GuideAntsApi.Services.LlamaCpp.ILlamaServerRuntimeClient, GuideAntsApi.Services.LlamaCpp.LlamaServerRuntimeClient>(client =>

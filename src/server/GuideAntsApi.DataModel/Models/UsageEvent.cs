@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.DataModel.Models
@@ -12,7 +13,8 @@ namespace GuideAntsApi.DataModel.Models
         Search = 5,
         StorageUploaded = 6,
         StorageSystemGenerated = 7,
-        ToolCall = 8
+        ToolCall = 8,
+        Embeddings = 9
     }
 
     [Index(nameof(UserId), nameof(ProjectId), nameof(NotebookId), nameof(ConversationId))]
@@ -23,6 +25,9 @@ namespace GuideAntsApi.DataModel.Models
     // with IncludeProperties for optimal query performance
     [Index(nameof(ConversationId), nameof(Created))]
     [Index(nameof(AgentInvocationId), nameof(Category))]
+    [Index(nameof(PublishedGuideId), nameof(Created))]
+    [Index(nameof(SourceChannel), nameof(Created))]
+    [Index(nameof(ExternalRequestId))]
     public class UsageEvent
     {
         public Guid Id { get; set; } = Guid.NewGuid();
@@ -36,6 +41,13 @@ namespace GuideAntsApi.DataModel.Models
         public Guid? ConversationId { get; set; }
         public Guid? ContentFileId { get; set; }
         public Guid? NotebookFileId { get; set; }
+        public Guid? PublishedGuideId { get; set; }
+        [MaxLength(64)]
+        public string? SourceChannel { get; set; }
+        [MaxLength(128)]
+        public string? ExternalRequestId { get; set; }
+        [MaxLength(255)]
+        public string? ExternalUserIdentity { get; set; }
         
         /// <summary>
         /// The specific notebook conversation message this usage event is associated with.
