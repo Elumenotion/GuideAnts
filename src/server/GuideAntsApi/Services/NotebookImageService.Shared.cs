@@ -238,7 +238,7 @@ namespace GuideAntsApi.Services
 
         /// <summary>
         /// Saves response and returns the first image bytes from a JSON response.
-        /// Handles OpenAI, Google Gemini, OpenRouter, and Azure Vertex response shapes.
+        /// Handles OpenAI, Google Gemini, OpenRouter, and Azure OpenAI response shapes.
         /// </summary>
         private Task<byte[]?> SaveResponseAndReturnBytes(string responseJson)
         {

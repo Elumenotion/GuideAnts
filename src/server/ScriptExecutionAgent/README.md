@@ -22,7 +22,11 @@ Executes a script and returns the result.
   "scriptType": "Python",
   "projectId": "11111111-1111-1111-1111-111111111111",
   "notebookId": "22222222-2222-2222-2222-222222222222",
-  "workingDirectory": "/app/ContentFiles/my-project/notebooks/22222222-2222-2222-2222-222222222222/Output"
+  "guideId": "33333333-3333-3333-3333-333333333333",
+  "workingDirectory": "/app/ContentFiles/my-project/notebooks/22222222-2222-2222-2222-222222222222/Output",
+  "environment": {
+    "MY_API_TOKEN": "per-run-secret-value"
+  }
 }
 ```
 
@@ -49,6 +53,93 @@ Lists files in a directory.
 ```json
 ["file1.py", "file2.txt", "output.csv"]
 ```
+
+### Admin API
+The admin API is disabled by default. Images that opt in expose it under `/admin/*` inside the agent, which is reachable as `/sandbox/admin/*` through the GuideAnts AI nginx gateway.
+
+All admin requests require `X-Script-Agent-Admin-Token`.
+
+- `GET /admin/health`
+- `GET /admin/config`
+- `PUT /admin/config`
+- `GET /admin/requirements`
+- `PUT /admin/requirements`
+- `GET /admin/apt-packages`
+- `PUT /admin/apt-packages`
+- `POST /admin/apply`
+
+`GET`/`PUT /admin/requirements` and `POST /admin/apply` operate on global state unless both `projectId` and `guideId` query parameters are provided. Scoped requests affect the shared `project + guide` Python venv used by all matching notebooks.
+
+## Execution Scope And Environment
+
+Every execution request must include `ProjectId`, `NotebookId`, and `WorkingDirectory`. The GuideAnts API also sends `GuideId`; when omitted for compatibility, the agent falls back to `NotebookId` as the scope key.
+
+Python runtime state is scoped by `project + guide`:
+
+```text
+{SCRIPT_EXECUTION_SCOPE_STATE_ROOT}/
+  project-{projectId:N}/
+    guide-{guideId:N}/
+      python-venv/
+      requirements.txt
+      applied-state.json
+```
+
+All notebooks in the same project that use the same guide share that venv. Scoped requirements are applied into the scoped venv before Python execution. If a scoped `requirements.txt` does not exist, the agent uses the global admin `requirements.txt` as the fallback requirements source for that scope.
+
+Scoped venvs extend the image-provided Python runtime instead of replacing it. By default on Linux, the agent links the scoped venv to `/opt/venv` site-packages with a `.pth` file. Packages installed into the scoped venv remain first on `sys.path`, and baked image packages remain available as a fallback. Set `SCRIPT_EXECUTION_BASE_PYTHON_VENV` to override the base runtime venv path or leave it unset on non-AI images.
+
+The optional `environment` object on `/execute` is a per-run injection surface. Values are placed only into the launched script process environment; they are not persisted by the ScriptExecutionAgent and are not written to scope state.
+
+Validation rules:
+
+- At most 128 environment entries per request.
+- Each value must be 64 KiB or smaller.
+- Names must match `[A-Za-z_][A-Za-z0-9_]*`.
+- Reserved runtime keys are rejected, including `PATH`, `HOME`, `PYTHONPATH`, loader/preload keys, `SCRIPT_EXECUTION_AGENT_TOKEN`, and `SCRIPT_EXECUTION_ADMIN_TOKEN`.
+- Names starting with `SCRIPT_EXECUTION_` or `GUIDEANTS_` are rejected.
+
+The child process receives a curated base environment:
+
+- `PATH`, `HOME`, `LANG`, `LC_ALL`
+- `GUIDEANTS_PROJECT_ID`, `GUIDEANTS_GUIDE_ID`
+- `VIRTUAL_ENV` when the scoped venv exists
+- selected runtime/cache variables required by GPU and model tooling, such as CUDA/ROCm visibility variables, Hugging Face/Torch cache paths, Playwright browser path, and certificate bundle variables
+
+It does not inherit the full container or agent process environment.
+
+## Credential Handling
+
+Credential persistence is intentionally not owned by the ScriptExecutionAgent. The API tier is responsible for resolving any credentials for the current `project + guide` boundary and, when needed, passing them as `/execute.environment` values for that single run.
+
+Current implementation status:
+
+- The ScriptExecutionAgent supports secure per-run environment hydration.
+- The GuideAnts API sends `GuideId` and has a `ResolveExecutionEnvironmentAsync(...)` integration point.
+- No agent-side credential file or credential store exists.
+- Until the API-owned credential service is wired into that integration point, no credentials are injected by default.
+
+Scripts can read their own process environment, so any injected credential is available to the executed script. The hardening goal is to avoid persistent credential files and to reduce cross-process environment inspection from sibling scripts.
+
+## Admin State Persistence
+
+GuideAnts AI images bake the admin mechanism into the image and enable it with image-level `ENV SCRIPT_EXECUTION_ADMIN_API_ENABLED=true`. Other images that embed the agent remain disabled by default unless they explicitly opt in.
+
+In the compose stacks, `guideants-ai` mounts `script_agent_admin_state` at:
+
+```text
+/var/lib/guideants/script-agent-admin
+```
+
+That volume stores:
+
+- `config.json`
+- global `requirements.txt`
+- global `apt-packages.txt`
+- global `applied-state.json`
+- scoped state under `scopes/project-{projectId:N}/guide-{guideId:N}/`
+
+The volume survives container restart and normal `docker compose down` / `up`. It is removed by `docker compose down -v` or manual volume deletion.
 
 ## Container Integration
 
@@ -108,6 +199,16 @@ services:
 | `SCRIPT_EXECUTION_REQUIRE_TOKEN` | `true` | Require `X-Script-Agent-Token` on `/execute` and `/files` |
 | `SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION` | `true` | Enable Linux notebook identity + `setpriv` execution/listing |
 | `SCRIPT_EXECUTION_ALLOW_OWNERSHIP_FALLBACK` | `false` in production (`true` in Development if not set) | Allow compatibility fallback if Linux ownership hardening fails |
+| `SCRIPT_EXECUTION_SCOPE_STATE_ROOT` | `FILE_STORAGE_ROOT/.guideants/script-execution` | Root for project+guide scoped runtime state (venv + requirements apply state) |
+| `SCRIPT_EXECUTION_SCOPE_PYTHON_VENV_DIR` | `python-venv` | Relative path (within scope root) for the Python virtual environment |
+| `SCRIPT_EXECUTION_PYTHON_BOOTSTRAP` | _(unset)_ | Optional bootstrap interpreter command used for `python -m venv` |
+| `SCRIPT_EXECUTION_REQUIRE_SCOPED_VENV` | `true` on Linux | Fail Python execution if the project+guide venv cannot be created/applied |
+| `SCRIPT_EXECUTION_BASE_PYTHON_VENV` | `/opt/venv` on Linux | Base image venv whose site-packages are exposed as fallback imports inside scoped venvs |
+| `SCRIPT_EXECUTION_PRIVACY_WRAPPER` | `/usr/local/bin/ga-script-exec` | Optional Linux wrapper that sets `PR_SET_DUMPABLE=0` before launching script interpreters |
+| `SCRIPT_EXECUTION_ADMIN_API_ENABLED` | `false` | Enable `/admin/*` routes |
+| `SCRIPT_EXECUTION_ADMIN_TOKEN` | _(required when admin API enabled)_ | Shared token expected in `X-Script-Agent-Admin-Token` |
+| `SCRIPT_EXECUTION_ADMIN_STATE_DIR` | `/var/lib/guideants/script-agent-admin` on Linux | Volume-backed admin state root |
+| `SCRIPT_EXECUTION_ADMIN_FAIL_OPEN` | `false` | Continue startup after admin reconcile failure |
 
 ## Supported Script Types
 
@@ -126,7 +227,12 @@ var request = new
     ScriptType = "Python",
     ProjectId = "11111111-1111-1111-1111-111111111111",
     NotebookId = "22222222-2222-2222-2222-222222222222",
-    WorkingDirectory = "/app/ContentFiles/my-project/notebooks/22222222-2222-2222-2222-222222222222/Output"
+    GuideId = "33333333-3333-3333-3333-333333333333",
+    WorkingDirectory = "/app/ContentFiles/my-project/notebooks/22222222-2222-2222-2222-222222222222/Output",
+    Environment = new Dictionary<string, string>
+    {
+        ["MY_API_TOKEN"] = "<per-run-value>"
+    }
 };
 
 using var httpClient = new HttpClient();
@@ -159,7 +265,7 @@ curl http://localhost/health
 curl -X POST http://localhost/execute \
   -H "Content-Type: application/json" \
   -H "X-Script-Agent-Token: your-shared-token" \
-  -d '{"script":"print(\"test\")","scriptType":"Python","projectId":"11111111-1111-1111-1111-111111111111","notebookId":"22222222-2222-2222-2222-222222222222","workingDirectory":"/app/ContentFiles/my-project/notebooks/22222222-2222-2222-2222-222222222222/Output"}'
+  -d '{"script":"print(\"test\")","scriptType":"Python","projectId":"11111111-1111-1111-1111-111111111111","notebookId":"22222222-2222-2222-2222-222222222222","guideId":"33333333-3333-3333-3333-333333333333","workingDirectory":"/app/ContentFiles/my-project/notebooks/22222222-2222-2222-2222-222222222222/Output"}'
 ```
 
 ## Azure Container Apps
@@ -175,10 +281,20 @@ For Azure Container Apps deployment:
 
 - The agent runs on internal port 80 and is intended for internal network use.
 - `/execute` and `/files` require `X-Script-Agent-Token` when token enforcement is enabled.
+- `/admin/*` is not mapped unless `SCRIPT_EXECUTION_ADMIN_API_ENABLED=true` and uses a separate `X-Script-Agent-Admin-Token`.
 - `ProjectId` + `NotebookId` are mandatory and validated for every execution/listing request.
+- Python runtime state is scoped to `ProjectId + GuideId` (falls back to notebook scope when `GuideId` is omitted for execution compatibility).
+- Scoped Python venvs extend the configured base image venv (`/opt/venv` by default on Linux) rather than replacing baked image packages.
+- Credentials are API-owned and may be supplied to `/execute` as per-run `environment` values; the agent does not persist credential files.
+- Child process environments are allowlisted and do not inherit agent tokens or admin tokens.
+- In GuideAnts AI images, script launches go through `ga-script-exec`, which sets `PR_SET_DUMPABLE=0` before exec to reduce `/proc/<pid>/environ` exposure between sibling processes.
+- Compose drops `SYS_PTRACE` from `guideants-ai` to reduce debugger-style process inspection.
+- `requirements.txt` is validated for blocked install sources/options before it is applied to a scoped venv.
+- `apt-packages.txt` is validated as package names only before startup/admin apply installs packages with `apt-get`.
 - Paths are canonicalized and rejected if they escape `FILE_STORAGE_ROOT` or notebook scope.
 - Reparse-point (symlink/junction) pivots in the authorized path chain are rejected.
 - On Linux, script/listing operations run under notebook-scoped low-privilege identities via `setpriv`.
+- When a notebook has registered host-folder mounts (`.guideants/mounts.json`), execution automatically uses compatibility mode (no notebook identity isolation) to avoid host-mount permission drift.
 
 ## Troubleshooting
 

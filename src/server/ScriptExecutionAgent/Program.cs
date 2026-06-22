@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -29,21 +30,69 @@ var allowOwnershipFallback = GetBooleanEnvironmentVariable(
     defaultValue: string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase));
 var enableNotebookIdentityIsolation = GetBooleanEnvironmentVariable("SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION", defaultValue: true);
 var agentToken = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_AGENT_TOKEN");
+var adminApiEnabled = GetBooleanEnvironmentVariable("SCRIPT_EXECUTION_ADMIN_API_ENABLED", defaultValue: false);
+var adminToken = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_ADMIN_TOKEN");
+var adminStateDir = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_ADMIN_STATE_DIR");
+if (string.IsNullOrWhiteSpace(adminStateDir))
+{
+    adminStateDir = OperatingSystem.IsWindows()
+        ? Path.Combine(fileStorageRoot, ".guideants", "script-agent-admin")
+        : "/var/lib/guideants/script-agent-admin";
+}
+var adminOptions = new AdminApiOptions(
+    adminApiEnabled,
+    adminToken,
+    Path.GetFullPath(adminStateDir),
+    GetBooleanEnvironmentVariable("SCRIPT_EXECUTION_ADMIN_FAIL_OPEN", defaultValue: false));
+var scopeStateRoot = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_SCOPE_STATE_ROOT");
+if (string.IsNullOrWhiteSpace(scopeStateRoot))
+{
+    scopeStateRoot = Path.Combine(fileStorageRoot, ".guideants", "script-execution");
+}
+var requireScopedPythonVenv = GetBooleanEnvironmentVariable(
+    "SCRIPT_EXECUTION_REQUIRE_SCOPED_VENV",
+    defaultValue: OperatingSystem.IsLinux());
+var basePythonVenvPath = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_BASE_PYTHON_VENV");
+if (string.IsNullOrWhiteSpace(basePythonVenvPath) && OperatingSystem.IsLinux())
+{
+    basePythonVenvPath = "/opt/venv";
+}
+var scopeOptions = new ScriptExecutionScopeOptions(
+    Path.GetFullPath(scopeStateRoot),
+    Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_SCOPE_PYTHON_VENV_DIR"),
+    Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_PYTHON_BOOTSTRAP"),
+    requireScopedPythonVenv,
+    string.IsNullOrWhiteSpace(basePythonVenvPath) ? null : Path.GetFullPath(basePythonVenvPath));
 
 if (requireAgentToken && string.IsNullOrWhiteSpace(agentToken))
 {
     throw new InvalidOperationException("SCRIPT_EXECUTION_AGENT_TOKEN must be configured when SCRIPT_EXECUTION_REQUIRE_TOKEN=true.");
 }
 
+if (adminOptions.Enabled && string.IsNullOrWhiteSpace(adminOptions.AdminToken))
+{
+    throw new InvalidOperationException("SCRIPT_EXECUTION_ADMIN_TOKEN must be configured when SCRIPT_EXECUTION_ADMIN_API_ENABLED=true.");
+}
+
 startupLogger.LogInformation(
-    "SECURITY: startup config tokenRequired={TokenRequired} tokenConfigured={TokenConfigured} storageRootConfigured={StorageRootConfigured} linuxIdentityIsolation={IdentityIsolation} allowOwnershipFallback={AllowOwnershipFallback}",
+    "SECURITY: startup config tokenRequired={TokenRequired} tokenConfigured={TokenConfigured} storageRootConfigured={StorageRootConfigured} linuxIdentityIsolation={IdentityIsolation} allowOwnershipFallback={AllowOwnershipFallback} scopeStateRoot={ScopeStateRoot} requireScopedVenv={RequireScopedVenv} adminApiEnabled={AdminApiEnabled} adminTokenConfigured={AdminTokenConfigured} adminStateDir={AdminStateDir}",
     requireAgentToken,
     !string.IsNullOrWhiteSpace(agentToken),
     !string.IsNullOrWhiteSpace(fileStorageRoot),
     enableNotebookIdentityIsolation,
-    allowOwnershipFallback);
+    allowOwnershipFallback,
+    LogValueSanitizer.Sanitize(scopeOptions.StateRootPath),
+    scopeOptions.RequireScopedPythonVenv,
+    adminOptions.Enabled,
+    !string.IsNullOrWhiteSpace(adminOptions.AdminToken),
+    LogValueSanitizer.Sanitize(adminOptions.StateDirectoryPath));
 
 await StartupFilesystemHardening.ApplyAsync(fileStorageRoot, startupLogger);
+Directory.CreateDirectory(scopeOptions.StateRootPath);
+if (adminOptions.Enabled)
+{
+    await AdminStateRuntime.InitializeAsync(adminOptions, scopeOptions, startupLogger, CancellationToken.None);
+}
 
 var securityOptions = new AgentSecurityOptions(
     requireAgentToken,
@@ -124,7 +173,7 @@ app.MapPost("/execute", async (HttpContext context, ILogger<Program> logger) =>
             context.RequestAborted);
 
         var normalizedRequest = request with { WorkingDirectory = authorizedWorkingDirectory };
-        var result = await ExecuteScriptAsync(normalizedRequest, scriptConfig, logger, executionIdentity);
+        var result = await ExecuteScriptAsync(normalizedRequest, scriptConfig, logger, executionIdentity, scopeOptions, adminOptions);
 
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(result));
@@ -229,6 +278,188 @@ app.MapGet("/files", async (HttpContext context, ILogger<Program> logger) =>
     }
 });
 
+if (adminOptions.Enabled)
+{
+    app.MapGet("/admin/health", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new
+        {
+            status = "OK",
+            adminStateDir = adminOptions.StateDirectoryPath,
+            scopeStateRoot = scopeOptions.StateRootPath
+        }));
+    });
+
+    app.MapGet("/admin/config", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var config = await AdminStateRuntime.ReadConfigAsync(adminOptions, context.RequestAborted);
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(config);
+    });
+
+    app.MapPut("/admin/config", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var body = await ReadRequestBodyAsync(context);
+        var validation = AdminStateRuntime.ValidateConfig(body);
+        if (!validation.IsValid)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(validation.ErrorMessage);
+            return;
+        }
+
+        await AdminStateRuntime.WriteConfigAsync(adminOptions, body, context.RequestAborted);
+        context.Response.StatusCode = StatusCodes.Status204NoContent;
+    });
+
+    app.MapGet("/admin/requirements", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var requirementsPath = TryResolveAdminScope(context, scopeOptions, out var scope, out var error)
+            ? AdminStateRuntime.GetRequirementsPath(adminOptions, scope)
+            : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
+        if (!string.IsNullOrEmpty(error))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(error);
+            return;
+        }
+
+        context.Response.ContentType = "text/plain";
+        await context.Response.WriteAsync(File.Exists(requirementsPath) ? await File.ReadAllTextAsync(requirementsPath, context.RequestAborted) : string.Empty);
+    });
+
+    app.MapPut("/admin/requirements", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var body = await ReadRequestBodyAsync(context);
+        var validation = ScriptExecutionScopeRuntime.ValidateRequirements(body);
+        if (!validation.IsValid)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(validation.ErrorMessage);
+            return;
+        }
+
+        var hasScope = TryResolveAdminScope(context, scopeOptions, out var scope, out var error);
+        if (!string.IsNullOrEmpty(error))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(error);
+            return;
+        }
+
+        var requirementsPath = hasScope
+            ? AdminStateRuntime.GetRequirementsPath(adminOptions, scope)
+            : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
+        await AtomicFile.WriteAllTextAsync(requirementsPath, body, context.RequestAborted);
+        context.Response.StatusCode = StatusCodes.Status204NoContent;
+    });
+
+    app.MapGet("/admin/apt-packages", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var aptPackagesPath = AdminStateRuntime.GetAptPackagesPath(adminOptions);
+        context.Response.ContentType = "text/plain";
+        await context.Response.WriteAsync(File.Exists(aptPackagesPath) ? await File.ReadAllTextAsync(aptPackagesPath, context.RequestAborted) : string.Empty);
+    });
+
+    app.MapPut("/admin/apt-packages", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var body = await ReadRequestBodyAsync(context);
+        var validation = AdminStateRuntime.ValidateAptPackages(body);
+        if (!validation.IsValid)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(validation.ErrorMessage);
+            return;
+        }
+
+        await AtomicFile.WriteAllTextAsync(AdminStateRuntime.GetAptPackagesPath(adminOptions), body, context.RequestAborted);
+        context.Response.StatusCode = StatusCodes.Status204NoContent;
+    });
+
+    app.MapPost("/admin/apply", async (HttpContext context, ILogger<Program> logger) =>
+    {
+        if (!AuthorizeAdminRequest(context, adminOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var hasScope = TryResolveAdminScope(context, scopeOptions, out var scope, out var error);
+        if (!string.IsNullOrEmpty(error))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(error);
+            return;
+        }
+
+        AdminApplyResult result;
+        if (hasScope)
+        {
+            result = await ScriptExecutionScopeRuntime.ApplyScopeRequirementsAsync(scope, scopeOptions, adminOptions, logger, context.RequestAborted);
+        }
+        else
+        {
+            await AdminStateRuntime.ApplyGlobalAptPackagesAsync(adminOptions, logger, context.RequestAborted);
+            result = await AdminStateRuntime.ApplyAllKnownScopesAsync(scopeOptions, adminOptions, logger, context.RequestAborted);
+        }
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(result));
+    });
+
+}
+
 await app.RunAsync();
 
 static bool AuthorizeAgentRequest(HttpContext context, AgentSecurityOptions options, ILogger logger)
@@ -251,6 +482,63 @@ static bool AuthorizeAgentRequest(HttpContext context, AgentSecurityOptions opti
         return false;
     }
 
+    return true;
+}
+
+static bool AuthorizeAdminRequest(HttpContext context, AdminApiOptions options, ILogger logger)
+{
+    var suppliedToken = context.Request.Headers["X-Script-Agent-Admin-Token"].ToString();
+    if (string.IsNullOrEmpty(suppliedToken) || string.IsNullOrWhiteSpace(options.AdminToken))
+    {
+        logger.LogWarning("SECURITY: admin token missing. path={Path}", LogValueSanitizer.Sanitize(context.Request.Path.Value));
+        return false;
+    }
+
+    if (!string.Equals(suppliedToken, options.AdminToken, StringComparison.Ordinal))
+    {
+        logger.LogWarning("SECURITY: admin token mismatch. path={Path}", LogValueSanitizer.Sanitize(context.Request.Path.Value));
+        return false;
+    }
+
+    return true;
+}
+
+static async Task<string> ReadRequestBodyAsync(HttpContext context)
+{
+    using var reader = new StreamReader(context.Request.Body, Encoding.UTF8);
+    return await reader.ReadToEndAsync(context.RequestAborted);
+}
+
+static bool TryResolveAdminScope(
+    HttpContext context,
+    ScriptExecutionScopeOptions scopeOptions,
+    out ScriptExecutionScope scope,
+    out string error)
+{
+    scope = default!;
+    error = string.Empty;
+
+    var projectIdValue = context.Request.Query["projectId"].ToString();
+    var guideIdValue = context.Request.Query["guideId"].ToString();
+    if (string.IsNullOrWhiteSpace(projectIdValue) && string.IsNullOrWhiteSpace(guideIdValue))
+    {
+        return false;
+    }
+
+    if (!Guid.TryParse(projectIdValue, out var projectId) || projectId == Guid.Empty)
+    {
+        error = "projectId query parameter must be a non-empty GUID when scope is provided.";
+        return false;
+    }
+
+    if (!Guid.TryParse(guideIdValue, out var guideId) || guideId == Guid.Empty)
+    {
+        error = "guideId query parameter must be a non-empty GUID when scope is provided.";
+        return false;
+    }
+
+    scope = ScriptExecutionScopeRuntime.ResolveScope(projectId, guideId, scopeOptions);
+    ScriptExecutionScopeRuntime.EnsureScopeDirectory(scope);
     return true;
 }
 
@@ -388,6 +676,57 @@ static ValidationResult ValidateExecutionRequest(ScriptExecutionRequest request,
         return ValidationResult.Failure("NotebookId must be a non-empty GUID");
     }
 
+    if (!string.IsNullOrWhiteSpace(request.GuideId)
+        && (!Guid.TryParse(request.GuideId, out var guideId) || guideId == Guid.Empty))
+    {
+        return ValidationResult.Failure("GuideId must be a non-empty GUID when provided");
+    }
+
+    var environmentValidation = ValidateExecutionEnvironment(request.Environment);
+    if (!environmentValidation.IsValid)
+    {
+        return environmentValidation;
+    }
+
+    return ValidationResult.Success();
+}
+
+static Guid ResolveGuideScopeId(ScriptExecutionRequest request)
+{
+    if (Guid.TryParse(request.GuideId, out var guideId) && guideId != Guid.Empty)
+    {
+        return guideId;
+    }
+
+    return Guid.Parse(request.NotebookId);
+}
+
+static ValidationResult ValidateExecutionEnvironment(IReadOnlyDictionary<string, string>? environment)
+{
+    if (environment is null)
+    {
+        return ValidationResult.Success();
+    }
+
+    if (environment.Count > 128)
+    {
+        return ValidationResult.Failure("Environment contains too many entries");
+    }
+
+    foreach (var (key, value) in environment)
+    {
+        var keyValidation = ScriptExecutionScopeRuntime.ValidateEnvironmentKey(key);
+        if (!keyValidation.IsValid)
+        {
+            return keyValidation;
+        }
+
+        if (value.Length > 64 * 1024)
+        {
+            return ValidationResult.Failure($"Environment value for '{key}' exceeds maximum size");
+        }
+    }
+
     return ValidationResult.Success();
 }
 
@@ -412,7 +751,9 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     ScriptExecutionRequest request,
     ScriptExecutionConfig config,
     ILogger logger,
-    NotebookExecutionIdentity? executionIdentity)
+    NotebookExecutionIdentity? executionIdentity,
+    ScriptExecutionScopeOptions scopeOptions,
+    AdminApiOptions adminOptions)
 {
     var stdOutBuffer = new StringBuilder();
     var stdErrBuffer = new StringBuilder();
@@ -464,20 +805,40 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
             }
         }
 
-        var (commandFile, commandArgs) = GetScriptCommand(request.ScriptType, scriptFilePath);
+        var scope = ScriptExecutionScopeRuntime.ResolveScope(
+            Guid.Parse(request.ProjectId),
+            ResolveGuideScopeId(request),
+            scopeOptions);
+        ScriptExecutionScopeRuntime.EnsureScopeDirectory(scope);
+        if (request.ScriptType == ScriptType.Python)
+        {
+            try
+            {
+                await ScriptExecutionScopeRuntime.EnsurePythonVenvAsync(scope, scopeOptions, logger, CancellationToken.None);
+                await ScriptExecutionScopeRuntime.ApplyScopeRequirementsAsync(scope, scopeOptions, adminOptions, logger, CancellationToken.None);
+            }
+            catch (Exception ex) when (!scopeOptions.RequireScopedPythonVenv)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Scoped Python venv provisioning failed for project={ProjectId} guide={GuideId}; falling back to system python because SCRIPT_EXECUTION_REQUIRE_SCOPED_VENV=false.",
+                    scope.ProjectId,
+                    scope.GuideScopeId);
+            }
+        }
+
+        var scopedEnvironment = ScriptExecutionScopeRuntime.BuildScriptEnvironment(scope, request.Environment, request.WorkingDirectory, logger);
+        var (commandFile, commandArgs) = GetScriptCommand(request.ScriptType, scriptFilePath, scope);
+        (commandFile, commandArgs) = ApplyPrivacyWrapper(commandFile, commandArgs);
         using var cts = new CancellationTokenSource(config.MaxExecutionTime);
-        BufferedCommandResult run;
+        ScriptProcessResult run;
         if (executionIdentity is not null && OperatingSystem.IsLinux())
         {
-            run = await ExecuteScriptWithSetprivAsync(commandFile, commandArgs, request.WorkingDirectory, executionIdentity, cts.Token);
+            run = await ExecuteScriptWithSetprivAsync(commandFile, commandArgs, scopedEnvironment, request.WorkingDirectory, executionIdentity, cts.Token);
         }
         else
         {
-            run = await Cli.Wrap(commandFile)
-                .WithArguments(commandArgs)
-                .WithWorkingDirectory(request.WorkingDirectory)
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(cts.Token);
+            run = await RunScriptProcessAsync(commandFile, commandArgs, scopedEnvironment, request.WorkingDirectory, cts.Token);
         }
 
         stdOutBuffer.Append(run.StandardOutput);
@@ -598,45 +959,989 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     };
 }
 
-static async Task<BufferedCommandResult> ExecuteScriptWithSetprivAsync(
+static async Task<ScriptProcessResult> ExecuteScriptWithSetprivAsync(
     string commandFile,
     string[] commandArgs,
+    IReadOnlyDictionary<string, string?> environmentVariables,
     string workingDirectory,
     NotebookExecutionIdentity executionIdentity,
     CancellationToken cancellationToken)
 {
-    return await Cli.Wrap("setpriv")
-        .WithArguments(args =>
-        {
-            args
-                .Add("--reuid")
-                .Add(executionIdentity.Uid.ToString())
-                .Add("--regid")
-                .Add(executionIdentity.Gid.ToString())
-                .Add("--init-groups")
-                .Add("--no-new-privs")
-                .Add("--bounding-set")
-                .Add("-all")
-                .Add("--")
-                .Add(commandFile);
-
-            foreach (var commandArg in commandArgs)
-            {
-                args.Add(commandArg);
-            }
-        })
-        .WithWorkingDirectory(workingDirectory)
-        .WithValidation(CommandResultValidation.None)
-        .ExecuteBufferedAsync(cancellationToken);
+    var setprivArgs = new List<string>
+    {
+        "--reuid",
+        executionIdentity.Uid.ToString(),
+        "--regid",
+        executionIdentity.Gid.ToString(),
+        "--init-groups",
+        "--no-new-privs",
+        "--bounding-set",
+        "-all",
+        "--",
+        commandFile
+    };
+    setprivArgs.AddRange(commandArgs);
+    return await RunScriptProcessAsync("setpriv", setprivArgs.ToArray(), environmentVariables, workingDirectory, cancellationToken);
 }
 
-static (string FileName, string[] Arguments) GetScriptCommand(ScriptType scriptType, string scriptFilePath) => scriptType switch
+static async Task<ScriptProcessResult> RunScriptProcessAsync(
+    string commandFile,
+    string[] commandArgs,
+    IReadOnlyDictionary<string, string?> environmentVariables,
+    string workingDirectory,
+    CancellationToken cancellationToken)
+{
+    var startInfo = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = commandFile,
+        WorkingDirectory = workingDirectory,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false
+    };
+
+    foreach (var commandArg in commandArgs)
+    {
+        startInfo.ArgumentList.Add(commandArg);
+    }
+
+    startInfo.Environment.Clear();
+    foreach (var pair in environmentVariables)
+    {
+        if (pair.Value is not null)
+        {
+            startInfo.Environment[pair.Key] = pair.Value;
+        }
+    }
+
+    using var process = System.Diagnostics.Process.Start(startInfo)
+        ?? throw new InvalidOperationException($"Failed to start process '{commandFile}'.");
+
+    var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+    var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+    await process.WaitForExitAsync(cancellationToken);
+    return new ScriptProcessResult(
+        process.ExitCode,
+        await stdoutTask,
+        await stderrTask);
+}
+
+static (string FileName, string[] Arguments) ApplyPrivacyWrapper(string commandFile, string[] commandArgs)
+{
+    if (!OperatingSystem.IsLinux())
+    {
+        return (commandFile, commandArgs);
+    }
+
+    var wrapper = Environment.GetEnvironmentVariable("SCRIPT_EXECUTION_PRIVACY_WRAPPER");
+    if (string.IsNullOrWhiteSpace(wrapper))
+    {
+        wrapper = "/usr/local/bin/ga-script-exec";
+    }
+
+    if (!File.Exists(wrapper))
+    {
+        return (commandFile, commandArgs);
+    }
+
+    var wrappedArgs = new List<string> { commandFile };
+    wrappedArgs.AddRange(commandArgs);
+    return (wrapper, wrappedArgs.ToArray());
+}
+
+static (string FileName, string[] Arguments) GetScriptCommand(
+    ScriptType scriptType,
+    string scriptFilePath,
+    ScriptExecutionScope scope) => scriptType switch
 {
     ScriptType.Bash => ("bash", new[] { scriptFilePath }),
     ScriptType.PowerShell => ("pwsh", new[] { "-File", scriptFilePath }),
-    ScriptType.Python => ("python", new[] { scriptFilePath }),
+    ScriptType.Python => (
+        File.Exists(scope.PythonExecutablePath) ? scope.PythonExecutablePath : "python",
+        new[] { scriptFilePath }),
     _ => throw new ArgumentOutOfRangeException(nameof(scriptType), scriptType, null)
 };
+
+file sealed record ScriptExecutionScopeOptions(
+    string StateRootPath,
+    string? PythonVenvRelativePath,
+    string? PythonBootstrapCommand,
+    bool RequireScopedPythonVenv,
+    string? BasePythonVenvPath);
+
+file sealed record AdminApiOptions(
+    bool Enabled,
+    string? AdminToken,
+    string StateDirectoryPath,
+    bool FailOpen);
+
+file sealed record AdminApplyResult(
+    string Status,
+    int ScopesApplied,
+    int ScopesSkipped,
+    string[] Errors);
+
+file sealed record ScriptProcessResult(
+    int ExitCode,
+    string StandardOutput,
+    string StandardError);
+
+file sealed record ScriptExecutionScope(
+    Guid ProjectId,
+    Guid GuideScopeId,
+    string ScopeRootPath,
+    string PythonVenvPath,
+    string RequirementsFilePath,
+    string AppliedStateFilePath)
+{
+    public string PythonExecutablePath =>
+        OperatingSystem.IsWindows()
+            ? Path.Combine(PythonVenvPath, "Scripts", "python.exe")
+            : Path.Combine(PythonVenvPath, "bin", "python");
+}
+
+file static class ScriptExecutionScopeRuntime
+{
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> VenvLocks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Regex EnvironmentVariableNamePattern = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly HashSet<string> ReservedEnvironmentKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "SCRIPT_EXECUTION_SCOPE_ROOT",
+        "SCRIPT_EXECUTION_SCOPE_PROJECT_ID",
+        "SCRIPT_EXECUTION_SCOPE_GUIDE_ID",
+        "SCRIPT_EXECUTION_SCOPE_CREDENTIALS_FILE",
+        "PATH",
+        "HOME",
+        "USER",
+        "USERNAME",
+        "SHELL",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "DYLD_INSERT_LIBRARIES",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "BASH_ENV",
+        "ENV",
+        "PROMPT_COMMAND",
+        "PSModulePath",
+        "DOTNET_STARTUP_HOOKS",
+        "DOTNET_ADDITIONAL_DEPS",
+        "DOTNET_SHARED_STORE",
+        "ASPNETCORE_ENVIRONMENT",
+        "DOTNET_ENVIRONMENT",
+        "SCRIPT_EXECUTION_AGENT_TOKEN",
+        "SCRIPT_EXECUTION_ADMIN_TOKEN"
+    };
+
+    private static readonly string[] AllowedInheritedEnvironmentKeys =
+    {
+        "CUDA_VISIBLE_DEVICES",
+        "NVIDIA_VISIBLE_DEVICES",
+        "NVIDIA_DRIVER_CAPABILITIES",
+        "ROCR_VISIBLE_DEVICES",
+        "HIP_VISIBLE_DEVICES",
+        "HSA_OVERRIDE_GFX_VERSION",
+        "HF_HOME",
+        "TRANSFORMERS_CACHE",
+        "TORCH_HOME",
+        "PLAYWRIGHT_BROWSERS_PATH",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "LD_LIBRARY_PATH",
+        "CPLUS_INCLUDE_PATH",
+        "C_INCLUDE_PATH"
+    };
+
+    public static ScriptExecutionScope ResolveScope(
+        Guid projectId,
+        Guid guideScopeId,
+        ScriptExecutionScopeOptions options)
+    {
+        var venvRelativePath = NormalizeRelativePath(options.PythonVenvRelativePath, "python-venv");
+
+        var scopeRoot = Path.Combine(
+            options.StateRootPath,
+            $"project-{projectId:N}",
+            $"guide-{guideScopeId:N}");
+
+        return new ScriptExecutionScope(
+            projectId,
+            guideScopeId,
+            scopeRoot,
+            Path.Combine(scopeRoot, venvRelativePath),
+            Path.Combine(scopeRoot, "requirements.txt"),
+            Path.Combine(scopeRoot, "applied-state.json"));
+    }
+
+    public static void EnsureScopeDirectory(ScriptExecutionScope scope)
+    {
+        Directory.CreateDirectory(scope.ScopeRootPath);
+        foreach (var filePath in new[] { scope.RequirementsFilePath, scope.AppliedStateFilePath })
+        {
+            var directory = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+        }
+    }
+
+    public static async Task EnsurePythonVenvAsync(
+        ScriptExecutionScope scope,
+        ScriptExecutionScopeOptions options,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (File.Exists(scope.PythonExecutablePath))
+        {
+            EnsureBasePythonRuntimeExtension(scope, options, logger);
+            return;
+        }
+
+        var venvLock = VenvLocks.GetOrAdd(scope.PythonVenvPath, static _ => new SemaphoreSlim(1, 1));
+        await venvLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (File.Exists(scope.PythonExecutablePath))
+            {
+                EnsureBasePythonRuntimeExtension(scope, options, logger);
+                return;
+            }
+
+            var venvParent = Path.GetDirectoryName(scope.PythonVenvPath);
+            if (!string.IsNullOrWhiteSpace(venvParent))
+            {
+                Directory.CreateDirectory(venvParent);
+            }
+
+            var attempts = GetPythonBootstrapCommands(options.PythonBootstrapCommand);
+            var failures = new List<string>();
+            foreach (var command in attempts)
+            {
+                try
+                {
+                    var result = await Cli.Wrap(command)
+                        .WithArguments(args => args
+                            .Add("-m")
+                            .Add("venv")
+                            .Add(scope.PythonVenvPath))
+                        .WithValidation(CommandResultValidation.None)
+                        .ExecuteBufferedAsync(cancellationToken);
+
+                    if (result.ExitCode == 0 && File.Exists(scope.PythonExecutablePath))
+                    {
+                        EnsureBasePythonRuntimeExtension(scope, options, logger);
+                        logger.LogInformation(
+                            "Created scoped Python virtual environment for project={ProjectId} guide={GuideId} using command={Command}.",
+                            scope.ProjectId,
+                            scope.GuideScopeId,
+                            LogValueSanitizer.Sanitize(command));
+                        return;
+                    }
+
+                    failures.Add($"{command}: exit {result.ExitCode} stderr='{LogValueSanitizer.Sanitize(result.StandardError)}'");
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{command}: {LogValueSanitizer.Sanitize(ex.Message)}");
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"Failed to create scoped Python virtual environment at '{scope.PythonVenvPath}'. Attempts: {string.Join("; ", failures)}");
+        }
+        finally
+        {
+            venvLock.Release();
+        }
+    }
+
+    private static void EnsureBasePythonRuntimeExtension(
+        ScriptExecutionScope scope,
+        ScriptExecutionScopeOptions options,
+        ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(options.BasePythonVenvPath)
+            || !Directory.Exists(options.BasePythonVenvPath)
+            || string.Equals(
+                Path.GetFullPath(options.BasePythonVenvPath),
+                Path.GetFullPath(scope.PythonVenvPath),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var scopedSitePackages = FindPythonSitePackages(scope.PythonVenvPath).FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(scopedSitePackages))
+        {
+            return;
+        }
+
+        var baseSitePackages = FindPythonSitePackages(options.BasePythonVenvPath)
+            .Where(path => !string.Equals(
+                Path.GetFullPath(path),
+                Path.GetFullPath(scopedSitePackages),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            .ToArray();
+        if (baseSitePackages.Length == 0)
+        {
+            return;
+        }
+
+        var pthPath = Path.Combine(scopedSitePackages, "guideants-base-runtime.pth");
+        var content = string.Join(Environment.NewLine, baseSitePackages) + Environment.NewLine;
+        if (File.Exists(pthPath) && string.Equals(File.ReadAllText(pthPath), content, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        File.WriteAllText(pthPath, content);
+        logger.LogInformation(
+            "Extended scoped Python venv for project={ProjectId} guide={GuideId} with base runtime packages from {BasePythonVenvPath}.",
+            scope.ProjectId,
+            scope.GuideScopeId,
+            LogValueSanitizer.Sanitize(options.BasePythonVenvPath));
+    }
+
+    public static async Task<AdminApplyResult> ApplyScopeRequirementsAsync(
+        ScriptExecutionScope scope,
+        ScriptExecutionScopeOptions scopeOptions,
+        AdminApiOptions adminOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        EnsureScopeDirectory(scope);
+        await EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
+
+        var requirementsPath = File.Exists(scope.RequirementsFilePath)
+            ? scope.RequirementsFilePath
+            : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
+        var requirementsText = File.Exists(requirementsPath)
+            ? await File.ReadAllTextAsync(requirementsPath, cancellationToken)
+            : string.Empty;
+        var validation = ValidateRequirements(requirementsText);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException(validation.ErrorMessage);
+        }
+
+        var requirementsHash = ComputeSha256(requirementsText);
+        var previousHash = ReadAppliedRequirementsHash(scope.AppliedStateFilePath);
+        if (requirementsHash == previousHash)
+        {
+            return new AdminApplyResult("skipped", 0, 1, Array.Empty<string>());
+        }
+
+        if (!string.IsNullOrWhiteSpace(requirementsText))
+        {
+            var result = await Cli.Wrap(scope.PythonExecutablePath)
+                .WithArguments(args => args
+                    .Add("-m")
+                    .Add("pip")
+                    .Add("install")
+                    .Add("-r")
+                    .Add(requirementsPath))
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(cancellationToken);
+
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"pip install failed with exit code {result.ExitCode}: {result.StandardError}");
+            }
+        }
+
+        await WriteAppliedStateAsync(scope, requirementsHash, requirementsPath, cancellationToken);
+        logger.LogInformation(
+            "Applied scoped Python requirements for project={ProjectId} guide={GuideId}. hash={Hash}",
+            scope.ProjectId,
+            scope.GuideScopeId,
+            requirementsHash);
+        return new AdminApplyResult("applied", 1, 0, Array.Empty<string>());
+    }
+
+    public static IReadOnlyDictionary<string, string?> BuildScriptEnvironment(
+        ScriptExecutionScope scope,
+        IReadOnlyDictionary<string, string>? requestEnvironment,
+        string workingDirectory,
+        ILogger logger)
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PATH"] = BuildDefaultPath(scope),
+            ["HOME"] = workingDirectory,
+            ["LANG"] = Environment.GetEnvironmentVariable("LANG") ?? "C.UTF-8",
+            ["LC_ALL"] = Environment.GetEnvironmentVariable("LC_ALL") ?? "C.UTF-8",
+            ["GUIDEANTS_PROJECT_ID"] = scope.ProjectId.ToString("D"),
+            ["GUIDEANTS_GUIDE_ID"] = scope.GuideScopeId.ToString("D")
+        };
+
+        if (Directory.Exists(scope.PythonVenvPath))
+        {
+            environment["VIRTUAL_ENV"] = scope.PythonVenvPath;
+        }
+
+        foreach (var inherited in GetAllowedInheritedEnvironment())
+        {
+            if (!environment.ContainsKey(inherited.Key))
+            {
+                environment[inherited.Key] = inherited.Value;
+            }
+        }
+
+        if (requestEnvironment is not null)
+        {
+            foreach (var pair in requestEnvironment)
+            {
+                environment[pair.Key] = pair.Value;
+            }
+        }
+
+        logger.LogInformation(
+            "Built script environment for project={ProjectId} guide={GuideId}. injectedEntries={InjectedCount}",
+            scope.ProjectId,
+            scope.GuideScopeId,
+            requestEnvironment?.Count ?? 0);
+        return environment;
+    }
+
+    public static ValidationResult ValidateEnvironmentKey(string key)
+    {
+        if (!EnvironmentVariableNamePattern.IsMatch(key))
+        {
+            return ValidationResult.Failure("Environment variable name must be valid.");
+        }
+
+        if (ReservedEnvironmentKeys.Contains(key)
+            || key.StartsWith("SCRIPT_EXECUTION_", StringComparison.OrdinalIgnoreCase)
+            || key.StartsWith("GUIDEANTS_", StringComparison.OrdinalIgnoreCase))
+        {
+            return ValidationResult.Failure("Environment variable name is reserved by ScriptExecutionAgent.");
+        }
+
+        return ValidationResult.Success();
+    }
+
+    public static ValidationResult ValidateRequirements(string requirementsText)
+    {
+        var lineNumber = 0;
+        foreach (var rawLine in requirementsText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        {
+            lineNumber++;
+            var line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            if (line.StartsWith("-e", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("--", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("://", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("git+", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith(".", StringComparison.Ordinal)
+                || line.StartsWith("/", StringComparison.Ordinal))
+            {
+                return ValidationResult.Failure($"requirements.txt line {lineNumber} uses a blocked install source or option.");
+            }
+        }
+
+        return ValidationResult.Success();
+    }
+
+    public static IEnumerable<ScriptExecutionScope> EnumerateExistingScopes(ScriptExecutionScopeOptions options)
+    {
+        if (!Directory.Exists(options.StateRootPath))
+        {
+            yield break;
+        }
+
+        foreach (var projectDirectory in Directory.EnumerateDirectories(options.StateRootPath, "project-*"))
+        {
+            var projectName = Path.GetFileName(projectDirectory);
+            if (!Guid.TryParse(projectName["project-".Length..], out var projectId))
+            {
+                continue;
+            }
+
+            foreach (var guideDirectory in Directory.EnumerateDirectories(projectDirectory, "guide-*"))
+            {
+                var guideName = Path.GetFileName(guideDirectory);
+                if (!Guid.TryParse(guideName["guide-".Length..], out var guideId))
+                {
+                    continue;
+                }
+
+                yield return ResolveScope(projectId, guideId, options);
+            }
+        }
+    }
+
+    private static string BuildDefaultPath(ScriptExecutionScope scope)
+    {
+        var segments = new List<string>();
+        if (Directory.Exists(Path.Combine(scope.PythonVenvPath, "bin")))
+        {
+            segments.Add(Path.Combine(scope.PythonVenvPath, "bin"));
+        }
+
+        segments.AddRange(new[]
+        {
+            "/opt/venv/bin",
+            "/usr/local/sbin",
+            "/usr/local/bin",
+            "/usr/sbin",
+            "/usr/bin",
+            "/sbin",
+            "/bin"
+        });
+
+        if (OperatingSystem.IsWindows())
+        {
+            return Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        }
+
+        return string.Join(":", segments.Distinct(StringComparer.Ordinal));
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> GetAllowedInheritedEnvironment()
+    {
+        foreach (var key in AllowedInheritedEnvironmentKeys)
+        {
+            var value = Environment.GetEnvironmentVariable(key);
+            if (!string.IsNullOrEmpty(value))
+            {
+                yield return new KeyValuePair<string, string>(key, value);
+            }
+        }
+    }
+
+    private static string ComputeSha256(string value)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    private static string? ReadAppliedRequirementsHash(string appliedStatePath)
+    {
+        if (!File.Exists(appliedStatePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(appliedStatePath));
+            return document.RootElement.TryGetProperty("requirementsHash", out var hash)
+                ? hash.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static Task WriteAppliedStateAsync(
+        ScriptExecutionScope scope,
+        string requirementsHash,
+        string requirementsPath,
+        CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            version = 1,
+            projectId = scope.ProjectId,
+            guideId = scope.GuideScopeId,
+            requirementsHash,
+            requirementsPath,
+            appliedAt = DateTimeOffset.UtcNow
+        }, new JsonSerializerOptions { WriteIndented = true });
+        return AtomicFile.WriteAllTextAsync(scope.AppliedStateFilePath, json, cancellationToken);
+    }
+
+    private static string NormalizeRelativePath(string? candidate, string fallback)
+    {
+        var value = string.IsNullOrWhiteSpace(candidate) ? fallback : candidate.Trim();
+        if (Path.IsPathRooted(value))
+        {
+            throw new InvalidOperationException($"Scoped path '{value}' must be relative.");
+        }
+
+        var normalized = value.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return fallback;
+        }
+
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Any(segment => string.Equals(segment, "..", StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"Scoped path '{value}' cannot traverse parent directories.");
+        }
+
+        return Path.Combine(segments);
+    }
+
+    private static IReadOnlyList<string> FindPythonSitePackages(string venvPath)
+    {
+        if (string.IsNullOrWhiteSpace(venvPath) || !Directory.Exists(venvPath))
+        {
+            return Array.Empty<string>();
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            var sitePackages = Path.Combine(venvPath, "Lib", "site-packages");
+            return Directory.Exists(sitePackages)
+                ? new[] { sitePackages }
+                : Array.Empty<string>();
+        }
+
+        var candidates = new List<string>();
+        foreach (var libDirectoryName in new[] { "lib", "lib64" })
+        {
+            var libDirectory = Path.Combine(venvPath, libDirectoryName);
+            if (!Directory.Exists(libDirectory))
+            {
+                continue;
+            }
+
+            candidates.AddRange(
+                Directory.EnumerateDirectories(libDirectory, "python*")
+                    .Select(pythonDirectory => Path.Combine(pythonDirectory, "site-packages"))
+                    .Where(Directory.Exists));
+        }
+
+        return candidates
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(static path => path, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> GetPythonBootstrapCommands(string? configuredBootstrapCommand)
+    {
+        var commands = new List<string>();
+        if (!string.IsNullOrWhiteSpace(configuredBootstrapCommand))
+        {
+            commands.Add(configuredBootstrapCommand.Trim());
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            commands.Add("python");
+        }
+        else
+        {
+            commands.Add("python3");
+            commands.Add("python");
+        }
+
+        return commands
+            .Where(static cmd => !string.IsNullOrWhiteSpace(cmd))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+}
+
+file static class AdminStateRuntime
+{
+    public static async Task InitializeAsync(
+        AdminApiOptions adminOptions,
+        ScriptExecutionScopeOptions scopeOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            Directory.CreateDirectory(adminOptions.StateDirectoryPath);
+
+            var configPath = GetConfigPath(adminOptions);
+            if (!File.Exists(configPath))
+            {
+                await AtomicFile.WriteAllTextAsync(
+                    configPath,
+                    JsonSerializer.Serialize(new { version = 1 }, new JsonSerializerOptions { WriteIndented = true }),
+                    cancellationToken);
+            }
+
+            var requirementsPath = GetGlobalRequirementsPath(adminOptions);
+            if (!File.Exists(requirementsPath))
+            {
+                await AtomicFile.WriteAllTextAsync(requirementsPath, string.Empty, cancellationToken);
+            }
+
+            var aptPackagesPath = GetAptPackagesPath(adminOptions);
+            if (!File.Exists(aptPackagesPath))
+            {
+                await AtomicFile.WriteAllTextAsync(aptPackagesPath, string.Empty, cancellationToken);
+            }
+
+            var configValidation = ValidateConfig(await File.ReadAllTextAsync(configPath, cancellationToken));
+            if (!configValidation.IsValid)
+            {
+                throw new InvalidOperationException(configValidation.ErrorMessage);
+            }
+
+            var requirementsValidation = ScriptExecutionScopeRuntime.ValidateRequirements(
+                await File.ReadAllTextAsync(requirementsPath, cancellationToken));
+            if (!requirementsValidation.IsValid)
+            {
+                throw new InvalidOperationException(requirementsValidation.ErrorMessage);
+            }
+
+            var aptPackagesValidation = ValidateAptPackages(await File.ReadAllTextAsync(aptPackagesPath, cancellationToken));
+            if (!aptPackagesValidation.IsValid)
+            {
+                throw new InvalidOperationException(aptPackagesValidation.ErrorMessage);
+            }
+
+            var aptResult = await ApplyGlobalAptPackagesAsync(adminOptions, logger, cancellationToken);
+            var result = await ApplyAllKnownScopesAsync(scopeOptions, adminOptions, logger, cancellationToken);
+            logger.LogInformation(
+                "ScriptExecutionAgent admin state initialized. aptStatus={AptStatus} status={Status} scopesApplied={Applied} scopesSkipped={Skipped}",
+                aptResult.Status,
+                result.Status,
+                result.ScopesApplied,
+                result.ScopesSkipped);
+        }
+        catch (Exception ex)
+        {
+            if (!adminOptions.FailOpen)
+            {
+                throw;
+            }
+
+            logger.LogWarning(ex, "ScriptExecutionAgent admin startup reconcile failed; continuing because SCRIPT_EXECUTION_ADMIN_FAIL_OPEN=true.");
+        }
+    }
+
+    public static string GetConfigPath(AdminApiOptions options) => Path.Combine(options.StateDirectoryPath, "config.json");
+
+    public static string GetGlobalRequirementsPath(AdminApiOptions options) => Path.Combine(options.StateDirectoryPath, "requirements.txt");
+
+    public static string GetAptPackagesPath(AdminApiOptions options) => Path.Combine(options.StateDirectoryPath, "apt-packages.txt");
+
+    public static string GetGlobalAppliedStatePath(AdminApiOptions options) => Path.Combine(options.StateDirectoryPath, "applied-state.json");
+
+    public static string GetRequirementsPath(AdminApiOptions options, ScriptExecutionScope? scope) =>
+        scope is null ? GetGlobalRequirementsPath(options) : scope.RequirementsFilePath;
+
+    public static async Task<string> ReadConfigAsync(AdminApiOptions options, CancellationToken cancellationToken)
+    {
+        var path = GetConfigPath(options);
+        return File.Exists(path) ? await File.ReadAllTextAsync(path, cancellationToken) : "{}";
+    }
+
+    public static Task WriteConfigAsync(AdminApiOptions options, string json, CancellationToken cancellationToken) =>
+        AtomicFile.WriteAllTextAsync(GetConfigPath(options), json, cancellationToken);
+
+    public static ValidationResult ValidateConfig(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return ValidationResult.Failure("config.json must contain a JSON object.");
+            }
+
+            if (document.RootElement.TryGetProperty("version", out var version)
+                && version.ValueKind != JsonValueKind.Number)
+            {
+                return ValidationResult.Failure("config.json property 'version' must be a number when provided.");
+            }
+
+            return ValidationResult.Success();
+        }
+        catch (JsonException ex)
+        {
+            return ValidationResult.Failure($"config.json is invalid JSON: {ex.Message}");
+        }
+    }
+
+    public static ValidationResult ValidateAptPackages(string packageText)
+    {
+        var lineNumber = 0;
+        foreach (var rawLine in packageText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        {
+            lineNumber++;
+            var line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            var packageName = line.Split('#', 2)[0].Trim();
+            if (!Regex.IsMatch(packageName, "^[a-z0-9][a-z0-9+.-]*$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase))
+            {
+                return ValidationResult.Failure($"apt-packages.txt line {lineNumber} is not a valid package name.");
+            }
+        }
+
+        return ValidationResult.Success();
+    }
+
+    public static async Task<AdminApplyResult> ApplyGlobalAptPackagesAsync(
+        AdminApiOptions adminOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var aptPackagesPath = GetAptPackagesPath(adminOptions);
+        var packageText = File.Exists(aptPackagesPath)
+            ? await File.ReadAllTextAsync(aptPackagesPath, cancellationToken)
+            : string.Empty;
+        var validation = ValidateAptPackages(packageText);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException(validation.ErrorMessage);
+        }
+
+        var hash = ComputeSha256(packageText);
+        var appliedState = ReadGlobalAppliedState(adminOptions);
+        if (appliedState.TryGetValue("aptPackagesHash", out var previousHash) && string.Equals(previousHash, hash, StringComparison.Ordinal))
+        {
+            return new AdminApplyResult("skipped", 0, 1, Array.Empty<string>());
+        }
+
+        var packages = ParseAptPackages(packageText).ToArray();
+        if (packages.Length > 0)
+        {
+            if (!OperatingSystem.IsLinux())
+            {
+                throw new InvalidOperationException("apt package apply is supported only on Linux containers.");
+            }
+
+            var update = await Cli.Wrap("apt-get")
+                .WithArguments(args => args.Add("update"))
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(cancellationToken);
+            if (update.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"apt-get update failed with exit code {update.ExitCode}: {update.StandardError}");
+            }
+
+            var install = await Cli.Wrap("apt-get")
+                .WithArguments(args =>
+                {
+                    args.Add("install").Add("-y").Add("--no-install-recommends");
+                    foreach (var package in packages)
+                    {
+                        args.Add(package);
+                    }
+                })
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync(cancellationToken);
+            if (install.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"apt-get install failed with exit code {install.ExitCode}: {install.StandardError}");
+            }
+        }
+
+        appliedState["version"] = "1";
+        appliedState["aptPackagesHash"] = hash;
+        appliedState["aptPackagesAppliedAt"] = DateTimeOffset.UtcNow.ToString("O");
+        await WriteGlobalAppliedStateAsync(adminOptions, appliedState, cancellationToken);
+        logger.LogInformation("Applied admin apt packages. packageCount={Count} hash={Hash}", packages.Length, hash);
+        return new AdminApplyResult("applied", 1, 0, Array.Empty<string>());
+    }
+
+    public static async Task<AdminApplyResult> ApplyAllKnownScopesAsync(
+        ScriptExecutionScopeOptions scopeOptions,
+        AdminApiOptions adminOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var errors = new List<string>();
+        var applied = 0;
+        var skipped = 0;
+
+        foreach (var scope in ScriptExecutionScopeRuntime.EnumerateExistingScopes(scopeOptions))
+        {
+            try
+            {
+                var result = await ScriptExecutionScopeRuntime.ApplyScopeRequirementsAsync(scope, scopeOptions, adminOptions, logger, cancellationToken);
+                applied += result.ScopesApplied;
+                skipped += result.ScopesSkipped;
+            }
+            catch (Exception ex)
+            {
+                var message = $"project={scope.ProjectId:D} guide={scope.GuideScopeId:D}: {ex.Message}";
+                errors.Add(message);
+                logger.LogWarning(ex, "Failed to apply scoped requirements. {Scope}", message);
+            }
+        }
+
+        if (errors.Count > 0 && !adminOptions.FailOpen)
+        {
+            throw new InvalidOperationException($"One or more scoped requirement applies failed: {string.Join("; ", errors)}");
+        }
+
+        var status = errors.Count > 0 ? "partial" : applied > 0 ? "applied" : "skipped";
+        return new AdminApplyResult(status, applied, skipped, errors.ToArray());
+    }
+
+    private static string ComputeSha256(string value)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    private static IEnumerable<string> ParseAptPackages(string packageText) =>
+        packageText.Replace("\r\n", "\n")
+            .Replace('\r', '\n')
+            .Split('\n')
+            .Select(line => line.Split('#', 2)[0].Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line));
+
+    private static Dictionary<string, string> ReadGlobalAppliedState(AdminApiOptions options)
+    {
+        var path = GetGlobalAppliedStatePath(options);
+        if (!File.Exists(path))
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            return document.RootElement.EnumerateObject()
+                .ToDictionary(
+                    property => property.Name,
+                    property => property.Value.ValueKind == JsonValueKind.String
+                        ? property.Value.GetString() ?? string.Empty
+                        : property.Value.GetRawText(),
+                    StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static Task WriteGlobalAppliedStateAsync(
+        AdminApiOptions options,
+        Dictionary<string, string> state,
+        CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
+        return AtomicFile.WriteAllTextAsync(GetGlobalAppliedStatePath(options), json, cancellationToken);
+    }
+}
+
+file static class AtomicFile
+{
+    public static async Task WriteAllTextAsync(string path, string content, CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        await File.WriteAllTextAsync(tempPath, content, cancellationToken);
+        File.Move(tempPath, path, overwrite: true);
+    }
+}
 
 file sealed record AgentSecurityOptions(
     bool RequireAgentToken,
@@ -707,9 +2012,20 @@ file static class NotebookExecutionIdentityProvider
             return null;
         }
 
-        var identity = await GetOrCreateIdentityAsync(projectId, notebookId, logger, cancellationToken);
         var (mountRegistry, _, _) = NotebookMountsRegistry.TryLoad(notebookRoot);
         mountRegistry ??= NotebookMountsRegistry.Empty;
+
+        if (mountRegistry.Mounts.Count > 0)
+        {
+            logger.LogInformation(
+                "SECURITY: notebook has registered mounts; using compatibility execution mode. projectId={ProjectId} notebookId={NotebookId} mountCount={MountCount}",
+                projectId,
+                notebookId,
+                mountRegistry.Mounts.Count);
+            return null;
+        }
+
+        var identity = await GetOrCreateIdentityAsync(projectId, notebookId, logger, cancellationToken);
 
         try
         {
@@ -925,6 +2241,8 @@ public sealed record ScriptExecutionRequest
     public string WorkingDirectory { get; init; } = string.Empty;
     public string ProjectId { get; init; } = string.Empty;
     public string NotebookId { get; init; } = string.Empty;
+    public string? GuideId { get; init; }
+    public IReadOnlyDictionary<string, string>? Environment { get; init; }
 }
 
 public class ScriptExecutionResult

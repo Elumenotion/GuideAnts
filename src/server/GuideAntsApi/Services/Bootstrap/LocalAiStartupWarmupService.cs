@@ -22,7 +22,7 @@ public interface ILocalAiStartupWarmupService
 
     /// <summary>
     /// Ensures local AI services are loaded and ready in deterministic order:
-    /// default llama-cpp chat target first, then non-chat local services.
+    /// unload auxiliary services, default llama-cpp chat target, then non-chat local services.
     /// </summary>
     Task WarmupAllAsync(CancellationToken cancellationToken = default);
 
@@ -69,6 +69,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILlamaRuntimeCoordinator _coordinator;
+    private readonly IServiceModeResolver _serviceModeResolver;
     private readonly ILogger<LocalAiStartupWarmupService> _logger;
 
     public LocalAiStartupWarmupService(
@@ -76,25 +77,31 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         IServiceScopeFactory scopeFactory,
         IHttpClientFactory httpClientFactory,
         ILlamaRuntimeCoordinator coordinator,
+        IServiceModeResolver serviceModeResolver,
         ILogger<LocalAiStartupWarmupService> logger)
     {
         _configuration = configuration;
         _scopeFactory = scopeFactory;
         _httpClientFactory = httpClientFactory;
         _coordinator = coordinator;
+        _serviceModeResolver = serviceModeResolver;
         _logger = logger;
     }
 
     public async Task WarmupAllAsync(CancellationToken cancellationToken = default)
     {
-        Interlocked.Increment(ref _warmupInProgress);
+        if (Interlocked.CompareExchange(ref _warmupInProgress, 1, 0) != 0)
+        {
+            _logger.LogDebug("Skipping duplicate local AI warmup; another warmup is already in progress.");
+            return;
+        }
+
         try
         {
-            // Hard requirement: LLM gets first claim on GPU memory before auxiliary
-            // local services are loaded.
+            // Drain GPU/RAM from auxiliary services (including any container autoload)
+            // before the LLM claims memory, then reload the full stack in order.
+            await UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
             await EnsureDefaultLlamaLoadedAsync(cancellationToken).ConfigureAwait(false);
-
-            // Keep auxiliary services ready at startup for indexing/chat inputs.
             await EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -298,6 +305,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
     private async Task EnsureLocalServiceLoadedAndReadyAsync(string serviceId, CancellationToken cancellationToken)
     {
+        if (!await ShouldWarmLocalServiceAsync(serviceId, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
         if (string.IsNullOrWhiteSpace(adminBase))
         {
@@ -335,6 +347,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
     private async Task EnsureLocalServiceUnloadedAsync(string serviceId, CancellationToken cancellationToken)
     {
+        if (!await ShouldWarmLocalServiceAsync(serviceId, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
         if (string.IsNullOrWhiteSpace(adminBase))
         {
@@ -523,7 +540,13 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                         return processAlive.Value && healthy.Value;
                     }
 
-                    return true;
+                    if (processAlive.HasValue)
+                    {
+                        return processAlive.Value;
+                    }
+
+                    var status = root?["status"]?.GetValue<string>();
+                    return string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase);
                 }
                 catch
                 {
@@ -723,6 +746,51 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         }
 
         return false;
+    }
+
+    private async Task<bool> ShouldWarmLocalServiceAsync(string serviceId, CancellationToken cancellationToken)
+    {
+        var expectedLocalProviderSection = serviceId switch
+        {
+            RoutedServiceNames.SpeechTranscription => "LocalServiceHosts:SpeechTranscriptionBaseUrl",
+            RoutedServiceNames.Embeddings => "LocalServiceHosts:EmbeddingsBaseUrl",
+            RoutedServiceNames.SpeechSynthesis => "LocalServiceHosts:SpeechSynthesisBaseUrl",
+            RoutedServiceNames.ImageGeneration => "LocalServiceHosts:ImageGenerationBaseUrl",
+            _ => null
+        };
+
+        if (expectedLocalProviderSection is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            var mode = await _serviceModeResolver
+                .ResolveAsync(serviceId, modeId: null, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (string.Equals(mode.ProviderSection, expectedLocalProviderSection, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            _logger.LogInformation(
+                "Skipping local {ServiceId} warmup: default mode '{ModeId}' routes to provider section '{ProviderSection}', not local '{LocalProviderSection}'.",
+                serviceId,
+                mode.ModeId,
+                mode.ProviderSection,
+                expectedLocalProviderSection);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not resolve routing mode for {ServiceId}; continuing with local warmup as fallback behavior.",
+                serviceId);
+            return true;
+        }
     }
 
     private static string Truncate(string? value, int maxChars)

@@ -340,6 +340,7 @@ using var scope = CreateDbScope();
                 .Include(p => p.SemiStructuredDatas)
                 .Include(p => p.Folders)
                 .Include(p => p.ExternalAuths)
+                .Include(p => p.AssistantEnvironments)
                 .FirstOrDefaultAsync(p => p.Id == projectId);
 
             if (sourceProject == null)
@@ -407,6 +408,19 @@ using var scope = CreateDbScope();
                     HeaderValue = ea.HeaderValue
                 };
                 context.ProjectExternalAuths.Add(newEa);
+            }
+            await context.SaveChangesAsync();
+
+            // Copy project-bounded guide/assistant environment configurations.
+            foreach (var environment in sourceProject.AssistantEnvironments)
+            {
+                context.ProjectAssistantEnvironments.Add(new ProjectAssistantEnvironment
+                {
+                    ProjectId = newProject.Id,
+                    AssistantId = environment.AssistantId,
+                    EnvironmentConfigJson = environment.EnvironmentConfigJson,
+                    Created = DateTime.UtcNow
+                });
             }
             await context.SaveChangesAsync();
 

@@ -105,7 +105,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ParentConversationId", "ParentTurnIndex");
 
-                    b.ToTable("AgentInvocations");
+                    b.ToTable("AgentInvocations", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AgentInvocationMessage", b =>
@@ -147,7 +147,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("AgentInvocationId", "Sequence");
 
-                    b.ToTable("AgentInvocationMessages");
+                    b.ToTable("AgentInvocationMessages", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ApplicationSetting", b =>
@@ -183,7 +183,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasKey("SectionName");
 
-                    b.ToTable("ApplicationSettings");
+                    b.ToTable("ApplicationSettings", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Assistant", b =>
@@ -279,7 +279,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("IsGlobal", "Kind", "Name");
 
-                    b.ToTable("Assistants");
+                    b.ToTable("Assistants", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantAuthProvider", b =>
@@ -327,7 +327,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ProviderId");
 
-                    b.ToTable("AssistantAuthProviders");
+                    b.ToTable("AssistantAuthProviders", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantAuthScope", b =>
@@ -346,7 +346,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasKey("AssistantAuthProviderId", "Scope");
 
-                    b.ToTable("AssistantAuthScopes");
+                    b.ToTable("AssistantAuthScopes", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantContextOption", b =>
@@ -369,7 +369,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasKey("AssistantId", "Key");
 
-                    b.ToTable("AssistantContextOptions");
+                    b.ToTable("AssistantContextOptions", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantConversationStarter", b =>
@@ -399,7 +399,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("AssistantId", "OrderIndex")
                         .IsUnique();
 
-                    b.ToTable("AssistantConversationStarters");
+                    b.ToTable("AssistantConversationStarters", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantFile", b =>
@@ -445,7 +445,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("AssistantId", "RelativePath")
                         .IsUnique();
 
-                    b.ToTable("AssistantFiles");
+                    b.ToTable("AssistantFiles", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantFileMarkdownShadow", b =>
@@ -493,7 +493,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("AssistantFileMarkdownShadows");
+                    b.ToTable("AssistantFileMarkdownShadows", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantOpenApiOperation", b =>
@@ -545,7 +545,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("SchemaId", "OperationId")
                         .IsUnique();
 
-                    b.ToTable("AssistantOpenApiOperations");
+                    b.ToTable("AssistantOpenApiOperations", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantOpenApiSchema", b =>
@@ -591,7 +591,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("AssistantId", "Name")
                         .IsUnique();
 
-                    b.ToTable("AssistantOpenApiSchemas");
+                    b.ToTable("AssistantOpenApiSchemas", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantTool", b =>
@@ -611,7 +611,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ToolId");
 
-                    b.ToTable("AssistantTools");
+                    b.ToTable("AssistantTools", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ContentFile", b =>
@@ -668,7 +668,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("ContentFiles");
+                    b.ToTable("ContentFiles", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ContentFileMarkdownShadow", b =>
@@ -716,7 +716,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("ContentFileMarkdownShadows");
+                    b.ToTable("ContentFileMarkdownShadows", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ContentFileVersion", b =>
@@ -797,7 +797,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("ContentFileId", "VersionNumber")
                         .IsUnique();
 
-                    b.ToTable("ContentFileVersions");
+                    b.ToTable("ContentFileVersions", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ConversationCurrentState", b =>
@@ -865,7 +865,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ExpiresAt");
 
-                    b.ToTable("ConversationLocks", t =>
+                    b.ToTable("ConversationLocks", null, t =>
                         {
                             t.HasCheckConstraint("CK_ExpiresInFuture", "[ExpiresAt] > [LockedAt]");
                         });
@@ -940,7 +940,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("NotebookConversationId", "TurnIndex"), new[] { "AssistantName" });
 
-                    b.ToTable("ConversationTurns", t =>
+                    b.ToTable("ConversationTurns", null, t =>
                         {
                             t.HasCheckConstraint("CK_Turn_Status", "[Status] IN ('streaming', 'completed', 'cancelled')");
                         });
@@ -1008,7 +1008,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ProjectId", "NotebookId");
 
-                    b.ToTable("DocumentChunks");
+                    b.ToTable("DocumentChunks", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ExcludedHost", b =>
@@ -1041,7 +1041,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("Host")
                         .IsUnique();
 
-                    b.ToTable("ExcludedHosts");
+                    b.ToTable("ExcludedHosts", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ExternalOAuthToken", b =>
@@ -1095,7 +1095,7 @@ namespace GuideAntsApi.DataModel.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_ExternalOAuthTokens_UserId_ProviderId_Unique");
 
-                    b.ToTable("ExternalOAuthTokens");
+                    b.ToTable("ExternalOAuthTokens", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.FileLineageEvent", b =>
@@ -1140,7 +1140,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ProjectId", "Timestamp");
 
-                    b.ToTable("FileLineageEvents", t =>
+                    b.ToTable("FileLineageEvents", null, t =>
                         {
                             t.HasCheckConstraint("CK_FileLineageEvent_NotebookId", "(FileKind = 1 AND NotebookId IS NOT NULL) OR (FileKind = 0 AND NotebookId IS NULL)");
                         });
@@ -1168,7 +1168,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("GuideId", "DisplayOrder");
 
-                    b.ToTable("GuideMembers");
+                    b.ToTable("GuideMembers", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.HostFolderMount", b =>
@@ -1259,7 +1259,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ProjectId", "Status");
 
-                    b.ToTable("HostFolderMounts");
+                    b.ToTable("HostFolderMounts", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.HostFolderMountLink", b =>
@@ -1307,7 +1307,7 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasDatabaseName("IX_HostFolderMountLinks_NotebookId_LinkRelativePath_ActiveUnique")
                         .HasFilter("[Status] IN (0, 1, 2)");
 
-                    b.ToTable("HostFolderMountLinks");
+                    b.ToTable("HostFolderMountLinks", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.JobQueue", b =>
@@ -1380,7 +1380,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("JobType", "Status", "AvailableAt", "Priority", "Created")
                         .HasDatabaseName("IX_JobQueue_TypeClaiming");
 
-                    b.ToTable("JobQueue");
+                    b.ToTable("JobQueue", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Link", b =>
@@ -1405,7 +1405,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("Links");
+                    b.ToTable("Links", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.MessageAttachment", b =>
@@ -1441,7 +1441,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("MessageId", "OrderIndex")
                         .IsUnique();
 
-                    b.ToTable("MessageAttachments");
+                    b.ToTable("MessageAttachments", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.MessageEditHistory", b =>
@@ -1473,7 +1473,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("MessageId")
                         .IsUnique();
 
-                    b.ToTable("MessageEditHistories");
+                    b.ToTable("MessageEditHistories", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Model", b =>
@@ -1520,7 +1520,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("IsActive", "DisplayOrder");
 
-                    b.ToTable("Models");
+                    b.ToTable("Models", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Notebook", b =>
@@ -1587,7 +1587,7 @@ namespace GuideAntsApi.DataModel.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_Notebooks_ProjectId_Slug_Unique");
 
-                    b.ToTable("Notebooks");
+                    b.ToTable("Notebooks", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.NotebookConversation", b =>
@@ -1618,7 +1618,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("NotebookId", "Created");
 
-                    b.ToTable("NotebookConversations");
+                    b.ToTable("NotebookConversations", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.NotebookConversationMessage", b =>
@@ -1707,7 +1707,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("NotebookConversationId", "TurnIndex", "MessageSequence");
 
-                    b.ToTable("NotebookConversationMessages");
+                    b.ToTable("NotebookConversationMessages", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.NotebookFile", b =>
@@ -1758,7 +1758,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("RelativePath", "NotebookId")
                         .IsUnique();
 
-                    b.ToTable("NotebookFiles");
+                    b.ToTable("NotebookFiles", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.NotebookFileMarkdownShadow", b =>
@@ -1806,7 +1806,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("NotebookFileMarkdownShadows");
+                    b.ToTable("NotebookFileMarkdownShadows", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.NotebookLink", b =>
@@ -1832,7 +1832,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("NotebookId");
 
-                    b.ToTable("NotebookLinks");
+                    b.ToTable("NotebookLinks", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.NotebookSemiStructuredData", b =>
@@ -1858,7 +1858,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("SemiStructuredProjectDataId");
 
-                    b.ToTable("NotebookSemiStructuredDatas");
+                    b.ToTable("NotebookSemiStructuredDatas", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.NotebookTemplate", b =>
@@ -1879,7 +1879,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("NotebookTemplates");
+                    b.ToTable("NotebookTemplates", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.OAuthAuthorizationState", b =>
@@ -1939,7 +1939,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("UserId", "ProviderId")
                         .HasDatabaseName("IX_OAuthAuthorizationStates_UserId_ProviderId");
 
-                    b.ToTable("OAuthAuthorizationStates");
+                    b.ToTable("OAuthAuthorizationStates", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Project", b =>
@@ -1982,7 +1982,33 @@ namespace GuideAntsApi.DataModel.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_Projects_Slug_Unique");
 
-                    b.ToTable("Projects");
+                    b.ToTable("Projects", (string)null);
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectAssistantEnvironment", b =>
+                {
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssistantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("Created")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<string>("EnvironmentConfigJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("Updated")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("ProjectId", "AssistantId");
+
+                    b.HasIndex("AssistantId");
+
+                    b.ToTable("ProjectAssistantEnvironments", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectExternalAuth", b =>
@@ -2030,7 +2056,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("ProjectId", "ProviderId")
                         .IsUnique();
 
-                    b.ToTable("ProjectExternalAuths");
+                    b.ToTable("ProjectExternalAuths", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectFolder", b =>
@@ -2071,7 +2097,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("RelativePath", "ProjectId")
                         .IsUnique();
 
-                    b.ToTable("ProjectFolders");
+                    b.ToTable("ProjectFolders", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.PublishedGuide", b =>
@@ -2168,7 +2194,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("GuideId", "Active");
 
-                    b.ToTable("PublishedGuides");
+                    b.ToTable("PublishedGuides", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.RuntimeProfile", b =>
@@ -2215,7 +2241,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasKey("ProfileId");
 
-                    b.ToTable("RuntimeProfiles");
+                    b.ToTable("RuntimeProfiles", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.SemiStructuredProjectData", b =>
@@ -2240,7 +2266,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("ProjectId");
 
-                    b.ToTable("SemiStructuredProjectDatas");
+                    b.ToTable("SemiStructuredProjectDatas", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Tool", b =>
@@ -2288,7 +2314,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("Category", "IsActive", "DisplayOrder");
 
-                    b.ToTable("Tools");
+                    b.ToTable("Tools", (string)null);
 
                     b.HasData(
                         new
@@ -2553,7 +2579,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("UserId", "ProjectId", "NotebookId", "ConversationId");
 
-                    b.ToTable("UsageEvents");
+                    b.ToTable("UsageEvents", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.UsageReportCategory", b =>
@@ -2586,7 +2612,7 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.HasIndex("Key")
                         .IsUnique();
 
-                    b.ToTable("UsageReportCategories");
+                    b.ToTable("UsageReportCategories", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.UsageReportCategoryOperation", b =>
@@ -2609,7 +2635,7 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.HasIndex("UsageReportCategoryId");
 
-                    b.ToTable("UsageReportCategoryOperations");
+                    b.ToTable("UsageReportCategoryOperations", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.User", b =>
@@ -2686,7 +2712,7 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasDatabaseName("IX_Users_Identity_Unique")
                         .HasFilter("[IdentityIssuer] IS NOT NULL AND [IdentitySubject] IS NOT NULL");
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.UserProjectContextOption", b =>
@@ -2743,7 +2769,7 @@ namespace GuideAntsApi.DataModel.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_UserRoles_UserId_Unique");
 
-                    b.ToTable("UserRoles");
+                    b.ToTable("UserRoles", (string)null);
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AgentInvocation", b =>
@@ -3320,6 +3346,25 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("HomePageContentFile");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectAssistantEnvironment", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.Assistant", "Assistant")
+                        .WithMany()
+                        .HasForeignKey("AssistantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("GuideAntsApi.DataModel.Models.Project", "Project")
+                        .WithMany("AssistantEnvironments")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Assistant");
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectExternalAuth", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.Project", "Project")
@@ -3525,6 +3570,8 @@ namespace GuideAntsApi.DataModel.Migrations
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Project", b =>
                 {
+                    b.Navigation("AssistantEnvironments");
+
                     b.Navigation("ContentFiles");
 
                     b.Navigation("ExternalAuths");

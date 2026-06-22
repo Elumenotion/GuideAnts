@@ -1,6 +1,7 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Tests.BackgroundJobs;
@@ -82,6 +83,34 @@ public sealed class GuidesServiceTests
     }
 
     [TestMethod]
+    public async Task Guide_environment_is_scoped_by_project()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"guide-env-project-{Guid.NewGuid():N}");
+        await using var context = new ApplicationDbContext(options);
+        var projectA = new Project { Title = "Project A", Slug = "project-a" };
+        var projectB = new Project { Title = "Project B", Slug = "project-b" };
+        context.Projects.AddRange(projectA, projectB);
+        await context.SaveChangesAsync();
+
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
+        var created = await service.CreateGuideAsync(MinimalCreateGuideDto("Env Guide") with
+        {
+            ProjectId = projectA.Id,
+            EnvironmentVariables = [new EnvironmentVariableDto("API_MODE", "project-a", false)]
+        });
+
+        var projectADetails = await service.GetGuideAsync(created.Id, projectA.Id);
+        var projectBDetails = await service.GetGuideAsync(created.Id, projectB.Id);
+        var unscopedDetails = await service.GetGuideAsync(created.Id);
+
+        projectADetails!.EnvironmentVariables.Should()
+            .ContainSingle()
+            .Which.Should().BeEquivalentTo(new EnvironmentVariableDto("API_MODE", "project-a", false));
+        projectBDetails!.EnvironmentVariables.Should().BeNull();
+        unscopedDetails!.EnvironmentVariables.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task ValidateRuntimeCompatibilityAsync_Returns_valid_for_empty_members()
     {
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"guides-validate-{Guid.NewGuid():N}");
@@ -125,10 +154,27 @@ public sealed class GuidesServiceTests
             }
             """;
 
-        var json = await service.PreviewToolDefinitionAsync(new PreviewToolDefinitionDto(fragment, "{}"));
+        var result = await service.PreviewToolDefinitionAsync(new PreviewToolDefinitionDto(fragment, WebApiSpec()));
 
-        json.Should().Contain("listItems");
+        result.ToolDefinition.Should().Contain("listItems");
     }
+
+    private static string WebApiSpec() => """
+        {
+          "openapi": "3.0.0",
+          "info": { "title": "Web API", "version": "1.0.0" },
+          "servers": [{ "url": "https://api.example.com" }],
+          "paths": {
+            "/items": {
+              "get": {
+                "operationId": "listItems",
+                "summary": "List items",
+                "responses": { "200": { "description": "ok" } }
+              }
+            }
+          }
+        }
+        """;
 
     [TestMethod]
     public async Task PreviewToolDefinitionAsync_Throws_for_invalid_fragment()
@@ -208,6 +254,7 @@ public sealed class GuidesServiceTests
         const string openApiSpec = """
             {
               "openapi": "3.0.0",
+              "info": { "title": "Example API", "version": "1.0.0" },
               "servers": [{ "url": "https://api.example.com" }],
               "paths": {
                 "/items": {

@@ -1,3 +1,5 @@
+using GuideAntsApi.Models;
+
 namespace GuideAntsApi.Models.Guides;
 
 // Summary view for guide list
@@ -29,7 +31,7 @@ public record GuideDetailsDto(
     List<FileDto> Files,
     List<ConversationStarterDto> ConversationStarters,
     List<CrewSummaryDto> Crews
-);
+) { public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; } }
 
 // Create guide request
 public record CreateGuideDto(
@@ -51,7 +53,10 @@ public record CreateGuideDto(
     List<FileUploadDto>? Files,
     List<string>? ConversationStarters,
     List<Guid>? CrewMemberIds  // Assistant IDs to include in crew
-);
+) {
+    public Guid? ProjectId { get; init; }
+    public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+}
 
 // Update guide request
 public record UpdateGuideDto(
@@ -74,7 +79,10 @@ public record UpdateGuideDto(
     List<FileUploadDto>? FilesToAdd,  // New files to upload
     List<string>? ConversationStarters,
     List<Guid>? CrewMemberIds  // Assistant IDs to include in crew
-);
+) {
+    public Guid? ProjectId { get; init; }
+    public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+}
 
 // Supporting DTOs
 public record ToolAssignmentDto(

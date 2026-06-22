@@ -47,7 +47,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                 new SettingsModelDto(
                     ModelId: "gemini-2.5-flash",
                     DisplayName: "Gemini 2.5 Flash",
-                    Provider: "google-vertex-chat",
+                    Provider: "google-gemini-chat",
                     Description: null,
                     ReasoningChoicesJson: null,
                     RuntimeConfigJson: null,
@@ -78,11 +78,11 @@ public sealed class NotebookHeaderToolbarServiceTests
                 string.Equals(modelId, "gemini-2.5-flash", StringComparison.Ordinal)
                     ? new ChatTargetReadinessDto(
                         ModelId: modelId,
-                        Provider: "google-vertex-chat",
+                        Provider: "google-gemini-chat",
                         Status: "blocked",
                         Blockers:
                         [
-                            "PROVIDER_MISSING_FIELDS: provider 'google-vertex-chat' for model 'gemini-2.5-flash' is not a recognized chat provider."
+                            "PROVIDER_MISSING_FIELDS: provider 'google-gemini-chat' for model 'gemini-2.5-flash' is not a recognized chat provider."
                         ],
                         RuntimeState: null,
                         AssistantUsageCount: 0,
@@ -143,7 +143,7 @@ public sealed class NotebookHeaderToolbarServiceTests
             .Which.Should().Contain("PROVIDER_MISSING_FIELDS");
         toolbar.Chat.ModelOptions.Select(option => option.ModelId).Should().Equal("gemini-2.5-pro");
         toolbar.Chat.ModelOptions.Should().OnlyContain(option =>
-            !string.Equals(option.Provider, "google-vertex-chat", StringComparison.OrdinalIgnoreCase));
+            !string.Equals(option.ModelId, "gemini-2.5-flash", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]

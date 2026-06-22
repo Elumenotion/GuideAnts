@@ -10,6 +10,21 @@ ARG PYTHON311_VERSION=3.11.11
 FROM python:${PYTHON311_VERSION}-slim-bookworm AS python311-runtime
 ARG PYTHON311_VERSION
 
+FROM ubuntu:24.04 AS script-agent-exec-builder
+ARG GA_UBUNTU_MIRROR_URL
+RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY script-agent-exec/ga-script-exec.c /tmp/ga-script-exec.c
+RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/ga-script-exec /tmp/ga-script-exec.c
+
 # =============================================================================
 # Slim backend (runtime base + python deps builder + dependency image)
 # =============================================================================
@@ -98,11 +113,17 @@ COPY --from=pydeps-slim-builder /opt/venv /opt/venv
 
 FROM ${GA_DEPS_SLIM_IMAGE} AS final-slim
 
+ENV SCRIPT_EXECUTION_ADMIN_API_ENABLED=true
+ENV SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
+ENV SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
+
 COPY ScriptExecutionAgent/ /app/script-agent/
+COPY script-agent-admin/ /opt/guideants/script-agent-admin/
+COPY --from=script-agent-exec-builder /usr/local/bin/ga-script-exec /usr/local/bin/ga-script-exec
 COPY nginx.slim.conf /etc/nginx/nginx.conf
 COPY entrypoint.slim.sh /entrypoint.sh
 COPY start-media.sh /app/start-media.sh
-RUN chmod +x /entrypoint.sh /app/start-media.sh
+RUN chmod +x /entrypoint.sh /opt/guideants/script-agent-admin/reconcile.sh /app/start-media.sh
 
 COPY media-service/ /app/media-service/
 

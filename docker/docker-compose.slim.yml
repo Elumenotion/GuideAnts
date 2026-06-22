@@ -4,9 +4,12 @@ services:
   guideants-ai:
     image: ${GA_AI_SLIM_IMAGE:-guideants-ai:slim-latest}
     container_name: guideants-ai
+    cap_drop:
+      - SYS_PTRACE
     ports:
       - "8110:80"
     volumes:
+      - script_agent_admin_state:/var/lib/guideants/script-agent-admin
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
         target: /app/ContentFiles
@@ -15,16 +18,36 @@ services:
       - GA_MEDIA_HOST=127.0.0.1
       - GA_MEDIA_PORT=8087
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
+      - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
     networks:
       - guideants-network
     restart: unless-stopped
 
   docling-serve:
-    image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.16.1}
+    image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.21.0}
     container_name: docling-serve
     environment:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
+      - DOCLING_SERVE_MAX_FILE_SIZE=${DOCLING_SERVE_MAX_FILE_SIZE:-524288000}
+      - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=${DOCLING_SERVE_ENG_LOC_NUM_WORKERS:-2}
+      - DOCLING_SERVE_ENG_LOC_SHARE_MODELS=${DOCLING_SERVE_ENG_LOC_SHARE_MODELS:-false}
+      - DOCLING_NUM_THREADS=${DOCLING_NUM_THREADS:-4}
+      - DOCLING_SERVE_LOAD_MODELS_AT_BOOT=${DOCLING_SERVE_LOAD_MODELS_AT_BOOT:-true}
+      - DOCLING_SERVE_OPTIONS_CACHE_SIZE=${DOCLING_SERVE_OPTIONS_CACHE_SIZE:-2}
+      - DOCLING_SERVE_LOG_LEVEL=${DOCLING_SERVE_LOG_LEVEL:-WARNING}
+      - DOCLING_SERVE_LOG_FORMAT=${DOCLING_SERVE_LOG_FORMAT:-text}
+      - DOCLING_SERVE_OTEL_ENABLE_METRICS=${DOCLING_SERVE_OTEL_ENABLE_METRICS:-true}
+      - DOCLING_SERVE_OTEL_ENABLE_TRACES=${DOCLING_SERVE_OTEL_ENABLE_TRACES:-false}
+      - DOCLING_DEBUG_PROFILE_PIPELINE_TIMINGS=${DOCLING_DEBUG_PROFILE_PIPELINE_TIMINGS:-false}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/version"]
+      interval: 30s
+      retries: 5
+      start_period: 120s
+      timeout: 10s
     ports:
       - "5001:5001"
     networks:
@@ -114,6 +137,7 @@ services:
       - FILE_STORAGE_ROOT=/app/ContentFiles
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - PLANTUML_LIMIT_SIZE=8192
     ports:
       - "8111:80"
     volumes:
@@ -145,6 +169,8 @@ services:
 
 volumes:
   guideants_slim_runtime_state:
+
+  script_agent_admin_state:
 
 networks:
   guideants-network:

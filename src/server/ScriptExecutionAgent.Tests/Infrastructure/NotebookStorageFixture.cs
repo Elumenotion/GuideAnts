@@ -6,6 +6,7 @@ public sealed class NotebookStorageFixture : IDisposable
 {
     public Guid ProjectId { get; } = Guid.NewGuid();
     public Guid NotebookId { get; } = Guid.NewGuid();
+    public Guid GuideId { get; } = Guid.NewGuid();
     public string StorageRoot { get; }
     public string NotebookRoot { get; }
     public string WorkingDirectory { get; }

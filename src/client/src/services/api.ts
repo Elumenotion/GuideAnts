@@ -475,7 +475,7 @@ export const api = {
                 method: 'PUT',
                 body: JSON.stringify(project),
             }),
-        
+
         deleteProject: (projectId: string) => 
             callApi<void>(`/projects/${projectId}`, {
                 method: 'DELETE',
@@ -1559,12 +1559,25 @@ export const api = {
     guides: {
         guides: {
             list: () => callApi<any[]>(`/guides`),
-            get: (guideId: string) => callApi<any>(`/guides/${guideId}`),
+            get: (guideId: string, projectId?: string) =>
+                callApi<any>(`/guides/${guideId}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
             create: (dto: any) => callApi<any>(`/guides`, { method: 'POST', body: JSON.stringify(dto) }),
             update: (guideId: string, dto: any) => callApi<any>(`/guides/${guideId}`, { method: 'PUT', body: JSON.stringify(dto) }),
             delete: (guideId: string) => callApi<void>(`/guides/${guideId}`, { method: 'DELETE' }),
             duplicate: (guideId: string) => callApi<any>(`/guides/${guideId}/duplicate`, { method: 'POST' }),
             validateRuntime: (dto: any) => callApi<any>(`/guides/runtime/validate`, { method: 'POST', body: JSON.stringify(dto) }),
+            mcpToolSources: {
+                testConnection: (dto: import('../types/guides').McpTestConnectionRequest) =>
+                    callApi<import('../types/guides').McpTestConnectionResponse>(
+                        `/guides/tool-sources/mcp/test-connection`,
+                        { method: 'POST', body: JSON.stringify(dto) }
+                    ),
+                discover: (dto: import('../types/guides').McpDiscoverToolsRequest) =>
+                    callApi<import('../types/guides').McpDiscoverToolsResponse>(
+                        `/guides/tool-sources/mcp/discover`,
+                        { method: 'POST', body: JSON.stringify(dto) }
+                    ),
+            },
             export: async (guideId: string): Promise<Blob> => {
                 const response = await fetchWithAuth(`${API_BASE_URL}/guides/${guideId}/export`);
                 if (!response.ok) {
@@ -1651,7 +1664,8 @@ export const api = {
         },
         assistants: {
             list: () => callApi<any[]>(`/assistants`),
-            get: (assistantId: string) => callApi<any>(`/assistants/${assistantId}`),
+            get: (assistantId: string, projectId?: string) =>
+                callApi<any>(`/assistants/${assistantId}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
             create: (dto: any) => callApi<any>(`/assistants`, { method: 'POST', body: JSON.stringify(dto) }),
             update: (assistantId: string, dto: any) => callApi<any>(`/assistants/${assistantId}`, { method: 'PUT', body: JSON.stringify(dto) }),
             delete: (assistantId: string) => callApi<void>(`/assistants/${assistantId}`, { method: 'DELETE' }),
@@ -1721,7 +1735,8 @@ export const api = {
         operations: {
             get: (operationId: string) => callApi<any>(`/operations/${operationId}`),
             update: (operationId: string, dto: any) => callApi<any>(`/operations/${operationId}`, { method: 'PUT', body: JSON.stringify(dto) }),
-            preview: (dto: any) => callApi<{ toolDefinition: string }>(`/operations/preview`, { method: 'POST', body: JSON.stringify(dto) }),
+            preview: (dto: import('../types/guides').PreviewToolDefinitionDto) =>
+                callApi<import('../types/guides').ToolDefinitionPreviewResult>(`/operations/preview`, { method: 'POST', body: JSON.stringify(dto) }),
         },
     },
     notebooks: {

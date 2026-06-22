@@ -40,13 +40,17 @@ public class NotebookFileSyncEndpointsTests
         _client.Dispose();
     }
 
-    private async Task<Guid> GetDefaultGuideIdAsync()
+    private async Task<Guid> GetCreativeGuideIdAsync()
     {
         using var scope = _factory.Services.CreateScope();
         var db = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<GuideAntsApi.DataModel.ApplicationDbContext>(scope.ServiceProvider);
         var guideId = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
             System.Linq.Queryable.Select(
-                System.Linq.Queryable.Where(db.Assistants, a => a.Kind == GuideAntsApi.DataModel.Models.AssistantKind.Guide && a.IsActive),
+                System.Linq.Queryable.Where(
+                    db.Assistants,
+                    a => a.Kind == GuideAntsApi.DataModel.Models.AssistantKind.Guide
+                        && a.IsActive
+                        && a.Name == "Creative Guide"),
                 a => a.Id));
         
         if (guideId == Guid.Empty)
@@ -67,7 +71,7 @@ public class NotebookFileSyncEndpointsTests
         projResp.EnsureSuccessStatusCode();
         var proj = await projResp.Content.ReadFromJsonAsync<ProjectDto>();
 
-        var nbResp = await _client.PostAsJsonAsync($"/api/projects/{proj!.Id}/notebooks", new { title = $"nb-{Guid.NewGuid():N}", guideId = await GetDefaultGuideIdAsync() });
+        var nbResp = await _client.PostAsJsonAsync($"/api/projects/{proj!.Id}/notebooks", new { title = $"nb-{Guid.NewGuid():N}", guideId = await GetCreativeGuideIdAsync() });
         nbResp.EnsureSuccessStatusCode();
         var notebook = await nbResp.Content.ReadFromJsonAsync<NotebookDto>();
 
@@ -140,7 +144,7 @@ public class NotebookFileSyncEndpointsTests
         projResp.EnsureSuccessStatusCode();
         var proj = await projResp.Content.ReadFromJsonAsync<ProjectDto>();
 
-        var nbResp = await _client.PostAsJsonAsync($"/api/projects/{proj!.Id}/notebooks", new { title = $"nb-{Guid.NewGuid():N}", guideId = await GetDefaultGuideIdAsync() });
+        var nbResp = await _client.PostAsJsonAsync($"/api/projects/{proj!.Id}/notebooks", new { title = $"nb-{Guid.NewGuid():N}", guideId = await GetCreativeGuideIdAsync() });
         nbResp.EnsureSuccessStatusCode();
         var notebook = await nbResp.Content.ReadFromJsonAsync<NotebookDto>();
 
@@ -165,11 +169,14 @@ public class NotebookFileSyncEndpointsTests
         }));
         await Task.WhenAll(syncTasks);
 
-        // Assert: exactly one file in DB and list
+        // Assert: exactly one row for the concurrently-created file.
+        // Other notebook files may already exist (for example guide resource copies).
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        
-        int count = await db.NotebookFiles.CountAsync(nf => nf.NotebookId == notebook.Id);
+
+        int count = await db.NotebookFiles.CountAsync(nf =>
+            nf.NotebookId == notebook.Id &&
+            nf.RelativePath == "concurrent.txt");
         count.Should().Be(1);
     }
 
@@ -181,7 +188,7 @@ public class NotebookFileSyncEndpointsTests
         projResp.EnsureSuccessStatusCode();
         var proj = await projResp.Content.ReadFromJsonAsync<ProjectDto>();
 
-        var nbResp = await _client.PostAsJsonAsync($"/api/projects/{proj!.Id}/notebooks", new { title = $"nb-{Guid.NewGuid():N}", guideId = await GetDefaultGuideIdAsync() });
+        var nbResp = await _client.PostAsJsonAsync($"/api/projects/{proj!.Id}/notebooks", new { title = $"nb-{Guid.NewGuid():N}", guideId = await GetCreativeGuideIdAsync() });
         nbResp.EnsureSuccessStatusCode();
         var notebook = await nbResp.Content.ReadFromJsonAsync<NotebookDto>();
 

@@ -142,6 +142,7 @@ public sealed class ToolCallerTests
     public void ActionType_MapsUriSchemesToExpectedKinds()
     {
         CreateCaller("client://bridge", "/x", "GET").ActionType.Should().Be(ActionType.ClientHandled);
+        CreateCaller("client://mcp-bridge-my-mcp", "/tools/search", "POST").ActionType.Should().Be(ActionType.ClientHandled);
         CreateCaller("tool://localhost", "A.B.C.Do", "POST").ActionType.Should().Be(ActionType.LocalFunction);
         CreateCaller("sandbox://init.py", "/x", "POST").ActionType.Should().Be(ActionType.SandboxHandled);
         CreateCaller("https://api.example.com", "/x", "GET").ActionType.Should().Be(ActionType.WebApi);

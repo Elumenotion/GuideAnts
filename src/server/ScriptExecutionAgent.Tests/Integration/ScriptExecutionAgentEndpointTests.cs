@@ -93,7 +93,8 @@ public sealed class ScriptExecutionAgentEndpointTests
             scriptType = (int)ScriptType.Bash,
             workingDirectory = _host.Notebook.WorkingDirectory,
             projectId = "not-a-guid",
-            notebookId = _host.Notebook.NotebookId.ToString()
+            notebookId = _host.Notebook.NotebookId.ToString(),
+            guideId = _host.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -128,7 +129,8 @@ public sealed class ScriptExecutionAgentEndpointTests
             scriptType = (int)ScriptType.Bash,
             workingDirectory = _host.Notebook.WorkingDirectory,
             projectId = _host.Notebook.ProjectId.ToString(),
-            notebookId = wrongNotebookId.ToString()
+            notebookId = wrongNotebookId.ToString(),
+            guideId = _host.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -152,7 +154,8 @@ public sealed class ScriptExecutionAgentEndpointTests
             scriptType = (int)ScriptType.Python,
             workingDirectory = _host.Notebook.WorkingDirectory,
             projectId = _host.Notebook.ProjectId.ToString(),
-            notebookId = _host.Notebook.NotebookId.ToString()
+            notebookId = _host.Notebook.NotebookId.ToString(),
+            guideId = _host.Notebook.GuideId.ToString()
         };
 
         var response = await client.PostAsJsonAsync("/execute", body);
@@ -160,10 +163,29 @@ public sealed class ScriptExecutionAgentEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var payload = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(payload);
-        var output = doc.RootElement.TryGetProperty("standardOutput", out var camel)
-            ? camel.GetString()
-            : doc.RootElement.GetProperty("StandardOutput").GetString();
+        var output = ReadStandardOutput(doc.RootElement);
+        output.Should().NotBeNullOrWhiteSpace(payload);
         output.Should().Contain("agent-ok");
+    }
+
+    private static string? ReadStandardOutput(JsonElement root)
+    {
+        if (root.TryGetProperty("standardOutput", out var camel))
+        {
+            return camel.GetString();
+        }
+
+        if (root.TryGetProperty("StandardOutput", out var pascal))
+        {
+            return pascal.GetString();
+        }
+
+        if (root.TryGetProperty("stdout", out var shortName))
+        {
+            return shortName.GetString();
+        }
+
+        return null;
     }
 
     [TestMethod]
@@ -220,7 +242,8 @@ public sealed class ScriptExecutionAgentEndpointTests
             scriptType = (int)ScriptType.Bash,
             workingDirectory = workingDirectory ?? notebook.WorkingDirectory,
             projectId = notebook.ProjectId.ToString(),
-            notebookId = notebook.NotebookId.ToString()
+            notebookId = notebook.NotebookId.ToString(),
+            guideId = notebook.GuideId.ToString()
         };
 
     private static bool IsInterpreterAvailable(string command)

@@ -41,6 +41,44 @@ public sealed class DoclingServeDocumentIntelligenceExtractorTests
     }
 
     [TestMethod]
+    public async Task ExtractMarkdownAsync_SendsConfiguredDoclingOptions_OnSubmit()
+    {
+        string? capturedBody = null;
+        var handler = new RoutedHandler
+        {
+            OnSubmit = request =>
+            {
+                capturedBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return Json("{\"task_id\":\"task-options\"}");
+            },
+            OnPoll = _ => Json("{\"task_status\":\"success\"}"),
+            OnResult = _ => Json("{\"document\":{\"md_content\":\"configured\"}}")
+        };
+        using var httpClient = new HttpClient(handler);
+        var extractor = CreateExtractor(
+            httpClient,
+            options: new DocumentIntelligenceOptions
+            {
+                TimeoutSeconds = 300,
+                MaxConcurrentConversions = 2,
+                AsyncStatusPollIntervalMs = 250,
+                DoclingDoOcr = true,
+                DoclingTableMode = "fast",
+                DoclingApiKey = "docling-secret"
+            });
+
+        await using var content = new MemoryStream(Encoding.UTF8.GetBytes("pdf-bytes"));
+        var markdown = await extractor.ExtractMarkdownAsync(content, "report.pdf", Mode);
+
+        markdown.Should().Be("configured");
+        capturedBody.Should().NotBeNullOrEmpty();
+        capturedBody.Should().Contain("name=do_ocr");
+        capturedBody.Should().Contain("name=table_mode");
+        handler.SubmitRequest!.Headers.TryGetValues("X-Api-Key", out var apiKeys).Should().BeTrue();
+        apiKeys!.Single().Should().Be("docling-secret");
+    }
+
+    [TestMethod]
     public async Task ExtractMarkdownAsync_ReturnsMarkdown_OnSuccessfulConversion()
     {
         var handler = new RoutedHandler
@@ -243,9 +281,10 @@ public sealed class DoclingServeDocumentIntelligenceExtractorTests
     private static DoclingServeDocumentIntelligenceExtractor CreateExtractor(
         HttpClient httpClient,
         string baseUrl = BaseUrl,
-        int pollIntervalMs = 250)
+        int pollIntervalMs = 250,
+        DocumentIntelligenceOptions? options = null)
     {
-        var diOptions = new DocumentIntelligenceOptions
+        var diOptions = options ?? new DocumentIntelligenceOptions
         {
             TimeoutSeconds = 300,
             MaxConcurrentConversions = 2,
@@ -279,6 +318,7 @@ public sealed class DoclingServeDocumentIntelligenceExtractorTests
         public Func<HttpRequestMessage, HttpResponseMessage>? OnResult { get; set; }
 
         public Uri? SubmitUri { get; private set; }
+        public HttpRequestMessage? SubmitRequest { get; private set; }
         public Uri? PollUri { get; private set; }
         public Uri? ResultUri { get; private set; }
 
@@ -288,6 +328,7 @@ public sealed class DoclingServeDocumentIntelligenceExtractorTests
             if (path.Contains("/v1/convert/file/async", StringComparison.Ordinal))
             {
                 SubmitUri = request.RequestUri;
+                SubmitRequest = request;
                 return Task.FromResult((OnSubmit ?? throw new InvalidOperationException("OnSubmit not configured"))(request));
             }
 

@@ -23,6 +23,7 @@ export interface GuideDetailsDto {
   tools: ToolAssignmentDto[];
   contextOptions: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   customTools: CustomToolDto[];
   files: FileDto[];
   conversationStarters: ConversationStarterDto[];
@@ -30,6 +31,7 @@ export interface GuideDetailsDto {
 }
 
 export interface CreateGuideDto {
+  projectId?: string;
   name: string;
   description: string;
   instructions?: string;
@@ -45,12 +47,14 @@ export interface CreateGuideDto {
   customTools?: CustomToolDto[];
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   files?: FileUploadDto[];
   conversationStarters?: string[];
   crewMemberIds?: string[];
 }
 
 export interface UpdateGuideDto {
+  projectId?: string;
   name: string;
   description: string;
   instructions?: string;
@@ -66,6 +70,7 @@ export interface UpdateGuideDto {
   customTools?: CustomToolDto[];
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   fileIdsToKeep?: string[]; // IDs of existing files to keep (omitted files are deleted)
   filesToAdd?: FileUploadDto[]; // New files to upload
   conversationStarters?: string[];
@@ -93,12 +98,14 @@ export interface AssistantDetailsDto {
   reasoningEffort?: string;
   tools: ToolAssignmentDto[];
   contextOptions: ContextOptionDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   customTools: CustomToolDto[];
   files: FileDto[];
   conversationStarters: ConversationStarterDto[];
 }
 
 export interface CreateAssistantDto {
+  projectId?: string;
   name: string;
   description: string;
   instructions?: string;
@@ -113,11 +120,13 @@ export interface CreateAssistantDto {
   customTools?: CustomToolDto[];
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   files?: FileUploadDto[];
   conversationStarters?: string[];
 }
 
 export interface UpdateAssistantDto {
+  projectId?: string;
   name: string;
   description: string;
   instructions?: string;
@@ -132,6 +141,7 @@ export interface UpdateAssistantDto {
   customTools?: CustomToolDto[];
   contextOptions?: ContextOptionDto[];
   authProviders?: AuthProviderDto[];
+  environmentVariables?: EnvironmentVariableDto[];
   fileIdsToKeep?: string[]; // IDs of existing files to keep (omitted files are deleted)
   filesToAdd?: FileUploadDto[]; // New files to upload
   conversationStarters?: string[];
@@ -172,6 +182,66 @@ export interface PreviewToolDefinitionDto {
   openApiSpecJson: string;
 }
 
+export type ToolSourceValidationSeverity = 'error' | 'warning';
+
+export interface ToolSourceValidationMessage {
+  code: string;
+  message: string;
+  field?: string;
+  severity: ToolSourceValidationSeverity;
+}
+
+export interface ToolDefinitionPreviewResult {
+  sourceKind: string;
+  actionType: string;
+  toolDefinition: string;
+  hiddenParameters: string[];
+  responseSchemas?: Record<string, unknown>;
+  validationMessages: ToolSourceValidationMessage[];
+}
+
+export type {
+  McpTransport,
+  McpConnectionPanelState,
+  McpToolDiffState,
+  McpToolSourceMetadata,
+  McpConnectionSettings,
+  McpDiscoveredToolRow,
+  McpDiscoverDiffSummary,
+  McpDiscoverToolsResponse,
+  McpTestConnectionResponse,
+} from '../components/guides/editor/toolSources/mcpToolSourceTypes';
+
+export interface McpToolSourceConnectionDto {
+  transport: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpTransport;
+  url?: string;
+  bridgeId?: string;
+  headers?: Record<string, string>;
+  toolNamePrefix?: string;
+}
+
+export interface McpExistingToolStateDto {
+  backingToolId: string;
+  schemaHash?: string;
+  enabled: boolean;
+  operationId?: string;
+}
+
+export interface McpTestConnectionRequest {
+  connection: McpToolSourceConnectionDto;
+}
+
+export interface McpDiscoverToolsRequest {
+  connection: McpToolSourceConnectionDto;
+  existingTools?: McpExistingToolStateDto[];
+  bridgeTools?: Array<{
+    name: string;
+    title?: string;
+    description?: string;
+    inputSchema?: unknown;
+  }>;
+}
+
 export interface OpenApiAuthConfig {
   authType: 'oauth' | 'service_http' | 'service_query';
   // OAuth fields
@@ -200,6 +270,12 @@ export interface AuthProviderDto {
   valueTemplate?: string;
   userConfigPolicy?: string;
   scopes?: string[];
+}
+
+export interface EnvironmentVariableDto {
+  name: string;
+  value?: string | null;
+  isSecret: boolean;
 }
 
 export enum MarkdownExtractionStatus {

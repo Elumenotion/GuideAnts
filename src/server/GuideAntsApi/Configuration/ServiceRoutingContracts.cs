@@ -12,6 +12,8 @@ internal static class ServiceRoutingContracts
     public const string LlamaCppPath = "/llama-cpp";
     public const string LlamaAdminPath = "/llama-admin";
     public const string LlamaHealthPath = "/llama-cpp/health";
+    public const string DocumentIntelligenceBaseUrlKey = "LocalServiceHosts:DocumentIntelligenceBaseUrl";
+    public const string DoclingVersionPath = "/version";
 
     public const string ImageGenerationAdminPath = "/sd";
     public const string SpeechTranscriptionAdminPath = "/asr";
