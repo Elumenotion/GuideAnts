@@ -15,8 +15,9 @@ namespace GuideAntsApi.IntegrationTests.Infrastructure;
 /// <para>
 /// The database is wiped of routing-relevant state (ApplicationSettings rows
 /// for <c>ServiceModes</c>, catalog models, runtime profiles) before each test
-/// method so tests do not see each other's writes. Projects / notebooks are
-/// left alone — the settings suite does not touch them.
+/// method so tests do not see each other's writes. Project and notebook rows are
+/// preserved, but notebook <c>GuideId</c> links are cleared so assistant cleanup
+/// does not hit <c>FK_Notebooks_Assistants_GuideId</c>.
 /// </para>
 /// </summary>
 [TestClass]
@@ -92,8 +93,17 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
         using var scope = SharedFactory!.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await db.Database.ExecuteSqlRawAsync("DELETE FROM ApplicationSettings WHERE SectionName = 'ServiceModes';");
-        // Assistants reference Models via ModelId; delete them first so the
-        // Models row can be removed without hitting the FK.
+
+        // Assistants reference Models via ModelId and must be removed before Models.
+        // Other test classes share this DB and may leave notebooks / guides that
+        // reference Assistants via Restrict FKs — clear those first, but keep
+        // project + notebook rows intact.
+        await db.Database.ExecuteSqlRawAsync("UPDATE Notebooks SET GuideId = NULL WHERE GuideId IS NOT NULL;");
+        await db.Database.ExecuteSqlRawAsync("DELETE FROM PublishedGuides;");
+        await db.Database.ExecuteSqlRawAsync("DELETE FROM GuideMembers;");
+        await db.Database.ExecuteSqlRawAsync("UPDATE AgentInvocations SET ParentInvocationId = NULL;");
+        await db.Database.ExecuteSqlRawAsync("DELETE FROM AgentInvocationMessages;");
+        await db.Database.ExecuteSqlRawAsync("DELETE FROM AgentInvocations;");
         await db.Database.ExecuteSqlRawAsync("DELETE FROM Assistants;");
         await db.Database.ExecuteSqlRawAsync("DELETE FROM Models;");
         await db.Database.ExecuteSqlRawAsync("DELETE FROM RuntimeProfiles;");

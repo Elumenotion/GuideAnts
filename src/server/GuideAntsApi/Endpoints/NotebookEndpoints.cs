@@ -1,3 +1,4 @@
+using GuideAnts.Logging;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
 using Microsoft.AspNetCore.Mvc;
@@ -476,7 +477,7 @@ var result = await notebookService.CreateNotebookFromFileAsync(projectId, dto);
             ILogger<Program> logger,
             CancellationToken ct) =>
         {
-            logger.LogInformation("GetNotebookTemplates called for projectId {ProjectId}", projectId);
+            logger.LogInformation("GetNotebookTemplates called for projectId {ProjectId}", LogValueSanitizer.Sanitize(projectId));
 
             // Return lightweight summaries - no home page content, auth providers, etc.
             var templates = await service.GetTemplateSummariesAsync(projectId);
