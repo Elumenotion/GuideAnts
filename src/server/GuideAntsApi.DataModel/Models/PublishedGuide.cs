@@ -40,6 +40,16 @@ namespace GuideAntsApi.DataModel.Models
         public bool Active { get; set; } = true;
 
         /// <summary>
+        /// Explicit authentication mode for this published guide. Exactly one mode
+        /// applies (mutually exclusive). Defaults to <see cref="PublishedGuideAuthMode.Anonymous"/>.
+        /// Legacy columns (<see cref="ApiKeyHash"/>, <see cref="AuthValidationWebhookUrl"/>)
+        /// still back the <see cref="PublishedGuideAuthMode.ApiKey"/> /
+        /// <see cref="PublishedGuideAuthMode.Webhook"/> modes.
+        /// </summary>
+        [Required]
+        public PublishedGuideAuthMode AuthMode { get; set; } = PublishedGuideAuthMode.Anonymous;
+
+        /// <summary>
         /// Optional retention period in days for conversations created from this published guide.
         /// If specified, conversations older than this period may be automatically archived or deleted.
         /// </summary>
@@ -114,6 +124,11 @@ namespace GuideAntsApi.DataModel.Models
         public bool ShowAttachments { get; set; }
 
         /// <summary>
+        /// Serialized wire API configuration for OpenAI-compatible published endpoints.
+        /// </summary>
+        public string? WireApiConfigJson { get; set; }
+
+        /// <summary>
         /// SHA-256 hash of the API key for authentication.
         /// When set, clients must provide the API key via x-guideants-apikey header.
         /// This is an alternative to the AuthValidationWebhookUrl - only one should be used.
@@ -146,12 +161,10 @@ namespace GuideAntsApi.DataModel.Models
         public decimal? DailyChargeLimitUsd { get; set; }
 
         /// <summary>
-        /// Optional maximum customer charge (USD) allowed per billing period for this published guide's notebook.
-        /// Billing periods follow the owning user's subscription rules.
-        /// When exceeded, the guide is automatically blocked for public access until the next billing period.
+        /// Optional maximum customer charge (USD) allowed per UTC calendar month for this published guide's notebook.
+        /// When exceeded, the guide is automatically blocked for public access until the next UTC month.
         /// </summary>
         [Column(TypeName = "decimal(19,4)")]
         public decimal? BillingPeriodChargeLimitUsd { get; set; }
     }
 }
-

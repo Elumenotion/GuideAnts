@@ -179,6 +179,29 @@ export interface GuideUsageConversationsPageDto {
   items: ConversationUsageSummaryDto[];
 }
 
+export type GuideUsageSourceFilter = 'all' | 'conversation' | 'published_chat' | 'mcp' | 'wire_api';
+
+export interface GuideApiUsageRowDto {
+  sourceChannel: string;
+  endpoint: string;
+  alias: string;
+  providerServiceMode: string;
+  statusFamily: string;
+  events: number;
+  chargeUsd: number;
+}
+
+export interface GuideApiUsageReportDto {
+  guideId: string;
+  guideName: string;
+  fromDate: string;
+  toDate: string;
+  sourceFilter: string;
+  totalEvents: number;
+  totalChargeUsd: number;
+  rows: GuideApiUsageRowDto[];
+}
+
 export interface GuideUsageReportDto {
   guideId: string;
   guideName: string;

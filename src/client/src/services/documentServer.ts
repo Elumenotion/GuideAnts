@@ -28,7 +28,7 @@ export interface DocumentServerEditorConfigResponse {
 }
 
 const OFFICE_EXTENSIONS = new Set([
-    'csv', 'doc', 'docm', 'docx', 'dot', 'dotm', 'dotx', 'epub', 'fb2', 'htm', 'html',
+    'csv', 'doc', 'docm', 'docx', 'dot', 'dotm', 'dotx', 'epub', 'fb2',
     'odp', 'ods', 'odt', 'pot', 'potm', 'potx', 'pps', 'ppsm', 'ppsx', 'ppt',
     'pptm', 'pptx', 'rtf', 'txt', 'xls', 'xlsb', 'xlsm', 'xlsx', 'xlt', 'xltm', 'xltx',
 ]);
@@ -40,8 +40,8 @@ const OFFICE_CONTENT_TYPE_MARKERS = [
     'application/msword',
     'application/vnd.oasis.opendocument',
 ];
-const EXCLUDED_DOCUMENT_SERVER_EXTENSIONS = new Set(['pdf']);
-const EXCLUDED_DOCUMENT_SERVER_CONTENT_TYPES = ['application/pdf'];
+const EXCLUDED_DOCUMENT_SERVER_EXTENSIONS = new Set(['pdf', 'htm', 'html']);
+const EXCLUDED_DOCUMENT_SERVER_CONTENT_TYPES = ['application/pdf', 'text/html', 'application/xhtml+xml'];
 
 let cachedCapabilities: DocumentServerCapabilities | null = null;
 const DOCUMENT_SERVER_REQUEST_TIMEOUT_MS = 10000;

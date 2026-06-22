@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { UsageBucket, UsageSummaryDto, ProjectUsageSummaryDto, UsageBreakdownWithCategoriesDto } from '../types/usage';
 import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import { TourStartButton } from '../tour/TourStartButton';
@@ -132,6 +133,7 @@ const Usage = () => {
             </div>
           </div>
           <HeaderActionsBar>
+            <GuideAntsGuideButton />
             <HomeButton />
             <SettingsButton />
             <TourStartButton screenId="usage" inline />

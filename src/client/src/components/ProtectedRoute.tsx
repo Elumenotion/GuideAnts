@@ -7,10 +7,12 @@ export function ProtectedRoute({
   children,
   requireAdmin = false,
   requireEditor = false,
+  adminFallbackPath = '/',
 }: {
   children: ReactNode;
   requireAdmin?: boolean;
   requireEditor?: boolean;
+  adminFallbackPath?: string;
 }) {
   const location = useLocation();
   const { status, isAuthenticated, user, role } = useAuth();
@@ -41,7 +43,7 @@ export function ProtectedRoute({
   }
 
   if (requireAdmin && role !== 'Admin') {
-    return <Navigate to="/" replace />;
+    return <Navigate to={adminFallbackPath} replace />;
   }
 
   if (requireEditor && role === 'Reader') {

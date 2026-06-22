@@ -72,6 +72,8 @@ public class NotebookServiceTests
     {
         var providerMock = new Mock<IServiceProvider>();
         providerMock.Setup(p => p.GetService(typeof(ApplicationDbContext))).Returns(context);
+        providerMock.Setup(p => p.GetService(typeof(GuideAntsApi.Services.SystemGuide.ISystemGuideCatalogFilter)))
+            .Returns(GuideAntsApi.Tests.TestUtils.EmptySystemGuideCatalogFilter.Instance);
 
         var scopeMock = new Mock<IServiceScope>();
         scopeMock.SetupGet(s => s.ServiceProvider).Returns(providerMock.Object);

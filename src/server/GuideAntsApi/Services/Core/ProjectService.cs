@@ -173,7 +173,7 @@ using var scope = CreateDbScope();
         phaseStopwatch.Restart();
         var projects = await (
             from p in context.Projects
-            where !p.Deleted
+            where !p.Deleted && !p.IsSystemProject
             join ue in
                 (
                     from e in context.UsageEvents

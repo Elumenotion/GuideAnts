@@ -5,6 +5,8 @@ import type {
   DailyUsageBucketDto,
   GuideUsageConversationsPageDto,
   GuideUsageCrewDto,
+  GuideApiUsageReportDto,
+  GuideUsageSourceFilter,
   GuideUsageSummaryDto,
   InvocationNodeDto,
   TurnInvocationTreeDto,
@@ -164,6 +166,46 @@ export const guideUsageApi = {
     handleUnauthorized(response);
     if (!response.ok) {
       throw new Error(`Failed to fetch assistant usage conversations: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  async getGuideApiUsage(
+    projectId: string,
+    guideId: string,
+    from: string,
+    to: string,
+    source: GuideUsageSourceFilter = 'all'
+  ): Promise<GuideApiUsageReportDto> {
+    const params = new URLSearchParams({ from, to });
+    if (source !== 'all') {
+      params.set('source', source);
+    }
+    const url = `${API_BASE_URL}/projects/${projectId}/guides/${guideId}/usage/api?${params}`;
+    const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
+    handleUnauthorized(response);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch guide API usage: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  async getAssistantApiUsage(
+    projectId: string,
+    assistantId: string,
+    from: string,
+    to: string,
+    source: GuideUsageSourceFilter = 'all'
+  ): Promise<GuideApiUsageReportDto> {
+    const params = new URLSearchParams({ from, to });
+    if (source !== 'all') {
+      params.set('source', source);
+    }
+    const url = `${API_BASE_URL}/projects/${projectId}/assistants/${assistantId}/usage/api?${params}`;
+    const response = await fetch(url, withAuthFetchInit({ method: 'GET', headers: getHeaders() }));
+    handleUnauthorized(response);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch assistant API usage: ${response.status}`);
     }
     return response.json();
   },

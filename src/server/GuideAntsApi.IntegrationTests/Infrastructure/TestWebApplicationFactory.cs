@@ -120,6 +120,14 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
                 SigningKey = IntegrationTestAuthHandler.JwtSigningKey,
                 LifetimeMinutes = IntegrationTestAuthHandler.JwtLifetimeMinutes
             })));
+            services.RemoveAll<IAppJwtValidator>();
+            services.AddSingleton<IAppJwtValidator>(_ => new AppJwtValidator(Microsoft.Extensions.Options.Options.Create(new JwtOptions
+            {
+                Issuer = IntegrationTestAuthHandler.JwtIssuer,
+                Audience = IntegrationTestAuthHandler.JwtAudience,
+                SigningKey = IntegrationTestAuthHandler.JwtSigningKey,
+                LifetimeMinutes = IntegrationTestAuthHandler.JwtLifetimeMinutes
+            })));
 
             services.RemoveAll<ICurrentUserService>();
             services.AddScoped<ICurrentUserService, IntegrationTestCurrentUserService>();

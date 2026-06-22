@@ -1,8 +1,10 @@
+using GuideAnts.Logging;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
 using Microsoft.AspNetCore.Mvc;
 using System.ComponentModel.DataAnnotations;
 using GuideAntsApi.Services;
+using GuideAntsApi.Services.SystemGuide;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Endpoints;
@@ -68,6 +70,7 @@ public static class NotebookEndpoints
         var group = app.MapGroup("/api/projects/{projectId}/notebooks")
             .WithTags("Notebooks")
             .RequireAuthorization("RequireApprovedUser")
+            .WithSystemProjectAccessGuard()
             .WithOpenApi();
 
         // Create a new notebook
@@ -469,14 +472,15 @@ var result = await notebookService.CreateNotebookFromFileAsync(projectId, dto);
             .WithOpenApi();
 
         templatesGroup.MapGet("/", async (
+            Guid? projectId,
             INotebookTemplateService service,
             ILogger<Program> logger,
             CancellationToken ct) =>
         {
-            logger.LogInformation("GetNotebookTemplates called");
+            logger.LogInformation("GetNotebookTemplates called for projectId {ProjectId}", LogValueSanitizer.Sanitize(projectId));
 
             // Return lightweight summaries - no home page content, auth providers, etc.
-            var templates = await service.GetTemplateSummariesAsync();
+            var templates = await service.GetTemplateSummariesAsync(projectId);
             logger.LogInformation("Returning {Count} template summaries", templates.Count());
             return Results.Ok(templates);
         })
@@ -485,10 +489,11 @@ var result = await notebookService.CreateNotebookFromFileAsync(projectId, dto);
 
         templatesGroup.MapGet("/{templateId:guid}", async (
             Guid templateId,
+            Guid? projectId,
             INotebookTemplateService service,
             CancellationToken ct) =>
         {
-            var template = await service.GetTemplateByIdAsync(templateId);
+            var template = await service.GetTemplateByIdAsync(templateId, projectId);
             return template is null ? Results.NotFound() : Results.Ok(template);
         })
         .WithName("GetNotebookTemplateById")
@@ -523,7 +528,7 @@ var result = await notebookService.CreateNotebookFromFileAsync(projectId, dto);
             INotebookTemplateService svc,
             CancellationToken ct) =>
         {
-            var list = await svc.GetAssistantsAsync(templateId);
+            var list = await svc.GetAssistantsAsync(templateId, projectId);
             return Results.Ok(list);
         })
         .WithName("GetNotebookTemplateAssistants")

@@ -174,7 +174,11 @@ public sealed class NotebookImageServiceTests
                 It.IsAny<Guid?>(),
                 It.IsAny<Guid?>(),
                 It.IsAny<Guid?>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>()))
             .Returns(Task.CompletedTask);
 
         var syncService = new Mock<INotebookFileSyncService>();
@@ -220,7 +224,11 @@ public sealed class NotebookImageServiceTests
             context.AssistantId,
             context.CurrentInvocationId,
             null,
-            It.IsAny<CancellationToken>()),
+            It.IsAny<CancellationToken>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>(),
+            It.IsAny<string?>()),
             Times.Once);
     }
 

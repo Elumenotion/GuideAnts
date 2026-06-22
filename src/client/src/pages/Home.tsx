@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { FiBarChart2, FiFolderPlus, FiTool } from 'react-icons/fi';
 import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
@@ -16,7 +16,9 @@ import { DEFAULT_CONVERSATION_TITLE } from '../constants/conversation';
 import { CONNECTION_SECTION_NAME_SET } from './settings/constants/connectionSections';
 import { useAuth } from '../contexts/AuthContext';
 import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HeaderUserMenu } from '../components/common/HeaderUserMenu';
+import { HeaderIconLinkButton } from '../components/common/HeaderIconLinkButton';
 
 interface ProjectSummary {
   id: string;
@@ -26,28 +28,6 @@ interface ProjectSummary {
 }
 
 const ADD_AI_SERVICES_WIZARD_DISMISS_KEY = 'guideants.firstLaunch.addAiServicesWizard.dismissed.v1';
-
-interface HeaderIconLinkButtonProps {
-  to: string;
-  title: string;
-  icon: React.ReactNode;
-  tourId?: string;
-}
-
-function HeaderIconLinkButton({ to, title, icon, tourId }: HeaderIconLinkButtonProps) {
-  return (
-    <Link
-      to={to}
-      title={title}
-      aria-label={title}
-      className="h-10 w-10 border rounded-md transition-colors flex items-center justify-center hover:bg-gray-50 text-gray-700 border-gray-300 bg-white"
-      {...(tourId ? { ['data-tour-id']: tourId } : {})}
-    >
-      {icon}
-      <span className="sr-only">{title}</span>
-    </Link>
-  );
-}
 
 interface HeaderIconActionButtonProps {
   title: string;
@@ -469,6 +449,7 @@ const Home = () => {
             </div>
           </div>
           <HeaderActionsBar>
+            <GuideAntsGuideButton />
             {canCreateContent ? (
               <HeaderIconLinkButton
                 to="/new-project"

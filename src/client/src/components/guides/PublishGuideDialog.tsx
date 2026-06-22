@@ -13,6 +13,15 @@ import { FeaturesTab } from './configTabs/FeaturesTab';
 import { LimitsTab } from './configTabs/LimitsTab';
 import { AuthTab } from './configTabs/AuthTab';
 import { McpTab } from './configTabs/McpTab';
+import {
+  ApisTab,
+  type WireApiAliasKey,
+  type WireApiAliasState,
+  type WireApiEndpointFlagKey,
+  type WireApiEndpointFlagsState,
+  type WireApiMaxRequestSizeKey,
+  type WireApiMaxRequestSizesState,
+} from './configTabs/ApisTab';
 
 interface PublishGuideDialogProps {
   guideName: string;
@@ -26,7 +35,54 @@ interface PublishGuideDialogProps {
   onPublishedGuideUpdated?: (publishedGuide: PublishedGuideDto) => void;
 }
 
-type TabId = 'general' | 'interface' | 'features' | 'limits' | 'auth' | 'mcp';
+type TabId = 'general' | 'interface' | 'features' | 'limits' | 'auth' | 'apis' | 'mcp';
+
+function getInitialWireApiEndpointFlags(
+  flags?: Partial<WireApiEndpointFlagsState> | null
+): WireApiEndpointFlagsState {
+  return {
+    models: flags?.models !== false,
+    chatCompletions: flags?.chatCompletions !== false,
+    responses: flags?.responses !== false,
+    embeddings: flags?.embeddings !== false,
+    imageGenerations: flags?.imageGenerations !== false,
+    audioTranscriptions: flags?.audioTranscriptions !== false,
+    audioSpeech: flags?.audioSpeech !== false,
+  };
+}
+
+function getInitialWireApiAliases(aliasMap?: Record<string, string> | null): WireApiAliasState {
+  return {
+    guide: aliasMap?.guide || 'guide',
+    embeddings: aliasMap?.embeddings || 'embeddings',
+    image: aliasMap?.image || 'image',
+    transcription: aliasMap?.transcription || 'transcription',
+    speech: aliasMap?.speech || 'speech',
+  };
+}
+
+function trimDefinedRecord<T extends string>(record: Partial<Record<T, string>>): Partial<Record<T, string>> {
+  const result: Partial<Record<T, string>> = {};
+  for (const key of Object.keys(record) as T[]) {
+    const value = record[key];
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    if (trimmed) {
+      result[key] = trimmed;
+    }
+  }
+  return result;
+}
+
+function compactNumberRecord<T extends string>(record: Partial<Record<T, number>>): Partial<Record<T, number>> {
+  const result: Partial<Record<T, number>> = {};
+  for (const key of Object.keys(record) as T[]) {
+    const value = record[key];
+    if (typeof value === 'number' && value > 0) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
 
 export function PublishGuideDialog({ 
   guideName, 
@@ -74,6 +130,17 @@ export function PublishGuideDialog({
   const [authWebhookUrl, setAuthWebhookUrl] = useState(publishedGuide?.authValidationWebhookUrl || '');
   const [authWebhookTimeout, setAuthWebhookTimeout] = useState<number>(publishedGuide?.authWebhookTimeoutSeconds || 5);
   const [hasApiKey, setHasApiKey] = useState(publishedGuide?.hasApiKey || false);
+  const [wireApiEnabled, setWireApiEnabled] = useState<boolean>(publishedGuide?.wireApiConfig?.enabled ?? false);
+  const [wireApiProfile, setWireApiProfile] = useState<string>(publishedGuide?.wireApiConfig?.profile || '');
+  const [wireApiEndpointFlags, setWireApiEndpointFlags] = useState<WireApiEndpointFlagsState>(
+    getInitialWireApiEndpointFlags(publishedGuide?.wireApiConfig?.endpointFlags ?? null)
+  );
+  const [wireApiAliases, setWireApiAliases] = useState<WireApiAliasState>(
+    getInitialWireApiAliases(publishedGuide?.wireApiConfig?.aliasMap ?? null)
+  );
+  const [wireApiMaxRequestSizes, setWireApiMaxRequestSizes] = useState<WireApiMaxRequestSizesState>(
+    publishedGuide?.wireApiConfig?.maxRequestSizes ?? {}
+  );
 
   // MCP
   const [mcpEnabled, setMcpEnabled] = useState(publishedGuide?.mcpEnabled || false);
@@ -150,6 +217,21 @@ export function PublishGuideDialog({
     return () => clearTimeout(timer);
   }, [friendlyName, validateFriendlyName]);
 
+  const setWireApiEndpointFlag = (key: WireApiEndpointFlagKey, value: boolean) => {
+    setWireApiEndpointFlags((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const setWireApiAlias = (key: WireApiAliasKey, value: string) => {
+    setWireApiAliases((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const setWireApiMaxRequestSize = (key: WireApiMaxRequestSizeKey, value: number | undefined) => {
+    setWireApiMaxRequestSizes((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
   const handleSubmit = (e?: React.FormEvent | React.MouseEvent) => {
     if (e) {
       e.preventDefault();
@@ -166,6 +248,26 @@ export function PublishGuideDialog({
       return;
     }
 
+    const isAppIdentityAuth = publishedGuide?.authMode === 'AppIdentity';
+
+    const aliasMap = trimDefinedRecord(wireApiAliases);
+    const maxRequestSizes = compactNumberRecord(wireApiMaxRequestSizes);
+    const wireApiConfig = {
+      enabled: wireApiEnabled,
+      profile: wireApiProfile.trim() || undefined,
+      endpointFlags: {
+        models: wireApiEndpointFlags.models,
+        chatCompletions: wireApiEndpointFlags.chatCompletions,
+        responses: wireApiEndpointFlags.responses,
+        embeddings: wireApiEndpointFlags.embeddings,
+        imageGenerations: wireApiEndpointFlags.imageGenerations,
+        audioTranscriptions: wireApiEndpointFlags.audioTranscriptions,
+        audioSpeech: wireApiEndpointFlags.audioSpeech,
+      },
+      aliasMap: Object.keys(aliasMap).length > 0 ? aliasMap : undefined,
+      maxRequestSizes: Object.keys(maxRequestSizes).length > 0 ? maxRequestSizes : undefined,
+    };
+
     const config = {
       friendlyName: friendlyName.trim() || undefined,
       displayMode,
@@ -179,8 +281,13 @@ export function PublishGuideDialog({
       retentionPeriod: retentionPeriod ?? undefined,
       dailyChargeLimitUsd: dailyChargeLimitUsd ?? undefined,
       billingPeriodChargeLimitUsd: billingPeriodChargeLimitUsd ?? undefined,
-      authValidationWebhookUrl: authWebhookUrl.trim() || undefined,
-      authWebhookTimeoutSeconds: authWebhookUrl.trim() ? authWebhookTimeout : undefined,
+      ...(isAppIdentityAuth
+        ? {}
+        : {
+            authValidationWebhookUrl: authWebhookUrl.trim() || undefined,
+            authWebhookTimeoutSeconds: authWebhookUrl.trim() ? authWebhookTimeout : undefined,
+          }),
+      wireApiConfig,
       mcpEnabled,
       mcpDescription: mcpDescription.trim() || undefined,
     };
@@ -289,6 +396,7 @@ export function PublishGuideDialog({
     { id: 'features', label: 'Features' },
     { id: 'limits', label: 'Limits' },
     { id: 'auth', label: 'Auth' },
+    { id: 'apis', label: 'APIs' },
     { id: 'mcp', label: 'MCP and Skills' },
   ];
 
@@ -428,8 +536,27 @@ export function PublishGuideDialog({
                 sessionApiKey={sessionApiKey}
                 guideId={guideId}
                 publishedGuideId={publishedGuide?.id}
+                authMode={publishedGuide?.authMode}
                 onApiKeyChange={handleApiKeyChange}
                 onSessionApiKeyChange={handleSessionApiKeyChange}
+              />
+            )}
+
+            {activeTab === 'apis' && (
+              <ApisTab
+                publishedGuideId={publishedGuide?.id}
+                wireApiEnabled={wireApiEnabled}
+                setWireApiEnabled={setWireApiEnabled}
+                wireApiProfile={wireApiProfile}
+                setWireApiProfile={setWireApiProfile}
+                endpointFlags={wireApiEndpointFlags}
+                setEndpointFlag={setWireApiEndpointFlag}
+                aliases={wireApiAliases}
+                setAlias={setWireApiAlias}
+                maxRequestSizes={wireApiMaxRequestSizes}
+                setMaxRequestSize={setWireApiMaxRequestSize}
+                hasApiKey={hasApiKey}
+                authWebhookUrl={authWebhookUrl}
               />
             )}
 

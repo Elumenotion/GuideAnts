@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../../services/api';
+import type { PublishedGuideAuthMode } from '../../../types/guides';
 
 interface AuthTabProps {
   authWebhookUrl: string;
@@ -11,6 +12,7 @@ interface AuthTabProps {
   sessionApiKey: string | null;
   guideId: string;
   publishedGuideId?: string;
+  authMode?: PublishedGuideAuthMode;
   onApiKeyChange: (hasKey: boolean) => void;
   onSessionApiKeyChange: (apiKey: string | null) => void;
 }
@@ -25,6 +27,7 @@ export function AuthTab({
   sessionApiKey,
   guideId,
   publishedGuideId,
+  authMode,
   onApiKeyChange,
   onSessionApiKeyChange,
 }: AuthTabProps) {
@@ -33,6 +36,22 @@ export function AuthTab({
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const isAppIdentity = authMode === 'AppIdentity';
+
+  if (isAppIdentity) {
+    return (
+      <div className="space-y-6">
+        <h3 className="text-lg font-medium text-gray-900">Authentication</h3>
+        <div className="p-4 bg-blue-50 border border-blue-100 rounded-md text-sm text-blue-800">
+          <p>
+            <strong>Authentication:</strong> GuideAnts app identity — callers must present a signed-in
+            GuideAnts user token. Managed by the system; cannot be changed here.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const handleGenerateApiKey = async () => {
     if (!publishedGuideId) return;
@@ -89,7 +108,7 @@ export function AuthTab({
       {friendlyName.trim() && (
          <div className="p-4 bg-blue-50 border border-blue-100 rounded-md mb-4 text-sm text-blue-800">
            <p><strong>Note:</strong> You have a Public URL configured ("{friendlyName}").</p>
-           <p className="mt-1">Authentication options are still available for the Public URL.</p>
+           <p className="mt-1">Public URL mode is anonymous. Remove the friendly name before saving if you want API key or webhook auth.</p>
          </div>
       )}
 
@@ -301,7 +320,6 @@ export function AuthTab({
     </div>
   );
 }
-
 
 
 

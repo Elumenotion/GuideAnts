@@ -1,3 +1,10 @@
+import { FiDownload, FiLoader, FiSave, FiX } from 'react-icons/fi';
+import { TourStartButton } from '../../../tour/TourStartButton';
+import { HeaderActionsBar } from '../../common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../../../features/guideantsGuide/GuideAntsGuideButton';
+import { HomeButton } from '../../common/HomeButton';
+import { SettingsButton } from '../../common/SettingsButton';
+
 interface EditorHeaderProps {
   isEditing: boolean;
   saving: boolean;
@@ -11,15 +18,14 @@ interface EditorHeaderProps {
   tourScreenId?: string;
 }
 
-import { TourStartButton } from '../../../tour/TourStartButton';
-import { HeaderActionsBar } from '../../common/HeaderActionsBar';
-import { HomeButton } from '../../common/HomeButton';
-import { SettingsButton } from '../../common/SettingsButton';
+const headerIconButtonClass =
+  'flex h-10 w-10 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50';
 
 export function EditorHeader({ isEditing, saving, showExport, entityType, entityName, hasValidationErrors, onCancel, onSave, onExport, tourScreenId }: EditorHeaderProps) {
   const entityLabel = entityType.charAt(0).toUpperCase() + entityType.slice(1);
   const backLabel = entityType === 'guide' ? 'Back to Guides' : 'Back to Assistants';
-  
+  const saveLabel = saving ? 'Saving...' : `Save ${entityLabel}`;
+
   return (
     <div className="bg-white border-b px-8 py-4" data-tour-id="guide.header.container">
       <div className="max-w-7xl mx-auto">
@@ -38,30 +44,46 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
             </h1>
           </div>
           <HeaderActionsBar>
+            <GuideAntsGuideButton />
             {isEditing && showExport && (
               <button
+                type="button"
                 onClick={onExport}
-                className="px-3 py-1 text-sm text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                className={headerIconButtonClass}
+                aria-label="Export"
+                title="Export"
                 data-tour-id="guide.header.export"
               >
-                Export
+                <FiDownload className="h-4 w-4" />
+                <span className="sr-only">Export</span>
               </button>
             )}
             <button
+              type="button"
               onClick={onCancel}
-              className="px-3 py-1 text-sm text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+              className={headerIconButtonClass}
+              aria-label="Cancel"
+              title="Cancel"
               data-tour-id="guide.header.cancel"
             >
-              Cancel
+              <FiX className="h-4 w-4" />
+              <span className="sr-only">Cancel</span>
             </button>
             <button
+              type="button"
               onClick={onSave}
               disabled={saving || hasValidationErrors}
-              className="px-3 py-1 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={hasValidationErrors ? 'Fix validation errors before saving' : undefined}
+              className="flex h-10 w-10 items-center justify-center rounded-md bg-blue-600 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label={saveLabel}
+              title={hasValidationErrors ? 'Fix validation errors before saving' : saveLabel}
               data-tour-id="guide.header.save"
             >
-              {saving ? 'Saving...' : `Save ${entityLabel}`}
+              {saving ? (
+                <FiLoader className="h-4 w-4 animate-spin" />
+              ) : (
+                <FiSave className="h-4 w-4" />
+              )}
+              <span className="sr-only">{saveLabel}</span>
             </button>
             <HomeButton />
             <SettingsButton />
@@ -74,4 +96,3 @@ export function EditorHeader({ isEditing, saving, showExport, entityType, entity
     </div>
   );
 }
-

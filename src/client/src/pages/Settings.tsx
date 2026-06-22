@@ -43,7 +43,10 @@ import {
 import { useLocalModelOnboardingOperation } from '../features/localModelOnboarding/useOperationPolling';
 import { useAuth } from '../contexts/AuthContext';
 import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HeaderUserMenu } from '../components/common/HeaderUserMenu';
+import { HeaderIconLinkButton } from '../components/common/HeaderIconLinkButton';
+import { FiBookOpen } from 'react-icons/fi';
 
 export default function Settings() {
   const { showToast } = useToast();
@@ -807,6 +810,15 @@ export default function Settings() {
             </div>
           </div>
           <HeaderActionsBar className="self-end sm:self-auto">
+            <GuideAntsGuideButton />
+            {isAdmin ? (
+              <HeaderIconLinkButton
+                to="/settings/system-guides"
+                title="System Guides"
+                icon={<FiBookOpen className="h-4 w-4" />}
+                tourId="settings.actions.system-guides"
+              />
+            ) : null}
             <HomeButton />
             <SettingsButton />
             <HeaderUserMenu />

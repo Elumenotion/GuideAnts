@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using GuideAntsApi.DataModel.Models;
 
 namespace GuideAntsApi.Models.Guides;
 
@@ -23,8 +24,10 @@ public class PublishedGuideDto
     public bool Collapsible { get; set; }
     public bool ShowConversationStarters { get; set; }
     public bool ShowAttachments { get; set; }
+    public PublishedWireApiConfigDto? WireApiConfig { get; set; }
     public decimal? DailyChargeLimitUsd { get; set; }
     public decimal? BillingPeriodChargeLimitUsd { get; set; }
+    public PublishedGuideAuthMode AuthMode { get; set; } = PublishedGuideAuthMode.Anonymous;
     /// <summary>
     /// Indicates whether an API key is configured for this published guide.
     /// The actual key is never returned - only shown once at creation/regeneration.
@@ -50,6 +53,7 @@ public class PublishGuideDto
     public int? MaxTurns { get; set; }
     public decimal? DailyChargeLimitUsd { get; set; }
     public decimal? BillingPeriodChargeLimitUsd { get; set; }
+    public PublishedGuideAuthMode? AuthMode { get; set; }
     [StringLength(2048)]
     public string? AuthValidationWebhookUrl { get; set; }
     public int? AuthWebhookTimeoutSeconds { get; set; }
@@ -62,6 +66,7 @@ public class PublishGuideDto
     public bool Collapsible { get; set; }
     public bool ShowConversationStarters { get; set; }
     public bool ShowAttachments { get; set; }
+    public PublishedWireApiConfigDto? WireApiConfig { get; set; }
     public bool McpEnabled { get; set; }
     [StringLength(2000)]
     public string? McpDescription { get; set; }
@@ -74,6 +79,7 @@ public class UpdatePublishedGuideDto
     public int? MaxTurns { get; set; }
     public decimal? DailyChargeLimitUsd { get; set; }
     public decimal? BillingPeriodChargeLimitUsd { get; set; }
+    public PublishedGuideAuthMode? AuthMode { get; set; }
     [StringLength(2048)]
     public string? AuthValidationWebhookUrl { get; set; }
     public int? AuthWebhookTimeoutSeconds { get; set; }
@@ -86,9 +92,41 @@ public class UpdatePublishedGuideDto
     public bool Collapsible { get; set; }
     public bool ShowConversationStarters { get; set; }
     public bool ShowAttachments { get; set; }
+    public PublishedWireApiConfigDto? WireApiConfig { get; set; }
     public bool McpEnabled { get; set; }
     [StringLength(2000)]
     public string? McpDescription { get; set; }
+}
+
+public class PublishedWireApiConfigDto
+{
+    public bool Enabled { get; set; }
+    [StringLength(64)]
+    public string? Profile { get; set; }
+    public PublishedWireApiEndpointFlagsDto? EndpointFlags { get; set; }
+    public Dictionary<string, string>? AliasMap { get; set; }
+    public PublishedWireApiMaxRequestSizesDto? MaxRequestSizes { get; set; }
+}
+
+public class PublishedWireApiEndpointFlagsDto
+{
+    public bool? Models { get; set; }
+    public bool? ChatCompletions { get; set; }
+    public bool? Responses { get; set; }
+    public bool? Embeddings { get; set; }
+    public bool? ImageGenerations { get; set; }
+    public bool? AudioTranscriptions { get; set; }
+    public bool? AudioSpeech { get; set; }
+}
+
+public class PublishedWireApiMaxRequestSizesDto
+{
+    public int? ChatCompletionsBytes { get; set; }
+    public int? ResponsesBytes { get; set; }
+    public int? EmbeddingsBytes { get; set; }
+    public int? ImageGenerationsBytes { get; set; }
+    public int? AudioTranscriptionsBytes { get; set; }
+    public int? AudioSpeechBytes { get; set; }
 }
 
 /// <summary>
@@ -107,7 +145,6 @@ public class ApiKeyGenerationResultDto
     /// </summary>
     public string Warning { get; set; } = "This API key will only be shown once. Store it securely - you will not be able to retrieve it again.";
 }
-
 
 
 

@@ -92,7 +92,7 @@ export default function GuidesDashboard() {
       setLoading(true);
       try {
         const [guidesData, assistantsData] = await Promise.all([
-          api.guides.guides.list(),
+          api.guides.guides.list(projectId),
           api.guides.assistants.list(),
         ]);
         setGuides(guidesData);
@@ -105,7 +105,7 @@ export default function GuidesDashboard() {
     };
 
     loadData();
-  }, []);
+  }, [projectId]);
 
   // Load published guides for current project
   useEffect(() => {
@@ -456,7 +456,7 @@ export default function GuidesDashboard() {
         message: warnings.length > 0 ? warnings.join('\n') : undefined,
         duration: warnings.length > 0 ? 12000 : undefined
       });
-      const guidesData = await api.guides.guides.list();
+      const guidesData = await api.guides.guides.list(projectId);
       setGuides(guidesData);
     } catch (error: any) {
       showToast({ type: 'error', title: 'Failed to import guide', message: error.message });

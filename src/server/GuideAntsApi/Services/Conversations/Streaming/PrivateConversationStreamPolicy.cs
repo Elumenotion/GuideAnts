@@ -38,7 +38,7 @@ public sealed class PrivateConversationStreamPolicy : IConversationStreamPolicy
 
     public bool UsesProgressThrottling => true;
 
-    public async Task<StreamUserIdentity> ResolveUserIdentityAsync(string? externalUserIdentity, CancellationToken ct)
+    public async Task<StreamUserIdentity> ResolveUserIdentityAsync(Guid? internalUserId, string? externalUserIdentity, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var currentUserService = scope.ServiceProvider.GetRequiredService<ICurrentUserService>();

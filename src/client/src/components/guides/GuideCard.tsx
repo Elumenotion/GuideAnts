@@ -22,6 +22,14 @@ export function GuideCard({ guide, publishedGuide, onEdit, onDelete, onPublish, 
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
+  const publishedBadgeTitle = publishedGuide
+    ? publishedGuide.active
+      ? publishedGuide.authMode === 'AppIdentity'
+        ? 'Published with GuideAnts app identity auth — Click to manage'
+        : 'Click to manage'
+      : 'Inactive - Click to reactivate'
+    : undefined;
+
   // Determine button behavior
   const handlePublishClick = () => {
     if (publishedGuide) {
@@ -106,7 +114,7 @@ export function GuideCard({ guide, publishedGuide, onEdit, onDelete, onPublish, 
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                   onClick={handlePublishClick}
-                  title={publishedGuide.active ? 'Click to manage' : 'Inactive - Click to reactivate'}
+                  title={publishedBadgeTitle}
                 >
                   {publishedGuide.active ? '✓ Published' : 'Inactive'}
                 </span>

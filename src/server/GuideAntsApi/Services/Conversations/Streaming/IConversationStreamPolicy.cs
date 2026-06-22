@@ -34,7 +34,7 @@ public interface IConversationStreamPolicy
 
     bool UsesProgressThrottling { get; }
 
-    Task<StreamUserIdentity> ResolveUserIdentityAsync(string? externalUserIdentity, CancellationToken ct);
+    Task<StreamUserIdentity> ResolveUserIdentityAsync(Guid? internalUserId, string? externalUserIdentity, CancellationToken ct);
 
     ConversationFileUrlContext BuildFileUrlContext(NotebookConversation conversation, string? publisherId, string? hostUrl);
 

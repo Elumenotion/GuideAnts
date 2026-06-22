@@ -1,5 +1,6 @@
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.SystemGuide;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -10,6 +11,7 @@ public static class ProjectFolderEndpoints
         var group = app.MapGroup("/api/projects/{projectId}/folders")
             .WithTags("Project Folders")
             .RequireAuthorization("RequireApprovedUser")
+            .WithSystemProjectAccessGuard()
             .WithOpenApi();
 
         // Get folder tree

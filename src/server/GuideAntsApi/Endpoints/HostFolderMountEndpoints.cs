@@ -3,6 +3,7 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.SystemGuide;
 using Microsoft.AspNetCore.Mvc;
 
 namespace GuideAntsApi.Endpoints;
@@ -13,7 +14,8 @@ public static class HostFolderMountEndpoints
     {
         var group = app.MapGroup("/api/projects/{projectId:guid}/host-folder-mounts")
             .WithTags("Host Folder Mounts")
-            .RequireAuthorization("RequireAdmin");
+            .RequireAuthorization("RequireAdmin")
+            .WithSystemProjectAccessGuard();
 
         group.MapGet("/", async (
             Guid projectId,

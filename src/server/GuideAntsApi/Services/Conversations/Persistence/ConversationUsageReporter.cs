@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http;
 using GuideAnts.Usage;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Services.Usage;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 
 namespace GuideAntsApi.Services.Conversations.Persistence;
@@ -10,15 +12,18 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IUsageRecorder _usageRecorder;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<ConversationUsageReporter> _logger;
 
     public ConversationUsageReporter(
         IServiceScopeFactory scopeFactory,
         IUsageRecorder usageRecorder,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<ConversationUsageReporter> logger)
     {
         _scopeFactory = scopeFactory;
         _usageRecorder = usageRecorder;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
     }
 
@@ -33,6 +38,8 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                 return;
             }
 
+            var attribution = UsageAttributionHttpContext.TryGet(_httpContextAccessor);
+
             await _usageRecorder.RecordChatAsync(
                 projectId: request.ProjectId,
                 notebookId: request.NotebookId,
@@ -43,7 +50,11 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                 metadataJson: null,
                 assistantId: request.AssistantId,
                 notebookConversationMessageId: messageId,
-                ct: ct);
+                ct: ct,
+                publishedGuideId: attribution?.PublishedGuideId,
+                sourceChannel: attribution?.SourceChannel,
+                externalRequestId: attribution?.ExternalRequestId,
+                externalUserIdentity: attribution?.ExternalUserIdentity);
         }
         catch (Exception ex)
         {
@@ -61,6 +72,7 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var attribution = UsageAttributionHttpContext.TryGet(_httpContextAccessor);
 
             var toolMessages = await db.NotebookConversationMessages
                 .Where(m => m.NotebookConversationId == request.ConversationId
@@ -109,7 +121,11 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                     }),
                     assistantId: request.AssistantId,
                     notebookConversationMessageId: toolMsg.Id,
-                    ct: ct);
+                    ct: ct,
+                    publishedGuideId: attribution?.PublishedGuideId,
+                    sourceChannel: attribution?.SourceChannel,
+                    externalRequestId: attribution?.ExternalRequestId,
+                    externalUserIdentity: attribution?.ExternalUserIdentity);
             }
         }
         catch (Exception ex)
@@ -130,6 +146,7 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var attribution = UsageAttributionHttpContext.TryGet(_httpContextAccessor);
 
             var turnMessageIds = await db.NotebookConversationMessages
                 .Where(m => m.NotebookConversationId == request.ConversationId
@@ -188,7 +205,11 @@ public sealed class ConversationUsageReporter : IConversationUsageReporter
                 metadataJson: markerMetadata,
                 assistantId: request.AssistantId,
                 notebookConversationMessageId: messageIdForUsage,
-                ct: ct);
+                ct: ct,
+                publishedGuideId: attribution?.PublishedGuideId,
+                sourceChannel: attribution?.SourceChannel,
+                externalRequestId: attribution?.ExternalRequestId,
+                externalUserIdentity: attribution?.ExternalUserIdentity);
         }
         catch (Exception ex)
         {

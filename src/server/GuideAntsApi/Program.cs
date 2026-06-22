@@ -3,6 +3,7 @@ using GuideAntsApi.Database;
 using GuideAntsApi.Services.Migrations;
 using GuideAntsApi.Services.Mcp;
 using GuideAntsApi.Endpoints;
+using GuideAntsApi.Endpoints.Settings;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Diagnostics;
@@ -210,6 +211,10 @@ public class Program
             requiredSeeder.SeedAsync().GetAwaiter().GetResult();
             LogPhase("RequiredGuidesAssistantsSeeder");
 
+            var guideAntsSystemSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IGuideAntsSystemSeeder>();
+            guideAntsSystemSeeder.SeedAsync().GetAwaiter().GetResult();
+            LogPhase("GuideAntsSystemSeeder");
+
             var runtimeProfileSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder>();
             runtimeProfileSeeder.SeedAsync().GetAwaiter().GetResult();
             LogPhase("RuntimeProfileSeeder");
@@ -371,6 +376,7 @@ public class Program
             .AllowAnonymous();
         
         app.MapProjectEndpoints();
+        app.MapSystemGuideEndpoints();
         app.MapGuidesMarkdownEndpoints();
         app.MapCatalogEndpoints();
         app.MapGuidesEndpoints();
@@ -390,6 +396,7 @@ public class Program
         app.MapUserConversationsEndpoints();
         app.MapPublishedNotebookConversationsEndpoints();
         app.MapPublishedGuidesEndpoints();
+        app.MapPublishedOpenAiWireEndpoints();
         app.MapSpeechEndpoints();
         app.MapPublishedSpeechEndpoints();
         app.MapNotebookEndpoints();

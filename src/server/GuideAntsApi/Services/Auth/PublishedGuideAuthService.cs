@@ -1,8 +1,11 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
 
 namespace GuideAntsApi.Services.Auth;
 
@@ -10,6 +13,7 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IAppJwtValidator _appJwtValidator;
     private readonly ILogger<PublishedGuideAuthService> _logger;
 
     /// <summary>
@@ -20,10 +24,12 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
     public PublishedGuideAuthService(
         IServiceScopeFactory scopeFactory,
         IHttpClientFactory httpClientFactory,
+        IAppJwtValidator appJwtValidator,
         ILogger<PublishedGuideAuthService> logger)
     {
         _scopeFactory = scopeFactory;
         _httpClientFactory = httpClientFactory;
+        _appJwtValidator = appJwtValidator;
         _logger = logger;
     }
 
@@ -33,9 +39,9 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
         Guid projectId,
         Guid notebookId,
         CancellationToken ct = default,
-        string? apiKeyHeader = null)
+        string? apiKeyHeader = null,
+        string? appAuthCookieToken = null)
     {
-        // Load PublishedGuide
         DataModel.Models.PublishedGuide? publishedGuide;
         using (var scope = _scopeFactory.CreateScope())
         {
@@ -55,19 +61,148 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
             };
         }
 
-        // Check if API key authentication is configured
-        if (!string.IsNullOrWhiteSpace(publishedGuide.ApiKeyHash))
+        return publishedGuide.AuthMode switch
         {
-            return ValidateApiKey(publishedGuide, apiKeyHeader);
+            PublishedGuideAuthMode.AppIdentity => await ValidateAppIdentityAsync(
+                authorizationHeader,
+                appAuthCookieToken,
+                ct),
+            PublishedGuideAuthMode.ApiKey => ValidateApiKey(publishedGuide, apiKeyHeader),
+            PublishedGuideAuthMode.Webhook => await ValidateWebhookAsync(
+                publishedGuide,
+                pubId,
+                authorizationHeader,
+                projectId,
+                notebookId,
+                ct),
+            PublishedGuideAuthMode.Anonymous => new AuthValidationResult { IsValid = true },
+            _ => new AuthValidationResult { IsValid = true }
+        };
+    }
+
+    private async Task<AuthValidationResult> ValidateAppIdentityAsync(
+        string? authorizationHeader,
+        string? appAuthCookieToken,
+        CancellationToken ct)
+    {
+        var token = ResolveAppIdentityJwt(appAuthCookieToken, authorizationHeader);
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return new AuthValidationResult
+            {
+                IsValid = false,
+                ErrorCode = "authentication_required",
+                ErrorMessage = "This published guide requires authentication"
+            };
         }
 
-        // If no webhook URL and no API key, allow anonymous access
+        var validation = _appJwtValidator.Validate(token);
+        if (!validation.IsValid)
+        {
+            return new AuthValidationResult
+            {
+                IsValid = false,
+                ErrorCode = validation.ErrorCode ?? "invalid_token",
+                ErrorMessage = validation.ErrorMessage ?? "Token validation failed"
+            };
+        }
+
+        var principal = validation.Principal!;
+        var userIdValue = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? principal.FindFirstValue(JwtRegisteredClaimNames.Sub);
+        var securityStampValue = principal.FindFirstValue(JwtClaimTypes.SecurityStamp);
+
+        if (!Guid.TryParse(userIdValue, out var userId) ||
+            !Guid.TryParse(securityStampValue, out var tokenSecurityStamp))
+        {
+            return new AuthValidationResult
+            {
+                IsValid = false,
+                ErrorCode = "invalid_token",
+                ErrorMessage = "Token claims are invalid"
+            };
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var account = await db.UserRoles
+            .AsNoTracking()
+            .Where(userRole => userRole.UserId == userId)
+            .Select(userRole => new { userRole.User.SecurityStamp, userRole.Role, userRole.User.ApprovedAt })
+            .SingleOrDefaultAsync(ct);
+
+        if (account is null || account.SecurityStamp != tokenSecurityStamp)
+        {
+            return new AuthValidationResult
+            {
+                IsValid = false,
+                ErrorCode = "invalid_token",
+                ErrorMessage = "Token security stamp mismatch"
+            };
+        }
+
+        if (account.Role == Role.Pending || account.ApprovedAt == null)
+        {
+            return new AuthValidationResult
+            {
+                IsValid = false,
+                ErrorCode = "user_not_approved",
+                ErrorMessage = "User is not approved for this published guide"
+            };
+        }
+
+        if (account.Role is not (Role.Reader or Role.Contributor or Role.Admin))
+        {
+            return new AuthValidationResult
+            {
+                IsValid = false,
+                ErrorCode = "user_not_approved",
+                ErrorMessage = "User is not approved for this published guide"
+            };
+        }
+
+        return new AuthValidationResult
+        {
+            IsValid = true,
+            UserIdentity = userId.ToString(),
+            InternalUserId = userId
+        };
+    }
+
+    private static string? ResolveAppIdentityJwt(string? appAuthCookieToken, string? authorizationHeader)
+    {
+        if (!string.IsNullOrWhiteSpace(appAuthCookieToken))
+        {
+            return appAuthCookieToken;
+        }
+
+        if (string.IsNullOrWhiteSpace(authorizationHeader))
+        {
+            return null;
+        }
+
+        var trimmed = authorizationHeader.Trim();
+        if (trimmed.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed["Bearer ".Length..].Trim();
+        }
+
+        return trimmed;
+    }
+
+    private async Task<AuthValidationResult> ValidateWebhookAsync(
+        DataModel.Models.PublishedGuide publishedGuide,
+        Guid pubId,
+        string? authorizationHeader,
+        Guid projectId,
+        Guid notebookId,
+        CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(publishedGuide.AuthValidationWebhookUrl))
         {
             return new AuthValidationResult { IsValid = true };
         }
 
-        // Webhook is configured, auth is required
         if (string.IsNullOrWhiteSpace(authorizationHeader))
         {
             return new AuthValidationResult
@@ -78,7 +213,6 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
             };
         }
 
-        // Call webhook to validate token
         try
         {
             var httpClient = _httpClientFactory.CreateClient();
@@ -149,7 +283,9 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
 
             if (string.IsNullOrWhiteSpace(userIdentity))
             {
-                _logger.LogWarning("Webhook returned valid=true but no userIdentity for pubId {PubId}", LogValueSanitizer.Sanitize(pubId));
+                _logger.LogWarning(
+                    "Webhook returned valid=true but no userIdentity for pubId {PubId}",
+                    LogValueSanitizer.Sanitize(pubId));
             }
 
             return new AuthValidationResult
@@ -217,7 +353,6 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
             };
         }
 
-        // API key is valid - use a generic identity since API keys are typically for service-to-service auth
         return new AuthValidationResult
         {
             IsValid = true,
@@ -231,9 +366,7 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
     /// <returns>A 32-character alphanumeric API key with "gak_" prefix.</returns>
     public static string GenerateApiKey()
     {
-        // Generate 24 random bytes (192 bits of entropy)
         var bytes = RandomNumberGenerator.GetBytes(24);
-        // Convert to base64url-safe string and prefix with "gak_" (guideants api key)
         var key = Convert.ToBase64String(bytes)
             .Replace("+", "")
             .Replace("/", "")
@@ -249,5 +382,19 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(apiKey));
         return Convert.ToHexString(bytes);
     }
-}
 
+    public static string? ReadAppAuthCookie(HttpRequest request) =>
+        request.Cookies.TryGetValue(AuthCookieConstants.CookieName, out var cookieToken) &&
+        !string.IsNullOrWhiteSpace(cookieToken)
+            ? cookieToken
+            : null;
+
+    public static int MapValidationFailureStatusCode(string? errorCode) =>
+        errorCode switch
+        {
+            "authentication_required" or "api_key_required" or "invalid_token" or "invalid_api_key"
+                => StatusCodes.Status401Unauthorized,
+            "user_not_approved" => StatusCodes.Status403Forbidden,
+            _ => StatusCodes.Status503ServiceUnavailable
+        };
+}

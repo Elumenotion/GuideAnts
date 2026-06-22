@@ -3,14 +3,17 @@ using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
+using GuideAntsApi.Services.SystemGuide;
 
 namespace GuideAntsApi.Services;
 
 public sealed class NotebookTemplateService(
     IServiceScopeFactory scopeFactory,
+    ISystemGuideCatalogFilter systemGuideCatalogFilter,
     ILogger<NotebookTemplateService> logger) : INotebookTemplateService
 {
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
+    private readonly ISystemGuideCatalogFilter _systemGuideCatalogFilter = systemGuideCatalogFilter;
     private readonly ILogger<NotebookTemplateService> _logger = logger;
 
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
@@ -38,7 +41,9 @@ public sealed class NotebookTemplateService(
     }
 
 
-    public async Task<IEnumerable<NotebookTemplateSummaryDto>> GetTemplateSummariesAsync(Guid? userId = null)
+    public async Task<IEnumerable<NotebookTemplateSummaryDto>> GetTemplateSummariesAsync(
+        Guid? projectId = null,
+        Guid? userId = null)
     {
         // Load lightweight template summaries for selection dialogs
         // Does NOT load: conversationStarters, defaultAssistant, homeContent, full authProviders
@@ -48,12 +53,14 @@ public sealed class NotebookTemplateService(
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         _logger.LogInformation("Loading template summaries for userId: {UserId}", userId);
+
+        var hiddenGuideIds = await _systemGuideCatalogFilter.GetHiddenGuideIdsForCatalogAsync(projectId);
         
         // Load only the fields we need from database guides
         // Include AuthConfigJson to compute HasConfigurableAuth flag
         var dbGuides = await context.Assistants
             .AsNoTracking()
-            .Where(a => a.Kind == AssistantKind.Guide && a.IsActive)
+            .Where(a => a.Kind == AssistantKind.Guide && a.IsActive && !hiddenGuideIds.Contains(a.Id))
             .Select(a => new
             {
                 a.Id,
@@ -110,7 +117,9 @@ public sealed class NotebookTemplateService(
         return results;
     }
 
-    public async Task<IEnumerable<NotebookTemplateDto>> GetTemplatesAsync(Guid? userId = null)
+    public async Task<IEnumerable<NotebookTemplateDto>> GetTemplatesAsync(
+        Guid? projectId = null,
+        Guid? userId = null)
     {
         // Load templates from database (user-specific + global guides).
         var results = new List<NotebookTemplateDto>();
@@ -121,11 +130,13 @@ public sealed class NotebookTemplateService(
         // RULE: Internally, we use string names for resolution always
         // PRIORITY: 1) User-specific guides, 2) Global guides
         _logger.LogInformation("Loading templates for userId: {UserId}", userId);
+
+        var hiddenGuideIds = await _systemGuideCatalogFilter.GetHiddenGuideIdsForCatalogAsync(projectId);
         var dbGuides = await context.Assistants
             .AsNoTracking()
             .Include(a => a.Model)
             .Include(a => a.ConversationStarters)
-            .Where(a => a.Kind == AssistantKind.Guide && a.IsActive)
+            .Where(a => a.Kind == AssistantKind.Guide && a.IsActive && !hiddenGuideIds.Contains(a.Id))
             .ToListAsync();
         _logger.LogInformation("Found {Count} guides from database for userId {UserId}", dbGuides.Count, userId);
 
@@ -217,12 +228,21 @@ public sealed class NotebookTemplateService(
         return results;
     }
 
-    public async Task<NotebookTemplateDto?> GetTemplateByIdAsync(Guid templateId, Guid? userId = null)
+    public async Task<NotebookTemplateDto?> GetTemplateByIdAsync(
+        Guid templateId,
+        Guid? projectId = null,
+        Guid? userId = null)
     {
         List<NotebookAuthProviderDto>? authProviders = null;
 
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var hiddenGuideIds = await _systemGuideCatalogFilter.GetHiddenGuideIdsForCatalogAsync(projectId);
+        if (hiddenGuideIds.Contains(templateId))
+        {
+            return null;
+        }
 
         // STEP 1: Try to look up guide by ID directly (new path)
         var dbGuides = await context.Assistants
@@ -304,7 +324,7 @@ public sealed class NotebookTemplateService(
             .AsNoTracking()
             .Include(a => a.Model)
             .Include(a => a.ConversationStarters)
-            .Where(a => a.Name == guideName && a.Kind == AssistantKind.Guide && a.IsActive)
+            .Where(a => a.Name == guideName && a.Kind == AssistantKind.Guide && a.IsActive && !hiddenGuideIds.Contains(a.Id))
             .ToListAsync();
 
         dbGuide = SelectPreferredGuide(guidesByName, userId);
@@ -363,10 +383,19 @@ public sealed class NotebookTemplateService(
         );
     }
 
-    public async Task<IReadOnlyList<AssistantDefinitionDto>> GetAssistantsAsync(Guid templateId, Guid? userId = null)
+    public async Task<IReadOnlyList<AssistantDefinitionDto>> GetAssistantsAsync(
+        Guid templateId,
+        Guid? projectId = null,
+        Guid? userId = null)
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var hiddenGuideIds = await _systemGuideCatalogFilter.GetHiddenGuideIdsForCatalogAsync(projectId);
+        if (hiddenGuideIds.Contains(templateId))
+        {
+            return [];
+        }
 
         // STEP 1: Try to find guide by ID directly (new path - GuideId)
         var guidesById = await context.Assistants
@@ -397,7 +426,7 @@ public sealed class NotebookTemplateService(
         var guidesByName = await context.Assistants
             .AsNoTracking()
             .Include(a => a.CrewMembers).ThenInclude(cm => cm.Assistant)
-            .Where(a => a.Name == guideName && a.Kind == AssistantKind.Guide && a.IsActive)
+            .Where(a => a.Name == guideName && a.Kind == AssistantKind.Guide && a.IsActive && !hiddenGuideIds.Contains(a.Id))
             .ToListAsync();
 
         var guide = SelectPreferredGuide(guidesByName, userId);

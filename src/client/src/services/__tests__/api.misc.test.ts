@@ -230,6 +230,31 @@ describe('api.guides and notebooks', () => {
     expect(mockFetch.mock.calls[0]?.[0]).toEqual(expect.stringContaining(urlPart));
   });
 
+  it('guides.publish sends wireApiConfig payload when provided', async () => {
+    mockFetch.mockResolvedValue(jsonOk({ id: 'pub-1' }));
+
+    await api.guides.guides.publish('g1', {
+      projectId: 'p1',
+      wireApiConfig: {
+        enabled: true,
+        profile: 'balanced',
+        endpointFlags: { models: true, embeddings: true },
+        aliasMap: { guide: 'guide', embeddings: 'embeddings' },
+        maxRequestSizes: { embeddingsBytes: 4096 },
+      },
+    });
+
+    const request = mockFetch.mock.calls[0]?.[1];
+    const body = JSON.parse((request?.body as string) ?? '{}');
+    expect(body.wireApiConfig).toMatchObject({
+      enabled: true,
+      profile: 'balanced',
+      endpointFlags: { models: true, embeddings: true },
+      aliasMap: { guide: 'guide', embeddings: 'embeddings' },
+      maxRequestSizes: { embeddingsBytes: 4096 },
+    });
+  });
+
   it('lineage download returns blob metadata', async () => {
     const blob = new Blob(['x'], { type: 'application/octet-stream' });
     mockFetch.mockResolvedValue({
