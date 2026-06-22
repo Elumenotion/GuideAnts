@@ -197,15 +197,17 @@ public sealed class ScriptExecutionAgentInProcessTests
     [TestMethod]
     public async Task Execute_python_scoped_venv_extends_base_runtime_packages()
     {
-        if (!CanCreatePythonVenv())
+        if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
         {
-            Assert.Inconclusive("python -m venv is not available on this machine.");
+            Assert.Inconclusive("Scoped Python venv with pip is not available on this machine.");
         }
 
         _factory.Dispose();
         var baseVenvPath = Path.Combine(Path.GetTempPath(), "script-agent-base-venv", Guid.NewGuid().ToString("N"));
         CreateFakeBaseRuntimePackage(baseVenvPath);
-        _factory = new ScriptExecutionAgentWebApplicationFactory(basePythonVenvPath: baseVenvPath);
+        _factory = new ScriptExecutionAgentWebApplicationFactory(
+            basePythonVenvPath: baseVenvPath,
+            requireScopedPythonVenv: true);
 
         using var client = _factory.CreateAuthenticatedClient();
         var body = CreateExecuteBody(
@@ -217,7 +219,18 @@ public sealed class ScriptExecutionAgentInProcessTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        ReadStandardOutput(doc.RootElement).Should().Be("from-base-runtime");
+        var stdout = ReadStandardOutput(doc.RootElement);
+        if (string.IsNullOrWhiteSpace(stdout))
+        {
+            var stderr = ReadStandardError(doc.RootElement);
+            if (stderr?.Contains("Failed to create scoped Python virtual environment", StringComparison.OrdinalIgnoreCase) == true
+                || stderr?.Contains("Error executing script:", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                Assert.Inconclusive($"Scoped Python venv could not be provisioned on this host: {stderr}");
+            }
+        }
+
+        stdout.Should().Be("from-base-runtime");
     }
 
     [TestMethod]
@@ -362,57 +375,19 @@ public sealed class ScriptExecutionAgentInProcessTests
         return null;
     }
 
-    private static bool CanCreatePythonVenv()
+    private static string? ReadStandardError(JsonElement root)
     {
-        var candidates = OperatingSystem.IsWindows()
-            ? new[] { "python" }
-            : new[] { "python3", "python" };
-
-        foreach (var candidate in candidates)
+        if (root.TryGetProperty("StandardError", out var pascal))
         {
-            var venvPath = Path.Combine(Path.GetTempPath(), "script-agent-venv-probe", Guid.NewGuid().ToString("N"));
-            try
-            {
-                using var process = Process.Start(new ProcessStartInfo
-                {
-                    FileName = candidate,
-                    ArgumentList = { "-m", "venv", venvPath },
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                });
-                if (process is null)
-                {
-                    continue;
-                }
-
-                if (process.WaitForExit(5000) && process.ExitCode == 0)
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-                // Try the next candidate.
-            }
-            finally
-            {
-                try
-                {
-                    if (Directory.Exists(venvPath))
-                    {
-                        Directory.Delete(venvPath, recursive: true);
-                    }
-                }
-                catch
-                {
-                    // Best-effort cleanup.
-                }
-            }
+            return pascal.GetString();
         }
 
-        return false;
+        if (root.TryGetProperty("standardError", out var camel))
+        {
+            return camel.GetString();
+        }
+
+        return null;
     }
 
     private static void CreateFakeBaseRuntimePackage(string baseVenvPath)

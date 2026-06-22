@@ -1336,15 +1336,12 @@ internal static class ScriptExecutionScopeRuntime
             {
                 try
                 {
-                    var result = await Cli.Wrap(command)
-                        .WithArguments(args => args
-                            .Add("-m")
-                            .Add("venv")
-                            .Add(scope.PythonVenvPath))
-                        .WithValidation(CommandResultValidation.None)
-                        .ExecuteBufferedAsync(cancellationToken);
-
-                    if (result.ExitCode == 0 && File.Exists(scope.PythonExecutablePath))
+                    var (created, createDetail) = await TryCreatePythonVenvAsync(
+                        command,
+                        scope.PythonVenvPath,
+                        withoutPip: false,
+                        cancellationToken);
+                    if (created && File.Exists(scope.PythonExecutablePath))
                     {
                         EnsureBasePythonRuntimeExtension(scope, options, logger);
                         logger.LogInformation(
@@ -1355,10 +1352,47 @@ internal static class ScriptExecutionScopeRuntime
                         return;
                     }
 
-                    failures.Add($"{command}: exit {result.ExitCode} stderr='{LogValueSanitizer.Sanitize(result.StandardError)}'");
+                    TryDeletePythonVenvDirectory(scope.PythonVenvPath);
+                    (created, createDetail) = await TryCreatePythonVenvAsync(
+                        command,
+                        scope.PythonVenvPath,
+                        withoutPip: true,
+                        cancellationToken);
+                    var pipReady = false;
+                    var pipDetail = created ? string.Empty : "python executable missing";
+                    if (created)
+                    {
+                        for (var pipAttempt = 0; pipAttempt < 3; pipAttempt++)
+                        {
+                            (pipReady, pipDetail) = await TryBootstrapScopedVenvPipAsync(
+                                scope.PythonExecutablePath,
+                                cancellationToken);
+                            if (pipReady)
+                            {
+                                break;
+                            }
+
+                            await Task.Delay(200, cancellationToken);
+                        }
+                    }
+                    if (created && pipReady && File.Exists(scope.PythonExecutablePath))
+                    {
+                        EnsureBasePythonRuntimeExtension(scope, options, logger);
+                        logger.LogInformation(
+                            "Created scoped Python virtual environment for project={ProjectId} guide={GuideId} using command={Command} with separate ensurepip bootstrap.",
+                            scope.ProjectId,
+                            scope.GuideScopeId,
+                            LogValueSanitizer.Sanitize(command));
+                        return;
+                    }
+
+                    TryDeletePythonVenvDirectory(scope.PythonVenvPath);
+                    failures.Add(
+                        $"{command}: venv={(created ? "ok" : createDetail)} pip={(pipReady ? "ok" : pipDetail)}");
                 }
                 catch (Exception ex)
                 {
+                    TryDeletePythonVenvDirectory(scope.PythonVenvPath);
                     failures.Add($"{command}: {LogValueSanitizer.Sanitize(ex.Message)}");
                 }
             }
@@ -1369,6 +1403,94 @@ internal static class ScriptExecutionScopeRuntime
         finally
         {
             venvLock.Release();
+        }
+    }
+
+    private static async Task<(bool Success, string Detail)> TryCreatePythonVenvAsync(
+        string command,
+        string venvPath,
+        bool withoutPip,
+        CancellationToken cancellationToken)
+    {
+        var result = await Cli.Wrap(command)
+            .WithArguments(args =>
+            {
+                args.Add("-m").Add("venv");
+                if (withoutPip)
+                {
+                    args.Add("--without-pip");
+                }
+
+                args.Add(venvPath);
+            })
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+
+        if (result.ExitCode == 0)
+        {
+            return (true, string.Empty);
+        }
+
+        var detail = !string.IsNullOrWhiteSpace(result.StandardError)
+            ? result.StandardError.Trim()
+            : !string.IsNullOrWhiteSpace(result.StandardOutput)
+                ? result.StandardOutput.Trim()
+                : $"exit {result.ExitCode}";
+        return (false, detail);
+    }
+
+    private static async Task<(bool Success, string Detail)> TryBootstrapScopedVenvPipAsync(
+        string pythonExecutablePath,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(pythonExecutablePath))
+        {
+            return (false, "python executable missing");
+        }
+
+        var result = await Cli.Wrap(pythonExecutablePath)
+            .WithArguments(args => args
+                .Add("-m")
+                .Add("ensurepip")
+                .Add("--upgrade")
+                .Add("--default-pip"))
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+
+        if (result.ExitCode == 0)
+        {
+            return (true, string.Empty);
+        }
+
+        var detail = !string.IsNullOrWhiteSpace(result.StandardError)
+            ? result.StandardError.Trim()
+            : $"exit {result.ExitCode}";
+        return (false, detail);
+    }
+
+    private static void TryDeletePythonVenvDirectory(string venvPath)
+    {
+        if (!Directory.Exists(venvPath))
+        {
+            return;
+        }
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                Directory.Delete(venvPath, recursive: true);
+                if (!Directory.Exists(venvPath))
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup before retrying venv creation.
+            }
+
+            Thread.Sleep(100);
         }
     }
 

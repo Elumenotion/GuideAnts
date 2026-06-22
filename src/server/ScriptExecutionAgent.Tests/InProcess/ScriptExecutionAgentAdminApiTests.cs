@@ -161,9 +161,9 @@ public sealed class ScriptExecutionAgentAdminApiTests
     [TestMethod]
     public async Task Admin_apply_scoped_reconciles_unmanaged_python_package_when_requirements_hash_is_unchanged()
     {
-        if (!CanCreatePythonVenv())
+        if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
         {
-            Assert.Inconclusive("python -m venv is not available on this machine.");
+            Assert.Inconclusive("Scoped Python venv with pip is not available on this machine.");
         }
 
         _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
@@ -267,9 +267,9 @@ print("created")
     [TestMethod]
     public async Task Admin_apply_scoped_preflight_rejects_missing_python_package()
     {
-        if (!CanCreatePythonVenv())
+        if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
         {
-            Assert.Inconclusive("python -m venv is not available on this machine.");
+            Assert.Inconclusive("Scoped Python venv with pip is not available on this machine.");
         }
 
         _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
@@ -314,9 +314,9 @@ print("created")
     [TestMethod]
     public async Task Admin_install_scripts_reject_invalid_python_syntax()
     {
-        if (!CanCreatePythonVenv())
+        if (!PythonVenvTestHelper.CanCreateScopedPythonVenv())
         {
-            Assert.Inconclusive("python -m venv is not available on this machine.");
+            Assert.Inconclusive("Scoped Python venv with pip is not available on this machine.");
         }
 
         _factory = new ScriptExecutionAgentWebApplicationFactory(enableAdminApi: true);
@@ -459,58 +459,5 @@ print("created")
         }
 
         return null;
-    }
-
-    private static bool CanCreatePythonVenv()
-    {
-        var candidates = OperatingSystem.IsWindows()
-            ? new[] { "python" }
-            : new[] { "python3", "python" };
-
-        foreach (var candidate in candidates)
-        {
-            var venvPath = Path.Combine(Path.GetTempPath(), "script-agent-admin-venv-probe", Guid.NewGuid().ToString("N"));
-            try
-            {
-                using var process = Process.Start(new ProcessStartInfo
-                {
-                    FileName = candidate,
-                    ArgumentList = { "-m", "venv", venvPath },
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                });
-                if (process is null)
-                {
-                    continue;
-                }
-
-                if (process.WaitForExit(5000) && process.ExitCode == 0)
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-                // Try next candidate.
-            }
-            finally
-            {
-                try
-                {
-                    if (Directory.Exists(venvPath))
-                    {
-                        Directory.Delete(venvPath, recursive: true);
-                    }
-                }
-                catch
-                {
-                    // Best-effort cleanup.
-                }
-            }
-        }
-
-        return false;
     }
 }
