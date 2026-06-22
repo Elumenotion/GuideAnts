@@ -762,8 +762,8 @@ cd "$ROOT_DIR"
 if wait_for_health; then
   hr
   log "GuideAnts is up: $HEALTH_URL"
-  open_browser
   apply_host_mount
+  open_browser
 else
   warn "Health check timed out. Inspect with: docker compose -f docker/$COMPOSE_FILE ps"
   if [[ -n "$MOUNT_PATH" ]]; then
