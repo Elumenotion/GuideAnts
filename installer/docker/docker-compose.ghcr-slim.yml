@@ -22,7 +22,6 @@ services:
 
   docling-serve:
     image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.16.1}
-    platform: linux/amd64
     pull_policy: missing
     container_name: docling-serve
     environment:

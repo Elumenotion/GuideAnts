@@ -171,6 +171,7 @@ services:
 
   documentserver:
     image: ${GA_DOCUMENTSERVER_IMAGE:-documentserver:latest}
+    platform: linux/amd64
     container_name: documentserver
     environment:
       - JWT_ENABLED=${GA_DOCUMENTSERVER_JWT_ENABLED:-false}
