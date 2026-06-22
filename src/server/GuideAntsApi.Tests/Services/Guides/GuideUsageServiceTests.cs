@@ -836,4 +836,148 @@ public sealed class GuideUsageServiceTests
             && tool.TotalCost == 0.05m);
     }
 
+    [TestMethod]
+    public async Task GetGuideApiUsageReportAsync_Groups_by_source_endpoint_alias_provider_mode_and_status_family()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"guide-api-usage-group-{Guid.NewGuid():N}");
+        var projectId = Guid.NewGuid();
+        var guideId = Guid.NewGuid();
+        var from = DateTime.UtcNow.AddDays(-7);
+        var to = DateTime.UtcNow.AddDays(1);
+
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            seed.Projects.Add(new Project
+            {
+                Id = projectId,
+                Title = "Project",
+                Slug = "project",
+                Created = DateTime.UtcNow
+            });
+            seed.Assistants.Add(new Assistant
+            {
+                Id = guideId,
+                Name = "Guide",
+                Kind = AssistantKind.Guide,
+                Created = DateTime.UtcNow
+            });
+            seed.UsageEvents.AddRange(
+                new UsageEvent
+                {
+                    ProjectId = projectId,
+                    AssistantId = guideId,
+                    SourceChannel = "wire_api",
+                    Operation = "embeddings",
+                    MetadataJson = "{\"endpoint\":\"embeddings\",\"alias\":\"embeddings\",\"providerServiceMode\":\"emb-default\",\"status\":\"success\"}",
+                    ChargeUsd = 0.20m,
+                    Created = DateTime.UtcNow.AddHours(-5)
+                },
+                new UsageEvent
+                {
+                    ProjectId = projectId,
+                    AssistantId = guideId,
+                    SourceChannel = "wire_api",
+                    Operation = "embeddings",
+                    MetadataJson = "{\"endpoint\":\"embeddings\",\"alias\":\"embeddings\",\"providerServiceMode\":\"emb-default\",\"status\":\"success\"}",
+                    ChargeUsd = 0.30m,
+                    Created = DateTime.UtcNow.AddHours(-4)
+                },
+                new UsageEvent
+                {
+                    ProjectId = projectId,
+                    AssistantId = guideId,
+                    SourceChannel = "mcp",
+                    Operation = "chat",
+                    ChargeUsd = 0.10m,
+                    Created = DateTime.UtcNow.AddHours(-3)
+                },
+                new UsageEvent
+                {
+                    ProjectId = projectId,
+                    AssistantId = guideId,
+                    SourceChannel = null,
+                    Operation = "chat",
+                    ChargeUsd = 0.05m,
+                    Created = DateTime.UtcNow.AddHours(-2)
+                });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var context = new ApplicationDbContext(options);
+        var service = GuidesServiceTestHelper.CreateGuideUsageService(context, options);
+
+        var report = await service.GetGuideApiUsageReportAsync(projectId, guideId, from, to, sourceFilter: "all");
+
+        report.Should().NotBeNull();
+        report!.TotalEvents.Should().Be(4);
+        report.TotalChargeUsd.Should().Be(0.65m);
+        report.Rows.Should().Contain(row =>
+            row.SourceChannel == "wire_api" &&
+            row.Endpoint == "embeddings" &&
+            row.Alias == "embeddings" &&
+            row.ProviderServiceMode == "emb-default" &&
+            row.StatusFamily == "success" &&
+            row.Events == 2 &&
+            row.ChargeUsd == 0.50m);
+        report.Rows.Should().Contain(row => row.SourceChannel == "mcp" && row.Endpoint == "chat");
+        report.Rows.Should().Contain(row => row.SourceChannel == "conversation" && row.Endpoint == "chat");
+    }
+
+    [TestMethod]
+    public async Task GetGuideApiUsageReportAsync_Applies_source_channel_filter()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"guide-api-usage-filter-{Guid.NewGuid():N}");
+        var projectId = Guid.NewGuid();
+        var guideId = Guid.NewGuid();
+        var from = DateTime.UtcNow.AddDays(-7);
+        var to = DateTime.UtcNow.AddDays(1);
+
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            seed.Projects.Add(new Project
+            {
+                Id = projectId,
+                Title = "Project",
+                Slug = "project",
+                Created = DateTime.UtcNow
+            });
+            seed.Assistants.Add(new Assistant
+            {
+                Id = guideId,
+                Name = "Guide",
+                Kind = AssistantKind.Guide,
+                Created = DateTime.UtcNow
+            });
+            seed.UsageEvents.AddRange(
+                new UsageEvent
+                {
+                    ProjectId = projectId,
+                    AssistantId = guideId,
+                    SourceChannel = null,
+                    Operation = "chat",
+                    ChargeUsd = 0.10m,
+                    Created = DateTime.UtcNow.AddHours(-2)
+                },
+                new UsageEvent
+                {
+                    ProjectId = projectId,
+                    AssistantId = guideId,
+                    SourceChannel = "wire_api",
+                    Operation = "chat.completions",
+                    ChargeUsd = 0.20m,
+                    Created = DateTime.UtcNow.AddHours(-1)
+                });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var context = new ApplicationDbContext(options);
+        var service = GuidesServiceTestHelper.CreateGuideUsageService(context, options);
+
+        var report = await service.GetGuideApiUsageReportAsync(projectId, guideId, from, to, sourceFilter: "conversation");
+
+        report.Should().NotBeNull();
+        report!.TotalEvents.Should().Be(1);
+        report.Rows.Should().ContainSingle(row => row.SourceChannel == "conversation" && row.Endpoint == "chat");
+    }
+
 }

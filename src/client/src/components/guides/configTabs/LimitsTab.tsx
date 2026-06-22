@@ -83,7 +83,7 @@ export function LimitsTab({
           <h4 className="text-sm font-medium text-gray-900 mb-2">Cost Limits (USD)</h4>
           <p className="text-xs text-gray-500 mb-3">
             These limits are enforced on the fly by summing <code>UsageEvents.ChargeUsd</code> for this published guide's notebook.
-            Daily limits use UTC days; billing-period limits follow the owning your subscription billing period.
+            Daily limits use UTC days; monthly limits use the UTC calendar month.
           </p>
 
           <div className="space-y-4">
@@ -107,7 +107,7 @@ export function LimitsTab({
 
             <div>
               <label htmlFor="billingPeriodChargeLimitUsd" className="block text-sm font-medium text-gray-700 mb-1">
-                Billing Period Cost Limit
+                Monthly Cost Limit (UTC month)
               </label>
               <input
                 type="number"
@@ -119,7 +119,7 @@ export function LimitsTab({
                   setBillingPeriodChargeLimitUsd(e.target.value ? Math.max(0, parseFloat(e.target.value)) : undefined)
                 }
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="No billing-period limit"
+                placeholder="No monthly limit"
               />
             </div>
           </div>

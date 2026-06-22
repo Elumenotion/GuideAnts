@@ -53,6 +53,12 @@ public class GuideUsageService : IGuideUsageService
         long CompletionTokens,
         decimal Cost);
 
+    private sealed record ApiUsageSlice(
+        string? SourceChannel,
+        string? Operation,
+        string? MetadataJson,
+        decimal ChargeUsd);
+
     // Assistants that should never appear in guide usage drill-downs.
     private static readonly HashSet<string> ExcludedAssistantNames =
         new(StringComparer.OrdinalIgnoreCase)
@@ -561,6 +567,73 @@ public class GuideUsageService : IGuideUsageService
         }).ToList();
 
         return new GuideUsageConversationsPageDto(page, pageSize, totalCount, items);
+    }
+
+    public async Task<GuideApiUsageReportDto?> GetGuideApiUsageReportAsync(
+        Guid projectId,
+        Guid guideId,
+        DateTime from,
+        DateTime to,
+        string? sourceFilter = null)
+    {
+        var guide = await GetOwnedAssistantAsync(guideId);
+        if (guide == null)
+        {
+            return null;
+        }
+
+        var normalizedSourceFilter = NormalizeSourceFilter(sourceFilter);
+        IQueryable<UsageEvent> query = _context.UsageEvents
+            .AsNoTracking()
+            .Where(e => e.AssistantId == guideId
+                     && e.ProjectId == projectId
+                     && e.Created >= from
+                     && e.Created <= to);
+
+        query = ApplySourceFilter(query, normalizedSourceFilter);
+
+        var slices = await query
+            .Select(e => new ApiUsageSlice(
+                e.SourceChannel,
+                e.Operation,
+                e.MetadataJson,
+                e.ChargeUsd ?? 0m))
+            .ToListAsync();
+
+        var rows = slices
+            .Select(MapApiUsageSlice)
+            .GroupBy(
+                x => new
+                {
+                    x.SourceChannel,
+                    x.Endpoint,
+                    x.Alias,
+                    x.ProviderServiceMode,
+                    x.StatusFamily
+                })
+            .Select(g => new GuideApiUsageRowDto(
+                SourceChannel: g.Key.SourceChannel,
+                Endpoint: g.Key.Endpoint,
+                Alias: g.Key.Alias,
+                ProviderServiceMode: g.Key.ProviderServiceMode,
+                StatusFamily: g.Key.StatusFamily,
+                Events: g.Count(),
+                ChargeUsd: g.Sum(x => x.ChargeUsd)))
+            .OrderByDescending(r => r.ChargeUsd)
+            .ThenByDescending(r => r.Events)
+            .ThenBy(r => r.SourceChannel)
+            .ThenBy(r => r.Endpoint)
+            .ToList();
+
+        return new GuideApiUsageReportDto(
+            GuideId: guide.Value.Id,
+            GuideName: guide.Value.Name,
+            FromDate: from,
+            ToDate: to,
+            SourceFilter: normalizedSourceFilter,
+            TotalEvents: rows.Sum(r => r.Events),
+            TotalChargeUsd: rows.Sum(r => r.ChargeUsd),
+            Rows: rows);
     }
 
     public async Task<GuideUsageReportDto?> GetGuideUsageReportAsync(
@@ -2219,6 +2292,140 @@ public class GuideUsageService : IGuideUsageService
             turn.Created,
             messageDtos
         );
+    }
+
+    private static string NormalizeSourceFilter(string? sourceFilter)
+    {
+        if (string.IsNullOrWhiteSpace(sourceFilter))
+        {
+            return "all";
+        }
+
+        return sourceFilter.Trim().ToLowerInvariant() switch
+        {
+            "conversation" => "conversation",
+            "published_chat" => "published_chat",
+            "mcp" => "mcp",
+            "wire_api" => "wire_api",
+            _ => "all"
+        };
+    }
+
+    private static IQueryable<UsageEvent> ApplySourceFilter(IQueryable<UsageEvent> query, string sourceFilter)
+    {
+        return sourceFilter switch
+        {
+            "conversation" => query.Where(e =>
+                string.IsNullOrEmpty(e.SourceChannel) ||
+                e.SourceChannel == "conversation"),
+            "published_chat" => query.Where(e => e.SourceChannel == "published_chat"),
+            "mcp" => query.Where(e => e.SourceChannel == "mcp"),
+            "wire_api" => query.Where(e => e.SourceChannel == "wire_api"),
+            _ => query
+        };
+    }
+
+    private static (string SourceChannel, string Endpoint, string Alias, string ProviderServiceMode, string StatusFamily, decimal ChargeUsd) MapApiUsageSlice(ApiUsageSlice slice)
+    {
+        var sourceChannel = string.IsNullOrWhiteSpace(slice.SourceChannel)
+            ? "conversation"
+            : slice.SourceChannel.Trim().ToLowerInvariant();
+        var endpoint = string.IsNullOrWhiteSpace(slice.Operation)
+            ? "unknown"
+            : slice.Operation.Trim().ToLowerInvariant();
+        var alias = "n/a";
+        var providerServiceMode = "n/a";
+        var statusFamily = "unknown";
+
+        if (!string.IsNullOrWhiteSpace(slice.MetadataJson))
+        {
+            try
+            {
+                using var metadata = JsonDocument.Parse(slice.MetadataJson);
+                var root = metadata.RootElement;
+
+                if (TryGetString(root, "endpoint", out var endpointValue))
+                {
+                    endpoint = endpointValue!.Trim().ToLowerInvariant();
+                }
+
+                if (TryGetString(root, "alias", out var aliasValue) && !string.IsNullOrWhiteSpace(aliasValue))
+                {
+                    alias = aliasValue!.Trim();
+                }
+
+                if (TryGetString(root, "providerServiceMode", out var modeValue) && !string.IsNullOrWhiteSpace(modeValue))
+                {
+                    providerServiceMode = modeValue!.Trim();
+                }
+
+                if (TryGetString(root, "status", out var statusValue))
+                {
+                    statusFamily = ResolveStatusFamily(statusValue);
+                }
+            }
+            catch (JsonException)
+            {
+                // Best effort metadata parsing for mixed historic payloads.
+            }
+        }
+
+        return (sourceChannel, endpoint, alias, providerServiceMode, statusFamily, slice.ChargeUsd);
+    }
+
+    private static bool TryGetString(JsonElement root, string propertyName, out string? value)
+    {
+        value = null;
+        if (!root.TryGetProperty(propertyName, out var element))
+        {
+            return false;
+        }
+
+        if (element.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        value = element.GetString();
+        return true;
+    }
+
+    private static string ResolveStatusFamily(string? rawStatus)
+    {
+        if (string.IsNullOrWhiteSpace(rawStatus))
+        {
+            return "unknown";
+        }
+
+        var status = rawStatus.Trim().ToLowerInvariant();
+        if (status.StartsWith("2", StringComparison.Ordinal))
+        {
+            return "success";
+        }
+
+        if (status.StartsWith("4", StringComparison.Ordinal))
+        {
+            return "client_error";
+        }
+
+        if (status.StartsWith("5", StringComparison.Ordinal))
+        {
+            return "server_error";
+        }
+
+        if (status is "success" or "ok" or "completed")
+        {
+            return "success";
+        }
+
+        if (status.Contains("error", StringComparison.Ordinal) ||
+            status.Contains("fail", StringComparison.Ordinal) ||
+            status.Contains("denied", StringComparison.Ordinal))
+        {
+            return "server_error";
+        }
+
+        return status;
     }
 }
 

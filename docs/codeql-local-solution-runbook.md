@@ -149,6 +149,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/compare-codeql-githu
    (also invoked automatically by `run-codeql-sln-triage.ps1` before the C# database).
    Integration test assembly cleanup removes `GuideAntsApi.IntegrationTests/docker/volumes`
    after each run.
+8. **C# create exits non-zero after finalize (`Error while recursively deleting ...\db-csharp\src`)** —
+   this can happen on Windows when file handles linger in CodeQL output folders. The
+   wrapper now treats "already finalized" as recoverable and continues to analyze. If it
+   still fails, rerun with `-CleanCodeqlOutputs` after closing tools that may hold file handles.
 
 ## Log forging (`cs/log-forging`)
 

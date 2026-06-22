@@ -176,7 +176,8 @@ function Assert-CSharpCoverage {
 function Invoke-CodeqlLogged {
     param(
         [string]$CodeqlExe,
-        [object[]]$Arguments
+        [object[]]$Arguments,
+        [switch]$PassThruOutput
     )
 
     $previousErrorAction = $ErrorActionPreference
@@ -185,6 +186,9 @@ function Invoke-CodeqlLogged {
         $output = & $CodeqlExe @Arguments 2>&1
         foreach ($line in $output) {
             Write-Host $line
+        }
+        if ($PassThruOutput) {
+            return ,$output
         }
     }
     finally {
@@ -230,7 +234,7 @@ function Invoke-CodeqlLanguageRun {
         )
     }
 
-    Invoke-CodeqlLogged -CodeqlExe $CodeqlExe -Arguments $createArgs
+    $createOutput = Invoke-CodeqlLogged -CodeqlExe $CodeqlExe -Arguments $createArgs -PassThruOutput
     $createExit = $LASTEXITCODE
     $databaseYml = Join-Path $Config.DatabasePath "codeql-database.yml"
     if ($createExit -ne 0) {
@@ -239,9 +243,25 @@ function Invoke-CodeqlLanguageRun {
         }
 
         Write-Warning "codeql database create exited $createExit; attempting finalize before analyze..."
-        Invoke-CodeqlLogged -CodeqlExe $CodeqlExe -Arguments @("database", "finalize", $Config.DatabasePath)
-        if ($LASTEXITCODE -ne 0) {
-            throw "codeql database create failed for $($Config.Language) (exit $createExit) and finalize could not recover."
+        $finalizeOutput = Invoke-CodeqlLogged -CodeqlExe $CodeqlExe -Arguments @("database", "finalize", $Config.DatabasePath) -PassThruOutput
+        $finalizeExit = $LASTEXITCODE
+        if ($finalizeExit -ne 0) {
+            $createText = (@($createOutput) | ForEach-Object { [string]$_ }) -join "`n"
+            $finalizeText = (@($finalizeOutput) | ForEach-Object { [string]$_ }) -join "`n"
+            $cleanupDeleteFailed = $createText -match "Error while recursively deleting" -and $createText -match "\\src"
+            $alreadyFinalized = $finalizeText -match "already finalized"
+
+            if ($cleanupDeleteFailed) {
+                if ($alreadyFinalized) {
+                    Write-Warning "CodeQL database create failed during post-finalize src cleanup; finalize reports already finalized. Continuing to analyze."
+                }
+                else {
+                    Write-Warning "CodeQL database create failed during post-finalize src cleanup; continuing to analyze."
+                }
+            }
+            else {
+                throw "codeql database create failed for $($Config.Language) (exit $createExit) and finalize could not recover (exit $finalizeExit)."
+            }
         }
     }
 
