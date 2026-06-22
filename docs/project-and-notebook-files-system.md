@@ -1,6 +1,8 @@
 # Project and Notebook Files System — Reference Architecture
 
-This document describes the logical design, entity relationships, storage mechanisms, processing pipelines, and client-side architecture of the dual file system in GuideAnts.
+This document describes the current logical design, entity relationships, storage mechanisms, processing pipelines, and client-side architecture of the dual file system in GuideAnts.
+
+> Current as of June 2026: storage paths are resolved through `IStoragePathResolver` and use project/notebook slugs for the browsable filesystem layout. Legacy GUID-based paths may still exist in historical database rows and are handled through compatibility code where needed.
 
 ---
 
@@ -19,16 +21,19 @@ These two domains are connected by **copy** and **publish** operations that pres
 
 ### 2.1 Project
 
-The top-level container. A project owns notebooks, content files, folders, links, semi-structured data, and external auth configurations. A project may designate a home page content file.
+The top-level container. A project owns notebooks, content files, folders, links, semi-structured data, and external auth configurations. A project may designate a home page content file. Each project has a required `Slug` used as the physical project directory name.
 
 - Server model: `src/server/GuideAntsApi.DataModel/Models/Project.cs`
 - Client type: `src/client/src/types/project.ts` (`ProjectDetailsDto`)
 
 ### 2.2 ContentFile (Project File)
 
-Represents a versioned file in the project library. Each content file has a unique `DocumentId` (SHA-256 hash of its path, URL-safe encoded) used for indexing. The file may optionally belong to a `ProjectFolder`. The `LatestVersion` counter tracks the current version number. An `IsSnapshot` flag distinguishes snapshot captures from normal files.
+Represents a versioned file in the project library. Each content file has a unique `DocumentId` generated from `{ProjectId}:{RelativePath}` so project or notebook slug renames do not invalidate embeddings. The file may optionally belong to a `ProjectFolder`. The `LatestVersion` counter tracks the current version number. An `IsSnapshot` flag distinguishes snapshot captures from normal files.
 
-Physical storage path: `{FileStorage:Path}/{ProjectId}/{RelativePath}`
+Project file bytes are stored through the service layer, not by `RelativePath` directly:
+
+- Versioned legacy-compatible path: `{FileStorage:Path}/{projectSlug}/files/{contentFileId}/v{version}/{fileName}`
+- Content-addressable path: `{FileStorage:Path}/projects/{projectSlug}/content/{aa}/{bb}/{contentHash}`
 
 - Server model: `src/server/GuideAntsApi.DataModel/Models/ContentFile.cs`
 - Client type: `src/client/src/types/project.ts` (`ContentFileDto`)
@@ -50,7 +55,7 @@ A hierarchical folder node for organizing project content files. Self-referencin
 
 ### 2.5 Notebook
 
-A workspace container within a project. Each notebook is optionally backed by a Guide (an `Assistant` with `Kind = Guide`) and can have many conversations, files, links, and semi-structured data records. A notebook may designate either a file or a conversation as its home page.
+A workspace container within a project. Each notebook is optionally backed by a Guide (an `Assistant` with `Kind = Guide`) and can have many conversations, files, links, and semi-structured data records. A notebook may designate either a file or a conversation as its home page. Each notebook has a required `Slug` unique within its project and used as the physical notebook directory name.
 
 Traceability fields (`SourceNotebookId`, `SourceConversationMessageId`) record when a notebook was created by copying another notebook or spawned from a conversation message.
 
@@ -138,17 +143,38 @@ The `MessageAttachment` entity links a `NotebookConversationMessage` to a `Noteb
 
 ## 7. Physical Storage Layout
 
-All file bytes are stored on the local filesystem under a configurable root path (`FileStorage:Path` in application configuration, normalized to an absolute path at startup in `src/server/GuideAntsApi/Program.cs`).
+All file bytes are stored on the local filesystem under a configurable root path (`FileStorage:Path` in application configuration). Application code should resolve physical paths through `IStoragePathResolver` rather than composing storage paths inline.
+
+The current browsable layout uses slugs:
+
+```text
+{storage}/
+├── {projectSlug}/
+│   ├── files/{contentFileId}/v{n}/{fileName}
+│   └── {notebookSlug}/
+│       ├── .guideants/notebook.json
+│       ├── Output/
+│       ├── Runs/{runId}/
+│       └── ...
+└── projects/
+    └── {projectSlug}/
+        ├── content/{aa}/{bb}/{contentHash}
+        └── {notebookSlug}/markdown/{aa}/{bb}/{contentHash}.md
+```
 
 ### 7.1 Project Files
 
-Stored at: `{FileStorage:Path}/{ProjectId}/{RelativePath}`
+Version records store immutable file bytes in content-addressable storage:
 
-The `ContentFile.GetPhysicalPath()` method resolves this. Folder structure on disk mirrors the `ProjectFolder` hierarchy.
+- `{FileStorage:Path}/projects/{projectSlug}/content/{aa}/{bb}/{contentHash}`
+
+`ContentFileVersion.Path` may also contain a legacy/versioned path for compatibility. New path construction should use `ContentFileService` and `IStoragePathResolver`; `ContentFile.GetPhysicalPath()` is legacy and should not be used for new storage behavior.
 
 ### 7.2 Notebook Files
 
-Stored at: `{FileStorage:Path}/{ProjectId}/notebooks/{NotebookId}/...`
+Stored at: `{FileStorage:Path}/{projectSlug}/{notebookSlug}/...`
+
+Each notebook root contains `.guideants/notebook.json`, which records `ProjectId` and `NotebookId`. This metadata lets the script execution agent authorize a path by association rather than trusting a human-readable folder name.
 
 The `NotebookPathHelper` class resolves working directories for both private and published contexts:
 
@@ -159,7 +185,16 @@ The `NotebookPathHelper` class resolves working directories for both private and
 
 ### 7.3 Container Paths
 
-For Docker-based script execution, `NotebookPathHelper.GetWorkingDirectory()` returns a container-mounted path convention: `/app/ContentFiles/{ProjectId}/notebooks/{NotebookId}/{runFolder}`.
+For Docker-based script execution, the host content-file root is mounted into containers at `/app/ContentFiles`. `NotebookPathHelper.GetWorkingDirectory()` returns:
+
+- Private notebook runs: `/app/ContentFiles/{projectSlug}/{notebookSlug}/Output`
+- Published notebook runs: `/app/ContentFiles/{projectSlug}/{notebookSlug}/Runs/{runId}`
+
+Before returning the container path, `NotebookPathHelper` resolves the local notebook root so `.guideants/notebook.json` exists for script-agent authorization.
+
+### 7.4 Legacy Path Compatibility
+
+Historical rows may still reference GUID-based paths such as `{storage}/{projectGuid}/notebooks/{notebookGuid}/...` or `{storage}/projects/{projectGuid}/...`. Content retrieval uses `StoragePathCompatibility` where needed to resolve legacy `StoragePath` and `Path` values after migration.
 
 ---
 
@@ -185,7 +220,7 @@ Located in `src/server/GuideAntsApi.DataModel/Migrations/`.
 
 ### 9.1 NotebookFileService
 
-Implements `INotebookFileService`. Handles file listing, content retrieval, upload (with FormData), folder creation, rename, move, and delete operations. File bytes are written to disk under the notebook root; database rows in `NotebookFile` are created or updated to mirror the filesystem state.
+Implements `INotebookFileService`. Handles file listing, content retrieval, upload (with FormData), folder creation, rename, move, and delete operations. File bytes are written under the notebook root resolved by `IStoragePathResolver`; database rows in `NotebookFile` are created or updated to mirror the filesystem state.
 
 - Server: `src/server/GuideAntsApi/Services/Components/NotebookFileService.cs`
 
@@ -197,7 +232,7 @@ Reconciles the on-disk state of a notebook's file tree with the `NotebookFile` d
 
 ### 9.3 ContentFileService
 
-Manages CRUD operations for project content files. Handles version creation, content-addressable storage, folder assignment, rename/move with path recalculation, and delete with cascade considerations.
+Manages CRUD operations for project content files. Handles version creation, content-addressable storage, folder assignment, rename/move metadata updates, and delete with cascade considerations.
 
 - Server: `src/server/GuideAntsApi/Services/Components/ContentFileService.cs`
 
@@ -211,6 +246,30 @@ High-level notebook lifecycle management including creation, update, delete, cop
 ### 9.5 NotebookCopyService
 
 Handles deep-copy operations when creating a notebook from an existing one, including file duplication.
+
+### 9.6 StoragePathResolver
+
+Central path service for storage roots, project roots, notebook roots, container notebook roots, content-addressable paths, and markdown shadow paths. It resolves GUID inputs to current slugs, caches those mappings, creates notebook roots as needed, writes notebook association metadata, and can discover externally renamed notebook folders by reading `.guideants/notebook.json`.
+
+- Server: `src/server/GuideAntsApi/Services/StoragePathResolver.cs`
+
+### 9.7 ScriptExecutionAgent Path Guard
+
+The script execution agent authorizes working directories by:
+
+1. Resolving the candidate path under `FILE_STORAGE_ROOT`.
+2. Walking upward until it finds `.guideants/notebook.json`.
+3. Verifying the metadata matches the requested `ProjectId` and `NotebookId`.
+4. Rejecting paths that escape the notebook root or cross reparse points.
+
+- Server: `src/server/ScriptExecutionAgent/Program.cs`
+
+Execution runtime scope is separate from path authorization:
+
+- File access remains bounded by `ProjectId + NotebookId` and notebook metadata.
+- Python venv/package state is bounded by `ProjectId + GuideId`, so notebooks in the same project that use the same guide share one venv.
+- Scoped Python venvs extend the image-provided base venv (`/opt/venv` by default on Linux), so guide-scoped packages add to the baked runtime instead of hiding it.
+- Environment variables and secret values, when provided, are per-run values resolved by the API from the project-bounded notebook guide scope. That scope includes the guide configuration plus the guide crew members' configurations for the same project. Secret values are encrypted at rest in API storage, and the script agent does not persist credential files.
 
 ---
 
@@ -412,7 +471,7 @@ Project-scoped routes wrap children in a `ProjectProvider`. The notebook view wr
 ### 14.2 Project File Lifecycle
 
 1. Files are uploaded via the project content file API.
-2. A `ContentFile` and initial `ContentFileVersion` are created; bytes are written to disk.
+2. A `ContentFile` and initial `ContentFileVersion` are created; bytes are written to content-addressable storage.
 3. The version triggers `ExtractContentVersionMarkdownJob` or `TranscribeContentVersionMarkdownJob`.
 4. Successful extraction creates a `ContentFileMarkdownShadow` and triggers `IndexContentMarkdownShadowJob`.
 5. Indexing produces `DocumentChunk` rows linked to the `ContentFile`.

@@ -143,6 +143,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/compare-codeql-githu
 4. **C# only 3 results** — you used `-CSharpBuildMode sln` or an old SARIF; rerun with default `none`.
 5. **~1000 C# rows** — wrong suite (`csharp-security-and-quality.qls`).
 6. **Do not use CodeQL barrier/model packs** to suppress alerts — fix code.
+7. **C# extraction crashes on Windows (`RecreateMe`, invalid path syntax)** — host-mount
+   integration tests leave symlinks targeting `/app/HostMounts/...`. CodeQL walks the
+   repo root and fails before finalize. Run `scripts/clean-codeql-blocking-artifacts.ps1`
+   (also invoked automatically by `run-codeql-sln-triage.ps1` before the C# database).
+   Integration test assembly cleanup removes `GuideAntsApi.IntegrationTests/docker/volumes`
+   after each run.
 
 ## Log forging (`cs/log-forging`)
 

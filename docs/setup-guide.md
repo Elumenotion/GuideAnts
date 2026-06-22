@@ -54,7 +54,7 @@ The services you see depend on that stack:
 |---------|---------------|------|
 | `mssql-express` | `mssql2025-express-fts` | SQL Server database for split-stack `cpu`, `cuda13`, and `rocm` deployments. Not present in the slim stack because SQL Server is bundled into `guideants-webapi-ui-mssql`. |
 | `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13,rocm}:latest` (or local tag); `guideants-ai-slim` for the slim stack | Full variants are the local AI gateway: llama.cpp, ASR, TTS, image generation, embeddings, media, script execution. The slim AI variant is for Python sandbox/script execution without starting local model runtime services. |
-| `docling-serve` | `quay.io/docling-project/docling-serve-cpu:v1.16.1` by default | Local document intelligence / markdown extraction. The `cpu` in this image tag is Docling's CPU image variant, not the GuideAnts backend selection. |
+| `docling-serve` | `quay.io/docling-project/docling-serve-cpu:v1.21.0` by default | Local document intelligence / markdown extraction. The `cpu` in this image tag is Docling's CPU image variant, not the GuideAnts backend selection. Healthcheck: `GET /version`. |
 | `documentserver` | `${GA_DOCUMENTSERVER_IMAGE}` from `docker/.env` | DocumentServer used for in-app Office document display and full editing in project/notebook file flows. |
 | `guideants-webapi-ui` / `guideants-webapi-ui-slim` / `guideants-webapi-ui-mssql` | Stack-specific API/UI image | Main API plus bundled browser UI at `http://localhost:5107`. `guideants-webapi-ui-slim` is API/UI-only for split stacks; it is not the slim AI stack. |
 | `plantuml` | `plantuml-1.2025.2` | ScriptExecutionAgent-backed PlantUML sandbox with PlantUML and Graphviz installed. |
@@ -71,6 +71,8 @@ Settings ownership split:
 
 - Runtime/environment config comes from compose/appsettings/env.
 - Credentials and routing choices are DB-backed settings edited in UI.
+- Script execution package/config state is owned by `guideants-ai` admin state and persisted in Docker volume `script_agent_admin_state`.
+- Script execution credentials are not stored by `guideants-ai`; the API must resolve credentials by `project + guide` and pass per-run environment values to the script agent when needed.
 
 Settings top-level tab order (current):
 
@@ -103,6 +105,14 @@ You can run in either mode:
 - `local` mode: uses `docker/docker-compose.{cpu,cuda,rocm,slim}.yml`; build GuideAnts local images first when needed. Third-party images such as Docling or DocumentServer may still be pulled if the exact tag is not already present locally.
 
 The slim stack is selected with `--backend slim` and uses `docker/docker-compose.slim.yml` locally or `docker/docker-compose.ghcr-slim.yml` in GHCR mode. It uses the combined Web/API/SQL image (`guideants-webapi-ui-mssql`) plus the sandbox-oriented AI image (`guideants-ai slim`). It does not use `guideants-webapi-ui-slim`; that image is orthogonal and remains the API/UI image for split-stack deployments.
+
+Script execution state:
+
+- The `guideants-ai` service mounts `script_agent_admin_state` at `/var/lib/guideants/script-agent-admin`.
+- That volume stores admin config, apt package requests, global requirements, and per-`project + guide` Python venv state.
+- Per-`project + guide` venvs extend the image-provided `/opt/venv` packages; they add or override packages for that scope instead of replacing the baked runtime.
+- It survives restart and normal `docker compose down` / `up`.
+- It is removed by `docker compose down -v`.
 
 Build references:
 
@@ -175,6 +185,9 @@ GHCR images:
 ```dotenv
 GA_WEBAPI_UI_IMAGE=guideants-webapi-ui:latest
 DOCLING_SERVE_MAX_SYNC_WAIT=600
+DOCLING_SERVE_MAX_FILE_SIZE=524288000
+DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2
+DOCLING_NUM_THREADS=4
 GA_CONTENT_FILES_HOST_PATH=./volumes/content-files
 GA_SEARXNG_CONFIG_HOST_PATH=./volumes/searxng/config
 GA_SEARXNG_DATA_HOST_PATH=./volumes/searxng/data
@@ -561,6 +574,14 @@ This removes compose-managed volumes for that stack.
 - Validate `LlamaCpp:BaseUrl` and `LocalServiceHosts:*` values.
 - Run Infrastructure probes.
 - Check `guideants-ai` and `docling-serve` logs.
+
+### Python package changes disappeared
+
+- Packages installed manually inside `guideants-ai` are container-local and disappear when the container is recreated.
+- Persist package changes through the script-agent admin state: global/scoped `requirements.txt` for pip packages and `apt-packages.txt` for apt packages.
+- Scoped pip packages extend the image's baked `/opt/venv` packages. For example, if `numpy` is baked into the image and a guide adds `humanize`, both are importable in that guide's scripts.
+- The persisted state lives in Docker volume `script_agent_admin_state`; keep the volume if you want changes to survive `down/up`.
+- Do not use `docker compose down -v` unless you intend to remove that state.
 
 ### Model download fails with Hugging Face auth error
 

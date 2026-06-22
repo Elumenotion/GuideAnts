@@ -1,6 +1,6 @@
-# Project and Notebook Files System — Proposed Architecture (Single-User, Name-Based Storage)
+# Project and Notebook Files System — Historical Proposal (Name-Based Storage)
 
-This document describes the proposed architecture for a single-user deployment where project and notebook directories use human-readable names and notebooks are physically subordinate to their project folders. It parallels the existing reference architecture document and highlights every structural change.
+This document is retained as the original proposal for the name-based storage migration. The live reference architecture is now `docs/project-and-notebook-files-system.md`; use that document for current behavior. This proposal remains useful for understanding the migration intent and design tradeoffs.
 
 ---
 
@@ -13,7 +13,7 @@ Two file domains remain logically distinct:
 - **Project Files** — versioned, library-managed files. Organized in explicit folder hierarchies visible through the UI. Internal storage structures (versioned file blobs, content-addressable storage, markdown shadows) retain their existing directory layout but with slugs replacing GUIDs in path segments.
 - **Notebook Files** — filesystem-first files in named subdirectories of the project. The filesystem is the source of truth; the database mirror is maintained via sync.
 
-The internal directory structure (`files/`, `projects/.../content/`, `projects/.../markdown/`) is preserved from the current architecture. The change is strictly: GUIDs become slugs, and the `notebooks/` intermediate segment is removed.
+The internal directory structure (`files/`, `projects/.../content/`, `projects/.../markdown/`) was intended to be preserved from the former GUID-based architecture. The change was strictly: GUIDs become slugs, and the `notebooks/` intermediate segment is removed.
 
 ---
 
@@ -49,9 +49,9 @@ Given a storage root of `/data/guideants` (or `D:\GuideAnts\Projects` on Windows
     └── ...
 ```
 
-### 2.2 Key Layout Changes from Current Architecture
+### 2.2 Key Layout Changes from the Former GUID-Based Architecture
 
-| Aspect | Current (GUID-based) | Proposed (Name-based) |
+| Aspect | Former GUID-based baseline | Proposed name-based layout |
 |--------|----------------------|----------------------|
 | Project root | `{storage}/{projectGuid}/` | `{storage}/{projectSlug}/` |
 | Notebook root | `{storage}/{projectGuid}/notebooks/{notebookGuid}/` | `{storage}/{projectSlug}/{notebookSlug}/` |
@@ -483,7 +483,7 @@ Container paths use slugs via `PathResolver`. No Dockerfile changes needed — p
 
 ## 18. Entity Relationship Summary
 
-Unchanged from the current architecture. All relationships use GUID foreign keys, not paths:
+Unchanged from the former architecture. All relationships use GUID foreign keys, not paths:
 
 - **Project** → many `ContentFile`, `ProjectFolder`, `Notebook`; optional `HomePageContentFile`
 - **ProjectFolder** → self-referencing parent/child; many `ContentFile`

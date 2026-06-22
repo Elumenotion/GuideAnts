@@ -206,7 +206,8 @@ Minimum config keys needed for local dev:
 - `ConnectionStrings:DefaultConnection` — SQL Server. Default points to `localhost,1434` which matches the compose-published port for `mssql-express`.
 - `Jwt:Issuer`, `Jwt:Audience`, `Jwt:LifetimeMinutes`, `Jwt:SigningKey` — first-party auth token settings. Keep `SigningKey` out of source control (use `dotnet user-secrets` or environment variable `Jwt__SigningKey` for local host runs).
 - `SettingsSecrets:ActiveKeyId` + `SettingsSecrets:Keys:<id>` — a base64-encoded 16/24/32-byte AES key. The container default `MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=` is `local-dev` only.
-- `LocalServiceHosts:*` URLs — six keys pointing at the AI/docling containers (probed by the Settings → Infrastructure UI).
+- `LocalServiceHosts:*` URLs — six keys pointing at the AI/docling containers (probed by the Settings → Infrastructure UI). Docling probes use `{DocumentIntelligenceBaseUrl}/version`.
+- `DocumentIntelligence:Docling*` — per-conversion options forwarded to docling-serve multipart requests (OCR, tables, pipeline, enrichments). Optional `DocumentIntelligence:DoclingApiKey` must match `DOCLING_SERVE_API_KEY` when the server requires `X-Api-Key` (do not set an empty `DOCLING_SERVE_API_KEY` in compose — docling-serve v1.21+ rejects it).
 - `LlamaCpp:BaseUrl` — `http://localhost:8110/llama-cpp` for direct host runs.
 - `Ui:RootPath` — where the built browser UI lives (`./ui` in container, blank in dev when Vite serves it).
 - `FileStorage:Path` — host or container path for project/notebook content files. Dev launchSettings uses `../../../docker/volumes/content-files`.
@@ -260,7 +261,7 @@ Already covered above: Docker, Compose plugin, optional GPU runtime, ~60 GB disk
 | Image | Build tool | Extra pre-requisites |
 |---|---|---|
 | `guideants-webapi-ui` (`docker/build/webapi-ui/Dockerfile`) | `build_webapi_ui.ps1` / `.sh` | Requires the client UI to be built first via `npm run browser:build:docker` (produces `src/client/dist-browser/`). Multi-stage uses `mcr.microsoft.com/dotnet/sdk:8.0`. |
-| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm,slim}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage) and BuildKit (`DOCKER_BUILDKIT=1`). CPU/CUDA/ROCm are full local AI variants; `slim` is the sandbox-oriented AI image for Python script execution without starting local model runtime services. For cache export (`--cache-to`), use `desktop-linux` context and enable Docker Desktop containerd image store. |
+| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm,slim}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage) and BuildKit (`DOCKER_BUILDKIT=1`). CPU/CUDA/ROCm are full local AI variants; `slim` is the sandbox-oriented AI image for Python script execution without starting local model runtime services. The AI image also bakes the script-agent admin assets and `ga-script-exec` privacy wrapper. For cache export (`--cache-to`), use `desktop-linux` context and enable Docker Desktop containerd image store. |
 | `mssql2025-express-fts` (`docker/build/mssql-fts/Dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `plantuml-1.2025.2` (`docker/build/Sandboxes/PlantUml/dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `guideants-searxng` | `docker compose build searxng` | Repo-root build context. |
@@ -295,6 +296,8 @@ If SearXNG still appears stale, remove and rebuild:
 
 The full AI builds are heavy: they compile local model runtime pieces such as `stable-diffusion.cpp` and include the full local AI service set. The `guideants-ai slim` build is intentionally for sandbox use: it starts `ScriptExecutionAgent` and the non-model media service, and it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. BuildKit cache is mandatory for sane iteration (the script tags `guideants-ai-deps:<backend>-cache` for layer reuse).
 
+Script execution package/config persistence is handled by `script_agent_admin_state`, mounted into `guideants-ai` at `/var/lib/guideants/script-agent-admin`. Use the admin API/state files for durable apt/pip changes; direct `apt-get install` or `pip install` inside a running container is lost when the container is recreated. Scoped venvs extend the baked `/opt/venv` runtime through `SCRIPT_EXECUTION_BASE_PYTHON_VENV`, so per-guide packages add to or override the image-provided packages instead of replacing them.
+
 ### Required env values for compose
 
 The committed `docker/.env`:
@@ -302,6 +305,11 @@ The committed `docker/.env`:
 ```1:13:docker/.env
 GA_WEBAPI_UI_IMAGE=guideants-webapi-ui:26132.1055
 DOCLING_SERVE_MAX_SYNC_WAIT=600
+DOCLING_SERVE_MAX_FILE_SIZE=524288000
+DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2
+DOCLING_NUM_THREADS=4
+# DOCLING_SERVE_API_KEY=
+# GA_DOCLING_CUDA_VISIBLE_DEVICES=
 GA_CONTENT_FILES_HOST_PATH=./volumes/content-files
 GA_SEARXNG_CONFIG_HOST_PATH=./volumes/searxng/config
 GA_SEARXNG_DATA_HOST_PATH=./volumes/searxng/data
@@ -386,7 +394,7 @@ A few items worth confirming explicitly before onboarding a new dev:
 - **`docker/.env` ships with stale-style local image tags** (`guideants-ai:cuda13-26132.1047` etc.) — irrelevant if you use the GHCR compose files but will fail `docker compose up` on the `local` compose files unless you build them first.
 - **CUDA 13 needs NVIDIA R580+ drivers** — the Windows launcher enforces this; manual `docker compose` does not.
 - **HF token must be set in UI** (`Settings → Connections → HuggingFace`); the API does *not* accept per-request token overrides per the setup guide.
-- **Python**: there is no required host Python install. `src/python/pptx` runs inside the `ScriptExecutionAgent`/sandbox containers; Python 3.11 is baked into the `guideants-ai` images, including the sandbox-oriented `slim` AI variant. Only install Python on the host if you specifically want to iterate on `src/python/pptx` outside Docker.
+- **Python**: there is no required host Python install. `src/python/pptx` runs inside the `ScriptExecutionAgent`/sandbox containers; Python 3.11 is baked into the `guideants-ai` images, including the sandbox-oriented `slim` AI variant. Script executions use per-`project + guide` venvs in the `script_agent_admin_state` volume, layered over the image's `/opt/venv` packages. Only install Python on the host if you specifically want to iterate on `src/python/pptx` outside Docker.
 
 ---
 
