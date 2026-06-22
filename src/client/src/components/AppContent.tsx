@@ -19,6 +19,7 @@ import PublicGuide from '../pages/PublicGuide';
 import GuideUsagePage from '../pages/GuideUsagePage';
 import FilePreviewPage from '../pages/FilePreviewPage';
 import Settings from '../pages/Settings';
+import SystemGuidesWorkspace from '../pages/SystemGuidesWorkspace';
 import Login from '../pages/Login';
 import Register from '../pages/Register';
 import Pending from '../pages/Pending';
@@ -47,8 +48,8 @@ const AppContent = () => {
       {component}
     </ProtectedRoute>
   );
-  const withAdminProtection = (component: React.ReactNode) => (
-    <ProtectedRoute requireAdmin>
+  const withAdminProtection = (component: React.ReactNode, adminFallbackPath = '/') => (
+    <ProtectedRoute requireAdmin adminFallbackPath={adminFallbackPath}>
       {component}
     </ProtectedRoute>
   );
@@ -75,6 +76,10 @@ const AppContent = () => {
       <Route path="/conversations" element={withProtection(<Conversations />)} />
       <Route path="/usage" element={withProtection(<Usage />)} />
       <Route path="/settings" element={withProtection(<Settings />)} />
+      <Route
+        path="/settings/system-guides"
+        element={withAdminProtection(<SystemGuidesWorkspace />, '/settings')}
+      />
       <Route path="/new-project" element={withEditorProtection(<NewProject />)} />
       <Route path="/projects/:projectId" element={withProtection(withProjectProvider(<ProjectDetails />))} />
       <Route path="/projects/:projectId/edit" element={withEditorProtection(withProjectProvider(<EditProject />))} />

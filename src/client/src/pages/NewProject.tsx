@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import { api } from '../services/api';
@@ -62,6 +63,7 @@ export default function NewProject() {
             <div className="max-w-2xl mx-auto">
                 <div className="mb-2">
                     <HeaderActionsBar>
+                        <GuideAntsGuideButton />
                         <HomeButton />
                         <SettingsButton />
                         <TourStartButton screenId="new-project" inline />

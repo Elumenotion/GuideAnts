@@ -20,6 +20,7 @@ public sealed record PublishedApiExecutionContext(
     PublishedWireApiConfigDto WireApiConfig,
     PublishedApiAuthMode AuthMode,
     string? ExternalUserIdentity,
+    Guid? InternalUserId,
     string SourceChannel,
     string ExternalRequestId,
     string EndpointName);

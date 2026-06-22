@@ -4,6 +4,7 @@ import { UserConversationDto, UserConversationsQuery } from '../types/conversati
 import { api } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import ErrorScreen from '../components/ErrorScreen';
@@ -321,6 +322,7 @@ const Conversations = () => {
         <div className="mb-6 flex items-center justify-between gap-2">
           <h1 className="min-w-0 flex-1 truncate text-xl font-semibold text-gray-900 sm:text-2xl">All Conversations</h1>
           <HeaderActionsBar>
+            <GuideAntsGuideButton />
             <HomeButton />
             <SettingsButton />
             <TourStartButton screenId="conversations-list" inline />

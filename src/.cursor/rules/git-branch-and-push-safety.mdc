@@ -1,0 +1,58 @@
+---
+description: Git branch, upstream, and push safety (never push feature work to main)
+alwaysApply: true
+---
+
+# Git Branch and Push Safety
+
+## Agent restrictions
+
+- Never run `git push` in any form unless the user explicitly asks in the current message.
+- Never run `git push --force` or `git push --force-with-lease` to `main` or `master`.
+- Never run `git commit` (see commit-ownership rule).
+- When the user asks to push, **verify upstream first** and show them the exact command; prefer `git push -u origin HEAD` on a feature branch.
+
+## Creating a feature branch (required pattern)
+
+Always create feature branches from updated `main` and set upstream to the **same branch name** on origin:
+
+```bash
+git fetch origin
+git checkout main
+git pull origin main
+git checkout -b feature/<name>
+git push -u origin feature/<name>
+```
+
+**Never** use any of these on a feature branch:
+
+- `git push -u origin main`
+- `git push origin HEAD:main`
+- `git branch --set-upstream-to=origin/main` (while not on `main`)
+
+## Verify before any push (user or agent handoff)
+
+```bash
+git branch -vv
+git rev-parse --abbrev-ref --symbolic-full-name @{u}
+```
+
+Upstream must be `origin/<same-branch-name>`, **not** `origin/main`, unless the current branch is literally `main`.
+
+If upstream is wrong on a feature branch:
+
+```bash
+git branch --set-upstream-to=origin/feature/<name> feature/<name>
+```
+
+## Local hook (install once per clone)
+
+```powershell
+.\scripts\install-git-hooks.ps1
+```
+
+This installs `.githooks/pre-push`, which **blocks** pushing a non-`main` branch to `origin/main`.
+
+## GitHub (already configured)
+
+`main` requires pull requests. Force-push rules may be bypassable by admins — the local hook is the last line of defense before push.

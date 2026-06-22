@@ -1,0 +1,76 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "GuideAnts App Tools",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "client://guideants-app"
+    }
+  ],
+  "paths": {
+    "GuideAntsApp.AppEcho": {
+      "post": {
+        "operationId": "AppEcho",
+        "summary": "Echo a message and optional context from the GuideAnts client (stub in phase 1).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "description": "Message to echo back."
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Optional client context snapshot.",
+                    "additionalProperties": true
+                  }
+                },
+                "required": ["message"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppEchoResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AppEchoResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ok"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "context": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": ["status", "message"]
+      }
+    }
+  }
+}

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Auth;
+using GuideAntsApi.Services.SystemGuide;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -12,7 +13,8 @@ public static class ProjectExternalAuthEndpoints
     {
         var group = app.MapGroup("/api/projects/{projectId:guid}/external-auth")
             .WithTags("Projects")
-            .RequireAuthorization("RequireApprovedUser");
+            .RequireAuthorization("RequireApprovedUser")
+            .WithSystemProjectAccessGuard();
 
         group.MapGet("", async (
             Guid projectId,

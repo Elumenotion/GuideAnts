@@ -8,6 +8,7 @@ import { TourStartButton } from '../../tour/TourStartButton';
 import { HomeButton } from '../common/HomeButton';
 import { SettingsButton } from '../common/SettingsButton';
 import { HeaderActionsBar } from '../common/HeaderActionsBar';
+import { GuideAntsGuideButton } from '../../features/guideantsGuide/GuideAntsGuideButton';
 import { HeaderUserMenu } from '../common/HeaderUserMenu';
 import { HiMenu } from 'react-icons/hi';
 import { FiEdit2 } from 'react-icons/fi';
@@ -98,6 +99,7 @@ function NotebookHeader({
                         {headerCenter ?? null}
                     </div>
                     <HeaderActionsBar className="w-full justify-self-end">
+                        <GuideAntsGuideButton />
                         {canEdit && onEdit && (
                             <button
                                 onClick={onEdit}

@@ -7,7 +7,7 @@ using GuideAntsApi.Models.Settings;
 namespace GuideAntsApi.IntegrationTests.Settings;
 
 /// <summary>
-/// Deep HTTP coverage for <see cref="GuideAntsApi.Endpoints.SettingsEndpoints"/>
+/// Deep HTTP coverage for <see cref="GuideAntsApi.Endpoints.Settings.SettingsEndpoints"/>
 /// and the underlying <see cref="GuideAntsApi.Settings.ApplicationSettingsService"/>
 /// branches. Drives the endpoints over the real pipeline (auth + DB) so section
 /// reads/writes, concurrency conflicts, validation errors, model + runtime-profile

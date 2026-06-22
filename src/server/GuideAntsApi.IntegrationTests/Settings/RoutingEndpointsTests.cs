@@ -50,7 +50,7 @@ public sealed class RoutingEndpointsTests : SettingsRoutingIntegrationTestBase
         var response = await Client.GetAsync("/api/settings/routing/chat-targets/does-not-exist/readiness?strict=false");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "readiness endpoint maps MODEL_NOT_FOUND to 404 with a ProblemDetails body (SettingsEndpoints)");
+            "readiness endpoint maps MODEL_NOT_FOUND to 404 with a ProblemDetails body (SettingsRoutingEndpoints)");
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

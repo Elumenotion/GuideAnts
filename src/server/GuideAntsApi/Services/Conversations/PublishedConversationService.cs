@@ -81,9 +81,10 @@ public class PublishedConversationService : IPublishedConversationService
         Guid conversationId,
         string? publisherId,
         string? externalUserIdentity,
+        Guid? internalUserId = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var user = await _streamPolicy.ResolveUserIdentityAsync(externalUserIdentity, cancellationToken);
+        var user = await _streamPolicy.ResolveUserIdentityAsync(internalUserId, externalUserIdentity, cancellationToken);
         var hostUrl = GetHostUrl();
 
         NotebookConversation dbConversation;
@@ -188,6 +189,7 @@ public class PublishedConversationService : IPublishedConversationService
         SendMessageRequest request,
         string? publisherId,
         string? externalUserIdentity,
+        Guid? internalUserId = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Instructions) && (request.Attachments == null || request.Attachments.Count == 0))
@@ -195,7 +197,7 @@ public class PublishedConversationService : IPublishedConversationService
             throw new ArgumentException("Instructions required", nameof(request));
         }
 
-        var user = await _streamPolicy.ResolveUserIdentityAsync(externalUserIdentity, cancellationToken);
+        var user = await _streamPolicy.ResolveUserIdentityAsync(internalUserId, externalUserIdentity, cancellationToken);
         var hostUrl = GetHostUrl();
 
         NotebookConversation dbConversation;
@@ -266,7 +268,7 @@ public class PublishedConversationService : IPublishedConversationService
                     MessageSequence: 1,
                     Content: request.Instructions,
                     ModelDeploymentId: modelDeploymentId,
-                    UserId: null,
+                    UserId: internalUserId,
                     ExternalUserIdentity: externalUserIdentity,
                     AssistantId: runningAssistantId),
                 cancellationToken);

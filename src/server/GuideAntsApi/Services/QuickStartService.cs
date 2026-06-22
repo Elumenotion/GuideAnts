@@ -49,7 +49,7 @@ public class QuickStartService : IQuickStartService
         var project = await _projectService.CreateProjectAsync(projectDto);
 
         // Get Creative Guide template for this user
-        var templates = await _templateService.GetTemplatesAsync(userId);
+        var templates = await _templateService.GetTemplatesAsync(project.Id, userId);
         var creativeGuideTemplate = templates.FirstOrDefault(t => t.TemplateName == "Creative Guide");
         if (creativeGuideTemplate == null)
         {

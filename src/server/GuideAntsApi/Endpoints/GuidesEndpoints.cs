@@ -17,9 +17,9 @@ public static class GuidesEndpoints
             .WithOpenApi();
 
         // List guides
-        group.MapGet("/", async (IGuidesService guidesService) =>
+        group.MapGet("/", async (Guid? projectId, IGuidesService guidesService) =>
         {
-            var guides = await guidesService.GetGuidesAsync();
+            var guides = await guidesService.GetGuidesAsync(projectId);
             return Results.Ok(guides);
         })
         .WithName("GetGuides")

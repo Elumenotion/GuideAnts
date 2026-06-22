@@ -730,6 +730,7 @@ public static class PublishedOpenAiWireHandlers
                            request,
                            context.PubId.ToString(),
                            context.ExternalUserIdentity,
+                           context.InternalUserId,
                            ct))
         {
             if (string.Equals(ev.EventType, StreamingEventTypes.PendingClientTool, StringComparison.Ordinal))

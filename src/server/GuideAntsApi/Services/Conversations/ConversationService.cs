@@ -99,7 +99,7 @@ public class ConversationService : IConversationService
         SendMessageRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var user = await _streamPolicy.ResolveUserIdentityAsync(externalUserIdentity: null, CancellationToken.None);
+        var user = await _streamPolicy.ResolveUserIdentityAsync(internalUserId: null, externalUserIdentity: null, CancellationToken.None);
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, CancellationToken.None);
 
         ConversationStreamRunContext runContext;

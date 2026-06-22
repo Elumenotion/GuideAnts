@@ -255,6 +255,8 @@ services:
       - DocumentServer__JwtHeader=${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}
       - DocumentServer__JwtInBody=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}
       - ScriptExecution__AgentToken=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
+      - ScriptExecution__AdminToken=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+
       - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
       - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox
       - ServiceRouting__Containers__plantuml__BaseUrl=http://plantuml:80
@@ -316,3 +318,4 @@ volumes:
 networks:
   guideants-network:
     driver: bridge
+

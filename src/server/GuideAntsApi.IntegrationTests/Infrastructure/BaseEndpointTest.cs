@@ -94,6 +94,11 @@ public abstract class BaseEndpointTest : BaseIntegrationTest
               INNER JOIN Projects p ON hfm.ProjectId = p.Id
               ;");
 
+        // Delete published guides before notebooks (FK_PublishedGuides_Notebooks_NotebookId).
+        // The system-guide seeder publishes the seeded guides, so these rows reference
+        // system-project notebooks and would block the notebook delete below.
+        await dbContext.Database.ExecuteSqlRawAsync(@"DELETE FROM PublishedGuides;");
+
         // Delete notebooks
         await dbContext.Database.ExecuteSqlRawAsync(
             @"DELETE n FROM Notebooks n 

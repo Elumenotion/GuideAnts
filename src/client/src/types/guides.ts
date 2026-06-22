@@ -412,6 +412,8 @@ export interface ImportGuideResultDto {
 }
 
 // Published Guide types
+export type PublishedGuideAuthMode = 'Anonymous' | 'Webhook' | 'ApiKey' | 'AppIdentity';
+
 export interface PublishedGuideDto {
   id: string;
   guideId: string;
@@ -434,6 +436,8 @@ export interface PublishedGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  /** Explicit auth mode for this published guide */
+  authMode?: PublishedGuideAuthMode;
   wireApiConfig?: PublishedWireApiConfigDto;
   /** Indicates whether an API key is configured (the key itself is never returned) */
   hasApiKey?: boolean;

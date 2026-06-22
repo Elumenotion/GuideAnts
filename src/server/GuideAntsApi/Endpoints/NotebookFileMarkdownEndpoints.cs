@@ -1,6 +1,7 @@
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.SystemGuide;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -11,6 +12,7 @@ public static class NotebookFileMarkdownEndpoints
         var group = app.MapGroup("/api/projects/{projectId}/notebooks/{notebookId}/files")
             .WithTags("Notebook File Markdown")
             .RequireAuthorization("RequireApprovedUser")
+            .WithSystemProjectAccessGuard()
             .WithOpenApi();
 
         // Get markdown shadow info for a notebook file

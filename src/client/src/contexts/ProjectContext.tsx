@@ -78,6 +78,7 @@ function projectReducer(state: ProjectState, action: ProjectAction): ProjectStat
 // Context interface
 interface ProjectContextValue {
     // State
+    projectId: string | undefined;
     project: ProjectDetailsDto | null;
     error: string | null;
     isLoading: boolean;
@@ -204,6 +205,7 @@ export function ProjectProvider({ children, projectId }: ProjectProviderProps) {
 
     const contextValue: ProjectContextValue = {
         // State
+        projectId,
         project: state.project,
         error: state.error,
         isLoading: state.isLoading,

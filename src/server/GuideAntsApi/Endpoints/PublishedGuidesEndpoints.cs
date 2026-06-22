@@ -63,8 +63,8 @@ public static class PublishedGuidesEndpoints
                 }, statusCode: StatusCodes.Status403Forbidden);
             }
 
-            var requiresWebhook = !string.IsNullOrWhiteSpace(publishedGuide.AuthValidationWebhookUrl);
-            var requiresApiKey = !string.IsNullOrWhiteSpace(publishedGuide.ApiKeyHash);
+            var requiresApiKey = publishedGuide.AuthMode == PublishedGuideAuthMode.ApiKey
+                || !string.IsNullOrWhiteSpace(publishedGuide.ApiKeyHash);
 
             var response = new
             {
@@ -77,7 +77,8 @@ public static class PublishedGuidesEndpoints
                 maxTurns = publishedGuide.MaxTurns,
                 dailyChargeLimitUsd = publishedGuide.DailyChargeLimitUsd,
                 billingPeriodChargeLimitUsd = publishedGuide.BillingPeriodChargeLimitUsd,
-                requiresAuth = requiresWebhook || requiresApiKey,
+                authMode = publishedGuide.AuthMode.ToString(),
+                requiresAuth = publishedGuide.AuthMode != PublishedGuideAuthMode.Anonymous,
                 requiresApiKey = requiresApiKey,
                 displayMode = publishedGuide.DisplayMode,
                 commandMode = publishedGuide.CommandMode,
@@ -148,8 +149,8 @@ public static class PublishedGuidesEndpoints
                 avatarUrl = $"/api/published/guides/{publishedGuide.Id}/avatar";
             }
 
-            var requiresWebhook = !string.IsNullOrWhiteSpace(publishedGuide.AuthValidationWebhookUrl);
-            var requiresApiKey = !string.IsNullOrWhiteSpace(publishedGuide.ApiKeyHash);
+            var requiresApiKey = publishedGuide.AuthMode == PublishedGuideAuthMode.ApiKey
+                || !string.IsNullOrWhiteSpace(publishedGuide.ApiKeyHash);
 
             var response = new
             {
@@ -165,7 +166,8 @@ public static class PublishedGuidesEndpoints
                 maxTurns = publishedGuide.MaxTurns,
                 dailyChargeLimitUsd = publishedGuide.DailyChargeLimitUsd,
                 billingPeriodChargeLimitUsd = publishedGuide.BillingPeriodChargeLimitUsd,
-                requiresAuth = requiresWebhook || requiresApiKey,
+                authMode = publishedGuide.AuthMode.ToString(),
+                requiresAuth = publishedGuide.AuthMode != PublishedGuideAuthMode.Anonymous,
                 requiresApiKey = requiresApiKey,
                 displayMode = publishedGuide.DisplayMode,
                 commandMode = publishedGuide.CommandMode,
@@ -229,16 +231,12 @@ public static class PublishedGuidesEndpoints
                 publishedGuide.Notebook.ProjectId,
                 publishedGuide.NotebookId,
                 ctx.RequestAborted,
-                apiKeyHeader);
+                apiKeyHeader,
+                PublishedGuideAuthService.ReadAppAuthCookie(ctx.Request));
 
             if (!authResult.IsValid)
             {
-                var statusCode = authResult.ErrorCode switch
-                {
-                    "authentication_required" or "api_key_required" => StatusCodes.Status401Unauthorized,
-                    "invalid_token" or "invalid_api_key" => StatusCodes.Status401Unauthorized,
-                    _ => StatusCodes.Status503ServiceUnavailable
-                };
+                var statusCode = PublishedGuideAuthService.MapValidationFailureStatusCode(authResult.ErrorCode);
 
                 return Results.Json(
                     new { error = authResult.ErrorCode, message = authResult.ErrorMessage, requiresAuth = true },
@@ -292,6 +290,7 @@ public static class PublishedGuidesEndpoints
                                    messageRequest,
                                    pubId.ToString(),
                                    authResult.UserIdentity,
+                                   authResult.InternalUserId,
                                    ctx.RequestAborted))
                 {
                     if (ev.EventType == StreamingEventTypes.ExternalToolCall)

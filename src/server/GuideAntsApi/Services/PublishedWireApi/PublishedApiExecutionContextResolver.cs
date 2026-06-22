@@ -100,10 +100,11 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
             return PublishedApiExecutionResolution.Fail(OpenAiWireErrorResults.RequestTooLarge(endpointName, effectiveMaxBytes));
         }
 
-        var authMode = ResolveAuthMode(publishedGuide, httpContext.User);
+        var authMode = ResolveAuthMode(publishedGuide);
         var externalUserIdentity = ResolveAuthenticatedUserIdentity(httpContext.User);
+        Guid? internalUserId = null;
 
-        if (authMode != PublishedApiAuthMode.AppIdentity)
+        if (authMode != PublishedApiAuthMode.Anonymous)
         {
             var authResult = await ValidateAuthAsync(
                 httpContext,
@@ -126,6 +127,8 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
             {
                 externalUserIdentity = authResult.UserIdentity;
             }
+
+            internalUserId = authResult.InternalUserId;
         }
 
         var limitResult = await _costLimits.EnsureWithinLimitsAsync(publishedGuide.NotebookId, ct);
@@ -143,6 +146,7 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
             WireApiConfig: wireApiConfig,
             AuthMode: authMode,
             ExternalUserIdentity: externalUserIdentity,
+            InternalUserId: internalUserId,
             SourceChannel: WireApiSourceChannel,
             ExternalRequestId: ResolveExternalRequestId(httpContext),
             EndpointName: endpointName);
@@ -170,47 +174,47 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
         var apiKeyHeader = httpContext.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
         var webhookHeader = httpContext.Request.Headers["X-Published-Auth"].ToString();
 
-        return authMode switch
+        string? authorizationHeader;
+        string? resolvedApiKeyHeader;
+
+        switch (authMode)
         {
-            PublishedApiAuthMode.ApiKey => await _authService.ValidateAsync(
-                pubId,
-                authorizationHeader: null,
-                projectId: projectId,
-                notebookId: notebookId,
-                ct: ct,
-                apiKeyHeader: string.IsNullOrWhiteSpace(apiKeyHeader) ? bearerToken : apiKeyHeader),
-            PublishedApiAuthMode.Webhook => await _authService.ValidateAsync(
-                pubId,
-                authorizationHeader: string.IsNullOrWhiteSpace(webhookHeader) ? bearerToken : webhookHeader,
-                projectId: projectId,
-                notebookId: notebookId,
-                ct: ct,
-                apiKeyHeader: null),
-            _ => new AuthValidationResult { IsValid = true }
+            case PublishedApiAuthMode.ApiKey:
+                authorizationHeader = null;
+                resolvedApiKeyHeader = string.IsNullOrWhiteSpace(apiKeyHeader) ? bearerToken : apiKeyHeader;
+                break;
+            case PublishedApiAuthMode.Webhook:
+                authorizationHeader = string.IsNullOrWhiteSpace(webhookHeader) ? bearerToken : webhookHeader;
+                resolvedApiKeyHeader = null;
+                break;
+            case PublishedApiAuthMode.AppIdentity:
+                authorizationHeader = bearerToken;
+                resolvedApiKeyHeader = null;
+                break;
+            default:
+                authorizationHeader = null;
+                resolvedApiKeyHeader = null;
+                break;
+        }
+
+        return await _authService.ValidateAsync(
+            pubId,
+            authorizationHeader: authorizationHeader,
+            projectId: projectId,
+            notebookId: notebookId,
+            ct: ct,
+            apiKeyHeader: resolvedApiKeyHeader,
+            appAuthCookieToken: PublishedGuideAuthService.ReadAppAuthCookie(httpContext.Request));
+    }
+
+    private static PublishedApiAuthMode ResolveAuthMode(DataModel.Models.PublishedGuide publishedGuide)
+        => publishedGuide.AuthMode switch
+        {
+            DataModel.Models.PublishedGuideAuthMode.AppIdentity => PublishedApiAuthMode.AppIdentity,
+            DataModel.Models.PublishedGuideAuthMode.ApiKey => PublishedApiAuthMode.ApiKey,
+            DataModel.Models.PublishedGuideAuthMode.Webhook => PublishedApiAuthMode.Webhook,
+            _ => PublishedApiAuthMode.Anonymous,
         };
-    }
-
-    private static PublishedApiAuthMode ResolveAuthMode(
-        DataModel.Models.PublishedGuide publishedGuide,
-        ClaimsPrincipal? principal)
-    {
-        if (principal?.Identity?.IsAuthenticated == true)
-        {
-            return PublishedApiAuthMode.AppIdentity;
-        }
-
-        if (!string.IsNullOrWhiteSpace(publishedGuide.ApiKeyHash))
-        {
-            return PublishedApiAuthMode.ApiKey;
-        }
-
-        if (!string.IsNullOrWhiteSpace(publishedGuide.AuthValidationWebhookUrl))
-        {
-            return PublishedApiAuthMode.Webhook;
-        }
-
-        return PublishedApiAuthMode.Anonymous;
-    }
 
     private static string? ReadBearerToken(HttpContext httpContext)
     {
