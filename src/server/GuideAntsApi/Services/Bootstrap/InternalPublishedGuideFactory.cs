@@ -92,6 +92,8 @@ internal sealed class InternalPublishedGuideFactory
             FriendlyName = null,
             DisplayMode = "full",
             CommandMode = true,
+            ShowTurnNavigation = true,
+            Collapsible = false,
             AuthMode = PublishedGuideAuthMode.AppIdentity,
             MaxTurns = DefaultMaxTurns
         };
@@ -101,7 +103,10 @@ internal sealed class InternalPublishedGuideFactory
     {
         publishedGuide.Active = true;
         publishedGuide.FriendlyName = null;
+        publishedGuide.DisplayMode = "full";
         publishedGuide.CommandMode = true;
+        publishedGuide.ShowTurnNavigation = true;
+        publishedGuide.Collapsible = false;
         publishedGuide.AuthMode = PublishedGuideAuthMode.AppIdentity;
 
         if (!publishedGuide.MaxTurns.HasValue)

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Guides;
 using GuideAntsApi.Settings;
@@ -9,6 +10,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.IO.Compression;
+using System.Text.Json;
 
 namespace GuideAntsApi.Tests.Services.SystemGuide;
 
@@ -118,6 +121,9 @@ public sealed class GuideAntsSystemSeederTests
         publishedGuides.Should().OnlyContain(pg =>
             pg.Active
             && pg.CommandMode
+            && pg.DisplayMode == "full"
+            && pg.ShowTurnNavigation
+            && !pg.Collapsible
             && pg.AuthMode == PublishedGuideAuthMode.AppIdentity
             && pg.FriendlyName == null
             && pg.MaxTurns == 50
@@ -186,7 +192,10 @@ public sealed class GuideAntsSystemSeederTests
         var environment = new Mock<IWebHostEnvironment>();
         environment.Setup(x => x.ContentRootPath).Returns(ResolveGuideAntsApiContentRoot());
 
-        var importService = new Mock<IGuideExportImportService>(MockBehavior.Strict);
+        var importService = new Mock<IGuideExportImportService>();
+        importService
+            .Setup(x => x.ImportGuideAsync(It.IsAny<Stream>()))
+            .Returns((Stream stream) => ResolveImportResultAsync(db, stream));
 
         return new GuideAntsSystemSeeder(
             environment.Object,
@@ -194,6 +203,39 @@ public sealed class GuideAntsSystemSeederTests
             importService.Object,
             CreateStore(db),
             NullLogger<GuideAntsSystemSeeder>.Instance);
+    }
+
+    private static async Task<ImportGuideResultDto> ResolveImportResultAsync(ApplicationDbContext db, Stream stream)
+    {
+        stream.Position = 0;
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true);
+        var manifestEntry = archive.GetEntry("manifest.json")
+            ?? throw new InvalidOperationException("manifest.json not found in bootstrap stream.");
+
+        await using var manifestStream = manifestEntry.Open();
+        using var reader = new StreamReader(manifestStream);
+        using var doc = JsonDocument.Parse(await reader.ReadToEndAsync());
+        var guideName = doc.RootElement.GetProperty("name").GetString()
+            ?? throw new InvalidOperationException("Bootstrap guide manifest is missing name.");
+
+        var existingGuide = await db.Assistants
+            .FirstOrDefaultAsync(a => a.Name == guideName && a.Kind == AssistantKind.Guide);
+
+        var guideId = existingGuide?.Id ?? Guid.NewGuid();
+        if (existingGuide == null)
+        {
+            db.Assistants.Add(new Assistant
+            {
+                Id = guideId,
+                Name = guideName,
+                Kind = AssistantKind.Guide,
+                IsGlobal = true,
+                IsActive = true
+            });
+            await db.SaveChangesAsync();
+        }
+
+        return new ImportGuideResultDto(true, guideId, 0, 0, 0, 0, []);
     }
 
     private static GuideAntsSystemSettingsStore CreateStore(ApplicationDbContext db)

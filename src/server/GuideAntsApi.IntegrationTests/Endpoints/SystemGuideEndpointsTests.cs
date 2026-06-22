@@ -249,7 +249,10 @@ public sealed class SystemGuideEndpointsTests : BaseEndpointTest
             GuideId = userGuide.Id,
             NotebookId = userNotebook.Id,
             Active = true,
+            DisplayMode = "full",
             CommandMode = true,
+            ShowTurnNavigation = true,
+            Collapsible = false,
             AuthMode = PublishedGuideAuthMode.AppIdentity
         };
         var adminPublished = new PublishedGuide
@@ -257,7 +260,10 @@ public sealed class SystemGuideEndpointsTests : BaseEndpointTest
             GuideId = adminGuide.Id,
             NotebookId = adminNotebook.Id,
             Active = true,
+            DisplayMode = "full",
             CommandMode = true,
+            ShowTurnNavigation = true,
+            Collapsible = false,
             AuthMode = PublishedGuideAuthMode.AppIdentity
         };
         db.PublishedGuides.AddRange(userPublished, adminPublished);

@@ -196,6 +196,17 @@ public sealed class GuideAntsSystemSeeder : IGuideAntsSystemSeeder
         Guid? preferredGuideId,
         CancellationToken cancellationToken)
     {
+        var guideFolder = Path.Combine(
+            _environment.ContentRootPath,
+            BootstrapRootRelativePath,
+            folderName);
+
+        if (!Directory.Exists(guideFolder))
+        {
+            throw new InvalidOperationException(
+                $"Bootstrap guide folder not found at '{guideFolder}'.");
+        }
+
         if (preferredGuideId.HasValue)
         {
             var preferredGuide = await _dbContext.Assistants
@@ -208,6 +219,7 @@ public sealed class GuideAntsSystemSeeder : IGuideAntsSystemSeeder
 
             if (preferredGuide != null)
             {
+                await SyncBootstrapGuideFromFolderAsync(guideFolder, guideName, folderName, cancellationToken);
                 return preferredGuide.Id;
             }
         }
@@ -220,18 +232,8 @@ public sealed class GuideAntsSystemSeeder : IGuideAntsSystemSeeder
 
         if (existingGuide != null)
         {
+            await SyncBootstrapGuideFromFolderAsync(guideFolder, guideName, folderName, cancellationToken);
             return existingGuide.Id;
-        }
-
-        var guideFolder = Path.Combine(
-            _environment.ContentRootPath,
-            BootstrapRootRelativePath,
-            folderName);
-
-        if (!Directory.Exists(guideFolder))
-        {
-            throw new InvalidOperationException(
-                $"Bootstrap guide folder not found at '{guideFolder}'.");
         }
 
         await using var stream = await OpenFolderAsZipStreamAsync(guideFolder, cancellationToken);
@@ -250,6 +252,28 @@ public sealed class GuideAntsSystemSeeder : IGuideAntsSystemSeeder
             folderName);
 
         return importResult.GuideId.Value;
+    }
+
+    private async Task SyncBootstrapGuideFromFolderAsync(
+        string guideFolder,
+        string guideName,
+        string folderName,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = await OpenFolderAsZipStreamAsync(guideFolder, cancellationToken);
+        var importResult = await _guideExportImportService.ImportGuideAsync(stream);
+
+        if (!importResult.Success || !importResult.GuideId.HasValue)
+        {
+            throw new InvalidOperationException(
+                $"Failed to sync bootstrap guide '{guideName}' from '{folderName}'.");
+        }
+
+        _logger.LogInformation(
+            "Synced bootstrap guide '{GuideName}' ({GuideId}) from {FolderName}.",
+            guideName,
+            importResult.GuideId.Value,
+            folderName);
     }
 
     private async Task<Notebook> EnsureNotebookAsync(
