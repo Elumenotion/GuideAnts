@@ -16,7 +16,9 @@
 # Flags:
 #   --doctor                 Run checks only; change nothing.
 #   --backend <cpu|cuda13|rocm|slim>   Skip the backend prompt.
+#   --compose <ghcr|local>   Use GHCR images (default) or local build images.
 #   --mount <path>           Mount a host folder into a project (requires prior login).
+#   --unmount                Interactively remove a host folder mount (requires prior login).
 #   --reconfigure            Re-prompt for backend even if one was saved.
 #   --yes                    Assume "yes" for prompts (auto-accept updates).
 #   --help                   Show this help.
@@ -33,9 +35,11 @@ DOCKER_DIRECTORY="docker"
 
 MODE="install"            # install | doctor
 BACKEND_OVERRIDE=""       # cpu | cuda13 | rocm | slim
+COMPOSE_MODE="ghcr"       # ghcr | local
 ASSUME_YES="0"            # 0 | 1
 RECONFIGURE="0"           # 0 | 1
 MOUNT_PATH=""             # host folder to bind-mount
+UNMOUNT="0"               # 0 | 1
 
 # --- logging helpers ---------------------------------------------------------
 log()  { printf '[guideants] %s\n' "$*"; }
@@ -44,7 +48,7 @@ fail() { printf '[guideants][error] %s\n' "$*" >&2; exit 1; }
 hr()   { printf '%s\n' "----------------------------------------------------------------"; }
 
 usage() {
-  sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '3,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # --- argument parsing --------------------------------------------------------
@@ -56,9 +60,13 @@ while [[ $# -gt 0 ]]; do
     --backend)
       [[ $# -ge 2 ]] || fail "Missing value for --backend"
       BACKEND_OVERRIDE="$2"; shift ;;
+    --compose)
+      [[ $# -ge 2 ]] || fail "Missing value for --compose"
+      COMPOSE_MODE="$2"; shift ;;
     --mount)
       [[ $# -ge 2 ]] || fail "Missing value for --mount"
       MOUNT_PATH="$2"; shift ;;
+    --unmount) UNMOUNT="1" ;;
     --help|-h) usage; exit 0 ;;
     *) fail "Unknown option: $1 (try --help)" ;;
   esac
@@ -67,6 +75,8 @@ done
 
 [[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" =~ ^(cpu|cuda13|rocm|slim)$ ]] \
   || fail "--backend must be cpu, cuda13, rocm, or slim"
+[[ "$COMPOSE_MODE" == "ghcr" || "$COMPOSE_MODE" == "local" ]] \
+  || fail "--compose must be ghcr or local"
 
 # =============================================================================
 # 1. Detect OS / shell environment
@@ -368,12 +378,21 @@ choose_backend() {
 }
 
 compose_file_for() {
-  case "$1" in
-    slim)   echo "docker-compose.ghcr-slim.yml" ;;
-    cuda13) echo "docker-compose.ghcr-cuda13.yml" ;;
-    rocm)   echo "docker-compose.ghcr-rocm.yml" ;;
-    *)      echo "docker-compose.ghcr-cpu.yml" ;;
-  esac
+  if [[ "$COMPOSE_MODE" == "local" ]]; then
+    case "$1" in
+      slim)   echo "docker-compose.slim.yml" ;;
+      cuda13) echo "docker-compose.cuda.yml" ;;
+      rocm)   echo "docker-compose.rocm.yml" ;;
+      *)      echo "docker-compose.cpu.yml" ;;
+    esac
+  else
+    case "$1" in
+      slim)   echo "docker-compose.ghcr-slim.yml" ;;
+      cuda13) echo "docker-compose.ghcr-cuda13.yml" ;;
+      rocm)   echo "docker-compose.ghcr-rocm.yml" ;;
+      *)      echo "docker-compose.ghcr-cpu.yml" ;;
+    esac
+  fi
 }
 
 # =============================================================================
@@ -506,72 +525,25 @@ for item in items:
 }
 
 acquire_token() {
-  # Try saved token first
-  if [[ -f "$CLI_TOKEN_FILE" ]]; then
-    local saved_token
-    saved_token="$(cat "$CLI_TOKEN_FILE")"
-    if [[ -n "$saved_token" ]]; then
-      local check_code
-      check_code="$(curl -sS -o /dev/null -w "%{http_code}" \
-        -H "Authorization: Bearer $saved_token" "$API_BASE/api/auth/me" 2>/dev/null || echo "000")"
-      if [[ "$check_code" == "200" ]]; then
-        log "Using saved login."
-        AUTH_TOKEN="$saved_token"
-        return 0
-      fi
-    fi
+  if [[ ! -f "$CLI_TOKEN_FILE" ]]; then
+    fail "No auth token found. Log in at $HEALTH_URL first, then rerun with --mount."
   fi
 
-  # Prompt for credentials
-  hr
-  log "Login required to mount a host folder."
-  local email password
-  read -r -p "Email: " email || fail "Login cancelled."
-  [[ -n "$email" ]] || fail "Email is required."
-  read -r -s -p "Password: " password || fail "Login cancelled."
-  printf '\n'
-  [[ -n "$password" ]] || fail "Password is required."
-
-  local tmp_cookie tmp_body login_http_code
-  tmp_cookie="$(mktemp)"
-  tmp_body="$(mktemp)"
-
-  local python_cmd=""
-  if command -v python3 >/dev/null 2>&1; then python_cmd=python3
-  elif command -v python >/dev/null 2>&1; then python_cmd=python
-  else fail "Python is required for --mount."; fi
-
-  local login_json
-  login_json="$("$python_cmd" -c "import json,sys; print(json.dumps({'email':sys.argv[1],'password':sys.argv[2]}))" "$email" "$password")"
-
-  login_http_code="$(curl -sS -o "$tmp_body" -w "%{http_code}" \
-    -c "$tmp_cookie" \
-    -X POST \
-    -H "Content-Type: application/json" \
-    -d "$login_json" \
-    "$API_BASE/api/auth/login" 2>/dev/null || echo "000")"
-
-  if [[ "$login_http_code" != "200" ]]; then
-    local err_msg
-    err_msg="$(json_extract "$(cat "$tmp_body")" "message" 2>/dev/null || echo "Invalid credentials.")"
-    rm -f "$tmp_cookie" "$tmp_body"
-    fail "Login failed (HTTP $login_http_code): $err_msg"
+  local saved_token
+  saved_token="$(cat "$CLI_TOKEN_FILE")"
+  if [[ -z "$saved_token" ]]; then
+    fail "Auth token file is empty. Log in at $HEALTH_URL first, then rerun with --mount."
   fi
 
-  local cookie_token
-  cookie_token="$(awk '/GuideAnts.Auth/{print $NF}' "$tmp_cookie" 2>/dev/null || true)"
-  rm -f "$tmp_cookie" "$tmp_body"
-
-  if [[ -z "$cookie_token" ]]; then
-    fail "Login succeeded but could not extract auth token."
+  local check_code
+  check_code="$(curl -sS -o /dev/null -w "%{http_code}" \
+    -H "Authorization: Bearer $saved_token" "$API_BASE/api/auth/me" 2>/dev/null || echo "000")"
+  if [[ "$check_code" != "200" ]]; then
+    fail "Auth token is invalid or expired. Log in at $HEALTH_URL first, then rerun with --mount."
   fi
 
-  AUTH_TOKEN="$cookie_token"
-
-  # Save for future runs
-  mkdir -p "$(dirname "$CLI_TOKEN_FILE")"
-  printf '%s' "$AUTH_TOKEN" > "$CLI_TOKEN_FILE"
-  log "Login successful. Token saved for future runs."
+  log "Using saved login."
+  AUTH_TOKEN="$saved_token"
 }
 
 apply_host_mount() {
@@ -635,9 +607,62 @@ apply_host_mount() {
     fi
   fi
 
+  hr
+  log "Fetching notebooks..."
+  local notebooks_response notebooks_http_code notebooks_body
+  notebooks_response="$(curl -sS -w "\n%{http_code}" -H "Authorization: Bearer $AUTH_TOKEN" "$API_BASE/api/projects/$selected_project_id/notebooks" 2>/dev/null || true)"
+  notebooks_http_code="$(echo "$notebooks_response" | tail -n1)"
+  notebooks_body="$(echo "$notebooks_response" | sed '$d')"
+
+  if [[ "$notebooks_http_code" != "200" ]]; then
+    fail "Failed to fetch notebooks (HTTP $notebooks_http_code)."
+  fi
+
+  local -a notebook_ids=() notebook_titles=()
+  while IFS='|' read -r nid ntitle; do
+    [[ -n "$nid" ]] || continue
+    notebook_ids+=("$nid")
+    notebook_titles+=("$ntitle")
+  done < <(json_extract_list "$notebooks_body")
+
+  local selected_scope="Project"
+  local selected_notebook_id=""
+
+  if [[ ${#notebook_ids[@]} -eq 0 ]]; then
+    log "No notebooks found in this project. Mounting to all notebooks (project scope)."
+  else
+    printf '\n  Select a notebook to mount "%s" into:\n' "$MOUNT_PATH"
+    for i in $(seq 0 $((${#notebook_ids[@]}-1))); do
+      printf '    %d) %s\n' "$((i+1))" "${notebook_titles[$i]}"
+    done
+    printf '    %d) All notebooks\n' "$((${#notebook_ids[@]}+1))"
+    printf '\n'
+
+    local all_choice=$((${#notebook_ids[@]}+1))
+    if [[ "$ASSUME_YES" == "1" ]]; then
+      log "--yes: mounting to all notebooks (project scope)."
+    else
+      local nb_choice
+      read -r -p "Enter 1-${all_choice}: " nb_choice || nb_choice=""
+      if [[ "$nb_choice" =~ ^[0-9]+$ && "$nb_choice" -ge 1 && "$nb_choice" -lt "$all_choice" ]]; then
+        selected_scope="Notebook"
+        selected_notebook_id="${notebook_ids[$((nb_choice-1))]}"
+        log "Mounting to notebook: ${notebook_titles[$((nb_choice-1))]}"
+      elif [[ "$nb_choice" =~ ^[0-9]+$ && "$nb_choice" -eq "$all_choice" ]]; then
+        log "Mounting to all notebooks (project scope)."
+      else
+        fail "Invalid selection."
+      fi
+    fi
+  fi
+
   log "Creating host mount..."
   local create_body create_response create_http_code create_result
-  create_body="{\"scope\":\"Project\",\"hostPath\":\"$MOUNT_PATH\"}"
+  if [[ "$selected_scope" == "Notebook" ]]; then
+    create_body="{\"scope\":\"Notebook\",\"notebookId\":\"$selected_notebook_id\",\"hostPath\":\"$MOUNT_PATH\"}"
+  else
+    create_body="{\"scope\":\"Project\",\"hostPath\":\"$MOUNT_PATH\"}"
+  fi
   create_response="$(curl -sS -w "\n%{http_code}" \
     -X POST \
     -H "Authorization: Bearer $AUTH_TOKEN" \
@@ -670,6 +695,157 @@ apply_host_mount() {
 }
 
 # =============================================================================
+# 5c. Post-startup host folder unmount (--unmount flag)
+# =============================================================================
+json_extract_mounts() {
+  local json="$1"
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then python_cmd=python3
+  elif command -v python >/dev/null 2>&1; then python_cmd=python
+  else fail "Python is required for --unmount."; fi
+  "$python_cmd" -c "
+import json,sys
+items = json.loads(sys.argv[1])
+if not isinstance(items, list):
+    sys.exit(1)
+active = [i for i in items if i.get('status') == 'Active']
+if len(active) == 0:
+    sys.exit(1)
+for item in active:
+    print(item.get('mountId','') + '|' + item.get('displayName','') + '|' + str(item.get('scope','')))
+" "$json"
+}
+
+remove_host_mount() {
+  [[ "$UNMOUNT" == "1" ]] || return 0
+
+  acquire_token
+
+  hr
+  log "Fetching projects..."
+  local projects_response projects_http_code projects_body
+  projects_response="$(curl -sS -w "\n%{http_code}" -H "Authorization: Bearer $AUTH_TOKEN" "$API_BASE/api/projects" 2>/dev/null || true)"
+  projects_http_code="$(echo "$projects_response" | tail -n1)"
+  projects_body="$(echo "$projects_response" | sed '$d')"
+
+  if [[ "$projects_http_code" != "200" ]]; then
+    fail "Failed to fetch projects (HTTP $projects_http_code)."
+  fi
+
+  local -a project_ids=() project_titles=()
+  while IFS='|' read -r pid ptitle; do
+    [[ -n "$pid" ]] || continue
+    project_ids+=("$pid")
+    project_titles+=("$ptitle")
+  done < <(json_extract_list "$projects_body")
+
+  if [[ ${#project_ids[@]} -eq 0 ]]; then
+    fail "No projects found."
+  fi
+
+  printf '\n  Select a project to unmount from:\n'
+  local i
+  for i in $(seq 0 $((${#project_ids[@]}-1))); do
+    printf '    %d) %s\n' "$((i+1))" "${project_titles[$i]}"
+  done
+  printf '\n'
+
+  local selected_project_id
+  if [[ ${#project_ids[@]} -eq 1 ]]; then
+    if [[ "$ASSUME_YES" == "1" ]]; then
+      selected_project_id="${project_ids[0]}"
+      log "Auto-selecting only project: ${project_titles[0]}"
+    else
+      local choice
+      read -r -p "Enter 1 or press Enter for [${project_titles[0]}]: " choice || choice=""
+      selected_project_id="${project_ids[0]}"
+    fi
+  else
+    local choice
+    read -r -p "Enter 1-${#project_ids[@]}: " choice || choice=""
+    if [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le "${#project_ids[@]}" ]]; then
+      selected_project_id="${project_ids[$((choice-1))]}"
+    else
+      fail "Invalid selection."
+    fi
+  fi
+
+  hr
+  log "Fetching mounts..."
+  local mounts_response mounts_http_code mounts_body
+  mounts_response="$(curl -sS -w "\n%{http_code}" -H "Authorization: Bearer $AUTH_TOKEN" "$API_BASE/api/projects/$selected_project_id/host-folder-mounts" 2>/dev/null || true)"
+  mounts_http_code="$(echo "$mounts_response" | tail -n1)"
+  mounts_body="$(echo "$mounts_response" | sed '$d')"
+
+  if [[ "$mounts_http_code" != "200" ]]; then
+    fail "Failed to fetch mounts (HTTP $mounts_http_code)."
+  fi
+
+  local -a mount_ids=() mount_names=() mount_scopes=()
+  while IFS='|' read -r mid mname mscope; do
+    [[ -n "$mid" ]] || continue
+    mount_ids+=("$mid")
+    mount_names+=("$mname")
+    mount_scopes+=("$mscope")
+  done < <(json_extract_mounts "$mounts_body")
+
+  if [[ ${#mount_ids[@]} -eq 0 ]]; then
+    log "No active mounts found for this project."
+    return 0
+  fi
+
+  printf '\n  Select a mount to remove:\n'
+  for i in $(seq 0 $((${#mount_ids[@]}-1))); do
+    printf '    %d) %s  [scope: %s]\n' "$((i+1))" "${mount_names[$i]}" "${mount_scopes[$i]}"
+  done
+  printf '\n'
+
+  local selected_mount_id
+  if [[ ${#mount_ids[@]} -eq 1 ]]; then
+    if [[ "$ASSUME_YES" == "1" ]]; then
+      selected_mount_id="${mount_ids[0]}"
+      log "Auto-selecting only mount: ${mount_names[0]}"
+    else
+      local choice
+      read -r -p "Enter 1 or press Enter for [${mount_names[0]}]: " choice || choice=""
+      selected_mount_id="${mount_ids[0]}"
+    fi
+  else
+    local choice
+    read -r -p "Enter 1-${#mount_ids[@]}: " choice || choice=""
+    if [[ "$choice" =~ ^[0-9]+$ && "$choice" -ge 1 && "$choice" -le "${#mount_ids[@]}" ]]; then
+      selected_mount_id="${mount_ids[$((choice-1))]}"
+    else
+      fail "Invalid selection."
+    fi
+  fi
+
+  log "Removing mount..."
+  local remove_response remove_http_code remove_result
+  remove_response="$(curl -sS -w "\n%{http_code}" \
+    -X POST \
+    -H "Authorization: Bearer $AUTH_TOKEN" \
+    "$API_BASE/api/projects/$selected_project_id/host-folder-mounts/$selected_mount_id/commands/remove" 2>/dev/null || true)"
+  remove_http_code="$(echo "$remove_response" | tail -n1)"
+  remove_result="$(echo "$remove_response" | sed '$d')"
+
+  if [[ "$remove_http_code" != "200" ]]; then
+    local err_msg
+    err_msg="$(json_extract "$remove_result" "message" 2>/dev/null || echo "$remove_result")"
+    fail "Failed to remove mount (HTTP $remove_http_code): $err_msg"
+  fi
+
+  local mount_script="$ROOT_DIR/scripts/guideants-host-mount.sh"
+  if [[ -f "$mount_script" ]]; then
+    bash "$mount_script" remove --mount-id "$selected_mount_id" --project-id "$selected_project_id"
+  else
+    warn "Host mount script not found. Run manually: guideants-host-mount.sh remove --mount-id $selected_mount_id"
+  fi
+
+  log "Host folder mount removed successfully."
+}
+
+# =============================================================================
 # 6. Compose up, health, browser
 # =============================================================================
 wait_for_health() {
@@ -694,6 +870,7 @@ open_browser() {
 save_state() {
   cat > "$STATE_FILE" <<EOF
 BACKEND=${SELECTED_BACKEND:-}
+COMPOSE_MODE=${COMPOSE_MODE}
 COMPOSE_FILE=${COMPOSE_FILE}
 HOST_MOUNT_OVERRIDE_FILE=${HOST_MOUNT_OVERRIDE_FILE}
 DOCKER_DIRECTORY=${DOCKER_DIRECTORY}
@@ -722,7 +899,12 @@ log "Selected backend: $SELECTED_BACKEND  ->  docker/$COMPOSE_FILE"
 check_gpu_drivers "$SELECTED_BACKEND"
 
 detect_prior_install
-plan_pull "$COMPOSE_FILE"
+if [[ "$COMPOSE_MODE" == "ghcr" ]]; then
+  plan_pull "$COMPOSE_FILE"
+else
+  log "Local compose mode — skipping registry update check."
+  UPDATE_DECISION="skip"
+fi
 
 if [[ "$MODE" == "doctor" ]]; then
   hr
@@ -736,7 +918,7 @@ if [[ "$MODE" == "doctor" ]]; then
   exit 0
 fi
 
-[[ "$OS" == "macos" && "$ARCH" == "arm64" ]] && export DOCKER_DEFAULT_PLATFORM=linux/amd64
+[[ "$OS" == "macos" && "$ARCH" == "arm64" && "$COMPOSE_MODE" != "local" ]] && export DOCKER_DEFAULT_PLATFORM=linux/amd64
 
 cd "$DOCKER_DIR"
 compose_args=(-f "$COMPOSE_FILE")
@@ -763,11 +945,12 @@ if wait_for_health; then
   hr
   log "GuideAnts is up: $HEALTH_URL"
   apply_host_mount
+  remove_host_mount
   open_browser
 else
   warn "Health check timed out. Inspect with: docker compose -f docker/$COMPOSE_FILE ps"
-  if [[ -n "$MOUNT_PATH" ]]; then
-    warn "Skipping --mount because the health check failed."
+  if [[ -n "$MOUNT_PATH" || "$UNMOUNT" == "1" ]]; then
+    warn "Skipping mount/unmount operations because the health check failed."
   fi
 fi
 

@@ -29,6 +29,11 @@ services:
         source: /Users/jacksonfalgoust/Documents/Internship/GuideAnts
         target: /app/HostMounts/a1f1946bceb049f78517089973a550a3
         read_only: false
+      # guideants-host-mount: mount-id=a980265e-4ebe-4a68-92d2-98cbc456c33c mount-key=a980265e4ebe4a6892d298cbc456c33c source-kind=LocalPath
+      - type: bind
+        source: /Users/jacksonfalgoust/Documents/Internship/GuideAnts
+        target: /app/HostMounts/a980265e4ebe4a6892d298cbc456c33c
+        read_only: false
       # guideants-host-mount: mount-id=dfeb598d-8a86-49e1-a689-af92df1e287b mount-key=dfeb598d8a8649e1a689af92df1e287b source-kind=LocalPath
       - type: bind
         source: /Users/jacksonfalgoust/Documents/Internship/GuideAnts
@@ -66,6 +71,11 @@ services:
         source: /Users/jacksonfalgoust/Documents/Internship/GuideAnts
         target: /app/HostMounts/a1f1946bceb049f78517089973a550a3
         read_only: false
+      # guideants-host-mount: mount-id=a980265e-4ebe-4a68-92d2-98cbc456c33c mount-key=a980265e4ebe4a6892d298cbc456c33c source-kind=LocalPath
+      - type: bind
+        source: /Users/jacksonfalgoust/Documents/Internship/GuideAnts
+        target: /app/HostMounts/a980265e4ebe4a6892d298cbc456c33c
+        read_only: false
       # guideants-host-mount: mount-id=dfeb598d-8a86-49e1-a689-af92df1e287b mount-key=dfeb598d8a8649e1a689af92df1e287b source-kind=LocalPath
       - type: bind
         source: /Users/jacksonfalgoust/Documents/Internship/GuideAnts
@@ -102,6 +112,11 @@ services:
       - type: bind
         source: /Users/jacksonfalgoust/Documents/Internship/GuideAnts
         target: /app/HostMounts/a1f1946bceb049f78517089973a550a3
+        read_only: false
+      # guideants-host-mount: mount-id=a980265e-4ebe-4a68-92d2-98cbc456c33c mount-key=a980265e4ebe4a6892d298cbc456c33c source-kind=LocalPath
+      - type: bind
+        source: /Users/jacksonfalgoust/Documents/Internship/GuideAnts
+        target: /app/HostMounts/a980265e4ebe4a6892d298cbc456c33c
         read_only: false
       # guideants-host-mount: mount-id=dfeb598d-8a86-49e1-a689-af92df1e287b mount-key=dfeb598d8a8649e1a689af92df1e287b source-kind=LocalPath
       - type: bind
