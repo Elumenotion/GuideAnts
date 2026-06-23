@@ -17,7 +17,7 @@ function resolveGuideAntsApiBaseUrl(): string {
 }
 
 export function GuideAntsGuideFlyout() {
-  const { isOpen, close, session, sessionLoading, buildAppContext } = useGuideAntsGuide();
+  const { isOpen, close, session, sessionLoading, buildAppContext, appActions } = useGuideAntsGuide();
   const location = useLocation();
   const panelRef = useRef<HTMLDivElement>(null);
   const chatHostRef = useRef<HTMLDivElement>(null);
@@ -60,10 +60,10 @@ export function GuideAntsGuideFlyout() {
         return;
       }
       chat.setContextProvider(() => JSON.stringify(buildAppContext()));
-      registerGuideAntsAppBridge(chat, buildAppContext, session?.isAdminGuide ?? false);
+      registerGuideAntsAppBridge(chat, buildAppContext, session?.isAdminGuide ?? false, appActions);
       setBridgeRegistered(true);
     },
-    [bridgeRegistered, buildAppContext, session?.isAdminGuide],
+    [appActions, bridgeRegistered, buildAppContext, session?.isAdminGuide],
   );
 
   useEffect(() => {

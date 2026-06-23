@@ -1,7 +1,8 @@
 import type { GuideantsChatElement, ToolCall, ToolResult } from 'guideants';
 import { getApiOrigin } from '../../config/apiConfig';
 import { withAuthFetchInit } from '../../services/authService';
-import type { AppGuideContext } from './types';
+import { api } from '../../services/api';
+import type { AppGuideContext, GuideAppActions, GuideViewContext } from './types';
 
 type ToolArguments = Record<string, unknown>;
 
@@ -298,10 +299,302 @@ async function callSandboxAdminEndpoint(
   };
 }
 
+type AppToolResult = {
+  status: 'ok' | 'error';
+  action: string;
+  message?: string;
+  httpStatus?: number;
+  data?: unknown;
+  navigatedTo?: string;
+};
+
+function appError(action: string, message: string, httpStatus?: number): AppToolResult {
+  return { status: 'error', action, message: truncateMessage(message), httpStatus };
+}
+
+function describeError(error: unknown): { message: string; httpStatus?: number } {
+  if (error && typeof error === 'object') {
+    const candidate = error as { message?: unknown; status?: unknown };
+    const message = typeof candidate.message === 'string' && candidate.message.trim().length > 0
+      ? candidate.message
+      : 'Request failed.';
+    const httpStatus = typeof candidate.status === 'number' ? candidate.status : undefined;
+    return { message, httpStatus };
+  }
+  return { message: 'Request failed.' };
+}
+
+/**
+ * Run an API-backed app action under the user's identity and normalize the
+ * result. Server-side authorization decides success or failure; any error is
+ * surfaced verbatim so the guide can report it instead of guessing.
+ */
+async function runAppAction(action: string, fn: () => Promise<unknown>): Promise<AppToolResult> {
+  try {
+    const data = await fn();
+    return { status: 'ok', action, data };
+  } catch (error) {
+    const { message, httpStatus } = describeError(error);
+    return appError(action, message, httpStatus);
+  }
+}
+
+function resolveProjectId(args: ToolArguments, context: AppGuideContext): string | undefined {
+  return readNonEmptyString(getFieldValue(args, 'projectId')) ?? readNonEmptyString(context.projectId);
+}
+
+function resolveNotebookId(args: ToolArguments, context: AppGuideContext): string | undefined {
+  return readNonEmptyString(getFieldValue(args, 'notebookId')) ?? readNonEmptyString(context.notebookId);
+}
+
+function registerAppActionTools(
+  chat: GuideantsChatElement,
+  buildAppContext: () => GuideViewContext,
+  appActions: GuideAppActions,
+): void {
+  // --- Context / reads ---------------------------------------------------
+
+  chat.registerTool('AppGetCurrentContext', async (call) =>
+    toolResult(call, 'AppGetCurrentContext', { status: 'ok', action: 'getContext', data: buildAppContext() }),
+  );
+
+  chat.registerTool('AppListProjects', async (call) => {
+    const result = await runAppAction('listProjects', () => api.projects.getUserProjects());
+    return toolResult(call, 'AppListProjects', result);
+  });
+
+  chat.registerTool('AppListNotebooks', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const projectId = resolveProjectId(args, buildAppContext());
+    if (!projectId) {
+      return toolResult(call, 'AppListNotebooks', appError('listNotebooks', 'projectId is required; none found in context.'));
+    }
+    const result = await runAppAction('listNotebooks', async () => {
+      const details = await api.projects.getProjectDetails(projectId);
+      return { projectId, projectTitle: details.title, notebooks: details.notebooks };
+    });
+    return toolResult(call, 'AppListNotebooks', result);
+  });
+
+  chat.registerTool('AppListConversations', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const context = buildAppContext();
+    const projectId = resolveProjectId(args, context);
+    const notebookId = resolveNotebookId(args, context);
+    if (!projectId || !notebookId) {
+      return toolResult(
+        call,
+        'AppListConversations',
+        appError('listConversations', 'projectId and notebookId are required; none found in context.'),
+      );
+    }
+    const result = await runAppAction('listConversations', async () => ({
+      projectId,
+      notebookId,
+      conversations: await api.projects.notebooks.conversations.getAll(projectId, notebookId),
+    }));
+    return toolResult(call, 'AppListConversations', result);
+  });
+
+  // --- Navigation --------------------------------------------------------
+
+  const navTo = (call: ToolCall, name: string, action: string, path: string): ToolResult => {
+    appActions.navigate(path);
+    return toolResult(call, name, { status: 'ok', action, navigatedTo: path } satisfies AppToolResult);
+  };
+
+  chat.registerTool('AppNavigateHome', async (call) => navTo(call, 'AppNavigateHome', 'navigate', '/'));
+  chat.registerTool('AppNavigateProjects', async (call) => navTo(call, 'AppNavigateProjects', 'navigate', '/projects'));
+  chat.registerTool('AppNavigateConversations', async (call) => navTo(call, 'AppNavigateConversations', 'navigate', '/conversations'));
+  chat.registerTool('AppNavigateUsage', async (call) => navTo(call, 'AppNavigateUsage', 'navigate', '/usage'));
+  chat.registerTool('AppNavigateSettings', async (call) => navTo(call, 'AppNavigateSettings', 'navigate', '/settings'));
+
+  chat.registerTool('AppNavigateBack', async (call) => {
+    appActions.goBack();
+    return toolResult(call, 'AppNavigateBack', { status: 'ok', action: 'navigateBack' } satisfies AppToolResult);
+  });
+
+  chat.registerTool('AppNavigateProject', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const projectId = resolveProjectId(args, buildAppContext());
+    if (!projectId) {
+      return toolResult(call, 'AppNavigateProject', appError('navigate', 'projectId is required; none found in context.'));
+    }
+    return navTo(call, 'AppNavigateProject', 'navigate', `/projects/${encodeURIComponent(projectId)}`);
+  });
+
+  chat.registerTool('AppNavigateNotebook', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const context = buildAppContext();
+    const projectId = resolveProjectId(args, context);
+    const notebookId = resolveNotebookId(args, context);
+    if (!projectId || !notebookId) {
+      return toolResult(call, 'AppNavigateNotebook', appError('navigate', 'projectId and notebookId are required; none found in context.'));
+    }
+    return navTo(
+      call,
+      'AppNavigateNotebook',
+      'navigate',
+      `/projects/${encodeURIComponent(projectId)}/notebooks/${encodeURIComponent(notebookId)}`,
+    );
+  });
+
+  // --- Content actions (mutations, server-authorized) --------------------
+
+  chat.registerTool('AppCreateProject', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const title = readNonEmptyString(getFieldValue(args, 'title'));
+    if (!title) {
+      return toolResult(call, 'AppCreateProject', appError('createProject', 'title is required.'));
+    }
+    const description = readNonEmptyString(getFieldValue(args, 'description'));
+    const result = await runAppAction('createProject', () => api.projects.create({ title, description }));
+    if (result.status === 'ok') {
+      dispatchAppEvent('refresh-project');
+      const created = result.data as { id?: string } | undefined;
+      if (created?.id) {
+        const path = `/projects/${encodeURIComponent(created.id)}`;
+        appActions.navigate(path);
+        result.navigatedTo = path;
+      }
+    }
+    return toolResult(call, 'AppCreateProject', result);
+  });
+
+  chat.registerTool('AppRenameProject', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const context = buildAppContext();
+    const projectId = resolveProjectId(args, context);
+    const title = readNonEmptyString(getFieldValue(args, 'title'));
+    if (!projectId) {
+      return toolResult(call, 'AppRenameProject', appError('renameProject', 'projectId is required; none found in context.'));
+    }
+    if (!title) {
+      return toolResult(call, 'AppRenameProject', appError('renameProject', 'title is required.'));
+    }
+    const description = readNonEmptyString(getFieldValue(args, 'description'));
+    const result = await runAppAction('renameProject', () => api.projects.updateProject(projectId, { title, description }));
+    if (result.status === 'ok') {
+      dispatchAppEvent('refresh-project');
+    }
+    return toolResult(call, 'AppRenameProject', result);
+  });
+
+  chat.registerTool('AppCreateNotebook', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const context = buildAppContext();
+    const projectId = resolveProjectId(args, context);
+    const title = readNonEmptyString(getFieldValue(args, 'title'));
+    if (!projectId) {
+      return toolResult(call, 'AppCreateNotebook', appError('createNotebook', 'projectId is required; none found in context.'));
+    }
+    if (!title) {
+      return toolResult(call, 'AppCreateNotebook', appError('createNotebook', 'title is required.'));
+    }
+    const description = readNonEmptyString(getFieldValue(args, 'description'));
+    const guideId = readNonEmptyString(getFieldValue(args, 'guideId'));
+    const result = await runAppAction('createNotebook', () =>
+      api.projects.createNotebook(projectId, { title, description, guideId }),
+    );
+    if (result.status === 'ok') {
+      dispatchAppEvent('refresh-project');
+      const created = result.data as { id?: string } | undefined;
+      const navigate = getFieldValue(args, 'navigate');
+      if (created?.id && navigate !== false) {
+        const path = `/projects/${encodeURIComponent(projectId)}/notebooks/${encodeURIComponent(created.id)}`;
+        appActions.navigate(path);
+        result.navigatedTo = path;
+      }
+    }
+    return toolResult(call, 'AppCreateNotebook', result);
+  });
+
+  chat.registerTool('AppRenameNotebook', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const context = buildAppContext();
+    const projectId = resolveProjectId(args, context);
+    const notebookId = resolveNotebookId(args, context);
+    const title = readNonEmptyString(getFieldValue(args, 'title'));
+    if (!projectId || !notebookId) {
+      return toolResult(call, 'AppRenameNotebook', appError('renameNotebook', 'projectId and notebookId are required; none found in context.'));
+    }
+    if (!title) {
+      return toolResult(call, 'AppRenameNotebook', appError('renameNotebook', 'title is required.'));
+    }
+    const description = readNonEmptyString(getFieldValue(args, 'description'));
+    const result = await runAppAction('renameNotebook', () =>
+      api.projects.updateNotebook(projectId, notebookId, { title, description }),
+    );
+    if (result.status === 'ok') {
+      dispatchAppEvent('refresh-project');
+      dispatchAppEvent('refresh-notebook-toolbar');
+    }
+    return toolResult(call, 'AppRenameNotebook', result);
+  });
+
+  chat.registerTool('AppCreateConversation', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const context = buildAppContext();
+    const projectId = resolveProjectId(args, context);
+    const notebookId = resolveNotebookId(args, context);
+    const title = readNonEmptyString(getFieldValue(args, 'title'));
+    if (!projectId || !notebookId) {
+      return toolResult(call, 'AppCreateConversation', appError('createConversation', 'projectId and notebookId are required; none found in context.'));
+    }
+    if (!title) {
+      return toolResult(call, 'AppCreateConversation', appError('createConversation', 'title is required.'));
+    }
+    const result = await runAppAction('createConversation', () =>
+      api.projects.notebooks.conversations.create(projectId, notebookId, title),
+    );
+    if (result.status === 'ok') {
+      dispatchAppEvent('refresh-conversations');
+    }
+    return toolResult(call, 'AppCreateConversation', result);
+  });
+
+  chat.registerTool('AppRenameConversation', async (call) => {
+    const args = parseToolArgumentsObject(call);
+    const context = buildAppContext();
+    const projectId = resolveProjectId(args, context);
+    const notebookId = resolveNotebookId(args, context);
+    const conversationId = readNonEmptyString(getFieldValue(args, 'conversationId'))
+      ?? readNonEmptyString(context.activeConversationId);
+    const title = readNonEmptyString(getFieldValue(args, 'title'));
+    if (!projectId || !notebookId || !conversationId) {
+      return toolResult(
+        call,
+        'AppRenameConversation',
+        appError('renameConversation', 'projectId, notebookId and conversationId are required; none found in context.'),
+      );
+    }
+    if (!title) {
+      return toolResult(call, 'AppRenameConversation', appError('renameConversation', 'title is required.'));
+    }
+    const result = await runAppAction('renameConversation', () =>
+      api.projects.notebooks.conversations.rename(projectId, notebookId, conversationId, title),
+    );
+    if (result.status === 'ok') {
+      dispatchAppEvent('refresh-conversations');
+    }
+    return toolResult(call, 'AppRenameConversation', result);
+  });
+}
+
+function dispatchAppEvent(name: string): void {
+  try {
+    window.dispatchEvent(new Event(name));
+  } catch {
+    // Event dispatch is a best-effort UI refresh hint; ignore environments
+    // without a DOM (e.g. unit tests without window event support).
+  }
+}
+
 export function registerGuideAntsAppBridge(
   chat: GuideantsChatElement,
-  buildAppContext: () => AppGuideContext,
+  buildAppContext: () => GuideViewContext,
   isAdminGuide: boolean,
+  appActions: GuideAppActions,
 ): void {
   chat.registerTool('AppEcho', async (call) => {
     const args = parseToolArguments(call);
@@ -311,6 +604,8 @@ export function registerGuideAntsAppBridge(
       context: buildAppContext(),
     });
   });
+
+  registerAppActionTools(chat, buildAppContext, appActions);
 
   if (!isAdminGuide) {
     return;

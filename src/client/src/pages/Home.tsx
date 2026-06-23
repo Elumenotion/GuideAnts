@@ -19,6 +19,7 @@ import { HeaderActionsBar } from '../components/common/HeaderActionsBar';
 import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideButton';
 import { HeaderUserMenu } from '../components/common/HeaderUserMenu';
 import { HeaderIconLinkButton } from '../components/common/HeaderIconLinkButton';
+import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
 
 interface ProjectSummary {
   id: string;
@@ -66,6 +67,12 @@ const Home = () => {
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const [quickStartTarget, setQuickStartTarget] = useState<{ projectId: string; notebookId: string } | null>(null);
   const [showAddAiServicesWizard, setShowAddAiServicesWizard] = useState(false);
+
+  usePublishGuideViewContext({
+    route: '/',
+    screen: 'home',
+    itemCounts: { projects: projects.length },
+  });
 
   const SCREEN_ID = 'home';
   const canCreateContent = role === 'Admin' || role === 'Contributor';

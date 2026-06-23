@@ -107,8 +107,11 @@ using var scope = CreateDbScope();
             .Where(f => f.NotebookId == notebookId)
             .ToListAsync();
 
+        var hiddenProjectedPaths = GetHiddenOutputProjectionPaths(projectId, notebookId, files);
+
         // Filter out temporary script files, __pycache__ folders, and Resources files (defense-in-depth)
         return files
+            .Where(f => !hiddenProjectedPaths.Contains(NormalizeRelativePath(f.RelativePath)))
             .Where(f => !IsTemporaryScriptFile(Path.GetFileName(f.RelativePath)))
             .Where(f => !IsInPycacheFolder(f.RelativePath))
             .Where(f => !IsInResourcesFolder(f.RelativePath))
@@ -127,8 +130,11 @@ using var scope2 = CreateDbScope();
             .Where(f => f.NotebookId == notebookId)
             .ToListAsync();
 
+        var hiddenProjectedPaths = GetHiddenOutputProjectionPaths(projectId, notebookId, files);
+
         // Filter out temporary script files, __pycache__ folders, and Resources files
         var fileDtos = files
+            .Where(f => !hiddenProjectedPaths.Contains(NormalizeRelativePath(f.RelativePath)))
             .Where(f => !IsTemporaryScriptFile(Path.GetFileName(f.RelativePath)))
             .Where(f => !IsInPycacheFolder(f.RelativePath))
             .Where(f => !IsInResourcesFolder(f.RelativePath))
@@ -1440,6 +1446,146 @@ using var scope = CreateDbScope();
         return relativePath.StartsWith("__pycache__/") || 
                relativePath.Contains("/__pycache__/") || 
                relativePath.EndsWith("/__pycache__");
+    }
+
+    private HashSet<string> GetHiddenOutputProjectionPaths(
+        Guid projectId,
+        Guid notebookId,
+        IReadOnlyCollection<NotebookFile> files)
+    {
+        var hiddenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (files.Count == 0)
+        {
+            return hiddenPaths;
+        }
+
+        var resourceFileNames = files
+            .Select(f => NormalizeRelativePath(f.RelativePath))
+            .Where(IsInResourcesFolder)
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (resourceFileNames.Count == 0)
+        {
+            return hiddenPaths;
+        }
+
+        var notebookRoot = GetNotebookRootPath(projectId, notebookId);
+        var resourcesRoot = Path.GetFullPath(Path.Combine(notebookRoot, "Resources"));
+
+        foreach (var file in files)
+        {
+            var relativePath = NormalizeRelativePath(file.RelativePath);
+            if (!IsInOutputFolder(relativePath))
+            {
+                continue;
+            }
+
+            var fileName = Path.GetFileName(relativePath);
+            if (string.IsNullOrWhiteSpace(fileName) || !resourceFileNames.Contains(fileName))
+            {
+                continue;
+            }
+
+            if (!TryResolveNotebookPath(projectId, notebookId, relativePath, out var physicalPath) || !File.Exists(physicalPath))
+            {
+                continue;
+            }
+
+            if (IsProjectedOutputResourceSymlink(physicalPath, resourcesRoot))
+            {
+                hiddenPaths.Add(relativePath);
+            }
+        }
+
+        return hiddenPaths;
+    }
+
+    private static bool IsInOutputFolder(string relativePath)
+    {
+        return relativePath.StartsWith("Output/", StringComparison.OrdinalIgnoreCase) ||
+               relativePath.Equals("Output", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeRelativePath(string relativePath) =>
+        relativePath.Replace("\\", "/").TrimStart('/');
+
+    private static bool IsProjectedOutputResourceSymlink(string physicalPath, string resourcesRoot)
+    {
+        if (!TryGetFileAttributes(physicalPath, out var attributes) || !attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            return false;
+        }
+
+        var resolvedTarget = ResolveSymlinkTargetFullPath(physicalPath);
+        if (string.IsNullOrWhiteSpace(resolvedTarget))
+        {
+            return false;
+        }
+
+        return IsPathUnderRoot(resolvedTarget, resourcesRoot);
+    }
+
+    private static bool TryGetFileAttributes(string physicalPath, out FileAttributes attributes)
+    {
+        attributes = default;
+        try
+        {
+            attributes = File.GetAttributes(physicalPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string? ResolveSymlinkTargetFullPath(string physicalPath)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(physicalPath);
+            var linkTarget = fileInfo.LinkTarget;
+            if (!string.IsNullOrWhiteSpace(linkTarget))
+            {
+                var candidate = Path.IsPathRooted(linkTarget)
+                    ? linkTarget
+                    : Path.Combine(fileInfo.DirectoryName ?? Path.GetDirectoryName(physicalPath) ?? string.Empty, linkTarget);
+                return Path.GetFullPath(candidate);
+            }
+
+            var resolved = fileInfo.ResolveLinkTarget(returnFinalTarget: true);
+            if (resolved != null)
+            {
+                return Path.GetFullPath(resolved.FullName);
+            }
+        }
+        catch
+        {
+            // Best-effort only.
+        }
+
+        return null;
+    }
+
+    private static bool IsPathUnderRoot(string candidatePath, string rootPath)
+    {
+        var rootFullPath = Path.GetFullPath(rootPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var candidateFullPath = Path.GetFullPath(candidatePath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (candidateFullPath.Equals(rootFullPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var rootWithSeparator = rootFullPath + Path.DirectorySeparatorChar;
+        var rootWithAltSeparator = rootFullPath + Path.AltDirectorySeparatorChar;
+        return candidateFullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase) ||
+               candidateFullPath.StartsWith(rootWithAltSeparator, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
