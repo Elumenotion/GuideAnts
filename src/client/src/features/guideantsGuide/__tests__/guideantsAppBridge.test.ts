@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerGuideAntsAppBridge } from '../guideantsAppBridge';
+import type { GuideAppActions } from '../types';
 import type { GuideantsChatElement, ToolCall } from 'guideants';
+
+const noopAppActions: GuideAppActions = { navigate: () => {}, goBack: () => {} };
 
 function createChatHarness() {
   const handlers = new Map<string, (call: ToolCall) => Promise<unknown>>();
@@ -40,7 +43,7 @@ describe('guideantsAppBridge', () => {
       displayName: 'Ada',
     });
 
-    registerGuideAntsAppBridge(chat, buildAppContext, false);
+    registerGuideAntsAppBridge(chat, buildAppContext, false, noopAppActions);
     expect(chat.registerTool).toHaveBeenCalledWith('AppEcho', expect.any(Function));
 
     const handler = handlers.get('AppEcho');
@@ -67,12 +70,17 @@ describe('guideantsAppBridge', () => {
     });
 
     const nonAdminHarness = createChatHarness();
-    registerGuideAntsAppBridge(nonAdminHarness.chat, buildAppContext, false);
-    expect(Array.from(nonAdminHarness.handlers.keys())).toEqual(['AppEcho']);
+    registerGuideAntsAppBridge(nonAdminHarness.chat, buildAppContext, false, noopAppActions);
+    const nonAdminKeys = Array.from(nonAdminHarness.handlers.keys());
+    expect(nonAdminKeys).toContain('AppEcho');
+    expect(nonAdminKeys).toContain('AppCreateNotebook');
+    expect(nonAdminKeys).toContain('AppNavigateHome');
+    expect(nonAdminKeys.some((key) => key.startsWith('SandboxAdmin'))).toBe(false);
 
     const adminHarness = createChatHarness();
-    registerGuideAntsAppBridge(adminHarness.chat, buildAppContext, true);
+    registerGuideAntsAppBridge(adminHarness.chat, buildAppContext, true, noopAppActions);
     expect(adminHarness.handlers.has('AppEcho')).toBe(true);
+    expect(adminHarness.handlers.has('AppCreateNotebook')).toBe(true);
     expect(adminHarness.handlers.has('SandboxAdminSetToken')).toBe(false);
     expect(adminHarness.handlers.has('SandboxAdminClearToken')).toBe(false);
     expect(adminHarness.handlers.has('SandboxAdminGetConfig')).toBe(false);
@@ -103,6 +111,7 @@ describe('guideantsAppBridge', () => {
         displayName: 'Admin',
       }),
       true,
+      noopAppActions,
     );
 
     const result = await handlers.get('SandboxAdminSetRequirements')!(
@@ -137,6 +146,7 @@ describe('guideantsAppBridge', () => {
         displayName: 'Admin',
       }),
       true,
+      noopAppActions,
     );
 
     const result = await handlers.get('SandboxAdminGetRequirements')!(
@@ -166,6 +176,7 @@ describe('guideantsAppBridge', () => {
         displayName: 'Admin',
       }),
       true,
+      noopAppActions,
     );
 
     const result = await handlers.get('SandboxAdminSetAptPackages')!(
@@ -211,6 +222,7 @@ describe('guideantsAppBridge', () => {
         notebookId: '22222222-2222-2222-2222-222222222222',
       }),
       true,
+      noopAppActions,
     );
 
     const result = await handlers.get('SandboxAdminSetRequirements')!(
@@ -254,6 +266,7 @@ describe('guideantsAppBridge', () => {
         guideId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
       }),
       true,
+      noopAppActions,
     );
 
     const result = await handlers.get('SandboxAdminGetRequirements')!(
@@ -289,6 +302,7 @@ describe('guideantsAppBridge', () => {
         displayName: 'Admin',
       }),
       true,
+      noopAppActions,
     );
 
     const result = await handlers.get('SandboxAdminSetRequirements')!(

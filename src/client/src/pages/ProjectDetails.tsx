@@ -25,6 +25,7 @@ import MarkdownViewer from '../components/common/MarkdownViewer';
 import DefaultProjectHomeMd from '../content/default-project-home.md?raw';
 import ProjectGuideAuthContent from '../components/project/content/ProjectGuideAuthContent';
 import { useRegisterTour } from '../tour/useRegisterTour';
+import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
 
 
 
@@ -50,6 +51,17 @@ export default function ProjectDetails() {
     const projectId = routeProjectId ?? contextProjectId;
 
     const { showToast } = useToast();
+
+    usePublishGuideViewContext({
+        route: location.pathname,
+        screen: 'project',
+        projectId,
+        projectTitle: project?.title,
+        selectedItem: selectedItem ? { type: selectedItem.type, id: selectedItem.id } : undefined,
+        itemCounts: project
+            ? { notebooks: project.notebooks.length, files: project.contentFiles.length }
+            : undefined,
+    });
 
     // Guided tour registration for Project Details
     const SCREEN_ID = 'projectDetails';

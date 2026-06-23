@@ -187,6 +187,45 @@ public sealed class NotebookFileChangeReporterTests
         modifiedFiles.Should().BeEmpty();
     }
 
+    [TestMethod]
+    public async Task DetectChangesAsync_IgnoresOutputSymlinkProjectedFromResources()
+    {
+        using var storage = new TempStorage();
+        var projectId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var notebookRoot = storage.NotebookRoot(projectId, notebookId);
+        var outputDir = storage.OutputDir(projectId, notebookId);
+
+        var resourcesDir = Path.Combine(notebookRoot, "Resources", "crew-Slide-Shows");
+        Directory.CreateDirectory(resourcesDir);
+        var targetPath = Path.Combine(resourcesDir, "api.py");
+        File.WriteAllText(targetPath, "print('hello')");
+
+        var symlinkPath = Path.Combine(outputDir, "api.py");
+        var relativeTarget = Path.Combine("..", "Resources", "crew-Slide-Shows", "api.py");
+        if (!TryCreateFileSymlink(symlinkPath, relativeTarget))
+        {
+            Assert.Inconclusive("File symlink creation is not available in this environment.");
+        }
+
+        var resourceInfo = new FileInfo(targetPath);
+        var provider = BuildProvider(storage.Root, projectId, notebookId, seed: ctx =>
+        {
+            ctx.NotebookFiles.Add(MakeFile(
+                notebookId,
+                "Resources/crew-Slide-Shows/api.py",
+                resourceInfo.Length,
+                resourceInfo.LastWriteTimeUtc,
+                ComputeSha256(targetPath)));
+        });
+        var context = new InvocationContext(projectId, notebookId, Guid.NewGuid()) { IsPublished = false };
+
+        var (newFiles, modifiedFiles) = await NotebookFileChangeReporter.DetectChangesAsync(provider, storage.Root, context);
+
+        newFiles.Should().BeEmpty();
+        modifiedFiles.Should().BeEmpty();
+    }
+
     private static NotebookFile MakeFile(Guid notebookId, string relativePath, long size, DateTime lastModifiedUtc, string hash)
     {
         var file = new NotebookFile
@@ -207,6 +246,32 @@ public sealed class NotebookFileChangeReporterTests
         using var sha = SHA256.Create();
         using var stream = File.OpenRead(filePath);
         return Convert.ToHexString(sha.ComputeHash(stream));
+    }
+
+    private static bool TryCreateFileSymlink(string symlinkPath, string targetPath)
+    {
+        try
+        {
+            if (File.Exists(symlinkPath))
+            {
+                File.Delete(symlinkPath);
+            }
+
+            File.CreateSymbolicLink(symlinkPath, targetPath);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 
     private static IServiceProvider BuildProvider(
@@ -240,9 +305,16 @@ public sealed class NotebookFileChangeReporterTests
 
         public TempStorage() => Directory.CreateDirectory(Root);
 
+        public string NotebookRoot(Guid projectId, Guid notebookId)
+        {
+            var dir = Path.Combine(Root, projectId.ToString(), "notebooks", notebookId.ToString());
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
         public string OutputDir(Guid projectId, Guid notebookId)
         {
-            var dir = Path.Combine(Root, projectId.ToString(), "notebooks", notebookId.ToString(), "Output");
+            var dir = Path.Combine(NotebookRoot(projectId, notebookId), "Output");
             Directory.CreateDirectory(dir);
             return dir;
         }

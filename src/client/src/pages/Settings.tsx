@@ -47,12 +47,19 @@ import { GuideAntsGuideButton } from '../features/guideantsGuide/GuideAntsGuideB
 import { HeaderUserMenu } from '../components/common/HeaderUserMenu';
 import { HeaderIconLinkButton } from '../components/common/HeaderIconLinkButton';
 import { FiBookOpen } from 'react-icons/fi';
+import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
 
 export default function Settings() {
   const { showToast } = useToast();
   const { role } = useAuth();
   const isAdmin = role === 'Admin';
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => (isAdmin ? 'overview' : 'personalization'));
+
+  usePublishGuideViewContext({
+    route: '/settings',
+    screen: 'settings',
+    settingsTab: activeTab,
+  });
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null);
   const [modelsRuntimeDeepLink, setModelsRuntimeDeepLink] = useState<ModelsRuntimeDeepLink | null>(null);
   const [connectionsFocusedSection, setConnectionsFocusedSection] = useState<string | null>(null);
