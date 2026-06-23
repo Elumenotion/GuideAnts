@@ -492,7 +492,6 @@ detect_prior_install() {
 # 5b. Post-startup host folder mount (--mount flag)
 # =============================================================================
 API_BASE="http://localhost:5107"
-CLI_TOKEN_FILE="$DOCKER_DIR/volumes/content-files/.cli-auth-token"
 
 json_extract() {
   local json="$1" field="$2"
@@ -525,25 +524,74 @@ for item in items:
 }
 
 acquire_token() {
-  if [[ ! -f "$CLI_TOKEN_FILE" ]]; then
-    fail "No auth token found. Log in at $HEALTH_URL first, then rerun with --mount."
+  # Best-effort scrub any stale on-disk token from earlier installs
+  rm -f "$DOCKER_DIR/volumes/content-files/.cli-auth-token" 2>/dev/null || true
+
+  # 1. Create a CLI session
+  local resp code body
+  resp="$(curl -sS -w "\n%{http_code}" -X POST "$API_BASE/api/cli/sessions" 2>/dev/null || true)"
+  code="$(echo "$resp" | tail -n1)"
+  body="$(echo "$resp" | sed '$d')"
+
+  if [[ "$code" != "200" ]]; then
+    fail "Could not create CLI session (HTTP $code). Ensure the stack is running and you are logged in at $HEALTH_URL."
   fi
 
-  local saved_token
-  saved_token="$(cat "$CLI_TOKEN_FILE")"
-  if [[ -z "$saved_token" ]]; then
-    fail "Auth token file is empty. Log in at $HEALTH_URL first, then rerun with --mount."
+  local session_id device_secret
+  session_id="$(json_extract "$body" "sessionId")"
+  device_secret="$(json_extract "$body" "deviceSecret")"
+
+  if [[ -z "$session_id" || -z "$device_secret" ]]; then
+    fail "Malformed session response from server. Try again or check the stack logs."
   fi
 
-  local check_code
-  check_code="$(curl -sS -o /dev/null -w "%{http_code}" \
-    -H "Authorization: Bearer $saved_token" "$API_BASE/api/auth/me" 2>/dev/null || echo "000")"
-  if [[ "$check_code" != "200" ]]; then
-    fail "Auth token is invalid or expired. Log in at $HEALTH_URL first, then rerun with --mount."
-  fi
+  # 2. Open the browser approval page
+  local approve_url="$API_BASE/cli/authorize?session=$session_id"
+  open_browser "$approve_url"
+  log "Authorize this request in your browser:"
+  log "  $approve_url"
+  log "Approve the command-line mount request in your browser, then return here..."
 
-  log "Using saved login."
-  AUTH_TOKEN="$saved_token"
+  # 3. Poll for the token (~5 min total, ~2 s between attempts)
+  local max_attempts=150 attempt=0
+  while [[ $attempt -lt $max_attempts ]]; do
+    sleep 2
+    attempt=$((attempt + 1))
+
+    resp="$(curl -sS -w "\n%{http_code}" -H "X-Device-Secret: $device_secret" \
+      "$API_BASE/api/cli/sessions/$session_id/token" 2>/dev/null || true)"
+    code="$(echo "$resp" | tail -n1)"
+    body="$(echo "$resp" | sed '$d')"
+
+    case "$code" in
+      200)
+        AUTH_TOKEN="$(json_extract "$body" "token")"
+        if [[ -z "$AUTH_TOKEN" ]]; then
+          fail "Server returned 200 but the token was empty."
+        fi
+        log "Authorized."
+        return 0
+        ;;
+      202)
+        # Still pending; print a heartbeat dot every 5 attempts
+        if (( attempt % 5 == 0 )); then printf "." >&2; fi
+        ;;
+      410)
+        fail "Authorization request expired or was already used. Rerun with --mount and approve promptly."
+        ;;
+      404)
+        fail "Authorization session not found. Rerun and try again."
+        ;;
+      401)
+        fail "Authorization failed (device secret rejected)."
+        ;;
+      *)
+        # Transient error; keep polling until the overall timeout
+        ;;
+    esac
+  done
+
+  fail "Timed out waiting for browser approval. Rerun with --mount and approve in the browser."
 }
 
 apply_host_mount() {
@@ -859,11 +907,12 @@ wait_for_health() {
 }
 
 open_browser() {
+  local url="${1:-$HEALTH_URL}"
   case "$OS" in
-    macos)   open "$HEALTH_URL" >/dev/null 2>&1 || true ;;
-    windows) (have cmd.exe && cmd.exe /c start "" "$HEALTH_URL") >/dev/null 2>&1 \
-               || (have explorer.exe && explorer.exe "$HEALTH_URL") >/dev/null 2>&1 || true ;;
-    *)       have xdg-open && xdg-open "$HEALTH_URL" >/dev/null 2>&1 || true ;;
+    macos)   open "$url" >/dev/null 2>&1 || true ;;
+    windows) (have cmd.exe && cmd.exe /c start "" "$url") >/dev/null 2>&1 \
+               || (have explorer.exe && explorer.exe "$url") >/dev/null 2>&1 || true ;;
+    *)       have xdg-open && xdg-open "$url" >/dev/null 2>&1 || true ;;
   esac
 }
 
