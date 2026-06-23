@@ -2,7 +2,6 @@ using System.Data;
 using System.Net.Mail;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Services;
 using GuideAntsApi.Services.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -111,7 +110,6 @@ public static class AuthEndpoints
             [FromServices] IUserPasswordHasher passwordHasher,
             [FromServices] IJwtTokenService jwtTokenService,
             [FromServices] IAuthCookieService authCookieService,
-            [FromServices] IStoragePathResolver storagePathResolver,
             CancellationToken cancellationToken) =>
         {
             var errors = ValidateLoginRequest(request);
@@ -167,17 +165,6 @@ public static class AuthEndpoints
 
             var issuedToken = jwtTokenService.IssueToken(user, role.Value);
             authCookieService.AppendAuthCookie(httpContext.Response, httpContext.Request, issuedToken);
-
-            try
-            {
-                var tokenPath = Path.Combine(storagePathResolver.GetStorageRoot(), ".cli-auth-token");
-                await File.WriteAllTextAsync(tokenPath, issuedToken.Token, cancellationToken);
-            }
-            catch
-            {
-                // Best-effort: token file is a convenience for the installer
-                // scripts; login must succeed even if the write fails.
-            }
 
             return Results.Ok(new AuthResponse(
                 user.Id,
