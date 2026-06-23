@@ -91,6 +91,7 @@ public static class StartupConfiguration
         services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<IAdminUserService, AdminUserService>();
         services.AddScoped<IToolOAuthService, ToolOAuthService>();
+        services.AddScoped<ICliAuthService, CliAuthService>();
         services.AddSingleton<IUserPasswordHasher, UserPasswordHasher>();
         services.AddSingleton<IStoragePathResolver, StoragePathResolver>();
         services.AddScoped<IProjectService, ProjectService>();
