@@ -203,6 +203,17 @@ export function ProjectProvider({ children, projectId }: ProjectProviderProps) {
         }
     }, [projectId, loadProject, reset]);
 
+    // Silent refresh when something outside this page mutates project content
+    // (e.g. the GuideAnts Guide creating/renaming a notebook via client tools).
+    React.useEffect(() => {
+        if (!projectId) {
+            return;
+        }
+        const handler = () => { void refreshProject(true); };
+        window.addEventListener('refresh-project', handler);
+        return () => window.removeEventListener('refresh-project', handler);
+    }, [projectId, refreshProject]);
+
     const contextValue: ProjectContextValue = {
         // State
         projectId,

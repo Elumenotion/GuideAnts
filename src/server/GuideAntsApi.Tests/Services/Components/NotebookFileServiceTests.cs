@@ -2,6 +2,7 @@ using FluentAssertions;
 using GuideAnts.Usage;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Core;
 using Microsoft.EntityFrameworkCore;
@@ -67,6 +68,22 @@ public sealed class NotebookFileServiceTests
             markdown);
     }
 
+    private static IEnumerable<NotebookFileDto> EnumerateFilesRecursively(NotebookFolderTreeDto node)
+    {
+        foreach (var file in node.Files)
+        {
+            yield return file;
+        }
+
+        foreach (var folder in node.SubFolders)
+        {
+            foreach (var file in EnumerateFilesRecursively(folder))
+            {
+                yield return file;
+            }
+        }
+    }
+
     private static string CreateTempRoot()
     {
         var root = Path.Combine(Path.GetTempPath(), "nbfile-tests-" + Guid.NewGuid().ToString("N"));
@@ -101,6 +118,32 @@ public sealed class NotebookFileServiceTests
         });
     }
 
+    private static bool TryCreateFileSymlink(string symlinkPath, string targetPath)
+    {
+        try
+        {
+            if (File.Exists(symlinkPath))
+            {
+                File.Delete(symlinkPath);
+            }
+
+            File.CreateSymbolicLink(symlinkPath, targetPath);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
     [TestMethod]
     public async Task ListFilesAsync_FiltersHiddenTemporaryAndProtectedFiles()
     {
@@ -130,6 +173,51 @@ public sealed class NotebookFileServiceTests
     }
 
     [TestMethod]
+    public async Task ListFilesAsync_HidesOutputProjectedResourceSymlinkFiles()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            await using var ctx = CreateContext();
+            var (project, notebook) = await SeedProjectAndNotebook(ctx);
+
+            var nbRoot = NotebookRoot(root, project.Id, notebook.Id);
+            var resourcesDir = Path.Combine(nbRoot, "Resources", "crew-Slide-Shows");
+            var outputDir = Path.Combine(nbRoot, "Output");
+            Directory.CreateDirectory(resourcesDir);
+            Directory.CreateDirectory(outputDir);
+
+            var resourcePath = Path.Combine(resourcesDir, "api.py");
+            await File.WriteAllTextAsync(resourcePath, "print('bootstrap')");
+            var projectedPath = Path.Combine(outputDir, "api.py");
+            var relativeTarget = Path.Combine("..", "Resources", "crew-Slide-Shows", "api.py");
+            if (!TryCreateFileSymlink(projectedPath, relativeTarget))
+            {
+                Assert.Inconclusive("File symlink creation is not available in this environment.");
+            }
+
+            var userVisiblePath = Path.Combine(outputDir, "user-visible.txt");
+            await File.WriteAllTextAsync(userVisiblePath, "hello");
+
+            AddFileRow(ctx, notebook.Id, "Resources/crew-Slide-Shows/api.py", new FileInfo(resourcePath).Length);
+            AddFileRow(ctx, notebook.Id, "Output/api.py", new FileInfo(projectedPath).Length);
+            AddFileRow(ctx, notebook.Id, "Output/user-visible.txt", new FileInfo(userVisiblePath).Length);
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, root);
+            var files = (await svc.ListFilesAsync(project.Id, notebook.Id)).ToList();
+            var relativePaths = files.Select(f => f.RelativePath).ToList();
+
+            relativePaths.Should().Contain("Output/user-visible.txt");
+            relativePaths.Should().NotContain("Output/api.py");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task GetFolderTreeAsync_BuildsNestedFolderHierarchy()
     {
         var root = CreateTempRoot();
@@ -151,6 +239,52 @@ public sealed class NotebookFileServiceTests
             tree.SubFolders.Should().ContainSingle(f => f.Name == "docs");
             var docs = tree.SubFolders.Single(f => f.Name == "docs");
             docs.SubFolders.Should().ContainSingle(f => f.Name == "sub");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetFolderTreeAsync_HidesOutputProjectedResourceSymlinkFiles()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            await using var ctx = CreateContext();
+            var (project, notebook) = await SeedProjectAndNotebook(ctx);
+
+            var nbRoot = NotebookRoot(root, project.Id, notebook.Id);
+            var resourcesDir = Path.Combine(nbRoot, "Resources", "crew-Slide-Shows");
+            var outputDir = Path.Combine(nbRoot, "Output");
+            Directory.CreateDirectory(resourcesDir);
+            Directory.CreateDirectory(outputDir);
+
+            var resourcePath = Path.Combine(resourcesDir, "api.py");
+            await File.WriteAllTextAsync(resourcePath, "print('bootstrap')");
+            var projectedPath = Path.Combine(outputDir, "api.py");
+            var relativeTarget = Path.Combine("..", "Resources", "crew-Slide-Shows", "api.py");
+            if (!TryCreateFileSymlink(projectedPath, relativeTarget))
+            {
+                Assert.Inconclusive("File symlink creation is not available in this environment.");
+            }
+
+            var userVisiblePath = Path.Combine(outputDir, "user-visible.txt");
+            await File.WriteAllTextAsync(userVisiblePath, "hello");
+
+            AddFileRow(ctx, notebook.Id, "Resources/crew-Slide-Shows/api.py", new FileInfo(resourcePath).Length);
+            AddFileRow(ctx, notebook.Id, "Output/api.py", new FileInfo(projectedPath).Length);
+            AddFileRow(ctx, notebook.Id, "Output/user-visible.txt", new FileInfo(userVisiblePath).Length);
+            await ctx.SaveChangesAsync();
+
+            var svc = CreateService(ctx, root);
+            var tree = await svc.GetFolderTreeAsync(project.Id, notebook.Id);
+
+            tree.Should().NotBeNull();
+            var allPaths = EnumerateFilesRecursively(tree!).Select(f => f.RelativePath).ToList();
+            allPaths.Should().Contain("Output/user-visible.txt");
+            allPaths.Should().NotContain("Output/api.py");
         }
         finally
         {

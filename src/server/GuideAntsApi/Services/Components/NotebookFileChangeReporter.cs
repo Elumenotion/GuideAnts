@@ -32,6 +32,14 @@ public static class NotebookFileChangeReporter
             .Where(f => f.NotebookId == context.NotebookId)
             .ToDictionaryAsync(f => f.RelativePath, f => new { f.FileSize, f.LastModifiedUtc, f.FileHash });
 
+        var resourceFileNames = dbFiles.Keys
+            .Where(p => p.StartsWith("Resources/", StringComparison.OrdinalIgnoreCase) ||
+                        p.StartsWith("Resources\\", StringComparison.OrdinalIgnoreCase))
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         var localFiles = Directory.GetFiles(localNotebookPath, "*", SearchOption.AllDirectories)
             .Where(f => !IsTempScriptFile(Path.GetFileName(f)))
             .ToArray();
@@ -48,6 +56,13 @@ public static class NotebookFileChangeReporter
         {
             // Get path relative to notebook root (for DB comparison)
             var dbRelativePath = Path.GetRelativePath(notebookRoot, localFile).Replace("\\", "/");
+
+            // Internal bootstrap links (Output/* -> ../Resources/*) should not be surfaced as user-created files.
+            if (ShouldIgnoreProjectedResourceSymlink(localFile, dbRelativePath, notebookRoot, resourceFileNames, logger))
+            {
+                continue;
+            }
+
             var fileInfo = new FileInfo(localFile);
             var fileSize = fileInfo.Length;
             var lastModifiedUtc = fileInfo.LastWriteTimeUtc;
@@ -156,6 +171,112 @@ public static class NotebookFileChangeReporter
         }
 
         return false;
+    }
+
+    private static bool ShouldIgnoreProjectedResourceSymlink(
+        string localFile,
+        string dbRelativePath,
+        string notebookRoot,
+        HashSet<string> resourceFileNames,
+        ILogger? logger)
+    {
+        if (!dbRelativePath.StartsWith("Output/", StringComparison.OrdinalIgnoreCase) &&
+            !dbRelativePath.StartsWith("Output\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!TryGetAttributes(localFile, out var attributes) || !attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            return false;
+        }
+
+        if (ResolvesUnderResourcesRoot(localFile, notebookRoot))
+        {
+            logger?.LogDebug("Ignoring projected resource symlink in file change reporting: {Path}", dbRelativePath);
+            return true;
+        }
+
+        var fileName = Path.GetFileName(dbRelativePath);
+        if (!string.IsNullOrWhiteSpace(fileName) && resourceFileNames.Contains(fileName))
+        {
+            logger?.LogDebug("Ignoring Output reparse-point file with matching Resources filename: {Path}", dbRelativePath);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetAttributes(string path, out FileAttributes attributes)
+    {
+        attributes = default;
+        try
+        {
+            attributes = File.GetAttributes(path);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool ResolvesUnderResourcesRoot(string localFile, string notebookRoot)
+    {
+        var resourcesRoot = Path.GetFullPath(Path.Combine(notebookRoot, "Resources"));
+        var resolvedTarget = ResolveSymlinkTarget(localFile);
+        if (string.IsNullOrWhiteSpace(resolvedTarget))
+        {
+            return false;
+        }
+
+        return IsPathUnderRoot(resolvedTarget, resourcesRoot);
+    }
+
+    private static string? ResolveSymlinkTarget(string localFile)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(localFile);
+            var linkTarget = fileInfo.LinkTarget;
+            if (!string.IsNullOrWhiteSpace(linkTarget))
+            {
+                var candidate = Path.IsPathRooted(linkTarget)
+                    ? linkTarget
+                    : Path.Combine(fileInfo.DirectoryName ?? Path.GetDirectoryName(localFile) ?? string.Empty, linkTarget);
+                return Path.GetFullPath(candidate);
+            }
+
+            var resolved = fileInfo.ResolveLinkTarget(returnFinalTarget: true);
+            if (resolved != null)
+            {
+                return Path.GetFullPath(resolved.FullName);
+            }
+        }
+        catch
+        {
+            // Best-effort resolution only.
+        }
+
+        return null;
+    }
+
+    private static bool IsPathUnderRoot(string candidatePath, string rootPath)
+    {
+        var rootFullPath = Path.GetFullPath(rootPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var candidateFullPath = Path.GetFullPath(candidatePath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (candidateFullPath.Equals(rootFullPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var rootWithSeparator = rootFullPath + Path.DirectorySeparatorChar;
+        var rootWithAltSeparator = rootFullPath + Path.AltDirectorySeparatorChar;
+        return candidateFullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase) ||
+               candidateFullPath.StartsWith(rootWithAltSeparator, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ComputeSha256(string filePath)

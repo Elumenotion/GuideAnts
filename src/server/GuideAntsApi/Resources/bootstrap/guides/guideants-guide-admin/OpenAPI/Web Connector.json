@@ -53,6 +53,518 @@
         }
       }
     },
+    "GuideAntsApp.AppGetCurrentContext": {
+      "post": {
+        "operationId": "AppGetCurrentContext",
+        "summary": "Return the current client view context (route, role, current project/notebook ids and titles, selected item, active conversation). Use this to resolve phrases like 'this notebook' before acting.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppListProjects": {
+      "post": {
+        "operationId": "AppListProjects",
+        "summary": "List the projects the signed-in user can access. Use the returned ids for navigation or actions; never invent ids.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppListNotebooks": {
+      "post": {
+        "operationId": "AppListNotebooks",
+        "summary": "List notebooks in a project. projectId defaults to the current project from context when omitted.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppProjectRef"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppListConversations": {
+      "post": {
+        "operationId": "AppListConversations",
+        "summary": "List conversations in a notebook. projectId/notebookId default to the current context when omitted.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppNotebookRef"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppNavigateHome": {
+      "post": {
+        "operationId": "AppNavigateHome",
+        "summary": "Navigate to the Home screen (/).",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppNavigateProjects": {
+      "post": {
+        "operationId": "AppNavigateProjects",
+        "summary": "Navigate to the Projects list (/projects).",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppNavigateConversations": {
+      "post": {
+        "operationId": "AppNavigateConversations",
+        "summary": "Navigate to the Conversations list (/conversations).",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppNavigateUsage": {
+      "post": {
+        "operationId": "AppNavigateUsage",
+        "summary": "Navigate to the Usage screen (/usage).",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppNavigateSettings": {
+      "post": {
+        "operationId": "AppNavigateSettings",
+        "summary": "Navigate to the Settings screen (/settings).",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppNavigateBack": {
+      "post": {
+        "operationId": "AppNavigateBack",
+        "summary": "Navigate back to the previous screen in history.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppNavigateProject": {
+      "post": {
+        "operationId": "AppNavigateProject",
+        "summary": "Open a project page. projectId defaults to the current project from context when omitted.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppProjectRef"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppNavigateNotebook": {
+      "post": {
+        "operationId": "AppNavigateNotebook",
+        "summary": "Open a notebook page. projectId/notebookId default to the current context when omitted.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppNotebookRef"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppCreateProject": {
+      "post": {
+        "operationId": "AppCreateProject",
+        "summary": "Create a new project and navigate to it. Requires title.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppCreateProjectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppRenameProject": {
+      "post": {
+        "operationId": "AppRenameProject",
+        "summary": "Update a project's title (and optional description). projectId defaults to the current project from context when omitted.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppRenameProjectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppCreateNotebook": {
+      "post": {
+        "operationId": "AppCreateNotebook",
+        "summary": "Create a notebook in a project and (by default) navigate to it. projectId defaults to the current project from context when omitted. Requires title.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppCreateNotebookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppRenameNotebook": {
+      "post": {
+        "operationId": "AppRenameNotebook",
+        "summary": "Update a notebook's title (and optional description). projectId/notebookId default to the current context when omitted. Requires title.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppRenameNotebookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppCreateConversation": {
+      "post": {
+        "operationId": "AppCreateConversation",
+        "summary": "Create a conversation in a notebook. projectId/notebookId default to the current context when omitted. Requires title.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppCreateConversationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GuideAntsApp.AppRenameConversation": {
+      "post": {
+        "operationId": "AppRenameConversation",
+        "summary": "Rename a conversation. projectId/notebookId/conversationId default to the current context when omitted. Requires title.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppRenameConversationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppToolResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "GuideAntsApp.SandboxAdminGetHealth": {
       "post": {
         "operationId": "SandboxAdminGetHealth",
@@ -359,6 +871,186 @@
           "status",
           "message"
         ]
+      },
+      "AppToolResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["ok", "error"]
+          },
+          "action": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "description": "Error detail when status is error; surfaced verbatim from the API."
+          },
+          "httpStatus": {
+            "type": "integer"
+          },
+          "data": {
+            "description": "Result payload (context snapshot, list of projects/notebooks/conversations, or the created/updated entity)."
+          },
+          "navigatedTo": {
+            "type": "string",
+            "description": "The client route navigated to, when the tool changed the current screen."
+          }
+        },
+        "required": ["status", "action"]
+      },
+      "AppProjectRef": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Defaults to the current project from context when omitted.",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AppNotebookRef": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Defaults to the current project from context when omitted.",
+            "format": "uuid"
+          },
+          "notebookId": {
+            "type": "string",
+            "description": "Defaults to the current notebook from context when omitted.",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AppCreateProjectRequest": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "AppRenameProjectRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Defaults to the current project from context when omitted.",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "AppCreateNotebookRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Defaults to the current project from context when omitted.",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "guideId": {
+            "type": "string",
+            "description": "Optional guide to attach to the new notebook.",
+            "format": "uuid"
+          },
+          "navigate": {
+            "type": "boolean",
+            "description": "When false, create without navigating to the new notebook. Defaults to true."
+          }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "AppRenameNotebookRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Defaults to the current project from context when omitted.",
+            "format": "uuid"
+          },
+          "notebookId": {
+            "type": "string",
+            "description": "Defaults to the current notebook from context when omitted.",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "AppCreateConversationRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Defaults to the current project from context when omitted.",
+            "format": "uuid"
+          },
+          "notebookId": {
+            "type": "string",
+            "description": "Defaults to the current notebook from context when omitted.",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "AppRenameConversationRequest": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Defaults to the current project from context when omitted.",
+            "format": "uuid"
+          },
+          "notebookId": {
+            "type": "string",
+            "description": "Defaults to the current notebook from context when omitted.",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "description": "Defaults to the active conversation from context when omitted.",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": ["title"],
+        "additionalProperties": false
       },
       "SandboxAdminToolResponse": {
         "type": "object",

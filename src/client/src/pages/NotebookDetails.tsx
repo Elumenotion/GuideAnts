@@ -31,6 +31,7 @@ import { NotebookFolderTreeDto } from '../types/notebook';
 import { useToast } from '../components/common/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { notebookPathMatches } from '../utils/notebookPath';
+import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
 
 // Inner component that uses notebook context
 function NotebookDetailsContent() {
@@ -130,6 +131,18 @@ function NotebookDetailsContent() {
 
     const headerToolbar = useNotebookHeaderToolbar(notebookId, activeConversationId, isAuthenticatedAdmin);
     const chatReadiness = useNotebookChatReadiness(notebookId, activeConversationId, Boolean(notebookId));
+
+    const publishedNotebookTitle = project?.notebooks.find((n) => n.id === notebookId)?.title ?? notebook?.title;
+    usePublishGuideViewContext({
+        route: location.pathname,
+        screen: 'notebook',
+        projectId,
+        notebookId,
+        projectTitle: project?.title,
+        notebookTitle: publishedNotebookTitle,
+        activeConversationId: activeConversationId ?? undefined,
+        selectedItem: selectedItem ? { type: selectedItem.type, id: selectedItem.id } : undefined,
+    });
     const [headerIsMobile, setHeaderIsMobile] = useState<boolean>(() => window.innerWidth < 768);
     useEffect(() => {
         const f = () => setHeaderIsMobile(window.innerWidth < 768);

@@ -3,15 +3,17 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
-import { matchPath, useLocation } from 'react-router-dom';
+import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/common/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/api';
 import type { SystemGuideSessionDto } from '../../types/systemGuide';
-import type { AppGuideContext } from './types';
+import type { AppGuideContext, GuideAppActions, GuideViewContext } from './types';
+import { getGuideViewContext } from './viewContext';
 import { GuideAntsGuideFlyout } from './GuideAntsGuideFlyout';
 
 interface GuideAntsGuideContextValue {
@@ -21,7 +23,8 @@ interface GuideAntsGuideContextValue {
   toggle: () => void;
   session: SystemGuideSessionDto | null;
   sessionLoading: boolean;
-  buildAppContext: () => AppGuideContext;
+  buildAppContext: () => GuideViewContext;
+  appActions: GuideAppActions;
 }
 
 const GuideAntsGuideContext = createContext<GuideAntsGuideContextValue | undefined>(undefined);
@@ -66,17 +69,31 @@ export function useGuideAntsGuide(): GuideAntsGuideContextValue {
 export function GuideAntsGuideProvider({ children }: { children: ReactNode }) {
   const { user, role, status } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const { showToast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [session, setSession] = useState<SystemGuideSessionDto | null>(null);
   const [sessionLoading, setSessionLoading] = useState(false);
 
-  const buildAppContext = useCallback((): AppGuideContext => {
+  // Keep a live ref to navigate so the stable appActions object (captured once
+  // by the bridge at registration time) always calls the current navigator.
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+
+  const appActions = useMemo<GuideAppActions>(
+    () => ({
+      navigate: (path: string) => navigateRef.current(path),
+      goBack: () => navigateRef.current(-1),
+    }),
+    [],
+  );
+
+  const buildAppContext = useCallback((): GuideViewContext => {
     if (!user || !role) {
       throw new Error('Guide context requires an authenticated user');
     }
     const routeContext = buildRouteContext(location.pathname);
-    return {
+    const base: GuideViewContext = {
       route: location.pathname,
       role,
       userId: user.id,
@@ -84,6 +101,29 @@ export function GuideAntsGuideProvider({ children }: { children: ReactNode }) {
       projectId: routeContext.projectId,
       notebookId: routeContext.notebookId,
       guideId: routeContext.guideId,
+    };
+
+    // Merge the page-published slice only while its publishing route is active.
+    // Route-derived ids always win so a stale slice can never misreport scope.
+    const patch = getGuideViewContext();
+    if (!patch || patch.route !== location.pathname) {
+      return base;
+    }
+
+    return {
+      ...base,
+      screen: patch.screen,
+      projectTitle: patch.projectTitle,
+      notebookTitle: patch.notebookTitle,
+      guideName: patch.guideName,
+      selectedItem: patch.selectedItem,
+      activeConversationId: patch.activeConversationId,
+      activeConversationTitle: patch.activeConversationTitle,
+      settingsTab: patch.settingsTab,
+      itemCounts: patch.itemCounts,
+      projectId: base.projectId ?? patch.projectId,
+      notebookId: base.notebookId ?? patch.notebookId,
+      guideId: base.guideId ?? patch.guideId,
     };
   }, [location.pathname, role, user]);
 
@@ -132,8 +172,9 @@ export function GuideAntsGuideProvider({ children }: { children: ReactNode }) {
       session,
       sessionLoading,
       buildAppContext,
+      appActions,
     }),
-    [buildAppContext, close, isOpen, open, session, sessionLoading, toggle],
+    [appActions, buildAppContext, close, isOpen, open, session, sessionLoading, toggle],
   );
 
   return (
