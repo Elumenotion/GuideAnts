@@ -18,7 +18,7 @@ public readonly record struct ToolOutputTruncationResult(string? Output, bool Wa
 /// </summary>
 public static class ToolOutputTruncator
 {
-    public const int MaxCharacters = 25_000;
+    public const int MaxCharacters = 131_072; //Approx 32 tokens
     private const string StdoutTruncationSuffix = "\n[... output truncated for length ...]";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
