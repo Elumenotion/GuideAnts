@@ -180,6 +180,22 @@ public class CliAuthEndpointsTests
     }
 
     [TestMethod]
+    public async Task Approve_AsNonAdmin_Returns403()
+    {
+        // Create session
+        var createResponse = await _client.PostAsync("/api/cli/sessions", null);
+        var session = await createResponse.Content.ReadFromJsonAsync<CreateSessionResponse>();
+
+        // A non-admin (Reader) cannot complete a mount, so approval is admin-only.
+        var readerToken = IntegrationTestAuthTokenFactory.CreateToken(Role.Reader);
+        using var readerClient = _factory.CreateClient();
+        AuthCookieTestHelper.SetBearerToken(readerClient, readerToken);
+        var approveResponse = await readerClient.PostAsync(
+            $"/api/cli/sessions/{session!.SessionId}/approve", null);
+        approveResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [TestMethod]
     public async Task GetToken_UnknownSessionId_Returns404()
     {
         using var request = new HttpRequestMessage(HttpMethod.Get,

@@ -47,9 +47,10 @@ public static class CliAuthEndpoints
             };
         })
         .WithName("ApproveCliSession")
-        .RequireAuthorization("RequireApprovedUser")
+        .RequireAuthorization("RequireAdmin")
         .Produces(StatusCodes.Status204NoContent)
         .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound);
 
         group.MapGet("/{sessionId}/token", async (
