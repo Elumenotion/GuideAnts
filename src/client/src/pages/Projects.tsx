@@ -11,6 +11,7 @@ import ErrorScreen from '../components/ErrorScreen';
 import { ConfirmationDialog } from '../components/common/ConfirmationDialog';
 import { TourStartButton } from '../tour/TourStartButton';
 import { useRegisterTour } from '../tour/useRegisterTour';
+import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
 
 // TypeScript declaration for Electron window is now in src/types/electron.d.ts
 
@@ -32,6 +33,12 @@ const Projects = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  usePublishGuideViewContext({
+    route: '/projects',
+    screen: 'projects',
+    itemCounts: { projects: projects.length },
+  });
 
   const fetchProjects = async () => {
     try {

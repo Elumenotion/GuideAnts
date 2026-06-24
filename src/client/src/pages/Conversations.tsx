@@ -10,10 +10,13 @@ import { SettingsButton } from '../components/common/SettingsButton';
 import ErrorScreen from '../components/ErrorScreen';
 import { TourStartButton } from '../tour/TourStartButton';
 import { useRegisterTour } from '../tour/useRegisterTour';
+import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
 
 const Conversations = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  usePublishGuideViewContext({ route: '/conversations', screen: 'conversations' });
   const [conversations, setConversations] = useState<UserConversationDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

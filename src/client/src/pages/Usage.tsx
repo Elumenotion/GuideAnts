@@ -7,6 +7,7 @@ import { HomeButton } from '../components/common/HomeButton';
 import { SettingsButton } from '../components/common/SettingsButton';
 import { TourStartButton } from '../tour/TourStartButton';
 import { useRegisterTour } from '../tour/useRegisterTour';
+import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
 
 type RangePreset = '7d' | '30d' | '90d' | 'custom';
 
@@ -17,6 +18,8 @@ type RangePreset = '7d' | '30d' | '90d' | 'custom';
 const Usage = () => {
   const formatCurrency = (value: number, currency?: string) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+
+  usePublishGuideViewContext({ route: '/usage', screen: 'usage' });
 
   const [range, setRange] = useState<RangePreset>('30d');
   const [bucket, setBucket] = useState<UsageBucket>('day');
