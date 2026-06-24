@@ -214,15 +214,103 @@ version_gte() {
   return 0
 }
 
-MIN_NVIDIA_DRIVER="580.0"
-MIN_CUDA_VERSION="13.0"
+FALLBACK_MIN_NVIDIA_DRIVER="580.0"
+FALLBACK_MIN_CUDA_VERSION="13.0"
 MIN_ROCM_VERSION="6.0.0"
+
+# Resolve the guideants-ai image reference from a compose file.
+resolve_cuda_image_ref() {
+  local compose_path="$1"
+  docker compose -f "$compose_path" --env-file "$ENV_FILE" config --format json 2>/dev/null \
+    | python3 -c "
+import json,sys
+svc = json.load(sys.stdin).get('services',{}).get('guideants-ai',{})
+img = svc.get('image','')
+if img: print(img)
+" 2>/dev/null
+}
+
+# Inspect a CUDA image for NVIDIA_REQUIRE_CUDA and set MIN_CUDA_VERSION / MIN_NVIDIA_DRIVER.
+# Tries local inspect first; falls back to pulling the image config from the registry.
+detect_cuda_requirements() {
+  local image_ref="$1" envs=""
+  MIN_CUDA_VERSION="$FALLBACK_MIN_CUDA_VERSION"
+  MIN_NVIDIA_DRIVER="$FALLBACK_MIN_NVIDIA_DRIVER"
+
+  envs="$(docker inspect "$image_ref" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null || true)"
+
+  if [[ -z "$envs" ]]; then
+    log "Image not available locally; pulling config from registry..."
+    local token manifest config_digest config_json
+    local repo="${image_ref%%:*}" tag="${image_ref##*:}"
+    [[ "$tag" == "$image_ref" ]] && tag="latest"
+
+    # GHCR auth (public, anonymous token)
+    if [[ "$repo" == ghcr.io/* ]]; then
+      local ghcr_path="${repo#ghcr.io/}"
+      token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${ghcr_path}:pull" 2>/dev/null \
+        | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
+      if [[ -n "$token" ]]; then
+        manifest="$(curl -fsSL -H "Authorization: Bearer $token" \
+          -H "Accept: application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
+          "https://ghcr.io/v2/${ghcr_path}/manifests/${tag}" 2>/dev/null || true)"
+        config_digest="$(echo "$manifest" | python3 -c "import json,sys; print(json.load(sys.stdin).get('config',{}).get('digest',''))" 2>/dev/null || true)"
+        if [[ -n "$config_digest" ]]; then
+          config_json="$(curl -fsSL -H "Authorization: Bearer $token" \
+            "https://ghcr.io/v2/${ghcr_path}/blobs/${config_digest}" 2>/dev/null || true)"
+          envs="$(echo "$config_json" | python3 -c "
+import json,sys
+cfg = json.load(sys.stdin)
+for e in cfg.get('config',{}).get('Env',[]):
+    print(e)
+" 2>/dev/null || true)"
+        fi
+      fi
+    fi
+  fi
+
+  if [[ -z "$envs" ]]; then
+    warn "Could not inspect CUDA image; using fallback minimums (CUDA >= $MIN_CUDA_VERSION, driver >= $MIN_NVIDIA_DRIVER)."
+    return
+  fi
+
+  local require_line
+  require_line="$(echo "$envs" | grep '^NVIDIA_REQUIRE_CUDA=' | head -n1 || true)"
+  if [[ -n "$require_line" ]]; then
+    local require_val="${require_line#NVIDIA_REQUIRE_CUDA=}"
+    local parsed_cuda parsed_driver
+    parsed_cuda="$(echo "$require_val" | grep -oP 'cuda>=\K[0-9]+\.[0-9]+' | head -n1 || true)"
+    parsed_driver="$(echo "$require_val" | grep -oP 'driver>=\K[0-9]+' | sort -n | head -n1 || true)"
+    if [[ -n "$parsed_cuda" ]]; then
+      MIN_CUDA_VERSION="$parsed_cuda"
+    fi
+    if [[ -n "$parsed_driver" ]]; then
+      MIN_NVIDIA_DRIVER="${parsed_driver}.0"
+    fi
+    log "Image requires: CUDA >= $MIN_CUDA_VERSION, NVIDIA driver >= $MIN_NVIDIA_DRIVER"
+  else
+    warn "Image has no NVIDIA_REQUIRE_CUDA env var; using fallback minimums."
+  fi
+}
 
 check_gpu_drivers() {
   local backend="$1"
   if [[ "$backend" == "cuda13" ]]; then
     hr
     log "Checking NVIDIA / CUDA driver versions..."
+
+    local compose_path="$DOCKER_DIR/$(compose_file_for "$backend")"
+    local cuda_image_ref
+    cuda_image_ref="$(resolve_cuda_image_ref "$compose_path" || true)"
+    if [[ -n "$cuda_image_ref" ]]; then
+      log "CUDA image: $cuda_image_ref"
+      detect_cuda_requirements "$cuda_image_ref"
+    else
+      MIN_CUDA_VERSION="$FALLBACK_MIN_CUDA_VERSION"
+      MIN_NVIDIA_DRIVER="$FALLBACK_MIN_NVIDIA_DRIVER"
+      warn "Could not resolve CUDA image from compose file; using fallback minimums."
+    fi
+
     local drv cuda_ver
     if ! drv="$(nvidia_driver_full)"; then
       warn "nvidia-smi not found or not working. CUDA backend requires NVIDIA drivers."
@@ -231,31 +319,29 @@ check_gpu_drivers() {
     fi
     log "NVIDIA driver version: $drv"
     if ! version_gte "$drv" "$MIN_NVIDIA_DRIVER"; then
-      warn "NVIDIA driver $drv is below the minimum ($MIN_NVIDIA_DRIVER) for CUDA 13."
+      warn "NVIDIA driver $drv is below the minimum ($MIN_NVIDIA_DRIVER) required by the CUDA image."
+      warn "The CUDA container will refuse to start without a compatible driver."
       warn "Update your drivers: https://www.nvidia.com/Download/index.aspx"
       case "$OS" in
         linux)
-          warn "  Ubuntu/Debian: sudo apt update && sudo apt install --upgrade nvidia-driver-580"
+          warn "  Ubuntu/Debian: sudo apt update && sudo apt install --upgrade nvidia-driver-${MIN_NVIDIA_DRIVER%%.*}"
           warn "  RHEL/Fedora:   sudo dnf upgrade nvidia-driver"
           ;;
         windows)
           warn "  Download the latest driver from the NVIDIA website, or use GeForce Experience to update."
           ;;
       esac
-      if ! ask_yes_no "Continue anyway with outdated NVIDIA driver? [y/N]" "N"; then
-        fail "Aborting. Update your NVIDIA drivers and rerun."
-      fi
+      fail "Aborting. Update your NVIDIA drivers to >= $MIN_NVIDIA_DRIVER and rerun, or use --backend cpu."
     else
       log "NVIDIA driver $drv meets minimum requirement (>= $MIN_NVIDIA_DRIVER)."
     fi
     if cuda_ver="$(nvidia_cuda_version)"; then
       log "CUDA version reported by driver: $cuda_ver"
       if ! version_gte "$cuda_ver" "$MIN_CUDA_VERSION"; then
-        warn "CUDA $cuda_ver is below the minimum ($MIN_CUDA_VERSION)."
+        warn "CUDA $cuda_ver is below the minimum ($MIN_CUDA_VERSION) required by the CUDA image."
+        warn "The CUDA container will refuse to start without CUDA >= $MIN_CUDA_VERSION support."
         warn "Update your NVIDIA drivers to get CUDA $MIN_CUDA_VERSION+ support."
-        if ! ask_yes_no "Continue anyway with older CUDA version? [y/N]" "N"; then
-          fail "Aborting. Update your NVIDIA drivers and rerun."
-        fi
+        fail "Aborting. Update your NVIDIA drivers and rerun, or use --backend cpu."
       else
         log "CUDA $cuda_ver meets minimum requirement (>= $MIN_CUDA_VERSION)."
       fi
@@ -527,15 +613,20 @@ acquire_token() {
   # Best-effort scrub any stale on-disk token from earlier installs
   rm -f "$DOCKER_DIR/volumes/content-files/.cli-auth-token" 2>/dev/null || true
 
-  # 1. Create a CLI session
-  local resp code body
-  resp="$(curl -sS -w "\n%{http_code}" -X POST "$API_BASE/api/cli/sessions" 2>/dev/null || true)"
-  code="$(echo "$resp" | tail -n1)"
-  body="$(echo "$resp" | sed '$d')"
-
-  if [[ "$code" != "200" ]]; then
-    fail "Could not create CLI session (HTTP $code). Ensure the stack is running and you are logged in at $HEALTH_URL."
-  fi
+  # 1. Wait for the API to be ready, then create a CLI session
+  local resp code body attempt=0
+  while true; do
+    resp="$(curl -sS -w "\n%{http_code}" --connect-timeout 3 --max-time 5 \
+      -X POST "$API_BASE/api/cli/sessions" 2>/dev/null || true)"
+    code="$(echo "$resp" | tail -n1)"
+    body="$(echo "$resp" | sed '$d')"
+    [[ "$code" == "200" ]] && break
+    attempt=$((attempt + 1))
+    if [[ $attempt -ge 15 ]]; then
+      fail "Could not create CLI session (HTTP $code). Ensure the stack is running and you are logged in at $HEALTH_URL."
+    fi
+    sleep 2
+  done
 
   local session_id device_secret
   session_id="$(json_extract "$body" "sessionId")"
@@ -899,8 +990,8 @@ remove_host_mount() {
 wait_for_health() {
   log "Waiting for GuideAnts at $HEALTH_URL ..."
   local i
-  for i in $(seq 1 120); do
-    if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then return 0; fi
+  for i in $(seq 1 45); do
+    if curl -fsS --connect-timeout 3 --max-time 5 "$HEALTH_URL" >/dev/null 2>&1; then return 0; fi
     sleep 2
   done
   return 1
@@ -910,8 +1001,14 @@ open_browser() {
   local url="${1:-$HEALTH_URL}"
   case "$OS" in
     macos)   open "$url" >/dev/null 2>&1 || true ;;
-    windows) (have cmd.exe && cmd.exe /c start "" "$url") >/dev/null 2>&1 \
-               || (have explorer.exe && explorer.exe "$url") >/dev/null 2>&1 || true ;;
+    windows)
+      if [[ "$IS_WSL" == "1" ]]; then
+        (have wslview && wslview "$url") >/dev/null 2>&1 \
+          || (have cmd.exe && cmd.exe /c start "" "$url") >/dev/null 2>&1 || true
+      else
+        start "$url" 2>/dev/null || true
+      fi
+      ;;
     *)       have xdg-open && xdg-open "$url" >/dev/null 2>&1 || true ;;
   esac
 }
@@ -969,6 +1066,9 @@ fi
 
 [[ "$OS" == "macos" && "$ARCH" == "arm64" && "$COMPOSE_MODE" != "local" ]] && export DOCKER_DEFAULT_PLATFORM=linux/amd64
 
+# Ensure shell scripts have LF endings for Linux containers.
+find "$DOCKER_DIR/build" -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+
 cd "$DOCKER_DIR"
 compose_args=(-f "$COMPOSE_FILE")
 if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
@@ -989,6 +1089,28 @@ fi
 log "Starting the stack..."
 docker compose "${compose_args[@]}" --env-file "$ENV_FILE" up -d
 cd "$ROOT_DIR"
+
+# Patch containers whose entrypoint scripts have Windows line endings (exit 127).
+fix_crlf_containers() {
+  sleep 3
+  local container exit_code entrypoint src_script
+  for container in $(docker ps -a --filter "label=com.docker.compose.project" --format '{{.Names}}' 2>/dev/null); do
+    exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || echo 0)"
+    [[ "$exit_code" == "127" ]] || continue
+    entrypoint="$(docker inspect --format '{{join .Config.Entrypoint " "}}' "$container" 2>/dev/null || true)"
+    # Extract the .sh path from the entrypoint (last argument)
+    src_script="${entrypoint##* }"
+    [[ "$src_script" == *.sh ]] || continue
+    # Copy the script out, strip \r, copy back in
+    if docker cp "$container:$src_script" "/tmp/_fix_crlf.sh" 2>/dev/null; then
+      sed -i 's/\r$//' "/tmp/_fix_crlf.sh"
+      docker cp "/tmp/_fix_crlf.sh" "$container:$src_script" >/dev/null 2>&1
+      rm -f "/tmp/_fix_crlf.sh"
+      docker restart "$container" >/dev/null 2>&1
+    fi
+  done
+}
+fix_crlf_containers
 
 if wait_for_health; then
   hr
