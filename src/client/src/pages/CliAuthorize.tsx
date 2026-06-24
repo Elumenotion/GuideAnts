@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { FaCheck, FaSpinner, FaTimes, FaTerminal } from 'react-icons/fa';
 import { TextActionButton } from './settings/components/shared/ActionButtons';
 import { getErrorMessage } from './settings/utils';
@@ -7,12 +7,20 @@ import { api } from '../services/api';
 
 type PageState = 'idle' | 'submitting' | 'approved' | 'denied' | 'error';
 
+const AUTO_CLOSE_MS = 1500;
+
 export default function CliAuthorize() {
   const [searchParams] = useSearchParams();
   const session = searchParams.get('session');
 
   const [state, setState] = useState<PageState>('idle');
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (state !== 'approved' && state !== 'denied') return;
+    const timer = setTimeout(() => window.close(), AUTO_CLOSE_MS);
+    return () => clearTimeout(timer);
+  }, [state]);
 
   const handleApprove = async () => {
     if (!session) return;
@@ -58,7 +66,7 @@ export default function CliAuthorize() {
               </div>
               <h1 className="mt-3 text-2xl font-bold text-gray-900">Approved</h1>
               <p className="mt-2 text-sm text-gray-600">
-                Approved — you can return to your terminal.
+                Approved — this window will close automatically.
               </p>
             </>
           ) : state === 'denied' ? (
@@ -68,13 +76,8 @@ export default function CliAuthorize() {
               </div>
               <h1 className="mt-3 text-2xl font-bold text-gray-900">Request Denied</h1>
               <p className="mt-2 text-sm text-gray-600">
-                Request denied. You can close this tab.
+                Request denied — this window will close automatically.
               </p>
-              <div className="mt-4">
-                <Link to="/" className="text-sm text-blue-600 hover:text-blue-800 underline">
-                  Go to home
-                </Link>
-              </div>
             </>
           ) : (
             <>
