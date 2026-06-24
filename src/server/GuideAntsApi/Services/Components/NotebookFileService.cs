@@ -466,106 +466,33 @@ using var scope = CreateDbScope();
             return [.. cached.Files];
         }
 
-        var results = new List<NotebookFileDto>();
-        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var truncated = false;
-        var scanDeadlineUtc = DateTimeOffset.UtcNow + _linkedMountTreeScanBudget;
-        var fileEnumerationOptions = new EnumerationOptions
-        {
-            RecurseSubdirectories = true,
-            IgnoreInaccessible = true,
-            ReturnSpecialDirectories = false,
-            MaxRecursionDepth = _linkedMountTreeMaxDepth
-        };
+        var scanRoots = linkedMountRoots
+            .Select(r => new HostMountDirectoryScanner.MountRoot(r.LinkRelativePath, r.LinkPhysicalPath))
+            .ToList();
 
-        foreach (var root in linkedMountRoots)
-        {
-            if (DateTimeOffset.UtcNow >= scanDeadlineUtc || results.Count >= _linkedMountTreeMaxFiles)
-            {
-                truncated = true;
-                break;
-            }
+        var scanResult = HostMountDirectoryScanner.Scan(
+            scanRoots,
+            _linkedMountTreeMaxFiles,
+            _linkedMountTreeMaxDepth,
+            _linkedMountTreeScanBudget,
+            _logger);
 
-            if (string.IsNullOrWhiteSpace(root.LinkPhysicalPath) || !Directory.Exists(root.LinkPhysicalPath))
-            {
-                continue;
-            }
+        var results = scanResult.Files
+            .Where(f => !IsInResourcesFolder(f.RelativePath) && !IsInGuideantsFolder(f.RelativePath))
+            .Select(f => new NotebookFileDto(
+                Id: CreateLinkedVirtualFileId(f.RelativePath),
+                FileName: f.FileName,
+                RelativePath: f.RelativePath,
+                FileSize: f.FileSize,
+                LastModifiedUtc: f.LastModifiedUtc,
+                FileHash: $"{f.FileSize:x}-{f.LastModifiedUtc.Ticks:x}",
+                OriginContentFileVersionId: null,
+                Index: false,
+                IsIndexed: false,
+                IsLinked: true))
+            .ToList();
 
-            IEnumerable<string> physicalFiles;
-            try
-            {
-                physicalFiles = Directory.EnumerateFiles(root.LinkPhysicalPath, "*", fileEnumerationOptions);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Skipping linked mount file enumeration for mount root {MountRoot}",
-                    LogValueSanitizer.Sanitize(root.LinkRelativePath));
-                continue;
-            }
-
-            foreach (var physicalFile in physicalFiles)
-            {
-                if (DateTimeOffset.UtcNow >= scanDeadlineUtc || results.Count >= _linkedMountTreeMaxFiles)
-                {
-                    truncated = true;
-                    break;
-                }
-
-                FileInfo fileInfo;
-                try
-                {
-                    fileInfo = new FileInfo(physicalFile);
-                    if (!fileInfo.Exists)
-                    {
-                        continue;
-                    }
-                }
-                catch
-                {
-                    continue;
-                }
-
-                var relativeWithinMount = Path.GetRelativePath(root.LinkPhysicalPath, physicalFile).Replace("\\", "/").TrimStart('/');
-                if (string.IsNullOrWhiteSpace(relativeWithinMount) || relativeWithinMount == ".")
-                {
-                    continue;
-                }
-
-                var notebookRelativePath = $"{root.LinkRelativePath}/{relativeWithinMount}".Replace("\\", "/");
-                var fileName = Path.GetFileName(notebookRelativePath);
-
-                if (IsTemporaryScriptFile(fileName)
-                    || IsInPycacheFolder(notebookRelativePath)
-                    || IsInResourcesFolder(notebookRelativePath)
-                    || IsInGuideantsFolder(notebookRelativePath))
-                {
-                    continue;
-                }
-
-                if (!seenPaths.Add(notebookRelativePath))
-                {
-                    continue;
-                }
-
-                results.Add(new NotebookFileDto(
-                    Id: CreateLinkedVirtualFileId(notebookRelativePath),
-                    FileName: fileName,
-                    RelativePath: notebookRelativePath,
-                    FileSize: fileInfo.Length,
-                    LastModifiedUtc: fileInfo.LastWriteTimeUtc,
-                    FileHash: BuildLinkedVirtualFileHash(fileInfo),
-                    OriginContentFileVersionId: null,
-                    Index: false,
-                    IsIndexed: false,
-                    IsLinked: true));
-            }
-        }
-
-        results.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.RelativePath, b.RelativePath));
-
-        if (truncated)
+        if (scanResult.WasTruncated)
         {
             _logger.LogWarning(
                 "Linked mount tree enumeration was truncated for notebook {NotebookId} (roots={RootCount}, maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
@@ -590,9 +517,6 @@ using var scope = CreateDbScope();
         Buffer.BlockCopy(digest, 0, guidBytes, 0, guidBytes.Length);
         return new Guid(guidBytes);
     }
-
-    private static string BuildLinkedVirtualFileHash(FileInfo fileInfo) =>
-        $"{fileInfo.Length:x}-{fileInfo.LastWriteTimeUtc.Ticks:x}";
 
     private static int ReadPositiveInt(string? rawValue, int fallback, int min, int max)
     {

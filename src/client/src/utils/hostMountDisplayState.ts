@@ -2,9 +2,10 @@ import type {
   HostFolderMountDisplayState,
   HostFolderMountLinkStatus,
   HostFolderMountStatus,
-  HostFolderMountDetailDto,
   HostFolderMountSummaryDto,
+  HostFolderMountDetailDto,
   NotebookHostMountEntry,
+  ProjectHostMountEntry,
 } from '../types/hostFolderMount';
 
 export function deriveHostMountDisplayState(
@@ -61,6 +62,31 @@ export function buildNotebookHostMountEntry(
     mountStatus: summary.status,
     scope: summary.scope,
     linkStatus: link?.status ?? null,
+  };
+}
+
+export function buildProjectHostMountEntry(
+  summary: HostFolderMountSummaryDto,
+  detail: HostFolderMountDetailDto,
+): ProjectHostMountEntry | null {
+  if (summary.scope !== 'Project') {
+    return null;
+  }
+
+  const anyLinked = detail.links.some((link) => link.status === 'Linked');
+  const linkStatus = anyLinked ? ('Linked' as const) : null;
+
+  return {
+    mountId: summary.mountId,
+    leafName: summary.leafName,
+    displayName: summary.displayName,
+    displayState: deriveHostMountDisplayState(
+      summary.status,
+      linkStatus,
+      null,
+      summary.errorMessage,
+    ),
+    mountStatus: summary.status,
   };
 }
 

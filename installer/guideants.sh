@@ -677,18 +677,18 @@ apply_host_mount() {
   local selected_notebook_id=""
 
   if [[ ${#notebook_ids[@]} -eq 0 ]]; then
-    log "No notebooks found in this project. Mounting to all notebooks (project scope)."
+    log "No notebooks found in this project. Mounting at the project root (applies to every notebook)."
   else
     printf '\n  Select a notebook to mount "%s" into:\n' "$MOUNT_PATH"
     for i in $(seq 0 $((${#notebook_ids[@]}-1))); do
       printf '    %d) %s\n' "$((i+1))" "${notebook_titles[$i]}"
     done
-    printf '    %d) All notebooks\n' "$((${#notebook_ids[@]}+1))"
+    printf '    %d) Entire project (project root + every notebook)\n' "$((${#notebook_ids[@]}+1))"
     printf '\n'
 
     local all_choice=$((${#notebook_ids[@]}+1))
     if [[ "$ASSUME_YES" == "1" ]]; then
-      log "--yes: mounting to all notebooks (project scope)."
+      log "--yes: mounting at the project root (applies to every notebook)."
     else
       local nb_choice
       read -r -p "Enter 1-${all_choice}: " nb_choice || nb_choice=""
@@ -697,7 +697,7 @@ apply_host_mount() {
         selected_notebook_id="${notebook_ids[$((nb_choice-1))]}"
         log "Mounting to notebook: ${notebook_titles[$((nb_choice-1))]}"
       elif [[ "$nb_choice" =~ ^[0-9]+$ && "$nb_choice" -eq "$all_choice" ]]; then
-        log "Mounting to all notebooks (project scope)."
+        log "Mounting at the project root (applies to every notebook)."
       else
         fail "Invalid selection."
       fi
