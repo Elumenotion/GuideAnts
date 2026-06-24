@@ -823,12 +823,16 @@ apply_host_mount() {
 
   log "Mount created (id: $mount_id). Applying..."
 
-  local mount_script="$ROOT_DIR/scripts/guideants-host-mount.sh"
-  if [[ -f "$mount_script" ]]; then
-    bash "$mount_script" apply --mount-id "$mount_id" --host-path "$MOUNT_PATH" --project-id "$selected_project_id"
+  local mount_script_ps1="$ROOT_DIR/scripts/guideants-host-mount.ps1"
+  local mount_script_sh="$ROOT_DIR/scripts/guideants-host-mount.sh"
+  if [[ "$OS" == "windows" && "$IS_WSL" == "0" && -f "$mount_script_ps1" ]]; then
+    powershell.exe -ExecutionPolicy Bypass -File "$mount_script_ps1" apply -MountId "$mount_id" -HostPath "$MOUNT_PATH" -ProjectId "$selected_project_id" || true
+  elif [[ -f "$mount_script_sh" ]]; then
+    bash "$mount_script_sh" apply --mount-id "$mount_id" --host-path "$MOUNT_PATH" --project-id "$selected_project_id" || true
   else
     warn "Host mount script not found. Run manually: $apply_command"
   fi
+  fix_crlf_containers
 
   log "Host folder mounted successfully."
 }
@@ -974,12 +978,16 @@ remove_host_mount() {
     fail "Failed to remove mount (HTTP $remove_http_code): $err_msg"
   fi
 
-  local mount_script="$ROOT_DIR/scripts/guideants-host-mount.sh"
-  if [[ -f "$mount_script" ]]; then
-    bash "$mount_script" remove --mount-id "$selected_mount_id" --project-id "$selected_project_id"
+  local mount_script_ps1="$ROOT_DIR/scripts/guideants-host-mount.ps1"
+  local mount_script_sh="$ROOT_DIR/scripts/guideants-host-mount.sh"
+  if [[ "$OS" == "windows" && "$IS_WSL" == "0" && -f "$mount_script_ps1" ]]; then
+    powershell.exe -ExecutionPolicy Bypass -File "$mount_script_ps1" remove -MountId "$selected_mount_id" -ProjectId "$selected_project_id" || true
+  elif [[ -f "$mount_script_sh" ]]; then
+    bash "$mount_script_sh" remove --mount-id "$selected_mount_id" --project-id "$selected_project_id" || true
   else
     warn "Host mount script not found. Run manually: guideants-host-mount.sh remove --mount-id $selected_mount_id"
   fi
+  fix_crlf_containers
 
   log "Host folder mount removed successfully."
 }
