@@ -13,6 +13,7 @@ using GuideAntsApi.Services;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Core;
+using GuideAntsApi.Services.Mcp;
 using GuideAntsApi.Services.PublishedWireApi;
 using GuideAntsApi.Services.Routing;
 using Microsoft.AspNetCore.Mvc;
@@ -71,6 +72,10 @@ public static class PublishedOpenAiWireHandlers
         public const string Speech = "speech";
     }
 
+    private const string DefaultConversationTitle = "New Conversation";
+
+    private static readonly TimeSpan TranscriptContinuationWindow = TimeSpan.FromMinutes(60);
+
     private sealed record WireConversationResult(
         Guid ConversationId,
         string Text,
@@ -102,7 +107,7 @@ public static class PublishedOpenAiWireHandlers
         Guid? ConversationId,
         IResult? ErrorResult);
 
-    private sealed record AnthropicHistoryMessage(
+    private sealed record WireTranscriptMessage(
         string Role,
         string Text,
         string? ToolCallId,
@@ -219,13 +224,20 @@ public static class PublishedOpenAiWireHandlers
                         param: "messages");
                 }
 
+                var existingConversationId = await ResolveConversationFromTranscriptAsync(
+                    context,
+                    clientPrompt.PrefixMessages,
+                    db,
+                    httpContext.RequestAborted);
+
                 conversation = await ExecuteConversationAsync(
                     publishedConversationService,
                     db,
                     context,
                     instructions,
                     httpContext.RequestAborted,
-                    clientMessages: clientPrompt.PrefixMessages,
+                    existingConversationId: existingConversationId,
+                    clientMessages: existingConversationId.HasValue ? null : clientPrompt.PrefixMessages,
                     clientToolDefinitions: clientToolDefinitions);
             }
 
@@ -242,7 +254,10 @@ public static class PublishedOpenAiWireHandlers
             }
 
             var finishReason = conversation.PendingClientTool ? "tool_calls" : "stop";
-            var assistantContent = string.IsNullOrWhiteSpace(conversation.Text) ? null : conversation.Text;
+            var publicApiOrigin = ResolvePublicApiOrigin(httpContext);
+            var assistantContent = string.IsNullOrWhiteSpace(conversation.Text)
+                ? null
+                : RewritePublishedContentUrls(conversation.Text, publicApiOrigin);
 
             if (request.Stream == true)
             {
@@ -395,9 +410,10 @@ public static class PublishedOpenAiWireHandlers
                         param: "input");
                 }
 
-                var conversationResolution = await ResolveResponsesConversationAsync(
+                var conversationResolution = await ResolveResponsesStateAsync(
                     context,
-                    request.PreviousResponseId,
+                    request,
+                    clientPrompt.PrefixMessages,
                     db,
                     httpContext.RequestAborted);
                 if (conversationResolution.ErrorResult != null)
@@ -425,7 +441,9 @@ public static class PublishedOpenAiWireHandlers
             var promptTokens = conversation.PromptTokens;
             var completionTokens = conversation.CompletionTokens;
             var responseId = conversation.ResponseId ?? $"resp_{Guid.NewGuid():N}";
-            var outputItems = BuildOpenAiResponsesOutputItems(conversation.Text, conversation.ExternalToolCalls);
+            var publicApiOrigin = ResolvePublicApiOrigin(httpContext);
+            var assistantText = RewritePublishedContentUrls(conversation.Text, publicApiOrigin);
+            var outputItems = BuildOpenAiResponsesOutputItems(assistantText, conversation.ExternalToolCalls);
             if (conversation.PendingClientTool && !ContainsFunctionCallItem(outputItems))
             {
                 return OpenAiWireErrorResults.UnsupportedFeature(
@@ -450,6 +468,7 @@ public static class PublishedOpenAiWireHandlers
             return Results.Json(new
             {
                 id = responseId,
+                conversation = FormatConversationId(conversation.ConversationId),
                 @object = "response",
                 created,
                 status = "completed",
@@ -545,7 +564,7 @@ public static class PublishedOpenAiWireHandlers
                         message: "At least one textual message is required in 'messages' or 'system'.");
                 }
 
-                var messageIdResolution = await ResolveAnthropicConversationFromMessageIdsAsync(
+                var messageIdResolution = await ResolveConversationFromMessageIdsAsync(
                     context,
                     request.Messages,
                     db,
@@ -558,7 +577,7 @@ public static class PublishedOpenAiWireHandlers
                 var existingConversationId = messageIdResolution.ConversationId;
                 if (!existingConversationId.HasValue)
                 {
-                    existingConversationId = await ResolveAnthropicConversationFromTranscriptAsync(
+                    existingConversationId = await ResolveConversationFromTranscriptAsync(
                         context,
                         clientPrompt.PrefixMessages,
                         db,
@@ -584,7 +603,9 @@ public static class PublishedOpenAiWireHandlers
                     message: "Provider execution failed for this request.");
             }
 
-            var contentBlocks = BuildAnthropicContentBlocks(conversation.Text, conversation.ExternalToolCalls);
+            var publicApiOrigin = ResolvePublicApiOrigin(httpContext);
+            var assistantText = RewritePublishedContentUrls(conversation.Text, publicApiOrigin);
+            var contentBlocks = BuildAnthropicContentBlocks(assistantText, conversation.ExternalToolCalls);
             if (conversation.PendingClientTool && contentBlocks.All(b => !string.Equals(b.Type, "tool_use", StringComparison.Ordinal)))
             {
                 return CreateAnthropicError(
@@ -1106,10 +1127,11 @@ public static class PublishedOpenAiWireHandlers
         IReadOnlyList<ChatMessage>? clientMessages = null,
         IReadOnlyList<ChatToolDefinition>? clientToolDefinitions = null)
     {
+        var createdConversation = !existingConversationId.HasValue;
         var conversationId = existingConversationId ??
             (await publishedConversationService.CreateConversationAsync(
                 context.NotebookId,
-                $"wire-{DateTime.UtcNow:yyyyMMddHHmmss}")).Id;
+                DefaultConversationTitle)).Id;
         var request = new SendMessageRequest
         {
             Instructions = instructions,
@@ -1125,7 +1147,13 @@ public static class PublishedOpenAiWireHandlers
             context.InternalUserId,
             ct);
 
-        return await CollectWireConversationResultAsync(stream, db, conversationId, ct);
+        var result = await CollectWireConversationResultAsync(stream, db, conversationId, ct);
+        if (createdConversation)
+        {
+            await TryGenerateWireConversationTitleAsync(db, conversationId, ct);
+        }
+
+        return result;
     }
 
     private static async Task<WireConversationResult> ResumeConversationAfterToolResultsAsync(
@@ -1221,6 +1249,21 @@ public static class PublishedOpenAiWireHandlers
             ResponseId: responseId,
             AssistantMessageId: latestAssistantMessageId,
             ExternalToolCalls: externalToolCalls);
+    }
+
+    private static async Task TryGenerateWireConversationTitleAsync(
+        ApplicationDbContext db,
+        Guid conversationId,
+        CancellationToken ct)
+    {
+        try
+        {
+            await ConversationTitleGenerator.GenerateAndApplyAsync(db, conversationId, ct);
+        }
+        catch
+        {
+            // best effort
+        }
     }
 
     private static IReadOnlyList<ChatToolCall> ParseExternalToolCallsFromPayload(string payload)
@@ -2724,7 +2767,7 @@ public static class PublishedOpenAiWireHandlers
         return JsonSerializer.SerializeToElement(new { value = arguments.GetRawText() });
     }
 
-    private static async Task<AnthropicConversationResolution> ResolveAnthropicConversationFromMessageIdsAsync(
+    private static async Task<AnthropicConversationResolution> ResolveConversationFromMessageIdsAsync(
         PublishedApiExecutionContext context,
         JsonElement messages,
         ApplicationDbContext db,
@@ -2789,13 +2832,13 @@ public static class PublishedOpenAiWireHandlers
         return new AnthropicConversationResolution(previousAssistant.NotebookConversationId, null);
     }
 
-    private static async Task<Guid?> ResolveAnthropicConversationFromTranscriptAsync(
+    private static async Task<Guid?> ResolveConversationFromTranscriptAsync(
         PublishedApiExecutionContext context,
         IReadOnlyList<ChatMessage> prefixMessages,
         ApplicationDbContext db,
         CancellationToken ct)
     {
-        var expectedHistory = BuildAnthropicTranscriptHistory(prefixMessages);
+        var expectedHistory = BuildWireTranscriptHistory(prefixMessages);
         if (expectedHistory.Count == 0)
         {
             return null;
@@ -2808,42 +2851,54 @@ public static class PublishedOpenAiWireHandlers
             return null;
         }
 
-        var assistantQuery = db.NotebookConversationMessages
+        var windowStart = DateTime.UtcNow - TranscriptContinuationWindow;
+        var candidateSummaries = await db.NotebookConversationMessages
             .AsNoTracking()
             .Where(m =>
                 m.NotebookConversation.NotebookId == context.NotebookId &&
-                m.Role == DataModelChatRole.Assistant &&
-                m.IsStreaming != true);
-
-        if (!string.IsNullOrWhiteSpace(latestExpectedAssistant.Text))
-        {
-            var expectedAssistantText = latestExpectedAssistant.Text;
-            assistantQuery = assistantQuery.Where(m => m.Content != null && m.Content.Trim() == expectedAssistantText);
-        }
-
-        foreach (var toolCallId in latestExpectedAssistant.ToolCallIds)
-        {
-            assistantQuery = assistantQuery.Where(m => m.ToolCalls != null && m.ToolCalls.Contains(toolCallId));
-        }
-
-        var candidates = await assistantQuery
-            .OrderByDescending(m => m.Created)
-            .Select(m => new
+                m.IsStreaming != true)
+            .GroupBy(m => m.NotebookConversationId)
+            .Where(g => g.Max(m => m.Created) >= windowStart)
+            .Select(g => new
             {
-                m.Id,
-                m.NotebookConversationId,
-                m.TurnIndex
+                ConversationId = g.Key,
+                LastTurnIndex = g.Max(m => m.TurnIndex),
+                LastActivity = g.Max(m => m.Created)
             })
+            .OrderByDescending(x => x.LastTurnIndex)
+            .ThenByDescending(x => x.LastActivity)
             .Take(50)
             .ToListAsync(ct);
 
-        foreach (var candidate in candidates)
+        Guid? matchedConversationId = null;
+        var matchCount = 0;
+
+        foreach (var candidate in candidateSummaries)
         {
+            if (!await ConversationMatchesCallerIdentityAsync(context, db, candidate.ConversationId, ct))
+            {
+                continue;
+            }
+
             var latestAssistantMessageId = await ResolveLatestAssistantMessageIdAsync(
                 db,
-                candidate.NotebookConversationId,
+                candidate.ConversationId,
                 ct);
-            if (latestAssistantMessageId != candidate.Id)
+            if (!latestAssistantMessageId.HasValue)
+            {
+                continue;
+            }
+
+            var latestAssistant = await db.NotebookConversationMessages
+                .AsNoTracking()
+                .Where(m => m.Id == latestAssistantMessageId.Value)
+                .Select(m => new { m.Content, m.ToolCalls, m.TurnIndex })
+                .FirstOrDefaultAsync(ct);
+            if (latestAssistant == null ||
+                !WireTranscriptMessageMatchesAssistant(
+                    latestExpectedAssistant,
+                    latestAssistant.Content,
+                    latestAssistant.ToolCalls))
             {
                 continue;
             }
@@ -2851,8 +2906,8 @@ public static class PublishedOpenAiWireHandlers
             if (!await TurnMatchesCallerScopeAsync(
                     context,
                     db,
-                    candidate.NotebookConversationId,
-                    candidate.TurnIndex,
+                    candidate.ConversationId,
+                    latestAssistant.TurnIndex,
                     ct))
             {
                 continue;
@@ -2861,7 +2916,7 @@ public static class PublishedOpenAiWireHandlers
             var persistedRows = await db.NotebookConversationMessages
                 .AsNoTracking()
                 .Where(m =>
-                    m.NotebookConversationId == candidate.NotebookConversationId &&
+                    m.NotebookConversationId == candidate.ConversationId &&
                     m.IsStreaming != true)
                 .OrderBy(m => m.TurnIndex)
                 .ThenBy(m => m.MessageSequence)
@@ -2872,19 +2927,73 @@ public static class PublishedOpenAiWireHandlers
                     m.ToolCalls))
                 .ToListAsync(ct);
             var persistedHistory = BuildPersistedTranscriptHistory(persistedRows);
-            if (TranscriptEndsWith(persistedHistory, expectedHistory))
+            if (!TranscriptEndsWith(persistedHistory, expectedHistory))
             {
-                return candidate.NotebookConversationId;
+                continue;
+            }
+
+            matchCount++;
+            matchedConversationId = candidate.ConversationId;
+        }
+
+        return matchCount == 1 ? matchedConversationId : null;
+    }
+
+    private static async Task<bool> ConversationMatchesCallerIdentityAsync(
+        PublishedApiExecutionContext context,
+        ApplicationDbContext db,
+        Guid conversationId,
+        CancellationToken ct)
+    {
+        if (context.InternalUserId.HasValue)
+        {
+            return await db.NotebookConversationMessages
+                .AsNoTracking()
+                .AnyAsync(
+                    m =>
+                        m.NotebookConversationId == conversationId &&
+                        m.Role == DataModelChatRole.User &&
+                        m.UserId == context.InternalUserId,
+                    ct);
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.ExternalUserIdentity))
+        {
+            return await db.NotebookConversationMessages
+                .AsNoTracking()
+                .AnyAsync(
+                    m =>
+                        m.NotebookConversationId == conversationId &&
+                        m.Role == DataModelChatRole.User &&
+                        m.ExternalUserIdentity == context.ExternalUserIdentity,
+                    ct);
+        }
+
+        return true;
+    }
+
+    private static bool WireTranscriptMessageMatchesAssistant(
+        WireTranscriptMessage expected,
+        string? persistedContent,
+        string? persistedToolCallsJson)
+    {
+        if (!string.IsNullOrWhiteSpace(expected.Text))
+        {
+            var persistedText = NormalizeTranscriptText(persistedContent);
+            if (!string.Equals(persistedText, expected.Text, StringComparison.Ordinal))
+            {
+                return false;
             }
         }
 
-        return null;
+        var persistedToolCallIds = ExtractToolCallIds(persistedToolCallsJson);
+        return ToolCallIdsMatch(persistedToolCallIds, expected.ToolCallIds);
     }
 
-    private static IReadOnlyList<AnthropicHistoryMessage> BuildAnthropicTranscriptHistory(
+    private static IReadOnlyList<WireTranscriptMessage> BuildWireTranscriptHistory(
         IReadOnlyList<ChatMessage> messages)
     {
-        var history = new List<AnthropicHistoryMessage>();
+        var history = new List<WireTranscriptMessage>();
         foreach (var message in messages)
         {
             var role = message.Role switch
@@ -2914,16 +3023,16 @@ public static class PublishedOpenAiWireHandlers
                 continue;
             }
 
-            history.Add(new AnthropicHistoryMessage(role, text, toolCallId, toolCallIds));
+            history.Add(new WireTranscriptMessage(role, text, toolCallId, toolCallIds));
         }
 
         return history;
     }
 
-    private static IReadOnlyList<AnthropicHistoryMessage> BuildPersistedTranscriptHistory(
+    private static IReadOnlyList<WireTranscriptMessage> BuildPersistedTranscriptHistory(
         IReadOnlyList<PersistedHistoryRow> rows)
     {
-        var history = new List<AnthropicHistoryMessage>();
+        var history = new List<WireTranscriptMessage>();
         foreach (var row in rows)
         {
             var role = row.Role switch
@@ -2948,15 +3057,15 @@ public static class PublishedOpenAiWireHandlers
                 continue;
             }
 
-            history.Add(new AnthropicHistoryMessage(role, text, toolCallId, toolCallIds));
+            history.Add(new WireTranscriptMessage(role, text, toolCallId, toolCallIds));
         }
 
         return history;
     }
 
     private static bool TranscriptEndsWith(
-        IReadOnlyList<AnthropicHistoryMessage> persistedHistory,
-        IReadOnlyList<AnthropicHistoryMessage> expectedHistory)
+        IReadOnlyList<WireTranscriptMessage> persistedHistory,
+        IReadOnlyList<WireTranscriptMessage> expectedHistory)
     {
         if (expectedHistory.Count == 0 || persistedHistory.Count < expectedHistory.Count)
         {
@@ -2988,7 +3097,7 @@ public static class PublishedOpenAiWireHandlers
         return true;
     }
 
-    private static bool TranscriptMessagesEqual(AnthropicHistoryMessage left, AnthropicHistoryMessage right)
+    private static bool TranscriptMessagesEqual(WireTranscriptMessage left, WireTranscriptMessage right)
     {
         return string.Equals(left.Role, right.Role, StringComparison.Ordinal) &&
                string.Equals(left.Text, right.Text, StringComparison.Ordinal) &&
@@ -3148,6 +3257,125 @@ public static class PublishedOpenAiWireHandlers
         return true;
     }
 
+    private static async Task<(Guid? ConversationId, IResult? ErrorResult)> ResolveResponsesStateAsync(
+        PublishedApiExecutionContext context,
+        OpenAiResponsesRequest request,
+        IReadOnlyList<ChatMessage> prefixMessages,
+        ApplicationDbContext db,
+        CancellationToken ct)
+    {
+        var conversationWireId = ParseResponsesConversationWireId(request.Conversation);
+        var hasConversation = !string.IsNullOrWhiteSpace(conversationWireId);
+        var hasPreviousResponse = !string.IsNullOrWhiteSpace(request.PreviousResponseId);
+
+        Guid? conversationFromConversation = null;
+        if (hasConversation)
+        {
+            var conversationResolution = await ResolveConversationFromWireIdAsync(
+                context,
+                conversationWireId!,
+                db,
+                ct);
+            if (conversationResolution.ErrorResult != null)
+            {
+                return conversationResolution;
+            }
+
+            conversationFromConversation = conversationResolution.ConversationId;
+        }
+
+        var previousResponseResolution = await ResolveResponsesConversationAsync(
+            context,
+            request.PreviousResponseId,
+            db,
+            ct);
+        if (previousResponseResolution.ErrorResult != null)
+        {
+            return previousResponseResolution;
+        }
+
+        if (hasConversation && hasPreviousResponse &&
+            conversationFromConversation != previousResponseResolution.ConversationId)
+        {
+            return (null, OpenAiWireErrorResults.ConversationPreviousResponseMismatch());
+        }
+
+        if (conversationFromConversation.HasValue)
+        {
+            return (conversationFromConversation, null);
+        }
+
+        if (previousResponseResolution.ConversationId.HasValue)
+        {
+            return previousResponseResolution;
+        }
+
+        if (hasConversation || hasPreviousResponse)
+        {
+            return (null, null);
+        }
+
+        var transcriptConversationId = await ResolveConversationFromTranscriptAsync(
+            context,
+            prefixMessages,
+            db,
+            ct);
+        return (transcriptConversationId, null);
+    }
+
+    private static async Task<(Guid? ConversationId, IResult? ErrorResult)> ResolveConversationFromWireIdAsync(
+        PublishedApiExecutionContext context,
+        string conversationWireId,
+        ApplicationDbContext db,
+        CancellationToken ct)
+    {
+        if (!TryParseConversationId(conversationWireId, out var notebookConversationId))
+        {
+            return (null, OpenAiWireErrorResults.InvalidConversationId(conversationWireId));
+        }
+
+        var conversation = await db.NotebookConversations
+            .AsNoTracking()
+            .Where(c => c.Id == notebookConversationId)
+            .Select(c => new { c.Id, c.NotebookId })
+            .FirstOrDefaultAsync(ct);
+
+        if (conversation == null || conversation.NotebookId != context.NotebookId)
+        {
+            return (null, OpenAiWireErrorResults.ConversationNotFound(conversationWireId));
+        }
+
+        if (!await ConversationMatchesCallerIdentityAsync(context, db, conversation.Id, ct))
+        {
+            return (null, OpenAiWireErrorResults.ConversationScopeMismatch());
+        }
+
+        return (conversation.Id, null);
+    }
+
+    private static string? ParseResponsesConversationWireId(JsonElement conversation)
+    {
+        if (conversation.ValueKind == JsonValueKind.Null ||
+            conversation.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (conversation.ValueKind == JsonValueKind.String)
+        {
+            return conversation.GetString();
+        }
+
+        if (conversation.ValueKind == JsonValueKind.Object &&
+            conversation.TryGetProperty("id", out var idElement) &&
+            idElement.ValueKind == JsonValueKind.String)
+        {
+            return idElement.GetString();
+        }
+
+        return null;
+    }
+
     private static async Task<(Guid? ConversationId, IResult? ErrorResult)> ResolveResponsesConversationAsync(
         PublishedApiExecutionContext context,
         string? previousResponseId,
@@ -3249,6 +3477,8 @@ public static class PublishedOpenAiWireHandlers
 
     private static string FormatResponsesId(Guid messageId) => $"resp_{messageId:N}";
 
+    private static string FormatConversationId(Guid notebookConversationId) => $"conv_{notebookConversationId:N}";
+
     private static string FormatAnthropicMessageId(Guid messageId) => $"msg_{messageId:N}";
 
     private static bool TryParseAnthropicMessageId(string? messageId, out Guid parsedMessageId)
@@ -3289,6 +3519,26 @@ public static class PublishedOpenAiWireHandlers
 
         var rawId = trimmed[prefix.Length..];
         return Guid.TryParse(rawId, out messageId);
+    }
+
+    private static bool TryParseConversationId(string? conversationId, out Guid notebookConversationId)
+    {
+        notebookConversationId = Guid.Empty;
+
+        if (string.IsNullOrWhiteSpace(conversationId))
+        {
+            return false;
+        }
+
+        var trimmed = conversationId.Trim();
+        const string prefix = "conv_";
+        if (!trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rawId = trimmed[prefix.Length..];
+        return Guid.TryParse(rawId, out notebookConversationId);
     }
 
     private static (string Alias, IResult? ErrorResult) ResolveModelAliasOrError(
@@ -4031,6 +4281,20 @@ public static class PublishedOpenAiWireHandlers
         return builder.ToString();
     }
 
+    private static string? ResolvePublicApiOrigin(HttpContext context)
+    {
+        var scheme = context.Request.Scheme?.Trim();
+        if (string.IsNullOrWhiteSpace(scheme) || !context.Request.Host.HasValue)
+        {
+            return null;
+        }
+
+        return $"{scheme}://{context.Request.Host.Value}".TrimEnd('/');
+    }
+
+    private static string RewritePublishedContentUrls(string? content, string? publicApiOrigin) =>
+        McpPublishedContentUrlRewriter.Rewrite(content, publicApiOrigin);
+
     private static long EstimateAnthropicInputTokens(JsonElement request)
     {
         try
@@ -4066,6 +4330,9 @@ public static class PublishedOpenAiWireHandlers
 
         [JsonPropertyName("previous_response_id")]
         public string? PreviousResponseId { get; set; }
+
+        [JsonPropertyName("conversation")]
+        public JsonElement Conversation { get; set; }
 
         [JsonPropertyName("tool_choice")]
         public JsonElement ToolChoice { get; set; }

@@ -78,7 +78,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -119,6 +119,60 @@ public sealed class PublishedOpenAiWireHandlersTests
     }
 
     [TestMethod]
+    public async Task PostChatCompletionsAsync_Rewrites_published_links_with_request_origin()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId));
+        var conversationService = new Mock<IPublishedConversationService>();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        var relativePublishedUrl =
+            $"/api/published/projects/{Guid.NewGuid()}/notebooks/{notebookId}/conversations/{conversationId}/files/content?path=audio%2Fnote.mp3&pubId={pubId}";
+        conversationService
+            .Setup(s => s.CreateConversationAsync(
+                notebookId,
+                It.Is<string>(title => title == "New Conversation")))
+            .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, $"{{\"content\":\"[audio]({relativePublishedUrl})\"}}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")
+            ));
+
+        using var db = CreateDbContext();
+        var http = new DefaultHttpContext();
+        http.Request.Scheme = "https";
+        http.Request.Host = new HostString("wire.example.com");
+        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello\"}]")
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        using var json = JsonDocument.Parse(executed.Body);
+        var content = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+        content.Should().Contain($"https://wire.example.com{relativePublishedUrl}");
+    }
+
+    [TestMethod]
     public async Task PostChatCompletionsAsync_Forwards_client_messages_prefix_and_last_user_prompt()
     {
         var pubId = Guid.NewGuid();
@@ -130,7 +184,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -194,7 +248,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -235,6 +289,60 @@ public sealed class PublishedOpenAiWireHandlersTests
     }
 
     [TestMethod]
+    public async Task PostResponsesAsync_Rewrites_published_links_with_request_origin()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId));
+        var conversationService = new Mock<IPublishedConversationService>();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        var relativePublishedUrl =
+            $"/api/published/projects/{Guid.NewGuid()}/notebooks/{notebookId}/conversations/{conversationId}/files/content?path=audio%2Fnote.mp3&pubId={pubId}";
+        conversationService
+            .Setup(s => s.CreateConversationAsync(
+                notebookId,
+                It.Is<string>(title => title == "New Conversation")))
+            .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, $"{{\"content\":\"[audio]({relativePublishedUrl})\"}}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":5}")
+            ));
+
+        using var db = CreateDbContext();
+        var http = new DefaultHttpContext();
+        http.Request.Scheme = "https";
+        http.Request.Host = new HostString("wire.example.com");
+        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        {
+            Model = "guide",
+            Input = ParseJsonElement("\"hello\"")
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        using var json = JsonDocument.Parse(executed.Body);
+        var content = json.RootElement.GetProperty("output")[0].GetProperty("content")[0].GetProperty("text").GetString();
+        content.Should().Contain($"https://wire.example.com{relativePublishedUrl}");
+    }
+
+    [TestMethod]
     public async Task PostResponsesAsync_Forwards_client_messages_prefix_and_last_user_prompt()
     {
         var pubId = Guid.NewGuid();
@@ -246,7 +354,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -319,7 +427,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -577,7 +685,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -817,7 +925,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -861,6 +969,60 @@ public sealed class PublishedOpenAiWireHandlersTests
     }
 
     [TestMethod]
+    public async Task PostMessagesAsync_Rewrites_published_links_with_request_origin()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId));
+        var conversationService = new Mock<IPublishedConversationService>();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        var relativePublishedUrl =
+            $"/api/published/projects/{Guid.NewGuid()}/notebooks/{notebookId}/conversations/{conversationId}/files/content?path=audio%2Fnote.mp3&pubId={pubId}";
+        conversationService
+            .Setup(s => s.CreateConversationAsync(
+                notebookId,
+                It.Is<string>(title => title == "New Conversation")))
+            .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, $"{{\"content\":\"[audio]({relativePublishedUrl})\"}}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":4,\"completion_tokens\":6}")
+            ));
+
+        using var db = CreateDbContext();
+        var http = new DefaultHttpContext();
+        http.Request.Scheme = "https";
+        http.Request.Host = new HostString("wire.example.com");
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello\"}]")
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        using var json = JsonDocument.Parse(executed.Body);
+        var content = json.RootElement.GetProperty("content")[0].GetProperty("text").GetString();
+        content.Should().Contain($"https://wire.example.com{relativePublishedUrl}");
+    }
+
+    [TestMethod]
     public async Task PostMessagesAsync_Forwards_client_messages_prefix_and_last_user_prompt()
     {
         var pubId = Guid.NewGuid();
@@ -872,7 +1034,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -996,7 +1158,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -1102,7 +1264,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -1147,7 +1309,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -2288,7 +2450,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         conversationService
             .Setup(s => s.CreateConversationAsync(
                 notebookId,
-                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+                It.Is<string>(title => title == "New Conversation")))
             .ReturnsAsync(new NotebookConversationListDto(newConversationId, "wire-conversation", now, now));
         conversationService
             .Setup(s => s.SendMessageStreamAsync(
@@ -2714,6 +2876,524 @@ public sealed class PublishedOpenAiWireHandlersTests
     }
 
     [TestMethod]
+    public async Task PostMessagesAsync_Transcript_does_not_match_conversation_idle_longer_than_60_minutes()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var staleTime = DateTime.UtcNow.AddHours(-2);
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, conversationId, staleTime, "hello", "Hi there", "user");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        var newConversationId = Guid.NewGuid();
+        conversationService
+            .Setup(s => s.CreateConversationAsync(notebookId, "New Conversation"))
+            .ReturnsAsync(new NotebookConversationListDto(newConversationId, "wire-conversation", DateTime.UtcNow, DateTime.UtcNow));
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                newConversationId,
+                It.Is<SendMessageRequest>(r => r.Instructions == "follow up" && r.ClientMessages != null),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"New thread\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement("""
+                [
+                  {"role":"user","content":"hello"},
+                  {"role":"assistant","content":"Hi there"},
+                  {"role":"user","content":"follow up"}
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        conversationService.Verify(s => s.CreateConversationAsync(notebookId, "New Conversation"), Times.Once);
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(conversationId, It.IsAny<SendMessageRequest>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostMessagesAsync_Transcript_does_not_attach_to_different_caller_identity()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, conversationId, now, "hello", "Hi there", "owner-user");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "other-user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        var newConversationId = Guid.NewGuid();
+        conversationService
+            .Setup(s => s.CreateConversationAsync(notebookId, "New Conversation"))
+            .ReturnsAsync(new NotebookConversationListDto(newConversationId, "wire-conversation", now, now));
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                newConversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "other-user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"New thread\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement("""
+                [
+                  {"role":"user","content":"hello"},
+                  {"role":"assistant","content":"Hi there"},
+                  {"role":"user","content":"follow up"}
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        conversationService.Verify(s => s.CreateConversationAsync(notebookId, "New Conversation"), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task PostMessagesAsync_Transcript_short_circuits_to_later_candidate_when_earlier_diverges()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var wrongConversationId = Guid.NewGuid();
+        var targetConversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, wrongConversationId, now.AddSeconds(10), "wrong hello", "Shared reply", "user");
+        await SeedTranscriptConversationAsync(db, notebookId, targetConversationId, now, "target hello", "Shared reply", "user");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                targetConversationId,
+                It.Is<SendMessageRequest>(r => r.Instructions == "continue target" && r.ClientMessages == null),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"Continued\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement("""
+                [
+                  {"role":"user","content":"target hello"},
+                  {"role":"assistant","content":"Shared reply"},
+                  {"role":"user","content":"continue target"}
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(targetConversationId, It.IsAny<SendMessageRequest>(), pubId.ToString(), "user", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(wrongConversationId, It.IsAny<SendMessageRequest>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostChatCompletionsAsync_Continues_conversation_from_transcript_replay()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, conversationId, now, "hello", "Hi from assistant", "user");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.Is<SendMessageRequest>(r => r.Instructions == "next question" && r.ClientMessages == null),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"Answer\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement("""
+                [
+                  {"role":"user","content":"hello"},
+                  {"role":"assistant","content":"Hi from assistant"},
+                  {"role":"user","content":"next question"}
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        conversationService.Verify(s => s.CreateConversationAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostChatCompletionsAsync_Continues_conversation_when_replay_omits_internal_tool_messages()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        const string finalAssistantText = "GuideAnts is a project.";
+
+        using var db = CreateDbContext();
+        var project = new Project { Id = Guid.NewGuid(), Title = "Project", Slug = "project-chat-internal-tools" };
+        var notebook = new Notebook { Id = notebookId, ProjectId = project.Id, Project = project, Title = "Notebook", Slug = "notebook-chat-internal-tools" };
+        var conversation = new NotebookConversation { Id = conversationId, NotebookId = notebookId, Notebook = notebook, Title = "Conversation", Created = now };
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        db.NotebookConversations.Add(conversation);
+        db.NotebookConversationMessages.AddRange(
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(), NotebookConversationId = conversationId, NotebookConversation = conversation,
+                Role = ChatRole.User, Content = "describe", TurnIndex = 1, MessageSequence = 1,
+                ExternalUserIdentity = "user", Created = now
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(), NotebookConversationId = conversationId, NotebookConversation = conversation,
+                Role = ChatRole.Assistant, Content = "Searching...", TurnIndex = 1, MessageSequence = 2,
+                AssistantName = "Guide", IsStreaming = false, Created = now.AddSeconds(1)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(), NotebookConversationId = conversationId, NotebookConversation = conversation,
+                Role = ChatRole.Tool, Content = "internal search result", ToolCallId = "server_search_1",
+                FunctionName = "Search", TurnIndex = 1, MessageSequence = 3, Created = now.AddSeconds(2)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(), NotebookConversationId = conversationId, NotebookConversation = conversation,
+                Role = ChatRole.Assistant, Content = finalAssistantText, TurnIndex = 1, MessageSequence = 4,
+                AssistantName = "Guide", IsStreaming = false, Created = now.AddSeconds(3)
+            });
+        await db.SaveChangesAsync();
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.Is<SendMessageRequest>(r => r.Instructions == "what else?" && r.ClientMessages == null),
+                pubId.ToString(), "user", null, It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"More\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement($$"""
+                [
+                  {"role":"user","content":"describe"},
+                  {"role":"assistant","content":"Searching..."},
+                  {"role":"assistant","content":"{{finalAssistantText}}"},
+                  {"role":"user","content":"what else?"}
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        conversationService.Verify(s => s.CreateConversationAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostResponsesAsync_Continues_conversation_when_conversation_id_provided()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, conversationId, now, "hello", "Hi", "user-a");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user-a"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.Is<SendMessageRequest>(r => r.Instructions == "follow-up"),
+                pubId.ToString(),
+                "user-a",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"Follow-up\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        {
+            Model = "guide",
+            Input = ParseJsonElement("\"follow-up\""),
+            Conversation = ParseJsonElement($"\"conv_{conversationId:N}\"")
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        using var json = JsonDocument.Parse(executed.Body);
+        json.RootElement.GetProperty("conversation").GetString().Should().Be($"conv_{conversationId:N}");
+        conversationService.Verify(s => s.CreateConversationAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostResponsesAsync_Returns_invalid_conversation_id_for_bad_format()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        using var db = CreateDbContext();
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        {
+            Model = "guide",
+            Input = ParseJsonElement("\"hello\""),
+            Conversation = ParseJsonElement("\"not-a-conversation-id\"")
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        using var json = JsonDocument.Parse(executed.Body);
+        var error = json.RootElement.GetProperty("error");
+        error.GetProperty("code").GetString().Should().Be("invalid_conversation_id");
+        error.GetProperty("param").GetString().Should().Be("conversation");
+    }
+
+    [TestMethod]
+    public async Task PostResponsesAsync_Rejects_conversation_scope_mismatch()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, conversationId, now, "hello", "Hi", "owner");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "intruder"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        {
+            Model = "guide",
+            Input = ParseJsonElement("\"hello\""),
+            Conversation = ParseJsonElement($"\"conv_{conversationId:N}\"")
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        using var json = JsonDocument.Parse(executed.Body);
+        json.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("conversation_scope_mismatch");
+    }
+
+    [TestMethod]
+    public async Task PostResponsesAsync_Rejects_conversation_and_previous_response_mismatch()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationA = Guid.NewGuid();
+        var conversationB = Guid.NewGuid();
+        var assistantMessageId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, conversationA, now, "a", "reply a", "user-a", assistantMessageId);
+        await SeedTranscriptConversationAsync(db, notebookId, conversationB, now.AddSeconds(5), "b", "reply b", "user-a");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user-a"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        {
+            Model = "guide",
+            Input = ParseJsonElement("\"hello\""),
+            Conversation = ParseJsonElement($"\"conv_{conversationB:N}\""),
+            PreviousResponseId = $"resp_{assistantMessageId:N}"
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        using var json = JsonDocument.Parse(executed.Body);
+        json.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("conversation_previous_response_mismatch");
+    }
+
+    [TestMethod]
+    public async Task PostResponsesAsync_Invalid_conversation_does_not_fall_back_to_transcript_matching()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, conversationId, now, "hello", "Hi", "user");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        {
+            Model = "guide",
+            Input = ParseJsonElement("""
+                [
+                  {"role":"user","content":"hello"},
+                  {"role":"assistant","content":"Hi"},
+                  {"role":"user","content":"follow up"}
+                ]
+                """),
+            Conversation = ParseJsonElement("\"conv_not_a_real_id\"")
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        conversationService.VerifyNoOtherCalls();
+    }
+
+    [TestMethod]
+    public async Task PostResponsesAsync_Continues_conversation_from_manual_transcript_replay()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, conversationId, now, "hello", "Hi there", "user");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.Is<SendMessageRequest>(r => r.Instructions == "follow up" && r.ClientMessages == null),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"Continued\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        {
+            Model = "guide",
+            Input = ParseJsonElement("""
+                [
+                  {"role":"user","content":"hello"},
+                  {"role":"assistant","content":"Hi there"},
+                  {"role":"user","content":"follow up"}
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        conversationService.Verify(s => s.CreateConversationAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostResponsesAsync_Invalid_previous_response_id_does_not_fall_back_to_transcript()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        await SeedTranscriptConversationAsync(db, notebookId, conversationId, now, "hello", "Hi", "user");
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        {
+            Model = "guide",
+            Input = ParseJsonElement("""
+                [
+                  {"role":"user","content":"hello"},
+                  {"role":"assistant","content":"Hi"},
+                  {"role":"user","content":"follow up"}
+                ]
+                """),
+            PreviousResponseId = "resp_not_a_real_id"
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        using var json = JsonDocument.Parse(executed.Body);
+        json.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("invalid_previous_response_id");
+        conversationService.VerifyNoOtherCalls();
+    }
+
+    [TestMethod]
     public async Task PostEmbeddingsAsync_Uses_service_mode_and_records_provider_metadata()
     {
         var pubId = Guid.NewGuid();
@@ -2848,6 +3528,93 @@ public sealed class PublishedOpenAiWireHandlersTests
         var error = json.RootElement.GetProperty("error");
         error.GetProperty("code").GetString().Should().Be("unsupported_feature");
         error.GetProperty("param").GetString().Should().Be("response_format");
+    }
+
+    private static async Task SeedTranscriptConversationAsync(
+        ApplicationDbContext db,
+        Guid notebookId,
+        Guid conversationId,
+        DateTime activityTime,
+        string userText,
+        string assistantText,
+        string externalUserIdentity,
+        Guid? assistantMessageId = null)
+    {
+        var project = db.Projects.Local.FirstOrDefault() ?? new Project
+        {
+            Id = Guid.NewGuid(),
+            Title = "Project",
+            Slug = $"project-{notebookId:N}"
+        };
+        if (db.Projects.Local.All(p => p.Id != project.Id))
+        {
+            db.Projects.Add(project);
+        }
+
+        var notebook = db.Notebooks.Local.FirstOrDefault(n => n.Id == notebookId) ?? new Notebook
+        {
+            Id = notebookId,
+            ProjectId = project.Id,
+            Project = project,
+            Title = "Notebook",
+            Slug = $"notebook-{notebookId:N}"
+        };
+        if (db.Notebooks.Local.All(n => n.Id != notebookId))
+        {
+            db.Notebooks.Add(notebook);
+        }
+
+        var conversation = new NotebookConversation
+        {
+            Id = conversationId,
+            NotebookId = notebookId,
+            Notebook = notebook,
+            Title = "Conversation",
+            Created = activityTime
+        };
+        var turn = new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = conversationId,
+            NotebookConversation = conversation,
+            TurnIndex = 1,
+            AssistantName = "Guide",
+            Instructions = userText,
+            Status = "completed",
+            Created = activityTime,
+            LastUpdated = activityTime
+        };
+
+        db.NotebookConversations.Add(conversation);
+        db.ConversationTurns.Add(turn);
+        db.NotebookConversationMessages.AddRange(
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.User,
+                Content = userText,
+                TurnIndex = 1,
+                MessageSequence = 1,
+                ExternalUserIdentity = externalUserIdentity,
+                Created = activityTime
+            },
+            new NotebookConversationMessage
+            {
+                Id = assistantMessageId ?? Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.Assistant,
+                Content = assistantText,
+                TurnIndex = 1,
+                MessageSequence = 2,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = activityTime.AddSeconds(1)
+            });
+
+        await db.SaveChangesAsync();
     }
 
     private static PublishedApiExecutionContext CreateExecutionContext(
