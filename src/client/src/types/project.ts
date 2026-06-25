@@ -115,7 +115,7 @@ export interface ProjectDetailsDto {
     canCreateContent: boolean;
 }
 
-export type SectionType = 'notebooks' | 'contentFiles' | 'links' | 'artifacts' | 'guideAuthorization';
+export type SectionType = 'notebooks' | 'contentFiles' | 'links' | 'artifacts' | 'guideAuthorization' | 'jobSchedule';
 
 export interface SelectedItem {
     type: SectionType;

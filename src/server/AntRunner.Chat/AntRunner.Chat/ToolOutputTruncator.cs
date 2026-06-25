@@ -70,6 +70,7 @@ public static class ToolOutputTruncator
         {
             StandardOutput = source.StandardOutput ?? string.Empty,
             StandardError = AppendStderr(source.StandardError, notice),
+            ExitCode = source.ExitCode,
             NewFiles = source.NewFiles,
             ModifiedFiles = source.ModifiedFiles
         };

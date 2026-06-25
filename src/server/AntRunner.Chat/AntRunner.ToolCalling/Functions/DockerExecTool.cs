@@ -16,6 +16,11 @@ namespace AntRunner.ToolCalling.Functions
     {
         public string StandardOutput { get; set; } = string.Empty;
         public string StandardError { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Process exit code when the script ran to completion; null when execution did not reach a process exit.
+        /// </summary>
+        public int? ExitCode { get; set; }
         
         /// <summary>
         /// CWD-relative paths of files created by this tool execution.
