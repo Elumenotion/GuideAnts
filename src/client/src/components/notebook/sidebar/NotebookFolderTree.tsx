@@ -1073,7 +1073,6 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
               (() => {
                   const selectedItems = context.multiSelect.getSelectedItems();
                   const selectedFiles = selectedItems.filter(item => item.type === 'file');
-                  const selectedLinkedFiles = selectedFiles.filter(item => isLinkedFile(item.data as NotebookFileDto));
                   const selectedEditableFiles = selectedFiles.filter(item => !isLinkedFile(item.data as NotebookFileDto));
                   const fileCount = selectedFiles.length;
                   const editableFileCount = selectedEditableFiles.length;
@@ -1131,17 +1130,12 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
                           Delete {deletableItemCount} Item{deletableItemCount > 1 ? 's' : ''}
                       </button>
                   )}
-                  {selectedLinkedFiles.length > 0 && (
-                    <div className="px-4 py-1.5 text-xs text-gray-500 whitespace-nowrap">
-                      Linked files are read-only here.
-                    </div>
-                  )}
               </>
                   );
               })()
           ) : (
               <>
-                  {canEdit && !selectedFileIsLinked && isMarkdownFile(selectedContextFile) && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={openMarkdownEditor}>Edit</button>}
+                  {canEdit && isMarkdownFile(selectedContextFile) && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={openMarkdownEditor}>Edit</button>}
                   {onPreviewFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { if (selectedContextFile) onPreviewFile(selectedContextFile); setShowFileContextMenu(false); }}>Preview</button>}
                   {canEdit && !selectedFileIsLinked && onPublishToProject && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { if (selectedContextFile) onPublishToProject([selectedContextFile]); setShowFileContextMenu(false); }}>Publish to Project</button>}
                   <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDownloadFile}>Download</button>
@@ -1152,11 +1146,6 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
                       ? 'Delete on host'
                       : 'Delete'}
                   </button>}
-                  {selectedFileIsLinked && (
-                    <div className="px-4 py-1.5 text-xs text-gray-500 whitespace-nowrap">
-                      Linked files are read-only here.
-                    </div>
-                  )}
               </>
           )}
         </div>,

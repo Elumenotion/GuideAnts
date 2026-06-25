@@ -195,7 +195,7 @@ describe('NotebookFolderTree host mounts', () => {
     expect(localStorage.getItem('hostCommand')).toBeNull();
   });
 
-  it('marks files inside mapped folders as read-only in the context menu', async () => {
+  it('hides mutating options for files inside mapped folders in the context menu', async () => {
     const user = userEvent.setup();
     renderTree({ onDeleteFile: vi.fn() });
 
@@ -214,7 +214,7 @@ describe('NotebookFolderTree host mounts', () => {
     }
 
     fireEvent.contextMenu(screen.getByTitle('host.txt'));
-    expect(screen.getByText('Linked files are read-only here.')).toBeInTheDocument();
+    expect(screen.queryByText('Linked files are read-only here.')).not.toBeInTheDocument();
     expect(screen.queryByText('Delete on host')).not.toBeInTheDocument();
   });
 

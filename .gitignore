@@ -428,6 +428,6 @@ FodyWeavers.xsd
 /scan-results.txt
 
 # Installer
-/installer/docker/volumes/content-files
-/installer/docker/docker-compose.host-mounts.generated.yml
+/installer/docker/volumes/content-files/*
+!/installer/docker/volumes/content-files/.gitkeep
 *.cli-auth-token

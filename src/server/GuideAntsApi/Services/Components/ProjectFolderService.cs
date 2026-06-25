@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using GuideAntsApi.DataModel;
@@ -22,6 +23,7 @@ public class ProjectFolderService : IProjectFolderService
     private readonly int _linkedMountTreeMaxFiles;
     private readonly int _linkedMountTreeMaxDepth;
     private readonly TimeSpan _linkedMountTreeScanBudget;
+    private readonly FileExtensionContentTypeProvider _contentTypeProvider = new();
 
     public ProjectFolderService(
         IServiceScopeFactory scopeFactory,
@@ -519,6 +521,101 @@ using var scope = CreateDbScope();
         return ToFolderTreeDto(folder, subFolders, files);
     }
 
+    // ---- Mounted-file read/write by relativePath ----
+
+    private async Task<(HostFolderMount Mount, string PhysicalPath, string ContentType, string FileName)?> ResolveMountedFilePhysicalPathAsync(Guid projectId, string relativePath)
+    {
+        var normalized = relativePath.Replace("\\", "/").TrimStart('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        var segments = normalized.Split('/');
+        if (segments.Length < 2)
+            return null;
+
+        var leafName = segments[0];
+
+        using var scope = CreateDbScope();
+        var context = GetDbContext(scope);
+        var mounts = await context.HostFolderMounts
+            .AsNoTracking()
+            .Where(m => m.ProjectId == projectId
+                && m.Scope == HostFolderMountScope.Project
+                && m.Status != HostFolderMountStatus.Removed
+                && m.Status != HostFolderMountStatus.PendingRemoval)
+            .ToListAsync();
+
+        var mount = mounts.FirstOrDefault(m =>
+            string.Equals(m.LeafName, leafName, StringComparison.OrdinalIgnoreCase));
+        if (mount == null)
+            return null;
+
+        var rest = normalized[(leafName.Length + 1)..];
+        if (string.IsNullOrWhiteSpace(rest))
+            return null;
+
+        var fullRoot = Path.GetFullPath(mount.ContainerSourcePath);
+        var candidate = Path.GetFullPath(Path.Combine(fullRoot, rest));
+
+        var sep = Path.DirectorySeparatorChar;
+        if (!candidate.StartsWith(fullRoot + sep, StringComparison.Ordinal) && candidate != fullRoot)
+            return null;
+
+        _contentTypeProvider.TryGetContentType(Path.GetFileName(candidate), out var ct);
+        return (mount, candidate, ct ?? "application/octet-stream", Path.GetFileName(candidate));
+    }
+
+    public async Task<(Stream Stream, string ContentType, string FileName)?> GetMountedFileContentAsync(Guid projectId, string relativePath)
+    {
+        var resolved = await ResolveMountedFilePhysicalPathAsync(projectId, relativePath);
+        if (resolved == null || !File.Exists(resolved.Value.PhysicalPath))
+            return null;
+
+        var stream = new FileStream(resolved.Value.PhysicalPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return (stream, resolved.Value.ContentType, resolved.Value.FileName);
+    }
+
+    public async Task<ContentFileDetailsDto?> GetMountedFileDetailsAsync(Guid projectId, string relativePath)
+    {
+        var resolved = await ResolveMountedFilePhysicalPathAsync(projectId, relativePath);
+        if (resolved == null || !File.Exists(resolved.Value.PhysicalPath))
+            return null;
+
+        var info = new FileInfo(resolved.Value.PhysicalPath);
+        return new ContentFileDetailsDto(
+            Id: CreateMountVirtualFileId(resolved.Value.Mount.Id, relativePath),
+            FileName: resolved.Value.FileName,
+            Path: "",
+            RelativePath: relativePath.Replace("\\", "/"),
+            ContentType: resolved.Value.ContentType,
+            Index: false,
+            DocumentId: "",
+            Created: info.LastWriteTimeUtc,
+            FileSize: info.Length,
+            FolderId: null,
+            FolderPath: null,
+            LatestVersion: 0,
+            IsSnapshot: false,
+            HasMarkdownShadow: false,
+            MarkdownStatus: null,
+            MarkdownProcessedAt: null);
+    }
+
+    public async Task<bool> SaveMountedFileContentAsync(Guid projectId, string relativePath, Stream content)
+    {
+        var resolved = await ResolveMountedFilePhysicalPathAsync(projectId, relativePath);
+        if (resolved == null)
+            return false;
+
+        var dir = Path.GetDirectoryName(resolved.Value.PhysicalPath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+
+        await using var fs = new FileStream(resolved.Value.PhysicalPath, FileMode.Create);
+        await content.CopyToAsync(fs);
+        return true;
+    }
+
     private List<FolderTreeDto> BuildMountOverlayNodes(List<HostFolderMount> mounts)
     {
         var mountNodes = new List<FolderTreeDto>();
@@ -554,7 +651,7 @@ using var scope = CreateDbScope();
         return mountNodes;
     }
 
-    private static FolderTreeDto BuildMountFolderTree(
+    private FolderTreeDto BuildMountFolderTree(
         HostFolderMount mount,
         IReadOnlyList<HostMountDirectoryScanner.ScannedFile> files)
     {
@@ -574,12 +671,14 @@ using var scope = CreateDbScope();
             if (!fileChildren.ContainsKey(dirPath))
                 fileChildren[dirPath] = [];
 
+            _contentTypeProvider.TryGetContentType(file.FileName, out var ct);
+
             fileChildren[dirPath].Add(new ContentFileDetailsDto(
-                Id: Guid.Empty,
+                Id: CreateMountVirtualFileId(mount.Id, file.RelativePath),
                 FileName: file.FileName,
                 Path: "",
                 RelativePath: file.RelativePath,
-                ContentType: "",
+                ContentType: ct ?? "application/octet-stream",
                 Index: false,
                 DocumentId: "",
                 Created: file.LastModifiedUtc,
@@ -662,6 +761,14 @@ using var scope = CreateDbScope();
     private static Guid CreateMountVirtualFolderId(Guid mountId, string folderPath)
     {
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"mount:{mountId:N}:{folderPath.ToLowerInvariant()}"));
+        var guidBytes = new byte[16];
+        Buffer.BlockCopy(digest, 0, guidBytes, 0, guidBytes.Length);
+        return new Guid(guidBytes);
+    }
+
+    private static Guid CreateMountVirtualFileId(Guid mountId, string relativePath)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"mountfile:{mountId:N}:{relativePath.Replace("\\", "/").ToLowerInvariant()}"));
         var guidBytes = new byte[16];
         Buffer.BlockCopy(digest, 0, guidBytes, 0, guidBytes.Length);
         return new Guid(guidBytes);

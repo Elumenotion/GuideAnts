@@ -241,6 +241,7 @@ interface FolderNodeProps {
     onShowApplyCommand?: (mountId: string) => void;
     onShowRemoveCommand?: (mountId: string) => void;
     onCheckMappedFolders?: (mountId: string) => void;
+    parentInsideMount?: boolean;
 }
 
 const FolderNode: React.FC<FolderNodeProps> = ({
@@ -275,8 +276,10 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     onShowApplyCommand,
     onShowRemoveCommand,
     onCheckMappedFolders,
+    parentInsideMount = false,
 }) => {
     const { showToast } = useToast();
+    const insideMount = parentInsideMount || !!folder.isHostMount || !!folder.isLinked;
     const context = useContext(FolderTreeContext);
     
     // Helper function to check if a folder has matching descendants
@@ -647,7 +650,9 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         setMdEditorError(undefined);
         setMdEditorLoading(true);
         try {
-            const result = await api.projects.getContentFileContent(projectId, selectedContextFile.id, selectedContextFile.latestVersion);
+            const result = insideMount
+                ? await api.projects.getMountedContentByPath(projectId, selectedContextFile.relativePath)
+                : await api.projects.getContentFileContent(projectId, selectedContextFile.id, selectedContextFile.latestVersion);
             const text = await result.blob.text();
             setMdEditorContent(text);
             setIsMdEditorOpen(true);
@@ -656,7 +661,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         } finally {
             setMdEditorLoading(false);
         }
-    }, [selectedContextFile, projectId]);
+    }, [selectedContextFile, projectId, insideMount]);
 
     const handleNewMarkdownFile = useCallback(async () => {
         setShowContextMenu(false);
@@ -725,26 +730,30 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         setMdEditorLoading(true);
         setMdEditorError(undefined);
         try {
-            let folderIdForUpload: string | undefined = undefined;
-            let fileNameForUpload: string = '';
-            if (isCreatingMd) {
-                folderIdForUpload = creatingMdFolderId;
-                fileNameForUpload = creatingMdFileName;
-            } else if (selectedContextFile) {
-                folderIdForUpload = selectedContextFile.folderId || undefined;
-                fileNameForUpload = selectedContextFile.fileName;
+            if (insideMount && !isCreatingMd && selectedContextFile) {
+                await api.projects.saveMountedByPath(projectId, selectedContextFile.relativePath, newContent);
             } else {
-                throw new Error('No target file specified');
-            }
-            const markdownFile = new File([newContent], fileNameForUpload, { type: 'text/markdown' });
-            const uploadResults = await api.projects.uploadFiles(projectId, [markdownFile], folderIdForUpload);
-            const newVersion = uploadResults[0]?.latestVersion;
-            if (newVersion !== undefined && selectedContextFile) {
-                setSelectedContextFile(prev => prev ? { ...prev, latestVersion: newVersion } : null);
-                setLocalFiles(prev => prev.map(f => 
-                    f.id === selectedContextFile.id ? { ...f, latestVersion: newVersion } : f
-                ));
-                onFileContentChanged?.(selectedContextFile.id, newVersion);
+                let folderIdForUpload: string | undefined = undefined;
+                let fileNameForUpload: string = '';
+                if (isCreatingMd) {
+                    folderIdForUpload = creatingMdFolderId;
+                    fileNameForUpload = creatingMdFileName;
+                } else if (selectedContextFile) {
+                    folderIdForUpload = selectedContextFile.folderId || undefined;
+                    fileNameForUpload = selectedContextFile.fileName;
+                } else {
+                    throw new Error('No target file specified');
+                }
+                const markdownFile = new File([newContent], fileNameForUpload, { type: 'text/markdown' });
+                const uploadResults = await api.projects.uploadFiles(projectId, [markdownFile], folderIdForUpload);
+                const newVersion = uploadResults[0]?.latestVersion;
+                if (newVersion !== undefined && selectedContextFile) {
+                    setSelectedContextFile(prev => prev ? { ...prev, latestVersion: newVersion } : null);
+                    setLocalFiles(prev => prev.map(f =>
+                        f.id === selectedContextFile.id ? { ...f, latestVersion: newVersion } : f
+                    ));
+                    onFileContentChanged?.(selectedContextFile.id, newVersion);
+                }
             }
             setIsMdEditorOpen(false);
             setIsCreatingMd(false);
@@ -755,7 +764,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         } finally {
             setMdEditorLoading(false);
         }
-    }, [projectId, isCreatingMd, creatingMdFolderId, creatingMdFileName, selectedContextFile]);
+    }, [projectId, isCreatingMd, creatingMdFolderId, creatingMdFileName, selectedContextFile, insideMount]);
 
     const handleDownloadSelectedFile = useCallback(async () => {
         if (!selectedContextFile) {
@@ -763,7 +772,9 @@ const FolderNode: React.FC<FolderNodeProps> = ({
             return;
         }
         try {
-            const result = await api.projects.getContentFileContent(projectId, selectedContextFile.id);
+            const result = insideMount
+                ? await api.projects.getMountedContentByPath(projectId, selectedContextFile.relativePath)
+                : await api.projects.getContentFileContent(projectId, selectedContextFile.id);
             const url = window.URL.createObjectURL(result.blob);
             const anchor = document.createElement('a');
             anchor.href = url;
@@ -780,7 +791,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         } finally {
             setShowFileContextMenu(false);
         }
-    }, [selectedContextFile, projectId]);
+    }, [selectedContextFile, projectId, insideMount]);
 
     const handleCreateNotebookFromFile = useCallback(() => {
         if (selectedContextFile && onCreateNotebookFromFile) {
@@ -942,6 +953,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                                 onShowApplyCommand={onShowApplyCommand}
                                 onShowRemoveCommand={onShowRemoveCommand}
                                 onCheckMappedFolders={onCheckMappedFolders}
+                                parentInsideMount={insideMount}
                             />
                         ))}
                         {isCreatingSubfolder && !disabled && (
@@ -1003,12 +1015,12 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                     {context?.multiSelect.selectedCount && context.multiSelect.selectedCount > 1 ? (
                         <>
                             {/* Multi-select context menu */}
-                            {onCreateNotebookFromFiles && (
+                            {!insideMount && onCreateNotebookFromFiles && (
                                 <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => {
                                     if (!context) return;
                                     const selectedItems = context.multiSelect.getSelectedItems();
                                     const files = selectedItems.filter(i => i.type === 'file').map(i => ({ id: i.id, fileName: (i.data as ProjectContentFile).fileName }));
-                                    
+
                                     if (files.length > 0) {
                                         onCreateNotebookFromFiles(files);
                                     }
@@ -1021,12 +1033,14 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                                 if (!context) return;
                                 const selectedItems = context.multiSelect.getSelectedItems();
                                 setShowFileContextMenu(false);
-                                
+
                                 for (const item of selectedItems) {
                                     if (item.type === 'file') {
                                         const file = item.data as ProjectContentFile;
                                         try {
-                                            const result = await api.projects.getContentFileContent(projectId, file.id);
+                                            const result = insideMount
+                                                ? await api.projects.getMountedContentByPath(projectId, file.relativePath)
+                                                : await api.projects.getContentFileContent(projectId, file.id);
                                             const url = window.URL.createObjectURL(result.blob);
                                             const anchor = document.createElement('a');
                                             anchor.href = url;
@@ -1046,12 +1060,18 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                             }}>
                                 Download {context.multiSelect.selectedCount} Items
                             </button>
-                            <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap text-red-600" onClick={() => {
+                            {!insideMount && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap text-red-600" onClick={() => {
                                 setShowFileContextMenu(false);
                                 setShowBatchDeleteConfirm(true);
                             }}>
                                 Delete {context.multiSelect.selectedCount} Items
-                            </button>
+                            </button>}
+                        </>
+                    ) : insideMount ? (
+                        <>
+                            {selectedContextFile && isMarkdownFileName(selectedContextFile.fileName, selectedContextFile.contentType) && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={openMarkdownEditor}>Edit</button>}
+                            {onFileSelect && selectedContextFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { onFileSelect(selectedContextFile.id); setShowFileContextMenu(false); }}>Preview</button>}
+                            <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDownloadSelectedFile}>Download</button>
                         </>
                     ) : (
                         <>

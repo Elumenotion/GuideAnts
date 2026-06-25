@@ -20,6 +20,7 @@ interface ContentFileContentProps {
     canEdit?: boolean;
     onDelete?: () => Promise<void>;
     resolveProjectFilePath?: (relativePath: string) => string | undefined;
+    mountedRelativePath?: string;
 }
 
 const convertToProjectContentFile = (dto: ContentFileDto): ProjectContentFile => ({
@@ -32,7 +33,8 @@ const convertToProjectContentFile = (dto: ContentFileDto): ProjectContentFile =>
     latestVersion: (dto as any).latestVersion ?? undefined,
 });
 
-function ContentFileContentComponent({ fileId, projectId, hideHeader = false, canEdit = false, onDelete, resolveProjectFilePath }: ContentFileContentProps) {
+function ContentFileContentComponent({ fileId, projectId, hideHeader = false, canEdit = false, onDelete, resolveProjectFilePath, mountedRelativePath }: ContentFileContentProps) {
+    const isMounted = !!mountedRelativePath;
     const [file, setFile] = useState<ProjectContentFile | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -64,8 +66,13 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
         try {
             setIsLoading(true);
             setError(null);
-            const fileDetails = await api.projects.getContentFile(projectId, fileId);
-            setFile(convertToProjectContentFile(fileDetails));
+            if (isMounted && mountedRelativePath) {
+                const fileDetails = await api.projects.getMountedDetailsByPath(projectId, mountedRelativePath);
+                setFile(convertToProjectContentFile(fileDetails));
+            } else {
+                const fileDetails = await api.projects.getContentFile(projectId, fileId);
+                setFile(convertToProjectContentFile(fileDetails));
+            }
         } catch (error) {
             console.error('Failed to fetch file details:', error);
             setError('Failed to load file details. Please try again.');
@@ -76,7 +83,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
 
     useEffect(() => {
         fetchFile();
-        
+
         // Reset markdown state when switching files
         setActiveTab('original');
         setMarkdownShadow(null);
@@ -84,7 +91,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
         setIsLoadingMarkdown(false);
         setMarkdownError(null);
         setHasAutoSwitched(false);
-    }, [projectId, fileId]);
+    }, [projectId, fileId, mountedRelativePath]);
 
     // Listen for version updates from sidebar saves
     useEffect(() => {
@@ -281,8 +288,9 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
             setIsDownloading(true);
             setError(null);
 
-            // Fetch the file content (blob) and filename from the API
-            const result = await api.projects.getContentFileContent(projectId, fileId, file?.latestVersion);
+            const result = isMounted && mountedRelativePath
+                ? await api.projects.getMountedContentByPath(projectId, mountedRelativePath)
+                : await api.projects.getContentFileContent(projectId, fileId, file?.latestVersion);
 
             const url = URL.createObjectURL(result.blob);
             const anchor = document.createElement('a');
@@ -312,15 +320,20 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
         setMdEditorError(undefined);
         setMdEditorLoading(true);
         try {
-            // Prefer markdown content endpoint if available
-            try {
-                const result = await api.projects.getContentFileMarkdownContent(projectId, fileId, file.latestVersion);
+            if (isMounted && mountedRelativePath) {
+                const result = await api.projects.getMountedContentByPath(projectId, mountedRelativePath);
                 const text = await result.blob.text();
                 setMdEditorContent(text);
-            } catch {
-                const result = await api.projects.getContentFileContent(projectId, fileId, file.latestVersion);
-                const text = await result.blob.text();
-                setMdEditorContent(text);
+            } else {
+                try {
+                    const result = await api.projects.getContentFileMarkdownContent(projectId, fileId, file.latestVersion);
+                    const text = await result.blob.text();
+                    setMdEditorContent(text);
+                } catch {
+                    const result = await api.projects.getContentFileContent(projectId, fileId, file.latestVersion);
+                    const text = await result.blob.text();
+                    setMdEditorContent(text);
+                }
             }
             setIsEditingMd(true);
         } catch (err) {
@@ -335,19 +348,23 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
         setMdEditorLoading(true);
         setMdEditorError(undefined);
         try {
-            const folderId = file.folderId || undefined;
-            const mdFile = new File([newContent], file.fileName, { type: 'text/markdown' });
-            const uploadResults = await api.projects.uploadFiles(projectId, [mdFile], folderId);
-            // Update local view immediately
-            setMarkdownContent(newContent);
-            // Update latestVersion immediately from upload response to avoid stale cache reads
-            const newVersion = uploadResults[0]?.latestVersion;
-            if (newVersion !== undefined) {
-                setFile(prev => prev ? { ...prev, latestVersion: newVersion } : null);
+            if (isMounted && mountedRelativePath) {
+                await api.projects.saveMountedByPath(projectId, mountedRelativePath, newContent);
+                setMarkdownContent(newContent);
+                setIsEditingMd(false);
+                await fetchFile();
+            } else {
+                const folderId = file.folderId || undefined;
+                const mdFile = new File([newContent], file.fileName, { type: 'text/markdown' });
+                const uploadResults = await api.projects.uploadFiles(projectId, [mdFile], folderId);
+                setMarkdownContent(newContent);
+                const newVersion = uploadResults[0]?.latestVersion;
+                if (newVersion !== undefined) {
+                    setFile(prev => prev ? { ...prev, latestVersion: newVersion } : null);
+                }
+                setIsEditingMd(false);
+                await fetchFile();
             }
-            setIsEditingMd(false);
-            // Refresh file metadata to pick up new latestVersion and details
-            await fetchFile();
         } catch (err) {
             setMdEditorError('Failed to save markdown file.');
         } finally {
@@ -398,6 +415,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                     canEdit={canEdit}
                     resolveProjectFilePath={resolveProjectFilePath}
                     onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
+                    mountedRelativePath={mountedRelativePath}
                 />
             </div>
         );
@@ -431,7 +449,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                     >
                         {isDownloading ? 'Downloading...' : (<><FaDownload className="w-4 h-4" /><span>Download</span></>)}
                     </button>
-                    {canEdit && (
+                    {canEdit && !isMounted && (
                         <button
                             className="px-4 py-2 text-sm text-red-600 border border-red-600 rounded hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2"
                             onClick={handleDelete}
@@ -440,12 +458,12 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                             {isDeleting ? 'Deleting...' : 'Delete'}
                         </button>
                     )}
-                    <button
+                    {!isMounted && <button
                         className="px-4 py-2 text-sm border rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2"
                         onClick={() => setShowHistory(true)}
                     >
                         History
-                    </button>
+                    </button>}
                 </div>
             </div>
             )}
@@ -503,6 +521,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                                     canEdit={canEdit}
                                     resolveProjectFilePath={resolveProjectFilePath}
                                     onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
+                                    mountedRelativePath={mountedRelativePath}
                                 />
                             ) : (
                                 <div className="w-full h-full flex flex-col p-4">
@@ -572,6 +591,7 @@ function ContentFileContentComponent({ fileId, projectId, hideHeader = false, ca
                                 canEdit={canEdit}
                                 resolveProjectFilePath={resolveProjectFilePath}
                                 onEditMarkdown={isMarkdown ? openMarkdownEditor : undefined}
+                                mountedRelativePath={mountedRelativePath}
                             />
                         </div>
                     </>
@@ -627,7 +647,8 @@ export const ContentFileContent = React.memo(ContentFileContentComponent, (prevP
         prevProps.fileId === nextProps.fileId &&
         prevProps.projectId === nextProps.projectId &&
         prevProps.hideHeader === nextProps.hideHeader &&
-        prevProps.canEdit === nextProps.canEdit
+        prevProps.canEdit === nextProps.canEdit &&
+        prevProps.mountedRelativePath === nextProps.mountedRelativePath
         // onDelete callback identity is ignored since it's stable now
     );
 });
