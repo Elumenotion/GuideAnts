@@ -39,5 +39,14 @@ public record IndexDirectTextFileJob(Guid FileId, bool IsContentFile);
 
 public record RetentionCleanupJob(Guid PublishedGuideId);
 
+public record ProjectScheduledJobExecutionJob(Guid ScheduledJobId, string TriggeredBy)
+{
+    /// <summary>
+    /// Must match <c>BackgroundJobs:JobTypes:ProjectScheduledJobExecution</c> in appsettings.
+    /// Do not derive from the type name — <c>ProjectScheduledJobExecutionJob</c> contains "Job" twice.
+    /// </summary>
+    public const string JobType = "ProjectScheduledJobExecution";
+}
+
 public record RebuildEmbeddingsJob;
 

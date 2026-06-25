@@ -6,6 +6,7 @@ export interface AssistantButtonProps {
   assistant?: AssistantOption;
   disabled?: boolean;
   onClick?: () => void;
+  className?: string;
   'aria-expanded'?: boolean;
   'aria-haspopup'?: 'listbox' | 'menu' | 'tree' | 'grid' | 'dialog' | boolean;
 }
@@ -14,6 +15,7 @@ const AssistantButton = forwardRef<HTMLButtonElement, AssistantButtonProps>(({
   assistant,
   disabled = false,
   onClick,
+  className = '',
   ...ariaProps
 }, ref) => {
   // Resolve absolute avatar URL (same logic as before)
@@ -35,6 +37,7 @@ const AssistantButton = forwardRef<HTMLButtonElement, AssistantButtonProps>(({
         hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500
         disabled:opacity-50 disabled:cursor-not-allowed
         transition-colors duration-150
+        ${className}
       `}
       {...ariaProps}
     >

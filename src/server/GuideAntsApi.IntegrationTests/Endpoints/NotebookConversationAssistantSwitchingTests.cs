@@ -183,6 +183,13 @@ public class NotebookConversationAssistantSwitchingTests
             return conversation.AssistantName != requestedAssistant;
         }
 
+        public IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsUserAsync(
+            Guid conversationId,
+            SendMessageRequest request,
+            Guid actingUserId,
+            CancellationToken cancellationToken = default) =>
+            SendMessageStreamToConversationAsync(conversationId, request, cancellationToken);
+
         public Task UndoLastForConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task UndoForConversationAsync(Guid conversationId, Guid messageId) => throw new NotImplementedException();
         public Task<PagedUserConversationsDto> GetUserConversationsAsync(UserConversationsQuery query)

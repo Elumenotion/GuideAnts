@@ -396,11 +396,19 @@ public static class StartupConfiguration
         services.AddJobHandler<GuideAntsApi.BackgroundJobs.Jobs.IndexAssistantFileMarkdownShadowHandler>();
         services.AddJobHandler<GuideAntsApi.BackgroundJobs.Jobs.RebuildEmbeddingsHandler>();
         services.AddJobHandler<GuideAntsApi.BackgroundJobs.Jobs.RetentionCleanupHandler>();
+        services.AddJobHandler<GuideAntsApi.Services.Scheduling.ProjectScheduledJobExecutionHandler>();
 
+        services.AddScoped<GuideAntsApi.Services.Scheduling.ICronScheduleService, GuideAntsApi.Services.Scheduling.CronScheduleService>();
+        services.AddScoped<GuideAntsApi.Services.Scheduling.IScheduleBuilderService, GuideAntsApi.Services.Scheduling.ScheduleBuilderService>();
+        services.AddScoped<GuideAntsApi.Services.Scheduling.IProjectScheduledJobService, GuideAntsApi.Services.Scheduling.ProjectScheduledJobService>();
+        services.AddScoped<GuideAntsApi.Services.Scheduling.IProjectScheduledJobExecutor, GuideAntsApi.Services.Scheduling.ProjectScheduledJobExecutor>();
 
         // Retention cleanup scheduler
         services.Configure<GuideAntsApi.BackgroundJobs.Options.RetentionCleanupOptions>(configuration.GetSection(GuideAntsApi.BackgroundJobs.Options.RetentionCleanupOptions.SectionName));
         services.AddHostedService<GuideAntsApi.BackgroundJobs.Services.RetentionCleanupScheduler>();
+
+        services.Configure<GuideAntsApi.BackgroundJobs.Options.ProjectScheduledJobOptions>(configuration.GetSection(GuideAntsApi.BackgroundJobs.Options.ProjectScheduledJobOptions.SectionName));
+        services.AddHostedService<GuideAntsApi.Services.Scheduling.ProjectScheduledJobScheduler>();
         phaseLogger?.Invoke("ConfigureServices.RegisterServices.BackgroundJobs");
         
         // Keep existing services but they will now enqueue jobs instead of direct processing

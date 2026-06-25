@@ -2187,6 +2187,137 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.ToTable("ProjectFolders");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectScheduledJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AssistantName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("ConversationTitle")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CronExpression")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<byte>("JobType")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte?>("LastRunStatus")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime?>("LastRunUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("NextRunUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("NotebookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Prompt")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid?>("ScriptNotebookFileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("NotebookId");
+
+                    b.HasIndex("ScriptNotebookFileId");
+
+                    b.HasIndex("ProjectId", "Name")
+                        .IsUnique();
+
+                    b.HasIndex("ProjectId", "IsEnabled", "NextRunUtc");
+
+                    b.ToTable("ProjectScheduledJobs");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectScheduledJobRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedConversationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int?>("ExitCode")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ScheduledJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("StandardError")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("StandardOutput")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("StartedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte>("TriggeredBy")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScheduledJobId", "StartedUtc");
+
+                    b.ToTable("ProjectScheduledJobRuns");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.PublishedGuide", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3536,6 +3667,51 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectScheduledJob", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GuideAntsApi.DataModel.Models.Notebook", "Notebook")
+                        .WithMany()
+                        .HasForeignKey("NotebookId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GuideAntsApi.DataModel.Models.Project", "Project")
+                        .WithMany("ScheduledJobs")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("GuideAntsApi.DataModel.Models.NotebookFile", "ScriptNotebookFile")
+                        .WithMany()
+                        .HasForeignKey("ScriptNotebookFileId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Notebook");
+
+                    b.Navigation("Project");
+
+                    b.Navigation("ScriptNotebookFile");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectScheduledJobRun", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.ProjectScheduledJob", "ScheduledJob")
+                        .WithMany("Runs")
+                        .HasForeignKey("ScheduledJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ScheduledJob");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.PublishedGuide", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.Assistant", "Guide")
@@ -3724,6 +3900,8 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.Navigation("Notebooks");
 
+                    b.Navigation("ScheduledJobs");
+
                     b.Navigation("SemiStructuredDatas");
                 });
 
@@ -3732,6 +3910,11 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("ContentFiles");
 
                     b.Navigation("SubFolders");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ProjectScheduledJob", b =>
+                {
+                    b.Navigation("Runs");
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.SemiStructuredProjectData", b =>

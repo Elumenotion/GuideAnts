@@ -10,6 +10,8 @@ export interface AssistantDropdownProps {
   onSelect: (assistantName: string) => void;
   className?: string;
   disabled?: boolean;
+  fullWidth?: boolean;
+  searchPlaceholder?: string;
   'data-tour-id'?: string;
 }
 
@@ -19,6 +21,8 @@ export default function AssistantDropdown({
   onSelect,
   className = '',
   disabled = false,
+  fullWidth = false,
+  searchPlaceholder = 'Search guides by name',
   'data-tour-id': dataTourId,
 }: AssistantDropdownProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -53,20 +57,22 @@ export default function AssistantDropdown({
     <CustomDropdown
       className={className}
       disabled={disabled}
+      fullWidth={fullWidth}
       onOpenChange={handleOpenChange}
       data-tour-id={dataTourId}
       trigger={
         <AssistantButton
           assistant={selectedAssistant}
           disabled={disabled}
+          className={fullWidth ? 'w-full' : ''}
         />
       }
     >
-      <DropdownPanel width="w-80" maxHeight="max-h-96">
+      <DropdownPanel width={fullWidth ? 'w-full' : 'w-80'} maxHeight="max-h-96">
         <DropdownSearch
           value={searchQuery}
           onChange={setSearchQuery}
-          placeholder="Search guides by name"
+          placeholder={searchPlaceholder}
         />
         
         <div className="overflow-y-auto max-h-80">
