@@ -253,6 +253,8 @@ namespace AntRunner.Chat
             }
 
             var tools = new List<ChatToolDefinition>();
+            var clientHandledToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var registeredToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             if (assistantDef.Tools != null)
             {
@@ -266,7 +268,28 @@ namespace AntRunner.Chat
                         var newFunction = new ChatFunctionDefinition(function.Name!, function.Description, functionParametersJsonNode);
                         var newTool = new ChatToolDefinition(newFunction);
                         tools.Add(newTool);
+                        registeredToolNames.Add(function.Name!);
                     }
+                }
+            }
+
+            if (options.ClientToolDefinitions != null)
+            {
+                foreach (var clientTool in options.ClientToolDefinitions)
+                {
+                    var functionName = clientTool.Function?.Name;
+                    if (string.IsNullOrWhiteSpace(functionName))
+                    {
+                        continue;
+                    }
+
+                    if (!registeredToolNames.Add(functionName))
+                    {
+                        continue;
+                    }
+
+                    tools.Add(clientTool);
+                    clientHandledToolNames.Add(functionName);
                 }
             }
 
@@ -346,22 +369,9 @@ namespace AntRunner.Chat
                                 // Partition tool calls into client-handled vs server-handled based on ActionType
                                 await EnsureRequestBuilderCache(assistantDef.Name!);
                                 var cacheKeyPartition = GenerateRequestBuilderCacheKey(assistantDef.Name!);
-                                if (!RequestBuilderCache.TryGetValue(cacheKeyPartition, out var buildersPartition) || buildersPartition.Count == 0)
+                                if (!RequestBuilderCache.TryGetValue(cacheKeyPartition, out var buildersPartition))
                                 {
-                                    // If no builders available, fall back to executing as server-handled
-                                    var (newFiles, modifiedFiles) = await DoToolCalls(
-                                        assistantDef,
-                                        choice.Message.ToolCalls!,
-                                        messages,
-                                        externalAuthTokens: options.ExternalAuthTokens,
-                                        oAuthUserAccessToken: options.oAuthUserAccessToken,
-                                        httpClient: httpClient,
-                                        messageAdded: onMessage,
-                                        ctx: ctx,
-                                        cancellationToken: token);
-                                    foreach (var f in newFiles) accumulatedNewFiles.Add(f);
-                                    foreach (var f in modifiedFiles) accumulatedModifiedFiles.Add(f);
-                                    break;
+                                    buildersPartition = new Dictionary<string, ToolCaller>(StringComparer.OrdinalIgnoreCase);
                                 }
 
                                 var clientHandled = new List<ChatToolCall>();
@@ -373,6 +383,13 @@ namespace AntRunner.Chat
                                         serverHandled.Add(tc);
                                         continue;
                                     }
+
+                                    if (clientHandledToolNames.Contains(tc.Function.Name))
+                                    {
+                                        clientHandled.Add(tc);
+                                        continue;
+                                    }
+
                                     if (buildersPartition.TryGetValue(tc.Function.Name, out var b))
                                     {
                                         if (b.ActionType == ActionType.ClientHandled)

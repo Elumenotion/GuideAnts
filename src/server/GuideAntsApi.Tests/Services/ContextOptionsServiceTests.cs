@@ -4,6 +4,7 @@ using AntRunner.ToolCalling.AssistantDefinitions;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Services;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.UserProjectContextOptions;
@@ -110,7 +111,8 @@ public sealed class ContextOptionsServiceTests
         return new ContextOptionsService(
             db,
             currentUserService,
-            new UserProjectContextOptionsService(db));
+            new UserProjectContextOptionsService(db),
+            new LegacyStoragePathResolver(Path.Combine(Path.GetTempPath(), "context-options-missing-" + Guid.NewGuid().ToString("N"))));
     }
 
     private sealed class TestUserContext : IUserContext

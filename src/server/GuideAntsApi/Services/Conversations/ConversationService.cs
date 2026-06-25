@@ -369,6 +369,7 @@ public class ConversationService : IConversationService
                 Instructions = ctx.Request.Instructions,
                 oAuthUserAccessToken = ctx.ExternalAuthTokens.FirstOrDefault().Value,
                 ExternalAuthTokens = ctx.ExternalAuthTokens,
+                ClientToolDefinitions = ctx.Request.ClientToolDefinitions,
                 ExecutionPolicy = ctx.ExecutionPolicy
             },
             PreviousMessages = ctx.PreviousMessages,

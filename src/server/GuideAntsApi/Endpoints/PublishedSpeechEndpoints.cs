@@ -30,14 +30,26 @@ public static class PublishedSpeechEndpoints
                 return Results.BadRequest(new { error = "Missing 'pubId' query parameter." });
             }
 
+            // Speech-to-text is a chat component feature, not a wire API endpoint, so it is
+            // gated by the published guide's ShowSpeechToText setting rather than wire API flags.
             var resolution = await executionContextResolver.ResolveAsync(
                 ctx,
                 pubId.Value,
                 endpointName: "audio.transcriptions",
+                requireWireApiEnabled: false,
+                sourceChannel: "published_chat",
                 ct: ctx.RequestAborted);
             if (!resolution.Success)
             {
                 return resolution.ErrorResult!;
+            }
+
+            // Disabling speech-to-text for the guide also disables the ASR endpoint.
+            if (!resolution.Context!.PublishedGuide.ShowSpeechToText)
+            {
+                return Results.Json(
+                    new { error = "speech_to_text_disabled", message = "Speech-to-text is disabled for this published guide." },
+                    statusCode: StatusCodes.Status403Forbidden);
             }
 
             // Validate form data

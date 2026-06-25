@@ -82,6 +82,7 @@ public class PublishedConversationService : IPublishedConversationService
         string? publisherId,
         string? externalUserIdentity,
         Guid? internalUserId = null,
+        IReadOnlyList<ChatToolDefinition>? clientToolDefinitions = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var user = await _streamPolicy.ResolveUserIdentityAsync(internalUserId, externalUserIdentity, cancellationToken);
@@ -132,7 +133,7 @@ public class PublishedConversationService : IPublishedConversationService
             dbConversation,
             assistantName,
             clientContext: null,
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         var assistantDefForResume = await AssistantUtility.GetAssistantCreateRequest(assistantName)
             ?? throw new InvalidOperationException($"Assistant definition not found for {assistantName}");
@@ -165,6 +166,7 @@ public class PublishedConversationService : IPublishedConversationService
                 AssistantName = assistantName,
                 Instructions = string.Empty,
                 DeploymentId = resolvedResume.ModelId,
+                ClientToolDefinitions = clientToolDefinitions,
                 ExecutionPolicy = resolvedResume.ExecutionPolicy
             },
             PreviousMessages = previousMessages,
@@ -249,6 +251,7 @@ public class PublishedConversationService : IPublishedConversationService
                 dbConversation,
                 assistantName,
                 request.ClientContext,
+                request.ClientMessages,
                 cancellationToken));
 
             var turnResult = await _persistence.CreateNextTurnAsync(
@@ -314,6 +317,7 @@ public class PublishedConversationService : IPublishedConversationService
                 DeploymentId = modelDeploymentId,
                 Instructions = request.Instructions,
                 ExternalAuthTokens = request.ExternalAuthTokens,
+                ClientToolDefinitions = request.ClientToolDefinitions,
                 ExecutionPolicy = executionPolicy
             },
             PreviousMessages = previousMessages,

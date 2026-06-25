@@ -741,6 +741,11 @@ namespace GuideAntsApi.DataModel
                  .IsRequired()
                  .HasDefaultValue(PublishedGuideAuthMode.Anonymous);
 
+                // Speech-to-text (voice input) is enabled by default for published guides.
+                b.Property(x => x.ShowSpeechToText)
+                 .IsRequired()
+                 .HasDefaultValue(true);
+
                 // Index for looking up all published guides for a specific guide
                 b.HasIndex(x => x.GuideId);
                 
