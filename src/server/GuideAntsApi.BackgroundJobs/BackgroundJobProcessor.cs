@@ -93,6 +93,17 @@ public class BackgroundJobProcessor : BackgroundService
             _logger.LogDebug("Registered job handler for type: {JobType}", handler.JobType);
         }
 
+        var unconfiguredHandlers = _jobHandlers.Keys
+            .Where(jobType => !_options.JobTypes.ContainsKey(jobType))
+            .OrderBy(jobType => jobType, StringComparer.Ordinal)
+            .ToList();
+
+        if (unconfiguredHandlers.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Background job handler(s) registered without matching BackgroundJobs:JobTypes configuration: {string.Join(", ", unconfiguredHandlers)}");
+        }
+
         _logger.LogInformation("Initialized {HandlerCount} job handlers", _jobHandlers.Count);
         return Task.CompletedTask;
     }

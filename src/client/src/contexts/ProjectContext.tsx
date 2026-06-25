@@ -31,7 +31,7 @@ const initialState: ProjectState = {
     error: null,
     isLoading: true,
     selectedItem: null,
-    expandedSections: new Set(['notebooks', 'contentFiles', 'artifacts', 'guideAuthorization']),
+    expandedSections: new Set(['notebooks', 'contentFiles', 'artifacts', 'guideAuthorization', 'jobSchedule']),
     folderTree: null,
     currentUserEmail: null,
 };

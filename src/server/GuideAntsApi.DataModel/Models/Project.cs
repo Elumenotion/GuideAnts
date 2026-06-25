@@ -38,6 +38,7 @@ namespace GuideAntsApi.DataModel.Models
         public ICollection<SemiStructuredProjectData> SemiStructuredDatas { get; set; } = [];
         public ICollection<ProjectExternalAuth> ExternalAuths { get; set; } = [];
         public ICollection<ProjectAssistantEnvironment> AssistantEnvironments { get; set; } = [];
+        public ICollection<ProjectScheduledJob> ScheduledJobs { get; set; } = [];
 
         [Required]
         public DateTime Created { get; set; } = DateTime.UtcNow;

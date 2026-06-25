@@ -13,6 +13,12 @@ public interface IConversationService
     Task DeleteConversationAsync(Guid conversationId);
     
     IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsync(Guid conversationId, SendMessageRequest request, CancellationToken cancellationToken = default);
+
+    IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsUserAsync(
+        Guid conversationId,
+        SendMessageRequest request,
+        Guid actingUserId,
+        CancellationToken cancellationToken = default);
     
     Task EditMessageAsync(Guid messageId, string newContent);
     Task UndoLastForConversationAsync(Guid conversationId);

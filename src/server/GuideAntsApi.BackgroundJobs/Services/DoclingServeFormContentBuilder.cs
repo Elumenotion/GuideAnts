@@ -92,11 +92,7 @@ internal static class DoclingServeFormContentBuilder
             ".xlsx" => "xlsx",
             ".pptx" => "pptx",
             ".html" or ".htm" => "html",
-            ".jpg" or ".jpeg" => "jpg",
-            ".png" => "png",
-            ".bmp" => "bmp",
-            ".tiff" => "tiff",
-            ".heif" => "heif",
+            ".jpg" or ".jpeg" or ".png" or ".bmp" or ".tiff" or ".heif" => "image",
             _ => null
         };
     }

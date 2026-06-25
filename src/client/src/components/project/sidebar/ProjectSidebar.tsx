@@ -14,6 +14,11 @@ import { useListKeyboardNavigation } from '../../../hooks/useListKeyboardNavigat
 import { useSidebarKeyboardShortcuts } from '../../../hooks/useSidebarKeyboardShortcuts';
 import { useSidebarSelectionCoordinator } from '../../../hooks/useSidebarSelectionCoordinator';
 import { useLongPress } from '../../../hooks/useLongPress';
+import { useProjectScheduledJobsPolling } from '../../../hooks/useProjectScheduledJobsPolling';
+import { CreateEditScheduledJobDialog } from '../dialogs/CreateEditScheduledJobDialog';
+import { ScheduledJobRunHistoryDialog } from '../dialogs/ScheduledJobRunHistoryDialog';
+import { scheduledJobsApi } from '../../../services/scheduledJobs';
+import type { ProjectScheduledJobDetailDto, ProjectScheduledJobSummaryDto } from '../../../types/scheduledJob';
 
 // Props for the extracted NotebookListItem component
 interface NotebookListItemProps {
@@ -305,6 +310,28 @@ export function ProjectSidebar({
     const [authTemplates, setAuthTemplates] = useState<NotebookTemplateSummaryDto[]>([]);
     const [isLoadingAuthTemplates, setIsLoadingAuthTemplates] = useState(false);
 
+    const [showCreateScheduledJobDialog, setShowCreateScheduledJobDialog] = useState(false);
+    const [editingScheduledJob, setEditingScheduledJob] = useState<ProjectScheduledJobDetailDto | null>(null);
+    const [historyScheduledJob, setHistoryScheduledJob] = useState<ProjectScheduledJobSummaryDto | null>(null);
+
+    const isScheduledJobDialogOpen =
+        showCreateScheduledJobDialog || Boolean(historyScheduledJob);
+
+    const {
+        jobs: scheduledJobs,
+        isLoading: isLoadingScheduledJobs,
+        refresh: refreshScheduledJobs,
+    } = useProjectScheduledJobsPolling({
+        projectId: project.id,
+        enabled: isCurrentUserOwner && !isScheduledJobDialogOpen,
+    });
+    const [showScheduledJobContextMenu, setShowScheduledJobContextMenu] = useState(false);
+    const [scheduledJobContextMenuPos, setScheduledJobContextMenuPos] = useState({ x: 0, y: 0 });
+    const [selectedContextScheduledJobId, setSelectedContextScheduledJobId] = useState<string | null>(null);
+    const [showDeleteScheduledJobConfirm, setShowDeleteScheduledJobConfirm] = useState(false);
+    const [scheduledJobToDelete, setScheduledJobToDelete] = useState<string | null>(null);
+    const [isScheduledJobActionPending, setIsScheduledJobActionPending] = useState(false);
+
     // Use polled notebooks if provided, otherwise fall back to project.notebooks
     const currentNotebooks = notebooks || project.notebooks;
 
@@ -347,12 +374,14 @@ export function ProjectSidebar({
         const handleClickOutside = () => {
             setShowLinkContextMenu(false);
             setShowNotebookContextMenu(false);
+            setShowScheduledJobContextMenu(false);
         };
         document.addEventListener('click', handleClickOutside);
 
         const globalCloseHandler = () => {
             setShowLinkContextMenu(false);
             setShowNotebookContextMenu(false);
+            setShowScheduledJobContextMenu(false);
         };
         window.addEventListener('close-context-menus', globalCloseHandler);
 
@@ -463,6 +492,138 @@ export function ProjectSidebar({
         setSelectedContextNotebookId(notebookId);
         setNotebookContextMenuPos({ x: e.clientX, y: e.clientY });
         setShowNotebookContextMenu(true);
+    };
+
+    const handleScheduledJobContextMenu = (e: React.MouseEvent, jobId: string) => {
+        if (disabled) return;
+        window.dispatchEvent(new Event('close-context-menus'));
+        e.preventDefault();
+        e.stopPropagation();
+        setSelectedContextScheduledJobId(jobId);
+        setScheduledJobContextMenuPos({ x: e.clientX, y: e.clientY });
+        setShowScheduledJobContextMenu(true);
+    };
+
+    const selectedScheduledJob = scheduledJobs.find((job) => job.id === selectedContextScheduledJobId) ?? null;
+
+    const handleEditScheduledJob = async () => {
+        if (!selectedContextScheduledJobId) {
+            setShowScheduledJobContextMenu(false);
+            return;
+        }
+        try {
+            const detail = await scheduledJobsApi.get(project.id, selectedContextScheduledJobId);
+            setEditingScheduledJob(detail);
+            setShowCreateScheduledJobDialog(true);
+        } catch (error) {
+            showToast({
+                type: 'error',
+                title: 'Failed to load scheduled job',
+                message: error instanceof Error ? error.message : 'Please try again.',
+            });
+        } finally {
+            setShowScheduledJobContextMenu(false);
+        }
+    };
+
+    const handleToggleScheduledJob = async () => {
+        if (!selectedScheduledJob) {
+            setShowScheduledJobContextMenu(false);
+            return;
+        }
+        setIsScheduledJobActionPending(true);
+        try {
+            const detail = await scheduledJobsApi.get(project.id, selectedScheduledJob.id);
+            await scheduledJobsApi.update(project.id, selectedScheduledJob.id, {
+                name: detail.name,
+                jobType: detail.jobType,
+                notebookId: detail.notebookId,
+                isEnabled: !detail.isEnabled,
+                timeZoneId: detail.timeZoneId,
+                schedule: detail.friendlySchedule,
+                conversationTitle: detail.conversationTitle,
+                prompt: detail.prompt,
+                assistantName: detail.assistantName,
+                scriptNotebookFileId: detail.scriptNotebookFileId,
+            });
+            refreshScheduledJobs();
+        } catch (error) {
+            showToast({
+                type: 'error',
+                title: 'Failed to update scheduled job',
+                message: error instanceof Error ? error.message : 'Please try again.',
+            });
+        } finally {
+            setIsScheduledJobActionPending(false);
+            setShowScheduledJobContextMenu(false);
+        }
+    };
+
+    const handleRunScheduledJobNow = async () => {
+        if (!selectedContextScheduledJobId) {
+            setShowScheduledJobContextMenu(false);
+            return;
+        }
+        const jobId = selectedContextScheduledJobId;
+        setIsScheduledJobActionPending(true);
+        try {
+            await scheduledJobsApi.runNow(project.id, jobId);
+            onItemSelect('jobSchedule', jobId);
+            window.dispatchEvent(new CustomEvent('scheduled-job-run-triggered', { detail: { jobId } }));
+            showToast({
+                type: 'success',
+                title: 'Run started',
+                message: 'The job is running. Check run history for status and output.',
+            });
+            refreshScheduledJobs();
+        } catch (error) {
+            showToast({
+                type: 'error',
+                title: 'Failed to run job',
+                message: error instanceof Error ? error.message : 'Please try again.',
+            });
+        } finally {
+            setIsScheduledJobActionPending(false);
+            setShowScheduledJobContextMenu(false);
+        }
+    };
+
+    const handleDeleteScheduledJobRequest = () => {
+        if (!selectedContextScheduledJobId) {
+            setShowScheduledJobContextMenu(false);
+            return;
+        }
+        setScheduledJobToDelete(selectedContextScheduledJobId);
+        setShowDeleteScheduledJobConfirm(true);
+        setShowScheduledJobContextMenu(false);
+    };
+
+    const handleDeleteScheduledJobConfirm = async () => {
+        if (!scheduledJobToDelete) {
+            return;
+        }
+        try {
+            await scheduledJobsApi.delete(project.id, scheduledJobToDelete);
+            refreshScheduledJobs();
+        } catch (error) {
+            showToast({
+                type: 'error',
+                title: 'Failed to delete scheduled job',
+                message: error instanceof Error ? error.message : 'Please try again.',
+            });
+        } finally {
+            setShowDeleteScheduledJobConfirm(false);
+            setScheduledJobToDelete(null);
+        }
+    };
+
+    const handleViewScheduledJobHistory = () => {
+        if (!selectedScheduledJob) {
+            setShowScheduledJobContextMenu(false);
+            return;
+        }
+        setHistoryScheduledJob(selectedScheduledJob);
+        setShowScheduledJobContextMenu(false);
     };
 
     const handleCopyNotebookInternal = async () => {
@@ -964,6 +1125,50 @@ export function ProjectSidebar({
                   
 
 
+                    {isCurrentUserOwner && (
+                        <SidebarSection
+                            title="Job Schedule"
+                            type="jobSchedule"
+                            isExpanded={expandedSections.has('jobSchedule')}
+                            onToggle={() => onSectionToggle('jobSchedule')}
+                            onSelect={onItemSelect}
+                            selectedItem={selectedItem}
+                            items={scheduledJobs.map((job) => ({ id: job.id, label: job.name }))}
+                            onAdd={() => {
+                                setEditingScheduledJob(null);
+                                setShowCreateScheduledJobDialog(true);
+                            }}
+                            showAddButton
+                            disabled={disabled || isLoadingScheduledJobs || isScheduledJobActionPending}
+                            data-tour-id="sidebar.section.jobSchedule"
+                        >
+                            {scheduledJobs.length === 0 ? (
+                                <p className="px-2 py-1 text-xs text-gray-500">No scheduled jobs yet.</p>
+                            ) : (
+                                scheduledJobs.map((job) => (
+                                    <button
+                                        key={job.id}
+                                        type="button"
+                                        onClick={() => onItemSelect('jobSchedule', job.id)}
+                                        onContextMenu={(e) => handleScheduledJobContextMenu(e, job.id)}
+                                        className={`w-full text-left py-1 px-2 text-sm rounded ${
+                                            selectedItem?.type === 'jobSchedule' && selectedItem.id === job.id
+                                                ? 'text-blue-600 bg-blue-50'
+                                                : ''
+                                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                        disabled={disabled}
+                                        aria-label={`${job.name}, ${job.scheduleSummary}${job.isEnabled ? '' : ', disabled'}`}
+                                    >
+                                        <span className="block font-medium truncate">{job.name}</span>
+                                        <span className="block text-xs text-gray-500 truncate">{job.scheduleSummary}</span>
+                                        {!job.isEnabled && (
+                                            <span className="block text-xs text-amber-600">Disabled</span>
+                                        )}
+                                    </button>
+                                ))
+                            )}
+                        </SidebarSection>
+                    )}
 
                     {/* Guide Authorization (Owners only, only when there are items) */}
                     {isCurrentUserOwner && authTemplates.length > 0 && (
@@ -1125,6 +1330,86 @@ export function ProjectSidebar({
                 confirmText="Delete"
                 cancelText="Cancel"
             />
+
+            {isCurrentUserOwner && (
+                <>
+                    <CreateEditScheduledJobDialog
+                        projectId={project.id}
+                        isOpen={showCreateScheduledJobDialog}
+                        onClose={() => {
+                            setShowCreateScheduledJobDialog(false);
+                            setEditingScheduledJob(null);
+                        }}
+                        onSaved={refreshScheduledJobs}
+                        notebooks={currentNotebooks}
+                        job={editingScheduledJob}
+                        disabled={disabled || isScheduledJobActionPending}
+                    />
+
+                    {historyScheduledJob && (
+                        <ScheduledJobRunHistoryDialog
+                            projectId={project.id}
+                            job={historyScheduledJob}
+                            isOpen={Boolean(historyScheduledJob)}
+                            onClose={() => setHistoryScheduledJob(null)}
+                        />
+                    )}
+
+                    {showScheduledJobContextMenu && !disabled && createPortal(
+                        <div
+                            className="fixed bg-white shadow-lg rounded-lg py-1 z-[9999]"
+                            style={{ top: scheduledJobContextMenuPos.y, left: scheduledJobContextMenuPos.x }}
+                            onClick={(e) => e.stopPropagation()}
+                            data-tour-id="scheduled-job.context-menu"
+                        >
+                            <button
+                                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                                onClick={handleEditScheduledJob}
+                            >
+                                Edit
+                            </button>
+                            <button
+                                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                                onClick={handleToggleScheduledJob}
+                            >
+                                {selectedScheduledJob?.isEnabled ? 'Disable' : 'Enable'}
+                            </button>
+                            <button
+                                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                                onClick={handleRunScheduledJobNow}
+                            >
+                                Run now
+                            </button>
+                            <button
+                                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100"
+                                onClick={handleViewScheduledJobHistory}
+                            >
+                                View history
+                            </button>
+                            <button
+                                className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100"
+                                onClick={handleDeleteScheduledJobRequest}
+                            >
+                                Delete
+                            </button>
+                        </div>,
+                        document.body,
+                    )}
+
+                    <ConfirmationDialog
+                        isOpen={showDeleteScheduledJobConfirm}
+                        onClose={() => {
+                            setShowDeleteScheduledJobConfirm(false);
+                            setScheduledJobToDelete(null);
+                        }}
+                        onConfirm={handleDeleteScheduledJobConfirm}
+                        title="Confirm Deletion"
+                        message="Are you sure you want to delete this scheduled job and its run history?"
+                        confirmText="Delete"
+                        cancelText="Cancel"
+                    />
+                </>
+            )}
         </>
     );
 } 

@@ -116,6 +116,13 @@ public class NotebookConversationStreamingToolCallsTests
             yield return new StreamingEvent(StreamingEventTypes.Complete, "{}");
         }
 
+        public IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsUserAsync(
+            Guid conversationId,
+            SendMessageRequest request,
+            Guid actingUserId,
+            CancellationToken cancellationToken = default) =>
+            SendMessageStreamToConversationAsync(conversationId, request, cancellationToken);
+
         public Task UndoLastForConversationAsync(Guid conversationId) => throw new NotImplementedException();
         public Task UndoForConversationAsync(Guid conversationId, Guid messageId) => throw new NotImplementedException();
         public Task<PagedUserConversationsDto> GetUserConversationsAsync(UserConversationsQuery query)
@@ -358,5 +365,12 @@ public class NotebookConversationStreamingToolCallsTests
             yield return new StreamingEvent(StreamingEventTypes.Usage, JsonSerializer.Serialize(new { promptTokens = 5, completionTokens = 10, totalTokens = 15 }));
             yield return new StreamingEvent(StreamingEventTypes.Complete, "{}");
         }
+
+        public IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsUserAsync(
+            Guid conversationId,
+            SendMessageRequest request,
+            Guid actingUserId,
+            CancellationToken cancellationToken = default) =>
+            SendMessageStreamToConversationAsync(conversationId, request, cancellationToken);
     }
 } 

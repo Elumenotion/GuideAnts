@@ -6,6 +6,7 @@ export interface CustomDropdownProps extends UseDropdownOptions {
   children: ReactNode;
   className?: string;
   disabled?: boolean;
+  fullWidth?: boolean;
   'data-tour-id'?: string;
 }
 
@@ -14,13 +15,17 @@ export default function CustomDropdown({
   children,
   className = '',
   disabled = false,
+  fullWidth = false,
   'data-tour-id': dataTourId,
   ...dropdownOptions
 }: CustomDropdownProps) {
   const { isOpen, toggle, close, dropdownRef, triggerRef } = useDropdown(dropdownOptions);
 
   return (
-    <div className={`relative inline-block ${className}`} ref={dropdownRef}>
+    <div
+      className={`relative ${fullWidth ? 'block w-full' : 'inline-block'} ${className}`}
+      ref={dropdownRef}
+    >
       {/* Trigger Button */}
       <div>
         {React.cloneElement(trigger as React.ReactElement<any>, {
@@ -34,8 +39,8 @@ export default function CustomDropdown({
 
       {/* Dropdown Panel */}
       {isOpen && !disabled && (
-        <div 
-          className="absolute top-full right-0 z-50 mt-1"
+        <div
+          className={`absolute top-full z-50 mt-1 ${fullWidth ? 'left-0 w-full' : 'right-0'}`}
           data-tour-id={dataTourId}
           onClick={(e) => {
             // Close dropdown when clicking on option buttons

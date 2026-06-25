@@ -403,6 +403,7 @@ public class Program
         app.MapProjectExternalAuthEndpoints();
         app.MapHostFolderMountEndpoints();
         app.MapHostFolderMountInternalEndpoints();
+        app.MapProjectScheduledJobEndpoints();
         app.MapNotebookFileMarkdownEndpoints();
         app.MapFileLineageEndpoints();
         app.MapUsageEndpoints();

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 
@@ -259,6 +260,23 @@ public class JobQueueService : IJobQueueService
         await using var context = await _dbFactory.CreateDbContextAsync(ct);
 
         var now = DateTime.UtcNow;
+
+        var scheduledInterrupted = await context.JobQueue
+            .Where(j => j.Status == JobStatus.Processing && j.JobType == ProjectScheduledJobExecutionJob.JobType)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, JobStatus.Failed)
+                .SetProperty(j => j.ClaimToken, Guid.Empty)
+                .SetProperty(j => j.LeaseUntil, (DateTime?)null)
+                .SetProperty(j => j.ErrorMessage, "Interrupted by process restart; scheduled jobs are not automatically retried.")
+                .SetProperty(j => j.UpdatedUtc, now), ct);
+
+        if (scheduledInterrupted > 0)
+        {
+            _logger.LogInformation(
+                "Marked {Count} interrupted scheduled job queue items as failed on startup",
+                scheduledInterrupted);
+        }
+
         var affected = await context.JobQueue
             .Where(j => j.Status == JobStatus.Processing)
             .ExecuteUpdateAsync(s => s
