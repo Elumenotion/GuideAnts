@@ -99,6 +99,18 @@ public abstract class BaseEndpointTest : BaseIntegrationTest
         // system-project notebooks and would block the notebook delete below.
         await dbContext.Database.ExecuteSqlRawAsync(@"DELETE FROM PublishedGuides;");
 
+        // Delete scheduled job runs and jobs before notebooks (FK_ProjectScheduledJobs_Notebooks_NotebookId).
+        await dbContext.Database.ExecuteSqlRawAsync(
+            @"DELETE psjr FROM ProjectScheduledJobRuns psjr
+              INNER JOIN ProjectScheduledJobs psj ON psjr.ScheduledJobId = psj.Id
+              INNER JOIN Projects p ON psj.ProjectId = p.Id
+              ;");
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            @"DELETE psj FROM ProjectScheduledJobs psj
+              INNER JOIN Projects p ON psj.ProjectId = p.Id
+              ;");
+
         // Delete notebooks
         await dbContext.Database.ExecuteSqlRawAsync(
             @"DELETE n FROM Notebooks n 

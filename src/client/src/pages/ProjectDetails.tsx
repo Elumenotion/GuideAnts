@@ -7,7 +7,8 @@ import { ProjectSidebar } from '../components/project/sidebar/ProjectSidebar';
 import {
     ContentFileContent,
     LinkContent,
-    ArtifactContent
+    ArtifactContent,
+    ScheduledJobContent,
 } from '../components/project/content';
 import { AddLinkForm } from '../components/project/content/AddLinkForm';
 import { AddFolderContent } from '../components/project/content/AddFolderContent';
@@ -195,8 +196,8 @@ export default function ProjectDetails() {
             }
         },
         {
-            target: '[data-tour-id="sidebar.section.members"]',
-            content: '👥 <strong>Collaborators</strong>: <strong>View</strong> and <strong>manage</strong> your project\'s collaborators. <strong>Invite</strong> others by email and <strong>assign</strong> them as <strong>Contributors</strong> (can edit) or <strong>Readers</strong> (can view). <strong>Project owners</strong> oversee <strong>access</strong>, <strong>usage</strong>, and <strong>billing</strong>.'
+            target: '[data-tour-id="sidebar.section.jobSchedule"]',
+            content: '⏱️ <strong>Job Schedule</strong>: <strong>Admins</strong> can <strong>automate</strong> recurring work—schedule <strong>new notebook conversations</strong> or <strong>Python script</strong> runs. Jobs appear here with their <strong>schedule</strong>; right-click for <strong>edit</strong>, <strong>run now</strong>, and <strong>history</strong>.'
         },
         {
             target: '[data-tour-id="sidebar.section.guides"]',
@@ -810,6 +811,15 @@ export default function ProjectDetails() {
             case 'artifacts': {
                 const artifact = project.semiStructuredDatas.find(a => a.id === selectedItem.id);
                 return artifact ? <ArtifactContent artifact={artifact} canEdit={canEdit()} /> : null;
+            }
+            case 'jobSchedule': {
+                return (
+                    <ScheduledJobContent
+                        projectId={project.id}
+                        jobId={selectedItem.id}
+                        canRun={isOwner()}
+                    />
+                );
             }
             default:
                 return <div>Unknown content type</div>;

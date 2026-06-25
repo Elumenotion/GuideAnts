@@ -859,6 +859,7 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     var stdErrBuffer = new StringBuilder();
     HashSet<string> preExistingFiles = new(StringComparer.OrdinalIgnoreCase);
     var preSnapshotSucceeded = false;
+    int? exitCode = null;
 
     try
     {
@@ -943,10 +944,7 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
 
         stdOutBuffer.Append(run.StandardOutput);
         stdErrBuffer.Append(run.StandardError);
-        if (run.ExitCode != 0)
-        {
-            stdErrBuffer.AppendLine($"Script exited with code {run.ExitCode}");
-        }
+        exitCode = run.ExitCode;
 
         var preserveScriptForDebug = false;
         var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
@@ -1055,7 +1053,8 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     return new ScriptExecutionResult
     {
         StandardOutput = cleanedOutput,
-        StandardError = cleanedError
+        StandardError = cleanedError,
+        ExitCode = exitCode
     };
 }
 
@@ -3004,6 +3003,7 @@ public class ScriptExecutionResult
 {
     public string StandardOutput { get; set; } = string.Empty;
     public string StandardError { get; set; } = string.Empty;
+    public int? ExitCode { get; set; }
 }
 
 public class ScriptExecutionConfig

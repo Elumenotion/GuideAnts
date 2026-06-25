@@ -53,6 +53,19 @@ public sealed class DoclingServeFormContentBuilderTests
     }
 
     [TestMethod]
+    public void BuildConversionForm_MapsImageExtensionsToDoclingImageFormat()
+    {
+        using var stream = new MemoryStream([0x89, 0x50, 0x4E, 0x47]);
+        using var form = DoclingServeFormContentBuilder.BuildConversionForm(
+            stream,
+            "screenshot.png",
+            new DocumentIntelligenceOptions());
+
+        var fields = ReadMultipartFields(form);
+        fields.Should().ContainKey("from_formats").WhoseValue.Should().Be("image");
+    }
+
+    [TestMethod]
     public void ApplyAuthHeaders_AddsApiKeyHeader_WhenConfigured()
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "http://docling:5001/v1/convert/file/async");

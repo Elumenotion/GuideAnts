@@ -76,6 +76,8 @@ namespace GuideAntsApi.DataModel
         public DbSet<RuntimeProfile> RuntimeProfiles { get; set; } = null!;
         public DbSet<HostFolderMount> HostFolderMounts { get; set; } = null!;
         public DbSet<HostFolderMountLink> HostFolderMountLinks { get; set; } = null!;
+        public DbSet<ProjectScheduledJob> ProjectScheduledJobs { get; set; } = null!;
+        public DbSet<ProjectScheduledJobRun> ProjectScheduledJobRuns { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -1104,6 +1106,47 @@ namespace GuideAntsApi.DataModel
                     .WithMany()
                     .HasForeignKey(m => m.CreatedByUserId)
                     .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<ProjectScheduledJob>(b =>
+            {
+                b.Property(j => j.JobType).HasConversion<byte>();
+                b.Property(j => j.LastRunStatus).HasConversion<byte>();
+                b.Property(j => j.Prompt).HasColumnType("nvarchar(max)");
+                b.Property(j => j.RowVersion).IsRowVersion();
+
+                b.HasOne(j => j.Project)
+                    .WithMany(p => p.ScheduledJobs)
+                    .HasForeignKey(j => j.ProjectId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne(j => j.Notebook)
+                    .WithMany()
+                    .HasForeignKey(j => j.NotebookId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne(j => j.ScriptNotebookFile)
+                    .WithMany()
+                    .HasForeignKey(j => j.ScriptNotebookFileId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne(j => j.CreatedByUser)
+                    .WithMany()
+                    .HasForeignKey(j => j.CreatedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<ProjectScheduledJobRun>(b =>
+            {
+                b.Property(r => r.TriggeredBy).HasConversion<byte>();
+                b.Property(r => r.Status).HasConversion<byte>();
+                b.Property(r => r.StandardOutput).HasColumnType("nvarchar(max)");
+                b.Property(r => r.StandardError).HasColumnType("nvarchar(max)");
+
+                b.HasOne(r => r.ScheduledJob)
+                    .WithMany(j => j.Runs)
+                    .HasForeignKey(r => r.ScheduledJobId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<HostFolderMountLink>(b =>
