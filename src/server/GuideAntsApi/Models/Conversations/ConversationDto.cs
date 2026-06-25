@@ -99,7 +99,8 @@ public enum ContentUploadType
     ImageUrl,
     AudioFile,
     TextFile,
-    SandboxFile
+    SandboxFile,
+    Folder
 } 
 
 public record AttachmentDto(

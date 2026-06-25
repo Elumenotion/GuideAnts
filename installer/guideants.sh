@@ -800,10 +800,11 @@ apply_host_mount() {
 
   log "Creating host mount..."
   local create_body create_response create_http_code create_result
+  local json_safe_path="${MOUNT_PATH//\\/\\\\}"
   if [[ "$selected_scope" == "Notebook" ]]; then
-    create_body="{\"scope\":\"Notebook\",\"notebookId\":\"$selected_notebook_id\",\"hostPath\":\"$MOUNT_PATH\"}"
+    create_body="{\"scope\":\"Notebook\",\"notebookId\":\"$selected_notebook_id\",\"hostPath\":\"$json_safe_path\"}"
   else
-    create_body="{\"scope\":\"Project\",\"hostPath\":\"$MOUNT_PATH\"}"
+    create_body="{\"scope\":\"Project\",\"hostPath\":\"$json_safe_path\"}"
   fi
   create_response="$(curl -sS -w "\n%{http_code}" \
     -X POST \

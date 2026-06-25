@@ -427,6 +427,7 @@ FodyWeavers.xsd
 /tmp
 /scan-results.txt
 
-# CLI auth token (never commit)
-installer/docker/volumes/content-files/.cli-auth-token
+# Installer
+/installer/docker/volumes/content-files
+/installer/docker/docker-compose.host-mounts.generated.yml
 *.cli-auth-token

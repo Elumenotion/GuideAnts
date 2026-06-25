@@ -837,6 +837,20 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   }, []);
 
   const isRootFolder = !folder.relativePath || folder.relativePath === '' || level === 0;
+
+  const handleFolderDragStart = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer || isRootFolder) return;
+    e.stopPropagation();
+    e.dataTransfer.setData('application/x-notebook-folder-relative-path', folder.relativePath || '');
+    e.dataTransfer.setData('application/x-notebook-folder-name', folder.name);
+    e.dataTransfer.setData('text/plain', folder.relativePath || '');
+    e.dataTransfer.effectAllowed = 'copy';
+    (e.currentTarget as HTMLElement).style.opacity = '0.5';
+  }, [folder.relativePath, folder.name, isRootFolder]);
+
+  const handleFolderDragEnd = useCallback((e: React.DragEvent) => {
+    (e.currentTarget as HTMLElement).style.opacity = '1';
+  }, []);
   const mountEntry = context?.getMountForPath(folder.relativePath || '') ?? null;
   const isMountRoot = mountEntry != null;
   const enclosingMount = context?.getEnclosingMount(folder.relativePath || '') ?? null;
@@ -951,6 +965,9 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
               handleToggleExpand(e);
           }}
           onContextMenu={handleContextMenu}
+          draggable={!isRootFolder && canEdit}
+          onDragStart={handleFolderDragStart}
+          onDragEnd={handleFolderDragEnd}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}

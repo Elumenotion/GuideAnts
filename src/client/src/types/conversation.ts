@@ -239,7 +239,7 @@ export interface PendingAttachment {
   notebookFileId: string;
   relativePath?: string;
   fileName: string;
-  uploadType: 'image' | 'audio' | 'text' | 'other';
+  uploadType: 'image' | 'audio' | 'text' | 'folder' | 'other';
 }
 
 // User conversations across all projects
