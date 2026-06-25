@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - main
+      - feature/**
     paths:
       - 'src/client/**'
       - 'src/server/**'
