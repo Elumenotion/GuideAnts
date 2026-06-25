@@ -12,7 +12,9 @@ public sealed record CliAuthSessionCreation(string SessionId, string DeviceSecre
 
 public enum CliAuthApproveOutcome { Approved, NotFound, Expired }
 
-public enum CliAuthTokenStatus { Pending, Issued, InvalidSecret, NotFound, Expired, Consumed }
+public enum CliAuthDenyOutcome { Denied, NotFound, Expired }
+
+public enum CliAuthTokenStatus { Pending, Issued, InvalidSecret, NotFound, Expired, Consumed, Denied }
 
 public sealed record CliAuthTokenResult(CliAuthTokenStatus Status, string? Token, DateTime? ExpiresAt);
 
@@ -44,6 +46,8 @@ public interface ICliAuthService
     /// The token is single-use: once issued, the session is marked Consumed.
     /// </summary>
     Task<CliAuthTokenResult> IssueTokenAsync(string sessionId, string deviceSecret, CancellationToken cancellationToken = default);
+
+    Task<CliAuthDenyOutcome> DenyAsync(string sessionId, Guid userId, CancellationToken cancellationToken = default);
 }
 
 public sealed class CliAuthService : ICliAuthService
@@ -157,6 +161,9 @@ public sealed class CliAuthService : ICliAuthService
         if (session.Status == CliAuthSessionStatus.Consumed)
             return new CliAuthTokenResult(CliAuthTokenStatus.Consumed, null, null);
 
+        if (session.Status == CliAuthSessionStatus.Denied)
+            return new CliAuthTokenResult(CliAuthTokenStatus.Denied, null, null);
+
         // Status == Approved — issue the token
         var user = await _db.Users
             .FirstOrDefaultAsync(u => u.Id == session.UserId, cancellationToken);
@@ -182,6 +189,37 @@ public sealed class CliAuthService : ICliAuthService
         await _db.SaveChangesAsync(cancellationToken);
 
         return new CliAuthTokenResult(CliAuthTokenStatus.Issued, issued.Token, issued.ExpiresAtUtc);
+    }
+
+    public async Task<CliAuthDenyOutcome> DenyAsync(string sessionId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        await CleanupExpiredSessionsAsync(cancellationToken);
+
+        var session = await _db.CliAuthSessions
+            .FirstOrDefaultAsync(s => s.SessionId == sessionId, cancellationToken);
+
+        if (session == null)
+            return CliAuthDenyOutcome.NotFound;
+
+        if (session.ExpiresAt <= DateTime.UtcNow)
+        {
+            _db.CliAuthSessions.Remove(session);
+            await _db.SaveChangesAsync(cancellationToken);
+            return CliAuthDenyOutcome.Expired;
+        }
+
+        if (session.Status == CliAuthSessionStatus.Consumed)
+            return CliAuthDenyOutcome.Expired;
+
+        if (session.Status == CliAuthSessionStatus.Pending || session.Status == CliAuthSessionStatus.Denied)
+        {
+            session.Status = CliAuthSessionStatus.Denied;
+            session.UserId = userId;
+            await _db.SaveChangesAsync(cancellationToken);
+            return CliAuthDenyOutcome.Denied;
+        }
+
+        return CliAuthDenyOutcome.NotFound;
     }
 
     // ── Private helpers ──

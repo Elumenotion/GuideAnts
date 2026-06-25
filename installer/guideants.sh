@@ -667,6 +667,9 @@ acquire_token() {
         # Still pending; print a heartbeat dot every 5 attempts
         if (( attempt % 5 == 0 )); then printf "." >&2; fi
         ;;
+      403)
+        fail "Authorization request was denied in the browser. Rerun with --mount to try again."
+        ;;
       410)
         fail "Authorization request expired or was already used. Rerun with --mount and approve promptly."
         ;;

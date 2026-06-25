@@ -7,11 +7,13 @@ import '@testing-library/jest-dom';
 import CliAuthorize from '../CliAuthorize';
 
 const mockApproveSession = vi.fn();
+const mockDenySession = vi.fn();
 
 vi.mock('../../services/api', () => ({
   api: {
     cli: {
       approveSession: (...args: unknown[]) => mockApproveSession(...args),
+      denySession: (...args: unknown[]) => mockDenySession(...args),
     },
   },
 }));
@@ -58,7 +60,7 @@ describe('CliAuthorize', () => {
 
     expect(mockApproveSession).toHaveBeenCalledTimes(1);
     expect(mockApproveSession).toHaveBeenCalledWith('test-session-123');
-    expect(screen.getByText('Approved — you can return to your terminal.')).toBeInTheDocument();
+    expect(screen.getByText('Approved — this window will close automatically.')).toBeInTheDocument();
   });
 
   it('shows an error state when the approve call fails with 404', async () => {
@@ -111,15 +113,20 @@ describe('CliAuthorize', () => {
     });
   });
 
-  it('shows the denied state without calling the API when Deny is clicked', async () => {
+  it('calls api.cli.denySession and shows the denied state when Deny is clicked', async () => {
+    mockDenySession.mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
 
     renderPage('?session=some-session');
 
     await user.click(screen.getByRole('button', { name: /deny/i }));
 
-    expect(screen.getByText('Request Denied')).toBeInTheDocument();
-    expect(screen.getByText('Request denied. You can close this tab.')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Request Denied')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Request denied — this window will close automatically.')).toBeInTheDocument();
+    expect(mockDenySession).toHaveBeenCalledTimes(1);
+    expect(mockDenySession).toHaveBeenCalledWith('some-session');
     expect(mockApproveSession).not.toHaveBeenCalled();
   });
 });

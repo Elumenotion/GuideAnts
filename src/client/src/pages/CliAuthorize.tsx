@@ -40,7 +40,10 @@ export default function CliAuthorize() {
     }
   };
 
-  const handleDeny = () => {
+  const handleDeny = async () => {
+    if (session) {
+      try { await api.cli.denySession(session); } catch { /* best-effort */ }
+    }
     setState('denied');
   };
 
@@ -114,7 +117,7 @@ export default function CliAuthorize() {
                   tone="neutral"
                   icon={<FaTimes />}
                   disabled={state === 'submitting'}
-                  onClick={handleDeny}
+                  onClick={() => void handleDeny()}
                 >
                   Deny
                 </TextActionButton>

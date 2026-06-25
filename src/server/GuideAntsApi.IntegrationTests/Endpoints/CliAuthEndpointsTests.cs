@@ -229,6 +229,67 @@ public class CliAuthEndpointsTests
         loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    [TestMethod]
+    public async Task Deny_AsAdmin_Returns204_ThenTokenPoll_Returns403()
+    {
+        // Create session
+        var createResponse = await _client.PostAsync("/api/cli/sessions", null);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var session = await createResponse.Content.ReadFromJsonAsync<CreateSessionResponse>();
+
+        // Deny as admin
+        var adminToken = IntegrationTestAuthTokenFactory.CreateAdminToken();
+        using var denyClient = _factory.CreateClient();
+        AuthCookieTestHelper.SetBearerToken(denyClient, adminToken);
+        var denyResponse = await denyClient.PostAsync(
+            $"/api/cli/sessions/{session!.SessionId}/deny", null);
+        denyResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        // Token poll should return 403 Denied
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Get,
+            $"/api/cli/sessions/{session.SessionId}/token");
+        tokenRequest.Headers.Add("X-Device-Secret", session.DeviceSecret);
+        var tokenResponse = await _client.SendAsync(tokenRequest);
+        tokenResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [TestMethod]
+    public async Task Deny_WithoutAuthentication_Returns401()
+    {
+        var createResponse = await _client.PostAsync("/api/cli/sessions", null);
+        var session = await createResponse.Content.ReadFromJsonAsync<CreateSessionResponse>();
+
+        using var anonClient = _factory.CreateClient();
+        var denyResponse = await anonClient.PostAsync(
+            $"/api/cli/sessions/{session!.SessionId}/deny", null);
+        denyResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [TestMethod]
+    public async Task Deny_AsNonAdmin_Returns403()
+    {
+        var createResponse = await _client.PostAsync("/api/cli/sessions", null);
+        var session = await createResponse.Content.ReadFromJsonAsync<CreateSessionResponse>();
+
+        var readerToken = IntegrationTestAuthTokenFactory.CreateToken(Role.Reader);
+        using var readerClient = _factory.CreateClient();
+        AuthCookieTestHelper.SetBearerToken(readerClient, readerToken);
+        var denyResponse = await readerClient.PostAsync(
+            $"/api/cli/sessions/{session!.SessionId}/deny", null);
+        denyResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [TestMethod]
+    public async Task Deny_UnknownSession_Returns404()
+    {
+        var adminToken = IntegrationTestAuthTokenFactory.CreateAdminToken();
+        using var denyClient = _factory.CreateClient();
+        AuthCookieTestHelper.SetBearerToken(denyClient, adminToken);
+        var denyResponse = await denyClient.PostAsync(
+            "/api/cli/sessions/nonexistent-session-id/deny", null);
+        denyResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
     private static async Task ResetAuthStateAsync()
     {
         using var scope = _factory.Services.CreateScope();
