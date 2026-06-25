@@ -165,6 +165,7 @@ public static class AuthEndpoints
 
             var issuedToken = jwtTokenService.IssueToken(user, role.Value);
             authCookieService.AppendAuthCookie(httpContext.Response, httpContext.Request, issuedToken);
+
             return Results.Ok(new AuthResponse(
                 user.Id,
                 user.Name,

@@ -25,6 +25,7 @@ import Register from '../pages/Register';
 import Pending from '../pages/Pending';
 import ChangePassword from '../pages/ChangePassword';
 import OAuthCallback from '../pages/OAuthCallback';
+import CliAuthorize from '../pages/CliAuthorize';
 import { ProtectedRoute } from './ProtectedRoute';
 
 function ProjectProviderWrapper({ children }: { children: React.ReactNode }) {
@@ -75,6 +76,7 @@ const AppContent = () => {
       <Route path="/projects" element={withProtection(<Projects />)} />
       <Route path="/conversations" element={withProtection(<Conversations />)} />
       <Route path="/usage" element={withProtection(<Usage />)} />
+      <Route path="/cli/authorize" element={withProtection(<CliAuthorize />)} />
       <Route path="/settings" element={withProtection(<Settings />)} />
       <Route
         path="/settings/system-guides"

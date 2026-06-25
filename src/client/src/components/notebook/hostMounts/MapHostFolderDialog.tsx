@@ -6,11 +6,11 @@ interface MapHostFolderDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (values: { hostPath: string; scope: HostFolderMountScope; leafName: string }) => Promise<void>;
+  scope?: HostFolderMountScope;
 }
 
-export function MapHostFolderDialog({ isOpen, onClose, onSubmit }: MapHostFolderDialogProps) {
+export function MapHostFolderDialog({ isOpen, onClose, onSubmit, scope = 'Notebook' }: MapHostFolderDialogProps) {
   const [hostPath, setHostPath] = useState('');
-  const [scope, setScope] = useState<HostFolderMountScope>('Notebook');
   const [leafName, setLeafName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +18,6 @@ export function MapHostFolderDialog({ isOpen, onClose, onSubmit }: MapHostFolder
   useEffect(() => {
     if (isOpen) {
       setHostPath('');
-      setScope('Notebook');
       setLeafName('');
       setError(null);
     }
@@ -68,7 +67,9 @@ export function MapHostFolderDialog({ isOpen, onClose, onSubmit }: MapHostFolder
   const dialogMarkup = (
     <div className="fixed inset-0 z-[9999] flex items-start justify-center bg-black bg-opacity-50">
       <div className="mx-4 mt-24 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
-        <h2 className="mb-4 text-lg font-bold text-gray-900">Map host folder here</h2>
+        <h2 className="mb-4 text-lg font-bold text-gray-900">
+          {scope === 'Project' ? 'Map host folder to project' : 'Map host folder here'}
+        </h2>
         <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700" htmlFor="host-mount-path">
@@ -85,25 +86,10 @@ export function MapHostFolderDialog({ isOpen, onClose, onSubmit }: MapHostFolder
               data-testid="host-mount-path-input"
             />
             <p className="mt-1 text-xs text-gray-500">
-              Enter the full absolute path on the Docker host.
+              {scope === 'Project'
+                ? 'Enter the full absolute path on the Docker host. This folder will appear at the project root and inside every notebook.'
+                : 'Enter the full absolute path on the Docker host.'}
             </p>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700" htmlFor="host-mount-scope">
-              Scope
-            </label>
-            <select
-              id="host-mount-scope"
-              value={scope}
-              onChange={(event) => setScope(event.target.value as HostFolderMountScope)}
-              disabled={isSubmitting}
-              className="w-full rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              data-testid="host-mount-scope-select"
-            >
-              <option value="Notebook">This notebook only</option>
-              <option value="Project">All notebooks in project</option>
-            </select>
           </div>
 
           <div>

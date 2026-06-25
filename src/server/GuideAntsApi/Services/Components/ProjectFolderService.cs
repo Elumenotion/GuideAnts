@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
@@ -7,21 +10,40 @@ namespace GuideAntsApi.Services.Components;
 
 public class ProjectFolderService : IProjectFolderService
 {
+    private const int DefaultLinkedMountTreeMaxFiles = 5000;
+    private const int DefaultLinkedMountTreeMaxDepth = 3;
+    private const int DefaultLinkedMountTreeScanBudgetMs = 2500;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly string _storagePath;
     private readonly IStoragePathResolver _pathResolver;
+    private readonly ILogger<ProjectFolderService> _logger;
+    private readonly int _linkedMountTreeMaxFiles;
+    private readonly int _linkedMountTreeMaxDepth;
+    private readonly TimeSpan _linkedMountTreeScanBudget;
 
     public ProjectFolderService(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
-        IStoragePathResolver pathResolver)
+        IStoragePathResolver pathResolver,
+        ILogger<ProjectFolderService> logger)
     {
         _scopeFactory = scopeFactory;
         _configuration = configuration;
         _pathResolver = pathResolver;
-        _storagePath = _configuration["FileStorage:Path"] ?? 
+        _logger = logger;
+        _storagePath = _configuration["FileStorage:Path"] ??
             throw new InvalidOperationException("FileStorage:Path is not configured");
+        _linkedMountTreeMaxFiles = ReadPositiveInt(
+            configuration["FileStorage:LinkedMountTreeMaxFiles"],
+            DefaultLinkedMountTreeMaxFiles, min: 1, max: 100000);
+        _linkedMountTreeMaxDepth = ReadPositiveInt(
+            configuration["FileStorage:LinkedMountTreeMaxDepth"],
+            DefaultLinkedMountTreeMaxDepth, min: 1, max: 32);
+        _linkedMountTreeScanBudget = TimeSpan.FromMilliseconds(ReadPositiveInt(
+            configuration["FileStorage:LinkedMountTreeScanBudgetMs"],
+            DefaultLinkedMountTreeScanBudgetMs, min: 250, max: 30000));
     }
 
     // Backward-compatible overload used by tests.
@@ -29,7 +51,8 @@ public class ProjectFolderService : IProjectFolderService
         : this(
             scopeFactory,
             configuration,
-            new LegacyStoragePathResolver(configuration["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured")))
+            new LegacyStoragePathResolver(configuration["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured")),
+            NullLogger<ProjectFolderService>.Instance)
     { }
 
     /// <summary>
@@ -308,7 +331,6 @@ using var scope = CreateDbScope();
 
         if (string.IsNullOrWhiteSpace(projectName))
         {
-            // Fallback to "Root" if the project cannot be found – should not normally happen
             projectName = "Root";
         }
 
@@ -325,7 +347,24 @@ using var scope = CreateDbScope();
             .ToListAsync();
 
         // Build tree structure
-        return BuildFolderTree(folders, files, null, projectName);
+        var tree = BuildFolderTree(folders, files, null, projectName);
+
+        // Overlay project-scope host folder mounts
+        var projectMounts = await context.HostFolderMounts
+            .AsNoTracking()
+            .Where(m => m.ProjectId == projectId
+                && m.Scope == HostFolderMountScope.Project
+                && m.Status != HostFolderMountStatus.Removed
+                && m.Status != HostFolderMountStatus.PendingRemoval)
+            .ToListAsync();
+
+        if (projectMounts.Count > 0)
+        {
+            var mountFolders = BuildMountOverlayNodes(projectMounts);
+            tree.SubFolders.AddRange(mountFolders);
+        }
+
+        return tree;
     }
 
     public async Task<bool> MoveFolderAsync(Guid projectId, Guid folderId, Guid? newParentId)
@@ -479,4 +518,169 @@ using var scope = CreateDbScope();
 
         return ToFolderTreeDto(folder, subFolders, files);
     }
-} 
+
+    private List<FolderTreeDto> BuildMountOverlayNodes(List<HostFolderMount> mounts)
+    {
+        var mountNodes = new List<FolderTreeDto>();
+
+        foreach (var mount in mounts)
+        {
+            var scanRoots = new List<HostMountDirectoryScanner.MountRoot>
+            {
+                new(mount.LeafName, mount.ContainerSourcePath)
+            };
+
+            var scanResult = HostMountDirectoryScanner.Scan(
+                scanRoots,
+                _linkedMountTreeMaxFiles,
+                _linkedMountTreeMaxDepth,
+                _linkedMountTreeScanBudget,
+                _logger);
+
+            if (scanResult.WasTruncated)
+            {
+                _logger.LogWarning(
+                    "Project mount tree enumeration was truncated for mount {MountId} (maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
+                    mount.Id,
+                    _linkedMountTreeMaxFiles,
+                    _linkedMountTreeMaxDepth,
+                    (int)_linkedMountTreeScanBudget.TotalMilliseconds);
+            }
+
+            var mountRootNode = BuildMountFolderTree(mount, scanResult.Files);
+            mountNodes.Add(mountRootNode);
+        }
+
+        return mountNodes;
+    }
+
+    private static FolderTreeDto BuildMountFolderTree(
+        HostFolderMount mount,
+        IReadOnlyList<HostMountDirectoryScanner.ScannedFile> files)
+    {
+        var folderChildren = new Dictionary<string, List<FolderTreeDto>>(StringComparer.OrdinalIgnoreCase);
+        var fileChildren = new Dictionary<string, List<ContentFileDetailsDto>>(StringComparer.OrdinalIgnoreCase);
+
+        folderChildren[mount.LeafName] = [];
+        fileChildren[mount.LeafName] = [];
+
+        foreach (var file in files)
+        {
+            var dirPath = Path.GetDirectoryName(file.RelativePath)?.Replace("\\", "/") ?? mount.LeafName;
+            if (string.IsNullOrEmpty(dirPath)) dirPath = mount.LeafName;
+
+            EnsureFolderPath(dirPath, mount.LeafName, folderChildren, fileChildren);
+
+            if (!fileChildren.ContainsKey(dirPath))
+                fileChildren[dirPath] = [];
+
+            fileChildren[dirPath].Add(new ContentFileDetailsDto(
+                Id: Guid.Empty,
+                FileName: file.FileName,
+                Path: "",
+                RelativePath: file.RelativePath,
+                ContentType: "",
+                Index: false,
+                DocumentId: "",
+                Created: file.LastModifiedUtc,
+                FileSize: file.FileSize,
+                FolderId: null,
+                FolderPath: dirPath,
+                LatestVersion: 0,
+                IsSnapshot: false,
+                HasMarkdownShadow: false,
+                MarkdownStatus: null,
+                MarkdownProcessedAt: null));
+        }
+
+        return BuildMountSubTree(mount.LeafName, mount, folderChildren, fileChildren);
+    }
+
+    private static void EnsureFolderPath(
+        string folderPath,
+        string mountRoot,
+        Dictionary<string, List<FolderTreeDto>> folderChildren,
+        Dictionary<string, List<ContentFileDetailsDto>> fileChildren)
+    {
+        if (folderChildren.ContainsKey(folderPath)) return;
+
+        var parts = folderPath.Replace("\\", "/").Split('/');
+        var current = "";
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var parent = current;
+            current = i == 0 ? parts[0] : $"{current}/{parts[i]}";
+
+            if (!folderChildren.ContainsKey(current))
+            {
+                folderChildren[current] = [];
+                fileChildren[current] = [];
+
+                if (!string.IsNullOrEmpty(parent) && folderChildren.ContainsKey(parent))
+                {
+                    // Will be built later in BuildMountSubTree
+                }
+            }
+        }
+    }
+
+    private static FolderTreeDto BuildMountSubTree(
+        string folderPath,
+        HostFolderMount mount,
+        Dictionary<string, List<FolderTreeDto>> folderChildren,
+        Dictionary<string, List<ContentFileDetailsDto>> fileChildren)
+    {
+        var name = Path.GetFileName(folderPath);
+        if (string.IsNullOrEmpty(name)) name = folderPath;
+
+        var childFolderPaths = folderChildren.Keys
+            .Where(k => !string.Equals(k, folderPath, StringComparison.OrdinalIgnoreCase)
+                && IsDirectChild(folderPath, k))
+            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var subFolders = childFolderPaths
+            .Select(p => BuildMountSubTree(p, mount, folderChildren, fileChildren))
+            .ToList();
+
+        var files = fileChildren.TryGetValue(folderPath, out var f) ? f : [];
+
+        var isRoot = string.Equals(folderPath, mount.LeafName, StringComparison.OrdinalIgnoreCase);
+
+        return new FolderTreeDto(
+            Id: CreateMountVirtualFolderId(mount.Id, folderPath),
+            Name: name,
+            RelativePath: folderPath,
+            SubFolders: subFolders,
+            Files: files,
+            IsHostMount: isRoot,
+            MountId: isRoot ? mount.Id : null,
+            MountStatus: isRoot ? mount.Status : null,
+            IsLinked: !isRoot);
+    }
+
+    private static Guid CreateMountVirtualFolderId(Guid mountId, string folderPath)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"mount:{mountId:N}:{folderPath.ToLowerInvariant()}"));
+        var guidBytes = new byte[16];
+        Buffer.BlockCopy(digest, 0, guidBytes, 0, guidBytes.Length);
+        return new Guid(guidBytes);
+    }
+
+    private static bool IsDirectChild(string parent, string candidate)
+    {
+        if (!candidate.StartsWith(parent + "/", StringComparison.OrdinalIgnoreCase))
+            return false;
+        var remainder = candidate[(parent.Length + 1)..];
+        return !remainder.Contains('/');
+    }
+
+    private static int ReadPositiveInt(string? rawValue, int fallback, int min, int max)
+    {
+        if (!int.TryParse(rawValue, out var parsed))
+            return fallback;
+        if (parsed < min) return min;
+        if (parsed > max) return max;
+        return parsed;
+    }
+}
