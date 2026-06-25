@@ -614,6 +614,38 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.ToTable("AssistantTools");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.CliAuthSession", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeviceSecretHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("SessionId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("CliAuthSessions");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ContentFile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2961,6 +2993,16 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("Tool");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.CliAuthSession", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.User", "User")
+                        .WithMany("CliAuthSessions")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.ContentFile", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.ProjectFolder", "Folder")
@@ -3648,6 +3690,8 @@ namespace GuideAntsApi.DataModel.Migrations
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.User", b =>
                 {
+                    b.Navigation("CliAuthSessions");
+
                     b.Navigation("ExternalOAuthTokens");
 
                     b.Navigation("OAuthAuthorizationStates");

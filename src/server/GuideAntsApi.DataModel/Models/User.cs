@@ -58,5 +58,6 @@ namespace GuideAntsApi.DataModel.Models
         public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
         public ICollection<ExternalOAuthToken> ExternalOAuthTokens { get; set; } = new List<ExternalOAuthToken>();
         public ICollection<OAuthAuthorizationState> OAuthAuthorizationStates { get; set; } = new List<OAuthAuthorizationState>();
+        public ICollection<CliAuthSession> CliAuthSessions { get; set; } = new List<CliAuthSession>();
     }
 }

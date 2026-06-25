@@ -364,6 +364,12 @@ export const api = {
     test: {
         secure: () => callApi<any>('/test/secure')
     },
+    cli: {
+        approveSession: (sessionId: string) =>
+            callApi<void>(`/cli/sessions/${encodeURIComponent(sessionId)}/approve`, { method: 'POST' }),
+        denySession: (sessionId: string) =>
+            callApi<void>(`/cli/sessions/${encodeURIComponent(sessionId)}/deny`, { method: 'POST' }),
+    },
     quickStart: {
         create: () => callApi<{
             projectId: string;

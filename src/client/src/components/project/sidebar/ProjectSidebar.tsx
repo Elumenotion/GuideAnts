@@ -13,6 +13,10 @@ import { useMultiSelect } from '../../../hooks/useMultiSelect';
 import { useListKeyboardNavigation } from '../../../hooks/useListKeyboardNavigation';
 import { useSidebarKeyboardShortcuts } from '../../../hooks/useSidebarKeyboardShortcuts';
 import { useSidebarSelectionCoordinator } from '../../../hooks/useSidebarSelectionCoordinator';
+import { MapHostFolderDialog } from '../../notebook/hostMounts/MapHostFolderDialog';
+import { HostMountCommandDialog } from '../../notebook/hostMounts/HostMountCommandDialog';
+import { useProjectHostMounts } from '../../../hooks/useProjectHostMounts';
+import { hostFolderMountsApi } from '../../../services/hostFolderMounts';
 import { useLongPress } from '../../../hooks/useLongPress';
 
 // Props for the extracted NotebookListItem component
@@ -286,6 +290,62 @@ export function ProjectSidebar({
     // Notebook inline rename state
     const [editingNotebookId, setEditingNotebookId] = useState<string | null>(null);
     const [editNotebookTitle, setEditNotebookTitle] = useState('');
+
+    // Host folder mount state
+    const [showMapHostFolderDialog, setShowMapHostFolderDialog] = useState(false);
+    const [commandDialog, setCommandDialog] = useState<{ title: string; description: string; command: string } | null>(null);
+    const { refresh: refreshProjectMounts } = useProjectHostMounts(project.id, isCurrentUserOwner);
+
+    const handleCreateProjectHostMount = useCallback(async (values: { hostPath: string; scope: 'Notebook' | 'Project'; leafName: string }) => {
+        const response = await hostFolderMountsApi.create(project.id, {
+            hostPath: values.hostPath,
+            scope: 'Project',
+            leafName: values.leafName || undefined,
+        });
+        await refreshProjectMounts();
+        const applyCmd = await hostFolderMountsApi.getApplyCommand(project.id, response.mountId);
+        setCommandDialog({
+            title: 'Apply host mount',
+            description: 'Run this command on the Docker host to mount the folder:',
+            command: applyCmd.command,
+        });
+    }, [project.id, refreshProjectMounts]);
+
+    const handleRemoveMappedFolder = useCallback(async (mountId: string) => {
+        const removeCmd = await hostFolderMountsApi.getRemoveCommand(project.id, mountId);
+        setCommandDialog({
+            title: 'Remove host mount',
+            description: 'Run this command on the Docker host to remove the mount:',
+            command: removeCmd.command,
+        });
+    }, [project.id]);
+
+    const handleShowApplyCommand = useCallback(async (mountId: string) => {
+        const applyCmd = await hostFolderMountsApi.getApplyCommand(project.id, mountId);
+        setCommandDialog({
+            title: 'Apply host mount',
+            description: 'Run this command on the Docker host to mount the folder:',
+            command: applyCmd.command,
+        });
+    }, [project.id]);
+
+    const handleShowRemoveCommand = useCallback(async (mountId: string) => {
+        const removeCmd = await hostFolderMountsApi.getRemoveCommand(project.id, mountId);
+        setCommandDialog({
+            title: 'Remove host mount',
+            description: 'Run this command on the Docker host to remove the mount:',
+            command: removeCmd.command,
+        });
+    }, [project.id]);
+
+    const handleCheckMappedFolders = useCallback(async (mountId: string) => {
+        if (mountId) {
+            await hostFolderMountsApi.reconcile(project.id, mountId);
+        }
+        await refreshProjectMounts();
+        window.dispatchEvent(new Event('refresh-project-mounts'));
+        showToast({ type: 'success', title: 'Mapped folders checked', message: 'Mount state has been reconciled.' });
+    }, [project.id, refreshProjectMounts, showToast]);
 
     // Search state
     const [searchTerm, setSearchTerm] = useState('');
@@ -893,10 +953,15 @@ export function ProjectSidebar({
                                 onSectionActivate={selectionCoordinator.activateSection}
                                 onDeleteFiles={async (ids) => {
                                     if (onDeleteFile) {
-                                        // TODO: Use batch API if available
                                         await Promise.all(ids.map(id => onDeleteFile(id)));
                                     }
                                 }}
+                                isAdmin={isCurrentUserOwner}
+                                onMapHostFolder={() => setShowMapHostFolderDialog(true)}
+                                onRemoveMappedFolder={handleRemoveMappedFolder}
+                                onShowApplyCommand={handleShowApplyCommand}
+                                onShowRemoveCommand={handleShowRemoveCommand}
+                                onCheckMappedFolders={handleCheckMappedFolders}
                             />
                         ) : (
                             // Fallback to simple file list if no folder tree
@@ -1124,6 +1189,19 @@ export function ProjectSidebar({
                     : "Are you sure you want to delete this notebook?"}
                 confirmText="Delete"
                 cancelText="Cancel"
+            />
+            <MapHostFolderDialog
+                isOpen={showMapHostFolderDialog}
+                onClose={() => setShowMapHostFolderDialog(false)}
+                onSubmit={handleCreateProjectHostMount}
+                scope="Project"
+            />
+            <HostMountCommandDialog
+                isOpen={commandDialog != null}
+                title={commandDialog?.title ?? ''}
+                description={commandDialog?.description ?? ''}
+                command={commandDialog?.command ?? ''}
+                onClose={() => setCommandDialog(null)}
             />
         </>
     );
