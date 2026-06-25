@@ -94,3 +94,11 @@ export interface NotebookHostMountEntry {
   scope: HostFolderMountScope;
   linkStatus: HostFolderMountLinkStatus | null;
 }
+
+export interface ProjectHostMountEntry {
+  mountId: string;
+  leafName: string;
+  displayName: string;
+  displayState: HostFolderMountDisplayState;
+  mountStatus: HostFolderMountStatus;
+}
