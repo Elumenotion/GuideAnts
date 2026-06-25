@@ -146,6 +146,7 @@ public class PublishedConversationService : IPublishedConversationService
             publishedAssistantId,
             notebookConversationMessageId,
             previousMessages,
+            clientToolDefinitions,
             publisherId,
             hostUrl,
             currentMessageSequence,
@@ -370,12 +371,14 @@ public class PublishedConversationService : IPublishedConversationService
         Guid publishedAssistantId,
         Guid? notebookConversationMessageId,
         List<ChatMessage> previousMessages,
+        IReadOnlyList<ChatToolDefinition>? clientToolDefinitions,
         string? publisherId,
         string? hostUrl,
         int currentMessageSequence,
         CancellationToken cancellationToken)
     {
         List<ChatToolCall> lastToolCalls;
+        HashSet<string> existingToolCallIds;
         using (var scope = _scopeFactory.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -396,6 +399,17 @@ public class PublishedConversationService : IPublishedConversationService
                     lastToolCalls = new();
                 }
             }
+
+            existingToolCallIds = (await db.NotebookConversationMessages
+                    .AsNoTracking()
+                    .Where(m =>
+                        m.NotebookConversationId == dbConversation.Id &&
+                        m.TurnIndex == dbTurn.TurnIndex &&
+                        m.Role == DataModelChatRole.Tool &&
+                        m.ToolCallId != null)
+                    .Select(m => m.ToolCallId!)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
         if (lastToolCalls.Count == 0)
@@ -405,6 +419,19 @@ public class PublishedConversationService : IPublishedConversationService
 
         var assistantDefForResume = await AssistantUtility.GetAssistantCreateRequest(assistantName)
             ?? throw new InvalidOperationException($"Assistant definition not found for {assistantName}");
+
+        var clientToolNames = CollectClientToolNames(clientToolDefinitions);
+        var serverToolNames = CollectAssistantToolNames(assistantDefForResume);
+        var deferredServerToolCalls = lastToolCalls
+            .Where(t => t.IsFunction)
+            .Where(t => !existingToolCallIds.Contains(t.Id))
+            .Where(t => !clientToolNames.Contains(t.Function.Name))
+            .Where(t => serverToolNames.Contains(t.Function.Name))
+            .ToList();
+        if (deferredServerToolCalls.Count == 0)
+        {
+            return currentMessageSequence;
+        }
 
         var sequence = currentMessageSequence;
 
@@ -476,7 +503,7 @@ public class PublishedConversationService : IPublishedConversationService
 
         await AntRunner.Chat.ThreadRun.DoToolCalls(
             assistantDefForResume,
-            lastToolCalls,
+            deferredServerToolCalls,
             previousMessages,
             oAuthUserAccessToken: null,
             httpClient: httpClient,
@@ -484,6 +511,42 @@ public class PublishedConversationService : IPublishedConversationService
             ctx: resumeToolContext);
 
         return sequence;
+    }
+
+    private static HashSet<string> CollectClientToolNames(IReadOnlyList<ChatToolDefinition>? clientToolDefinitions)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (clientToolDefinitions == null)
+        {
+            return names;
+        }
+
+        foreach (var tool in clientToolDefinitions)
+        {
+            var name = tool.Function?.Name;
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                names.Add(name.Trim());
+            }
+        }
+
+        return names;
+    }
+
+    private static HashSet<string> CollectAssistantToolNames(
+        AntRunner.ToolCalling.AssistantDefinitions.AssistantDefinition assistantDef)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tool in assistantDef.Tools ?? [])
+        {
+            var name = tool.Function?.AsObject?.Name ?? tool.Function?.AsString;
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                names.Add(name.Trim());
+            }
+        }
+
+        return names;
     }
 
     private string? GetHostUrl() =>

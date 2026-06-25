@@ -978,6 +978,56 @@ namespace GuideAntsApi.DataModel.Migrations
                         });
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ConversationTurnTrace", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CaptureState")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("ConversationTurnId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("Created")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<Guid>("NotebookConversationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TraceJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("TurnIndex")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("Updated")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationTurnId")
+                        .IsUnique();
+
+                    b.HasIndex("NotebookConversationId", "TurnIndex");
+
+                    b.ToTable("ConversationTurnTraces", t =>
+                        {
+                            t.HasCheckConstraint("CK_ConversationTurnTrace_State", "[CaptureState] IN ('partial', 'completed', 'cancelled', 'failed')");
+                        });
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.DocumentChunk", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3090,6 +3140,17 @@ namespace GuideAntsApi.DataModel.Migrations
                         .IsRequired();
 
                     b.Navigation("NotebookConversation");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.ConversationTurnTrace", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.ConversationTurn", "ConversationTurn")
+                        .WithOne()
+                        .HasForeignKey("GuideAntsApi.DataModel.Models.ConversationTurnTrace", "ConversationTurnId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ConversationTurn");
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.DocumentChunk", b =>

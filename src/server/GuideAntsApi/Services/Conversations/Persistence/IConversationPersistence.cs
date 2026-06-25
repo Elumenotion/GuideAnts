@@ -55,6 +55,14 @@ public sealed record CreateToolMessageRequest(
     Guid? AssistantId,
     string? AssistantName);
 
+public sealed record AppendTurnTraceSegmentRequest(
+    Guid TurnId,
+    Guid ConversationId,
+    int TurnIndex,
+    int SchemaVersion,
+    string CaptureState,
+    string SegmentJson);
+
 public interface IConversationPersistence
 {
     Task<CreatedTurnResult> CreateTurnAsync(CreateTurnRequest request, int turnIndex, CancellationToken ct = default);
@@ -85,4 +93,6 @@ public interface IConversationPersistence
         ChatRunOutput? output,
         IReadOnlyList<Guid> assistantMessageIds,
         CancellationToken ct = default);
+
+    Task AppendTurnTraceSegmentAsync(AppendTurnTraceSegmentRequest request, CancellationToken ct = default);
 }

@@ -62,5 +62,11 @@ namespace AntRunner.Chat
         /// These tools are advertised in addition to assistant-defined tools and are never executed server-side.
         /// </summary>
         public IReadOnlyList<ChatToolDefinition>? ClientToolDefinitions { get; set; }
+
+        /// <summary>
+        /// Optional diagnostics collector for capturing request/response prompt traces.
+        /// This collector is for internal observability only and must not mutate execution behavior.
+        /// </summary>
+        public IThreadRunTraceCollector? TraceCollector { get; set; }
     }
 }

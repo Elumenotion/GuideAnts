@@ -79,6 +79,7 @@ public static class PublishedOpenAiWireHandlers
         bool PendingClientTool,
         string? ErrorPayload,
         string? ResponseId,
+        Guid? AssistantMessageId,
         IReadOnlyList<ChatToolCall> ExternalToolCalls);
 
     private sealed record ClientPromptParts(
@@ -96,6 +97,22 @@ public static class PublishedOpenAiWireHandlers
         string ToolCallId,
         string? Name,
         string Content);
+
+    private sealed record AnthropicConversationResolution(
+        Guid? ConversationId,
+        IResult? ErrorResult);
+
+    private sealed record AnthropicHistoryMessage(
+        string Role,
+        string Text,
+        string? ToolCallId,
+        IReadOnlyList<string> ToolCallIds);
+
+    private sealed record PersistedHistoryRow(
+        DataModelChatRole Role,
+        string? Content,
+        string? ToolCallId,
+        string? ToolCallsJson);
 
     public static async Task<IResult> GetModelsAsync(
         HttpContext httpContext,
@@ -395,7 +412,7 @@ public static class PublishedOpenAiWireHandlers
                     instructions,
                     httpContext.RequestAborted,
                     existingConversationId: conversationResolution.ConversationId,
-                    clientMessages: clientPrompt.PrefixMessages,
+                    clientMessages: conversationResolution.ConversationId.HasValue ? null : clientPrompt.PrefixMessages,
                     clientToolDefinitions: clientToolDefinitions);
             }
 
@@ -528,13 +545,34 @@ public static class PublishedOpenAiWireHandlers
                         message: "At least one textual message is required in 'messages' or 'system'.");
                 }
 
+                var messageIdResolution = await ResolveAnthropicConversationFromMessageIdsAsync(
+                    context,
+                    request.Messages,
+                    db,
+                    httpContext.RequestAborted);
+                if (messageIdResolution.ErrorResult != null)
+                {
+                    return messageIdResolution.ErrorResult;
+                }
+
+                var existingConversationId = messageIdResolution.ConversationId;
+                if (!existingConversationId.HasValue)
+                {
+                    existingConversationId = await ResolveAnthropicConversationFromTranscriptAsync(
+                        context,
+                        clientPrompt.PrefixMessages,
+                        db,
+                        httpContext.RequestAborted);
+                }
+
                 conversation = await ExecuteConversationAsync(
                     publishedConversationService,
                     db,
                     context,
                     instructions,
                     httpContext.RequestAborted,
-                    clientMessages: clientPrompt.PrefixMessages,
+                    existingConversationId: existingConversationId,
+                    clientMessages: existingConversationId.HasValue ? null : clientPrompt.PrefixMessages,
                     clientToolDefinitions: clientToolDefinitions);
             }
 
@@ -556,7 +594,9 @@ public static class PublishedOpenAiWireHandlers
             }
 
             var stopReason = conversation.PendingClientTool ? "tool_use" : "end_turn";
-            var messageId = $"msg_{Guid.NewGuid():N}";
+            var messageId = conversation.AssistantMessageId.HasValue
+                ? FormatAnthropicMessageId(conversation.AssistantMessageId.Value)
+                : $"msg_{Guid.NewGuid():N}";
 
             if (request.Stream == true)
             {
@@ -1179,6 +1219,7 @@ public static class PublishedOpenAiWireHandlers
             PendingClientTool: pendingClientTool,
             ErrorPayload: errorPayload,
             ResponseId: responseId,
+            AssistantMessageId: latestAssistantMessageId,
             ExternalToolCalls: externalToolCalls);
     }
 
@@ -1953,16 +1994,11 @@ public static class PublishedOpenAiWireHandlers
             return results;
         }
 
-        foreach (var message in messages.EnumerateArray())
+        // Only treat trailing tool messages as new tool outputs for this request.
+        // Historical tool messages can be replayed in stateless clients and should not
+        // trigger a resume attempt.
+        foreach (var message in EnumerateTrailingArrayItems(messages, IsOpenAiChatToolMessage))
         {
-            if (message.ValueKind != JsonValueKind.Object ||
-                !message.TryGetProperty("role", out var roleElement) ||
-                roleElement.ValueKind != JsonValueKind.String ||
-                !string.Equals(roleElement.GetString(), "tool", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
             var toolCallId = message.TryGetProperty("tool_call_id", out var idElement) && idElement.ValueKind == JsonValueKind.String
                 ? idElement.GetString()
                 : null;
@@ -1989,7 +2025,9 @@ public static class PublishedOpenAiWireHandlers
         var results = new List<AnthropicToolResult>();
         if (input.ValueKind == JsonValueKind.Array)
         {
-            foreach (var item in input.EnumerateArray())
+            // Like chat/messages, only trailing tool output items represent the active
+            // callback payload for this request.
+            foreach (var item in EnumerateTrailingArrayItems(input, IsOpenAiResponsesToolResultItem))
             {
                 TryAddOpenAiResponsesToolResult(item, results);
             }
@@ -2161,28 +2199,105 @@ public static class PublishedOpenAiWireHandlers
             return results;
         }
 
-        foreach (var message in messages.EnumerateArray())
+        // Anthropic tool results arrive in the latest user message. Ignore older history
+        // blocks so a subsequent normal user turn does not get mistaken for a stale
+        // tool callback.
+        var trailingUserMessage = EnumerateTrailingArrayItems(messages, IsAnthropicUserMessage)
+            .LastOrDefault();
+        if (trailingUserMessage.ValueKind != JsonValueKind.Object ||
+            !trailingUserMessage.TryGetProperty("content", out var contentElement))
         {
-            if (message.ValueKind != JsonValueKind.Object ||
-                !message.TryGetProperty("content", out var contentElement))
-            {
-                continue;
-            }
+            return results;
+        }
 
-            if (contentElement.ValueKind == JsonValueKind.Array)
+        if (contentElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var block in contentElement.EnumerateArray())
             {
-                foreach (var block in contentElement.EnumerateArray())
-                {
-                    TryAddAnthropicToolResult(block, results);
-                }
+                TryAddAnthropicToolResult(block, results);
             }
-            else
-            {
-                TryAddAnthropicToolResult(contentElement, results);
-            }
+        }
+        else
+        {
+            TryAddAnthropicToolResult(contentElement, results);
         }
 
         return results;
+    }
+
+    private static bool IsOpenAiChatToolMessage(JsonElement message)
+    {
+        if (message.ValueKind != JsonValueKind.Object ||
+            !message.TryGetProperty("role", out var roleElement) ||
+            roleElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        return string.Equals(roleElement.GetString(), "tool", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOpenAiResponsesToolResultItem(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var type = item.TryGetProperty("type", out var typeElement) && typeElement.ValueKind == JsonValueKind.String
+            ? typeElement.GetString()
+            : null;
+
+        return string.Equals(type, "function_call_output", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(type, "tool_result", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAnthropicUserMessage(JsonElement message)
+    {
+        if (message.ValueKind != JsonValueKind.Object ||
+            !message.TryGetProperty("role", out var roleElement) ||
+            roleElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        return string.Equals(roleElement.GetString(), "user", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<JsonElement> EnumerateTrailingArrayItems(
+        JsonElement array,
+        Func<JsonElement, bool> predicate)
+    {
+        if (array.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var items = array.EnumerateArray().ToList();
+        if (items.Count == 0)
+        {
+            return [];
+        }
+
+        var trailing = new List<JsonElement>();
+        for (var index = items.Count - 1; index >= 0; index--)
+        {
+            var item = items[index];
+            if (!predicate(item))
+            {
+                break;
+            }
+
+            trailing.Add(item.Clone());
+        }
+
+        if (trailing.Count == 0)
+        {
+            return [];
+        }
+
+        trailing.Reverse();
+        return trailing;
     }
 
     private static void TryAddAnthropicToolResult(JsonElement block, ICollection<AnthropicToolResult> destination)
@@ -2609,6 +2724,430 @@ public static class PublishedOpenAiWireHandlers
         return JsonSerializer.SerializeToElement(new { value = arguments.GetRawText() });
     }
 
+    private static async Task<AnthropicConversationResolution> ResolveAnthropicConversationFromMessageIdsAsync(
+        PublishedApiExecutionContext context,
+        JsonElement messages,
+        ApplicationDbContext db,
+        CancellationToken ct)
+    {
+        if (!TryFindLatestAnthropicAssistantMessageId(messages, out var previousMessageId))
+        {
+            return new AnthropicConversationResolution(null, null);
+        }
+
+        var previousAssistant = await db.NotebookConversationMessages
+            .AsNoTracking()
+            .Where(m => m.Id == previousMessageId && m.Role == DataModelChatRole.Assistant)
+            .Select(m => new
+            {
+                m.Id,
+                m.NotebookConversationId,
+                m.TurnIndex,
+                NotebookId = m.NotebookConversation.NotebookId
+            })
+            .FirstOrDefaultAsync(ct);
+
+        if (previousAssistant == null || previousAssistant.NotebookId != context.NotebookId)
+        {
+            return new AnthropicConversationResolution(
+                null,
+                CreateAnthropicError(
+                    StatusCodes.Status404NotFound,
+                    errorType: "not_found_error",
+                    message: "The referenced message id was not found for this published guide."));
+        }
+
+        if (!await TurnMatchesCallerScopeAsync(
+                context,
+                db,
+                previousAssistant.NotebookConversationId,
+                previousAssistant.TurnIndex,
+                ct))
+        {
+            return new AnthropicConversationResolution(
+                null,
+                CreateAnthropicError(
+                    StatusCodes.Status404NotFound,
+                    errorType: "not_found_error",
+                    message: "The referenced message id is not accessible for this caller."));
+        }
+
+        var latestAssistantMessageId = await ResolveLatestAssistantMessageIdAsync(
+            db,
+            previousAssistant.NotebookConversationId,
+            ct);
+        if (latestAssistantMessageId != previousAssistant.Id)
+        {
+            return new AnthropicConversationResolution(
+                null,
+                CreateAnthropicError(
+                    StatusCodes.Status400BadRequest,
+                    errorType: "invalid_request_error",
+                    message: "The referenced message id is not the latest assistant message in this conversation."));
+        }
+
+        return new AnthropicConversationResolution(previousAssistant.NotebookConversationId, null);
+    }
+
+    private static async Task<Guid?> ResolveAnthropicConversationFromTranscriptAsync(
+        PublishedApiExecutionContext context,
+        IReadOnlyList<ChatMessage> prefixMessages,
+        ApplicationDbContext db,
+        CancellationToken ct)
+    {
+        var expectedHistory = BuildAnthropicTranscriptHistory(prefixMessages);
+        if (expectedHistory.Count == 0)
+        {
+            return null;
+        }
+
+        var latestExpectedAssistant = expectedHistory
+            .LastOrDefault(m => string.Equals(m.Role, "assistant", StringComparison.Ordinal));
+        if (latestExpectedAssistant == null)
+        {
+            return null;
+        }
+
+        var assistantQuery = db.NotebookConversationMessages
+            .AsNoTracking()
+            .Where(m =>
+                m.NotebookConversation.NotebookId == context.NotebookId &&
+                m.Role == DataModelChatRole.Assistant &&
+                m.IsStreaming != true);
+
+        if (!string.IsNullOrWhiteSpace(latestExpectedAssistant.Text))
+        {
+            var expectedAssistantText = latestExpectedAssistant.Text;
+            assistantQuery = assistantQuery.Where(m => m.Content != null && m.Content.Trim() == expectedAssistantText);
+        }
+
+        foreach (var toolCallId in latestExpectedAssistant.ToolCallIds)
+        {
+            assistantQuery = assistantQuery.Where(m => m.ToolCalls != null && m.ToolCalls.Contains(toolCallId));
+        }
+
+        var candidates = await assistantQuery
+            .OrderByDescending(m => m.Created)
+            .Select(m => new
+            {
+                m.Id,
+                m.NotebookConversationId,
+                m.TurnIndex
+            })
+            .Take(50)
+            .ToListAsync(ct);
+
+        foreach (var candidate in candidates)
+        {
+            var latestAssistantMessageId = await ResolveLatestAssistantMessageIdAsync(
+                db,
+                candidate.NotebookConversationId,
+                ct);
+            if (latestAssistantMessageId != candidate.Id)
+            {
+                continue;
+            }
+
+            if (!await TurnMatchesCallerScopeAsync(
+                    context,
+                    db,
+                    candidate.NotebookConversationId,
+                    candidate.TurnIndex,
+                    ct))
+            {
+                continue;
+            }
+
+            var persistedRows = await db.NotebookConversationMessages
+                .AsNoTracking()
+                .Where(m =>
+                    m.NotebookConversationId == candidate.NotebookConversationId &&
+                    m.IsStreaming != true)
+                .OrderBy(m => m.TurnIndex)
+                .ThenBy(m => m.MessageSequence)
+                .Select(m => new PersistedHistoryRow(
+                    m.Role,
+                    m.Content,
+                    m.ToolCallId,
+                    m.ToolCalls))
+                .ToListAsync(ct);
+            var persistedHistory = BuildPersistedTranscriptHistory(persistedRows);
+            if (TranscriptEndsWith(persistedHistory, expectedHistory))
+            {
+                return candidate.NotebookConversationId;
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<AnthropicHistoryMessage> BuildAnthropicTranscriptHistory(
+        IReadOnlyList<ChatMessage> messages)
+    {
+        var history = new List<AnthropicHistoryMessage>();
+        foreach (var message in messages)
+        {
+            var role = message.Role switch
+            {
+                ChatRole.User => "user",
+                ChatRole.Assistant => "assistant",
+                ChatRole.Tool => "tool",
+                _ => null
+            };
+            if (role == null)
+            {
+                continue;
+            }
+
+            var text = NormalizeTranscriptText(message.GetText());
+            var toolCallId = NormalizeTranscriptId(message.ToolCallId);
+            var toolCallIds = message.ToolCalls?
+                .Select(t => NormalizeTranscriptId(t.Id))
+                .Where(id => id != null)
+                .Select(id => id!)
+                .ToList() ?? [];
+
+            if (string.IsNullOrWhiteSpace(text) &&
+                string.IsNullOrWhiteSpace(toolCallId) &&
+                toolCallIds.Count == 0)
+            {
+                continue;
+            }
+
+            history.Add(new AnthropicHistoryMessage(role, text, toolCallId, toolCallIds));
+        }
+
+        return history;
+    }
+
+    private static IReadOnlyList<AnthropicHistoryMessage> BuildPersistedTranscriptHistory(
+        IReadOnlyList<PersistedHistoryRow> rows)
+    {
+        var history = new List<AnthropicHistoryMessage>();
+        foreach (var row in rows)
+        {
+            var role = row.Role switch
+            {
+                DataModelChatRole.User => "user",
+                DataModelChatRole.Assistant => "assistant",
+                DataModelChatRole.Tool => "tool",
+                _ => null
+            };
+            if (role == null)
+            {
+                continue;
+            }
+
+            var text = NormalizeTranscriptText(row.Content);
+            var toolCallId = NormalizeTranscriptId(row.ToolCallId);
+            var toolCallIds = ExtractToolCallIds(row.ToolCallsJson);
+            if (string.IsNullOrWhiteSpace(text) &&
+                string.IsNullOrWhiteSpace(toolCallId) &&
+                toolCallIds.Count == 0)
+            {
+                continue;
+            }
+
+            history.Add(new AnthropicHistoryMessage(role, text, toolCallId, toolCallIds));
+        }
+
+        return history;
+    }
+
+    private static bool TranscriptEndsWith(
+        IReadOnlyList<AnthropicHistoryMessage> persistedHistory,
+        IReadOnlyList<AnthropicHistoryMessage> expectedHistory)
+    {
+        if (expectedHistory.Count == 0 || persistedHistory.Count < expectedHistory.Count)
+        {
+            return false;
+        }
+
+        var persistedIndex = persistedHistory.Count - 1;
+        for (var expectedIndex = expectedHistory.Count - 1; expectedIndex >= 0; expectedIndex--)
+        {
+            var matched = false;
+            while (persistedIndex >= 0)
+            {
+                if (TranscriptMessagesEqual(persistedHistory[persistedIndex], expectedHistory[expectedIndex]))
+                {
+                    matched = true;
+                    persistedIndex--;
+                    break;
+                }
+
+                persistedIndex--;
+            }
+
+            if (!matched)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TranscriptMessagesEqual(AnthropicHistoryMessage left, AnthropicHistoryMessage right)
+    {
+        return string.Equals(left.Role, right.Role, StringComparison.Ordinal) &&
+               string.Equals(left.Text, right.Text, StringComparison.Ordinal) &&
+               string.Equals(left.ToolCallId, right.ToolCallId, StringComparison.Ordinal) &&
+               ToolCallIdsMatch(left.ToolCallIds, right.ToolCallIds);
+    }
+
+    private static bool ToolCallIdsMatch(IReadOnlyList<string> persistedIds, IReadOnlyList<string> expectedIds)
+    {
+        if (expectedIds.Count == 0)
+        {
+            return persistedIds.Count == 0;
+        }
+
+        if (persistedIds.Count < expectedIds.Count)
+        {
+            return false;
+        }
+
+        var persistedIndex = 0;
+        foreach (var expectedId in expectedIds)
+        {
+            var found = false;
+            while (persistedIndex < persistedIds.Count)
+            {
+                if (string.Equals(persistedIds[persistedIndex], expectedId, StringComparison.Ordinal))
+                {
+                    found = true;
+                    persistedIndex++;
+                    break;
+                }
+
+                persistedIndex++;
+            }
+
+            if (!found)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string NormalizeTranscriptText(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? string.Empty : text.Trim();
+
+    private static string? NormalizeTranscriptId(string? id) =>
+        string.IsNullOrWhiteSpace(id) ? null : id.Trim();
+
+    private static IReadOnlyList<string> ExtractToolCallIds(string? toolCallsJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolCallsJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(toolCallsJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            var ids = new List<string>();
+            foreach (var item in document.RootElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var id = item.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String
+                    ? idElement.GetString()
+                    : item.TryGetProperty("Id", out var pascalIdElement) && pascalIdElement.ValueKind == JsonValueKind.String
+                        ? pascalIdElement.GetString()
+                        : null;
+                id = NormalizeTranscriptId(id);
+                if (id != null)
+                {
+                    ids.Add(id);
+                }
+            }
+
+            return ids;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static bool TryFindLatestAnthropicAssistantMessageId(JsonElement messages, out Guid messageId)
+    {
+        messageId = Guid.Empty;
+        if (messages.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var message in messages.EnumerateArray())
+        {
+            if (message.ValueKind != JsonValueKind.Object ||
+                !message.TryGetProperty("role", out var roleElement) ||
+                roleElement.ValueKind != JsonValueKind.String ||
+                !string.Equals(roleElement.GetString(), "assistant", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!message.TryGetProperty("id", out var idElement) ||
+                idElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var id = idElement.GetString();
+            if (TryParseAnthropicMessageId(id, out var parsedMessageId))
+            {
+                messageId = parsedMessageId;
+            }
+        }
+
+        return messageId != Guid.Empty;
+    }
+
+    private static async Task<bool> TurnMatchesCallerScopeAsync(
+        PublishedApiExecutionContext context,
+        ApplicationDbContext db,
+        Guid conversationId,
+        int turnIndex,
+        CancellationToken ct)
+    {
+        if (context.InternalUserId.HasValue)
+        {
+            return await db.NotebookConversationMessages
+                .AsNoTracking()
+                .Where(m =>
+                    m.NotebookConversationId == conversationId &&
+                    m.TurnIndex == turnIndex &&
+                    m.Role == DataModelChatRole.User)
+                .AnyAsync(m => m.UserId == context.InternalUserId, ct);
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.ExternalUserIdentity))
+        {
+            return await db.NotebookConversationMessages
+                .AsNoTracking()
+                .Where(m =>
+                    m.NotebookConversationId == conversationId &&
+                    m.TurnIndex == turnIndex &&
+                    m.Role == DataModelChatRole.User)
+                .AnyAsync(m => m.ExternalUserIdentity == context.ExternalUserIdentity, ct);
+        }
+
+        return true;
+    }
+
     private static async Task<(Guid? ConversationId, IResult? ErrorResult)> ResolveResponsesConversationAsync(
         PublishedApiExecutionContext context,
         string? previousResponseId,
@@ -2709,6 +3248,28 @@ public static class PublishedOpenAiWireHandlers
     }
 
     private static string FormatResponsesId(Guid messageId) => $"resp_{messageId:N}";
+
+    private static string FormatAnthropicMessageId(Guid messageId) => $"msg_{messageId:N}";
+
+    private static bool TryParseAnthropicMessageId(string? messageId, out Guid parsedMessageId)
+    {
+        parsedMessageId = Guid.Empty;
+
+        if (string.IsNullOrWhiteSpace(messageId))
+        {
+            return false;
+        }
+
+        var trimmed = messageId.Trim();
+        const string prefix = "msg_";
+        if (!trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rawId = trimmed[prefix.Length..];
+        return Guid.TryParse(rawId, out parsedMessageId);
+    }
 
     private static bool TryParseResponsesMessageId(string responseId, out Guid messageId)
     {

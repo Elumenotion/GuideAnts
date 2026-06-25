@@ -1041,6 +1041,101 @@ public sealed class PublishedOpenAiWireHandlersTests
     }
 
     [TestMethod]
+    public async Task PostMessagesAsync_Returns_persisted_assistant_message_id()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var assistantMessageId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            Title = "Project",
+            Slug = "project-message-id"
+        };
+        var notebook = new Notebook
+        {
+            Id = notebookId,
+            ProjectId = project.Id,
+            Project = project,
+            Title = "Notebook",
+            Slug = "notebook-message-id"
+        };
+        var conversation = new NotebookConversation
+        {
+            Id = conversationId,
+            NotebookId = notebookId,
+            Notebook = notebook,
+            Title = "Conversation",
+            Created = now
+        };
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        db.NotebookConversations.Add(conversation);
+        await db.SaveChangesAsync();
+
+        async IAsyncEnumerable<StreamingEvent> PersistingStream()
+        {
+            db.NotebookConversationMessages.Add(new NotebookConversationMessage
+            {
+                Id = assistantMessageId,
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.Assistant,
+                Content = "Hello from guide",
+                TurnIndex = 1,
+                MessageSequence = 2,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = now.AddSeconds(1)
+            });
+            await db.SaveChangesAsync();
+            yield return new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"Hello from guide\"}");
+            yield return new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":7,\"completion_tokens\":11}");
+        }
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.CreateConversationAsync(
+                notebookId,
+                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+            .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(PersistingStream);
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello from messages\"}]")
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        using var json = JsonDocument.Parse(executed.Body);
+        json.RootElement.GetProperty("id").GetString().Should().Be($"msg_{assistantMessageId:N}");
+    }
+
+    [TestMethod]
     public async Task PostMessagesAsync_Returns_tool_use_content_when_pending_client_tool()
     {
         var pubId = Guid.NewGuid();
@@ -1289,6 +1384,993 @@ public sealed class PublishedOpenAiWireHandlersTests
                 It.IsAny<string?>(),
                 It.IsAny<string?>(),
                 It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostMessagesAsync_Continues_conversation_from_transcript_when_history_has_no_assistant_message_id()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            Title = "Project",
+            Slug = "project-messages-transcript-continuation"
+        };
+        var notebook = new Notebook
+        {
+            Id = notebookId,
+            ProjectId = project.Id,
+            Project = project,
+            Title = "Notebook",
+            Slug = "notebook-messages-transcript-continuation"
+        };
+        var conversation = new NotebookConversation
+        {
+            Id = conversationId,
+            NotebookId = notebookId,
+            Notebook = notebook,
+            Title = "Existing conversation",
+            Created = now
+        };
+        var turn = new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = conversationId,
+            NotebookConversation = conversation,
+            TurnIndex = 1,
+            AssistantName = "Guide",
+            Instructions = "hello",
+            Status = "completed",
+            Created = now,
+            LastUpdated = now
+        };
+
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        db.NotebookConversations.Add(conversation);
+        db.ConversationTurns.Add(turn);
+        db.NotebookConversationMessages.AddRange(
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.User,
+                Content = "hello",
+                TurnIndex = 1,
+                MessageSequence = 1,
+                ExternalUserIdentity = "user",
+                Created = now
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.Assistant,
+                Content = "Hello! How can I help you today?",
+                TurnIndex = 1,
+                MessageSequence = 2,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = now.AddSeconds(1)
+            });
+        await db.SaveChangesAsync();
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.Is<SendMessageRequest>(r =>
+                    r.Instructions == "tell me about this project" &&
+                    r.ClientMessages == null),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"Project summary\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":12,\"completion_tokens\":4}")
+            ));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement("""
+                [
+                  {
+                    "role": "user",
+                    "content": "hello"
+                  },
+                  {
+                    "role": "assistant",
+                    "content": "Hello! How can I help you today?"
+                  },
+                  {
+                    "role": "system",
+                    "content": "{\"contextOptions\":{\"system.currentDate\":\"2026-06-25\"}}"
+                  },
+                  {
+                    "role": "user",
+                    "content": "tell me about this project"
+                  }
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        using var json = JsonDocument.Parse(executed.Body);
+        json.RootElement.GetProperty("content")[0].GetProperty("text").GetString().Should().Be("Project summary");
+
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(
+                conversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        conversationService.Verify(
+            s => s.CreateConversationAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>()),
+            Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostMessagesAsync_Continues_conversation_from_full_transcript_when_assistant_text_repeats()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var targetConversationId = Guid.NewGuid();
+        var otherConversationId = Guid.NewGuid();
+        var repeatedAssistantText = "Same assistant answer";
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            Title = "Project",
+            Slug = "project-messages-transcript-repeat"
+        };
+        var notebook = new Notebook
+        {
+            Id = notebookId,
+            ProjectId = project.Id,
+            Project = project,
+            Title = "Notebook",
+            Slug = "notebook-messages-transcript-repeat"
+        };
+        var targetConversation = new NotebookConversation
+        {
+            Id = targetConversationId,
+            NotebookId = notebookId,
+            Notebook = notebook,
+            Title = "Target conversation",
+            Created = now
+        };
+        var otherConversation = new NotebookConversation
+        {
+            Id = otherConversationId,
+            NotebookId = notebookId,
+            Notebook = notebook,
+            Title = "Other conversation",
+            Created = now.AddSeconds(10)
+        };
+        var targetTurn = new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = targetConversationId,
+            NotebookConversation = targetConversation,
+            TurnIndex = 1,
+            AssistantName = "Guide",
+            Instructions = "target hello",
+            Status = "completed",
+            Created = now,
+            LastUpdated = now
+        };
+        var otherTurn = new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = otherConversationId,
+            NotebookConversation = otherConversation,
+            TurnIndex = 1,
+            AssistantName = "Guide",
+            Instructions = "other hello",
+            Status = "completed",
+            Created = now.AddSeconds(10),
+            LastUpdated = now.AddSeconds(10)
+        };
+
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        db.NotebookConversations.AddRange(targetConversation, otherConversation);
+        db.ConversationTurns.AddRange(targetTurn, otherTurn);
+        db.NotebookConversationMessages.AddRange(
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = targetConversationId,
+                NotebookConversation = targetConversation,
+                Role = ChatRole.User,
+                Content = "target hello",
+                TurnIndex = 1,
+                MessageSequence = 1,
+                ExternalUserIdentity = "user",
+                Created = now
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = targetConversationId,
+                NotebookConversation = targetConversation,
+                Role = ChatRole.Assistant,
+                Content = repeatedAssistantText,
+                TurnIndex = 1,
+                MessageSequence = 2,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = now.AddSeconds(1)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = otherConversationId,
+                NotebookConversation = otherConversation,
+                Role = ChatRole.User,
+                Content = "other hello",
+                TurnIndex = 1,
+                MessageSequence = 1,
+                ExternalUserIdentity = "user",
+                Created = now.AddSeconds(10)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = otherConversationId,
+                NotebookConversation = otherConversation,
+                Role = ChatRole.Assistant,
+                Content = repeatedAssistantText,
+                TurnIndex = 1,
+                MessageSequence = 2,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = now.AddSeconds(11)
+            });
+        await db.SaveChangesAsync();
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                targetConversationId,
+                It.Is<SendMessageRequest>(r =>
+                    r.Instructions == "continue this one" &&
+                    r.ClientMessages == null),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"Continued target conversation\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":12,\"completion_tokens\":4}")
+            ));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement($$"""
+                [
+                  {
+                    "role": "user",
+                    "content": "target hello"
+                  },
+                  {
+                    "role": "assistant",
+                    "content": "{{repeatedAssistantText}}"
+                  },
+                  {
+                    "role": "user",
+                    "content": "continue this one"
+                  }
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(
+                targetConversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(
+                otherConversationId,
+                It.IsAny<SendMessageRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        conversationService.Verify(
+            s => s.CreateConversationAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>()),
+            Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostMessagesAsync_Continues_conversation_when_persisted_history_has_internal_tool_messages()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        const string clientToolCallId = "client_read_1";
+        const string serverToolCallId = "server_search_1";
+        const string toolAssistantText = "Let me explore the project to understand what it is.";
+        const string finalAssistantText = "GuideAnts is a project.";
+
+        using var db = CreateDbContext();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            Title = "Project",
+            Slug = "project-messages-internal-tools"
+        };
+        var notebook = new Notebook
+        {
+            Id = notebookId,
+            ProjectId = project.Id,
+            Project = project,
+            Title = "Notebook",
+            Slug = "notebook-messages-internal-tools"
+        };
+        var conversation = new NotebookConversation
+        {
+            Id = conversationId,
+            NotebookId = notebookId,
+            Notebook = notebook,
+            Title = "Existing conversation",
+            Created = now
+        };
+        var firstTurn = new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = conversationId,
+            NotebookConversation = conversation,
+            TurnIndex = 1,
+            AssistantName = "Guide",
+            Instructions = "hello",
+            Status = "completed",
+            Created = now,
+            LastUpdated = now
+        };
+        var secondTurn = new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = conversationId,
+            NotebookConversation = conversation,
+            TurnIndex = 2,
+            AssistantName = "Guide",
+            Instructions = "describe this project",
+            Status = "completed",
+            Created = now.AddSeconds(2),
+            LastUpdated = now.AddSeconds(6)
+        };
+
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        db.NotebookConversations.Add(conversation);
+        db.ConversationTurns.AddRange(firstTurn, secondTurn);
+        db.NotebookConversationMessages.AddRange(
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.User,
+                Content = "hello",
+                TurnIndex = 1,
+                MessageSequence = 1,
+                ExternalUserIdentity = "user",
+                Created = now
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.Assistant,
+                Content = "Hello! How can I help you today?",
+                TurnIndex = 1,
+                MessageSequence = 2,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = now.AddSeconds(1)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.User,
+                Content = "describe this project",
+                TurnIndex = 2,
+                MessageSequence = 1,
+                ExternalUserIdentity = "user",
+                Created = now.AddSeconds(2)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.Assistant,
+                Content = toolAssistantText,
+                ToolCalls = JsonSerializer.Serialize(new[]
+                {
+                    new AntRunner.Chat.Abstractions.ChatToolCall
+                    {
+                        Id = serverToolCallId,
+                        Type = "function",
+                        Function = new AntRunner.Chat.Abstractions.ChatToolCallFunction
+                        {
+                            Name = "Search",
+                            Arguments = JsonSerializer.SerializeToElement(new { instructions = "Describe GuideAnts" })
+                        }
+                    },
+                    new AntRunner.Chat.Abstractions.ChatToolCall
+                    {
+                        Id = clientToolCallId,
+                        Type = "function",
+                        Function = new AntRunner.Chat.Abstractions.ChatToolCallFunction
+                        {
+                            Name = "Read",
+                            Arguments = JsonSerializer.SerializeToElement(new { file_path = @"D:\repos\GuideAnts\README.md" })
+                        }
+                    }
+                }),
+                TurnIndex = 2,
+                MessageSequence = 2,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = now.AddSeconds(3)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.Tool,
+                Content = "README contents",
+                ToolCallId = clientToolCallId,
+                FunctionName = "Read",
+                TurnIndex = 2,
+                MessageSequence = 3,
+                Created = now.AddSeconds(4)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.Tool,
+                Content = "Search summary",
+                ToolCallId = serverToolCallId,
+                FunctionName = "Search",
+                TurnIndex = 2,
+                MessageSequence = 4,
+                Created = now.AddSeconds(5)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = conversationId,
+                NotebookConversation = conversation,
+                Role = ChatRole.Assistant,
+                Content = finalAssistantText,
+                TurnIndex = 2,
+                MessageSequence = 5,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = now.AddSeconds(6)
+            });
+        await db.SaveChangesAsync();
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.Is<SendMessageRequest>(r =>
+                    r.Instructions == "what else?" &&
+                    r.ClientMessages == null),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"More details\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":12,\"completion_tokens\":4}")
+            ));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement($$"""
+                [
+                  {
+                    "role": "user",
+                    "content": "hello"
+                  },
+                  {
+                    "role": "assistant",
+                    "content": "Hello! How can I help you today?"
+                  },
+                  {
+                    "role": "user",
+                    "content": "describe this project"
+                  },
+                  {
+                    "role": "assistant",
+                    "content": [
+                      { "type": "text", "text": "{{toolAssistantText}}" },
+                      {
+                        "type": "tool_use",
+                        "id": "{{clientToolCallId}}",
+                        "name": "Read",
+                        "input": { "file_path": "D:\\repos\\GuideAnts\\README.md" }
+                      }
+                    ]
+                  },
+                  {
+                    "role": "user",
+                    "content": [
+                      {
+                        "type": "tool_result",
+                        "tool_use_id": "{{clientToolCallId}}",
+                        "content": "README contents"
+                      }
+                    ]
+                  },
+                  {
+                    "role": "assistant",
+                    "content": "{{finalAssistantText}}"
+                  },
+                  {
+                    "role": "user",
+                    "content": "what else?"
+                  }
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(
+                conversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        conversationService.Verify(
+            s => s.CreateConversationAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>()),
+            Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostMessagesAsync_Continues_conversation_by_assistant_message_id_when_text_repeats()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var targetConversationId = Guid.NewGuid();
+        var otherConversationId = Guid.NewGuid();
+        var targetAssistantMessageId = Guid.NewGuid();
+        var repeatedAssistantText = "Same assistant answer";
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            Title = "Project",
+            Slug = "project-messages-id-continuation"
+        };
+        var notebook = new Notebook
+        {
+            Id = notebookId,
+            ProjectId = project.Id,
+            Project = project,
+            Title = "Notebook",
+            Slug = "notebook-messages-id-continuation"
+        };
+        var targetConversation = new NotebookConversation
+        {
+            Id = targetConversationId,
+            NotebookId = notebookId,
+            Notebook = notebook,
+            Title = "Target conversation",
+            Created = now
+        };
+        var otherConversation = new NotebookConversation
+        {
+            Id = otherConversationId,
+            NotebookId = notebookId,
+            Notebook = notebook,
+            Title = "Other conversation",
+            Created = now.AddSeconds(10)
+        };
+        var targetTurn = new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = targetConversationId,
+            NotebookConversation = targetConversation,
+            TurnIndex = 1,
+            AssistantName = "Guide",
+            Instructions = "hello",
+            Status = "completed",
+            Created = now,
+            LastUpdated = now
+        };
+        var otherTurn = new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = otherConversationId,
+            NotebookConversation = otherConversation,
+            TurnIndex = 1,
+            AssistantName = "Guide",
+            Instructions = "hello",
+            Status = "completed",
+            Created = now.AddSeconds(10),
+            LastUpdated = now.AddSeconds(10)
+        };
+
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        db.NotebookConversations.AddRange(targetConversation, otherConversation);
+        db.ConversationTurns.AddRange(targetTurn, otherTurn);
+        db.NotebookConversationMessages.AddRange(
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = targetConversationId,
+                NotebookConversation = targetConversation,
+                Role = ChatRole.User,
+                Content = "hello",
+                TurnIndex = 1,
+                MessageSequence = 1,
+                ExternalUserIdentity = "user",
+                Created = now
+            },
+            new NotebookConversationMessage
+            {
+                Id = targetAssistantMessageId,
+                NotebookConversationId = targetConversationId,
+                NotebookConversation = targetConversation,
+                Role = ChatRole.Assistant,
+                Content = repeatedAssistantText,
+                TurnIndex = 1,
+                MessageSequence = 2,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = now.AddSeconds(1)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = otherConversationId,
+                NotebookConversation = otherConversation,
+                Role = ChatRole.User,
+                Content = "hello",
+                TurnIndex = 1,
+                MessageSequence = 1,
+                ExternalUserIdentity = "user",
+                Created = now.AddSeconds(10)
+            },
+            new NotebookConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                NotebookConversationId = otherConversationId,
+                NotebookConversation = otherConversation,
+                Role = ChatRole.Assistant,
+                Content = repeatedAssistantText,
+                TurnIndex = 1,
+                MessageSequence = 2,
+                AssistantName = "Guide",
+                IsStreaming = false,
+                Created = now.AddSeconds(11)
+            });
+        await db.SaveChangesAsync();
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                targetConversationId,
+                It.Is<SendMessageRequest>(r =>
+                    r.Instructions == "continue this one" &&
+                    r.ClientMessages == null),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"Continued target conversation\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":12,\"completion_tokens\":4}")
+            ));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement($$"""
+                [
+                  {
+                    "role": "user",
+                    "content": "hello"
+                  },
+                  {
+                    "id": "msg_{{targetAssistantMessageId:N}}",
+                    "role": "assistant",
+                    "content": "{{repeatedAssistantText}}"
+                  },
+                  {
+                    "role": "user",
+                    "content": "continue this one"
+                  }
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(
+                targetConversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(
+                otherConversationId,
+                It.IsAny<SendMessageRequest>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        conversationService.Verify(
+            s => s.CreateConversationAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>()),
+            Times.Never);
+    }
+
+    [TestMethod]
+    public async Task PostMessagesAsync_Ignores_historical_tool_results_when_latest_message_is_user_text()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var historicalConversationId = Guid.NewGuid();
+        var newConversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using var db = CreateDbContext();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            Title = "Project",
+            Slug = "project-messages-history"
+        };
+        var notebook = new Notebook
+        {
+            Id = notebookId,
+            ProjectId = project.Id,
+            Project = project,
+            Title = "Notebook",
+            Slug = "notebook-messages-history"
+        };
+        var historicalConversation = new NotebookConversation
+        {
+            Id = historicalConversationId,
+            NotebookId = notebookId,
+            Notebook = notebook,
+            Title = "Historical conversation",
+            Created = now
+        };
+        var completedTurn = new ConversationTurn
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = historicalConversationId,
+            NotebookConversation = historicalConversation,
+            TurnIndex = 1,
+            AssistantName = "Guide",
+            Instructions = "where am i?",
+            Status = "completed",
+            Created = now,
+            LastUpdated = now
+        };
+
+        db.Projects.Add(project);
+        db.Notebooks.Add(notebook);
+        db.NotebookConversations.Add(historicalConversation);
+        db.ConversationTurns.Add(completedTurn);
+        db.NotebookConversationMessages.Add(new NotebookConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = historicalConversationId,
+            NotebookConversation = historicalConversation,
+            Role = ChatRole.User,
+            Content = "where am i?",
+            TurnIndex = 1,
+            MessageSequence = 1,
+            ExternalUserIdentity = "user",
+            Created = now
+        });
+        db.NotebookConversationMessages.Add(new NotebookConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            NotebookConversationId = historicalConversationId,
+            NotebookConversation = historicalConversation,
+            Role = ChatRole.Assistant,
+            Content = string.Empty,
+            TurnIndex = 1,
+            MessageSequence = 2,
+            AssistantName = "Guide",
+            ToolCalls = "[{\"id\":\"toolu_1\",\"type\":\"function\",\"function\":{\"name\":\"run_shell\",\"arguments\":{\"command\":\"pwd\"}}}]",
+            IsStreaming = false,
+            Created = now.AddSeconds(1)
+        });
+        await db.SaveChangesAsync();
+
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
+        var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
+        conversationService
+            .Setup(s => s.CreateConversationAsync(
+                notebookId,
+                It.Is<string>(title => title.StartsWith("wire-", StringComparison.Ordinal))))
+            .ReturnsAsync(new NotebookConversationListDto(newConversationId, "wire-conversation", now, now));
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                newConversationId,
+                It.Is<SendMessageRequest>(r => r.Instructions == "tell me about this project"),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"Project summary\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":13,\"completion_tokens\":5}")
+            ));
+
+        var http = new DefaultHttpContext();
+        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        {
+            Model = "guide",
+            Messages = ParseJsonElement("""
+                [
+                  {
+                    "role": "assistant",
+                    "content": [
+                      {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "run_shell",
+                        "input": { "command": "pwd" }
+                      }
+                    ]
+                  },
+                  {
+                    "role": "user",
+                    "content": [
+                      {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": "D:/repos/GuideAnts"
+                      }
+                    ]
+                  },
+                  {
+                    "role": "assistant",
+                    "content": "I checked the repo."
+                  },
+                  {
+                    "role": "user",
+                    "content": "tell me about this project"
+                  }
+                ]
+                """)
+        };
+
+        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        using var json = JsonDocument.Parse(executed.Body);
+        json.RootElement.GetProperty("content")[0].GetProperty("text").GetString().Should().Be("Project summary");
+
+        conversationService.Verify(
+            s => s.SendMessageStreamAsync(
+                newConversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        conversationService.Verify(
+            s => s.ResumeAfterExternalToolResultsStreamAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<IReadOnlyList<AntRunner.Chat.Abstractions.ChatToolDefinition>?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
     }

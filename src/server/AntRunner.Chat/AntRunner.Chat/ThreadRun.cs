@@ -184,6 +184,22 @@ namespace AntRunner.Chat
             var samplingParams = BuildSamplingParameters(resolvedParameterBag);
 
             var api = clientFactory.CreateClient(options.DeploymentId, httpClient);
+            var traceCollector = options.TraceCollector;
+
+            MessageAddedEventHandler? tracedMessageAdded = null;
+            if (onMessage != null || traceCollector != null)
+            {
+                tracedMessageAdded = (_, e) =>
+                {
+                    traceCollector?.CaptureMessageEvent(
+                        e.Role ?? string.Empty,
+                        e.Message,
+                        e.ToolCallId,
+                        e.FunctionName,
+                        e.ToolCallsJson);
+                    onMessage?.Invoke(null, e);
+                };
+            }
 
             var messages = new List<ChatMessage>();
             var hasKnowledge = assistantDef.Tools?.FirstOrDefault(t => t.Type == "file_search") != null;
@@ -210,7 +226,7 @@ namespace AntRunner.Chat
 
                 if (messages.Count > 0)
                 {
-                    onMessage?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
+                    tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
                 }
 
                 if (previous != null && previous.Count > 0)
@@ -222,7 +238,7 @@ namespace AntRunner.Chat
                 }
 
                 messages.Add(new ChatMessage(ChatRole.User, options.Instructions));
-                onMessage?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
+                tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
             }
             else if (previous != null && previous.Count > 0)
             {
@@ -233,7 +249,7 @@ namespace AntRunner.Chat
                 if (!resumeWithoutNewUserMessage)
                 {
                     messages.Add(new ChatMessage(ChatRole.User, options.Instructions));
-                    onMessage?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
+                    tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
                 }
             }
             else
@@ -248,13 +264,16 @@ namespace AntRunner.Chat
                 }
                 messages.Add(new ChatMessage(ChatRole.User, options.Instructions));
 
-                onMessage?.Invoke(null, new MessageAddedEventArgs(messages.First().Role.ToString(), messages.First().GetText()));
-                onMessage?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
+                tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.First().Role.ToString(), messages.First().GetText()));
+                tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(messages.Last().Role.ToString(), messages.Last().GetText()));
             }
+
+            traceCollector?.CaptureSeedMessages(BuildTraceMessageSnapshots(messages));
 
             var tools = new List<ChatToolDefinition>();
             var clientHandledToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var registeredToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var traceTools = new List<ThreadRunTraceToolDefinitionSnapshot>();
 
             if (assistantDef.Tools != null)
             {
@@ -269,6 +288,11 @@ namespace AntRunner.Chat
                         var newTool = new ChatToolDefinition(newFunction);
                         tools.Add(newTool);
                         registeredToolNames.Add(function.Name!);
+                        traceTools.Add(new ThreadRunTraceToolDefinitionSnapshot(
+                            function.Name!,
+                            function.Description,
+                            functionParametersJsonNode?.ToJsonString(),
+                            "guide"));
                     }
                 }
             }
@@ -290,10 +314,18 @@ namespace AntRunner.Chat
 
                     tools.Add(clientTool);
                     clientHandledToolNames.Add(functionName);
+                    traceTools.Add(new ThreadRunTraceToolDefinitionSnapshot(
+                        functionName,
+                        clientTool.Function?.Description,
+                        clientTool.Function?.Parameters?.ToJsonString(),
+                        "client"));
                 }
             }
 
+            traceCollector?.CaptureToolDefinitions(traceTools);
+
             bool continueChat = true;
+            var roundIndex = 0;
 
             ChatChoice? choice = null;
             ChatRunOutput? runResults = null;
@@ -312,12 +344,18 @@ namespace AntRunner.Chat
                 while (continueChat)
                 {
                     token.ThrowIfCancellationRequested();
+                    roundIndex++;
                     var chatRequest = new ChatCompletionRequest(
                         messages,
                         tools: tools,
                         model: options.DeploymentId,
                         reasoningEffort: reasoningEffortParam,
                         samplingParameters: samplingParams);
+                    traceCollector?.CaptureRoundRequest(
+                        roundIndex,
+                        options.DeploymentId,
+                        BuildTraceMessageSnapshots(messages),
+                        traceTools);
 
                     ChatCompletionResponse response;
                     try
@@ -329,7 +367,7 @@ namespace AntRunner.Chat
                         // Unwind the largest offending message in this turn, replace it with a short
                         // abort notice, and retry. If nothing can be unwound the request is
                         // irreducible (e.g. the system prompt alone overflows) so we rethrow.
-                        if (TryUnwindOversizedMessage(messages, unwoundMessages, overflowEx, onMessage))
+                        if (TryUnwindOversizedMessage(messages, unwoundMessages, overflowEx, tracedMessageAdded))
                         {
                             continue;
                         }
@@ -344,6 +382,10 @@ namespace AntRunner.Chat
                     {
                         toolCallJson = JsonSerializer.Serialize(response.FirstChoice.Message.ToolCalls);
                     }
+                    traceCollector?.CaptureRoundResponse(
+                        roundIndex,
+                        response.FirstChoice.FinishReason,
+                        BuildTraceMessageSnapshot(response.FirstChoice.Message, toolCallJson));
 
                     var lastRole = messages.Last().Role;
                     var lastText = messages.Last().GetText();
@@ -351,7 +393,7 @@ namespace AntRunner.Chat
                     {
                         lastText = NormalizeAssistantText(lastText);
                     }
-                    onMessage?.Invoke(null, new MessageAddedEventArgs(
+                    tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(
                         lastRole.ToString(),
                         lastText,
                         null,
@@ -412,6 +454,7 @@ namespace AntRunner.Chat
                                 if (clientHandled.Count > 0)
                                 {
                                     // Emit client-handled subset to the host/client and pause the run
+                                    traceCollector?.CaptureExternalToolCalls(roundIndex, BuildTraceToolCallSnapshots(clientHandled));
                                     try
                                     {
                                         var json = JsonSerializer.Serialize(clientHandled);
@@ -434,7 +477,7 @@ namespace AntRunner.Chat
                                         externalAuthTokens: options.ExternalAuthTokens,
                                         oAuthUserAccessToken: options.oAuthUserAccessToken,
                                         httpClient: httpClient,
-                                        messageAdded: onMessage,
+                                        messageAdded: tracedMessageAdded,
                                         ctx: ctx,
                                         cancellationToken: token);
                                     foreach (var f in newFiles) accumulatedNewFiles.Add(f);
@@ -452,7 +495,10 @@ namespace AntRunner.Chat
                             break;
                     }
 
-                    runResults = BuildRunResults(messages, response);
+                    if (!string.Equals(runResults?.Status, "pending_client_tool", StringComparison.OrdinalIgnoreCase))
+                    {
+                        runResults = BuildRunResults(messages, response);
+                    }
 
                     if (choice.FinishReason == "stop" && !string.IsNullOrEmpty(options.Evaluator) && runResults != null)
                     {
@@ -491,17 +537,69 @@ namespace AntRunner.Chat
                         runResults.ModifiedFiles = [.. accumulatedModifiedFiles];
                 }
 
+                traceCollector?.CaptureTerminalStatus(runResults?.Status ?? (choice?.FinishReason ?? "unknown"));
                 return runResults;
             }
             catch (OperationCanceledException)
             {
+                traceCollector?.CaptureTerminalStatus("cancelled");
                 // Propagate cancellation so upstream callers can react appropriately
                 throw;
             }
             catch (Exception ex)
             {
+                traceCollector?.CaptureTerminalStatus("failed", ex.Message);
                 throw new ChatConversationException(ex, runResults);
             }
+        }
+
+        private static IReadOnlyList<ThreadRunTraceMessageSnapshot> BuildTraceMessageSnapshots(IEnumerable<ChatMessage> messages)
+        {
+            var list = new List<ThreadRunTraceMessageSnapshot>();
+            foreach (var message in messages)
+            {
+                string? toolCallsJson = null;
+                if (message.ToolCalls is { Count: > 0 })
+                {
+                    toolCallsJson = JsonSerializer.Serialize(message.ToolCalls);
+                }
+
+                list.Add(new ThreadRunTraceMessageSnapshot(
+                    message.Role.ToString().ToLowerInvariant(),
+                    message.GetText(),
+                    message.ToolCallId,
+                    message.FunctionName,
+                    toolCallsJson));
+            }
+
+            return list;
+        }
+
+        private static ThreadRunTraceMessageSnapshot BuildTraceMessageSnapshot(ChatMessage message, string? toolCallsJson = null) =>
+            new(
+                message.Role.ToString().ToLowerInvariant(),
+                message.GetText(),
+                message.ToolCallId,
+                message.FunctionName,
+                toolCallsJson);
+
+        private static IReadOnlyList<ThreadRunTraceToolCallSnapshot> BuildTraceToolCallSnapshots(IEnumerable<ChatToolCall> toolCalls)
+        {
+            var list = new List<ThreadRunTraceToolCallSnapshot>();
+            foreach (var toolCall in toolCalls)
+            {
+                if (!toolCall.IsFunction)
+                {
+                    continue;
+                }
+
+                list.Add(new ThreadRunTraceToolCallSnapshot(
+                    toolCall.Id,
+                    toolCall.Function.Name,
+                    toolCall.Function.Arguments.ToString()));
+            }
+
+            return list;
         }
 
         private static async Task<ChatCompletionResponse> GetCompletionAndStreamAsync(
@@ -875,6 +973,7 @@ namespace AntRunner.Chat
             if (!RequestBuilderCache.TryGetValue(cacheKey, out var builders)) throw new Exception($"No request builders found for {assistantName}");
 
             var toolCallTasks = new List<Task<ToolOutput>>();
+            var executableToolCalls = new List<ChatToolCall>();
 
             foreach (var requiredOutput in toolCalls)
             {
@@ -1125,6 +1224,7 @@ namespace AntRunner.Chat
                     }, cancellationToken);
 
                     toolCallTasks.Add(task);
+                    executableToolCalls.Add(requiredOutput);
                 }
                 else
                 {
@@ -1138,6 +1238,7 @@ namespace AntRunner.Chat
                         };
                     });
                     toolCallTasks.Add(task);
+                    executableToolCalls.Add(requiredOutput);
                 }
             }
 
@@ -1150,7 +1251,7 @@ namespace AntRunner.Chat
                 cancellationToken.ThrowIfCancellationRequested();
                 var toolOutputs = await Task.WhenAll(toolCallTasks);
 
-                foreach (var toolCall in toolCalls)
+                foreach (var toolCall in executableToolCalls)
                 {
                     if (!toolCall.IsFunction) continue;
                     var id = toolCall.Id;
