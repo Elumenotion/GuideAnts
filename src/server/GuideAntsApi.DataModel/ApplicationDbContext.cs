@@ -31,6 +31,7 @@ namespace GuideAntsApi.DataModel
         public DbSet<ProjectExternalAuth> ProjectExternalAuths { get; set; } = null!;
         public DbSet<ExternalOAuthToken> ExternalOAuthTokens { get; set; } = null!;
         public DbSet<OAuthAuthorizationState> OAuthAuthorizationStates { get; set; } = null!;
+        public DbSet<CliAuthSession> CliAuthSessions { get; set; } = null!;
         public DbSet<NotebookLink> NotebookLinks { get; set; } = null!;
         public DbSet<SemiStructuredProjectData> SemiStructuredProjectDatas { get; set; } = null!;
         public DbSet<NotebookSemiStructuredData> NotebookSemiStructuredDatas { get; set; } = null!;
@@ -871,6 +872,15 @@ namespace GuideAntsApi.DataModel
             modelBuilder.Entity<OAuthAuthorizationState>()
                 .HasOne(e => e.User)
                 .WithMany(u => u.OAuthAuthorizationStates)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<CliAuthSession>()
+                .HasIndex(e => e.ExpiresAt);
+
+            modelBuilder.Entity<CliAuthSession>()
+                .HasOne(e => e.User)
+                .WithMany(u => u.CliAuthSessions)
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 

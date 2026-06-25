@@ -1,0 +1,3 @@
+[botdetection.ip_limit]
+# Private instance: keep limiter features effectively off.
+link_token = false

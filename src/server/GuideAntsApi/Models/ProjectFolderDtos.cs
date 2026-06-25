@@ -1,3 +1,5 @@
+using GuideAntsApi.DataModel.Models;
+
 namespace GuideAntsApi.Models;
 
 public record ProjectFolderDto(
@@ -26,7 +28,11 @@ public record FolderTreeDto(
     string Name,
     string RelativePath,
     List<FolderTreeDto> SubFolders,
-    List<ContentFileDetailsDto> Files
+    List<ContentFileDetailsDto> Files,
+    bool IsHostMount = false,
+    Guid? MountId = null,
+    HostFolderMountStatus? MountStatus = null,
+    bool IsLinked = false
 );
 
 public record MoveFileDto(

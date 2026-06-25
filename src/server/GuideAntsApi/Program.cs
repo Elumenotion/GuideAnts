@@ -388,6 +388,7 @@ public class Program
         app.MapProjectFolderEndpoints();
         app.MapLinkEndpoints();
         app.MapAuthEndpoints();
+        app.MapCliAuthEndpoints();
         app.MapAdminUsersEndpoints();
         app.MapUserEndpoints();
         app.MapNotebookConversationsEndpoints();

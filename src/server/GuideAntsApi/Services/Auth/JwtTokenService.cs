@@ -12,7 +12,7 @@ public sealed record IssuedJwtToken(string Token, DateTime ExpiresAtUtc);
 
 public interface IJwtTokenService
 {
-    IssuedJwtToken IssueToken(User user, Role role);
+    IssuedJwtToken IssueToken(User user, Role role, TimeSpan? lifetimeOverride = null);
 }
 
 public sealed class JwtTokenService : IJwtTokenService
@@ -25,10 +25,15 @@ public sealed class JwtTokenService : IJwtTokenService
         ValidateOptions(_options);
     }
 
-    public IssuedJwtToken IssueToken(User user, Role role)
+    public IssuedJwtToken IssueToken(User user, Role role, TimeSpan? lifetimeOverride = null)
     {
+        if (lifetimeOverride is { } ts && ts <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(lifetimeOverride));
+
         var nowUtc = DateTime.UtcNow;
-        var expiresUtc = nowUtc.AddMinutes(_options.LifetimeMinutes);
+        var expiresUtc = lifetimeOverride.HasValue
+            ? nowUtc + lifetimeOverride.Value
+            : nowUtc.AddMinutes(_options.LifetimeMinutes);
 
         var claims = new List<Claim>
         {

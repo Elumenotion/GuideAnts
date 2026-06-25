@@ -76,6 +76,10 @@ export interface FolderTreeDto {
     relativePath: string;
     subFolders: FolderTreeDto[];
     files: ProjectContentFile[];
+    isHostMount?: boolean;
+    mountId?: string;
+    mountStatus?: string;
+    isLinked?: boolean;
 }
 
 export interface MoveFolderDto {

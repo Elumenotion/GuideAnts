@@ -1823,6 +1823,7 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
       isOpen={showMapHostFolderDialog}
       onClose={() => setShowMapHostFolderDialog(false)}
       onSubmit={handleCreateHostMount}
+      scope="Notebook"
     />
     <HostMountCommandDialog
       isOpen={commandDialog != null}
