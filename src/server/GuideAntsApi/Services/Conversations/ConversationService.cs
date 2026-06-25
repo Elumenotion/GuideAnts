@@ -100,6 +100,47 @@ public class ConversationService : IConversationService
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var user = await _streamPolicy.ResolveUserIdentityAsync(internalUserId: null, externalUserIdentity: null, CancellationToken.None);
+        await foreach (var ev in SendMessageStreamCoreAsync(conversationId, request, user, cancellationToken))
+        {
+            yield return ev;
+        }
+    }
+
+    public async IAsyncEnumerable<StreamingEvent> SendMessageStreamToConversationAsUserAsync(
+        Guid conversationId,
+        SendMessageRequest request,
+        Guid actingUserId,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var user = await ResolveStreamUserIdentityAsync(actingUserId, cancellationToken);
+        await foreach (var ev in SendMessageStreamCoreAsync(conversationId, request, user, cancellationToken))
+        {
+            yield return ev;
+        }
+    }
+
+    private async Task<StreamUserIdentity> ResolveStreamUserIdentityAsync(Guid userId, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new KeyNotFoundException($"User {userId} was not found.");
+
+        var userName = string.IsNullOrWhiteSpace(user.Name) ? user.Email : user.Name;
+        if (string.IsNullOrWhiteSpace(userName))
+        {
+            throw new InvalidOperationException($"User {userId} has no display identity.");
+        }
+
+        return new StreamUserIdentity(user.Id, userName, null);
+    }
+
+    private async IAsyncEnumerable<StreamingEvent> SendMessageStreamCoreAsync(
+        Guid conversationId,
+        SendMessageRequest request,
+        StreamUserIdentity user,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         var lockHandle = await _streamPolicy.TryAcquireStreamAsync(conversationId, user, CancellationToken.None);
 
         ConversationStreamRunContext runContext;
