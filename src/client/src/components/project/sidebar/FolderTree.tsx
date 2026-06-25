@@ -12,6 +12,9 @@ import { useLongPress } from '../../../hooks/useLongPress';
 import { getContentTypeFromFileName, formatFileSize } from '../../../utils/fileUtils';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
 import { useToast } from '../../common/Toast';
+import { HostMountStateBadge } from '../../notebook/hostMounts/HostMountStateBadge';
+import type { HostFolderMountStatus } from '../../../types/hostFolderMount';
+import { deriveHostMountDisplayState } from '../../../utils/hostMountDisplayState';
 
 // Context for sharing state down the tree
 type TreeItem = 
@@ -191,7 +194,15 @@ interface FolderTreeProps {
     disabled?: boolean;
     searchTerm?: string;
     onFileContentChanged?: (fileId: string, newVersion: number) => void;
-    
+
+    // Host mount props
+    isAdmin?: boolean;
+    onMapHostFolder?: () => void;
+    onRemoveMappedFolder?: (mountId: string) => void;
+    onShowApplyCommand?: (mountId: string) => void;
+    onShowRemoveCommand?: (mountId: string) => void;
+    onCheckMappedFolders?: (mountId: string) => void;
+
     // Coordination props
     activeSection?: string;
     onSectionActivate?: (section: string) => void;
@@ -224,6 +235,12 @@ interface FolderNodeProps {
     registerOpenMenu: (closer: () => void) => void;
     searchTerm?: string;
     onFileContentChanged?: (fileId: string, newVersion: number) => void;
+    isAdmin?: boolean;
+    onMapHostFolder?: () => void;
+    onRemoveMappedFolder?: (mountId: string) => void;
+    onShowApplyCommand?: (mountId: string) => void;
+    onShowRemoveCommand?: (mountId: string) => void;
+    onCheckMappedFolders?: (mountId: string) => void;
 }
 
 const FolderNode: React.FC<FolderNodeProps> = ({
@@ -252,6 +269,12 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     registerOpenMenu,
     searchTerm,
     onFileContentChanged,
+    isAdmin,
+    onMapHostFolder,
+    onRemoveMappedFolder,
+    onShowApplyCommand,
+    onShowRemoveCommand,
+    onCheckMappedFolders,
 }) => {
     const { showToast } = useToast();
     const context = useContext(FolderTreeContext);
@@ -859,10 +882,21 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                     )}
                     {!hasChildren && <div className="w-3 mr-1" />}
                     <svg className="w-4 h-4 mr-2 text-yellow-500" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" /></svg>
-                    {isEditing ? (
+                    {isEditing && !folder.isHostMount ? (
                         <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} onBlur={handleSaveRename} onKeyDown={handleKeyDownFolderRename} className="flex-1 px-1 py-0 text-sm border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" autoFocus />
                     ) : (
                         <span className="flex-1 truncate" title={folder.name}>{folder.name}</span>
+                    )}
+                    {folder.isHostMount && folder.mountStatus && (
+                        <HostMountStateBadge
+                            state={deriveHostMountDisplayState(
+                                folder.mountStatus as HostFolderMountStatus,
+                                folder.mountStatus === 'Active' ? 'Linked' : null,
+                                null,
+                                null,
+                            )}
+                            className="ml-2 flex-shrink-0"
+                        />
                     )}
                     {!disabled && (
                         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex space-x-1">
@@ -902,6 +936,12 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                                 registerOpenMenu={registerOpenMenu}
                                 searchTerm={searchTerm}
                                 onFileContentChanged={onFileContentChanged}
+                                isAdmin={isAdmin}
+                                onMapHostFolder={onMapHostFolder}
+                                onRemoveMappedFolder={onRemoveMappedFolder}
+                                onShowApplyCommand={onShowApplyCommand}
+                                onShowRemoveCommand={onShowRemoveCommand}
+                                onCheckMappedFolders={onCheckMappedFolders}
                             />
                         ))}
                         {isCreatingSubfolder && !disabled && (
@@ -934,11 +974,26 @@ const FolderNode: React.FC<FolderNodeProps> = ({
 
             {showContextMenu && !disabled && createPortal(
                 <div ref={menuRef} className="fixed bg-white shadow-lg rounded-lg py-1 z-[9999]" style={{ top: contextMenuPosition.y, left: contextMenuPosition.x }} data-tour-id="folder.context-menu" onClick={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()}>
-                    <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>
-                    {onRenameFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
-                    {onCreateFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleCreateSubfolder}>Create Subfolder</button>}
-                    {onUploadToFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); const isRootFolder = level === 0; const targetFolderId = isRootFolder ? undefined : folder.id; onUploadToFolder?.(targetFolderId); }}>Upload Files</button>}
-                    {folder.id && onDeleteFolder && <button className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${hasChildren ? 'opacity-50 cursor-not-allowed' : 'text-red-600'}`} onClick={hasChildren ? undefined : handleDeleteFolder} disabled={hasChildren}>Delete</button>}
+                    {folder.isHostMount && folder.mountId ? (
+                        <>
+                            {onRemoveMappedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 text-red-600" onClick={() => { setShowContextMenu(false); onRemoveMappedFolder(folder.mountId!); }}>Remove mapped folder</button>}
+                            {onShowApplyCommand && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onShowApplyCommand(folder.mountId!); }}>Show apply command</button>}
+                            {onShowRemoveCommand && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onShowRemoveCommand(folder.mountId!); }}>Show remove command</button>}
+                            {onCheckMappedFolders && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onCheckMappedFolders(folder.mountId!); }}>Check mapped folders</button>}
+                        </>
+                    ) : folder.isLinked ? (
+                        <span className="block px-4 py-2 text-xs text-gray-400">Read-only (host mount)</span>
+                    ) : (
+                        <>
+                            <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>
+                            {onRenameFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
+                            {onCreateFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleCreateSubfolder}>Create Subfolder</button>}
+                            {onUploadToFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); const isRootFolder = level === 0; const targetFolderId = isRootFolder ? undefined : folder.id; onUploadToFolder?.(targetFolderId); }}>Upload Files</button>}
+                            {isAdmin && level === 0 && onMapHostFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" data-testid="host-mount-menu-map" onClick={() => { setShowContextMenu(false); onMapHostFolder(); }}>Map host folder here</button>}
+                            {isAdmin && level === 0 && onCheckMappedFolders && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" data-testid="host-mount-menu-check" onClick={() => { setShowContextMenu(false); onCheckMappedFolders(''); }}>Check mapped folders</button>}
+                            {folder.id && onDeleteFolder && <button className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${hasChildren ? 'opacity-50 cursor-not-allowed' : 'text-red-600'}`} onClick={hasChildren ? undefined : handleDeleteFolder} disabled={hasChildren}>Delete</button>}
+                        </>
+                    )}
                 </div>,
                 document.body
             )}
@@ -1044,6 +1099,12 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
     disabled = false,
     searchTerm,
     onFileContentChanged,
+    isAdmin,
+    onMapHostFolder,
+    onRemoveMappedFolder,
+    onShowApplyCommand,
+    onShowRemoveCommand,
+    onCheckMappedFolders,
     activeSection,
     onSectionActivate
 }) => {
@@ -1296,6 +1357,12 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
                     registerOpenMenu={registerOpenMenu}
                     searchTerm={searchTerm}
                     onFileContentChanged={onFileContentChanged}
+                    isAdmin={isAdmin}
+                    onMapHostFolder={onMapHostFolder}
+                    onRemoveMappedFolder={onRemoveMappedFolder}
+                    onShowApplyCommand={onShowApplyCommand}
+                    onShowRemoveCommand={onShowRemoveCommand}
+                    onCheckMappedFolders={onCheckMappedFolders}
                 />
             </div>
             <ConfirmationDialog 

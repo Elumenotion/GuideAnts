@@ -143,6 +143,8 @@ COPY requirements.txt /tmp/requirements.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip "setuptools<82" wheel \
+    && echo "setuptools<82" > /tmp/build-constraints.txt \
+    && export PIP_CONSTRAINT=/tmp/build-constraints.txt \
     && pip install \
         torch==2.11.0 torchaudio==2.11.0 torchvision==0.26.0 \
         --index-url https://download.pytorch.org/whl/cpu \
