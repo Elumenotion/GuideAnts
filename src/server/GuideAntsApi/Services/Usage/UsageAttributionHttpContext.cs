@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Http;
-
 namespace GuideAntsApi.Services.Usage;
 
 public sealed record UsageAttributionContext(

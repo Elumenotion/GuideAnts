@@ -5,7 +5,6 @@ using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Tests.BackgroundJobs;
-using Microsoft.EntityFrameworkCore;
 using Moq;
 
 namespace GuideAntsApi.Tests.Services.SystemGuide;

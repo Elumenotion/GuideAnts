@@ -1,8 +1,6 @@
 using System.Text.Json;
 using AntRunner.ToolCalling.AssistantDefinitions;
-using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.Services;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.UserProjectContextOptions;
 

@@ -1,4 +1,3 @@
-using System.Net.Http;
 using System.Text;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;

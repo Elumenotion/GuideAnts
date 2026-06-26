@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;

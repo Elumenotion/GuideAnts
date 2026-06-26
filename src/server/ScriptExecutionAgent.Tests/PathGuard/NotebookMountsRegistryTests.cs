@@ -1,5 +1,4 @@
 using FluentAssertions;
-using ScriptExecutionAgent;
 
 namespace ScriptExecutionAgent.Tests.PathGuard;
 

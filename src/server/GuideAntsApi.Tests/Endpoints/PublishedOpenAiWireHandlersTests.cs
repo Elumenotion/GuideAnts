@@ -5,7 +5,7 @@ using GuideAnts.Usage;
 using GuideAntsApi.BackgroundJobs.Services.Embeddings;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Endpoints;
+using GuideAntsApi.Endpoints.PublishedWire;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services;
@@ -54,7 +54,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         var resolver = new StubResolver(context);
         var http = new DefaultHttpContext();
 
-        var result = await PublishedOpenAiWireHandlers.GetModelsAsync(http, pubId, resolver);
+        var result = await PublishedWireModelsHandler.GetModelsAsync(http, pubId, resolver);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -95,14 +95,14 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        var request = new OpenAiChatCompletionsRequest
         {
             Model = "guide",
             Stream = true,
             Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello\"}]")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(
             http,
             pubId,
             request,
@@ -151,13 +151,13 @@ public sealed class PublishedOpenAiWireHandlersTests
         var http = new DefaultHttpContext();
         http.Request.Scheme = "https";
         http.Request.Host = new HostString("wire.example.com");
-        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        var request = new OpenAiChatCompletionsRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello\"}]")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(
             http,
             pubId,
             request,
@@ -210,7 +210,7 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        var request = new OpenAiChatCompletionsRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -223,7 +223,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(
             http,
             pubId,
             request,
@@ -265,14 +265,14 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Stream = true,
             Input = ParseJsonElement("\"hello\"")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(
             http,
             pubId,
             request,
@@ -321,13 +321,13 @@ public sealed class PublishedOpenAiWireHandlersTests
         var http = new DefaultHttpContext();
         http.Request.Scheme = "https";
         http.Request.Host = new HostString("wire.example.com");
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("\"hello\"")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(
             http,
             pubId,
             request,
@@ -378,7 +378,7 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("""
@@ -402,7 +402,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(
             http,
             pubId,
             request,
@@ -452,7 +452,7 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        var request = new OpenAiChatCompletionsRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"where am i?\"}]"),
@@ -476,7 +476,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(
             http,
             pubId,
             request,
@@ -591,7 +591,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             ));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        var request = new OpenAiChatCompletionsRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -638,7 +638,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(
             http,
             pubId,
             request,
@@ -710,7 +710,7 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("\"where am i?\""),
@@ -732,7 +732,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(
             http,
             pubId,
             request,
@@ -846,7 +846,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             ));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("""
@@ -877,7 +877,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(
             http,
             pubId,
             request,
@@ -942,14 +942,14 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Stream = true,
             Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello\"}]")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -1001,13 +1001,13 @@ public sealed class PublishedOpenAiWireHandlersTests
         var http = new DefaultHttpContext();
         http.Request.Scheme = "https";
         http.Request.Host = new HostString("wire.example.com");
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello\"}]")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -1060,7 +1060,7 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             System = ParseJsonElement("\"anthropic client system\""),
@@ -1082,7 +1082,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -1113,13 +1113,13 @@ public sealed class PublishedOpenAiWireHandlersTests
         var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "wrong-alias",
             Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello\"}]")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -1175,13 +1175,13 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide-alias",
             Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello from messages\"}]")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -1277,13 +1277,13 @@ public sealed class PublishedOpenAiWireHandlersTests
             .Returns(PersistingStream);
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello from messages\"}]")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -1334,7 +1334,7 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"where am i?\"}]"),
@@ -1355,7 +1355,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -1470,7 +1470,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             ));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -1515,7 +1515,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -1644,7 +1644,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             ));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -1669,7 +1669,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -1839,7 +1839,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             ));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement($$"""
@@ -1860,7 +1860,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -2092,7 +2092,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             ));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement($$"""
@@ -2143,7 +2143,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -2311,7 +2311,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             ));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement($$"""
@@ -2333,7 +2333,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -2466,7 +2466,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             ));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -2504,7 +2504,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(
             http,
             pubId,
             request,
@@ -2560,7 +2560,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             }
             """);
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesCountTokensAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesCountTokensAsync(
             http,
             pubId,
             request,
@@ -2599,7 +2599,7 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         var expectedTokens = (Encoding.UTF8.GetByteCount(request.GetRawText()) + 3L) / 4L;
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesCountTokensAsync(
+        var result = await PublishedAnthropicWireHandler.PostMessagesCountTokensAsync(
             http,
             pubId,
             request,
@@ -2620,14 +2620,14 @@ public sealed class PublishedOpenAiWireHandlersTests
         var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("\"hello\""),
             PreviousResponseId = "not-a-wire-response-id"
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(
             http,
             pubId,
             request,
@@ -2723,14 +2723,14 @@ public sealed class PublishedOpenAiWireHandlersTests
             ));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("\"follow-up\""),
             PreviousResponseId = $"resp_{assistantMessageId:N}"
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(
             http,
             pubId,
             request,
@@ -2850,14 +2850,14 @@ public sealed class PublishedOpenAiWireHandlersTests
         var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user-a"));
         var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("\"new request\""),
             PreviousResponseId = $"resp_{firstAssistantMessageId:N}"
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(
             http,
             pubId,
             request,
@@ -2905,7 +2905,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -2917,7 +2917,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -2957,7 +2957,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -2969,7 +2969,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3004,7 +3004,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.AnthropicMessagesRequest
+        var request = new AnthropicMessagesRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -3016,7 +3016,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedAnthropicWireHandler.PostMessagesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3054,7 +3054,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        var request = new OpenAiChatCompletionsRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -3066,7 +3066,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3128,7 +3128,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        var request = new OpenAiChatCompletionsRequest
         {
             Model = "guide",
             Messages = ParseJsonElement($$"""
@@ -3141,7 +3141,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3174,14 +3174,14 @@ public sealed class PublishedOpenAiWireHandlersTests
                 new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("\"follow-up\""),
             Conversation = ParseJsonElement($"\"conv_{conversationId:N}\"")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3199,14 +3199,14 @@ public sealed class PublishedOpenAiWireHandlersTests
         var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
         using var db = CreateDbContext();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("\"hello\""),
             Conversation = ParseJsonElement("\"not-a-conversation-id\"")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
@@ -3230,14 +3230,14 @@ public sealed class PublishedOpenAiWireHandlersTests
         var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "intruder"));
         var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("\"hello\""),
             Conversation = ParseJsonElement($"\"conv_{conversationId:N}\"")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
@@ -3262,7 +3262,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user-a"));
         var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("\"hello\""),
@@ -3270,7 +3270,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             PreviousResponseId = $"resp_{assistantMessageId:N}"
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
@@ -3292,7 +3292,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
         var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("""
@@ -3305,7 +3305,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             Conversation = ParseJsonElement("\"conv_not_a_real_id\"")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
@@ -3338,7 +3338,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("""
@@ -3350,7 +3350,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -3371,7 +3371,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId, externalUserIdentity: "user"));
         var conversationService = new Mock<IPublishedConversationService>(MockBehavior.Strict);
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiResponsesRequest
+        var request = new OpenAiResponsesRequest
         {
             Model = "guide",
             Input = ParseJsonElement("""
@@ -3384,7 +3384,7 @@ public sealed class PublishedOpenAiWireHandlersTests
             PreviousResponseId = "resp_not_a_real_id"
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostResponsesAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
@@ -3420,13 +3420,13 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         var usageRecorder = new CapturingWireUsageRecorder();
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiEmbeddingsRequest
+        var request = new OpenAiEmbeddingsRequest
         {
             Model = "embeddings",
             Input = ParseJsonElement("\"hello\"")
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostEmbeddingsAsync(
+        var result = await PublishedWireMediaHandler.PostEmbeddingsAsync(
             http,
             pubId,
             request,
@@ -3457,10 +3457,10 @@ public sealed class PublishedOpenAiWireHandlersTests
         var usageRecorder = new CapturingWireUsageRecorder();
         var http = new DefaultHttpContext();
 
-        var result = await PublishedOpenAiWireHandlers.PostImageGenerationsAsync(
+        var result = await PublishedWireMediaHandler.PostImageGenerationsAsync(
             http,
             pubId,
-            new PublishedOpenAiWireHandlers.OpenAiImageGenerationsRequest { Model = "image", Prompt = "" },
+            new OpenAiImageGenerationsRequest { Model = "image", Prompt = "" },
             resolver,
             imageService.Object,
             modeResolver.Object,
@@ -3484,7 +3484,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         var http = new DefaultHttpContext();
         http.Request.ContentType = "application/json";
 
-        var result = await PublishedOpenAiWireHandlers.PostAudioTranscriptionsAsync(
+        var result = await PublishedWireMediaHandler.PostAudioTranscriptionsAsync(
             http,
             pubId,
             resolver,
@@ -3508,10 +3508,10 @@ public sealed class PublishedOpenAiWireHandlersTests
         var usageRecorder = new CapturingWireUsageRecorder();
         var http = new DefaultHttpContext();
 
-        var result = await PublishedOpenAiWireHandlers.PostAudioSpeechAsync(
+        var result = await PublishedWireMediaHandler.PostAudioSpeechAsync(
             http,
             pubId,
-            new PublishedOpenAiWireHandlers.OpenAiAudioSpeechRequest
+            new OpenAiAudioSpeechRequest
             {
                 Model = "speech",
                 Input = "hello",
@@ -3757,7 +3757,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
 
         var http = new DefaultHttpContext();
-        var request = new PublishedOpenAiWireHandlers.OpenAiChatCompletionsRequest
+        var request = new OpenAiChatCompletionsRequest
         {
             Model = "guide",
             Messages = ParseJsonElement("""
@@ -3770,7 +3770,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 """)
         };
 
-        var result = await PublishedOpenAiWireHandlers.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(http, pubId, request, resolver, conversationService.Object, db);
         var executed = await ExecuteResultAsync(result);
 
         executed.StatusCode.Should().Be(StatusCodes.Status200OK);

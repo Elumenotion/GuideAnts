@@ -1,4 +1,3 @@
-using GuideAnts.Logging;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
 using Microsoft.AspNetCore.Mvc;

@@ -1,6 +1,6 @@
 using AntRunner.Chat.Abstractions;
 using FluentAssertions;
-using GuideAntsApi.Endpoints;
+using GuideAntsApi.Endpoints.PublishedWire;
 using ChatMessageRole = AntRunner.Chat.Abstractions.ChatRole;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 
@@ -20,10 +20,10 @@ public sealed class PublishedWireTranscriptMatchingTests
     private const string FirstUserPrompt = "This is the first message in the turn. Reply with 'Uno'";
     private const string AssistantReply = "Uno";
 
-    private static PublishedOpenAiWireHandlers.PersistedHistoryRow UserRow(string content) =>
+    private static WireConversationResolver.PersistedHistoryRow UserRow(string content) =>
         new(DataModelChatRole.User, content, null, null);
 
-    private static PublishedOpenAiWireHandlers.PersistedHistoryRow AssistantRow(string content) =>
+    private static WireConversationResolver.PersistedHistoryRow AssistantRow(string content) =>
         new(DataModelChatRole.Assistant, content, null, null);
 
     [TestMethod]
@@ -37,10 +37,10 @@ public sealed class PublishedWireTranscriptMatchingTests
             new(ChatMessageRole.User, FirstUserPrompt),
             new(ChatMessageRole.Assistant, AssistantReply)
         };
-        var expectedHistory = PublishedOpenAiWireHandlers.BuildWireTranscriptHistory(clientPrefix);
+        var expectedHistory = WireConversationResolver.BuildWireTranscriptHistory(clientPrefix);
 
         // What GuideAnts actually persisted: just the real user turn and assistant reply.
-        var persistedHistory = PublishedOpenAiWireHandlers.BuildPersistedTranscriptHistory(
+        var persistedHistory = WireConversationResolver.BuildPersistedTranscriptHistory(
         [
             UserRow(FirstUserPrompt),
             AssistantRow(AssistantReply)
@@ -49,7 +49,7 @@ public sealed class PublishedWireTranscriptMatchingTests
         // Persisted history is shorter than the replayed transcript purely because of the
         // client-injected prefix; this must still be recognized as a continuation.
         persistedHistory.Count.Should().BeLessThan(expectedHistory.Count);
-        PublishedOpenAiWireHandlers.TranscriptEndsWith(persistedHistory, expectedHistory)
+        WireConversationResolver.TranscriptEndsWith(persistedHistory, expectedHistory)
             .Should().BeTrue();
     }
 
@@ -62,15 +62,15 @@ public sealed class PublishedWireTranscriptMatchingTests
             new(ChatMessageRole.User, FirstUserPrompt),
             new(ChatMessageRole.Assistant, AssistantReply)
         };
-        var expectedHistory = PublishedOpenAiWireHandlers.BuildWireTranscriptHistory(clientPrefix);
+        var expectedHistory = WireConversationResolver.BuildWireTranscriptHistory(clientPrefix);
 
-        var persistedHistory = PublishedOpenAiWireHandlers.BuildPersistedTranscriptHistory(
+        var persistedHistory = WireConversationResolver.BuildPersistedTranscriptHistory(
         [
             UserRow("a completely different question"),
             AssistantRow("a completely different answer")
         ]);
 
-        PublishedOpenAiWireHandlers.TranscriptEndsWith(persistedHistory, expectedHistory)
+        WireConversationResolver.TranscriptEndsWith(persistedHistory, expectedHistory)
             .Should().BeFalse();
     }
 
@@ -87,9 +87,9 @@ public sealed class PublishedWireTranscriptMatchingTests
             new(ChatMessageRole.User, "and next is?"),
             new(ChatMessageRole.Assistant, "Dos")
         };
-        var expectedHistory = PublishedOpenAiWireHandlers.BuildWireTranscriptHistory(clientPrefix);
+        var expectedHistory = WireConversationResolver.BuildWireTranscriptHistory(clientPrefix);
 
-        var persistedHistory = PublishedOpenAiWireHandlers.BuildPersistedTranscriptHistory(
+        var persistedHistory = WireConversationResolver.BuildPersistedTranscriptHistory(
         [
             UserRow(FirstUserPrompt),
             AssistantRow(AssistantReply),
@@ -97,7 +97,7 @@ public sealed class PublishedWireTranscriptMatchingTests
             AssistantRow("Dos")
         ]);
 
-        PublishedOpenAiWireHandlers.TranscriptEndsWith(persistedHistory, expectedHistory)
+        WireConversationResolver.TranscriptEndsWith(persistedHistory, expectedHistory)
             .Should().BeTrue();
     }
 }

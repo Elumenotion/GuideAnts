@@ -1,10 +1,7 @@
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using GuideAnts.Logging;
 using GuideAntsApi.Configuration;
-using Microsoft.AspNetCore.Http;
 
 namespace GuideAntsApi.Services.SystemGuide;
 

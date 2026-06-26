@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.EnvironmentVariables;
 using GuideAntsApi.Settings;

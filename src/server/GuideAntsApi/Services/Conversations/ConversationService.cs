@@ -6,7 +6,6 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using System.Runtime.CompilerServices;
 using GuideAntsApi.Services.Auth;
-using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.Conversations.Attachments;
 using GuideAntsApi.Services.Conversations.Commands;

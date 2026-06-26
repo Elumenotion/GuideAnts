@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using GuideAntsApi.Models.Guides;
 using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
 
 namespace GuideAntsApi.Services.Mcp;
 
