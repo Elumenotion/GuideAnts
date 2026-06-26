@@ -418,7 +418,10 @@ FodyWeavers.xsd
 /docker/.buildx-cache
 /docker/.build-state
 /docker/.buildx-cache-deps-new
-/docker/docker-compose.host-mounts.generated.yml
+# Local-only generated host-mount Compose override (contains personal paths; never commit).
+# Template: docker/docker-compose.host-mounts.generated.example.yml. Non-anchored so it
+# also covers installer/docker/. The .example.yml template is intentionally NOT matched.
+docker-compose.host-mounts.generated.yml
 /_hf_test
 /.codeql
 /scan-recs
