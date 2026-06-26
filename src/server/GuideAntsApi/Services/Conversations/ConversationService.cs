@@ -321,16 +321,16 @@ public class ConversationService : IConversationService
             return;
         }
 
+        await _attachmentContentService.AddAttachmentsToUserMessageAsync(
+            ctx.UserMessage!.Id,
+            ctx.Conversation.NotebookId,
+            ctx.Request.Attachments,
+            ct);
+
         foreach (var attachment in ctx.Request.Attachments)
         {
             if (attachment.NotebookFileId.HasValue)
             {
-                await _attachmentContentService.AddAttachmentsToUserMessageAsync(
-                    ctx.UserMessage!.Id,
-                    ctx.Conversation.NotebookId,
-                    [attachment],
-                    ct);
-
                 var messages = await _attachmentContentService.CreateOpenAiMessagesFromNotebookFileAsync(attachment.NotebookFileId.Value, ct);
                 foreach (var message in messages)
                 {

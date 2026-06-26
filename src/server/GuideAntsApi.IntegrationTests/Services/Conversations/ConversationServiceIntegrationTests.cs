@@ -954,6 +954,65 @@ public sealed class ConversationServiceIntegrationTests : BaseEndpointTest
     }
 
     [TestMethod]
+    public async Task SendMessageStream_With_multiple_attachments_persists_distinct_order_indexes()
+    {
+        Guid projectId;
+        Guid notebookId;
+        Guid conversationId;
+        Guid firstNotebookFileId;
+        Guid secondNotebookFileId;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            (projectId, notebookId) = await SeedProjectNotebookAsync(db);
+            conversationId = await SeedConversationAsync(db, notebookId, "Multiple attachments send");
+
+            var fileService = scope.ServiceProvider.GetRequiredService<INotebookFileService>();
+            var first = await fileService.CreateTextFileAsync(projectId, notebookId, "Output/first-attach.txt", "first body");
+            var second = await fileService.CreateTextFileAsync(projectId, notebookId, "Output/second-attach.txt", "second body");
+            first.Should().NotBeNull();
+            second.Should().NotBeNull();
+            firstNotebookFileId = first!.Id;
+            secondNotebookFileId = second!.Id;
+        }
+
+        var events = await SendConversationStreamToCompletionAsync(
+            projectId,
+            notebookId,
+            conversationId,
+            new
+            {
+                instructions = " ",
+                assistantName = "assistant",
+                attachments = new[]
+                {
+                    new { notebookFileId = firstNotebookFileId, uploadType = 0 },
+                    new { notebookFileId = secondNotebookFileId, uploadType = 0 }
+                }
+            });
+
+        events.Should().Contain(e => e.EventType == StreamingEventTypes.Complete);
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var db2 = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var userMessage = await db2.NotebookConversationMessages
+            .Where(m => m.NotebookConversationId == conversationId && m.Role == DataModelChatRole.User)
+            .SingleAsync();
+
+        var attachmentRows = await db2.MessageAttachments
+            .Where(ma => ma.MessageId == userMessage.Id)
+            .OrderBy(ma => ma.OrderIndex)
+            .ToListAsync();
+
+        attachmentRows.Should().HaveCount(2);
+        attachmentRows[0].NotebookFileId.Should().Be(firstNotebookFileId);
+        attachmentRows[0].OrderIndex.Should().Be(0);
+        attachmentRows[1].NotebookFileId.Should().Be(secondNotebookFileId);
+        attachmentRows[1].OrderIndex.Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task SendMessageStream_Emits_thinking_blocks_in_stream_and_persists_to_assistant_message()
     {
         Guid projectId;
