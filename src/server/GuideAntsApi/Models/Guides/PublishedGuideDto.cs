@@ -24,6 +24,7 @@ public class PublishedGuideDto
     public bool Collapsible { get; set; }
     public bool ShowConversationStarters { get; set; }
     public bool ShowAttachments { get; set; }
+    public bool ShowSpeechToText { get; set; } = true;
     public PublishedWireApiConfigDto? WireApiConfig { get; set; }
     public decimal? DailyChargeLimitUsd { get; set; }
     public decimal? BillingPeriodChargeLimitUsd { get; set; }
@@ -66,6 +67,7 @@ public class PublishGuideDto
     public bool Collapsible { get; set; }
     public bool ShowConversationStarters { get; set; }
     public bool ShowAttachments { get; set; }
+    public bool ShowSpeechToText { get; set; } = true;
     public PublishedWireApiConfigDto? WireApiConfig { get; set; }
     public bool McpEnabled { get; set; }
     [StringLength(2000)]
@@ -92,6 +94,7 @@ public class UpdatePublishedGuideDto
     public bool Collapsible { get; set; }
     public bool ShowConversationStarters { get; set; }
     public bool ShowAttachments { get; set; }
+    public bool ShowSpeechToText { get; set; } = true;
     public PublishedWireApiConfigDto? WireApiConfig { get; set; }
     public bool McpEnabled { get; set; }
     [StringLength(2000)]
@@ -113,6 +116,7 @@ public class PublishedWireApiEndpointFlagsDto
     public bool? Models { get; set; }
     public bool? ChatCompletions { get; set; }
     public bool? Responses { get; set; }
+    public bool? Messages { get; set; }
     public bool? Embeddings { get; set; }
     public bool? ImageGenerations { get; set; }
     public bool? AudioTranscriptions { get; set; }
@@ -123,6 +127,7 @@ public class PublishedWireApiMaxRequestSizesDto
 {
     public int? ChatCompletionsBytes { get; set; }
     public int? ResponsesBytes { get; set; }
+    public int? MessagesBytes { get; set; }
     public int? EmbeddingsBytes { get; set; }
     public int? ImageGenerationsBytes { get; set; }
     public int? AudioTranscriptionsBytes { get; set; }

@@ -68,6 +68,32 @@ public sealed class PublishedApiExecutionContextResolverTests
     }
 
     [TestMethod]
+    public async Task ResolveAsync_Uses_x_api_key_header_for_api_key_mode()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"wire-api-key-anthropic-{Guid.NewGuid():N}");
+        var pubId = Guid.NewGuid();
+        await SeedPublishedGuideAsync(
+            options,
+            pubId,
+            apiKeyHash: PublishedGuideAuthService.HashApiKey("gak_test_alt"),
+            webhookUrl: null);
+
+        await using var db = new ApplicationDbContext(options);
+        var auth = new FakePublishedGuideAuthService { NextResult = new AuthValidationResult { IsValid = true, UserIdentity = "api-key-user" } };
+        var limits = new FakePublishedGuideCostLimitService(allowed: true);
+        var resolver = new PublishedApiExecutionContextResolver(db, auth, limits, NullLogger<PublishedApiExecutionContextResolver>.Instance);
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers["x-api-key"] = "gak_test_alt";
+
+        var result = await resolver.ResolveAsync(ctx, pubId, endpointName: "messages", ct: CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        auth.LastApiKeyHeader.Should().Be("gak_test_alt");
+        auth.LastAuthorizationHeader.Should().BeNull();
+        result.Context!.AuthMode.Should().Be(PublishedApiAuthMode.ApiKey);
+    }
+
+    [TestMethod]
     public async Task ResolveAsync_Uses_bearer_token_for_webhook_mode()
     {
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"wire-api-webhook-{Guid.NewGuid():N}");
@@ -183,6 +209,42 @@ public sealed class PublishedApiExecutionContextResolverTests
         ctx.Request.ContentLength = 65;
 
         var result = await resolver.ResolveAsync(ctx, pubId, endpointName: "chat.completions", ct: CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorResult.Should().NotBeNull();
+        var executed = await ExecuteResultAsync(result.ErrorResult!);
+        executed.StatusCode.Should().Be(StatusCodes.Status413PayloadTooLarge);
+        using var json = JsonDocument.Parse(executed.Body);
+        json.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("request_too_large");
+    }
+
+    [TestMethod]
+    public async Task ResolveAsync_Returns_request_too_large_for_messages_endpoint_limit()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"wire-api-size-limit-msg-{Guid.NewGuid():N}");
+        var pubId = Guid.NewGuid();
+        await SeedPublishedGuideAsync(
+            options,
+            pubId,
+            apiKeyHash: null,
+            webhookUrl: null,
+            wireApiConfig: new PublishedWireApiConfigDto
+            {
+                Enabled = true,
+                MaxRequestSizes = new PublishedWireApiMaxRequestSizesDto
+                {
+                    MessagesBytes = 64
+                }
+            });
+
+        await using var db = new ApplicationDbContext(options);
+        var auth = new FakePublishedGuideAuthService();
+        var limits = new FakePublishedGuideCostLimitService(allowed: true);
+        var resolver = new PublishedApiExecutionContextResolver(db, auth, limits, NullLogger<PublishedApiExecutionContextResolver>.Instance);
+        var ctx = new DefaultHttpContext();
+        ctx.Request.ContentLength = 65;
+
+        var result = await resolver.ResolveAsync(ctx, pubId, endpointName: "messages", ct: CancellationToken.None);
 
         result.Success.Should().BeFalse();
         result.ErrorResult.Should().NotBeNull();

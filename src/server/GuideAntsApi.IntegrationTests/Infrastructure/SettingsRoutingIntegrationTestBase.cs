@@ -95,10 +95,12 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
         await db.Database.ExecuteSqlRawAsync("DELETE FROM ApplicationSettings WHERE SectionName = 'ServiceModes';");
 
         // Assistants reference Models via ModelId and must be removed before Models.
-        // Other test classes share this DB and may leave notebooks / guides that
-        // reference Assistants via Restrict FKs — clear those first, but keep
-        // project + notebook rows intact.
+        // Other test classes share this DB and may leave notebooks / conversation
+        // messages that reference Assistants via Restrict FKs — clear those first,
+        // but keep project + notebook rows intact.
         await db.Database.ExecuteSqlRawAsync("UPDATE Notebooks SET GuideId = NULL WHERE GuideId IS NOT NULL;");
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE NotebookConversationMessages SET AssistantId = NULL WHERE AssistantId IS NOT NULL;");
         await db.Database.ExecuteSqlRawAsync("DELETE FROM PublishedGuides;");
         await db.Database.ExecuteSqlRawAsync("DELETE FROM GuideMembers;");
         await db.Database.ExecuteSqlRawAsync("UPDATE AgentInvocations SET ParentInvocationId = NULL;");

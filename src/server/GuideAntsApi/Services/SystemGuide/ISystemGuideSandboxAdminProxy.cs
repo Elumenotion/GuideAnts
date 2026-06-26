@@ -1,5 +1,3 @@
-using System.Net.Http;
-
 namespace GuideAntsApi.Services.SystemGuide;
 
 public interface ISystemGuideSandboxAdminProxy

@@ -3,7 +3,6 @@ using CliWrap;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
-using Microsoft.Extensions.Logging;
 
 namespace GuideAntsApi.Services.Components;
 

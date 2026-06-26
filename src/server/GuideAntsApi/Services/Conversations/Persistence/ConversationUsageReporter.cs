@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Http;
 using GuideAnts.Usage;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Services.Usage;

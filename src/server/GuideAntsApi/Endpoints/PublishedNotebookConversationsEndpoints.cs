@@ -574,7 +574,12 @@ public static class PublishedNotebookConversationsEndpoints
             if (resume == true)
             {
                 ctx.Response.Headers["Content-Type"] = "text/event-stream";
-                await foreach (var ev in publishedService.ResumeAfterExternalToolResultsStreamAsync(convoId, pubId, authResult.UserIdentity, authResult.InternalUserId, ctx.RequestAborted))
+                await foreach (var ev in publishedService.ResumeAfterExternalToolResultsStreamAsync(
+                                   convoId,
+                                   pubId,
+                                   authResult.UserIdentity,
+                                   authResult.InternalUserId,
+                                   cancellationToken: ctx.RequestAborted))
                 {
                     await ctx.Response.WriteSseEventAsync(ev.EventType, ev.Payload, ctx.RequestAborted);
                 }

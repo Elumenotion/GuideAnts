@@ -10,9 +10,7 @@ using GuideAntsApi.Tests.BackgroundJobs;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Moq;
 using OptionsFactory = Microsoft.Extensions.Options.Options;
 
 namespace GuideAntsApi.Tests.Services.Scheduling;

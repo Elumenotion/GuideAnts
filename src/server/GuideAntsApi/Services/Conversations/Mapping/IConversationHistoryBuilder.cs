@@ -34,5 +34,6 @@ public interface IConversationHistoryBuilder
         NotebookConversation conv,
         string assistantName,
         string? clientContext,
+        IReadOnlyList<ChatMessage>? clientMessages = null,
         CancellationToken cancellationToken = default);
 }

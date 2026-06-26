@@ -1,4 +1,3 @@
-using System.Net;
 using System.Text;
 using FluentAssertions;
 using GuideAntsApi.BackgroundJobs.Options;

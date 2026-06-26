@@ -5,7 +5,6 @@ using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
-using GuideAntsApi.Configuration;
 
 namespace GuideAntsApi.Endpoints.Settings;
 

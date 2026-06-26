@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
+import { FaCopy } from 'react-icons/fa';
+import { API_BASE_URL } from '../../config/apiConfig';
 import { guideUsageApi } from '../../services/guideUsageApi';
+import { broadcastAuthExpired } from '../../services/authEvents';
+import { withAuthFetchInit, withAuthHeaders } from '../../services/authService';
+import { useToast } from '../common/Toast';
 import type { TurnMessagesDto, TurnMessageDto } from '../../types/usage';
 
 interface TurnMessagesPanelProps {
@@ -8,6 +13,259 @@ interface TurnMessagesPanelProps {
   onClose: () => void;
   onInvocationClick: (invocationId: string) => void;
 }
+
+type TurnMessageViewTab = 'messages' | 'promptTrace';
+
+interface TurnPromptTraceMessageDto {
+  role: string;
+  content: string | null;
+  toolCallId: string | null;
+  functionName: string | null;
+  toolCallsJson: string | null;
+}
+
+interface TurnPromptTraceToolDefinitionDto {
+  name: string;
+  description: string | null;
+  parametersJson: string | null;
+  source: string;
+}
+
+interface TurnPromptTraceToolCallDto {
+  id: string;
+  name: string;
+  argumentsJson: string | null;
+}
+
+interface TurnPromptTraceRoundDto {
+  roundIndex: number;
+  createdUtc: string;
+  modelDeploymentId: string | null;
+  responseFinishReason: string | null;
+  responseMessage: TurnPromptTraceMessageDto | null;
+  requestMessages: TurnPromptTraceMessageDto[];
+  externalToolCalls: TurnPromptTraceToolCallDto[];
+}
+
+interface TurnPromptTraceMessageEventDto {
+  createdUtc: string;
+  role: string;
+  content: string | null;
+  toolCallId: string | null;
+  functionName: string | null;
+  toolCallsJson: string | null;
+}
+
+interface TurnPromptTraceSegmentDto {
+  segmentId: string;
+  status: string;
+  startedUtc: string;
+  completedUtc: string | null;
+  assistantName: string;
+  modelDeploymentId: string | null;
+  terminalStatus: string | null;
+  errorMessage: string | null;
+  seedMessages: TurnPromptTraceMessageDto[];
+  toolDefinitions: TurnPromptTraceToolDefinitionDto[];
+  rounds: TurnPromptTraceRoundDto[];
+  messageEvents: TurnPromptTraceMessageEventDto[];
+}
+
+interface TurnPromptTraceDto {
+  conversationId: string;
+  turnIndex: number;
+  assistantName: string | null;
+  turnStarted: string;
+  hasTrace: boolean;
+  schemaVersion: number;
+  captureState: string;
+  segments: TurnPromptTraceSegmentDto[];
+}
+
+const formatJsonForMarkdown = (raw: string | null | undefined): string | null => {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+};
+
+const appendTraceMessageMarkdown = (
+  lines: string[],
+  message: TurnPromptTraceMessageDto,
+): void => {
+  const roleLabel = message.functionName ? `${message.role} (${message.functionName})` : message.role;
+  lines.push(`**${roleLabel}**${message.toolCallId ? ` — tool_call_id: \`${message.toolCallId}\`` : ''}`);
+  lines.push('');
+
+  if (message.content && message.content.trim().length > 0) {
+    lines.push(message.content);
+  } else {
+    lines.push('_No content_');
+  }
+  lines.push('');
+
+  const toolCalls = formatJsonForMarkdown(message.toolCallsJson);
+  if (toolCalls) {
+    lines.push('Tool Calls:');
+    lines.push('');
+    lines.push('```json');
+    lines.push(toolCalls);
+    lines.push('```');
+    lines.push('');
+  }
+};
+
+const buildPromptTraceMarkdown = (trace: TurnPromptTraceDto): string => {
+  const lines: string[] = [];
+
+  lines.push(`# Prompt Trace — Turn ${trace.turnIndex + 1}`);
+  lines.push('');
+  if (trace.assistantName) {
+    lines.push(`- **Assistant:** ${trace.assistantName}`);
+  }
+  lines.push(`- **Capture state:** ${trace.captureState}`);
+  lines.push(`- **Schema version:** ${trace.schemaVersion}`);
+  lines.push(`- **Turn started:** ${trace.turnStarted}`);
+  lines.push(`- **Segments:** ${trace.segments.length}`);
+  lines.push('');
+
+  trace.segments.forEach((segment, segmentIndex) => {
+    lines.push(`## Segment ${segmentIndex + 1}`);
+    lines.push('');
+    lines.push(`- **Status:** ${segment.status}`);
+    lines.push(`- **Assistant:** ${segment.assistantName}`);
+    if (segment.modelDeploymentId) {
+      lines.push(`- **Model deployment:** ${segment.modelDeploymentId}`);
+    }
+    lines.push(`- **Started:** ${segment.startedUtc}`);
+    if (segment.completedUtc) {
+      lines.push(`- **Completed:** ${segment.completedUtc}`);
+    }
+    if (segment.terminalStatus) {
+      lines.push(`- **Terminal status:** ${segment.terminalStatus}`);
+    }
+    if (segment.errorMessage) {
+      lines.push(`- **Error:** ${segment.errorMessage}`);
+    }
+    lines.push('');
+
+    lines.push(`### Seed Messages (${segment.seedMessages.length})`);
+    lines.push('');
+    if (segment.seedMessages.length === 0) {
+      lines.push('_None_');
+      lines.push('');
+    } else {
+      segment.seedMessages.forEach((message) => appendTraceMessageMarkdown(lines, message));
+    }
+
+    lines.push(`### Tool Definitions (${segment.toolDefinitions.length})`);
+    lines.push('');
+    if (segment.toolDefinitions.length === 0) {
+      lines.push('_None_');
+      lines.push('');
+    } else {
+      segment.toolDefinitions.forEach((tool) => {
+        lines.push(`**${tool.name}** _(${tool.source})_`);
+        lines.push('');
+        if (tool.description) {
+          lines.push(tool.description);
+          lines.push('');
+        }
+        const parameters = formatJsonForMarkdown(tool.parametersJson);
+        if (parameters) {
+          lines.push('```json');
+          lines.push(parameters);
+          lines.push('```');
+          lines.push('');
+        }
+      });
+    }
+
+    lines.push(`### Model Rounds (${segment.rounds.length})`);
+    lines.push('');
+    if (segment.rounds.length === 0) {
+      lines.push('_None_');
+      lines.push('');
+    } else {
+      segment.rounds.forEach((round) => {
+        const roundMeta = [
+          round.modelDeploymentId ? round.modelDeploymentId : null,
+          round.responseFinishReason ? `finish: ${round.responseFinishReason}` : null,
+        ]
+          .filter(Boolean)
+          .join(' • ');
+        lines.push(`#### Round ${round.roundIndex}${roundMeta ? ` — ${roundMeta}` : ''}`);
+        lines.push('');
+
+        lines.push(`##### Request Messages (${round.requestMessages.length})`);
+        lines.push('');
+        if (round.requestMessages.length === 0) {
+          lines.push('_None_');
+          lines.push('');
+        } else {
+          round.requestMessages.forEach((message) => appendTraceMessageMarkdown(lines, message));
+        }
+
+        if (round.responseMessage) {
+          lines.push('##### Response Message');
+          lines.push('');
+          appendTraceMessageMarkdown(lines, round.responseMessage);
+        }
+
+        if (round.externalToolCalls.length > 0) {
+          lines.push(`##### External Tool Calls (${round.externalToolCalls.length})`);
+          lines.push('');
+          round.externalToolCalls.forEach((toolCall) => {
+            lines.push(`**${toolCall.name}** — id: \`${toolCall.id}\``);
+            lines.push('');
+            const args = formatJsonForMarkdown(toolCall.argumentsJson);
+            if (args) {
+              lines.push('```json');
+              lines.push(args);
+              lines.push('```');
+              lines.push('');
+            }
+          });
+        }
+      });
+    }
+
+    lines.push(`### Message Events (${segment.messageEvents.length})`);
+    lines.push('');
+    if (segment.messageEvents.length === 0) {
+      lines.push('_None_');
+      lines.push('');
+    } else {
+      segment.messageEvents.forEach((event) => {
+        const roleLabel = event.functionName ? `${event.role} (${event.functionName})` : event.role;
+        lines.push(`**${roleLabel}** — ${event.createdUtc}`);
+        lines.push('');
+        if (event.content && event.content.trim().length > 0) {
+          lines.push(event.content);
+        } else {
+          lines.push('_No content_');
+        }
+        lines.push('');
+        const toolCalls = formatJsonForMarkdown(event.toolCallsJson);
+        if (toolCalls) {
+          lines.push('Tool Calls:');
+          lines.push('');
+          lines.push('```json');
+          lines.push(toolCalls);
+          lines.push('```');
+          lines.push('');
+        }
+      });
+    }
+  });
+
+  return lines.join('\n').trimEnd() + '\n';
+};
 
 export function TurnMessagesPanel({
   conversationId,
@@ -18,8 +276,59 @@ export function TurnMessagesPanel({
   const [data, setData] = useState<TurnMessagesDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TurnMessageViewTab>('messages');
+  const [traceData, setTraceData] = useState<TurnPromptTraceDto | null>(null);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceError, setTraceError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const isOpen = conversationId !== null && turnIndex !== null;
+
+  useEffect(() => {
+    setActiveTab('messages');
+    setTraceData(null);
+    setTraceLoading(false);
+    setTraceError(null);
+  }, [conversationId, turnIndex]);
+
+  const handleCopyTraceMarkdown = async () => {
+    if (!traceData) {
+      return;
+    }
+
+    const markdown = buildPromptTraceMarkdown(traceData);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(markdown);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = markdown;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (!successful) {
+          throw new Error('Copy command failed');
+        }
+      }
+      showToast({
+        type: 'success',
+        title: 'Prompt trace copied to clipboard',
+        duration: 3000,
+      });
+    } catch (error) {
+      console.error('Failed to copy prompt trace to clipboard:', error);
+      showToast({
+        type: 'error',
+        title: 'Copy failed',
+        message: 'Unable to copy the prompt trace. Please try again.',
+        duration: 5000,
+      });
+    }
+  };
 
   useEffect(() => {
     if (!conversationId || turnIndex === null) {
@@ -54,6 +363,59 @@ export function TurnMessagesPanel({
     };
   }, [conversationId, turnIndex]);
 
+  useEffect(() => {
+    if (!conversationId || turnIndex === null || activeTab !== 'promptTrace' || traceData) {
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function loadPromptTrace() {
+      setTraceLoading(true);
+      setTraceError(null);
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/conversations/${conversationId}/turns/${turnIndex}/trace`,
+          withAuthFetchInit({
+            method: 'GET',
+            headers: withAuthHeaders({
+              'Content-Type': 'application/json',
+            }),
+            signal: controller.signal,
+          }),
+        );
+
+        if (response.status === 401) {
+          broadcastAuthExpired('Authentication expired.');
+        }
+
+        if (!response.ok) {
+          throw new Error(`Failed to load prompt trace: ${response.status}`);
+        }
+
+        const result = (await response.json()) as TurnPromptTraceDto;
+        if (!cancelled) {
+          setTraceData(result);
+        }
+      } catch (e: any) {
+        if (!cancelled && e?.name !== 'AbortError') {
+          setTraceError(e?.message ?? 'Failed to load prompt trace');
+        }
+      } finally {
+        if (!cancelled) {
+          setTraceLoading(false);
+        }
+      }
+    }
+
+    loadPromptTrace();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [activeTab, conversationId, turnIndex, traceData]);
+
   const getRoleBadgeClass = (role: string) => {
     switch (role.toLowerCase()) {
       case 'user':
@@ -69,9 +431,21 @@ export function TurnMessagesPanel({
     }
   };
 
+  const formatJson = (raw: string | null | undefined) => {
+    if (!raw) {
+      return '';
+    }
+
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
+  };
+
   const renderMessage = (msg: TurnMessageDto) => {
     const hasInvocation = msg.agentInvocationId !== null;
-    
+
     return (
       <div key={msg.id} className="border rounded-lg p-3 bg-gray-50">
         <div className="flex items-center justify-between mb-2">
@@ -103,16 +477,212 @@ export function TurnMessagesPanel({
           <div className="mt-2 p-2 bg-purple-50 rounded text-xs font-mono overflow-x-auto">
             <div className="text-purple-700 font-medium mb-1">Tool Calls:</div>
             <pre className="text-purple-600 whitespace-pre-wrap">
-              {(() => {
-                try {
-                  return JSON.stringify(JSON.parse(msg.toolCallsJson), null, 2);
-                } catch {
-                  return msg.toolCallsJson;
-                }
-              })()}
+              {formatJson(msg.toolCallsJson)}
             </pre>
           </div>
         )}
+      </div>
+    );
+  };
+
+  const renderTraceMessage = (message: TurnPromptTraceMessageDto, key: string) => (
+    <div key={key} className="border rounded-lg p-3 bg-gray-50">
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`px-2 py-0.5 text-xs font-medium rounded ${getRoleBadgeClass(message.role)}`}>
+          {message.role}
+          {message.functionName && ` (${message.functionName})`}
+        </span>
+        {message.toolCallId && (
+          <span className="text-xs text-gray-500">tool_call_id: {message.toolCallId}</span>
+        )}
+      </div>
+      <div className="text-sm text-gray-900 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+        {message.content || <span className="text-gray-400 italic">No content</span>}
+      </div>
+      {message.toolCallsJson && (
+        <div className="mt-2 p-2 bg-purple-50 rounded text-xs font-mono overflow-x-auto">
+          <div className="text-purple-700 font-medium mb-1">Tool Calls:</div>
+          <pre className="text-purple-600 whitespace-pre-wrap">
+            {formatJson(message.toolCallsJson)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderPromptTrace = () => {
+    if (traceLoading) {
+      return (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        </div>
+      );
+    }
+
+    if (traceError) {
+      return (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+          {traceError}
+        </div>
+      );
+    }
+
+    if (!traceData) {
+      return (
+        <div className="text-sm text-gray-500 text-center py-8">
+          Prompt trace is unavailable.
+        </div>
+      );
+    }
+
+    if (!traceData.hasTrace) {
+      return (
+        <div className="text-sm text-gray-500 text-center py-8">
+          No prompt trace captured for this turn.
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {traceData.segments.map((segment, segmentIndex) => (
+          <div key={segment.segmentId} className="border rounded-lg p-4 bg-gray-50 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-gray-900">
+                Segment {segmentIndex + 1}
+              </div>
+              <div className="text-xs text-gray-600 flex gap-3">
+                <span>Status: <span className="font-medium">{segment.status}</span></span>
+                <span>Started: <span className="font-medium">{new Date(segment.startedUtc).toLocaleTimeString()}</span></span>
+                {segment.completedUtc && (
+                  <span>Completed: <span className="font-medium">{new Date(segment.completedUtc).toLocaleTimeString()}</span></span>
+                )}
+              </div>
+            </div>
+
+            {segment.errorMessage && (
+              <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+                {segment.errorMessage}
+              </div>
+            )}
+
+            <details className="border rounded bg-white">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-800">
+                Seed Messages ({segment.seedMessages.length})
+              </summary>
+              <div className="p-3 space-y-3">
+                {segment.seedMessages.map((message, idx) => renderTraceMessage(message, `seed-${segment.segmentId}-${idx}`))}
+              </div>
+            </details>
+
+            <details className="border rounded bg-white">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-800">
+                Tool Definitions ({segment.toolDefinitions.length})
+              </summary>
+              <div className="p-3 space-y-3">
+                {segment.toolDefinitions.length === 0 && (
+                  <div className="text-sm text-gray-500">No tools captured.</div>
+                )}
+                {segment.toolDefinitions.map((tool, idx) => (
+                  <div key={`tool-${segment.segmentId}-${idx}`} className="border rounded p-3 bg-gray-50">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-medium text-gray-900">{tool.name}</div>
+                      <span className="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">{tool.source}</span>
+                    </div>
+                    {tool.description && (
+                      <div className="mt-1 text-sm text-gray-700">{tool.description}</div>
+                    )}
+                    {tool.parametersJson && (
+                      <pre className="mt-2 p-2 bg-indigo-50 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto text-indigo-700">
+                        {formatJson(tool.parametersJson)}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
+
+            <details className="border rounded bg-white" open>
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-800">
+                Model Rounds ({segment.rounds.length})
+              </summary>
+              <div className="p-3 space-y-4">
+                {segment.rounds.length === 0 && (
+                  <div className="text-sm text-gray-500">No model rounds captured.</div>
+                )}
+                {segment.rounds.map((round) => (
+                  <div key={`round-${segment.segmentId}-${round.roundIndex}`} className="border rounded p-3 bg-gray-50 space-y-3">
+                    <div className="text-sm font-medium text-gray-900">
+                      Round {round.roundIndex}
+                      {round.modelDeploymentId ? ` • ${round.modelDeploymentId}` : ''}
+                      {round.responseFinishReason ? ` • finish: ${round.responseFinishReason}` : ''}
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">Request Messages</div>
+                      <div className="space-y-2">
+                        {round.requestMessages.map((message, idx) =>
+                          renderTraceMessage(message, `request-${segment.segmentId}-${round.roundIndex}-${idx}`),
+                        )}
+                      </div>
+                    </div>
+
+                    {round.responseMessage && (
+                      <div>
+                        <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">Response Message</div>
+                        {renderTraceMessage(round.responseMessage, `response-${segment.segmentId}-${round.roundIndex}`)}
+                      </div>
+                    )}
+
+                    {round.externalToolCalls.length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-2">
+                          External Tool Calls ({round.externalToolCalls.length})
+                        </div>
+                        <div className="space-y-2">
+                          {round.externalToolCalls.map((toolCall) => (
+                            <div key={toolCall.id} className="border rounded p-2 bg-white">
+                              <div className="text-sm font-medium text-gray-900">{toolCall.name}</div>
+                              {toolCall.argumentsJson && (
+                                <pre className="mt-1 text-xs font-mono bg-purple-50 rounded p-2 whitespace-pre-wrap overflow-x-auto text-purple-700">
+                                  {formatJson(toolCall.argumentsJson)}
+                                </pre>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
+
+            <details className="border rounded bg-white">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-gray-800">
+                Message Events ({segment.messageEvents.length})
+              </summary>
+              <div className="p-3 space-y-2">
+                {segment.messageEvents.length === 0 && (
+                  <div className="text-sm text-gray-500">No message events captured.</div>
+                )}
+                {segment.messageEvents.map((event, idx) => (
+                  <div key={`event-${segment.segmentId}-${idx}`} className="border rounded p-2 bg-gray-50">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded ${getRoleBadgeClass(event.role)}`}>
+                        {event.role}
+                      </span>
+                      <span className="text-xs text-gray-500">{new Date(event.createdUtc).toLocaleTimeString()}</span>
+                    </div>
+                    <div className="text-sm text-gray-900 whitespace-pre-wrap break-words">
+                      {event.content || <span className="text-gray-400 italic">No content</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        ))}
       </div>
     );
   };
@@ -141,7 +711,7 @@ export function TurnMessagesPanel({
           <div className="flex items-center justify-between p-4 md:p-6 border-b flex-shrink-0">
             <div>
               <h2 className="text-lg font-semibold">Turn Messages</h2>
-              {data && (
+              {activeTab === 'messages' && data && (
                 <div className="mt-1 text-sm text-gray-600">
                   <span>Turn {turnIndex! + 1}</span>
                   {data.assistantName && (
@@ -154,12 +724,33 @@ export function TurnMessagesPanel({
                   <span>{data.messages.length} messages</span>
                 </div>
               )}
+              {activeTab === 'promptTrace' && traceData && (
+                <div className="mt-1 text-sm text-gray-600">
+                  <span>Turn {turnIndex! + 1}</span>
+                  <span className="text-gray-400 mx-2">•</span>
+                  <span>Trace state: {traceData.captureState}</span>
+                  <span className="text-gray-400 mx-2">•</span>
+                  <span>{traceData.segments.length} segments</span>
+                </div>
+              )}
             </div>
-            <button
-              onClick={onClose}
-              className="p-1 hover:bg-gray-100 rounded"
-              aria-label="Close"
-            >
+            <div className="flex items-center gap-2">
+              {activeTab === 'promptTrace' && traceData?.hasTrace && (
+                <button
+                  type="button"
+                  onClick={handleCopyTraceMarkdown}
+                  className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700"
+                  aria-label="Copy prompt trace as Markdown"
+                  title="Copy prompt trace as Markdown"
+                >
+                  <FaCopy className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-1 hover:bg-gray-100 rounded"
+                aria-label="Close"
+              >
               <svg
                 className="w-5 h-5 text-gray-500"
                 fill="none"
@@ -173,34 +764,65 @@ export function TurnMessagesPanel({
                   d="M6 18L18 6M6 6l12 12"
                 />
               </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="px-4 md:px-6 py-2 border-b bg-gray-50 flex gap-2">
+            <button
+              onClick={() => setActiveTab('messages')}
+              className={`px-3 py-1.5 text-sm rounded border transition-colors ${
+                activeTab === 'messages'
+                  ? 'bg-white border-blue-300 text-blue-700'
+                  : 'bg-white border-gray-200 text-gray-600 hover:text-gray-800'
+              }`}
+            >
+              Messages
+            </button>
+            <button
+              onClick={() => setActiveTab('promptTrace')}
+              className={`px-3 py-1.5 text-sm rounded border transition-colors ${
+                activeTab === 'promptTrace'
+                  ? 'bg-white border-blue-300 text-blue-700'
+                  : 'bg-white border-gray-200 text-gray-600 hover:text-gray-800'
+              }`}
+            >
+              Prompt Trace
             </button>
           </div>
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-4 md:p-6">
-            {loading && (
-              <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-              </div>
+            {activeTab === 'messages' && (
+              <>
+                {loading && (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+                  </div>
+                )}
+
+                {error && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+                    {error}
+                  </div>
+                )}
+
+                {data && !loading && (
+                  <div className="space-y-3">
+                    {data.messages.map(renderMessage)}
+                  </div>
+                )}
+
+                {data && data.messages.length === 0 && !loading && (
+                  <div className="text-sm text-gray-500 text-center py-8">
+                    No messages in this turn.
+                  </div>
+                )}
+              </>
             )}
 
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-                {error}
-              </div>
-            )}
-
-            {data && !loading && (
-              <div className="space-y-3">
-                {data.messages.map(renderMessage)}
-              </div>
-            )}
-
-            {data && data.messages.length === 0 && !loading && (
-              <div className="text-sm text-gray-500 text-center py-8">
-                No messages in this turn.
-              </div>
-            )}
+            {activeTab === 'promptTrace' && renderPromptTrace()}
           </div>
         </div>
       </div>

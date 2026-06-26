@@ -256,8 +256,29 @@ export function ConversationDetailPanel({
                 )}
 
                 {turns.length === 0 && (
-                  <div className="text-sm text-gray-500">
-                    No invocation data recorded for this conversation.
+                  <div className="space-y-3">
+                    <div className="text-sm text-gray-500">
+                      No invocation data recorded for this conversation.
+                    </div>
+                    {conversation.turnIndices.length > 0 && (
+                      <div className="border rounded-lg p-4 bg-gray-50">
+                        <div className="text-sm font-semibold text-gray-900 mb-3">
+                          Turn Messages
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {conversation.turnIndices.map((turnIndex, idx) => (
+                            <button
+                              key={turnIndex}
+                              onClick={() => setSelectedTurnForMessages(turnIndex)}
+                              className="px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+                              title="View conversation messages"
+                            >
+                              Turn {idx + 1} Messages
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </>

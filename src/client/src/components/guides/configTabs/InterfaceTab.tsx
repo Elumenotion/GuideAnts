@@ -7,6 +7,8 @@ interface InterfaceTabProps {
   setShowTurnNavigation: (show: boolean) => void;
   collapsible: boolean;
   setCollapsible: (collapsible: boolean) => void;
+  showSpeechToText: boolean;
+  setShowSpeechToText: (show: boolean) => void;
 }
 
 export function InterfaceTab({
@@ -17,7 +19,9 @@ export function InterfaceTab({
   showTurnNavigation,
   setShowTurnNavigation,
   collapsible,
-  setCollapsible
+  setCollapsible,
+  showSpeechToText,
+  setShowSpeechToText
 }: InterfaceTabProps) {
   return (
     <div className="space-y-6">
@@ -97,6 +101,26 @@ export function InterfaceTab({
               type="checkbox" 
               checked={collapsible} 
               onChange={(e) => setCollapsible(e.target.checked)}
+              className="sr-only peer" 
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+          </label>
+        </div>
+
+        <div className="flex items-center justify-between py-3 border-b border-gray-100">
+          <div className="pr-4">
+            <span className="block text-sm font-medium text-gray-700">Voice Input (Speech-to-Text)</span>
+            <span className="block text-xs text-gray-500">
+              Show a microphone button so users can dictate messages. Turning this off also disables the
+              published speech transcription (ASR) endpoint for this guide, so the microphone cannot be used
+              even by custom embeds. Enabled by default.
+            </span>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={showSpeechToText} 
+              onChange={(e) => setShowSpeechToText(e.target.checked)}
               className="sr-only peer" 
             />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>

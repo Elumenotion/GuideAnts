@@ -398,6 +398,7 @@ public class Program
         app.MapPublishedNotebookConversationsEndpoints();
         app.MapPublishedGuidesEndpoints();
         app.MapPublishedOpenAiWireEndpoints();
+        app.MapPublishedAnthropicWireEndpoints();
         app.MapSpeechEndpoints();
         app.MapPublishedSpeechEndpoints();
         app.MapNotebookEndpoints();

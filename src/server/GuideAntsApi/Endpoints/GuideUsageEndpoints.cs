@@ -409,5 +409,34 @@ public static class GuideUsageEndpoints
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden);
+
+        // Turn prompt-trace endpoint (system/context/tool definitions drill-down)
+        var turnTraceGroup = app.MapGroup("/api/conversations/{conversationId}/turns/{turnIndex}/trace")
+            .WithTags("Conversation Messages")
+            .RequireAuthorization("RequireAdmin")
+            .WithOpenApi();
+
+        turnTraceGroup.MapGet("/", async (
+            Guid conversationId,
+            int turnIndex,
+            IGuideUsageService usageService) =>
+        {
+            try
+            {
+                var trace = await usageService.GetTurnPromptTraceAsync(conversationId, turnIndex);
+                if (trace == null)
+                    return Results.NotFound();
+                return Results.Ok(trace);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.Forbid();
+            }
+        })
+        .WithName("GetTurnPromptTrace")
+        .Produces<TurnPromptTraceDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
     }
 }

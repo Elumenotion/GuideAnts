@@ -436,6 +436,8 @@ export interface PublishedGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  /** Whether speech-to-text (voice input) is enabled for the chat and ASR endpoint */
+  showSpeechToText?: boolean;
   /** Explicit auth mode for this published guide */
   authMode?: PublishedGuideAuthMode;
   wireApiConfig?: PublishedWireApiConfigDto;
@@ -471,6 +473,7 @@ export interface PublishGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  showSpeechToText?: boolean;
   wireApiConfig?: PublishedWireApiConfigDto;
   mcpEnabled?: boolean;
   mcpDescription?: string;
@@ -491,6 +494,7 @@ export interface UpdatePublishedGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  showSpeechToText?: boolean;
   wireApiConfig?: PublishedWireApiConfigDto;
   mcpEnabled?: boolean;
   mcpDescription?: string;
@@ -498,7 +502,6 @@ export interface UpdatePublishedGuideDto {
 
 export interface PublishedWireApiConfigDto {
   enabled?: boolean;
-  profile?: string;
   endpointFlags?: PublishedWireApiEndpointFlagsDto;
   aliasMap?: Record<string, string>;
   maxRequestSizes?: PublishedWireApiMaxRequestSizesDto;
@@ -508,6 +511,7 @@ export interface PublishedWireApiEndpointFlagsDto {
   models?: boolean;
   chatCompletions?: boolean;
   responses?: boolean;
+  messages?: boolean;
   embeddings?: boolean;
   imageGenerations?: boolean;
   audioTranscriptions?: boolean;
@@ -517,6 +521,7 @@ export interface PublishedWireApiEndpointFlagsDto {
 export interface PublishedWireApiMaxRequestSizesDto {
   chatCompletionsBytes?: number;
   responsesBytes?: number;
+  messagesBytes?: number;
   embeddingsBytes?: number;
   imageGenerationsBytes?: number;
   audioTranscriptionsBytes?: number;
