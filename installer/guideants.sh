@@ -9,13 +9,13 @@
 #   1. Detects your OS / shell environment.
 #   2. Checks Docker is installed and running.
 #   3. Reports memory and disk (warns if low, never blocks).
-#   4. Walks you through which backend to use (cpu / cuda13 / rocm / slim).
+#   4. Walks you through which backend to use (cpu / cuda13 / rocm / slim / vulkan).
 #   5. Checks the registry for newer images and asks before updating.
 #   6. Starts the stack, waits for health, opens your browser.
 #
 # Flags:
 #   --doctor                 Run checks only; change nothing.
-#   --backend <cpu|cuda13|rocm|slim>   Skip the backend prompt.
+#   --backend <cpu|cuda13|rocm|slim|vulkan>   Skip the backend prompt.
 #   --compose <ghcr|local>   Use GHCR images (default) or local build images.
 #   --mount <path>           Mount a host folder into a project (requires prior login).
 #   --unmount                Interactively remove a host folder mount (requires prior login).
@@ -34,7 +34,7 @@ HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
 DOCKER_DIRECTORY="docker"
 
 MODE="install"            # install | doctor
-BACKEND_OVERRIDE=""       # cpu | cuda13 | rocm | slim
+BACKEND_OVERRIDE=""       # cpu | cuda13 | rocm | slim | vulkan
 COMPOSE_MODE="ghcr"       # ghcr | local
 ASSUME_YES="0"            # 0 | 1
 RECONFIGURE="0"           # 0 | 1
@@ -73,8 +73,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" =~ ^(cpu|cuda13|rocm|slim)$ ]] \
-  || fail "--backend must be cpu, cuda13, rocm, or slim"
+[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" =~ ^(cpu|cuda13|rocm|slim|vulkan)$ ]] \
+  || fail "--backend must be cpu, cuda13, rocm, slim, or vulkan"
 [[ "$COMPOSE_MODE" == "ghcr" || "$COMPOSE_MODE" == "local" ]] \
   || fail "--compose must be ghcr or local"
 
@@ -378,6 +378,12 @@ check_gpu_drivers() {
         fi
       fi
     fi
+  elif [[ "$backend" == "vulkan" ]]; then
+    hr
+    # select_vulkan_runtime() (run just before this) already detected the host,
+    # exported the GA_VULKAN_* wiring, and logged the chosen GPU path. Vulkan
+    # never hard-fails the installer: a GPU-less host degrades to CPU with a warning.
+    log "Vulkan GPU wiring resolved (runtime='${GA_VULKAN_RUNTIME:-runc}', device='${GA_VULKAN_DEVICE:-/dev/dxg}', icd='$(basename "${GA_VULKAN_ICD:-dzn_icd.json}")')."
   fi
 }
 
@@ -412,7 +418,7 @@ choose_backend() {
   if [[ "$RECONFIGURE" == "0" && -f "$STATE_FILE" ]]; then
     local saved_backend
     saved_backend="$(. "$STATE_FILE" && echo "${BACKEND:-}")"
-    if [[ "$saved_backend" =~ ^(cpu|cuda13|rocm|slim)$ ]]; then
+    if [[ "$saved_backend" =~ ^(cpu|cuda13|rocm|slim|vulkan)$ ]]; then
       SELECTED_BACKEND="$saved_backend"
       log "Using previously saved backend: $SELECTED_BACKEND (run with --reconfigure to change)"
       return
@@ -433,6 +439,8 @@ choose_backend() {
     backend_keys+=("rocm")
     backend_labels+=("rocm    Local AI on AMD GPU (ROCm device detected)")
   fi
+  backend_keys+=("vulkan")
+  backend_labels+=("vulkan  Local AI on any GPU via Vulkan (NVIDIA/AMD/Intel)")
   backend_keys+=("cpu")
   backend_labels+=("cpu     Local AI, no GPU (slower, biggest download ~60 GB)")
   backend_keys+=("slim")
@@ -463,12 +471,68 @@ choose_backend() {
   fi
 }
 
+# Vulkan is ONE image that reaches the GPU differently per host. docker-compose.vulkan.yml
+# defaults to the Windows / Docker Desktop dzn (Vulkan-on-D3D12) path; on native Linux we
+# export GA_VULKAN_* so the SAME file uses /dev/dri + in-image Mesa (AMD/Intel) or the
+# nvidia container runtime + toolkit-injected ICD (NVIDIA). Windows needs no env — the
+# compose defaults win. VK_DRIVER_FILES is always pinned to one ICD so llvmpipe (CPU) is
+# never selected; a host with no usable GPU degrades to CPU (warned), never silently.
+select_vulkan_runtime() {
+  [[ "$SELECTED_BACKEND" == "vulkan" ]] || return 0
+
+  # Windows / Docker Desktop: the dzn defaults already do the right thing for every vendor.
+  if docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
+    log "Vulkan: Docker Desktop → Mesa dzn over D3D12 (/dev/dxg). Using built-in defaults (no env)."
+    return 0
+  fi
+
+  # --- Native Linux ----------------------------------------------------------
+  # Pick a render-node device, falling back to /dev/null so the static devices:
+  # entry never hard-fails a headless/GPU-less host (NVIDIA still works via the
+  # toolkit, which injects its own /dev/nvidia* nodes).
+  local dev="/dev/null"
+  [[ -e /dev/dri ]] && dev="/dev/dri"
+  export GA_VULKAN_DEVICE="$dev"
+  export GA_VULKAN_DRIVER_LIBS="/usr/lib"                 # harmless existing dir (the /usr/lib/wsl bind is unused on Linux)
+  export GA_VULKAN_LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu"
+
+  if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; then
+    # NVIDIA: the nvidia-container-toolkit injects the Vulkan ICD when the nvidia
+    # runtime is used AND NVIDIA_DRIVER_CAPABILITIES includes 'graphics' (set in compose).
+    export GA_VULKAN_RUNTIME="nvidia"
+    export GA_VULKAN_ICD="/usr/share/vulkan/icd.d/nvidia_icd.json"
+    log "Vulkan: native Linux NVIDIA → nvidia runtime injects the Vulkan ICD (device $dev)."
+    log "       (If the GPU isn't found, the injected ICD path may differ — override GA_VULKAN_ICD.)"
+  elif [[ -e /dev/dri ]]; then
+    # AMD/Intel via in-image Mesa (RADV/ANV). Pin the matching ICD so llvmpipe is excluded.
+    local icd=""
+    for v in /sys/class/drm/renderD*/device/vendor; do
+      [[ -r "$v" ]] || continue
+      case "$(cat "$v" 2>/dev/null)" in
+        0x1002) icd="/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"; break ;;  # AMD (RADV)
+        0x8086) icd="/usr/share/vulkan/icd.d/intel_icd.x86_64.json";  break ;;  # Intel (ANV)
+      esac
+    done
+    if [[ -n "$icd" ]]; then
+      export GA_VULKAN_ICD="$icd"
+      log "Vulkan: native Linux Mesa via /dev/dri (ICD $(basename "$icd"))."
+    else
+      export GA_VULKAN_ICD="/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"
+      warn "Vulkan: /dev/dri present but GPU vendor undetermined; assuming AMD RADV. Override GA_VULKAN_ICD if this is an Intel GPU."
+    fi
+  else
+    warn "Vulkan: native Linux with no nvidia runtime and no /dev/dri — no GPU device found."
+    warn "        LLM and image generation will run on CPU. Install Mesa (AMD/Intel) or the nvidia-container-toolkit (NVIDIA)."
+  fi
+}
+
 compose_file_for() {
   if [[ "$COMPOSE_MODE" == "local" ]]; then
     case "$1" in
       slim)   echo "docker-compose.slim.yml" ;;
       cuda13) echo "docker-compose.cuda.yml" ;;
       rocm)   echo "docker-compose.rocm.yml" ;;
+      vulkan) echo "docker-compose.vulkan.yml" ;;
       *)      echo "docker-compose.cpu.yml" ;;
     esac
   else
@@ -476,6 +540,7 @@ compose_file_for() {
       slim)   echo "docker-compose.ghcr-slim.yml" ;;
       cuda13) echo "docker-compose.ghcr-cuda13.yml" ;;
       rocm)   echo "docker-compose.ghcr-rocm.yml" ;;
+      vulkan) echo "docker-compose.ghcr-vulkan.yml" ;;
       *)      echo "docker-compose.ghcr-cpu.yml" ;;
     esac
   fi
@@ -1054,6 +1119,8 @@ choose_backend
 COMPOSE_FILE="$(compose_file_for "$SELECTED_BACKEND")"
 log "Selected backend: $SELECTED_BACKEND  ->  docker/$COMPOSE_FILE"
 
+select_vulkan_runtime
+
 check_gpu_drivers "$SELECTED_BACKEND"
 
 detect_prior_install
@@ -1067,11 +1134,9 @@ fi
 if [[ "$MODE" == "doctor" ]]; then
   hr
   log "Doctor mode complete. No changes were made."
-  if [[ -f "$DOCKER_DIR/$HOST_MOUNT_OVERRIDE_FILE" ]]; then
-    log "Would start: docker compose -f docker/$COMPOSE_FILE -f docker/$HOST_MOUNT_OVERRIDE_FILE up -d"
-  else
-    log "Would start: docker compose -f docker/$COMPOSE_FILE up -d"
-  fi
+  would_start="docker compose -f docker/$COMPOSE_FILE"
+  [[ -f "$DOCKER_DIR/$HOST_MOUNT_OVERRIDE_FILE" ]] && would_start+=" -f docker/$HOST_MOUNT_OVERRIDE_FILE"
+  log "Would start: $would_start up -d"
   log "Update decision: ${UPDATE_DECISION:-skip}"
   exit 0
 fi

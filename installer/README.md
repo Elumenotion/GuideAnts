@@ -156,8 +156,8 @@ PowerShell) handle writing this file and restarting services.
 
 Each mode has its own set of compose files:
 
-- GHCR: `docker-compose.ghcr-cpu.yml`, `docker-compose.ghcr-cuda13.yml`, `docker-compose.ghcr-rocm.yml`, `docker-compose.ghcr-slim.yml`
-- Local: `docker-compose.cpu.yml`, `docker-compose.cuda.yml`, `docker-compose.rocm.yml`, `docker-compose.slim.yml`
+- GHCR: `docker-compose.ghcr-cpu.yml`, `docker-compose.ghcr-cuda13.yml`, `docker-compose.ghcr-rocm.yml`, `docker-compose.ghcr-slim.yml`, `docker-compose.ghcr-vulkan.yml`
+- Local: `docker-compose.cpu.yml`, `docker-compose.cuda.yml`, `docker-compose.rocm.yml`, `docker-compose.slim.yml`, `docker-compose.vulkan.yml`
 
 ## Stopping
 
