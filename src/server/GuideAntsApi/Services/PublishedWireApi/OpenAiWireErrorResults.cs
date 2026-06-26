@@ -33,6 +33,71 @@ public static class OpenAiWireErrorResults
             code: "model_alias_not_found",
             param: "model");
 
+    public static IResult InvalidPreviousResponseId(string? value) =>
+        Create(
+            StatusCodes.Status400BadRequest,
+            string.IsNullOrWhiteSpace(value)
+                ? "previous_response_id is required when continuing a response."
+                : $"previous_response_id '{value}' is invalid. Expected format: resp_<id>.",
+            type: "invalid_request_error",
+            code: "invalid_previous_response_id",
+            param: "previous_response_id");
+
+    public static IResult PreviousResponseNotFound(string value) =>
+        Create(
+            StatusCodes.Status400BadRequest,
+            $"previous_response_id '{value}' was not found for this published guide.",
+            type: "invalid_request_error",
+            code: "previous_response_not_found",
+            param: "previous_response_id");
+
+    public static IResult PreviousResponseScopeMismatch() =>
+        Create(
+            StatusCodes.Status403Forbidden,
+            "previous_response_id is not accessible for this caller.",
+            type: "invalid_request_error",
+            code: "previous_response_scope_mismatch",
+            param: "previous_response_id");
+
+    public static IResult UnsupportedPreviousResponseBranch() =>
+        UnsupportedFeature(
+            "Only continuation from the latest response is supported for this conversation.",
+            "previous_response_id");
+
+    public static IResult InvalidConversationId(string? value) =>
+        Create(
+            StatusCodes.Status400BadRequest,
+            string.IsNullOrWhiteSpace(value)
+                ? "conversation is required when continuing by conversation id."
+                : $"conversation '{value}' is invalid. Expected format: conv_<id>.",
+            type: "invalid_request_error",
+            code: "invalid_conversation_id",
+            param: "conversation");
+
+    public static IResult ConversationNotFound(string value) =>
+        Create(
+            StatusCodes.Status400BadRequest,
+            $"conversation '{value}' was not found for this published guide.",
+            type: "invalid_request_error",
+            code: "conversation_not_found",
+            param: "conversation");
+
+    public static IResult ConversationScopeMismatch() =>
+        Create(
+            StatusCodes.Status403Forbidden,
+            "conversation is not accessible for this caller.",
+            type: "invalid_request_error",
+            code: "conversation_scope_mismatch",
+            param: "conversation");
+
+    public static IResult ConversationPreviousResponseMismatch() =>
+        Create(
+            StatusCodes.Status400BadRequest,
+            "conversation and previous_response_id must refer to the same internal conversation.",
+            type: "invalid_request_error",
+            code: "conversation_previous_response_mismatch",
+            param: "conversation");
+
     public static IResult ProviderNotReady(string message) =>
         Create(
             StatusCodes.Status503ServiceUnavailable,

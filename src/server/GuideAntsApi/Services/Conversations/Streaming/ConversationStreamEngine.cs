@@ -8,6 +8,7 @@ using GuideAnts.Usage;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations.Persistence;
+using GuideAntsApi.Services.Conversations.Tracing;
 
 namespace GuideAntsApi.Services.Conversations.Streaming;
 
@@ -152,6 +153,23 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             var flushCounter = 0;
             const int flushInterval = 20;
             var fileUrlContext = policy.BuildFileUrlContext(context.Conversation, context.PublisherId, context.HostUrl);
+            var turnTraceCollector = new TurnTraceCollector(context.AssistantName, context.ModelDeploymentId);
+            context.ChatOptions.TraceCollector = turnTraceCollector;
+
+            async Task PersistTraceSegmentAsync(string captureState, string? errorMessage = null, CancellationToken ct = default)
+            {
+                var segment = turnTraceCollector.BuildFinalizedSegment(captureState, errorMessage);
+                var segmentJson = JsonSerializer.Serialize(segment, JsonOptions);
+                await _persistence.AppendTurnTraceSegmentAsync(
+                    new AppendTurnTraceSegmentRequest(
+                        context.DbTurn.Id,
+                        context.Conversation.Id,
+                        context.TurnIndex,
+                        TurnTraceCollector.SchemaVersion,
+                        captureState,
+                        segmentJson),
+                    ct);
+            }
 
             void TryWrite(StreamingEvent ev)
             {
@@ -400,6 +418,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     && output.Status.Equals("pending_client_tool", StringComparison.OrdinalIgnoreCase))
                 {
                     await _persistence.SetTurnStatusAsync(context.DbTurn.Id, "streaming", ct: noneCt);
+                    await PersistTraceSegmentAsync("partial", ct: noneCt);
                     TryWrite(new StreamingEvent(StreamingEventTypes.PendingClientTool, "{}"));
                     return;
                 }
@@ -433,21 +452,55 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 }
 
                 await QueueNotebookSyncIfNeededAsync(context, output);
+                await PersistTraceSegmentAsync("completed", ct: noneCt);
             }
             catch (OperationCanceledException)
             {
-                await HandleCancellationAsync(
-                    context,
-                    currentAssistantMessageId,
-                    currentAssistantContent,
-                    assistantMessageIds,
-                    TryWrite,
-                    noneCt);
+                try
+                {
+                    await HandleCancellationAsync(
+                        context,
+                        currentAssistantMessageId,
+                        currentAssistantContent,
+                        assistantMessageIds,
+                        TryWrite,
+                        noneCt);
+                    await PersistTraceSegmentAsync("cancelled", ct: noneCt);
+                }
+                catch (Exception cancellationHandlingException)
+                {
+                    _logger.LogError(
+                        cancellationHandlingException,
+                        "Failed while handling cancellation for {ConversationId} turn {TurnIndex}",
+                        context.Conversation.Id,
+                        context.TurnIndex);
+
+                    TryWrite(new StreamingEvent(
+                        StreamingEventTypes.Error,
+                        JsonSerializer.Serialize(StreamingErrorEnvelope.Build(cancellationHandlingException), JsonOptions)));
+                }
             }
             catch (Exception ex)
             {
+                Exception surfacedException = ex;
+                try
+                {
+                    await PersistTraceSegmentAsync("failed", ex.Message, noneCt);
+                }
+                catch (Exception tracePersistException)
+                {
+                    surfacedException = new InvalidOperationException(
+                        "Conversation failed and prompt-trace persistence also failed.",
+                        new AggregateException(ex, tracePersistException));
+                    _logger.LogError(
+                        tracePersistException,
+                        "Prompt-trace persistence failed for {ConversationId} turn {TurnIndex}",
+                        context.Conversation.Id,
+                        context.TurnIndex);
+                }
+
                 _logger.LogError(
-                    ex,
+                    surfacedException,
                     "Streaming conversation failed for {ConversationId} turn {TurnIndex}",
                     context.Conversation.Id,
                     context.TurnIndex);
@@ -465,7 +518,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
 
                 TryWrite(new StreamingEvent(
                     StreamingEventTypes.Error,
-                    JsonSerializer.Serialize(StreamingErrorEnvelope.Build(ex), JsonOptions)));
+                    JsonSerializer.Serialize(StreamingErrorEnvelope.Build(surfacedException), JsonOptions)));
             }
             finally
             {

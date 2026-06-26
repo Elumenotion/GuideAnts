@@ -60,74 +60,18 @@ public static class NotebookConversationsEndpoints
 
         // Generate and set conversation title using Conversation Title Generator assistant
         group.MapPost("/{convoId:guid}/title/generate", async (
-            [FromServices] IConversationService svc,
             [FromServices] IServiceScopeFactory scopeFactory,
             Guid convoId) =>
         {
-            // 1) Load conversation with full context
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            
-            var conv = await db.NotebookConversations
-                .Include(c => c.Notebook)
-                    .ThenInclude(n => n.Project)
-                .Include(c => c.Messages)
-                .FirstOrDefaultAsync(c => c.Id == convoId);
-                
-            if (conv == null)
+            var generation = await ConversationTitleGenerator.GenerateAndApplyAsync(db, convoId);
+            if (!generation.Found)
+            {
                 return Results.NotFound();
-            
-            var notebookId = conv.NotebookId;
-            var projectId = conv.Notebook.ProjectId;
-            
-            // Verify project access
-
-// 2) Build conversation dialog text (user and assistant messages only)
-            var sb = new System.Text.StringBuilder();
-            foreach (var m in conv.Messages.OrderBy(m => m.TurnIndex).ThenBy(m => m.MessageSequence))
-            {
-                if (string.IsNullOrWhiteSpace(m.Content)) continue;
-                if (m.Role != ChatRole.User && m.Role != ChatRole.Assistant) continue;
-                var role = m.Role == ChatRole.User ? "User" : "Assistant";
-                sb.Append(role).Append(": ").AppendLine(m.Content.Trim());
-            }
-            var dialogText = sb.ToString().Trim();
-            if (string.IsNullOrWhiteSpace(dialogText))
-                dialogText = "(No substantive messages in this conversation.)";
-            
-            // 3) Create InvocationContext with all required IDs
-            var context = new AntRunner.ToolCalling.InvocationContext(
-                ProjectId: projectId,
-                NotebookId: notebookId,
-                ConversationId: convoId);
-            
-            // 4) Use Agent.Invoke with proper context
-            var instructions = "Create a concise 4–8 word, title case, single-line title without punctuation.\n\nConversation:\n" + dialogText;
-            var result = await AntRunner.Chat.Agent.Invoke("Conversation Title Generator", instructions, context);
-            
-            // 5) Sanitize and clamp to DB constraints (nvarchar(255))
-            var title = (result?.StandardOutput ?? string.Empty).Trim().Trim('\"').Trim();
-            if (title.EndsWith('.') || title.EndsWith('!') || title.EndsWith('?'))
-            {
-                title = title.TrimEnd('.', '!', '?').TrimEnd();
-            }
-            if (title.Length > 255)
-            {
-                title = title.Substring(0, 255).Trim();
             }
 
-            // 6) Persist only if we have a non-empty title; otherwise keep the existing one
-            if (!string.IsNullOrWhiteSpace(title))
-            {
-                await svc.RenameConversationAsync(convoId, title);
-            }
-            else
-            {
-                title = conv.Title;
-            }
-
-            // 8) Return the final title
-            return Results.Ok(new { title });
+            return Results.Ok(new { title = generation.Title });
         })
         .RequireAuthorization("RequireContributor")
         .Produces(StatusCodes.Status200OK)

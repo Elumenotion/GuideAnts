@@ -1,7 +1,5 @@
 using GuideAntsApi.Configuration;
-using GuideAntsApi.DataModel;
 using GuideAntsApi.Services.LlamaCpp;
-using GuideAntsApi.Services.Routing;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Services.Bootstrap;

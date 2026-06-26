@@ -1,6 +1,5 @@
 using System.Text.Json;
 using FluentAssertions;
-using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;
@@ -8,7 +7,6 @@ using GuideAntsApi.Services.Components;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Options;
 using Moq;
 
 namespace GuideAntsApi.Tests.Services.Components;

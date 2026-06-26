@@ -1,4 +1,5 @@
 using GuideAntsApi.Models.Conversations;
+using AntRunner.Chat.Abstractions;
 
 namespace GuideAntsApi.Services.Conversations;
 
@@ -9,11 +10,11 @@ public interface IPublishedConversationService
 	/// </summary>
 	/// <param name="conversationId">Target conversation</param>
 	/// <param name="request">Send message request</param>
-	/// <param name="publisherId">Optional opaque publisher correlation id</param>
-	/// <param name="externalUserIdentity">External user identity from auth validation</param>
-	/// <param name="internalUserId">Internal Users.Id for AppIdentity-mode published guides</param>
-	/// <param name="cancellationToken">Cancellation token</param>
-	/// <returns>Streaming events compatible with main client SSE event types</returns>
+    /// <param name="publisherId">Optional opaque publisher correlation id</param>
+    /// <param name="externalUserIdentity">External user identity from auth validation</param>
+    /// <param name="internalUserId">Internal Users.Id for AppIdentity-mode published guides</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Streaming events compatible with main client SSE event types</returns>
 	IAsyncEnumerable<StreamingEvent> SendMessageStreamAsync(
         Guid conversationId,
         SendMessageRequest request,
@@ -30,6 +31,7 @@ public interface IPublishedConversationService
 	/// <param name="publisherId">Optional opaque publisher correlation id</param>
 	/// <param name="externalUserIdentity">External user identity from auth validation</param>
 	/// <param name="internalUserId">Internal Users.Id for AppIdentity-mode published guides</param>
+	/// <param name="clientToolDefinitions">Optional run-scoped client tool definitions to expose during resume.</param>
 	/// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Streaming events compatible with main client SSE event types</returns>
     IAsyncEnumerable<StreamingEvent> ResumeAfterExternalToolResultsStreamAsync(
@@ -37,6 +39,7 @@ public interface IPublishedConversationService
         string? publisherId,
         string? externalUserIdentity,
         Guid? internalUserId = null,
+        IReadOnlyList<ChatToolDefinition>? clientToolDefinitions = null,
         CancellationToken cancellationToken = default);
 
     Task<NotebookConversationListDto> CreateConversationAsync(Guid notebookId, string title);

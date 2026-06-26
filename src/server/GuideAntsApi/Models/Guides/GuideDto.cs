@@ -1,5 +1,3 @@
-using GuideAntsApi.Models;
-
 namespace GuideAntsApi.Models.Guides;
 
 // Summary view for guide list

@@ -16,6 +16,8 @@ public interface IPublishedApiExecutionContextResolver
         Guid pubId,
         string endpointName,
         int? endpointMaxBytes = null,
+        bool requireWireApiEnabled = true,
+        string? sourceChannel = null,
         CancellationToken ct = default);
 }
 
@@ -51,8 +53,13 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
         Guid pubId,
         string endpointName,
         int? endpointMaxBytes = null,
+        bool requireWireApiEnabled = true,
+        string? sourceChannel = null,
         CancellationToken ct = default)
     {
+        var resolvedSourceChannel = string.IsNullOrWhiteSpace(sourceChannel)
+            ? WireApiSourceChannel
+            : sourceChannel;
         var publishedGuide = await _db.PublishedGuides
             .AsNoTracking()
             .Include(pg => pg.Notebook)
@@ -83,14 +90,20 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
                 OpenAiWireErrorResults.ProviderNotReady("Published guide wire API configuration is invalid."));
         }
 
-        if (!wireApiConfig.Enabled)
+        // Wire API gating only applies to the OpenAI-compatible wire endpoints. Other
+        // channels (e.g. the chat component's speech-to-text) opt out via
+        // requireWireApiEnabled:false and are gated by their own published-guide setting.
+        if (requireWireApiEnabled)
         {
-            return PublishedApiExecutionResolution.Fail(OpenAiWireErrorResults.EndpointDisabled(endpointName));
-        }
+            if (!wireApiConfig.Enabled)
+            {
+                return PublishedApiExecutionResolution.Fail(OpenAiWireErrorResults.EndpointDisabled(endpointName));
+            }
 
-        if (!IsEndpointEnabled(wireApiConfig, endpointName))
-        {
-            return PublishedApiExecutionResolution.Fail(OpenAiWireErrorResults.EndpointDisabled(endpointName));
+            if (!IsEndpointEnabled(wireApiConfig, endpointName))
+            {
+                return PublishedApiExecutionResolution.Fail(OpenAiWireErrorResults.EndpointDisabled(endpointName));
+            }
         }
 
         var effectiveMaxBytes = endpointMaxBytes ?? ResolveConfiguredMaxBytes(wireApiConfig, endpointName);
@@ -147,7 +160,7 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
             AuthMode: authMode,
             ExternalUserIdentity: externalUserIdentity,
             InternalUserId: internalUserId,
-            SourceChannel: WireApiSourceChannel,
+            SourceChannel: resolvedSourceChannel,
             ExternalRequestId: ResolveExternalRequestId(httpContext),
             EndpointName: endpointName);
 
@@ -156,7 +169,7 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
             httpContext,
             new UsageAttributionContext(
                 PublishedGuideId: pubId,
-                SourceChannel: WireApiSourceChannel,
+                SourceChannel: resolvedSourceChannel,
                 ExternalRequestId: executionContext.ExternalRequestId,
                 ExternalUserIdentity: executionContext.ExternalUserIdentity));
         return PublishedApiExecutionResolution.Pass(executionContext);
@@ -172,6 +185,7 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
     {
         var bearerToken = ReadBearerToken(httpContext);
         var apiKeyHeader = httpContext.Request.Headers[PublishedGuideAuthService.ApiKeyHeaderName].ToString();
+        var anthropicApiKeyHeader = httpContext.Request.Headers["x-api-key"].ToString();
         var webhookHeader = httpContext.Request.Headers["X-Published-Auth"].ToString();
 
         string? authorizationHeader;
@@ -181,7 +195,11 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
         {
             case PublishedApiAuthMode.ApiKey:
                 authorizationHeader = null;
-                resolvedApiKeyHeader = string.IsNullOrWhiteSpace(apiKeyHeader) ? bearerToken : apiKeyHeader;
+                resolvedApiKeyHeader = !string.IsNullOrWhiteSpace(apiKeyHeader)
+                    ? apiKeyHeader
+                    : !string.IsNullOrWhiteSpace(anthropicApiKeyHeader)
+                        ? anthropicApiKeyHeader
+                        : bearerToken;
                 break;
             case PublishedApiAuthMode.Webhook:
                 authorizationHeader = string.IsNullOrWhiteSpace(webhookHeader) ? bearerToken : webhookHeader;
@@ -273,6 +291,7 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
             "models" => flags.Models != false,
             "chat.completions" => flags.ChatCompletions != false,
             "responses" => flags.Responses != false,
+            "messages" => flags.Messages != false,
             "embeddings" => flags.Embeddings != false,
             "images.generations" => flags.ImageGenerations != false,
             "audio.transcriptions" => flags.AudioTranscriptions != false,
@@ -293,6 +312,7 @@ public sealed class PublishedApiExecutionContextResolver : IPublishedApiExecutio
         {
             "chat.completions" => max.ChatCompletionsBytes,
             "responses" => max.ResponsesBytes,
+            "messages" => max.MessagesBytes,
             "embeddings" => max.EmbeddingsBytes,
             "images.generations" => max.ImageGenerationsBytes,
             "audio.transcriptions" => max.AudioTranscriptionsBytes,

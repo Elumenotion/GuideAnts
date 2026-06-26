@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using GuideAntsApi.Configuration;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;

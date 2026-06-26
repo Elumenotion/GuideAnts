@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using AntRunner.Chat.Abstractions;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -165,6 +167,58 @@ public sealed class PublishedConversationStreamingTests : BaseEndpointTest
         turn.Status.Should().Be("completed");
         turn.Instructions.Should().Be("Hello");
         turn.ChatRunOutputJson.Should().NotBeNullOrEmpty();
+    }
+
+    [TestMethod]
+    public async Task SendMessageStream_When_client_tool_is_requested_leaves_turn_streaming()
+    {
+        FakeChatCompletionBehavior.Instance.Scenario = FakeChatScenario.ToolCallThenReply;
+        FakeChatCompletionBehavior.Instance.ToolFunctionName = "ClientLookup";
+
+        SeededConversation seeded;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            seeded = await SeedConversationAsync(db);
+        }
+
+        List<StreamingEvent> events;
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var svc = ResolveService(scope);
+            var request = new SendMessageRequest
+            {
+                Instructions = "Use a client tool",
+                ModelDeploymentId = ModelId,
+                ClientToolDefinitions =
+                [
+                    new ChatToolDefinition(new ChatFunctionDefinition(
+                        "ClientLookup",
+                        "Look up data in the client",
+                        JsonNode.Parse("""{"type":"object","properties":{"query":{"type":"string"}}}""")))
+                ]
+            };
+            events = await CollectAsync(svc.SendMessageStreamAsync(seeded.ConversationId, request, publisherId: null, externalUserIdentity: null));
+        }
+
+        var eventTypes = events.Select(e => e.EventType).ToList();
+        eventTypes.Should().Contain(StreamingEventTypes.ExternalToolCall);
+        eventTypes.Should().Contain(StreamingEventTypes.PendingClientTool);
+        eventTypes.Should().NotContain(StreamingEventTypes.Complete);
+
+        using var verifyScope = SharedFactory!.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var turn = await verifyDb.ConversationTurns
+            .SingleAsync(t => t.NotebookConversationId == seeded.ConversationId && t.TurnIndex == 1);
+        turn.Status.Should().Be("streaming");
+        turn.ChatRunOutputJson.Should().BeNull();
+
+        var assistantMessage = await verifyDb.NotebookConversationMessages
+            .SingleAsync(m =>
+                m.NotebookConversationId == seeded.ConversationId &&
+                m.TurnIndex == 1 &&
+                m.Role == DataModelChatRole.Assistant);
+        assistantMessage.ToolCalls.Should().Contain(FakeChatCompletionBehavior.Instance.ToolCallId);
     }
 
     [TestMethod]

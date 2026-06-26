@@ -86,6 +86,7 @@ public static class PublishedGuidesEndpoints
                 collapsible = publishedGuide.Collapsible,
                 showConversationStarters = publishedGuide.ShowConversationStarters,
                 showAttachments = publishedGuide.ShowAttachments,
+                showSpeechToText = publishedGuide.ShowSpeechToText,
                 mcpEnabled = publishedGuide.McpEnabled,
                 mcpEndpoint = publishedGuide.McpEnabled
                     ? $"/api/published/mcp?pubId={publishedGuide.Id}"
@@ -175,6 +176,7 @@ public static class PublishedGuidesEndpoints
                 collapsible = publishedGuide.Collapsible,
                 showConversationStarters = publishedGuide.ShowConversationStarters,
                 showAttachments = publishedGuide.ShowAttachments,
+                showSpeechToText = publishedGuide.ShowSpeechToText,
                 mcpEnabled = publishedGuide.McpEnabled,
                 mcpEndpoint = publishedGuide.McpEnabled
                     ? $"/api/published/mcp?pubId={publishedGuide.Id}"

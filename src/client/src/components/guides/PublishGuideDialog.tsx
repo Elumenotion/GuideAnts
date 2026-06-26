@@ -44,6 +44,7 @@ function getInitialWireApiEndpointFlags(
     models: flags?.models !== false,
     chatCompletions: flags?.chatCompletions !== false,
     responses: flags?.responses !== false,
+    messages: flags?.messages !== false,
     embeddings: flags?.embeddings !== false,
     imageGenerations: flags?.imageGenerations !== false,
     audioTranscriptions: flags?.audioTranscriptions !== false,
@@ -116,6 +117,7 @@ export function PublishGuideDialog({
   // Features
   const [showConversationStarters, setShowConversationStarters] = useState(publishedGuide?.showConversationStarters || false);
   const [showAttachments, setShowAttachments] = useState(publishedGuide?.showAttachments || false);
+  const [showSpeechToText, setShowSpeechToText] = useState(publishedGuide?.showSpeechToText ?? true);
 
   // Limits
   const [maxUserMessageLength, setMaxUserMessageLength] = useState<number | undefined>(publishedGuide?.maxUserMessageLength);
@@ -131,7 +133,6 @@ export function PublishGuideDialog({
   const [authWebhookTimeout, setAuthWebhookTimeout] = useState<number>(publishedGuide?.authWebhookTimeoutSeconds || 5);
   const [hasApiKey, setHasApiKey] = useState(publishedGuide?.hasApiKey || false);
   const [wireApiEnabled, setWireApiEnabled] = useState<boolean>(publishedGuide?.wireApiConfig?.enabled ?? false);
-  const [wireApiProfile, setWireApiProfile] = useState<string>(publishedGuide?.wireApiConfig?.profile || '');
   const [wireApiEndpointFlags, setWireApiEndpointFlags] = useState<WireApiEndpointFlagsState>(
     getInitialWireApiEndpointFlags(publishedGuide?.wireApiConfig?.endpointFlags ?? null)
   );
@@ -254,11 +255,11 @@ export function PublishGuideDialog({
     const maxRequestSizes = compactNumberRecord(wireApiMaxRequestSizes);
     const wireApiConfig = {
       enabled: wireApiEnabled,
-      profile: wireApiProfile.trim() || undefined,
       endpointFlags: {
         models: wireApiEndpointFlags.models,
         chatCompletions: wireApiEndpointFlags.chatCompletions,
         responses: wireApiEndpointFlags.responses,
+        messages: wireApiEndpointFlags.messages,
         embeddings: wireApiEndpointFlags.embeddings,
         imageGenerations: wireApiEndpointFlags.imageGenerations,
         audioTranscriptions: wireApiEndpointFlags.audioTranscriptions,
@@ -276,6 +277,7 @@ export function PublishGuideDialog({
       collapsible,
       showConversationStarters,
       showAttachments,
+      showSpeechToText,
       maxUserMessageLength: maxUserMessageLength || undefined,
       maxTurns: maxTurns || undefined,
       retentionPeriod: retentionPeriod ?? undefined,
@@ -403,10 +405,10 @@ export function PublishGuideDialog({
   const dialogMarkup = (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div 
-        className="bg-white rounded-lg shadow-xl w-full max-w-3xl lg:max-w-4xl mx-4 max-h-[90vh] overflow-y-auto flex flex-col"
+        className="bg-white rounded-lg shadow-xl w-full max-w-6xl mx-4 max-h-[90vh] overflow-hidden flex flex-col"
         tabIndex={-1}
       >
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 z-10">
+        <div className="flex-none bg-white border-b border-gray-200 px-6 py-4">
           <h2 className="text-xl font-semibold text-gray-900">
             {isEditMode ? `Manage Published Guide: "${guideName}"` : `Publish "${guideName}"`}
           </h2>
@@ -432,7 +434,7 @@ export function PublishGuideDialog({
           )}
         </div>
 
-        <div className="flex border-b border-gray-200 px-6 overflow-x-auto">
+        <div className="flex-none flex border-b border-gray-200 px-6 overflow-x-auto">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -448,7 +450,7 @@ export function PublishGuideDialog({
           ))}
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6 flex-1 overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-6 space-y-6 flex-1 min-h-0 overflow-y-auto">
           {/* Inactive Warning Banner (edit mode only) */}
           {isEditMode && !isActive && (
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-md mb-4">
@@ -498,6 +500,8 @@ export function PublishGuideDialog({
                 setShowTurnNavigation={setShowTurnNavigation}
                 collapsible={collapsible}
                 setCollapsible={setCollapsible}
+                showSpeechToText={showSpeechToText}
+                setShowSpeechToText={setShowSpeechToText}
               />
             )}
 
@@ -547,8 +551,6 @@ export function PublishGuideDialog({
                 publishedGuideId={publishedGuide?.id}
                 wireApiEnabled={wireApiEnabled}
                 setWireApiEnabled={setWireApiEnabled}
-                wireApiProfile={wireApiProfile}
-                setWireApiProfile={setWireApiProfile}
                 endpointFlags={wireApiEndpointFlags}
                 setEndpointFlag={setWireApiEndpointFlag}
                 aliases={wireApiAliases}
@@ -568,8 +570,12 @@ export function PublishGuideDialog({
                 setMcpDescription={setMcpDescription}
                 hasApiKey={hasApiKey}
                 sessionApiKey={sessionApiKey}
+                guideId={guideId}
                 publishedGuideId={publishedGuide?.id}
+                authWebhookUrl={authWebhookUrl}
                 mcpPersisted={mcpPersisted}
+                onApiKeyChange={handleApiKeyChange}
+                onSessionApiKeyChange={handleSessionApiKeyChange}
                 onEnableMcpAccess={publishedGuide?.id ? handleEnableMcpAccess : undefined}
                 onDownloadClaudeSkill={publishedGuide?.id ? handleDownloadClaudeSkill : undefined}
               />
@@ -578,7 +584,7 @@ export function PublishGuideDialog({
         </form>
 
         {/* Footer/Actions */}
-        <div className="flex justify-between items-center p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+        <div className="flex-none flex justify-between items-center p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg">
           {isEditMode && (
             <div>
               {isActive ? (
