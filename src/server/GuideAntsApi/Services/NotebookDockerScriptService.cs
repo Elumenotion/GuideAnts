@@ -105,6 +105,7 @@ namespace GuideAntsApi.Services
             // Track detected file changes for ScriptExecutionResult
             List<string>? detectedNewFiles = null;
             List<string>? detectedModifiedFiles = null;
+            int? agentExitCode = null;
 
             try
             {
@@ -129,6 +130,7 @@ namespace GuideAntsApi.Services
                     _logger.LogDebug("Agent STDERR: {StdErr}", LogValueSanitizer.Sanitize(result.StandardError));
                     stdOutBuffer.Append(result.StandardOutput);
                     stdErrBuffer.Append(result.StandardError);
+                    agentExitCode = result.ExitCode;
 
                     // For scripts, detect new files BEFORE syncing DB
                     // because scripts can create multiple files in various locations
@@ -202,6 +204,7 @@ namespace GuideAntsApi.Services
             {
                 StandardOutput = cleanedOutput,
                 StandardError = cleanedError,
+                ExitCode = agentExitCode,
                 NewFiles = detectedNewFiles,
                 ModifiedFiles = detectedModifiedFiles
             };

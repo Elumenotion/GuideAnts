@@ -393,10 +393,8 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         var list = new List<ChatMessage>();
         AntRunner.ToolCalling.AssistantDefinitions.AssistantDefinition? assistantDef = null;
 
-        if (clientMessages != null && clientMessages.Count > 0)
-        {
-            list.AddRange(clientMessages);
-        }
+        SplitPublishedClientPrefix(clientMessages, out var leadingDeveloperMessages, out var conversationalClientPrefix);
+        list.AddRange(leadingDeveloperMessages);
 
         try
         {
@@ -415,6 +413,11 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             }
         }
         catch { /* ignore */ }
+
+        if (conversationalClientPrefix.Count > 0)
+        {
+            list.AddRange(conversationalClientPrefix);
+        }
 
         var isNewConversation = IsNewConversation(conv);
         var isAssistantSwitch = !isNewConversation && IsAssistantSwitch(conv, assistantName);
@@ -549,6 +552,37 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         }
 
         return list;
+    }
+
+    /// <summary>
+    /// Splits a published-wire client prefix so guide system instructions can be injected
+    /// before replayed user/assistant history. Leading <c>developer</c> messages stay at the
+    /// front (Cursor sandbox permissions); conversational replay follows guide instructions.
+    /// </summary>
+    internal static void SplitPublishedClientPrefix(
+        IReadOnlyList<ChatMessage>? clientMessages,
+        out List<ChatMessage> leadingDeveloperMessages,
+        out List<ChatMessage> conversationalClientPrefix)
+    {
+        leadingDeveloperMessages = [];
+        conversationalClientPrefix = [];
+
+        if (clientMessages == null || clientMessages.Count == 0)
+        {
+            return;
+        }
+
+        var index = 0;
+        while (index < clientMessages.Count && clientMessages[index].Role == ChatMessageRole.Developer)
+        {
+            leadingDeveloperMessages.Add(clientMessages[index]);
+            index++;
+        }
+
+        for (; index < clientMessages.Count; index++)
+        {
+            conversationalClientPrefix.Add(clientMessages[index]);
+        }
     }
 
     private static HashSet<string> CollectValidToolCallIds(

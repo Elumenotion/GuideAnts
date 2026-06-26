@@ -24,6 +24,8 @@ namespace GuideAntsApi.Endpoints;
 
 public static class PublishedOpenAiWireEndpoints
 {
+    public const string WireDiagnosticsLoggerCategory = "GuideAntsApi.Endpoints.PublishedOpenAiWireHandlers";
+
     public static void MapPublishedOpenAiWireEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/published/openai/{pubId:guid}/v1")
@@ -61,6 +63,16 @@ public static class PublishedOpenAiWireHandlers
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    // Diagnostics-only options. Optional JsonElement fields left unset bind to
+    // default(JsonElement) (ValueKind.Undefined), which throws on WriteTo during
+    // serialization. WhenWritingDefault skips those defaults so request logging
+    // never faults the endpoint.
+    private static readonly JsonSerializerOptions DiagnosticsJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault
     };
 
     private static class AliasKeys
@@ -107,13 +119,13 @@ public static class PublishedOpenAiWireHandlers
         Guid? ConversationId,
         IResult? ErrorResult);
 
-    private sealed record WireTranscriptMessage(
+    internal sealed record WireTranscriptMessage(
         string Role,
         string Text,
         string? ToolCallId,
         IReadOnlyList<string> ToolCallIds);
 
-    private sealed record PersistedHistoryRow(
+    internal sealed record PersistedHistoryRow(
         DataModelChatRole Role,
         string? Content,
         string? ToolCallId,
@@ -153,6 +165,27 @@ public static class PublishedOpenAiWireHandlers
         }, JsonOptions);
     }
 
+    private static void LogInboundResponsesRequest(ILogger logger, OpenAiResponsesRequest request)
+    {
+        if (!logger.IsEnabled(LogLevel.Debug)) return;
+        var rawJson = JsonSerializer.Serialize(request, DiagnosticsJsonOptions);
+        logger.LogDebug("RAW INBOUND PAYLOAD (/responses): {RawJson}", rawJson);
+    }
+
+    private static void LogInboundChatCompletionsRequest(ILogger logger, OpenAiChatCompletionsRequest request)
+    {
+        if (!logger.IsEnabled(LogLevel.Debug)) return;
+        var rawJson = JsonSerializer.Serialize(request, DiagnosticsJsonOptions);
+        logger.LogDebug("RAW INBOUND PAYLOAD (/chat/completions): {RawJson}", rawJson);
+    }
+
+    private static void LogInboundAnthropicMessagesRequest(ILogger logger, AnthropicMessagesRequest request)
+    {
+        if (!logger.IsEnabled(LogLevel.Debug)) return;
+        var rawJson = JsonSerializer.Serialize(request, DiagnosticsJsonOptions);
+        logger.LogDebug("RAW INBOUND PAYLOAD (/messages): {RawJson}", rawJson);
+    }
+
     public static async Task<IResult> PostChatCompletionsAsync(
         HttpContext httpContext,
         [FromRoute] Guid pubId,
@@ -161,6 +194,10 @@ public static class PublishedOpenAiWireHandlers
         [FromServices] IPublishedConversationService publishedConversationService,
         [FromServices] ApplicationDbContext db)
     {
+        var loggerFactory = httpContext.RequestServices?.GetService<ILoggerFactory>() ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
+        var wireLogger = loggerFactory.CreateLogger(PublishedOpenAiWireEndpoints.WireDiagnosticsLoggerCategory);
+        LogInboundChatCompletionsRequest(wireLogger, request);
+
         var resolution = await executionContextResolver.ResolveAsync(
             httpContext,
             pubId,
@@ -326,6 +363,10 @@ public static class PublishedOpenAiWireHandlers
         [FromServices] IPublishedConversationService publishedConversationService,
         [FromServices] ApplicationDbContext db)
     {
+        var loggerFactory = httpContext.RequestServices?.GetService<ILoggerFactory>() ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
+        var wireLogger = loggerFactory.CreateLogger(PublishedOpenAiWireEndpoints.WireDiagnosticsLoggerCategory);
+        LogInboundResponsesRequest(wireLogger, request);
+
         var resolution = await executionContextResolver.ResolveAsync(
             httpContext,
             pubId,
@@ -500,6 +541,10 @@ public static class PublishedOpenAiWireHandlers
         [FromServices] IPublishedConversationService publishedConversationService,
         [FromServices] ApplicationDbContext db)
     {
+        var loggerFactory = httpContext.RequestServices?.GetService<ILoggerFactory>() ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
+        var wireLogger = loggerFactory.CreateLogger(PublishedOpenAiWireEndpoints.WireDiagnosticsLoggerCategory);
+        LogInboundAnthropicMessagesRequest(wireLogger, request);
+
         var resolution = await executionContextResolver.ResolveAsync(
             httpContext,
             pubId,
@@ -2990,7 +3035,7 @@ public static class PublishedOpenAiWireHandlers
         return ToolCallIdsMatch(persistedToolCallIds, expected.ToolCallIds);
     }
 
-    private static IReadOnlyList<WireTranscriptMessage> BuildWireTranscriptHistory(
+    internal static IReadOnlyList<WireTranscriptMessage> BuildWireTranscriptHistory(
         IReadOnlyList<ChatMessage> messages)
     {
         var history = new List<WireTranscriptMessage>();
@@ -3029,7 +3074,7 @@ public static class PublishedOpenAiWireHandlers
         return history;
     }
 
-    private static IReadOnlyList<WireTranscriptMessage> BuildPersistedTranscriptHistory(
+    internal static IReadOnlyList<WireTranscriptMessage> BuildPersistedTranscriptHistory(
         IReadOnlyList<PersistedHistoryRow> rows)
     {
         var history = new List<WireTranscriptMessage>();
@@ -3063,11 +3108,11 @@ public static class PublishedOpenAiWireHandlers
         return history;
     }
 
-    private static bool TranscriptEndsWith(
+    internal static bool TranscriptEndsWith(
         IReadOnlyList<WireTranscriptMessage> persistedHistory,
         IReadOnlyList<WireTranscriptMessage> expectedHistory)
     {
-        if (expectedHistory.Count == 0 || persistedHistory.Count < expectedHistory.Count)
+        if (expectedHistory.Count == 0)
         {
             return false;
         }
@@ -3075,6 +3120,14 @@ public static class PublishedOpenAiWireHandlers
         var persistedIndex = persistedHistory.Count - 1;
         for (var expectedIndex = expectedHistory.Count - 1; expectedIndex >= 0; expectedIndex--)
         {
+            // If we run out of persisted history but still have expected history,
+            // we assume the remaining expected messages are client-injected unpersisted prefixes
+            // (e.g. <environment_context>). Since we matched from the end backwards, this is a valid continuation.
+            if (persistedIndex < 0)
+            {
+                break;
+            }
+
             var matched = false;
             while (persistedIndex >= 0)
             {
@@ -4319,6 +4372,9 @@ public static class PublishedOpenAiWireHandlers
 
         [JsonPropertyName("tool_choice")]
         public JsonElement ToolChoice { get; set; }
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }
     }
 
     public sealed class OpenAiResponsesRequest
@@ -4336,6 +4392,9 @@ public static class PublishedOpenAiWireHandlers
 
         [JsonPropertyName("tool_choice")]
         public JsonElement ToolChoice { get; set; }
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }
     }
 
     public sealed class AnthropicMessagesRequest
@@ -4351,6 +4410,9 @@ public static class PublishedOpenAiWireHandlers
 
         [JsonPropertyName("max_tokens")]
         public int? MaxTokens { get; set; }
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }
     }
 
     public sealed class OpenAiEmbeddingsRequest

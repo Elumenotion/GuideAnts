@@ -210,6 +210,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         new("IndexingServices", "Logging:LogLevel:GuideAntsApi.BackgroundJobs.Services.Indexing", DefaultValue: "Information"),
         new("SearchServices", "Logging:LogLevel:GuideAntsApi.BackgroundJobs.Services.Search", DefaultValue: "Information"),
         new("GuideAntsApiServicesRouting", "Logging:LogLevel:GuideAntsApi.Services.Routing", DefaultValue: "Information"),
+        new("PublishedWireApi", "Logging:LogLevel:GuideAntsApi.Endpoints.PublishedOpenAiWireHandlers", DefaultValue: "Information"),
         new("RoutingChatCompletionClientFactory", "Logging:LogLevel:GuideAntsApi.Services.Conversations.RoutingChatCompletionClientFactory", DefaultValue: "Information"),
         new("GuideAntsApiServicesLlamaCpp", "Logging:LogLevel:GuideAntsApi.Services.LlamaCpp", DefaultValue: "Information"),
         new("InfrastructureProbeService", "Logging:LogLevel:GuideAntsApi.Services.Infrastructure.InfrastructureProbeService", DefaultValue: "Warning"),

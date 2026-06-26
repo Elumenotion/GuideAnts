@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { FaCopy } from 'react-icons/fa';
 import { API_BASE_URL } from '../../config/apiConfig';
 import { guideUsageApi } from '../../services/guideUsageApi';
 import { broadcastAuthExpired } from '../../services/authEvents';
 import { withAuthFetchInit, withAuthHeaders } from '../../services/authService';
+import { useToast } from '../common/Toast';
 import type { TurnMessagesDto, TurnMessageDto } from '../../types/usage';
 
 interface TurnMessagesPanelProps {
@@ -80,6 +82,191 @@ interface TurnPromptTraceDto {
   segments: TurnPromptTraceSegmentDto[];
 }
 
+const formatJsonForMarkdown = (raw: string | null | undefined): string | null => {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+};
+
+const appendTraceMessageMarkdown = (
+  lines: string[],
+  message: TurnPromptTraceMessageDto,
+): void => {
+  const roleLabel = message.functionName ? `${message.role} (${message.functionName})` : message.role;
+  lines.push(`**${roleLabel}**${message.toolCallId ? ` — tool_call_id: \`${message.toolCallId}\`` : ''}`);
+  lines.push('');
+
+  if (message.content && message.content.trim().length > 0) {
+    lines.push(message.content);
+  } else {
+    lines.push('_No content_');
+  }
+  lines.push('');
+
+  const toolCalls = formatJsonForMarkdown(message.toolCallsJson);
+  if (toolCalls) {
+    lines.push('Tool Calls:');
+    lines.push('');
+    lines.push('```json');
+    lines.push(toolCalls);
+    lines.push('```');
+    lines.push('');
+  }
+};
+
+const buildPromptTraceMarkdown = (trace: TurnPromptTraceDto): string => {
+  const lines: string[] = [];
+
+  lines.push(`# Prompt Trace — Turn ${trace.turnIndex + 1}`);
+  lines.push('');
+  if (trace.assistantName) {
+    lines.push(`- **Assistant:** ${trace.assistantName}`);
+  }
+  lines.push(`- **Capture state:** ${trace.captureState}`);
+  lines.push(`- **Schema version:** ${trace.schemaVersion}`);
+  lines.push(`- **Turn started:** ${trace.turnStarted}`);
+  lines.push(`- **Segments:** ${trace.segments.length}`);
+  lines.push('');
+
+  trace.segments.forEach((segment, segmentIndex) => {
+    lines.push(`## Segment ${segmentIndex + 1}`);
+    lines.push('');
+    lines.push(`- **Status:** ${segment.status}`);
+    lines.push(`- **Assistant:** ${segment.assistantName}`);
+    if (segment.modelDeploymentId) {
+      lines.push(`- **Model deployment:** ${segment.modelDeploymentId}`);
+    }
+    lines.push(`- **Started:** ${segment.startedUtc}`);
+    if (segment.completedUtc) {
+      lines.push(`- **Completed:** ${segment.completedUtc}`);
+    }
+    if (segment.terminalStatus) {
+      lines.push(`- **Terminal status:** ${segment.terminalStatus}`);
+    }
+    if (segment.errorMessage) {
+      lines.push(`- **Error:** ${segment.errorMessage}`);
+    }
+    lines.push('');
+
+    lines.push(`### Seed Messages (${segment.seedMessages.length})`);
+    lines.push('');
+    if (segment.seedMessages.length === 0) {
+      lines.push('_None_');
+      lines.push('');
+    } else {
+      segment.seedMessages.forEach((message) => appendTraceMessageMarkdown(lines, message));
+    }
+
+    lines.push(`### Tool Definitions (${segment.toolDefinitions.length})`);
+    lines.push('');
+    if (segment.toolDefinitions.length === 0) {
+      lines.push('_None_');
+      lines.push('');
+    } else {
+      segment.toolDefinitions.forEach((tool) => {
+        lines.push(`**${tool.name}** _(${tool.source})_`);
+        lines.push('');
+        if (tool.description) {
+          lines.push(tool.description);
+          lines.push('');
+        }
+        const parameters = formatJsonForMarkdown(tool.parametersJson);
+        if (parameters) {
+          lines.push('```json');
+          lines.push(parameters);
+          lines.push('```');
+          lines.push('');
+        }
+      });
+    }
+
+    lines.push(`### Model Rounds (${segment.rounds.length})`);
+    lines.push('');
+    if (segment.rounds.length === 0) {
+      lines.push('_None_');
+      lines.push('');
+    } else {
+      segment.rounds.forEach((round) => {
+        const roundMeta = [
+          round.modelDeploymentId ? round.modelDeploymentId : null,
+          round.responseFinishReason ? `finish: ${round.responseFinishReason}` : null,
+        ]
+          .filter(Boolean)
+          .join(' • ');
+        lines.push(`#### Round ${round.roundIndex}${roundMeta ? ` — ${roundMeta}` : ''}`);
+        lines.push('');
+
+        lines.push(`##### Request Messages (${round.requestMessages.length})`);
+        lines.push('');
+        if (round.requestMessages.length === 0) {
+          lines.push('_None_');
+          lines.push('');
+        } else {
+          round.requestMessages.forEach((message) => appendTraceMessageMarkdown(lines, message));
+        }
+
+        if (round.responseMessage) {
+          lines.push('##### Response Message');
+          lines.push('');
+          appendTraceMessageMarkdown(lines, round.responseMessage);
+        }
+
+        if (round.externalToolCalls.length > 0) {
+          lines.push(`##### External Tool Calls (${round.externalToolCalls.length})`);
+          lines.push('');
+          round.externalToolCalls.forEach((toolCall) => {
+            lines.push(`**${toolCall.name}** — id: \`${toolCall.id}\``);
+            lines.push('');
+            const args = formatJsonForMarkdown(toolCall.argumentsJson);
+            if (args) {
+              lines.push('```json');
+              lines.push(args);
+              lines.push('```');
+              lines.push('');
+            }
+          });
+        }
+      });
+    }
+
+    lines.push(`### Message Events (${segment.messageEvents.length})`);
+    lines.push('');
+    if (segment.messageEvents.length === 0) {
+      lines.push('_None_');
+      lines.push('');
+    } else {
+      segment.messageEvents.forEach((event) => {
+        const roleLabel = event.functionName ? `${event.role} (${event.functionName})` : event.role;
+        lines.push(`**${roleLabel}** — ${event.createdUtc}`);
+        lines.push('');
+        if (event.content && event.content.trim().length > 0) {
+          lines.push(event.content);
+        } else {
+          lines.push('_No content_');
+        }
+        lines.push('');
+        const toolCalls = formatJsonForMarkdown(event.toolCallsJson);
+        if (toolCalls) {
+          lines.push('Tool Calls:');
+          lines.push('');
+          lines.push('```json');
+          lines.push(toolCalls);
+          lines.push('```');
+          lines.push('');
+        }
+      });
+    }
+  });
+
+  return lines.join('\n').trimEnd() + '\n';
+};
+
 export function TurnMessagesPanel({
   conversationId,
   turnIndex,
@@ -93,6 +280,7 @@ export function TurnMessagesPanel({
   const [traceData, setTraceData] = useState<TurnPromptTraceDto | null>(null);
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const isOpen = conversationId !== null && turnIndex !== null;
 
@@ -102,6 +290,45 @@ export function TurnMessagesPanel({
     setTraceLoading(false);
     setTraceError(null);
   }, [conversationId, turnIndex]);
+
+  const handleCopyTraceMarkdown = async () => {
+    if (!traceData) {
+      return;
+    }
+
+    const markdown = buildPromptTraceMarkdown(traceData);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(markdown);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = markdown;
+        textArea.style.position = 'fixed';
+        textArea.style.opacity = '0';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (!successful) {
+          throw new Error('Copy command failed');
+        }
+      }
+      showToast({
+        type: 'success',
+        title: 'Prompt trace copied to clipboard',
+        duration: 3000,
+      });
+    } catch (error) {
+      console.error('Failed to copy prompt trace to clipboard:', error);
+      showToast({
+        type: 'error',
+        title: 'Copy failed',
+        message: 'Unable to copy the prompt trace. Please try again.',
+        duration: 5000,
+      });
+    }
+  };
 
   useEffect(() => {
     if (!conversationId || turnIndex === null) {
@@ -507,11 +734,23 @@ export function TurnMessagesPanel({
                 </div>
               )}
             </div>
-            <button
-              onClick={onClose}
-              className="p-1 hover:bg-gray-100 rounded"
-              aria-label="Close"
-            >
+            <div className="flex items-center gap-2">
+              {activeTab === 'promptTrace' && traceData?.hasTrace && (
+                <button
+                  type="button"
+                  onClick={handleCopyTraceMarkdown}
+                  className="p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700"
+                  aria-label="Copy prompt trace as Markdown"
+                  title="Copy prompt trace as Markdown"
+                >
+                  <FaCopy className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-1 hover:bg-gray-100 rounded"
+                aria-label="Close"
+              >
               <svg
                 className="w-5 h-5 text-gray-500"
                 fill="none"
@@ -525,7 +764,8 @@ export function TurnMessagesPanel({
                   d="M6 18L18 6M6 6l12 12"
                 />
               </svg>
-            </button>
+              </button>
+            </div>
           </div>
 
           {/* Tabs */}
