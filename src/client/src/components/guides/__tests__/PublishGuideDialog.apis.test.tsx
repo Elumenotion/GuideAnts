@@ -31,7 +31,7 @@ function createPublishedGuide(overrides?: Partial<PublishedGuideDto>): Published
 }
 
 describe('PublishGuideDialog APIs tab', () => {
-  it('shows SDK auth warning and examples when enabled without API key', () => {
+  it('shows absolute base URL and per-service SDK examples when enabled without API key', () => {
     render(
       <PublishGuideDialog
         guideName="Guide"
@@ -41,7 +41,6 @@ describe('PublishGuideDialog APIs tab', () => {
           hasApiKey: false,
           wireApiConfig: {
             enabled: true,
-            profile: 'openai_default',
             aliasMap: { guide: 'guide' },
           },
         })}
@@ -52,10 +51,45 @@ describe('PublishGuideDialog APIs tab', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'APIs' }));
 
-    expect(screen.getByText('Enabled')).toBeInTheDocument();
-    expect(screen.getByText(/OpenAI SDKs work best with API key authentication/i)).toBeInTheDocument();
+    expect(screen.getByText(/SDK clients work best with API key authentication/i)).toBeInTheDocument();
     expect(screen.getByText('OpenAI JavaScript SDK')).toBeInTheDocument();
     expect(screen.getByText('OpenAI Python SDK')).toBeInTheDocument();
+
+    const openAiBaseUrlCodeBlocks = screen.getAllByText((content, element) => {
+      if (element?.tagName.toLowerCase() !== 'code') {
+        return false;
+      }
+
+      return /^http:\/\/localhost(?::\d+)?\/api\/published\/openai\/pub-1\/v1$/.test(content);
+    });
+    expect(openAiBaseUrlCodeBlocks.length).toBeGreaterThan(0);
+
+    const anthropicBaseUrlCodeBlocks = screen.getAllByText((content, element) => {
+      if (element?.tagName.toLowerCase() !== 'code') {
+        return false;
+      }
+
+      return /^http:\/\/localhost(?::\d+)?\/api\/published\/anthropic\/pub-1\/v1$/.test(content);
+    });
+    expect(anthropicBaseUrlCodeBlocks.length).toBeGreaterThan(0);
+
+    for (const tabLabel of ['Models', 'Chat', 'Responses', 'Messages', 'Embeddings', 'Image', 'Transcription', 'Speech']) {
+      expect(screen.getByRole('button', { name: tabLabel })).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'Embeddings' }));
+    expect(screen.getAllByText(/client\.embeddings\.create/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Responses' }));
+    expect(screen.getAllByText(/client\.responses\.create/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Models' }));
+    expect(screen.getAllByText(/client\.models\.list/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Messages' }));
+    expect(screen.getByText('Anthropic JavaScript SDK')).toBeInTheDocument();
+    expect(screen.getByText('Anthropic Python SDK')).toBeInTheDocument();
+    expect(screen.getAllByText(/client\.messages\.create/).length).toBeGreaterThan(0);
   });
 
   it('round-trips wireApiConfig in update payload', () => {
@@ -75,10 +109,7 @@ describe('PublishGuideDialog APIs tab', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'APIs' }));
-    fireEvent.click(screen.getByLabelText('Enable OpenAI-compatible APIs'));
-    fireEvent.change(screen.getByLabelText('Provider / Service Mode Profile'), {
-      target: { value: 'openai_default' },
-    });
+    fireEvent.click(screen.getByLabelText('Enable Published API Endpoints'));
     fireEvent.change(screen.getByLabelText('Guide model alias'), {
       target: { value: 'guide-prod' },
     });
@@ -94,10 +125,10 @@ describe('PublishGuideDialog APIs tab', () => {
       expect.objectContaining({
         wireApiConfig: expect.objectContaining({
           enabled: true,
-          profile: 'openai_default',
           endpointFlags: expect.objectContaining({
             responses: false,
             chatCompletions: true,
+            messages: true,
           }),
           aliasMap: expect.objectContaining({
             guide: 'guide-prod',

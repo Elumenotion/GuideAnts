@@ -35,6 +35,7 @@ describe('AuthTab', () => {
     expect(screen.getByText(/GuideAnts app identity/i)).toBeInTheDocument();
     expect(screen.getByText(/Managed by the system; cannot be changed here/i)).toBeInTheDocument();
     expect(screen.queryByText('API Key Authentication')).not.toBeInTheDocument();
+    expect(screen.queryByText('One API key for this published guide')).not.toBeInTheDocument();
     expect(screen.queryByText('Webhook Authentication (Advanced)')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Generate API Key/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Authentication Webhook URL')).not.toBeInTheDocument();
@@ -50,7 +51,7 @@ describe('AuthTab', () => {
     );
 
     expect(screen.queryByText(/GuideAnts app identity/i)).not.toBeInTheDocument();
-    expect(screen.getByText('API Key Authentication')).toBeInTheDocument();
+    expect(screen.getByText('One API key for this published guide')).toBeInTheDocument();
     expect(screen.getByText('Webhook Authentication (Advanced)')).toBeInTheDocument();
     expect(screen.getByLabelText('Authentication Webhook URL')).toBeInTheDocument();
   });
@@ -59,7 +60,7 @@ describe('AuthTab', () => {
     render(<AuthTab {...defaultProps} authMode="ApiKey" hasApiKey />);
 
     expect(screen.queryByText(/GuideAnts app identity/i)).not.toBeInTheDocument();
-    expect(screen.getByText('API Key Authentication')).toBeInTheDocument();
+    expect(screen.getByText('One API key for this published guide')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Regenerate Key/i })).toBeInTheDocument();
   });
 });

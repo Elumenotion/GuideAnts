@@ -337,7 +337,7 @@ public class PublishedGuideAuthService : IPublishedGuideAuthService
             {
                 IsValid = false,
                 ErrorCode = "api_key_required",
-                ErrorMessage = "This published guide requires an API key. Provide it via the x-guideants-apikey header."
+                ErrorMessage = "This published guide requires an API key. Provide it via Authorization Bearer, x-guideants-apikey, or x-api-key."
             };
         }
 

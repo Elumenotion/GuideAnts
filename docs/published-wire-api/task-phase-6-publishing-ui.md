@@ -40,7 +40,6 @@ Add admin UI controls to safely enable and operate published wire APIs.
 3. Add readiness states:
    - enabled
    - disabled
-   - missing provider/service mode
    - missing chat model
    - auth mode unsuitable for server-to-server SDK use
 4. Align General/Auth/API copy so `AuthMode` is the single source of truth.

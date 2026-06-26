@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
+using GuideAntsApi.Services.Conversations.Tracing;
 
 namespace GuideAntsApi.Services.Guides;
 
@@ -12,6 +13,12 @@ namespace GuideAntsApi.Services.Guides;
 /// </summary>
 public class GuideUsageService : IGuideUsageService
 {
+    private static readonly JsonSerializerOptions TraceJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
     private readonly ApplicationDbContext _context;
     private readonly IDbContextFactory<ApplicationDbContext> _contextFactory;
     private readonly ILogger<GuideUsageService>? _logger;
@@ -2293,6 +2300,135 @@ public class GuideUsageService : IGuideUsageService
             messageDtos
         );
     }
+
+    /// <inheritdoc />
+    public async Task<TurnPromptTraceDto?> GetTurnPromptTraceAsync(
+        Guid conversationId,
+        int turnIndex)
+    {
+        var turn = await _context.ConversationTurns
+            .AsNoTracking()
+            .Where(t => t.NotebookConversationId == conversationId && t.TurnIndex == turnIndex)
+            .Select(t => new
+            {
+                t.Id,
+                t.AssistantName,
+                t.Created
+            })
+            .FirstOrDefaultAsync();
+
+        if (turn == null)
+        {
+            return null;
+        }
+
+        var trace = await _context.ConversationTurnTraces
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.ConversationTurnId == turn.Id);
+
+        if (trace == null)
+        {
+            return new TurnPromptTraceDto(
+                conversationId,
+                turnIndex,
+                turn.AssistantName,
+                turn.Created,
+                HasTrace: false,
+                SchemaVersion: TurnTraceCollector.SchemaVersion,
+                CaptureState: "missing",
+                Segments: []);
+        }
+
+        if (string.IsNullOrWhiteSpace(trace.TraceJson))
+        {
+            throw new InvalidOperationException(
+                $"Prompt trace payload is missing for conversation {conversationId} turn {turnIndex}.");
+        }
+
+        TurnTraceEnvelope envelope;
+        try
+        {
+            envelope = JsonSerializer.Deserialize<TurnTraceEnvelope>(trace.TraceJson, TraceJsonOptions)
+                ?? throw new InvalidOperationException(
+                    $"Prompt trace payload is malformed for conversation {conversationId} turn {turnIndex}.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                $"Prompt trace payload is malformed for conversation {conversationId} turn {turnIndex}.",
+                ex);
+        }
+
+        var schemaVersion = envelope.SchemaVersion > 0 ? envelope.SchemaVersion : trace.SchemaVersion;
+        var segments = (envelope.Segments ?? [])
+            .Select(MapPromptTraceSegment)
+            .ToList();
+
+        return new TurnPromptTraceDto(
+            conversationId,
+            turnIndex,
+            turn.AssistantName,
+            turn.Created,
+            HasTrace: true,
+            SchemaVersion: schemaVersion,
+            CaptureState: trace.CaptureState,
+            Segments: segments);
+    }
+
+    private static TurnPromptTraceSegmentDto MapPromptTraceSegment(TurnTraceSegment segment) =>
+        new(
+            segment.SegmentId,
+            segment.Status,
+            segment.StartedUtc,
+            segment.CompletedUtc,
+            segment.AssistantName,
+            segment.ModelDeploymentId,
+            segment.TerminalStatus,
+            segment.ErrorMessage,
+            (segment.SeedMessages ?? []).Select(MapPromptTraceMessage).ToList(),
+            (segment.ToolDefinitions ?? []).Select(MapPromptTraceToolDefinition).ToList(),
+            (segment.Rounds ?? []).Select(MapPromptTraceRound).ToList(),
+            (segment.MessageEvents ?? []).Select(MapPromptTraceMessageEvent).ToList());
+
+    private static TurnPromptTraceMessageDto MapPromptTraceMessage(TurnTraceMessage message) =>
+        new(
+            message.Role,
+            message.Content,
+            message.ToolCallId,
+            message.FunctionName,
+            message.ToolCallsJson);
+
+    private static TurnPromptTraceToolDefinitionDto MapPromptTraceToolDefinition(TurnTraceToolDefinition toolDefinition) =>
+        new(
+            toolDefinition.Name,
+            toolDefinition.Description,
+            toolDefinition.ParametersJson,
+            toolDefinition.Source);
+
+    private static TurnPromptTraceRoundDto MapPromptTraceRound(TurnTraceRound round) =>
+        new(
+            round.RoundIndex,
+            round.CreatedUtc,
+            round.ModelDeploymentId,
+            round.ResponseFinishReason,
+            round.ResponseMessage != null ? MapPromptTraceMessage(round.ResponseMessage) : null,
+            (round.RequestMessages ?? []).Select(MapPromptTraceMessage).ToList(),
+            (round.ExternalToolCalls ?? []).Select(MapPromptTraceToolCall).ToList());
+
+    private static TurnPromptTraceToolCallDto MapPromptTraceToolCall(TurnTraceToolCall toolCall) =>
+        new(
+            toolCall.Id,
+            toolCall.Name,
+            toolCall.ArgumentsJson);
+
+    private static TurnPromptTraceMessageEventDto MapPromptTraceMessageEvent(TurnTraceMessageEvent messageEvent) =>
+        new(
+            messageEvent.CreatedUtc,
+            messageEvent.Role,
+            messageEvent.Content,
+            messageEvent.ToolCallId,
+            messageEvent.FunctionName,
+            messageEvent.ToolCallsJson);
 
     private static string NormalizeSourceFilter(string? sourceFilter)
     {

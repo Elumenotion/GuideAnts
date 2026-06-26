@@ -101,6 +101,7 @@ nbclassic==0.4.5
 numexpr==2.10.2
 numpy-financial==1.0.0
 odfpy==1.4.1
+openai>=2.44.0
 opencv-python==4.8.1.78
 openpyxl==3.0.10
 orjson==3.11.6

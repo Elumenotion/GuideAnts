@@ -38,6 +38,7 @@ namespace GuideAntsApi.DataModel
         public DbSet<NotebookConversation> NotebookConversations { get; set; } = null!;
         public DbSet<NotebookConversationMessage> NotebookConversationMessages { get; set; } = null!;
         public DbSet<ConversationTurn> ConversationTurns { get; set; } = null!;
+        public DbSet<ConversationTurnTrace> ConversationTurnTraces { get; set; } = null!;
         public DbSet<ConversationLock> ConversationLocks { get; set; } = null!;
         public DbSet<AgentInvocation> AgentInvocations { get; set; } = null!;
         public DbSet<AgentInvocationMessage> AgentInvocationMessages { get; set; } = null!;
@@ -302,6 +303,15 @@ namespace GuideAntsApi.DataModel
             // Check constraint for valid status values
             modelBuilder.Entity<ConversationTurn>()
                 .ToTable(t => t.HasCheckConstraint("CK_Turn_Status", "[Status] IN ('streaming', 'completed', 'cancelled')"));
+
+            modelBuilder.Entity<ConversationTurnTrace>()
+                .Property(t => t.Updated)
+                .HasDefaultValueSql("GETUTCDATE()");
+
+            modelBuilder.Entity<ConversationTurnTrace>()
+                .ToTable(t => t.HasCheckConstraint(
+                    "CK_ConversationTurnTrace_State",
+                    "[CaptureState] IN ('partial', 'completed', 'cancelled', 'failed')"));
 
             modelBuilder.Entity<MessageEditHistory>()
                 .HasIndex(h => h.MessageId);
@@ -744,6 +754,11 @@ namespace GuideAntsApi.DataModel
                  .IsRequired()
                  .HasDefaultValue(PublishedGuideAuthMode.Anonymous);
 
+                // Speech-to-text (voice input) is enabled by default for published guides.
+                b.Property(x => x.ShowSpeechToText)
+                 .IsRequired()
+                 .HasDefaultValue(true);
+
                 // Index for looking up all published guides for a specific guide
                 b.HasIndex(x => x.GuideId);
                 
@@ -932,6 +947,12 @@ namespace GuideAntsApi.DataModel
                 .HasForeignKey(m => new { m.NotebookConversationId, m.TurnIndex })
                 .HasPrincipalKey(t => new { t.NotebookConversationId, t.TurnIndex })
                 .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ConversationTurnTrace>()
+                .HasOne(t => t.ConversationTurn)
+                .WithOne()
+                .HasForeignKey<ConversationTurnTrace>(t => t.ConversationTurnId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             // ------------------------------------------------------------
             // Configure ConversationLock relationships

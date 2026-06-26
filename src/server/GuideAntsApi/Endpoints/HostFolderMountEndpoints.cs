@@ -1,4 +1,3 @@
-using GuideAnts.Logging;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Auth;

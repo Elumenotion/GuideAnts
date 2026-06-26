@@ -6,7 +6,6 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using System.Runtime.CompilerServices;
 using GuideAntsApi.Services.Auth;
-using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.Conversations.Attachments;
 using GuideAntsApi.Services.Conversations.Commands;
@@ -410,6 +409,7 @@ public class ConversationService : IConversationService
                 Instructions = ctx.Request.Instructions,
                 oAuthUserAccessToken = ctx.ExternalAuthTokens.FirstOrDefault().Value,
                 ExternalAuthTokens = ctx.ExternalAuthTokens,
+                ClientToolDefinitions = ctx.Request.ClientToolDefinitions,
                 ExecutionPolicy = ctx.ExecutionPolicy
             },
             PreviousMessages = ctx.PreviousMessages,

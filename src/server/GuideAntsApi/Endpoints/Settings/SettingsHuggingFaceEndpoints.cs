@@ -1,5 +1,3 @@
-using GuideAntsApi.Endpoints;
-
 namespace GuideAntsApi.Endpoints.Settings;
 
 public static class SettingsHuggingFaceEndpoints

@@ -83,4 +83,11 @@ public interface IGuideUsageService
     Task<TurnMessagesDto?> GetTurnMessagesAsync(
         Guid conversationId,
         int turnIndex);
+
+    /// <summary>
+    /// Gets internal prompt-trace capture for a turn (system/context/tool-definition drill-down).
+    /// </summary>
+    Task<TurnPromptTraceDto?> GetTurnPromptTraceAsync(
+        Guid conversationId,
+        int turnIndex);
 }

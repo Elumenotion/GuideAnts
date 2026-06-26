@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -94,6 +95,107 @@ public sealed class GuideUsageEndpointsTests : BaseEndpointTest
         rootNodes.Should().Contain(node => node.AssistantName == "Researcher");
         rootNodes.Should().Contain(node => node.AssistantName == "Tool: summarize");
         rootNodes.Should().NotContain(node => node.AssistantName.Contains("ReadWeb", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public async Task Turn_trace_endpoint_returns_prompt_trace_for_turn()
+    {
+        var project = await CreateTestProjectAsync();
+        var notebook = await CreateTestNotebookAsync(project.Id);
+        var conversation = await CreateTestConversationAsync(project.Id, notebook.Id);
+        var turnId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        using (var scope = SharedFactory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            db.ConversationTurns.Add(new ConversationTurn
+            {
+                Id = turnId,
+                NotebookConversationId = conversation.Id,
+                TurnIndex = 0,
+                AssistantName = "Guide",
+                Instructions = "Tell me about this project",
+                Created = now.AddMinutes(-2),
+                LastUpdated = now.AddMinutes(-1),
+                Status = "completed"
+            });
+
+            var tracePayload = new
+            {
+                schemaVersion = 1,
+                segments = new[]
+                {
+                    new
+                    {
+                        segmentId = Guid.NewGuid(),
+                        status = "completed",
+                        startedUtc = now.AddMinutes(-2),
+                        completedUtc = now.AddMinutes(-1),
+                        assistantName = "Guide",
+                        modelDeploymentId = "guide",
+                        seedMessages = new[]
+                        {
+                            new { role = "system", content = "System prompt", toolCallId = (string?)null, functionName = (string?)null, toolCallsJson = (string?)null },
+                            new { role = "user", content = "Tell me about this project", toolCallId = (string?)null, functionName = (string?)null, toolCallsJson = (string?)null }
+                        },
+                        toolDefinitions = new[]
+                        {
+                            new { name = "Search", description = "Search docs", parametersJson = "{}", source = "guide" }
+                        },
+                        rounds = new[]
+                        {
+                            new
+                            {
+                                roundIndex = 1,
+                                createdUtc = now.AddMinutes(-2),
+                                modelDeploymentId = "guide",
+                                requestMessages = new[]
+                                {
+                                    new { role = "system", content = "System prompt", toolCallId = (string?)null, functionName = (string?)null, toolCallsJson = (string?)null }
+                                },
+                                responseFinishReason = "stop",
+                                responseMessage = new { role = "assistant", content = "Hello", toolCallId = (string?)null, functionName = (string?)null, toolCallsJson = (string?)null },
+                                externalToolCalls = Array.Empty<object>()
+                            }
+                        },
+                        messageEvents = new[]
+                        {
+                            new { createdUtc = now.AddMinutes(-2), role = "assistant", content = "Hello", toolCallId = (string?)null, functionName = (string?)null, toolCallsJson = (string?)null }
+                        },
+                        terminalStatus = "completed",
+                        errorMessage = (string?)null
+                    }
+                }
+            };
+
+            db.ConversationTurnTraces.Add(new ConversationTurnTrace
+            {
+                Id = Guid.NewGuid(),
+                ConversationTurnId = turnId,
+                NotebookConversationId = conversation.Id,
+                TurnIndex = 0,
+                SchemaVersion = 1,
+                CaptureState = "completed",
+                TraceJson = JsonSerializer.Serialize(tracePayload),
+                Created = now.AddMinutes(-1),
+                Updated = now.AddMinutes(-1)
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        var response = await Client.GetAsync($"/api/conversations/{conversation.Id}/turns/0/trace");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var payload = await response.Content.ReadFromJsonAsync<TurnPromptTraceDto>();
+        payload.Should().NotBeNull();
+        payload!.HasTrace.Should().BeTrue();
+        payload.CaptureState.Should().Be("completed");
+        payload.Segments.Should().HaveCount(1);
+        payload.Segments[0].SeedMessages.Should().Contain(m => m.Role == "system");
+        payload.Segments[0].ToolDefinitions.Should().Contain(t => t.Name == "Search");
     }
 
     private static async Task SeedUsageAsync(Guid projectId, Guid notebookId, Guid conversationId, Guid guideId)

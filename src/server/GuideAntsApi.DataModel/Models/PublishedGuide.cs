@@ -124,6 +124,13 @@ namespace GuideAntsApi.DataModel.Models
         public bool ShowAttachments { get; set; }
 
         /// <summary>
+        /// Whether speech-to-text (voice input via microphone) is enabled for this published guide.
+        /// Controls both the chat component microphone UI and access to the published ASR
+        /// (<c>/api/published/speech/transcribe</c>) endpoint. Enabled by default.
+        /// </summary>
+        public bool ShowSpeechToText { get; set; } = true;
+
+        /// <summary>
         /// Serialized wire API configuration for OpenAI-compatible published endpoints.
         /// </summary>
         public string? WireApiConfigJson { get; set; }

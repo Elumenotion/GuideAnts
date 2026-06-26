@@ -2,6 +2,7 @@ using AntRunner.Chat;
 using AntRunner.Chat.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using ChatMessageRole = AntRunner.Chat.Abstractions.ChatRole;
@@ -369,6 +370,76 @@ public sealed class ConversationPersistence : IConversationPersistence
             stub.ThinkingBlocksJson = update.ThinkingJson;
             db.Entry(stub).Property(x => x.ThinkingBlocksJson).IsModified = true;
         }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task AppendTurnTraceSegmentAsync(AppendTurnTraceSegmentRequest request, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.SegmentJson))
+        {
+            throw new InvalidOperationException("Trace segment JSON cannot be empty.");
+        }
+
+        var segmentNode = JsonNode.Parse(request.SegmentJson)
+            ?? throw new InvalidOperationException("Trace segment JSON is invalid.");
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var trace = await db.ConversationTurnTraces
+            .FirstOrDefaultAsync(t => t.ConversationTurnId == request.TurnId, ct);
+
+        if (trace == null)
+        {
+            var envelope = new JsonObject
+            {
+                ["schemaVersion"] = request.SchemaVersion,
+                ["segments"] = new JsonArray(segmentNode)
+            };
+
+            db.ConversationTurnTraces.Add(new ConversationTurnTrace
+            {
+                ConversationTurnId = request.TurnId,
+                NotebookConversationId = request.ConversationId,
+                TurnIndex = request.TurnIndex,
+                SchemaVersion = request.SchemaVersion,
+                CaptureState = request.CaptureState,
+                TraceJson = envelope.ToJsonString(JsonOptions),
+                Created = DateTime.UtcNow,
+                Updated = DateTime.UtcNow
+            });
+
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        JsonObject envelopeNode;
+        if (string.IsNullOrWhiteSpace(trace.TraceJson))
+        {
+            envelopeNode = new JsonObject();
+        }
+        else
+        {
+            envelopeNode = JsonNode.Parse(trace.TraceJson) as JsonObject
+                ?? throw new InvalidOperationException(
+                    $"Stored turn trace payload for turn {request.TurnId} is malformed.");
+        }
+
+        envelopeNode["schemaVersion"] = request.SchemaVersion;
+        var segments = envelopeNode["segments"] as JsonArray;
+        if (segments == null)
+        {
+            segments = new JsonArray();
+            envelopeNode["segments"] = segments;
+        }
+
+        segments.Add(segmentNode);
+
+        trace.SchemaVersion = request.SchemaVersion;
+        trace.CaptureState = request.CaptureState;
+        trace.TraceJson = envelopeNode.ToJsonString(JsonOptions);
+        trace.Updated = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
     }
