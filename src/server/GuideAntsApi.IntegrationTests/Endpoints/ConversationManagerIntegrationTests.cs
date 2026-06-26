@@ -381,18 +381,7 @@ public class ConversationManagerIntegrationTests : BaseEndpointTest
 
     private async Task<NotebookDto> CreateTestNotebookAsync(Guid projectId)
     {
-        // Get an active guide to use
-        using var scope = SharedFactory!.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var guideId = await db.Assistants.Where(a => a.Kind == AssistantKind.Guide && a.IsActive).Select(a => a.Id).FirstOrDefaultAsync();
-        if (guideId == Guid.Empty)
-        {
-            // Create a dummy guide if none exists
-            var guide = new Assistant { Id = Guid.NewGuid(), Name = "Test Guide", Kind = AssistantKind.Guide, IsActive = true, IsGlobal = true };
-            db.Assistants.Add(guide);
-            await db.SaveChangesAsync();
-            guideId = guide.Id;
-        }
+        var guideId = await GetDefaultGuideIdAsync();
 
         var response = await Client!.PostAsJsonAsync($"/api/projects/{projectId}/notebooks", 
             new { title = "Test Notebook", guideId = guideId });

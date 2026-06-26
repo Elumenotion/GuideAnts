@@ -217,22 +217,6 @@ public abstract class BaseIntegrationTest : IAsyncDisposable
         return claims;
     }
 
-    protected async Task<Guid> GetDefaultGuideIdAsync()
-    {
-        using var scope = SharedFactory!.Services.CreateScope();
-        var db = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<GuideAntsApi.DataModel.ApplicationDbContext>(scope.ServiceProvider);
-        var guideId = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(
-            System.Linq.Queryable.Select(
-                System.Linq.Queryable.Where(db.Assistants, a => a.Kind == GuideAntsApi.DataModel.Models.AssistantKind.Guide && a.IsActive),
-                a => a.Id));
-        
-        if (guideId == Guid.Empty)
-        {
-            var guide = new GuideAntsApi.DataModel.Models.Assistant { Id = Guid.NewGuid(), Name = "Test Guide", Kind = GuideAntsApi.DataModel.Models.AssistantKind.Guide, IsActive = true, IsGlobal = true };
-            db.Assistants.Add(guide);
-            await db.SaveChangesAsync();
-            guideId = guide.Id;
-        }
-        return guideId;
-    }
+    protected Task<Guid> GetDefaultGuideIdAsync() =>
+        IntegrationTestGuideHelper.GetDefaultGuideIdAsync(SharedFactory!.Services);
 } 
