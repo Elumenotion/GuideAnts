@@ -43,4 +43,8 @@ public record MoveFileDto(
 public record MoveFolderDto(
     Guid FolderId,
     Guid? NewParentFolderId
-); 
+);
+
+public record RenameMountedEntryDto(
+    string NewName
+);

@@ -107,7 +107,7 @@ function ProjectFileItem({
   return (
     <div
       key={file.id}
-      draggable={!disabled}
+      draggable={!disabled && editingFileId !== file.id}
       tabIndex={isFocused ? 0 : -1}
       ref={el => {
         // Only apply focus if explicitly requested via keyboard navigation
@@ -117,7 +117,7 @@ function ProjectFileItem({
           context.focusIntentRef.current = false;
         }
       }}
-      onDragStart={(e) => onFileDragStart(e, file)}
+      onDragStart={(e) => { if (editingFileId === file.id) { e.preventDefault(); return; } onFileDragStart(e, file); }}
       onDragEnd={onFileDragEnd}
       onContextMenu={(e) => onFileContextMenu(e, file)}
       className={`
@@ -140,7 +140,7 @@ function ProjectFileItem({
         }
       }}
       onDoubleClick={() => {
-        if (!disabled && !isMobile) onFileSelect?.(file.id);
+        if (!disabled && !isMobile && editingFileId !== file.id) onFileSelect?.(file.id);
       }}
       onKeyDown={(e) => {
         if (disabled) return;
@@ -422,10 +422,16 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     }, [context?.renamingId, folder.id, localFiles, handleStartRename, context]);
 
     const handleSaveRename = useCallback(async () => {
-        if (editName.trim() && editName !== folder.name && folder.id) {
+        if (editName.trim() && editName !== folder.name) {
             try {
-                await onRenameFolder?.(folder.id, editName.trim());
-                setIsEditing(false);
+                if (insideMount && folder.relativePath) {
+                    setIsEditing(false);
+                    await api.projects.renameMountedByPath(projectId, folder.relativePath, editName.trim());
+                    try { window.dispatchEvent(new Event('refresh-project-files')); } catch {}
+                } else if (folder.id) {
+                    await onRenameFolder?.(folder.id, editName.trim());
+                    setIsEditing(false);
+                }
             } catch (error) {
                 console.error('Failed to rename folder:', error);
                 showToast({ type: 'error', title: 'Failed to rename folder', message: 'Please try again.' });
@@ -434,7 +440,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
             setIsEditing(false);
             setEditName(folder.name);
         }
-    }, [editName, folder.name, folder.id, onRenameFolder]);
+    }, [editName, folder.name, folder.id, folder.relativePath, onRenameFolder, insideMount, projectId]);
 
     const handleCancelRename = useCallback(() => {
         setIsEditing(false);
@@ -809,13 +815,21 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     }, [selectedContextFile]);
 
     const handleSaveFileRename = useCallback(async (fileId: string) => {
+        if (!editingFileId) return;
         const file = localFiles.find(f => f.id === fileId);
         if (editingFileName.trim() && file && editingFileName !== file.fileName) {
             try {
-                await onRenameFile?.(fileId, editingFileName.trim());
-                setEditingFileId(null);
-                setEditingFileName('');
-                setLocalFiles(prev => prev.map(f => f.id === fileId ? { ...f, fileName: editingFileName.trim() } : f));
+                if (insideMount) {
+                    setEditingFileId(null);
+                    setEditingFileName('');
+                    await api.projects.renameMountedByPath(projectId, file.relativePath, editingFileName.trim());
+                    try { window.dispatchEvent(new Event('refresh-project-files')); } catch {}
+                } else {
+                    await onRenameFile?.(fileId, editingFileName.trim());
+                    setEditingFileId(null);
+                    setEditingFileName('');
+                    setLocalFiles(prev => prev.map(f => f.id === fileId ? { ...f, fileName: editingFileName.trim() } : f));
+                }
             } catch (error) {
                 console.error('Failed to rename file:', error);
                 showToast({ type: 'error', title: 'Failed to rename file', message: 'Please try again.' });
@@ -824,7 +838,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
             setEditingFileId(null);
             setEditingFileName('');
         }
-    }, [editingFileName, localFiles, onRenameFile]);
+    }, [editingFileId, editingFileName, localFiles, onRenameFile, insideMount, projectId]);
 
     const handleCancelFileRename = useCallback(() => {
         setEditingFileId(null);
@@ -832,8 +846,14 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     }, []);
 
     const handleFileRenameKeyDown = useCallback((e: React.KeyboardEvent, fileId: string) => {
-        if (e.key === 'Enter') handleSaveFileRename(fileId);
-        else if (e.key === 'Escape') handleCancelFileRename();
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleSaveFileRename(fileId);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            handleCancelFileRename();
+        }
     }, [handleSaveFileRename, handleCancelFileRename]);
 
     const handleToggleHomePage = useCallback(() => {
@@ -859,7 +879,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                     }`}
                     style={{ paddingLeft: `${paddingLeft}px` }}
                     onClick={(e) => {
-                        if (!disabled) {
+                        if (!disabled && !isEditing) {
                             // On mobile: single tap toggles expansion
                             // On desktop: single click selects folder
                             if (context?.isMobile) {
@@ -871,7 +891,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                         }
                     }}
                     onDoubleClick={(e) => {
-                        if (!disabled && !context?.isMobile) {
+                        if (!disabled && !context?.isMobile && !isEditing) {
                             handleFolderClick();
                             handleToggleExpand(e);
                         }
@@ -994,7 +1014,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                             {onCheckMappedFolders && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onCheckMappedFolders(folder.mountId!); }}>Check mapped folders</button>}
                         </>
                     ) : folder.isLinked ? (
-                        <span className="block px-4 py-2 text-xs text-gray-400">Read-only (host mount)</span>
+                        <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>
                     ) : (
                         <>
                             <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>
@@ -1071,6 +1091,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                         <>
                             {selectedContextFile && isMarkdownFileName(selectedContextFile.fileName, selectedContextFile.contentType) && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={openMarkdownEditor}>Edit</button>}
                             {onFileSelect && selectedContextFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { onFileSelect(selectedContextFile.id); setShowFileContextMenu(false); }}>Preview</button>}
+                            <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleStartFileRename}>Rename</button>
                             <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDownloadSelectedFile}>Download</button>
                         </>
                     ) : (

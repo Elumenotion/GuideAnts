@@ -616,6 +616,51 @@ using var scope = CreateDbScope();
         return true;
     }
 
+    public async Task<bool> RenameMountedEntryAsync(Guid projectId, string relativePath, string newName)
+    {
+        if (string.IsNullOrWhiteSpace(newName))
+            return false;
+
+        var safeName = newName.Trim();
+        if (safeName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || safeName.Contains('/')
+            || safeName.Contains('\\')
+            || safeName == "."
+            || safeName == "..")
+            return false;
+
+        var resolved = await ResolveMountedFilePhysicalPathAsync(projectId, relativePath);
+        if (resolved == null)
+            return false;
+
+        var sourceDir = Path.GetDirectoryName(resolved.Value.PhysicalPath);
+        if (string.IsNullOrEmpty(sourceDir))
+            return false;
+
+        var newPhysicalPath = Path.GetFullPath(Path.Combine(sourceDir, safeName));
+
+        // Validate the new path stays under the mount root
+        var fullRoot = Path.GetFullPath(resolved.Value.Mount.ContainerSourcePath);
+        var sep = Path.DirectorySeparatorChar;
+        if (!newPhysicalPath.StartsWith(fullRoot + sep, StringComparison.Ordinal) && newPhysicalPath != fullRoot)
+            return false;
+
+        if (newPhysicalPath == resolved.Value.PhysicalPath)
+            return true;
+
+        if (File.Exists(newPhysicalPath) || Directory.Exists(newPhysicalPath))
+            return false;
+
+        if (File.Exists(resolved.Value.PhysicalPath))
+            File.Move(resolved.Value.PhysicalPath, newPhysicalPath);
+        else if (Directory.Exists(resolved.Value.PhysicalPath))
+            Directory.Move(resolved.Value.PhysicalPath, newPhysicalPath);
+        else
+            return false;
+
+        return true;
+    }
+
     private List<FolderTreeDto> BuildMountOverlayNodes(List<HostFolderMount> mounts)
     {
         var mountNodes = new List<FolderTreeDto>();

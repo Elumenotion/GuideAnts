@@ -97,6 +97,20 @@ public static class ProjectContentFileEndpoints
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
 
+        // Rename a mounted file or folder on the host
+        group.MapPatch("/mounted/rename", async (Guid projectId, string path, [FromBody] RenameMountedEntryDto dto, IProjectFolderService folderService) =>
+        {
+            var success = await folderService.RenameMountedEntryAsync(projectId, path, dto.NewName);
+            if (!success)
+                return Results.NotFound();
+            return Results.NoContent();
+        })
+        .WithName("RenameMountedEntry")
+        .RequireAuthorization("RequireContributor")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized);
+
         // Upload a file
         group.MapPost("/", async (
             Guid projectId,

@@ -2004,20 +2004,22 @@ using var scope = CreateDbScope();
         if (File.Exists(sourcePhysicalPath))
         {
             var dbFile = await context.NotebookFiles.FirstOrDefaultAsync(f => f.NotebookId == notebookId && f.RelativePath == sourceRelativePath);
-            if (dbFile == null) return false;
 
             File.Move(sourcePhysicalPath, newPhysicalPath);
-            dbFile.RelativePath = Path.GetRelativePath(notebookRoot, newPhysicalPath).Replace("\\", "/");
-            // Recalculate DocumentId after path change
-            dbFile.GenerateDocumentId(notebookId);
-            await _lineageService.RecordAsync(
-            FileKind.Notebook,
-                projectId,
-                dbFile.Id,
-                null,
-                FileLineageAction.Renamed,
-                notebookId,
-                newPhysicalPath);
+
+            if (dbFile != null)
+            {
+                dbFile.RelativePath = Path.GetRelativePath(notebookRoot, newPhysicalPath).Replace("\\", "/");
+                dbFile.GenerateDocumentId(notebookId);
+                await _lineageService.RecordAsync(
+                    FileKind.Notebook,
+                    projectId,
+                    dbFile.Id,
+                    null,
+                    FileLineageAction.Renamed,
+                    notebookId,
+                    newPhysicalPath);
+            }
         }
         else if (Directory.Exists(sourcePhysicalPath))
         {

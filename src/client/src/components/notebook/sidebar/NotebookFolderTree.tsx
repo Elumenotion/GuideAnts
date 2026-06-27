@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { FileIcon } from '../../common/FileIcon';
 import { useParams } from 'react-router-dom';
 import { notebookFilesApi } from '../../../services/notebookFiles';
+import { api } from '../../../services/api';
 import FullScreenEditor from '../../notebook/conversations/FullScreenEditor';
 import { useMultiSelect, UseMultiSelectReturn } from '../../../hooks/useMultiSelect';
 import { useListKeyboardNavigation } from '../../../hooks/useListKeyboardNavigation';
@@ -131,7 +132,7 @@ function NotebookFileItem({
   return (
     <div
       key={file.relativePath || file.id}
-      draggable={canEdit && !isIndexing}
+      draggable={canEdit && !isIndexing && editingFileId !== file.id}
       tabIndex={isFocused ? 0 : -1}
       ref={el => {
         // Only apply focus if explicitly requested via keyboard navigation
@@ -141,7 +142,7 @@ function NotebookFileItem({
           context.focusIntentRef.current = false;
         }
       }}
-      onDragStart={(e) => onFileDragStart(e, file)}
+      onDragStart={(e) => { if (editingFileId === file.id) { e.preventDefault(); return; } onFileDragStart(e, file); }}
       onDragEnd={onFileDragEnd}
       className={`group flex items-center py-1 px-2 text-sm cursor-pointer outline-none
         ${isSelected ? 'bg-blue-100' : 'hover:bg-gray-100'}
@@ -162,7 +163,7 @@ function NotebookFileItem({
         }
       }}
       onDoubleClick={() => {
-        if (!isIndexing && !isMobile) onFileClick(file);
+        if (!isIndexing && !isMobile && editingFileId !== file.id) onFileClick(file);
       }}
       onKeyDown={(e) => context?.handleKeyDown(e)}
       onContextMenu={(e) => !isIndexing && onFileContextMenu(e, file)}
@@ -739,13 +740,26 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
 
   const handleSaveFileRename = useCallback(async (fileId: string) => {
     const file = folder.files.find(f => f.id === fileId);
-    if (!file || !editingFileName.trim() || editingFileName === file.fileName || !onRenameFile) {
+    if (!file || !editingFileName.trim() || editingFileName === file.fileName) {
       setEditingFileId(null);
       setEditingFileName('');
       return;
     }
+    const fileIsLinked = Boolean(
+      file.isLinked ||
+      context?.getMountForPath(file.relativePath) ||
+      context?.getEnclosingMount(file.relativePath)
+    );
     try {
-      await onRenameFile(fileId, editingFileName.trim());
+      if (fileIsLinked && projectId && notebookId) {
+        await api.projects.notebooks.renameNotebookItem(projectId, notebookId, file.relativePath, editingFileName.trim());
+      } else if (onRenameFile) {
+        await onRenameFile(fileId, editingFileName.trim());
+      } else {
+        setEditingFileId(null);
+        setEditingFileName('');
+        return;
+      }
       setEditingFileId(null);
       setEditingFileName('');
       try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
@@ -753,7 +767,7 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
       console.error('Failed to rename file:', error);
       showToast({ type: 'error', title: 'Failed to rename file', message: 'Please try again.' });
     }
-  }, [folder.files, editingFileName, onRenameFile]);
+  }, [folder.files, editingFileName, onRenameFile, context, projectId, notebookId]);
 
   const handleCancelFileRename = useCallback(() => {
     setEditingFileId(null);
@@ -839,7 +853,7 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   const isRootFolder = !folder.relativePath || folder.relativePath === '' || level === 0;
 
   const handleFolderDragStart = useCallback((e: React.DragEvent) => {
-    if (!e.dataTransfer || isRootFolder) return;
+    if (!e.dataTransfer || isRootFolder || isEditing) { e.preventDefault(); return; }
     e.stopPropagation();
     e.dataTransfer.setData('application/x-notebook-folder-relative-path', folder.relativePath || '');
     e.dataTransfer.setData('application/x-notebook-folder-name', folder.name);
@@ -952,6 +966,7 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
           }`}
           style={{ paddingLeft: `${paddingLeft}px` }}
           onClick={(e) => {
+             if (isEditing) return;
              // Single click on folder row toggles expansion (common file explorer UX)
              toggleExpand();
              if (folder.relativePath && context) {
@@ -960,12 +975,12 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
              }
           }}
           onDoubleClick={(e) => {
-              // Double click also toggles (for users who double-click by habit)
-              // Note: Removed handleFolderClick() - folders should NOT navigate away
-              handleToggleExpand(e);
+              if (!isEditing) {
+                  handleToggleExpand(e);
+              }
           }}
           onContextMenu={handleContextMenu}
-          draggable={!isRootFolder && canEdit}
+          draggable={!isRootFolder && canEdit && !isEditing}
           onDragStart={handleFolderDragStart}
           onDragEnd={handleFolderDragEnd}
           onDragOver={handleDragOver}
@@ -1057,7 +1072,7 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
 
       {showContextMenu && canEdit && createPortal(
         <div ref={menuRef} className="fixed bg-white shadow-lg rounded-lg py-1 z-[9999]" style={{ top: contextMenuPosition.y, left: contextMenuPosition.x }} onClick={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()} data-tour-id="notebook.folder.context-menu">
-          {onRenameFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
+          {onRenameFolder && !isMountRoot && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>}
           {!isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>}
           {onCreateFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={openCreateSubfolderInput}>Create Subfolder</button>}
           {onUploadToFolder && !isLinkedFolder && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onUploadToFolder(folder.relativePath); }}>Upload Files</button>}
@@ -1139,7 +1154,7 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
                   {onPreviewFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { if (selectedContextFile) onPreviewFile(selectedContextFile); setShowFileContextMenu(false); }}>Preview</button>}
                   {canEdit && !selectedFileIsLinked && onPublishToProject && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { if (selectedContextFile) onPublishToProject([selectedContextFile]); setShowFileContextMenu(false); }}>Publish to Project</button>}
                   <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDownloadFile}>Download</button>
-                  {canEdit && !selectedFileIsLinked && onRenameFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleStartFileRename}>Rename</button>}
+                  {canEdit && (onRenameFile || selectedFileIsLinked) && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleStartFileRename}>Rename</button>}
                   {canEdit && !selectedFileIsLinked && onSetHomePage && selectedContextFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleToggleHomePage}>{homePageFileId === selectedContextFile.id ? 'Clear as Home Page' : 'Set as Notebook Home Page'}</button>}
                   {canEdit && !selectedFileIsLinked && <button className="block w-full text-left px-4 py-1.5 text-sm text-red-600 hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDeleteFile}>
                     {isInsideMount || (selectedContextFile && context?.getEnclosingMount(selectedContextFile.relativePath))
@@ -1645,14 +1660,8 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
         onRename: () => {
              if (multiSelect.selectedCount === 1) {
                  const item = multiSelect.getSelectedItems()[0];
-                 const fileLinked = item.type === 'file' && Boolean(
-                   (item.data as NotebookFileDto).isLinked ||
-                   hostMounts.some(m => item.id === m.relativePath || isPathInsideHostMount((item.data as NotebookFileDto).relativePath, m.relativePath))
-                 );
-                 const folderLinked = item.type === 'folder' && hostMounts.some(
-                   (mount) => item.id === mount.relativePath || isPathInsideHostMount(item.id, mount.relativePath)
-                 );
-                 if (!fileLinked && !folderLinked && ((item.type === 'file' && onRenameFile) || (item.type === 'folder' && onRenameFolder))) {
+                 const isMountRootItem = item.type === 'folder' && hostMounts.some(m => item.id === m.relativePath);
+                 if (!isMountRootItem && ((item.type === 'file') || (item.type === 'folder' && onRenameFolder))) {
                      setRenamingId(item.id);
                  }
              }

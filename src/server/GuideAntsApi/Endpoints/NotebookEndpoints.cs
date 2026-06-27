@@ -355,6 +355,29 @@ try
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status409Conflict);
 
+        // Rename a notebook file or folder by relative path (supports linked/mounted entries)
+        fileGroup.MapPatch("/rename", async (
+            Guid projectId,
+            Guid notebookId,
+            [FromBody] RenameItemDto dto,
+            INotebookFileService fsService) =>
+        {
+            try
+            {
+                var success = await fsService.RenameAsync(projectId, notebookId, dto.SourcePath, dto.NewName);
+                if (!success) return Results.NotFound(new { message = "The file or folder was not found or the new name is invalid/conflicts." });
+                return Results.NoContent();
+            }
+            catch (InvalidOperationException ex) { return Results.Conflict(new { message = ex.Message }); }
+            catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
+        })
+        .WithName("RenameNotebookItemByPath")
+        .RequireAuthorization("RequireContributor")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status409Conflict);
+
         fileGroup.MapPatch("/{fileId:guid}/rename", async (
             Guid projectId,
             Guid notebookId,

@@ -679,6 +679,18 @@ export const api = {
             }
         },
 
+        renameMountedByPath: async (projectId: string, relativePath: string, newName: string) => {
+            const url = `${API_BASE_URL}/projects/${projectId}/files/mounted/rename?path=${encodeURIComponent(relativePath)}`;
+            const response = await fetchWithAuth(url, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ newName }),
+            });
+            if (!response.ok) {
+                throw new Error('Failed to rename mounted entry');
+            }
+        },
+
         updateContentFile: (projectId: string, fileId: string, updates: { index?: boolean; fileName?: string }) =>
             callApi<import('../types/project').ContentFileDto>(`/projects/${projectId}/files/${fileId}`, {
                 method: 'PATCH',
