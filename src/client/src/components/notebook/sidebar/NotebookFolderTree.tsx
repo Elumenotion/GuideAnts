@@ -63,6 +63,7 @@ interface NotebookFolderTreeContextType {
     onRemoveMappedFolder: (mountId: string) => void;
     onShowApplyCommand: (mountId: string) => void;
     onShowRemoveCommand: (mountId: string) => void;
+    refreshNotebookFiles: () => void;
 }
 
 const NotebookFolderTreeContext = createContext<NotebookFolderTreeContextType | undefined>(undefined);
@@ -215,6 +216,7 @@ interface NotebookFolderTreeProps {
   activeSection?: string;
   onSectionActivate?: (section: string) => void;
   isAdmin?: boolean;
+  onRefreshFiles?: () => void;
 }
 
 interface NotebookFolderNodeProps {
@@ -304,10 +306,6 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
     return null;
   }
 
-  const hasActiveSearch = Boolean(searchTerm?.trim());
-  const isExpanded = hasActiveSearch || (context?.expandedIds.has(folder.relativePath || 'ROOT') ?? true);
-  const toggleExpand = () => context?.toggleExpansion(folder.relativePath || 'ROOT');
-
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(folder.name);
   const [showContextMenu, setShowContextMenu] = useState(false);
@@ -354,9 +352,28 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   const [folderToDelete, setFolderToDelete] = useState<string | null>(null);
   const [fileToDelete, setFileToDelete] = useState<NotebookFileDto | null>(null);
 
+  const mountEntry = context?.getMountForPath(folder.relativePath || '') ?? null;
+  const isMountRoot = mountEntry != null;
+  const enclosingMount = context?.getEnclosingMount(folder.relativePath || '') ?? null;
+  const isInsideMount = enclosingMount != null;
+  const isLinkedFolder = isMountRoot || isInsideMount;
+  const canExpandEmptyLinkedMount = mountEntry?.displayState === 'Linked';
   const displaySubFolders = filteredSubFolders;
   const displayFiles = filteredFiles;
-  const hasChildren = displaySubFolders.length > 0 || displayFiles.length > 0;
+  const hasRenderableChildren = displaySubFolders.length > 0 || displayFiles.length > 0;
+  const hasChildren = hasRenderableChildren || canExpandEmptyLinkedMount;
+  const hasActiveSearch = Boolean(searchTerm?.trim());
+  const expansionId = folder.relativePath || 'ROOT';
+  const isExpanded = hasActiveSearch || (context?.expandedIds.has(expansionId) ?? true);
+  const requestLinkedFolderRefresh = useCallback(() => {
+    if (canExpandEmptyLinkedMount && !hasRenderableChildren) {
+      context?.refreshNotebookFiles();
+    }
+  }, [canExpandEmptyLinkedMount, hasRenderableChildren, context]);
+  const toggleExpand = useCallback(() => {
+    context?.toggleExpansion(expansionId);
+    requestLinkedFolderRefresh();
+  }, [context, expansionId, requestLinkedFolderRefresh]);
   const paddingLeft = level === 0 ? 0 : level * 20 + 8;
   const openCreateSubfolderInput = useCallback(() => {
     if (!isExpanded) {
@@ -865,11 +882,6 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
   const handleFolderDragEnd = useCallback((e: React.DragEvent) => {
     (e.currentTarget as HTMLElement).style.opacity = '1';
   }, []);
-  const mountEntry = context?.getMountForPath(folder.relativePath || '') ?? null;
-  const isMountRoot = mountEntry != null;
-  const enclosingMount = context?.getEnclosingMount(folder.relativePath || '') ?? null;
-  const isInsideMount = enclosingMount != null;
-  const isLinkedFolder = isMountRoot || isInsideMount;
   const isLinkedFile = useCallback((file?: NotebookFileDto | null) => Boolean(
     file && (
       file.isLinked ||
@@ -989,7 +1001,12 @@ const NotebookFolderNodeComponent: React.FC<NotebookFolderNodeProps> = ({
           data-tour-id={isRootFolder ? 'notebook.folder.root' : undefined}
         >
           {hasChildren && (
-            <button onClick={handleToggleExpand} className="mr-1 text-gray-500 hover:text-gray-700">
+            <button
+              type="button"
+              onClick={handleToggleExpand}
+              className="mr-1 text-gray-500 hover:text-gray-700"
+              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${level === 0 ? notebookName || folder.name : folder.name}`}
+            >
               {isExpanded ? (
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
               ) : (
@@ -1230,10 +1247,23 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
   activeSection,
   onSectionActivate,
   isAdmin: isAdmin = false,
+  onRefreshFiles,
 }) => {
   const { projectId, notebookId } = useParams<{ projectId: string; notebookId: string }>();
   const { showToast } = useToast();
   const { mounts: hostMounts, refresh: refreshHostMounts } = useNotebookHostMounts(projectId, notebookId, isAdmin);
+  const requestNotebookFilesRefresh = useCallback(() => {
+    if (onRefreshFiles) {
+      onRefreshFiles();
+      return;
+    }
+
+    try {
+      window.dispatchEvent(new Event('refresh-notebook-files'));
+    } catch {
+      // Best-effort refresh signal for tests and non-browser environments.
+    }
+  }, [onRefreshFiles]);
   const [showMapHostFolderDialog, setShowMapHostFolderDialog] = useState(false);
   const [commandDialog, setCommandDialog] = useState<{
     title: string;
@@ -1526,6 +1556,48 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
     };
   }, [tree, localEmptyFolders, mergeLocalFolders, hostMounts]);
 
+  const folderHasRenderableChildren = useCallback((node: NotebookFolderTreeDto, relativePath: string): boolean | null => {
+    if (node.relativePath === relativePath) {
+      return node.subFolders.length > 0 || node.files.length > 0;
+    }
+
+    for (const subFolder of node.subFolders) {
+      const result = folderHasRenderableChildren(subFolder, relativePath);
+      if (result !== null) {
+        return result;
+      }
+    }
+
+    return null;
+  }, []);
+
+  const emptyLinkedMountRefreshKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!effectiveTree || hostMounts.length === 0) {
+      emptyLinkedMountRefreshKeyRef.current = null;
+      return;
+    }
+
+    const emptyLinkedMountPaths = hostMounts
+      .filter((mount) => mount.displayState === 'Linked')
+      .filter((mount) => folderHasRenderableChildren(effectiveTree, mount.relativePath) !== true)
+      .map((mount) => mount.relativePath)
+      .sort();
+
+    if (emptyLinkedMountPaths.length === 0) {
+      emptyLinkedMountRefreshKeyRef.current = null;
+      return;
+    }
+
+    const key = emptyLinkedMountPaths.join('|');
+    if (emptyLinkedMountRefreshKeyRef.current === key) {
+      return;
+    }
+
+    emptyLinkedMountRefreshKeyRef.current = key;
+    requestNotebookFilesRefresh();
+  }, [effectiveTree, hostMounts, folderHasRenderableChildren, requestNotebookFilesRefresh]);
+
   const getVisibleItems = useCallback((node: NotebookFolderTreeDto): TreeItem[] => {
       let results: TreeItem[] = [];
       const normalizedSearchTerm = searchTerm?.trim().toLowerCase() ?? '';
@@ -1693,6 +1765,7 @@ const NotebookFolderTreeComponent: React.FC<NotebookFolderTreeProps> = ({
       onRemoveMappedFolder: handleRemoveMappedFolder,
       onShowApplyCommand: handleShowApplyCommand,
       onShowRemoveCommand: handleShowRemoveCommand,
+      refreshNotebookFiles: requestNotebookFilesRefresh,
   };
 
   const closeCurrentMenuRef = useRef<(() => void) | null>(null);

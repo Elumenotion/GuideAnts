@@ -949,6 +949,7 @@ function NotebookSidebarInner({
                 activeSection={selectionCoordinator.activeSection || undefined}
                 onSectionActivate={selectionCoordinator.activateSection}
                 isAdmin={isAdmin}
+                onRefreshFiles={refreshNotebookFiles}
               />
             )}
           </SidebarSection>

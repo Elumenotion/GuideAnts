@@ -98,6 +98,13 @@ const mockTree: NotebookFolderTreeDto = {
   files: [],
 };
 
+const emptyLinkedMountTree: NotebookFolderTreeDto = {
+  name: 'Notebook',
+  relativePath: '',
+  subFolders: [],
+  files: [],
+};
+
 const renderTree = (overrides: Partial<React.ComponentProps<typeof NotebookFolderTree>> = {}) => {
   const props = {
     tree: mockTree,
@@ -168,6 +175,29 @@ describe('NotebookFolderTree host mounts', () => {
 
     expect(screen.getByTestId('host-mount-state-Linked')).toBeInTheDocument();
     expect(screen.getByTestId('host-mount-state-PendingRestart')).toBeInTheDocument();
+  });
+
+  it('keeps linked mount roots expandable while scanned children are missing', async () => {
+    const user = userEvent.setup();
+    const onRefreshFiles = vi.fn();
+
+    renderTree({
+      tree: emptyLinkedMountTree,
+      onRefreshFiles,
+    });
+
+    const expandShared = screen.getByLabelText('Expand Shared');
+    expect(expandShared).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(onRefreshFiles).toHaveBeenCalledTimes(1);
+    });
+
+    onRefreshFiles.mockClear();
+    await user.click(expandShared);
+
+    expect(onRefreshFiles).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Collapse Shared')).toBeInTheDocument();
   });
 
   it('shows remove mapped folder instead of delete on mount root', () => {
