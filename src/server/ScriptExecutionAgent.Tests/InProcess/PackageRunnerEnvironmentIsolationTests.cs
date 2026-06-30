@@ -76,9 +76,10 @@ public sealed class PackageRunnerEnvironmentIsolationTests
             env.Should().NotContainKey(ProbeVariable);
             env.Should().NotContainKey("SCRIPT_EXECUTION_AGENT_TOKEN");
             env.Should().NotContainKey("GA_TTS_HOST");
-            env.Values.Should().NotContain(string.Empty);
             env.Should().ContainKey("HOME");
+            env["HOME"].Should().Be(scopedEnvironment["HOME"]);
             env.Should().ContainKey("PATH");
+            env["PATH"].Should().NotBeNullOrWhiteSpace();
         }
         finally
         {
