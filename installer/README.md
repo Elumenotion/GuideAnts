@@ -33,7 +33,7 @@ xattr -d com.apple.quarantine guideants.sh
 Open PowerShell in this folder and run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\guideants.ps1
+./guideants.ps1
 ```
 
 **Windows (WSL / Git Bash)**
