@@ -19,19 +19,27 @@ Rules:
 
 ### D1. MCP scheme strategy
 
+> **Superseded (2026-06-29):** D1 and D2 below are **revised** by
+> [`../mcp-tool-execution/DECISIONS.md`](../mcp-tool-execution/DECISIONS.md) Part A
+> (API-only MCP; remove `client://` MCP path). That folder is the single source of truth
+> for MCP runtime execution. This entry is retained for historical context only.
+
 Proposal question: should server-reachable MCP use `mcp://`, or should all MCP route
 through `client://` initially?
 
-- Status: `LOCKED`
+- Status: `LOCKED` *(superseded — see note above)*
 - Resolved: `client-bridge-first` — MCP routes via existing `client://` external-tool flow; no `mcp://` runtime dispatch.
 - Blocks: Phase 3, Phase 4.
 
 ### D2. MCP transport scope for first release
 
+> **Superseded (2026-06-29):** revised to `streamable_http` + `stdio` (drop `client_bridge`)
+> in [`../mcp-tool-execution/DECISIONS.md`](../mcp-tool-execution/DECISIONS.md) Part A.
+
 Proposal question: which transports are in scope first (streamable HTTP, SSE, stdio,
 client bridge)?
 
-- Status: `LOCKED`
+- Status: `LOCKED` *(superseded — see note above)*
 - Resolved: `streamable_http;client_bridge`
 - Blocks: Phase 3, Phase 4 publish checks.
 

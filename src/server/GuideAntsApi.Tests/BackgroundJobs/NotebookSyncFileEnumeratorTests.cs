@@ -43,6 +43,30 @@ public sealed class NotebookSyncFileEnumeratorTests
     }
 
     [TestMethod]
+    public void EnumerateSyncableRelativePaths_ExcludesNpmCacheDirectories()
+    {
+        var notebookRoot = CreateTempNotebookRoot();
+        try
+        {
+            var outputDir = Path.Combine(notebookRoot, "Output");
+            Directory.CreateDirectory(outputDir);
+            var npmCacheDir = Path.Combine(outputDir, ".npm", "_cacache", "content-v2");
+            Directory.CreateDirectory(npmCacheDir);
+            File.WriteAllText(Path.Combine(npmCacheDir, "artifact.bin"), "cache");
+            File.WriteAllText(Path.Combine(outputDir, "result.txt"), "visible");
+
+            var paths = NotebookSyncFileEnumerator.EnumerateSyncableRelativePaths(notebookRoot);
+
+            paths.Should().Contain("Output/result.txt");
+            paths.Should().NotContain(p => p.Contains(".npm", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            TryDeleteDirectory(notebookRoot);
+        }
+    }
+
+    [TestMethod]
     public void EnumerateSyncableRelativePaths_KeepsOutputSymlink_WhenTargetOutsideResources()
     {
         var notebookRoot = CreateTempNotebookRoot();

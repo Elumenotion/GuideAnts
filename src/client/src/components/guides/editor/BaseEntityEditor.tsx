@@ -1025,6 +1025,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               customTools={formData.customTools}
               contextOptions={formData.contextOptions}
               environmentVariables={formData.environmentVariables}
+              projectId={projectId}
+              guideId={isGuide && isEditing ? entityId : undefined}
               onSelectedToolIdsChange={(selectedToolIds) => updateForm({ selectedToolIds })}
               onCustomToolsChange={(customTools) => updateForm({ customTools })}
               onEnvironmentVariablesChange={(environmentVariables) => updateForm({ environmentVariables })}

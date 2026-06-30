@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
@@ -13,7 +14,10 @@ var app = builder.Build();
 
 var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 var asmVersion = typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown";
-startupLogger.LogInformation("ScriptExecutionAgent starting. Assembly version: {Version}", asmVersion);
+AgentLogEvent.Emit("script_agent_startup", new Dictionary<string, object?>
+{
+    ["version"] = asmVersion,
+});
 
 var scriptConfig = new ScriptExecutionConfig
 {
@@ -156,12 +160,16 @@ app.MapPost("/execute", async (HttpContext context, ILogger<Program> logger) =>
             return;
         }
 
-        logger.LogInformation(
-            "Executing script type {ScriptType} in authorized working directory {WorkingDirectory}. projectId={ProjectId} notebookId={NotebookId}",
-            request.ScriptType,
-            LogValueSanitizer.Sanitize(authorizedWorkingDirectory),
-            projectId,
-            notebookId);
+        var guideId = ResolveGuideScopeId(request);
+        var executionStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        AgentLogEvent.Emit("script_execution_start", new Dictionary<string, object?>
+        {
+            ["projectId"] = projectId.ToString("D"),
+            ["notebookId"] = notebookId.ToString("D"),
+            ["guideId"] = guideId.ToString("D"),
+            ["scriptType"] = request.ScriptType.ToString(),
+            ["workingDirectory"] = LogValueSanitizer.Sanitize(authorizedWorkingDirectory),
+        });
 
         var executionIdentity = await NotebookExecutionIdentityProvider.PrepareAsync(
             projectId,
@@ -173,7 +181,14 @@ app.MapPost("/execute", async (HttpContext context, ILogger<Program> logger) =>
             context.RequestAborted);
 
         var normalizedRequest = request with { WorkingDirectory = authorizedWorkingDirectory };
-        var result = await ExecuteScriptAsync(normalizedRequest, scriptConfig, logger, executionIdentity, scopeOptions, adminOptions);
+        var result = await ExecuteScriptAsync(
+            normalizedRequest,
+            scriptConfig,
+            logger,
+            executionIdentity,
+            scopeOptions,
+            adminOptions,
+            executionStopwatch);
 
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(result));
@@ -187,6 +202,169 @@ app.MapPost("/execute", async (HttpContext context, ILogger<Program> logger) =>
     catch (Exception ex)
     {
         logger.LogError(ex, "/execute unexpected exception");
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsync($"Internal server error: {ex.Message}");
+    }
+});
+
+app.MapPost("/mcp-stdio", async (HttpContext context, ILogger<Program> logger) =>
+{
+    try
+    {
+        if (!AuthorizeAgentRequest(context, securityOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var request = await JsonSerializer.DeserializeAsync<McpStdioExecutionRequest>(
+            context.Request.Body,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+            context.RequestAborted);
+
+        if (request is null)
+        {
+            logger.LogWarning("SECURITY: /mcp-stdio rejected because request JSON was missing or invalid.");
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid request body");
+            return;
+        }
+
+        var validationResult = McpStdioChildRuntime.ValidateMcpStdioRequest(request);
+        if (!validationResult.IsValid)
+        {
+            logger.LogWarning(
+                "SECURITY: /mcp-stdio rejected due to invalid request. reason={Reason}",
+                LogValueSanitizer.Sanitize(validationResult.ErrorMessage));
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync($"Validation failed: {validationResult.ErrorMessage}");
+            return;
+        }
+
+        var projectId = Guid.Parse(request.ProjectId);
+        var notebookId = Guid.Parse(request.NotebookId);
+
+        if (!PathGuard.TryResolveAndAuthorizePath(
+                fileStorageRoot,
+                request.WorkingDirectory,
+                projectId,
+                notebookId,
+                PathAccessMode.Write,
+                out var authorizedWorkingDirectory,
+                out _,
+                out var rejectionReason))
+        {
+            logger.LogWarning(
+                "SECURITY: /mcp-stdio rejected due to path authorization failure. projectId={ProjectId} notebookId={NotebookId} reason={Reason}",
+                projectId,
+                notebookId,
+                LogValueSanitizer.Sanitize(rejectionReason));
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync($"WorkingDirectory rejected: {rejectionReason}");
+            return;
+        }
+
+        logger.LogInformation(
+            "Executing MCP stdio child. projectId={ProjectId} notebookId={NotebookId} guideId={GuideId} tool={ToolName}",
+            projectId,
+            notebookId,
+            request.GuideId,
+            LogValueSanitizer.Sanitize(request.ToolName));
+
+        var result = await McpStdioChildRuntime.ExecuteToolCallAsync(
+            request,
+            authorizedWorkingDirectory,
+            scopeOptions,
+            logger,
+            context.RequestAborted);
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(
+            result,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    }
+    catch (JsonException jsonEx)
+    {
+        logger.LogError(jsonEx, "/mcp-stdio JSON parsing exception");
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsync($"JSON parsing error: {jsonEx.Message}");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "/mcp-stdio unexpected exception");
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsync($"Internal server error: {ex.Message}");
+    }
+});
+
+app.MapPost("/mcp-stdio/discover", async (HttpContext context, ILogger<Program> logger) =>
+{
+    try
+    {
+        if (!AuthorizeAgentRequest(context, securityOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var request = await JsonSerializer.DeserializeAsync<McpStdioDiscoverRequest>(
+            context.Request.Body,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+            context.RequestAborted);
+
+        if (request is null)
+        {
+            logger.LogWarning("SECURITY: /mcp-stdio/discover rejected because request JSON was missing or invalid.");
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid request body");
+            return;
+        }
+
+        var validationResult = McpStdioChildRuntime.ValidateMcpStdioDiscoverRequest(request);
+        if (!validationResult.IsValid)
+        {
+            logger.LogWarning(
+                "SECURITY: /mcp-stdio/discover rejected due to invalid request. reason={Reason}",
+                LogValueSanitizer.Sanitize(validationResult.ErrorMessage));
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync($"Validation failed: {validationResult.ErrorMessage}");
+            return;
+        }
+
+        var projectId = Guid.Parse(request.ProjectId);
+        var guideScopeId = Guid.Parse(request.GuideId);
+        var scope = ScriptExecutionScopeRuntime.ResolveScope(projectId, guideScopeId, scopeOptions);
+        ScriptExecutionScopeRuntime.EnsureScopeDirectory(scope);
+        var authorizedWorkingDirectory = scope.ScopeRootPath;
+
+        logger.LogInformation(
+            "Discovering MCP stdio tools. projectId={ProjectId} guideId={GuideId}",
+            projectId,
+            guideScopeId);
+
+        var result = await McpStdioChildRuntime.DiscoverToolsAsync(
+            request,
+            authorizedWorkingDirectory,
+            scopeOptions,
+            logger,
+            context.RequestAborted);
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(
+            result,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    }
+    catch (JsonException jsonEx)
+    {
+        logger.LogError(jsonEx, "/mcp-stdio/discover JSON parsing exception");
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsync($"JSON parsing error: {jsonEx.Message}");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "/mcp-stdio/discover unexpected exception");
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         await context.Response.WriteAsync($"Internal server error: {ex.Message}");
     }
@@ -560,7 +738,21 @@ if (adminOptions.Enabled)
 
 }
 
-await app.RunAsync();
+await app.StartAsync();
+
+if (adminOptions.Enabled)
+{
+    // Bind the HTTP listener first, then reconcile sandbox scopes in the background so that
+    // apt/pip provisioning never delays /execute or /health. Any scope an execution needs that
+    // has not been reconciled yet is provisioned on demand by EnsureScopeRequirementsForExecutionAsync.
+    _ = Task.Run(() => AdminStateRuntime.ReconcileStartupStateAsync(
+        adminOptions,
+        scopeOptions,
+        startupLogger,
+        app.Lifetime.ApplicationStopping));
+}
+
+await app.WaitForShutdownAsync();
 
 static bool AuthorizeAgentRequest(HttpContext context, AgentSecurityOptions options, ILogger logger)
 {
@@ -853,13 +1045,16 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     ILogger logger,
     NotebookExecutionIdentity? executionIdentity,
     ScriptExecutionScopeOptions scopeOptions,
-    AdminApiOptions adminOptions)
+    AdminApiOptions adminOptions,
+    System.Diagnostics.Stopwatch executionStopwatch)
 {
     var stdOutBuffer = new StringBuilder();
     var stdErrBuffer = new StringBuilder();
     HashSet<string> preExistingFiles = new(StringComparer.OrdinalIgnoreCase);
     var preSnapshotSucceeded = false;
     int? exitCode = null;
+    var injectedEnvEntries = request.Environment?.Count ?? 0;
+    var timedOut = false;
 
     try
     {
@@ -875,7 +1070,6 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
                 .EnumerateFiles(request.WorkingDirectory, "*", SearchOption.AllDirectories)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             preSnapshotSucceeded = true;
-            logger.LogInformation("Captured {Count} pre-existing files before script execution", preExistingFiles.Count);
         }
         catch (Exception ex)
         {
@@ -978,6 +1172,7 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     }
     catch (OperationCanceledException)
     {
+        timedOut = true;
         stdErrBuffer.AppendLine("Script execution timed out");
     }
     catch (Exception ex)
@@ -1049,6 +1244,21 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     {
         cleanedOutput = "The operation completed successfully";
     }
+
+    var guideId = ResolveGuideScopeId(request);
+    AgentLogEvent.Emit("script_execution_complete", new Dictionary<string, object?>
+    {
+        ["projectId"] = request.ProjectId,
+        ["notebookId"] = request.NotebookId,
+        ["guideId"] = guideId.ToString("D"),
+        ["scriptType"] = request.ScriptType.ToString(),
+        ["durationMs"] = executionStopwatch.ElapsedMilliseconds,
+        ["exitCode"] = exitCode,
+        ["success"] = exitCode == 0,
+        ["preExistingFileCount"] = preExistingFiles.Count,
+        ["injectedEnvEntries"] = injectedEnvEntries,
+        ["timedOut"] = timedOut,
+    });
 
     return new ScriptExecutionResult
     {
@@ -1193,10 +1403,16 @@ internal sealed record ScriptProcessResult(
     string StandardOutput,
     string StandardError);
 
+internal sealed record IsolatedProcessLaunchPlan(
+    string Command,
+    string[] Arguments,
+    IReadOnlyDictionary<string, string?>? ProcessEnvironment);
+
 internal sealed record ScriptExecutionScope(
     Guid ProjectId,
     Guid GuideScopeId,
     string ScopeRootPath,
+    string ProjectRuntimeRootPath,
     string PythonVenvPath,
     string RequirementsFilePath,
     string AppliedStateFilePath)
@@ -1227,6 +1443,13 @@ internal static class ScriptExecutionScopeRuntime
         "SCRIPT_EXECUTION_SCOPE_CREDENTIALS_FILE",
         "PATH",
         "HOME",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "NPM_CONFIG_CACHE",
+        "npm_config_cache",
+        "UV_CACHE_DIR",
+        "PIP_CACHE_DIR",
         "USER",
         "USERNAME",
         "SHELL",
@@ -1274,18 +1497,25 @@ internal static class ScriptExecutionScopeRuntime
     {
         var venvRelativePath = NormalizeRelativePath(options.PythonVenvRelativePath, "python-venv");
 
-        var scopeRoot = Path.Combine(
-            options.StateRootPath,
-            $"project-{projectId:N}",
-            $"guide-{guideScopeId:N}");
+        var projectRoot = Path.Combine(options.StateRootPath, $"project-{projectId:N}");
+        var scopeRoot = Path.Combine(projectRoot, $"guide-{guideScopeId:N}");
+        var projectRuntimeRoot = Path.Combine(projectRoot, "runtime");
 
         return new ScriptExecutionScope(
             projectId,
             guideScopeId,
             scopeRoot,
+            projectRuntimeRoot,
             Path.Combine(scopeRoot, venvRelativePath),
             Path.Combine(scopeRoot, "requirements.txt"),
             Path.Combine(scopeRoot, "applied-state.json"));
+    }
+
+    public static void EnsureProjectRuntimeDirectory(ScriptExecutionScope scope)
+    {
+        Directory.CreateDirectory(scope.ProjectRuntimeRootPath);
+        Directory.CreateDirectory(Path.Combine(scope.ProjectRuntimeRootPath, "cache"));
+        Directory.CreateDirectory(Path.Combine(scope.ProjectRuntimeRootPath, "config"));
     }
 
     public static void EnsureScopeDirectory(ScriptExecutionScope scope)
@@ -1550,62 +1780,73 @@ internal static class ScriptExecutionScopeRuntime
         EnsureScopeDirectory(scope);
         await EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
 
-        var requirementsPath = File.Exists(scope.RequirementsFilePath)
-            ? scope.RequirementsFilePath
-            : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
-        var requirementsText = File.Exists(requirementsPath)
-            ? await File.ReadAllTextAsync(requirementsPath, cancellationToken)
-            : string.Empty;
-        var validation = ValidateRequirements(requirementsText);
-        if (!validation.IsValid)
+        // Serialize requirement installs per venv so a background startup reconcile and an
+        // on-demand execution never run two pip processes against the same environment.
+        var venvLock = VenvLocks.GetOrAdd(scope.PythonVenvPath, static _ => new SemaphoreSlim(1, 1));
+        await venvLock.WaitAsync(cancellationToken);
+        try
         {
-            throw new InvalidOperationException(validation.ErrorMessage);
-        }
-
-        var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
-        var requirementsHash = ComputeSha256(requirementsText);
-        var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
-        if (requirementsHash == appliedState.RequirementsHash)
-        {
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(requirementsText))
-        {
-            var result = await Cli.Wrap(scope.PythonExecutablePath)
-                .WithArguments(args => args
-                    .Add("-m")
-                    .Add("pip")
-                    .Add("--disable-pip-version-check")
-                    .Add("install")
-                    .Add("-r")
-                    .Add(requirementsPath))
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(cancellationToken);
-
-            if (result.ExitCode != 0)
+            var requirementsPath = File.Exists(scope.RequirementsFilePath)
+                ? scope.RequirementsFilePath
+                : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
+            var requirementsText = File.Exists(requirementsPath)
+                ? await File.ReadAllTextAsync(requirementsPath, cancellationToken)
+                : string.Empty;
+            var validation = ValidateRequirements(requirementsText);
+            if (!validation.IsValid)
             {
-                throw new InvalidOperationException(FormatPipFailure(result));
+                throw new InvalidOperationException(validation.ErrorMessage);
             }
+
+            var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
+            var requirementsHash = ComputeSha256(requirementsText);
+            var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
+            if (requirementsHash == appliedState.RequirementsHash)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(requirementsText))
+            {
+                var result = await Cli.Wrap(scope.PythonExecutablePath)
+                    .WithArguments(args => args
+                        .Add("-m")
+                        .Add("pip")
+                        .Add("--disable-pip-version-check")
+                        .Add("install")
+                        .Add("-r")
+                        .Add(requirementsPath))
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync(cancellationToken);
+
+                if (result.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(FormatPipFailure(result));
+                }
+            }
+
+            await PruneUnmanagedTopLevelPackagesAsync(
+                scope.PythonExecutablePath,
+                desiredTopLevelPackages,
+                cancellationToken);
+
+            await AdminScopeAppliedStateRuntime.WriteAsync(
+                scope,
+                requirementsHash,
+                requirementsPath,
+                desiredTopLevelPackages,
+                appliedState.InstallScriptsHash,
+                appliedState.InstallScriptStepResults,
+                cancellationToken);
+            logger.LogInformation(
+                "Synced scoped Python requirements for execution on project={ProjectId} guide={GuideId}.",
+                scope.ProjectId,
+                scope.GuideScopeId);
         }
-
-        await PruneUnmanagedTopLevelPackagesAsync(
-            scope.PythonExecutablePath,
-            desiredTopLevelPackages,
-            cancellationToken);
-
-        await AdminScopeAppliedStateRuntime.WriteAsync(
-            scope,
-            requirementsHash,
-            requirementsPath,
-            desiredTopLevelPackages,
-            appliedState.InstallScriptsHash,
-            appliedState.InstallScriptStepResults,
-            cancellationToken);
-        logger.LogInformation(
-            "Synced scoped Python requirements for execution on project={ProjectId} guide={GuideId}.",
-            scope.ProjectId,
-            scope.GuideScopeId);
+        finally
+        {
+            venvLock.Release();
+        }
     }
 
     public static async Task<AdminApplyResult> ApplyScopeRequirementsAsync(
@@ -1618,91 +1859,102 @@ internal static class ScriptExecutionScopeRuntime
         EnsureScopeDirectory(scope);
         await EnsurePythonVenvAsync(scope, scopeOptions, logger, cancellationToken);
 
-        var requirementsPath = File.Exists(scope.RequirementsFilePath)
-            ? scope.RequirementsFilePath
-            : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
-        var requirementsText = File.Exists(requirementsPath)
-            ? await File.ReadAllTextAsync(requirementsPath, cancellationToken)
-            : string.Empty;
-        var validation = ValidateRequirements(requirementsText);
-        if (!validation.IsValid)
+        // Serialize requirement installs per venv so a background startup reconcile and an
+        // on-demand execution never run two pip processes against the same environment.
+        var venvLock = VenvLocks.GetOrAdd(scope.PythonVenvPath, static _ => new SemaphoreSlim(1, 1));
+        await venvLock.WaitAsync(cancellationToken);
+        try
         {
-            throw new InvalidOperationException(validation.ErrorMessage);
-        }
-
-        var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
-        var requirementsHash = ComputeSha256(requirementsText);
-        var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
-        var unmanagedPackagesBeforeInstall = await GetUnmanagedTopLevelPackagesAsync(
-            scope.PythonExecutablePath,
-            desiredTopLevelPackages,
-            cancellationToken);
-        var installScriptsDocument = AdminInstallScriptsRuntime.ReadDocument(scope);
-        var installScriptsHash = AdminInstallScriptsRuntime.ComputeDocumentHash(installScriptsDocument);
-        var requirementsNeedsApply = requirementsHash != appliedState.RequirementsHash || unmanagedPackagesBeforeInstall.Count > 0;
-        var scriptsNeedApply = AdminInstallScriptsRuntime.NeedsApply(
-            installScriptsHash,
-            appliedState.InstallScriptsHash,
-            installScriptsDocument.Scripts.Count);
-        if (!requirementsNeedsApply && !scriptsNeedApply)
-        {
-            return new AdminApplyResult("skipped", 0, 1, Array.Empty<string>());
-        }
-
-        if (requirementsNeedsApply && requirementsHash != appliedState.RequirementsHash && !string.IsNullOrWhiteSpace(requirementsText))
-        {
-            var result = await Cli.Wrap(scope.PythonExecutablePath)
-                .WithArguments(args => args
-                    .Add("-m")
-                    .Add("pip")
-                    .Add("--disable-pip-version-check")
-                    .Add("install")
-                    .Add("-r")
-                    .Add(requirementsPath))
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(cancellationToken);
-
-            if (result.ExitCode != 0)
+            var requirementsPath = File.Exists(scope.RequirementsFilePath)
+                ? scope.RequirementsFilePath
+                : AdminStateRuntime.GetGlobalRequirementsPath(adminOptions);
+            var requirementsText = File.Exists(requirementsPath)
+                ? await File.ReadAllTextAsync(requirementsPath, cancellationToken)
+                : string.Empty;
+            var validation = ValidateRequirements(requirementsText);
+            if (!validation.IsValid)
             {
-                throw new InvalidOperationException(FormatPipFailure(result));
+                throw new InvalidOperationException(validation.ErrorMessage);
             }
-        }
 
-        if (requirementsNeedsApply)
-        {
-            await PruneUnmanagedTopLevelPackagesAsync(
+            var desiredTopLevelPackages = ParseTopLevelRequirementPackageNames(requirementsText);
+            var requirementsHash = ComputeSha256(requirementsText);
+            var appliedState = AdminScopeAppliedStateRuntime.Read(scope);
+            var unmanagedPackagesBeforeInstall = await GetUnmanagedTopLevelPackagesAsync(
                 scope.PythonExecutablePath,
                 desiredTopLevelPackages,
                 cancellationToken);
-        }
+            var installScriptsDocument = AdminInstallScriptsRuntime.ReadDocument(scope);
+            var installScriptsHash = AdminInstallScriptsRuntime.ComputeDocumentHash(installScriptsDocument);
+            var requirementsNeedsApply = requirementsHash != appliedState.RequirementsHash || unmanagedPackagesBeforeInstall.Count > 0;
+            var scriptsNeedApply = AdminInstallScriptsRuntime.NeedsApply(
+                installScriptsHash,
+                appliedState.InstallScriptsHash,
+                installScriptsDocument.Scripts.Count);
+            if (!requirementsNeedsApply && !scriptsNeedApply)
+            {
+                return new AdminApplyResult("skipped", 0, 1, Array.Empty<string>());
+            }
 
-        AdminInstallScriptsApplyDetails? installScriptsDetails = null;
-        IReadOnlyList<AdminInstallScriptStepResult> installScriptStepResults = appliedState.InstallScriptStepResults;
-        if (scriptsNeedApply)
-        {
-            installScriptsDetails = await ApplyScopeInstallScriptsAsync(
+            if (requirementsNeedsApply && requirementsHash != appliedState.RequirementsHash && !string.IsNullOrWhiteSpace(requirementsText))
+            {
+                var result = await Cli.Wrap(scope.PythonExecutablePath)
+                    .WithArguments(args => args
+                        .Add("-m")
+                        .Add("pip")
+                        .Add("--disable-pip-version-check")
+                        .Add("install")
+                        .Add("-r")
+                        .Add(requirementsPath))
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync(cancellationToken);
+
+                if (result.ExitCode != 0)
+                {
+                    throw new InvalidOperationException(FormatPipFailure(result));
+                }
+            }
+
+            if (requirementsNeedsApply)
+            {
+                await PruneUnmanagedTopLevelPackagesAsync(
+                    scope.PythonExecutablePath,
+                    desiredTopLevelPackages,
+                    cancellationToken);
+            }
+
+            AdminInstallScriptsApplyDetails? installScriptsDetails = null;
+            IReadOnlyList<AdminInstallScriptStepResult> installScriptStepResults = appliedState.InstallScriptStepResults;
+            if (scriptsNeedApply)
+            {
+                installScriptsDetails = await ApplyScopeInstallScriptsAsync(
+                    scope,
+                    installScriptsDocument,
+                    logger,
+                    cancellationToken);
+                installScriptStepResults = installScriptsDetails.StepResults;
+            }
+
+            await AdminScopeAppliedStateRuntime.WriteAsync(
                 scope,
-                installScriptsDocument,
-                logger,
+                requirementsHash,
+                requirementsPath,
+                desiredTopLevelPackages,
+                installScriptsHash,
+                installScriptStepResults,
                 cancellationToken);
-            installScriptStepResults = installScriptsDetails.StepResults;
+            logger.LogInformation(
+                "Applied scoped sandbox setup for project={ProjectId} guide={GuideId}. requirementsApplied={RequirementsApplied} installScriptsApplied={InstallScriptsApplied}",
+                scope.ProjectId,
+                scope.GuideScopeId,
+                requirementsNeedsApply,
+                scriptsNeedApply);
+            return new AdminApplyResult("applied", 1, 0, Array.Empty<string>(), InstallScripts: installScriptsDetails);
         }
-
-        await AdminScopeAppliedStateRuntime.WriteAsync(
-            scope,
-            requirementsHash,
-            requirementsPath,
-            desiredTopLevelPackages,
-            installScriptsHash,
-            installScriptStepResults,
-            cancellationToken);
-        logger.LogInformation(
-            "Applied scoped sandbox setup for project={ProjectId} guide={GuideId}. requirementsApplied={RequirementsApplied} installScriptsApplied={InstallScriptsApplied}",
-            scope.ProjectId,
-            scope.GuideScopeId,
-            requirementsNeedsApply,
-            scriptsNeedApply);
-        return new AdminApplyResult("applied", 1, 0, Array.Empty<string>(), InstallScripts: installScriptsDetails);
+        finally
+        {
+            venvLock.Release();
+        }
     }
 
     public static async Task<AdminInstallScriptsApplyDetails> ApplyScopeInstallScriptsAsync(
@@ -1919,10 +2171,16 @@ internal static class ScriptExecutionScopeRuntime
         string workingDirectory,
         ILogger logger)
     {
+        EnsureProjectRuntimeDirectory(scope);
+        var projectRuntimeRoot = scope.ProjectRuntimeRootPath;
+        var cacheRoot = Path.Combine(projectRuntimeRoot, "cache");
+
         var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["PATH"] = BuildDefaultPath(scope),
-            ["HOME"] = workingDirectory,
+            ["HOME"] = projectRuntimeRoot,
+            ["XDG_CACHE_HOME"] = cacheRoot,
+            ["XDG_CONFIG_HOME"] = Path.Combine(projectRuntimeRoot, "config"),
             ["LANG"] = Environment.GetEnvironmentVariable("LANG") ?? "C.UTF-8",
             ["LC_ALL"] = Environment.GetEnvironmentVariable("LC_ALL") ?? "C.UTF-8",
             ["GUIDEANTS_PROJECT_ID"] = scope.ProjectId.ToString("D"),
@@ -1950,11 +2208,60 @@ internal static class ScriptExecutionScopeRuntime
             }
         }
 
-        logger.LogInformation(
-            "Built script environment for project={ProjectId} guide={GuideId}. injectedEntries={InjectedCount}",
-            scope.ProjectId,
-            scope.GuideScopeId,
-            requestEnvironment?.Count ?? 0);
+        return environment;
+    }
+
+    /// <summary>
+    /// Builds a process launch plan that matches <c>/execute</c> isolation. On Linux this uses
+    /// <c>env -i</c> so package runners cannot inherit ScriptExecutionAgent container variables.
+    /// </summary>
+    public static IsolatedProcessLaunchPlan BuildIsolatedProcessLaunchPlan(
+        string commandFile,
+        IReadOnlyList<string> commandArgs,
+        IReadOnlyDictionary<string, string?> scopedEnvironment)
+    {
+        var curated = BuildTransportEnvironment(scopedEnvironment);
+
+        if (OperatingSystem.IsLinux())
+        {
+            var envExecutable = ResolveEnvExecutable();
+            if (envExecutable is not null)
+            {
+                var envArgs = new List<string>(curated.Count + commandArgs.Count + 2) { "-i" };
+                foreach (var (key, value) in curated)
+                {
+                    envArgs.Add($"{key}={value}");
+                }
+
+                envArgs.Add(commandFile);
+                envArgs.AddRange(commandArgs);
+                return new IsolatedProcessLaunchPlan(envExecutable, envArgs.ToArray(), null);
+            }
+        }
+
+        return new IsolatedProcessLaunchPlan(commandFile, commandArgs.ToArray(), curated);
+    }
+
+    private static string? ResolveEnvExecutable() =>
+        File.Exists("/usr/bin/env") ? "/usr/bin/env" : null;
+
+    /// <summary>
+    /// Builds the MCP stdio child environment to match <c>/execute</c>: only the curated
+    /// scoped variables, with no ScriptExecutionAgent container inheritance.
+    /// </summary>
+    public static Dictionary<string, string?> BuildTransportEnvironment(
+        IReadOnlyDictionary<string, string?> scopedEnvironment)
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (key, value) in scopedEnvironment)
+        {
+            if (value is not null)
+            {
+                environment[key] = value;
+            }
+        }
+
         return environment;
     }
 
@@ -2338,14 +2645,6 @@ internal static class AdminStateRuntime
                 throw new InvalidOperationException(aptPackagesValidation.ErrorMessage);
             }
 
-            var aptResult = await ApplyGlobalAptPackagesAsync(adminOptions, logger, cancellationToken);
-            var result = await ApplyAllKnownScopesAsync(scopeOptions, adminOptions, logger, cancellationToken);
-            logger.LogInformation(
-                "ScriptExecutionAgent admin state initialized. aptStatus={AptStatus} status={Status} scopesApplied={Applied} scopesSkipped={Skipped}",
-                aptResult.Status,
-                result.Status,
-                result.ScopesApplied,
-                result.ScopesSkipped);
         }
         catch (Exception ex)
         {
@@ -2354,7 +2653,40 @@ internal static class AdminStateRuntime
                 throw;
             }
 
-            logger.LogWarning(ex, "ScriptExecutionAgent admin startup reconcile failed; continuing because SCRIPT_EXECUTION_ADMIN_FAIL_OPEN=true.");
+            logger.LogWarning(ex, "ScriptExecutionAgent admin state validation failed; continuing because SCRIPT_EXECUTION_ADMIN_FAIL_OPEN=true.");
+        }
+    }
+
+    // Applies global apt packages and reconciles every known scope's Python requirements/install
+    // scripts. Intentionally NOT awaited during startup: it performs lengthy pip/apt work and must
+    // never gate the HTTP listener. /execute provisions whatever scope it needs on demand, so this
+    // is a warm-up reconcile rather than a prerequisite for serving requests.
+    public static async Task ReconcileStartupStateAsync(
+        AdminApiOptions adminOptions,
+        ScriptExecutionScopeOptions scopeOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var aptResult = await ApplyGlobalAptPackagesAsync(adminOptions, logger, cancellationToken);
+            var result = await ApplyAllKnownScopesAsync(scopeOptions, adminOptions, logger, cancellationToken);
+            logger.LogInformation(
+                "ScriptExecutionAgent admin startup reconcile complete. aptStatus={AptStatus} status={Status} scopesApplied={Applied} scopesSkipped={Skipped}",
+                aptResult.Status,
+                result.Status,
+                result.ScopesApplied,
+                result.ScopesSkipped);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            logger.LogInformation("ScriptExecutionAgent admin startup reconcile canceled during shutdown.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "ScriptExecutionAgent admin startup reconcile failed; affected scopes will be provisioned on first execution.");
         }
     }
 

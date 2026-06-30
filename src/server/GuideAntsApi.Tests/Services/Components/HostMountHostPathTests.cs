@@ -6,7 +6,7 @@ namespace GuideAntsApi.Tests.Services.Components;
 [TestClass]
 public sealed class HostMountHostPathTests
 {
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(@"D:\repos\GuideAnts", true)]
     [DataRow(@"D:/repos/GuideAnts", true)]
     [DataRow(@"/home/user/shared", true)]
@@ -20,7 +20,7 @@ public sealed class HostMountHostPathTests
         HostMountHostPath.IsAbsoluteHostPath(path).Should().Be(expected);
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(@"D:\repos\GuideAnts", "GuideAnts")]
     [DataRow(@"D:\Data\Shared Reports", "Shared Reports")]
     [DataRow(@"/Users/me/Data/Shared", "Shared")]

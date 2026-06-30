@@ -114,6 +114,49 @@ public sealed class ContextOptionFilesResolverTests
         resolved["files"].Should().Contain("../Shared/docs/");
     }
 
+    [TestMethod]
+    public async Task ResolveAsync_FilesContextOption_ExcludesNpmArtifactPathsFromDatabase()
+    {
+        await using var db = CreateDbContext();
+        var notebookId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+
+        var npmFile = new NotebookFile
+        {
+            NotebookId = notebookId,
+            RelativePath = "Output/.npm/_cacache/content-v2/sha512/ab/cd/cache-entry",
+            FileSize = 128,
+            LastModifiedUtc = DateTime.UtcNow,
+            FileHash = "hash-npm"
+        };
+        npmFile.GenerateDocumentId(notebookId);
+        var userFile = new NotebookFile
+        {
+            NotebookId = notebookId,
+            RelativePath = "Output/result.txt",
+            FileSize = 64,
+            LastModifiedUtc = DateTime.UtcNow,
+            FileHash = "hash-result"
+        };
+        userFile.GenerateDocumentId(notebookId);
+        db.NotebookFiles.AddRange(npmFile, userFile);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new LegacyStoragePathResolver(Path.Combine(Path.GetTempPath(), "context-option-files-" + Guid.NewGuid().ToString("N"))));
+        var assistant = new AssistantDefinition
+        {
+            ContextOptions = new Dictionary<string, string>
+            {
+                ["files"] = "[@files]"
+            }
+        };
+
+        var resolved = await service.ResolveAsync(assistant, projectId, notebookId, Guid.NewGuid());
+
+        resolved["files"].Should().Contain("result.txt");
+        resolved["files"].Should().NotContain(".npm");
+    }
+
     private static ContextOptionsService CreateService(ApplicationDbContext db, IStoragePathResolver pathResolver)
     {
         var currentUserService = new Mock<ICurrentUserService>();

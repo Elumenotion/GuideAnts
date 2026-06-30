@@ -54,7 +54,7 @@ public static async Task<IResult> PostMessagesAsync(
 
     try
     {
-        WireConversationExecutor.WireConversationResult conversation;
+        WireConversationExecutor.WireConversationStreamHandle streamHandle;
         if (inboundToolResults.Count > 0)
         {
             var continuation = await WireToolResultContinuation.ResolveAnthropicToolResultConversationAsync(
@@ -73,9 +73,8 @@ public static async Task<IResult> PostMessagesAsync(
                 inboundToolResults,
                 httpContext.RequestAborted);
 
-            conversation = await WireConversationExecutor.ResumeConversationAfterToolResultsAsync(
+            streamHandle = WireConversationExecutor.StartResumeConversationStream(
                 publishedConversationService,
-                db,
                 context,
                 continuation.ConversationId.Value,
                 clientToolDefinitions,
@@ -113,15 +112,62 @@ public static async Task<IResult> PostMessagesAsync(
                     httpContext.RequestAborted);
             }
 
-            conversation = await WireConversationExecutor.ExecuteConversationAsync(
+            streamHandle = await WireConversationExecutor.StartConversationStreamAsync(
                 publishedConversationService,
-                db,
                 context,
                 instructions,
                 httpContext.RequestAborted,
                 existingConversationId: existingConversationId,
                 clientMessages: existingConversationId.HasValue ? null : clientPrompt.PrefixMessages,
                 clientToolDefinitions: clientToolDefinitions);
+        }
+
+        var publicApiOrigin = WireResponseSerializer.ResolvePublicApiOrigin(httpContext);
+
+        if (request.Stream == true)
+        {
+            var streamMessageId = $"msg_{Guid.NewGuid():N}";
+            var streamState = new WireStreamAdapter.AnthropicMessagesStreamState();
+            var conversationId = streamHandle.ConversationId;
+            var createdConversation = streamHandle.CreatedConversation;
+
+            return Results.Stream(async outputStream =>
+            {
+                await foreach (var sseChunk in WireStreamAdapter.WriteAnthropicMessagesSseAsync(
+                                   streamHandle.Events,
+                                   streamMessageId,
+                                   configuredAlias,
+                                   publicApiOrigin,
+                                   streamState,
+                                   httpContext.RequestAborted))
+                {
+                    var bytes = Encoding.UTF8.GetBytes(sseChunk);
+                    await outputStream.WriteAsync(bytes, httpContext.RequestAborted);
+                    await outputStream.FlushAsync(httpContext.RequestAborted);
+                }
+
+                if (createdConversation)
+                {
+                    await WireConversationExecutor.TryGenerateWireConversationTitleAsync(
+                        db,
+                        conversationId,
+                        httpContext.RequestAborted);
+                }
+            }, contentType: "text/event-stream");
+        }
+
+        var conversation = await WireConversationExecutor.CollectWireConversationResultAsync(
+            streamHandle.Events,
+            db,
+            streamHandle.ConversationId,
+            httpContext.RequestAborted);
+
+        if (streamHandle.CreatedConversation)
+        {
+            await WireConversationExecutor.TryGenerateWireConversationTitleAsync(
+                db,
+                streamHandle.ConversationId,
+                httpContext.RequestAborted);
         }
 
         if (!string.IsNullOrWhiteSpace(conversation.ErrorPayload))
@@ -132,7 +178,6 @@ public static async Task<IResult> PostMessagesAsync(
                 message: "Provider execution failed for this request.");
         }
 
-        var publicApiOrigin = WireResponseSerializer.ResolvePublicApiOrigin(httpContext);
         var assistantText = WireResponseSerializer.RewritePublishedContentUrls(conversation.Text, publicApiOrigin);
         var contentBlocks = WireResponseSerializer.BuildAnthropicContentBlocks(assistantText, conversation.ExternalToolCalls);
         if (conversation.PendingClientTool && contentBlocks.All(b => !string.Equals(b.Type, "tool_use", StringComparison.Ordinal)))
@@ -147,21 +192,6 @@ public static async Task<IResult> PostMessagesAsync(
         var messageId = conversation.AssistantMessageId.HasValue
             ? WireIdCodec.FormatAnthropicMessageId(conversation.AssistantMessageId.Value)
             : $"msg_{Guid.NewGuid():N}";
-
-        if (request.Stream == true)
-        {
-            var ssePayload = WireResponseSerializer.BuildAnthropicMessageSsePayload(
-                messageId,
-                configuredAlias,
-                contentBlocks,
-                stopReason,
-                conversation.PromptTokens,
-                conversation.CompletionTokens);
-            return Results.Text(
-                ssePayload,
-                "text/event-stream",
-                Encoding.UTF8);
-        }
 
         return Results.Json(new
         {

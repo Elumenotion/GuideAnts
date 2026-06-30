@@ -3,11 +3,14 @@ using System.Text.Json;
 namespace GuideAntsApi.Models.Guides;
 
 public record McpToolSourceConnectionDto(
-    string Transport,
+    string RuntimeExecution,
+    string DiscoveryTransport,
     string? Url,
     string? BridgeId,
     Dictionary<string, string>? Headers,
-    string? ToolNamePrefix
+    string? ToolNamePrefix,
+    McpPackageDescriptorDto? Package = null,
+    List<McpEnvironmentVariableRefDto>? EnvironmentVariables = null
 );
 
 public record McpExistingToolStateDto(
@@ -24,7 +27,10 @@ public record McpBridgeToolInputDto(
     JsonElement? InputSchema
 );
 
-public record McpTestConnectionRequest(McpToolSourceConnectionDto Connection);
+public record McpTestConnectionRequest(
+    McpToolSourceConnectionDto Connection,
+    Guid? ProjectId = null,
+    Guid? GuideId = null);
 
 public record McpTestConnectionResponse(
     bool Connected,
@@ -36,8 +42,9 @@ public record McpTestConnectionResponse(
 public record McpDiscoverToolsRequest(
     McpToolSourceConnectionDto Connection,
     List<McpExistingToolStateDto>? ExistingTools,
-    List<McpBridgeToolInputDto>? BridgeTools
-);
+    List<McpBridgeToolInputDto>? BridgeTools,
+    Guid? ProjectId = null,
+    Guid? GuideId = null);
 
 public record McpDiscoveredToolDto(
     string BackingToolId,
