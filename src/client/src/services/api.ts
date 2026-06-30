@@ -645,6 +645,52 @@ export const api = {
             return { blob, contentType, fileName };
         },
 
+        getMountedDetailsByPath: async (projectId: string, relativePath: string) => {
+            return callApi<ContentFileDto>(`/projects/${projectId}/files/mounted/details?path=${encodeURIComponent(relativePath)}`);
+        },
+
+        getMountedContentByPath: async (projectId: string, relativePath: string) => {
+            const url = `${API_BASE_URL}/projects/${projectId}/files/mounted/content?path=${encodeURIComponent(relativePath)}`;
+            const response = await fetchWithAuth(url);
+            if (!response.ok) {
+                throw new Error('Failed to fetch mounted file content');
+            }
+            const blob = await response.blob();
+            const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
+            const contentDisposition = response.headers.get('Content-Disposition') || '';
+            let fileName = 'unknown';
+            if (contentDisposition) {
+                const starMatch = contentDisposition.match(/filename\*=(?:UTF-8''|)([^;]+)/i);
+                if (starMatch?.[1]) {
+                    try { fileName = decodeURIComponent(starMatch[1].replace(/"/g, '')); } catch { fileName = starMatch[1].replace(/"/g, ''); }
+                } else {
+                    const regularMatch = contentDisposition.match(/filename=([^;]+)/i);
+                    if (regularMatch?.[1]) { fileName = regularMatch[1].replace(/"/g, ''); }
+                }
+            }
+            return { blob, contentType, fileName };
+        },
+
+        saveMountedByPath: async (projectId: string, relativePath: string, content: string | Blob) => {
+            const url = `${API_BASE_URL}/projects/${projectId}/files/mounted/content?path=${encodeURIComponent(relativePath)}`;
+            const response = await fetchWithAuth(url, { method: 'PUT', body: content });
+            if (!response.ok) {
+                throw new Error('Failed to save mounted file content');
+            }
+        },
+
+        renameMountedByPath: async (projectId: string, relativePath: string, newName: string) => {
+            const url = `${API_BASE_URL}/projects/${projectId}/files/mounted/rename?path=${encodeURIComponent(relativePath)}`;
+            const response = await fetchWithAuth(url, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ newName }),
+            });
+            if (!response.ok) {
+                throw new Error('Failed to rename mounted entry');
+            }
+        },
+
         updateContentFile: (projectId: string, fileId: string, updates: { index?: boolean; fileName?: string }) =>
             callApi<import('../types/project').ContentFileDto>(`/projects/${projectId}/files/${fileId}`, {
                 method: 'PATCH',

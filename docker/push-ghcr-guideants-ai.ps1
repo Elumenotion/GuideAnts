@@ -122,7 +122,7 @@ function Get-DefaultGhcrUsername {
 function Get-LatestVariantImage {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim')]
+        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
         [string]$Variant
     )
 
@@ -131,6 +131,7 @@ function Get-LatestVariantImage {
         'cuda13' { '^cuda13-(?<build>\d{5}\.\d{4})$' }
         'rocm' { '^rocm-(?<build>\d{5}\.\d{4})$' }
         'slim' { '^slim-(?<build>\d{5}\.\d{4})$' }
+        'vulkan' { '^vulkan-(?<build>\d{5}\.\d{4})$' }
     }
 
     $rows = docker image ls guideants-ai --format "{{.Repository}}|{{.Tag}}"
@@ -258,6 +259,14 @@ catch {
     Write-Warning "No local slim AI image found; skipping slim push. Build it first with docker/build/build_guideants_ai.ps1 (backend slim)."
 }
 
+$vulkanImage = $null
+try {
+    $vulkanImage = Get-LatestVariantImage -Variant 'vulkan'
+}
+catch {
+    Write-Warning "No local Vulkan AI image found; skipping Vulkan push. Build it first with docker/build/build_guideants_ai.ps1 (backend vulkan)."
+}
+
 $targets = @(
     [pscustomobject]@{
         Variant     = 'cpu'
@@ -288,6 +297,15 @@ if ($null -ne $slimImage) {
         PackageName = 'guideants-ai-slim'
         SourceRef   = $slimImage.SourceRef
         BuildTag    = $slimImage.BuildTag
+    }
+}
+
+if ($null -ne $vulkanImage) {
+    $targets += [pscustomobject]@{
+        Variant     = 'vulkan'
+        PackageName = 'guideants-ai-vulkan'
+        SourceRef   = $vulkanImage.SourceRef
+        BuildTag    = $vulkanImage.BuildTag
     }
 }
 
@@ -363,9 +381,5 @@ foreach ($target in $extraTargets) {
 }
 
 Write-Host ""
-if ($null -ne $rocmImage) {
-    Write-Host "Done. Pushed latest local CPU, CUDA13, and ROCm GuideAnts AI images plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$Owner'." -ForegroundColor Green
-}
-else {
-    Write-Host "Done. Pushed latest local CPU and CUDA13 GuideAnts AI images plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$Owner'." -ForegroundColor Green
-}
+$aiVariants = ($targets | ForEach-Object { $_.Variant }) -join ', '
+Write-Host "Done. Pushed local GuideAnts AI images ($aiVariants) plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$Owner'." -ForegroundColor Green

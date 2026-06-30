@@ -73,6 +73,17 @@ export function useProjectFilesPolling({
             fetchProjectFiles(newController.signal);
         }, pollInterval);
 
+        // Listen for manual refresh requests (e.g. after mounted file rename)
+        const handleRefreshEvent = () => {
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+            }
+            const refreshController = new AbortController();
+            abortControllerRef.current = refreshController;
+            fetchProjectFiles(refreshController.signal);
+        };
+        window.addEventListener('refresh-project-files', handleRefreshEvent);
+
         // Cleanup function
         return () => {
             if (intervalRef.current) {
@@ -83,6 +94,7 @@ export function useProjectFilesPolling({
                 abortControllerRef.current.abort();
                 abortControllerRef.current = null;
             }
+            window.removeEventListener('refresh-project-files', handleRefreshEvent);
         };
     }, [enabled, projectId, pollInterval, fetchProjectFiles]);
 

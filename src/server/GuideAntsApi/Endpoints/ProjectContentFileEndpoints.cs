@@ -56,6 +56,61 @@ public static class ProjectContentFileEndpoints
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status401Unauthorized);
 
+        // Get mounted file details by path
+        group.MapGet("/mounted/details", async (Guid projectId, string path, IProjectFolderService folderService) =>
+        {
+            var details = await folderService.GetMountedFileDetailsAsync(projectId, path);
+            if (details == null)
+                return Results.NotFound();
+            return Results.Ok(details);
+        })
+        .WithName("GetMountedFileDetails")
+        .Produces<ContentFileDetailsDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized);
+
+        // Get mounted file content by path
+        group.MapGet("/mounted/content", async (Guid projectId, string path, IProjectFolderService folderService) =>
+        {
+            var result = await folderService.GetMountedFileContentAsync(projectId, path);
+            if (result == null)
+                return Results.NotFound();
+            return Results.File(result.Value.Stream, result.Value.ContentType, result.Value.FileName);
+        })
+        .WithName("GetMountedFileContent")
+        .Produces(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized);
+
+        // Save mounted file content by path (host write-back)
+        group.MapPut("/mounted/content", async (Guid projectId, string path, HttpContext context, IProjectFolderService folderService) =>
+        {
+            var saved = await folderService.SaveMountedFileContentAsync(projectId, path, context.Request.Body);
+            if (!saved)
+                return Results.NotFound();
+            return Results.NoContent();
+        })
+        .WithName("SaveMountedFileContent")
+        .RequireAuthorization("RequireContributor")
+        .DisableAntiforgery()
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized);
+
+        // Rename a mounted file or folder on the host
+        group.MapPatch("/mounted/rename", async (Guid projectId, string path, [FromBody] RenameMountedEntryDto dto, IProjectFolderService folderService) =>
+        {
+            var success = await folderService.RenameMountedEntryAsync(projectId, path, dto.NewName);
+            if (!success)
+                return Results.NotFound();
+            return Results.NoContent();
+        })
+        .WithName("RenameMountedEntry")
+        .RequireAuthorization("RequireContributor")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status401Unauthorized);
+
         // Upload a file
         group.MapPost("/", async (
             Guid projectId,

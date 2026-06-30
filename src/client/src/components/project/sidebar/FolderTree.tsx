@@ -107,7 +107,7 @@ function ProjectFileItem({
   return (
     <div
       key={file.id}
-      draggable={!disabled}
+      draggable={!disabled && editingFileId !== file.id}
       tabIndex={isFocused ? 0 : -1}
       ref={el => {
         // Only apply focus if explicitly requested via keyboard navigation
@@ -117,7 +117,7 @@ function ProjectFileItem({
           context.focusIntentRef.current = false;
         }
       }}
-      onDragStart={(e) => onFileDragStart(e, file)}
+      onDragStart={(e) => { if (editingFileId === file.id) { e.preventDefault(); return; } onFileDragStart(e, file); }}
       onDragEnd={onFileDragEnd}
       onContextMenu={(e) => onFileContextMenu(e, file)}
       className={`
@@ -140,7 +140,7 @@ function ProjectFileItem({
         }
       }}
       onDoubleClick={() => {
-        if (!disabled && !isMobile) onFileSelect?.(file.id);
+        if (!disabled && !isMobile && editingFileId !== file.id) onFileSelect?.(file.id);
       }}
       onKeyDown={(e) => {
         if (disabled) return;
@@ -241,6 +241,7 @@ interface FolderNodeProps {
     onShowApplyCommand?: (mountId: string) => void;
     onShowRemoveCommand?: (mountId: string) => void;
     onCheckMappedFolders?: (mountId: string) => void;
+    parentInsideMount?: boolean;
 }
 
 const FolderNode: React.FC<FolderNodeProps> = ({
@@ -275,8 +276,10 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     onShowApplyCommand,
     onShowRemoveCommand,
     onCheckMappedFolders,
+    parentInsideMount = false,
 }) => {
     const { showToast } = useToast();
+    const insideMount = parentInsideMount || !!folder.isHostMount || !!folder.isLinked;
     const context = useContext(FolderTreeContext);
     
     // Helper function to check if a folder has matching descendants
@@ -419,10 +422,16 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     }, [context?.renamingId, folder.id, localFiles, handleStartRename, context]);
 
     const handleSaveRename = useCallback(async () => {
-        if (editName.trim() && editName !== folder.name && folder.id) {
+        if (editName.trim() && editName !== folder.name) {
             try {
-                await onRenameFolder?.(folder.id, editName.trim());
-                setIsEditing(false);
+                if (insideMount && folder.relativePath) {
+                    setIsEditing(false);
+                    await api.projects.renameMountedByPath(projectId, folder.relativePath, editName.trim());
+                    try { window.dispatchEvent(new Event('refresh-project-files')); } catch {}
+                } else if (folder.id) {
+                    await onRenameFolder?.(folder.id, editName.trim());
+                    setIsEditing(false);
+                }
             } catch (error) {
                 console.error('Failed to rename folder:', error);
                 showToast({ type: 'error', title: 'Failed to rename folder', message: 'Please try again.' });
@@ -431,7 +440,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
             setIsEditing(false);
             setEditName(folder.name);
         }
-    }, [editName, folder.name, folder.id, onRenameFolder]);
+    }, [editName, folder.name, folder.id, folder.relativePath, onRenameFolder, insideMount, projectId]);
 
     const handleCancelRename = useCallback(() => {
         setIsEditing(false);
@@ -647,7 +656,9 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         setMdEditorError(undefined);
         setMdEditorLoading(true);
         try {
-            const result = await api.projects.getContentFileContent(projectId, selectedContextFile.id, selectedContextFile.latestVersion);
+            const result = insideMount
+                ? await api.projects.getMountedContentByPath(projectId, selectedContextFile.relativePath)
+                : await api.projects.getContentFileContent(projectId, selectedContextFile.id, selectedContextFile.latestVersion);
             const text = await result.blob.text();
             setMdEditorContent(text);
             setIsMdEditorOpen(true);
@@ -656,7 +667,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         } finally {
             setMdEditorLoading(false);
         }
-    }, [selectedContextFile, projectId]);
+    }, [selectedContextFile, projectId, insideMount]);
 
     const handleNewMarkdownFile = useCallback(async () => {
         setShowContextMenu(false);
@@ -725,26 +736,30 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         setMdEditorLoading(true);
         setMdEditorError(undefined);
         try {
-            let folderIdForUpload: string | undefined = undefined;
-            let fileNameForUpload: string = '';
-            if (isCreatingMd) {
-                folderIdForUpload = creatingMdFolderId;
-                fileNameForUpload = creatingMdFileName;
-            } else if (selectedContextFile) {
-                folderIdForUpload = selectedContextFile.folderId || undefined;
-                fileNameForUpload = selectedContextFile.fileName;
+            if (insideMount && !isCreatingMd && selectedContextFile) {
+                await api.projects.saveMountedByPath(projectId, selectedContextFile.relativePath, newContent);
             } else {
-                throw new Error('No target file specified');
-            }
-            const markdownFile = new File([newContent], fileNameForUpload, { type: 'text/markdown' });
-            const uploadResults = await api.projects.uploadFiles(projectId, [markdownFile], folderIdForUpload);
-            const newVersion = uploadResults[0]?.latestVersion;
-            if (newVersion !== undefined && selectedContextFile) {
-                setSelectedContextFile(prev => prev ? { ...prev, latestVersion: newVersion } : null);
-                setLocalFiles(prev => prev.map(f => 
-                    f.id === selectedContextFile.id ? { ...f, latestVersion: newVersion } : f
-                ));
-                onFileContentChanged?.(selectedContextFile.id, newVersion);
+                let folderIdForUpload: string | undefined = undefined;
+                let fileNameForUpload: string = '';
+                if (isCreatingMd) {
+                    folderIdForUpload = creatingMdFolderId;
+                    fileNameForUpload = creatingMdFileName;
+                } else if (selectedContextFile) {
+                    folderIdForUpload = selectedContextFile.folderId || undefined;
+                    fileNameForUpload = selectedContextFile.fileName;
+                } else {
+                    throw new Error('No target file specified');
+                }
+                const markdownFile = new File([newContent], fileNameForUpload, { type: 'text/markdown' });
+                const uploadResults = await api.projects.uploadFiles(projectId, [markdownFile], folderIdForUpload);
+                const newVersion = uploadResults[0]?.latestVersion;
+                if (newVersion !== undefined && selectedContextFile) {
+                    setSelectedContextFile(prev => prev ? { ...prev, latestVersion: newVersion } : null);
+                    setLocalFiles(prev => prev.map(f =>
+                        f.id === selectedContextFile.id ? { ...f, latestVersion: newVersion } : f
+                    ));
+                    onFileContentChanged?.(selectedContextFile.id, newVersion);
+                }
             }
             setIsMdEditorOpen(false);
             setIsCreatingMd(false);
@@ -755,7 +770,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         } finally {
             setMdEditorLoading(false);
         }
-    }, [projectId, isCreatingMd, creatingMdFolderId, creatingMdFileName, selectedContextFile]);
+    }, [projectId, isCreatingMd, creatingMdFolderId, creatingMdFileName, selectedContextFile, insideMount]);
 
     const handleDownloadSelectedFile = useCallback(async () => {
         if (!selectedContextFile) {
@@ -763,7 +778,9 @@ const FolderNode: React.FC<FolderNodeProps> = ({
             return;
         }
         try {
-            const result = await api.projects.getContentFileContent(projectId, selectedContextFile.id);
+            const result = insideMount
+                ? await api.projects.getMountedContentByPath(projectId, selectedContextFile.relativePath)
+                : await api.projects.getContentFileContent(projectId, selectedContextFile.id);
             const url = window.URL.createObjectURL(result.blob);
             const anchor = document.createElement('a');
             anchor.href = url;
@@ -780,7 +797,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
         } finally {
             setShowFileContextMenu(false);
         }
-    }, [selectedContextFile, projectId]);
+    }, [selectedContextFile, projectId, insideMount]);
 
     const handleCreateNotebookFromFile = useCallback(() => {
         if (selectedContextFile && onCreateNotebookFromFile) {
@@ -798,13 +815,21 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     }, [selectedContextFile]);
 
     const handleSaveFileRename = useCallback(async (fileId: string) => {
+        if (!editingFileId) return;
         const file = localFiles.find(f => f.id === fileId);
         if (editingFileName.trim() && file && editingFileName !== file.fileName) {
             try {
-                await onRenameFile?.(fileId, editingFileName.trim());
-                setEditingFileId(null);
-                setEditingFileName('');
-                setLocalFiles(prev => prev.map(f => f.id === fileId ? { ...f, fileName: editingFileName.trim() } : f));
+                if (insideMount) {
+                    setEditingFileId(null);
+                    setEditingFileName('');
+                    await api.projects.renameMountedByPath(projectId, file.relativePath, editingFileName.trim());
+                    try { window.dispatchEvent(new Event('refresh-project-files')); } catch {}
+                } else {
+                    await onRenameFile?.(fileId, editingFileName.trim());
+                    setEditingFileId(null);
+                    setEditingFileName('');
+                    setLocalFiles(prev => prev.map(f => f.id === fileId ? { ...f, fileName: editingFileName.trim() } : f));
+                }
             } catch (error) {
                 console.error('Failed to rename file:', error);
                 showToast({ type: 'error', title: 'Failed to rename file', message: 'Please try again.' });
@@ -813,7 +838,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
             setEditingFileId(null);
             setEditingFileName('');
         }
-    }, [editingFileName, localFiles, onRenameFile]);
+    }, [editingFileId, editingFileName, localFiles, onRenameFile, insideMount, projectId]);
 
     const handleCancelFileRename = useCallback(() => {
         setEditingFileId(null);
@@ -821,8 +846,14 @@ const FolderNode: React.FC<FolderNodeProps> = ({
     }, []);
 
     const handleFileRenameKeyDown = useCallback((e: React.KeyboardEvent, fileId: string) => {
-        if (e.key === 'Enter') handleSaveFileRename(fileId);
-        else if (e.key === 'Escape') handleCancelFileRename();
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleSaveFileRename(fileId);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            handleCancelFileRename();
+        }
     }, [handleSaveFileRename, handleCancelFileRename]);
 
     const handleToggleHomePage = useCallback(() => {
@@ -848,7 +879,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                     }`}
                     style={{ paddingLeft: `${paddingLeft}px` }}
                     onClick={(e) => {
-                        if (!disabled) {
+                        if (!disabled && !isEditing) {
                             // On mobile: single tap toggles expansion
                             // On desktop: single click selects folder
                             if (context?.isMobile) {
@@ -860,7 +891,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                         }
                     }}
                     onDoubleClick={(e) => {
-                        if (!disabled && !context?.isMobile) {
+                        if (!disabled && !context?.isMobile && !isEditing) {
                             handleFolderClick();
                             handleToggleExpand(e);
                         }
@@ -942,6 +973,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                                 onShowApplyCommand={onShowApplyCommand}
                                 onShowRemoveCommand={onShowRemoveCommand}
                                 onCheckMappedFolders={onCheckMappedFolders}
+                                parentInsideMount={insideMount}
                             />
                         ))}
                         {isCreatingSubfolder && !disabled && (
@@ -982,7 +1014,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                             {onCheckMappedFolders && <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={() => { setShowContextMenu(false); onCheckMappedFolders(folder.mountId!); }}>Check mapped folders</button>}
                         </>
                     ) : folder.isLinked ? (
-                        <span className="block px-4 py-2 text-xs text-gray-400">Read-only (host mount)</span>
+                        <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleStartRename}>Rename</button>
                     ) : (
                         <>
                             <button className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100" onClick={handleNewMarkdownFile}>New Markdown File</button>
@@ -1003,12 +1035,12 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                     {context?.multiSelect.selectedCount && context.multiSelect.selectedCount > 1 ? (
                         <>
                             {/* Multi-select context menu */}
-                            {onCreateNotebookFromFiles && (
+                            {!insideMount && onCreateNotebookFromFiles && (
                                 <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => {
                                     if (!context) return;
                                     const selectedItems = context.multiSelect.getSelectedItems();
                                     const files = selectedItems.filter(i => i.type === 'file').map(i => ({ id: i.id, fileName: (i.data as ProjectContentFile).fileName }));
-                                    
+
                                     if (files.length > 0) {
                                         onCreateNotebookFromFiles(files);
                                     }
@@ -1021,12 +1053,14 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                                 if (!context) return;
                                 const selectedItems = context.multiSelect.getSelectedItems();
                                 setShowFileContextMenu(false);
-                                
+
                                 for (const item of selectedItems) {
                                     if (item.type === 'file') {
                                         const file = item.data as ProjectContentFile;
                                         try {
-                                            const result = await api.projects.getContentFileContent(projectId, file.id);
+                                            const result = insideMount
+                                                ? await api.projects.getMountedContentByPath(projectId, file.relativePath)
+                                                : await api.projects.getContentFileContent(projectId, file.id);
                                             const url = window.URL.createObjectURL(result.blob);
                                             const anchor = document.createElement('a');
                                             anchor.href = url;
@@ -1046,12 +1080,19 @@ const FolderNode: React.FC<FolderNodeProps> = ({
                             }}>
                                 Download {context.multiSelect.selectedCount} Items
                             </button>
-                            <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap text-red-600" onClick={() => {
+                            {!insideMount && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap text-red-600" onClick={() => {
                                 setShowFileContextMenu(false);
                                 setShowBatchDeleteConfirm(true);
                             }}>
                                 Delete {context.multiSelect.selectedCount} Items
-                            </button>
+                            </button>}
+                        </>
+                    ) : insideMount ? (
+                        <>
+                            {selectedContextFile && isMarkdownFileName(selectedContextFile.fileName, selectedContextFile.contentType) && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={openMarkdownEditor}>Edit</button>}
+                            {onFileSelect && selectedContextFile && <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={() => { onFileSelect(selectedContextFile.id); setShowFileContextMenu(false); }}>Preview</button>}
+                            <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleStartFileRename}>Rename</button>
+                            <button className="block w-full text-left px-4 py-1.5 text-sm hover:bg-gray-100 cursor-pointer whitespace-nowrap" onClick={handleDownloadSelectedFile}>Download</button>
                         </>
                     ) : (
                         <>
