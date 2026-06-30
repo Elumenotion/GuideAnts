@@ -74,4 +74,20 @@ fi
 [ "$GA_LLAMA_JINJA" = "1" ]       && ARGS="$ARGS --jinja"
 [ "$GA_LLAMA_CONT_BATCH" = "1" ]  && ARGS="$ARGS --cont-batching"
 [ "$GA_LLAMA_NO_MMAP" = "1" ]     && ARGS="$ARGS --no-mmap"
+# Global runtime knobs that intentionally DO propagate from the router base
+# preset into every spawned child instance (unlike ctx-size/cache-ram, which
+# are left per-alias). --flash-attn takes a literal value (on|off|auto);
+# cache-type-v quantization requires flash attention to be enabled. The
+# image-min-tokens knob only affects vision (mmproj) models.
+[ -n "$GA_LLAMA_FLASH_ATTN" ]     && ARGS="$ARGS --flash-attn $GA_LLAMA_FLASH_ATTN"
+[ -n "$GA_LLAMA_CACHE_TYPE_K" ]   && ARGS="$ARGS --cache-type-k $GA_LLAMA_CACHE_TYPE_K"
+[ -n "$GA_LLAMA_CACHE_TYPE_V" ]   && ARGS="$ARGS --cache-type-v $GA_LLAMA_CACHE_TYPE_V"
+[ -n "$GA_LLAMA_IMAGE_MIN_TOKENS" ] && ARGS="$ARGS --image-min-tokens $GA_LLAMA_IMAGE_MIN_TOKENS"
+# --tensor-split sets the per-GPU layer proportion (comma list, e.g. "7,1").
+# Indices follow this process's visible-device order: with
+# GA_LLAMA_CUDA_VISIBLE_DEVICES=1,0 the FIRST proportion targets physical GPU 1
+# (5090) and the second targets physical GPU 0 (4090), so a larger first value
+# biases layers onto the 5090. Empty => llama.cpp's default free-VRAM heuristic
+# (which mis-splits here because the 4090 is shared with asr/tts/emb/sd).
+[ -n "$GA_LLAMA_TENSOR_SPLIT" ]   && ARGS="$ARGS --tensor-split $GA_LLAMA_TENSOR_SPLIT"
 exec /app/llama-server $ARGS

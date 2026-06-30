@@ -74,6 +74,17 @@ services:
       - GA_LLAMA_JINJA=1
       - GA_LLAMA_CONT_BATCH=1
       - GA_LLAMA_NO_MMAP=0
+      # Global router knobs (propagate to every spawned child instance).
+      # q8_0 KV cache halves KV VRAM with ~no quality loss on 20B+ models;
+      # cache-type-v quantization requires flash attention to be enabled.
+      - GA_LLAMA_FLASH_ATTN=on
+      - GA_LLAMA_CACHE_TYPE_K=q8_0
+      - GA_LLAMA_CACHE_TYPE_V=q8_0
+      # Qwen-VL grounding accuracy requires >=1024 image tokens.
+      - GA_LLAMA_IMAGE_MIN_TOKENS=1024
+      # Per-GPU layer split (comma list, e.g. "7,1"). Hardware-specific, so it is
+      # sourced from .env; empty falls back to llama.cpp's free-VRAM heuristic.
+      - GA_LLAMA_TENSOR_SPLIT=${GA_LLAMA_TENSOR_SPLIT:-}
       - GA_LLAMA_CUDA_VISIBLE_DEVICES=${GA_LLAMA_CUDA_VISIBLE_DEVICES:-}
       - GA_ASR_HOST=127.0.0.1
       - GA_ASR_PORT=8082

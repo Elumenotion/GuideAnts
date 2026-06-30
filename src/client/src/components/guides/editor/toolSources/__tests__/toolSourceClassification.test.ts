@@ -33,17 +33,24 @@ describe('toolSourceClassification', () => {
     expect(CONNECTOR_KEY_LABELS['local-function']).toBe('Local tool host');
   });
 
-  it('classifies mcp-bridge client URLs as mcp-connection', () => {
-    expect(classifySchemeFromServerUrl('client://mcp-bridge-server1')).toBe('mcp-connection');
-    expect(extractConnectorKeyFromServerUrl('client://mcp-bridge-server1')).toBe('server1');
+  it('classifies mcp+api URLs as mcp-connection', () => {
+    expect(classifySchemeFromServerUrl('mcp+api://server1')).toBe('mcp-connection');
+    expect(extractConnectorKeyFromServerUrl('mcp+api://server1')).toBe('server1');
+    expect(classifySchemeFromServerUrl('mcp+sandbox://pkg1')).toBe('mcp-connection');
+    expect(extractConnectorKeyFromServerUrl('mcp+sandbox://pkg1')).toBe('pkg1');
   });
 
   it('classifies MCP from descriptor metadata', () => {
     const spec = JSON.stringify({
-      servers: [{ url: 'client://mcp-bridge-x' }],
-      'x-guideants-tool-source': { kind: 'mcp', transport: 'streamable_http', bridgeId: 'x' },
+      servers: [{ url: 'mcp+api://x' }],
+      'x-guideants-tool-source': {
+        kind: 'mcp',
+        runtimeExecution: 'api',
+        discoveryTransport: 'streamable_http',
+        bridgeId: 'x',
+      },
     });
-    expect(classifyToolSourceFromSpec(spec, 'client://mcp-bridge-x')).toBe('mcp-connection');
+    expect(classifyToolSourceFromSpec(spec, 'mcp+api://x')).toBe('mcp-connection');
   });
 
   it('returns unknown for missing or invalid URL', () => {

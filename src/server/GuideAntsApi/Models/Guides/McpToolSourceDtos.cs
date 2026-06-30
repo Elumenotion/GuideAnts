@@ -3,11 +3,14 @@ using System.Text.Json;
 namespace GuideAntsApi.Models.Guides;
 
 public record McpToolSourceConnectionDto(
-    string Transport,
+    string RuntimeExecution,
+    string DiscoveryTransport,
     string? Url,
     string? BridgeId,
     Dictionary<string, string>? Headers,
-    string? ToolNamePrefix
+    string? ToolNamePrefix,
+    McpPackageDescriptorDto? Package = null,
+    List<McpEnvironmentVariableRefDto>? EnvironmentVariables = null
 );
 
 public record McpExistingToolStateDto(

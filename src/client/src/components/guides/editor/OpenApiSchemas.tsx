@@ -18,9 +18,12 @@ import { McpConnectionPanel } from './toolSources/McpConnectionPanel';
 import { validateOpenApiSpec } from './toolSources/validation';
 import {
   buildToolSourceCardViewModel,
+  mcpMigrationNoticeClassName,
+  mcpRuntimeSubBadgeClassName,
   sourceKindBadgeClassName,
   statusChipClassName,
 } from './toolSources/toolSourceCardViewModel';
+import { validateMcpToolNamePrefixCollision, parseMcpToolSourceMetadata } from './toolSources/mcpToolSource';
 import { AddToolSourcePicker } from './toolSources/AddToolSourcePicker';
 import type { DraftSourceKind } from './toolSources/openApiDescriptorBuilder';
 import {
@@ -34,6 +37,8 @@ import { buildFragmentJsonFromModel } from './toolSources/operationFragmentBuild
 interface OpenApiSchemasProps {
   customTools: CustomToolDto[];
   environmentVariables: EnvironmentVariableDto[];
+  projectId?: string;
+  guideId?: string;
   onCustomToolsChange: (tools: CustomToolDto[]) => void;
   onEnvironmentVariablesChange: (variables: EnvironmentVariableDto[]) => void;
   onValidationChange?: (hasErrors: boolean) => void;
@@ -43,6 +48,8 @@ interface OpenApiSchemasProps {
 export function OpenApiSchemas({
   customTools,
   environmentVariables,
+  projectId,
+  guideId,
   onCustomToolsChange,
   onEnvironmentVariablesChange,
   onValidationChange,
@@ -62,9 +69,14 @@ export function OpenApiSchemas({
 
   // Notify parent of validation state changes
   useEffect(() => {
-    const hasErrors = Object.keys(jsonErrors).length > 0;
-    onValidationChange?.(hasErrors);
-  }, [jsonErrors, onValidationChange]);
+    const hasJsonErrors = Object.keys(jsonErrors).length > 0;
+    const hasPrefixCollisions = customTools.some((tool, index) => {
+      const meta = parseMcpToolSourceMetadata(tool.openApiSpec);
+      if (!meta) return false;
+      return Boolean(validateMcpToolNamePrefixCollision(customTools, index, meta.toolNamePrefix ?? 'mcp'));
+    });
+    onValidationChange?.(hasJsonErrors || hasPrefixCollisions);
+  }, [customTools, jsonErrors, onValidationChange]);
 
   // Auto-expand if there's only one connector
   useEffect(() => {
@@ -535,8 +547,22 @@ export function OpenApiSchemas({
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${sourceKindBadgeClassName(cardVm.sourceKind)}`}
                         >
-                          {cardVm.sourceKindLabel}
+                          {cardVm.sourceKind === 'mcp-connection' ? 'MCP' : cardVm.sourceKindLabel}
                         </span>
+                        {cardVm.mcpRuntimeSubBadge && (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${mcpRuntimeSubBadgeClassName()}`}
+                          >
+                            {cardVm.mcpRuntimeSubBadge}
+                          </span>
+                        )}
+                        {cardVm.showMcpMigrationNotice && (
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${mcpMigrationNoticeClassName()}`}
+                          >
+                            Migrated to API
+                          </span>
+                        )}
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${statusChipClassName(cardVm.status)}`}
                         >
@@ -549,7 +575,12 @@ export function OpenApiSchemas({
                         )}
                       </div>
                       <div className="text-xs text-gray-500 mt-0.5">
-                        {cardVm.connectorKeyLabel}: {cardVm.connectorKeyValue}
+                        {cardVm.sourceKind === 'mcp-connection'
+                          ? cardVm.mcpRuntimeSubBadge === 'Sandbox'
+                            ? 'MCP package'
+                            : 'MCP server'
+                          : cardVm.connectorKeyLabel}
+                        : {cardVm.mcpConnectorKeyValue ?? cardVm.connectorKeyValue}
                         {' · '}
                         {cardVm.operationCount} operation{cardVm.operationCount === 1 ? '' : 's'}
                       </div>
@@ -612,11 +643,15 @@ export function OpenApiSchemas({
                        {cardVm.sourceKind === 'mcp-connection' && (
                          <McpConnectionPanel
                            tool={tool}
+                           toolIndex={index}
+                           allTools={customTools}
+                           projectId={projectId}
+                           guideId={guideId}
                            environmentVariables={environmentVariables}
                            onEnvironmentVariablesChange={onEnvironmentVariablesChange}
                            onUpdate={(updates) => handleUpdate(index, updates)}
                            onDirty={onDirtyChange}
-                           inputRef={(el) => { connectionInputRefs.current[`${index}-mcp-bridge-id`] = el; }}
+                           inputRef={(el) => { connectionInputRefs.current[`${index}-mcp-dispatch-id`] = el; }}
                          />
                        )}
                        {cardVm.sourceKind === 'client-actions' && (

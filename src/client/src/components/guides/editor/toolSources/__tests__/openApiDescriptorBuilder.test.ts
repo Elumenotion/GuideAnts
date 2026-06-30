@@ -34,9 +34,10 @@ describe('openApiDescriptorBuilder', () => {
 
   it('generates MCP connection descriptor snapshot', () => {
     const spec = JSON.parse(buildEmptyOpenApiDescriptor('mcp-connection'));
-    expect(spec.servers[0].url).toMatch(/^client:\/\/mcp-bridge-/);
+    expect(spec.servers[0].url).toMatch(/^mcp\+api:\/\//);
     expect(spec['x-guideants-tool-source'].kind).toBe('mcp');
-    expect(spec['x-guideants-tool-source'].transport).toBe('streamable_http');
+    expect(spec['x-guideants-tool-source'].runtimeExecution).toBe('api');
+    expect(spec['x-guideants-tool-source'].discoveryTransport).toBe('streamable_http');
   });
 
   it('marks raw OpenAPI as custom descriptor', () => {

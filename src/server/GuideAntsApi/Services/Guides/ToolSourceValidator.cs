@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using AntRunner.ToolCalling.AssistantDefinitions;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Models.Guides;
+using GuideAntsApi.Services.Mcp;
 
 namespace GuideAntsApi.Services.Guides;
 
@@ -12,10 +13,16 @@ namespace GuideAntsApi.Services.Guides;
 /// </summary>
 public static class ToolSourceValidator
 {
-    private static readonly HashSet<string> SupportedMcpTransports = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> SupportedDiscoveryTransports = new(StringComparer.Ordinal)
     {
-        "streamable_http",
-        "client_bridge",
+        McpDiscoveryTransport.StreamableHttp,
+        McpDiscoveryTransport.Stdio,
+    };
+
+    private static readonly HashSet<string> SupportedRuntimeExecutions = new(StringComparer.Ordinal)
+    {
+        McpRuntimeExecution.Api,
+        McpRuntimeExecution.SandboxSubprocess,
     };
 
     private static readonly JsonSerializerOptions JsonIndentedOptions = new()
@@ -180,6 +187,16 @@ public static class ToolSourceValidator
         return messages;
     }
 
+    public static string NormalizeDescriptor(string openApiSpecJson)
+    {
+        if (McpDescriptorMigrator.NeedsMigration(openApiSpecJson))
+        {
+            return McpDescriptorMigrator.Migrate(openApiSpecJson);
+        }
+
+        return openApiSpecJson;
+    }
+
     public static void EnsurePublishableOrThrow(string openApiSpecJson, string toolName)
     {
         var messages = ValidateDescriptor(openApiSpecJson, publishChecks: true);
@@ -191,6 +208,102 @@ public static class ToolSourceValidator
 
         var summary = string.Join("; ", blocking.Select(m => m.Message));
         throw new InvalidOperationException($"Tool source '{toolName}' failed validation: {summary}");
+    }
+
+    public static List<ToolSourceValidationMessageDto> ValidateMcpAssistantConstraints(
+        IReadOnlyList<(string ToolName, string OpenApiSpecJson)> customTools)
+    {
+        var messages = new List<ToolSourceValidationMessageDto>();
+        if (customTools.Count == 0)
+        {
+            return messages;
+        }
+
+        var schemaNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var toolNamePrefixes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (toolName, openApiSpecJson) in customTools)
+        {
+            if (string.IsNullOrWhiteSpace(toolName))
+            {
+                continue;
+            }
+
+            if (schemaNames.TryGetValue(toolName, out var firstSchema))
+            {
+                messages.Add(Error(
+                    "duplicate_schema_name",
+                    $"Schema name '{toolName}' is already used by source '{firstSchema}'.",
+                    "customTools.name"));
+            }
+            else
+            {
+                schemaNames[toolName] = toolName;
+            }
+
+            if (!TryReadMcpToolNamePrefix(openApiSpecJson, out var prefix))
+            {
+                continue;
+            }
+
+            if (toolNamePrefixes.TryGetValue(prefix, out var firstPrefixSource))
+            {
+                messages.Add(Error(
+                    "duplicate_mcp_tool_name_prefix",
+                    $"toolNamePrefix '{prefix}' is already used by source '{firstPrefixSource}'.",
+                    "openApiSpec.x-guideants-tool-source.toolNamePrefix"));
+            }
+            else
+            {
+                toolNamePrefixes[prefix] = toolName;
+            }
+        }
+
+        return messages;
+    }
+
+    public static void EnsureMcpAssistantConstraintsOrThrow(
+        IReadOnlyList<(string ToolName, string OpenApiSpecJson)> customTools)
+    {
+        var messages = ValidateMcpAssistantConstraints(customTools);
+        var blocking = messages.Where(m => string.Equals(m.Severity, "error", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (blocking.Count == 0)
+        {
+            return;
+        }
+
+        var summary = string.Join("; ", blocking.Select(m => m.Message));
+        throw new InvalidOperationException($"MCP tool source constraints failed: {summary}");
+    }
+
+    private static bool TryReadMcpToolNamePrefix(string openApiSpecJson, out string prefix)
+    {
+        prefix = "mcp";
+        try
+        {
+            using var doc = JsonDocument.Parse(openApiSpecJson);
+            if (!doc.RootElement.TryGetProperty("x-guideants-tool-source", out var meta)
+                || meta.ValueKind != JsonValueKind.Object
+                || !meta.TryGetProperty("kind", out var kindEl)
+                || kindEl.ValueKind != JsonValueKind.String
+                || !string.Equals(kindEl.GetString(), "mcp", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (meta.TryGetProperty("toolNamePrefix", out var prefixEl)
+                && prefixEl.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(prefixEl.GetString()))
+            {
+                prefix = prefixEl.GetString()!;
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static string BuildSingleOperationOpenApiSpec(
@@ -365,11 +478,12 @@ public static class ToolSourceValidator
 
         ValidateMcpMetadata(root, serverUrl, messages, publishChecks: true);
 
-        if (TryGetUriScheme(serverUrl) == "mcp")
+        var scheme = TryGetUriScheme(serverUrl);
+        if (scheme is "mcp" or "client")
         {
             messages.Add(Error(
                 "unsupported_mcp_scheme",
-                "MCP tool sources must route through client://mcp-bridge-{id} (client-bridge-first). mcp:// is not supported.",
+                "MCP tool sources must use mcp+api://{bridgeId} or mcp+sandbox://{bridgeId} as servers[0].url.",
                 "openApiSpec.servers[0].url"));
         }
     }
@@ -399,26 +513,85 @@ public static class ToolSourceValidator
                 "openApiSpec.x-guideants-tool-source.kind"));
         }
 
-        if (!meta.TryGetProperty("transport", out var transportEl) || transportEl.ValueKind != JsonValueKind.String)
+        if (meta.TryGetProperty("transport", out _))
         {
             messages.Add(Error(
-                "missing_mcp_transport",
-                "x-guideants-tool-source.transport is required for MCP connections.",
+                "legacy_mcp_transport",
+                "Legacy x-guideants-tool-source.transport is not supported. Use runtimeExecution and discoveryTransport.",
                 "openApiSpec.x-guideants-tool-source.transport"));
             return;
         }
 
-        var transport = transportEl.GetString()!;
-        if (!SupportedMcpTransports.Contains(transport))
+        if (!meta.TryGetProperty("runtimeExecution", out var runtimeEl)
+            || runtimeEl.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(runtimeEl.GetString()))
         {
             messages.Add(Error(
-                "unsupported_mcp_transport",
-                $"MCP transport '{transport}' is not supported. Allowed transports: streamable_http, client_bridge.",
-                "openApiSpec.x-guideants-tool-source.transport"));
+                "missing_mcp_runtime_execution",
+                "x-guideants-tool-source.runtimeExecution is required for MCP connections.",
+                "openApiSpec.x-guideants-tool-source.runtimeExecution"));
             return;
         }
 
-        if (publishChecks && string.Equals(transport, "streamable_http", StringComparison.Ordinal))
+        var runtimeExecution = runtimeEl.GetString()!;
+        if (!SupportedRuntimeExecutions.Contains(runtimeExecution))
+        {
+            messages.Add(Error(
+                "unsupported_mcp_runtime_execution",
+                $"MCP runtimeExecution '{runtimeExecution}' is not supported. Allowed values: api, sandbox_subprocess.",
+                "openApiSpec.x-guideants-tool-source.runtimeExecution"));
+            return;
+        }
+
+        if (!meta.TryGetProperty("discoveryTransport", out var transportEl)
+            || transportEl.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(transportEl.GetString()))
+        {
+            messages.Add(Error(
+                "missing_mcp_discovery_transport",
+                "x-guideants-tool-source.discoveryTransport is required for MCP connections.",
+                "openApiSpec.x-guideants-tool-source.discoveryTransport"));
+            return;
+        }
+
+        var discoveryTransport = transportEl.GetString()!;
+        if (!SupportedDiscoveryTransports.Contains(discoveryTransport))
+        {
+            messages.Add(Error(
+                "unsupported_mcp_discovery_transport",
+                $"MCP discoveryTransport '{discoveryTransport}' is not supported. Allowed values: streamable_http, stdio.",
+                "openApiSpec.x-guideants-tool-source.discoveryTransport"));
+            return;
+        }
+
+        ValidateRuntimeExecutionTransportPair(runtimeExecution, discoveryTransport, messages);
+        ValidateMcpSchemeConsistency(serverUrl, runtimeExecution, messages);
+
+        var bridgeFromMeta = meta.TryGetProperty("bridgeId", out var bridgeEl) && bridgeEl.ValueKind == JsonValueKind.String
+            ? bridgeEl.GetString()
+            : null;
+        var bridgeFromUrl = ExtractMcpBridgeIdFromServerUrl(serverUrl);
+
+        if (string.IsNullOrWhiteSpace(bridgeFromMeta) && string.IsNullOrWhiteSpace(bridgeFromUrl))
+        {
+            messages.Add(Error(
+                "missing_mcp_bridge_id",
+                "MCP connections require x-guideants-tool-source.bridgeId and a matching mcp+api:// or mcp+sandbox:// server URL.",
+                "openApiSpec.x-guideants-tool-source.bridgeId"));
+        }
+        else if (!string.IsNullOrWhiteSpace(bridgeFromMeta)
+                 && !string.IsNullOrWhiteSpace(bridgeFromUrl)
+                 && !string.Equals(bridgeFromMeta, bridgeFromUrl, StringComparison.Ordinal))
+        {
+            messages.Add(Error(
+                "mcp_bridge_id_mismatch",
+                "x-guideants-tool-source.bridgeId must match the bridge id in servers[0].url.",
+                "openApiSpec.x-guideants-tool-source.bridgeId"));
+        }
+
+        if (publishChecks
+            && string.Equals(runtimeExecution, McpRuntimeExecution.Api, StringComparison.Ordinal)
+            && string.Equals(discoveryTransport, McpDiscoveryTransport.StreamableHttp, StringComparison.Ordinal))
         {
             if (!meta.TryGetProperty("url", out var urlEl)
                 || urlEl.ValueKind != JsonValueKind.String
@@ -439,31 +612,52 @@ public static class ToolSourceValidator
             }
         }
 
-        if (string.Equals(transport, "client_bridge", StringComparison.Ordinal))
+        if (publishChecks
+            && string.Equals(runtimeExecution, McpRuntimeExecution.SandboxSubprocess, StringComparison.Ordinal))
         {
-            var bridgeFromMeta = meta.TryGetProperty("bridgeId", out var bridgeEl) && bridgeEl.ValueKind == JsonValueKind.String
-                ? bridgeEl.GetString()
-                : null;
-            var bridgeFromUrl = ExtractMcpBridgeId(serverUrl);
-
-            if (string.IsNullOrWhiteSpace(bridgeFromMeta) && string.IsNullOrWhiteSpace(bridgeFromUrl))
+            if (!meta.TryGetProperty("package", out var packageEl) || packageEl.ValueKind != JsonValueKind.Object)
             {
                 messages.Add(Error(
-                    "missing_mcp_bridge_id",
-                    "Client bridge MCP connections require x-guideants-tool-source.bridgeId or client://mcp-bridge-{id} server URL.",
-                    "openApiSpec.x-guideants-tool-source.bridgeId"));
+                    "missing_mcp_package",
+                    "Sandbox subprocess MCP connections require x-guideants-tool-source.package for publish.",
+                    "openApiSpec.x-guideants-tool-source.package"));
             }
         }
+    }
 
-        if (publishChecks
-            && string.Equals(transport, "client_bridge", StringComparison.Ordinal)
-            && TryGetUriScheme(serverUrl) == "client"
-            && serverUrl is not null
-            && !serverUrl.Contains("mcp-bridge-", StringComparison.Ordinal))
+    private static void ValidateRuntimeExecutionTransportPair(
+        string runtimeExecution,
+        string discoveryTransport,
+        List<ToolSourceValidationMessageDto> messages)
+    {
+        var expectedTransport = string.Equals(runtimeExecution, McpRuntimeExecution.SandboxSubprocess, StringComparison.Ordinal)
+            ? McpDiscoveryTransport.Stdio
+            : McpDiscoveryTransport.StreamableHttp;
+
+        if (!string.Equals(discoveryTransport, expectedTransport, StringComparison.Ordinal))
         {
             messages.Add(Error(
-                "mcp_client_bridge_url_mismatch",
-                "Client bridge MCP descriptors must use client://mcp-bridge-{id} as servers[0].url.",
+                "mcp_runtime_transport_mismatch",
+                $"runtimeExecution '{runtimeExecution}' requires discoveryTransport '{expectedTransport}'.",
+                "openApiSpec.x-guideants-tool-source.discoveryTransport"));
+        }
+    }
+
+    private static void ValidateMcpSchemeConsistency(
+        string? serverUrl,
+        string runtimeExecution,
+        List<ToolSourceValidationMessageDto> messages)
+    {
+        var scheme = TryGetUriScheme(serverUrl);
+        var expectedScheme = string.Equals(runtimeExecution, McpRuntimeExecution.SandboxSubprocess, StringComparison.Ordinal)
+            ? "mcp+sandbox"
+            : "mcp+api";
+
+        if (scheme is not null && !string.Equals(scheme, expectedScheme, StringComparison.Ordinal))
+        {
+            messages.Add(Error(
+                "mcp_runtime_scheme_mismatch",
+                $"runtimeExecution '{runtimeExecution}' requires servers[0].url scheme '{expectedScheme}://'.",
                 "openApiSpec.servers[0].url"));
         }
     }
@@ -504,7 +698,7 @@ public static class ToolSourceValidator
     {
         if (sourceKind == "mcp-connection")
         {
-            return "ClientHandled";
+            return ResolveMcpActionType(openApiSpecJson);
         }
 
         var serverUrl = TryExtractServerUrl(openApiSpecJson);
@@ -516,6 +710,32 @@ public static class ToolSourceValidator
             "tool" => "LocalFunction",
             _ => "WebApi",
         };
+    }
+
+    private static string ResolveMcpActionType(string openApiSpecJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(openApiSpecJson);
+            if (doc.RootElement.TryGetProperty("x-guideants-tool-source", out var meta)
+                && meta.TryGetProperty("runtimeExecution", out var runtimeEl)
+                && runtimeEl.ValueKind == JsonValueKind.String)
+            {
+                return runtimeEl.GetString() switch
+                {
+                    McpRuntimeExecution.SandboxSubprocess => "McpSandbox",
+                    McpRuntimeExecution.Api => "McpApi",
+                    _ => "McpApi",
+                };
+            }
+
+            var serverUrl = TryExtractServerUrl(openApiSpecJson);
+            return TryGetUriScheme(serverUrl) == "mcp+sandbox" ? "McpSandbox" : "McpApi";
+        }
+        catch
+        {
+            return "McpApi";
+        }
     }
 
     private static string? TryGetDeclaredSourceKind(JsonElement root)
@@ -547,11 +767,10 @@ public static class ToolSourceValidator
         return scheme switch
         {
             "http" or "https" => "web-api",
-            "client" when serverUrl?.Contains("mcp-bridge-", StringComparison.Ordinal) == true => "mcp-connection",
             "client" => "client-actions",
             "sandbox" => "sandbox-module",
             "tool" => "local-function",
-            "mcp" => "mcp-connection",
+            "mcp" or "mcp+api" or "mcp+sandbox" => "mcp-connection",
             _ => "unknown",
         };
     }
@@ -619,15 +838,18 @@ public static class ToolSourceValidator
     private static string? ExtractUriHost(string? serverUrl) =>
         Uri.TryCreate(serverUrl, UriKind.Absolute, out var uri) ? uri.Host : null;
 
-    private static string? ExtractMcpBridgeId(string? serverUrl)
+    private static string? ExtractMcpBridgeIdFromServerUrl(string? serverUrl)
     {
-        var host = ExtractUriHost(serverUrl);
-        if (host is null || !host.StartsWith("mcp-bridge-", StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(serverUrl) || !Uri.TryCreate(serverUrl, UriKind.Absolute, out var uri))
         {
             return null;
         }
 
-        return host["mcp-bridge-".Length..];
+        return uri.Scheme switch
+        {
+            "mcp+api" or "mcp+sandbox" or "mcp" => string.IsNullOrWhiteSpace(uri.Host) ? null : uri.Host,
+            _ => null,
+        };
     }
 
     private static Dictionary<string, object>? ExtractResponseSchemaView(ToolDefinition toolDef)

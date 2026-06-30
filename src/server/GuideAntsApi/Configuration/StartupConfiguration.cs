@@ -428,6 +428,13 @@ public static class StartupConfiguration
         services.AddScoped<McpPublishedRunImageEmbedder>();
         services.AddScoped<IClaudeSkillPackService, ClaudeSkillPackService>();
         services.AddScoped<IMcpToolSourceDiscoveryService, McpToolSourceDiscoveryService>();
+        services.Configure<McpToolExecutorOptions>(
+            configuration.GetSection(McpToolExecutorOptions.SectionName));
+        services.AddScoped<McpSandboxAdminApiClient>();
+        services.AddScoped<IMcpSandboxSetupStagingService, McpSandboxSetupStagingService>();
+        services.AddScoped<IMcpSandboxPublishGateService, McpSandboxPublishGateService>();
+        services.AddScoped<McpSandboxExecutor>();
+        services.AddScoped<IMcpToolExecutor, McpToolExecutor>();
         services.AddMcpServer()
             .WithHttpTransport(options =>
             {

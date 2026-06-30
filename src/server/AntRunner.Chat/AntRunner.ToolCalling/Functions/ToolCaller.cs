@@ -34,7 +34,17 @@ namespace AntRunner.ToolCalling.Functions
         /// Represents a sandbox-handled action (Python script executed in sandboxed Docker environment).
         /// The initialization script filename is specified in the OpenAPI server URL (e.g., sandbox://init.py).
         /// </summary>
-        SandboxHandled
+        SandboxHandled,
+
+        /// <summary>
+        /// Represents a server-side MCP tool call over streamable HTTP (mcp+api://).
+        /// </summary>
+        McpApi,
+
+        /// <summary>
+        /// Represents a server-side MCP tool call via sandbox subprocess (mcp+sandbox://).
+        /// </summary>
+        McpSandbox
     }
 
     /// <summary>
@@ -228,6 +238,8 @@ namespace AntRunner.ToolCalling.Functions
                 if (string.Equals(scheme, "client", StringComparison.InvariantCultureIgnoreCase)) return ActionType.ClientHandled;
                 if (string.Equals(scheme, "tool", StringComparison.InvariantCultureIgnoreCase)) return ActionType.LocalFunction;
                 if (string.Equals(scheme, "sandbox", StringComparison.InvariantCultureIgnoreCase)) return ActionType.SandboxHandled;
+                if (string.Equals(scheme, "mcp+api", StringComparison.InvariantCultureIgnoreCase)) return ActionType.McpApi;
+                if (string.Equals(scheme, "mcp+sandbox", StringComparison.InvariantCultureIgnoreCase)) return ActionType.McpSandbox;
                 return ActionType.WebApi;
             }
         }

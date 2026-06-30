@@ -12,6 +12,11 @@ internal static class WireConversationExecutor
 {
 internal const string DefaultConversationTitle = "New Conversation";
 
+    internal sealed record WireConversationStreamHandle(
+        Guid ConversationId,
+        bool CreatedConversation,
+        IAsyncEnumerable<StreamingEvent> Events);
+
     internal sealed record WireConversationResult(
         Guid ConversationId,
         string Text,
@@ -23,9 +28,8 @@ internal const string DefaultConversationTitle = "New Conversation";
         Guid? AssistantMessageId,
         IReadOnlyList<ChatToolCall> ExternalToolCalls);
 
-internal static async Task<WireConversationResult> ExecuteConversationAsync(
+internal static async Task<WireConversationStreamHandle> StartConversationStreamAsync(
     IPublishedConversationService publishedConversationService,
-    ApplicationDbContext db,
     PublishedApiExecutionContext context,
     string instructions,
     CancellationToken ct,
@@ -53,10 +57,50 @@ internal static async Task<WireConversationResult> ExecuteConversationAsync(
         context.InternalUserId,
         ct);
 
-    var result = await CollectWireConversationResultAsync(stream, db, conversationId, ct);
-    if (createdConversation)
+    return new WireConversationStreamHandle(conversationId, createdConversation, stream);
+}
+
+internal static WireConversationStreamHandle StartResumeConversationStream(
+    IPublishedConversationService publishedConversationService,
+    PublishedApiExecutionContext context,
+    Guid conversationId,
+    IReadOnlyList<ChatToolDefinition>? clientToolDefinitions,
+    CancellationToken ct)
+{
+    var stream = publishedConversationService.ResumeAfterExternalToolResultsStreamAsync(
+        conversationId,
+        context.PubId.ToString(),
+        context.ExternalUserIdentity,
+        context.InternalUserId,
+        clientToolDefinitions,
+        ct);
+
+    return new WireConversationStreamHandle(conversationId, CreatedConversation: false, stream);
+}
+
+internal static async Task<WireConversationResult> ExecuteConversationAsync(
+    IPublishedConversationService publishedConversationService,
+    ApplicationDbContext db,
+    PublishedApiExecutionContext context,
+    string instructions,
+    CancellationToken ct,
+    Guid? existingConversationId = null,
+    IReadOnlyList<ChatMessage>? clientMessages = null,
+    IReadOnlyList<ChatToolDefinition>? clientToolDefinitions = null)
+{
+    var streamHandle = await StartConversationStreamAsync(
+        publishedConversationService,
+        context,
+        instructions,
+        ct,
+        existingConversationId,
+        clientMessages,
+        clientToolDefinitions);
+
+    var result = await CollectWireConversationResultAsync(streamHandle.Events, db, streamHandle.ConversationId, ct);
+    if (streamHandle.CreatedConversation)
     {
-        await TryGenerateWireConversationTitleAsync(db, conversationId, ct);
+        await TryGenerateWireConversationTitleAsync(db, streamHandle.ConversationId, ct);
     }
 
     return result;
@@ -70,15 +114,14 @@ internal static async Task<WireConversationResult> ResumeConversationAfterToolRe
     IReadOnlyList<ChatToolDefinition>? clientToolDefinitions,
     CancellationToken ct)
 {
-    var stream = publishedConversationService.ResumeAfterExternalToolResultsStreamAsync(
+    var streamHandle = StartResumeConversationStream(
+        publishedConversationService,
+        context,
         conversationId,
-        context.PubId.ToString(),
-        context.ExternalUserIdentity,
-        context.InternalUserId,
         clientToolDefinitions,
-        cancellationToken: ct);
+        ct);
 
-    return await CollectWireConversationResultAsync(stream, db, conversationId, ct);
+    return await CollectWireConversationResultAsync(streamHandle.Events, db, conversationId, ct);
 }
 
 internal static async Task<WireConversationResult> CollectWireConversationResultAsync(
@@ -133,7 +176,7 @@ internal static async Task<WireConversationResult> CollectWireConversationResult
         else if (string.Equals(ev.EventType, StreamingEventTypes.Token, StringComparison.Ordinal))
         {
             var delta = WireStreamPayloadReader.ReadContentDeltaPayload(ev.Payload);
-            if (!string.IsNullOrWhiteSpace(delta) && assistantText.Length == 0)
+            if (!string.IsNullOrWhiteSpace(delta))
             {
                 assistantText.Append(delta);
             }

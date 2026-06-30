@@ -1,21 +1,40 @@
-export type McpTransport = 'streamable_http' | 'client_bridge';
+export type McpRuntimeExecution = 'api' | 'sandbox_subprocess';
+
+export type McpDiscoveryTransport = 'streamable_http' | 'stdio';
 
 export type McpConnectionPanelState =
   | 'idle'
   | 'testing'
   | 'connected'
   | 'discovering'
-  | 'discovery-failed';
+  | 'discovery-failed'
+  | 'applying'
+  | 'apply-failed';
 
 export type McpToolDiffState = 'added' | 'changed' | 'removed' | 'disabled' | 'unchanged';
 
+export interface McpPackageDescriptor {
+  registryType: string;
+  identifier: string;
+  command: string;
+  args?: string[];
+}
+
+export interface McpEnvironmentVariableRef {
+  name: string;
+  secretRef: string;
+}
+
 export interface McpToolSourceMetadata {
   kind: 'mcp';
-  transport: McpTransport;
+  runtimeExecution: McpRuntimeExecution;
+  discoveryTransport: McpDiscoveryTransport;
   url?: string;
   bridgeId?: string;
   toolNamePrefix?: string;
   headers?: Record<string, string>;
+  package?: McpPackageDescriptor;
+  environmentVariables?: McpEnvironmentVariableRef[];
 }
 
 export interface McpToolOperationMetadata {
@@ -26,11 +45,14 @@ export interface McpToolOperationMetadata {
 }
 
 export interface McpConnectionSettings {
-  transport: McpTransport;
+  runtimeExecution: McpRuntimeExecution;
+  discoveryTransport: McpDiscoveryTransport;
   url: string;
   bridgeId: string;
   toolNamePrefix: string;
   headers: Record<string, string>;
+  package?: McpPackageDescriptor;
+  environmentVariables?: McpEnvironmentVariableRef[];
 }
 
 export interface McpHeaderRow {
@@ -73,4 +95,10 @@ export interface McpTestConnectionResponse {
   message: string;
   serverName?: string;
   serverVersion?: string;
+}
+
+export function defaultDiscoveryTransport(
+  runtimeExecution: McpRuntimeExecution
+): McpDiscoveryTransport {
+  return runtimeExecution === 'sandbox_subprocess' ? 'stdio' : 'streamable_http';
 }
