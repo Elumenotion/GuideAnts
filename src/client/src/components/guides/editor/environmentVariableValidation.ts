@@ -4,6 +4,13 @@ export const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const RESERVED_NAMES = new Set([
   'PATH',
   'HOME',
+  'XDG_CACHE_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'NPM_CONFIG_CACHE',
+  'npm_config_cache',
+  'UV_CACHE_DIR',
+  'PIP_CACHE_DIR',
   'USER',
   'USERNAME',
   'SHELL',

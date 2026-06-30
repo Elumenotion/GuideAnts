@@ -10,10 +10,12 @@ namespace GuideAntsApi.Tests.Services.Mcp;
 public sealed class McpOpenApiDescriptorGeneratorTests
 {
     [TestMethod]
-    public void BuildBridgeServerUrl_UsesClientBridgePrefix()
+    public void BuildMcpServerUrl_UsesLockedSchemes()
     {
-        McpOpenApiDescriptorGenerator.BuildBridgeServerUrl("my-server")
-            .Should().Be("client://mcp-bridge-my-server");
+        McpOpenApiDescriptorGenerator.BuildMcpServerUrl("my-server", McpRuntimeExecution.Api)
+            .Should().Be("mcp+api://my-server");
+        McpOpenApiDescriptorGenerator.BuildMcpServerUrl("my-server", McpRuntimeExecution.SandboxSubprocess)
+            .Should().Be("mcp+sandbox://my-server");
     }
 
     [TestMethod]
@@ -60,102 +62,96 @@ public sealed class McpOpenApiDescriptorGeneratorTests
 [TestClass]
 public sealed class McpToolSourceDiscoveryServiceTests
 {
-    private readonly McpToolSourceDiscoveryService _service = new(NullLogger<McpToolSourceDiscoveryService>.Instance);
+    private readonly McpToolSourceDiscoveryService _service = new(
+        new NoOpSandboxStdioDiscoveryClient(),
+        NullLogger<McpToolSourceDiscoveryService>.Instance);
+
+    private static McpToolSourceConnectionDto ApiConnection(
+        string bridgeId = "worm-bridge",
+        string url = "https://mcp.example.com/mcp") =>
+        new(
+            McpRuntimeExecution.Api,
+            McpDiscoveryTransport.StreamableHttp,
+            url,
+            bridgeId,
+            null,
+            "mcp");
+
+    private static McpToolSourceConnectionDto SandboxConnection() =>
+        new(
+            McpRuntimeExecution.SandboxSubprocess,
+            McpDiscoveryTransport.Stdio,
+            null,
+            "worm-bridge",
+            null,
+            "mcp",
+            new McpPackageDescriptorDto("npm", "@example/mcp", "npx", ["-y", "@example/mcp"]));
 
     [TestMethod]
-    public async Task TestConnection_ClientBridge_ValidatesBridgeId()
+    public async Task TestConnection_Api_RejectsMissingBridgeId()
     {
         var result = await _service.TestConnectionAsync(new McpTestConnectionRequest(
-            new McpToolSourceConnectionDto("client_bridge", null, "worm-bridge", null, null)));
-
-        result.Connected.Should().BeTrue();
-        result.Message.Should().Contain("Client bridge");
-    }
-
-    [TestMethod]
-    public async Task TestConnection_ClientBridge_RejectsMissingBridgeId()
-    {
-        var result = await _service.TestConnectionAsync(new McpTestConnectionRequest(
-            new McpToolSourceConnectionDto("client_bridge", null, null, null, null)));
+            ApiConnection(bridgeId: "")));
 
         result.Connected.Should().BeFalse();
     }
 
     [TestMethod]
-    public async Task TestConnection_StreamableHttp_RejectsInvalidUrl()
+    public async Task TestConnection_Api_RejectsInvalidUrl()
     {
         var result = await _service.TestConnectionAsync(new McpTestConnectionRequest(
-            new McpToolSourceConnectionDto("streamable_http", "not-a-url", null, null, null)));
+            ApiConnection(url: "not-a-url")));
 
         result.Connected.Should().BeFalse();
     }
 
     [TestMethod]
-    public async Task DiscoverTools_ClientBridge_RequiresBridgeToolsPayload()
+    public async Task TestConnection_SandboxSubprocess_RequiresGuideScope()
+    {
+        var result = await _service.TestConnectionAsync(new McpTestConnectionRequest(
+            SandboxConnection()));
+
+        result.Connected.Should().BeFalse();
+        result.Message.Should().Contain("projectId");
+    }
+
+    [TestMethod]
+    public async Task DiscoverTools_SandboxSubprocess_RequiresGuideScope()
     {
         var result = await _service.DiscoverToolsAsync(new McpDiscoverToolsRequest(
-            new McpToolSourceConnectionDto("client_bridge", null, "worm-bridge", null, "mcp"),
+            SandboxConnection(),
             null,
             null));
 
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("client host");
+        result.Message.Should().Contain("projectId");
     }
 
     [TestMethod]
-    public async Task DiscoverTools_ClientBridge_ConvertsBridgeToolsWithStableIds()
+    public async Task DiscoverTools_Rejects_runtime_transport_mismatch()
     {
-        using var schema = JsonDocument.Parse("""{"type":"object","properties":{"query":{"type":"string"}}}""");
-        var request = new McpDiscoverToolsRequest(
-            new McpToolSourceConnectionDto("client_bridge", null, "worm-bridge", null, "mcp"),
+        var result = await _service.DiscoverToolsAsync(new McpDiscoverToolsRequest(
+            new McpToolSourceConnectionDto(
+                McpRuntimeExecution.Api,
+                McpDiscoveryTransport.Stdio,
+                "https://mcp.example.com",
+                "worm-bridge",
+                null,
+                "mcp"),
             null,
-            [
-                new McpBridgeToolInputDto("search", "Search", "Search files", schema.RootElement),
-            ]);
+            null));
 
-        var first = await _service.DiscoverToolsAsync(request);
-        first.Success.Should().BeTrue();
-        first.Tools.Should().ContainSingle();
-        first.Tools[0].BackingToolId.Should().Be("search");
-        first.Tools[0].OperationId.Should().Be("mcp_search");
-        first.Diff.Added.Should().Be(1);
-
-        var second = await _service.DiscoverToolsAsync(request with
-        {
-            ExistingTools =
-            [
-                new McpExistingToolStateDto("search", first.Tools[0].SchemaHash, true, "mcp_search"),
-            ],
-        });
-
-        second.Success.Should().BeTrue();
-        second.Tools[0].DiffState.Should().Be("unchanged");
-        second.Tools[0].OperationId.Should().Be("mcp_search");
-        second.Diff.Added.Should().Be(0);
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("discoveryTransport");
     }
 
-    [TestMethod]
-    public async Task DiscoverTools_ClientBridge_DetectsChangedAndRemovedTools()
+    private sealed class NoOpSandboxStdioDiscoveryClient : IMcpSandboxStdioDiscoveryClient
     {
-        using var oldSchema = JsonDocument.Parse("""{"type":"object","properties":{"q":{"type":"string"}}}""");
-        using var newSchema = JsonDocument.Parse("""{"type":"object","properties":{"q":{"type":"string"},"limit":{"type":"integer"}}}""");
-
-        var existingHash = McpOpenApiDescriptorGenerator.ComputeSchemaHash(oldSchema.RootElement);
-
-        var refresh = await _service.DiscoverToolsAsync(new McpDiscoverToolsRequest(
-            new McpToolSourceConnectionDto("client_bridge", null, "worm-bridge", null, null),
-            [
-                new McpExistingToolStateDto("search", existingHash, true, "search"),
-                new McpExistingToolStateDto("delete", existingHash, true, "delete"),
-            ],
-            [
-                new McpBridgeToolInputDto("search", "Search", null, newSchema.RootElement),
-            ]));
-
-        refresh.Success.Should().BeTrue();
-        refresh.Diff.Changed.Should().Be(1);
-        refresh.Diff.Removed.Should().Be(1);
-        refresh.Tools.Should().Contain(t => t.BackingToolId == "search" && t.DiffState == "changed");
-        refresh.Tools.Should().Contain(t => t.BackingToolId == "delete" && t.DiffState == "removed");
+        public Task<McpStdioDiscoverResponse> DiscoverAsync(
+            Guid projectId,
+            Guid guideId,
+            McpToolSourceConnectionDto connection,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(McpStdioDiscoverResponse.Succeeded("test-server", "1.0.0", []));
     }
 }

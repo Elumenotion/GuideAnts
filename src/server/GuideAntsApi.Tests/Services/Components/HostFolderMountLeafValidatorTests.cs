@@ -13,7 +13,7 @@ public sealed class HostFolderMountLeafValidatorTests
 {
     private readonly HostFolderMountLeafValidator _validator = new();
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("")]
     [DataRow("   ")]
     public void ValidateFormat_RejectsEmpty(string leafName)
@@ -24,7 +24,7 @@ public sealed class HostFolderMountLeafValidatorTests
         result.ErrorCode.Should().Be("leaf_empty");
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(".")]
     [DataRow("..")]
     public void ValidateFormat_RejectsDotSegments(string leafName)
@@ -35,7 +35,7 @@ public sealed class HostFolderMountLeafValidatorTests
         result.ErrorCode.Should().Be("leaf_reserved_dot");
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("a/b")]
     [DataRow(@"a\b")]
     public void ValidateFormat_RejectsPathSeparators(string leafName)
@@ -55,7 +55,7 @@ public sealed class HostFolderMountLeafValidatorTests
         result.ErrorCode.Should().Be("leaf_null_char");
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(".guideants")]
     [DataRow("Output")]
     [DataRow("Runs")]

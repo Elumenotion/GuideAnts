@@ -201,7 +201,8 @@ export interface ToolDefinitionPreviewResult {
 }
 
 export type {
-  McpTransport,
+  McpRuntimeExecution,
+  McpDiscoveryTransport,
   McpConnectionPanelState,
   McpToolDiffState,
   McpToolSourceMetadata,
@@ -210,14 +211,19 @@ export type {
   McpDiscoverDiffSummary,
   McpDiscoverToolsResponse,
   McpTestConnectionResponse,
+  McpPackageDescriptor,
+  McpEnvironmentVariableRef,
 } from '../components/guides/editor/toolSources/mcpToolSourceTypes';
 
 export interface McpToolSourceConnectionDto {
-  transport: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpTransport;
+  runtimeExecution: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpRuntimeExecution;
+  discoveryTransport: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpDiscoveryTransport;
   url?: string;
   bridgeId?: string;
   headers?: Record<string, string>;
   toolNamePrefix?: string;
+  package?: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpPackageDescriptor;
+  environmentVariables?: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpEnvironmentVariableRef[];
 }
 
 export interface McpExistingToolStateDto {
@@ -229,6 +235,8 @@ export interface McpExistingToolStateDto {
 
 export interface McpTestConnectionRequest {
   connection: McpToolSourceConnectionDto;
+  projectId?: string;
+  guideId?: string;
 }
 
 export interface McpDiscoverToolsRequest {
@@ -240,6 +248,8 @@ export interface McpDiscoverToolsRequest {
     description?: string;
     inputSchema?: unknown;
   }>;
+  projectId?: string;
+  guideId?: string;
 }
 
 export interface OpenApiAuthConfig {

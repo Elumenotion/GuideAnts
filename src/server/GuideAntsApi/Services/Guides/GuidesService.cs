@@ -7,6 +7,7 @@ using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.EnvironmentVariables;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.Mcp;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Settings;
 using AntRunner.ToolCalling.Functions;
@@ -21,6 +22,7 @@ public class GuidesService(
     IRuntimeProfileResolver runtimeProfileResolver,
     IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions,
     ISystemGuideCatalogFilter systemGuideCatalogFilter,
+    IMcpSandboxSetupStagingService mcpSandboxSetupStagingService,
     ILogger<GuidesService> logger) : IGuidesService
 {
     private readonly ApplicationDbContext _context = context;
@@ -28,6 +30,7 @@ public class GuidesService(
     private readonly IRuntimeProfileResolver _runtimeProfileResolver = runtimeProfileResolver;
     private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptions = settingsSecretsOptions;
     private readonly ISystemGuideCatalogFilter _systemGuideCatalogFilter = systemGuideCatalogFilter;
+    private readonly IMcpSandboxSetupStagingService _mcpSandboxSetupStagingService = mcpSandboxSetupStagingService;
     private readonly ILogger<GuidesService> _logger = logger;
 
     private static readonly JsonSerializerOptions JsonCaseInsensitiveOptions = new()
@@ -312,6 +315,45 @@ public class GuidesService(
         return EnvironmentVariableConfigSerializer.DeserializeForClient(environmentJson);
     }
 
+    private async Task StageMcpSandboxSetupIfNeededAsync(
+        Guid? projectId,
+        Guid guideId,
+        IReadOnlyList<CustomToolDto>? customTools)
+    {
+        if (!projectId.HasValue || projectId.Value == Guid.Empty || customTools is null || customTools.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await _mcpSandboxSetupStagingService.StageGuideSandboxSetupAsync(
+                projectId.Value,
+                guideId,
+                customTools);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to stage sandbox MCP setup for guide {GuideId} in project {ProjectId}",
+                guideId,
+                projectId.Value);
+            throw new InvalidOperationException(
+                "Failed to stage sandbox MCP package setup. Ensure guideants-ai is reachable and try again.",
+                ex);
+        }
+    }
+
+    private static void ValidateMcpAssistantConstraints(IReadOnlyList<CustomToolDto> customTools)
+    {
+        ToolSourceValidator.EnsureMcpAssistantConstraintsOrThrow(
+            customTools
+                .Where(tool => !string.IsNullOrWhiteSpace(tool.Name) && !string.IsNullOrWhiteSpace(tool.OpenApiSpec))
+                .Select(tool => (tool.Name, tool.OpenApiSpec))
+                .ToList());
+    }
+
     private async Task SaveProjectEnvironmentAsync(
         Guid? projectId,
         Guid assistantId,
@@ -422,6 +464,7 @@ public class GuidesService(
         _context.Assistants.Add(guide);
         await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
+        await StageMcpSandboxSetupIfNeededAsync(dto.ProjectId, guide.Id, dto.CustomTools);
 
         // Create markdown shadows for vector store files
         var vectorStoreFiles = guide.Files.Where(f => f.FolderKind == "VectorStore").ToList();
@@ -514,6 +557,7 @@ public class GuidesService(
             : null;
         await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
+        await StageMcpSandboxSetupIfNeededAsync(dto.ProjectId, guide.Id, dto.CustomTools);
 
         return new GuideDto(
             guide.Id,
@@ -1373,6 +1417,8 @@ public class GuidesService(
                     $"Duplicate OpenAPI schema names are not allowed: {string.Join(", ", duplicateSchemaNames)}");
             }
 
+            ValidateMcpAssistantConstraints(customTools);
+
             foreach (var customTool in customTools)
             {
                 AssistantAuthProvider? authProvider = null;
@@ -1416,7 +1462,9 @@ public class GuidesService(
                 if (string.IsNullOrWhiteSpace(customTool.OpenApiSpec))
                     throw new ArgumentException($"OpenAPI specification is required for custom tool '{customTool.Name}'.");
 
-                ToolSourceValidator.EnsurePublishableOrThrow(customTool.OpenApiSpec, customTool.Name);
+                var normalizedOpenApiSpec = ToolSourceValidator.NormalizeDescriptor(customTool.OpenApiSpec);
+
+                ToolSourceValidator.EnsurePublishableOrThrow(normalizedOpenApiSpec, customTool.Name);
 
                 var schema = new AssistantOpenApiSchema
                 {
@@ -1424,7 +1472,7 @@ public class GuidesService(
                     AssistantId = assistant.Id,
                     Name = customTool.Name,
                     ApiHost = customTool.ApiHost,
-                    SpecificationJson = customTool.OpenApiSpec,
+                    SpecificationJson = normalizedOpenApiSpec,
                     AuthProvider = authProvider
                 };
 
@@ -1432,7 +1480,7 @@ public class GuidesService(
                 List<AssistantOpenApiOperation> operations;
                 try
                 {
-                    operations = ParseOpenApiOperations(schema.Id, customTool.OpenApiSpec, _logger);
+                    operations = ParseOpenApiOperations(schema.Id, normalizedOpenApiSpec, _logger);
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -1649,6 +1697,8 @@ public class GuidesService(
                 throw new InvalidOperationException(
                     $"Duplicate OpenAPI schema names are not allowed: {string.Join(", ", duplicateSchemaNames)}");
 
+            ValidateMcpAssistantConstraints(customTools);
+
             foreach (var tool in customTools)
             {
                 if (string.IsNullOrEmpty(tool.ApiHost))
@@ -1775,7 +1825,9 @@ public class GuidesService(
                 if (string.IsNullOrWhiteSpace(customTool.OpenApiSpec))
                     throw new ArgumentException($"OpenAPI specification is required for custom tool '{customTool.Name}'.");
 
-                ToolSourceValidator.EnsurePublishableOrThrow(customTool.OpenApiSpec, customTool.Name);
+                var normalizedOpenApiSpec = ToolSourceValidator.NormalizeDescriptor(customTool.OpenApiSpec);
+
+                ToolSourceValidator.EnsurePublishableOrThrow(normalizedOpenApiSpec, customTool.Name);
 
                 var schema = new AssistantOpenApiSchema
                 {
@@ -1783,7 +1835,7 @@ public class GuidesService(
                     AssistantId = assistantId,
                     Name = customTool.Name,
                     ApiHost = customTool.ApiHost,
-                    SpecificationJson = customTool.OpenApiSpec,
+                    SpecificationJson = normalizedOpenApiSpec,
                     AuthProvider = authProvider
                 };
 
@@ -1793,7 +1845,7 @@ public class GuidesService(
                 List<AssistantOpenApiOperation> operations;
                 try
                 {
-                    operations = ParseOpenApiOperations(schema.Id, customTool.OpenApiSpec, _logger);
+                    operations = ParseOpenApiOperations(schema.Id, normalizedOpenApiSpec, _logger);
                 }
                 catch (InvalidOperationException ex)
                 {

@@ -39,7 +39,7 @@ const OPTIONS: PickerOption[] = [
   {
     kind: 'mcp-connection',
     label: 'MCP Connection',
-    description: 'Connect to an MCP server, discover tools, and expose them via client bridge.',
+    description: 'Connect to an MCP server or registry package; tools execute server-side.',
     icon: <FaNetworkWired className="w-5 h-5 text-teal-600" />,
   },
   {

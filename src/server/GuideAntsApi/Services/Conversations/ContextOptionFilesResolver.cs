@@ -1,3 +1,4 @@
+using GuideAntsApi.BackgroundJobs.Sync;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using Microsoft.EntityFrameworkCore;
@@ -24,7 +25,9 @@ internal static class ContextOptionFilesResolver
 
         foreach (var notebookRootPath in notebookRootPaths)
         {
-            if (IsInResourcesFolder(notebookRootPath) || IsInGuideantsFolder(notebookRootPath))
+            if (IsInResourcesFolder(notebookRootPath)
+                || IsInGuideantsFolder(notebookRootPath)
+                || NotebookArtifactPathExclusions.IsExcludedRelativePath(notebookRootPath))
             {
                 continue;
             }
@@ -123,6 +126,11 @@ internal static class ContextOptionFilesResolver
             }
 
             var notebookPath = $"{mountNotebookRelativePath}/{fileName}".Replace('\\', '/');
+            if (NotebookArtifactPathExclusions.IsExcludedRelativePath(notebookPath))
+            {
+                continue;
+            }
+
             paths.Add(ToCwdRelativePath(notebookPath, isPublished));
         }
 
@@ -135,6 +143,11 @@ internal static class ContextOptionFilesResolver
             }
 
             var notebookPath = $"{mountNotebookRelativePath}/{directoryName}/".Replace('\\', '/');
+            if (NotebookArtifactPathExclusions.IsExcludedRelativePath(notebookPath.TrimEnd('/')))
+            {
+                continue;
+            }
+
             paths.Add(ToCwdRelativePath(notebookPath.TrimEnd('/'), isPublished) + "/");
         }
     }

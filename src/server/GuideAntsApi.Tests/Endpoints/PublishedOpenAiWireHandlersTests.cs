@@ -119,6 +119,112 @@ public sealed class PublishedOpenAiWireHandlersTests
     }
 
     [TestMethod]
+    public async Task PostChatCompletionsAsync_Stream_emits_incremental_token_chunks()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId));
+        var conversationService = new Mock<IPublishedConversationService>();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        conversationService
+            .Setup(s => s.CreateConversationAsync(
+                notebookId,
+                It.Is<string>(title => title == "New Conversation")))
+            .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(
+                new StreamingEvent(StreamingEventTypes.Token, "{\"contentDelta\":\"Hel\"}"),
+                new StreamingEvent(StreamingEventTypes.Token, "{\"contentDelta\":\"lo\"}"),
+                new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")));
+
+        using var db = CreateDbContext();
+        var http = new DefaultHttpContext();
+        var request = new OpenAiChatCompletionsRequest
+        {
+            Model = "guide",
+            Stream = true,
+            Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello\"}]")
+        };
+
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        CountContentChunks(executed.Body).Should().BeGreaterThanOrEqualTo(2);
+        executed.Body.Should().Contain("\"finish_reason\":\"stop\"");
+        executed.Body.Should().Contain("data: [DONE]");
+    }
+
+    [TestMethod]
+    public async Task PostChatCompletionsAsync_Stream_false_folds_same_token_stream()
+    {
+        var pubId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var resolver = new StubResolver(CreateExecutionContext(pubId, notebookId: notebookId));
+        var conversationService = new Mock<IPublishedConversationService>();
+        var conversationId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        var streamEvents = new[]
+        {
+            new StreamingEvent(StreamingEventTypes.Token, "{\"contentDelta\":\"Hel\"}"),
+            new StreamingEvent(StreamingEventTypes.Token, "{\"contentDelta\":\"lo\"}"),
+            new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":3,\"completion_tokens\":2}")
+        };
+
+        conversationService
+            .Setup(s => s.CreateConversationAsync(
+                notebookId,
+                It.Is<string>(title => title == "New Conversation")))
+            .ReturnsAsync(new NotebookConversationListDto(conversationId, "wire-conversation", now, now));
+        conversationService
+            .Setup(s => s.SendMessageStreamAsync(
+                conversationId,
+                It.IsAny<SendMessageRequest>(),
+                pubId.ToString(),
+                "user",
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamEvents(streamEvents));
+
+        using var db = CreateDbContext();
+        var http = new DefaultHttpContext();
+        var request = new OpenAiChatCompletionsRequest
+        {
+            Model = "guide",
+            Stream = false,
+            Messages = ParseJsonElement("[{\"role\":\"user\",\"content\":\"hello\"}]")
+        };
+
+        var result = await PublishedOpenAiChatWireHandler.PostChatCompletionsAsync(
+            http,
+            pubId,
+            request,
+            resolver,
+            conversationService.Object,
+            db);
+        var executed = await ExecuteResultAsync(result);
+
+        executed.StatusCode.Should().Be(StatusCodes.Status200OK);
+        using var json = JsonDocument.Parse(executed.Body);
+        var content = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+        content.Should().Be("Hello");
+    }
+
+    [TestMethod]
     public async Task PostChatCompletionsAsync_Rewrites_published_links_with_request_origin()
     {
         var pubId = Guid.NewGuid();
@@ -435,8 +541,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 It.Is<SendMessageRequest>(r =>
                     r.ClientToolDefinitions != null &&
                     r.ClientToolDefinitions.Count == 1 &&
-                    r.ClientToolDefinitions[0].Function != null &&
-                    r.ClientToolDefinitions[0].Function.Name == "run_shell"),
+                    r.ClientToolDefinitions[0].Function!.Name == "run_shell"),
                 pubId.ToString(),
                 "user",
                 null,
@@ -582,8 +687,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 It.Is<IReadOnlyList<AntRunner.Chat.Abstractions.ChatToolDefinition>?>(tools =>
                     tools != null &&
                     tools.Count == 1 &&
-                    tools[0].Function != null &&
-                    tools[0].Function.Name == "run_shell"),
+                    tools[0].Function!.Name == "run_shell"),
                 It.IsAny<CancellationToken>()))
             .Returns(StreamEvents(
                 new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"You are in D:/repos/GuideAnts\"}"),
@@ -693,8 +797,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 It.Is<SendMessageRequest>(r =>
                     r.ClientToolDefinitions != null &&
                     r.ClientToolDefinitions.Count == 1 &&
-                    r.ClientToolDefinitions[0].Function != null &&
-                    r.ClientToolDefinitions[0].Function.Name == "run_shell"),
+                    r.ClientToolDefinitions[0].Function!.Name == "run_shell"),
                 pubId.ToString(),
                 "user",
                 null,
@@ -837,8 +940,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 It.Is<IReadOnlyList<AntRunner.Chat.Abstractions.ChatToolDefinition>?>(tools =>
                     tools != null &&
                     tools.Count == 1 &&
-                    tools[0].Function != null &&
-                    tools[0].Function.Name == "run_shell"),
+                    tools[0].Function!.Name == "run_shell"),
                 It.IsAny<CancellationToken>()))
             .Returns(StreamEvents(
                 new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"You are in D:/repos/GuideAnts\"}"),
@@ -1317,8 +1419,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 It.Is<SendMessageRequest>(r =>
                     r.ClientToolDefinitions != null &&
                     r.ClientToolDefinitions.Count == 1 &&
-                    r.ClientToolDefinitions[0].Function != null &&
-                    r.ClientToolDefinitions[0].Function.Name == "run_shell"),
+                    r.ClientToolDefinitions[0].Function!.Name == "run_shell"),
                 pubId.ToString(),
                 "user",
                 null,
@@ -1461,8 +1562,7 @@ public sealed class PublishedOpenAiWireHandlersTests
                 It.Is<IReadOnlyList<AntRunner.Chat.Abstractions.ChatToolDefinition>?>(tools =>
                     tools != null &&
                     tools.Count == 1 &&
-                    tools[0].Function != null &&
-                    tools[0].Function.Name == "run_shell"),
+                    tools[0].Function!.Name == "run_shell"),
                 It.IsAny<CancellationToken>()))
             .Returns(StreamEvents(
                 new StreamingEvent(StreamingEventTypes.AssistantMessage, "{\"content\":\"You are in D:/repos/GuideAnts\"}"),
@@ -3663,6 +3763,38 @@ public sealed class PublishedOpenAiWireHandlersTests
             yield return ev;
             await Task.Yield();
         }
+    }
+
+    private static int CountContentChunks(string sseBody)
+    {
+        var count = 0;
+        foreach (var line in sseBody.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!line.StartsWith("data: ", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var json = line["data: ".Length..].Trim();
+            if (json == "[DONE]")
+            {
+                continue;
+            }
+
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
+            {
+                continue;
+            }
+
+            var delta = choices[0].GetProperty("delta");
+            if (delta.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private static async Task<(int StatusCode, string Body)> ExecuteResultAsync(IResult result)
