@@ -433,18 +433,18 @@ choose_backend() {
   local major
   if major="$(nvidia_driver_major)" && [[ "$major" =~ ^[0-9]+$ && "$major" -ge 580 ]]; then
     backend_keys+=("cuda13")
-    backend_labels+=("cuda13  Local AI on NVIDIA GPU (R${major} driver detected)")
+    backend_labels+=("cuda13  Local AI on NVIDIA GPU (R${major} driver detected, ~50 GB disk)")
   fi
   if [[ -e /dev/kfd ]] || { have rocminfo && rocminfo >/dev/null 2>&1; }; then
     backend_keys+=("rocm")
-    backend_labels+=("rocm    Local AI on AMD GPU (ROCm device detected)")
+    backend_labels+=("rocm    Local AI on AMD GPU (ROCm device detected, ~50 GB disk)")
   fi
   backend_keys+=("vulkan")
-  backend_labels+=("vulkan  Local AI on any GPU via Vulkan (NVIDIA/AMD/Intel)")
+  backend_labels+=("vulkan  Local AI on any GPU via Vulkan (NVIDIA/AMD/Intel, ~30 GB disk)")
   backend_keys+=("cpu")
-  backend_labels+=("cpu     Local AI, no GPU (slower, biggest download ~60 GB)")
+  backend_labels+=("cpu     Local AI, no GPU (slower, ~25 GB disk)")
   backend_keys+=("slim")
-  backend_labels+=("slim    No local model runtime; use cloud AI providers (lightest, ~15 GB)")
+  backend_labels+=("slim    No local model runtime; use cloud AI providers (lightest, ~20 GB disk)")
 
   local n=${#backend_keys[@]}
   printf '\n  Choose a backend:\n'

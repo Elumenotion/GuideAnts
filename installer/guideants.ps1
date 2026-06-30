@@ -815,19 +815,19 @@ function Choose-Backend {
     $major = Get-NvidiaDriverMajor
     if ($major -match '^[0-9]+$' -and [int]$major -ge 580) {
         $backendKeys.Add('cuda13') | Out-Null
-        $backendLabels.Add("cuda13  Local AI on NVIDIA GPU (R$major driver detected)") | Out-Null
+        $backendLabels.Add("cuda13  Local AI on NVIDIA GPU (R$major driver detected, ~50 GB disk)") | Out-Null
     }
     if (Test-AmdGpuDetected) {
         $backendKeys.Add('rocm') | Out-Null
-        $backendLabels.Add('rocm    Local AI on AMD GPU (ROCm device detected)') | Out-Null
+        $backendLabels.Add('rocm    Local AI on AMD GPU (ROCm device detected, ~50 GB disk)') | Out-Null
     }
 
     $backendKeys.Add('vulkan') | Out-Null
-    $backendLabels.Add('vulkan  Local AI on any GPU via Vulkan (NVIDIA/AMD/Intel)') | Out-Null
+    $backendLabels.Add('vulkan  Local AI on any GPU via Vulkan (NVIDIA/AMD/Intel, ~30 GB disk)') | Out-Null
     $backendKeys.Add('cpu') | Out-Null
-    $backendLabels.Add('cpu     Local AI, no GPU (slower, biggest download ~60 GB)') | Out-Null
+    $backendLabels.Add('cpu     Local AI, no GPU (slower, ~25 GB disk)') | Out-Null
     $backendKeys.Add('slim') | Out-Null
-    $backendLabels.Add('slim    No local model runtime; use cloud AI providers (lightest, ~15 GB)') | Out-Null
+    $backendLabels.Add('slim    No local model runtime; use cloud AI providers (lightest, ~20 GB disk)') | Out-Null
 
     Write-Host ''
     Write-Host '  Choose a backend:'
