@@ -1,14 +1,12 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Models;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Tests.BackgroundJobs;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;

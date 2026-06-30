@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Endpoints.PublishedWire;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Conversations;
@@ -86,6 +87,7 @@ public static class PublishedGuidesEndpoints
                 collapsible = publishedGuide.Collapsible,
                 showConversationStarters = publishedGuide.ShowConversationStarters,
                 showAttachments = publishedGuide.ShowAttachments,
+                showSpeechToText = publishedGuide.ShowSpeechToText,
                 mcpEnabled = publishedGuide.McpEnabled,
                 mcpEndpoint = publishedGuide.McpEnabled
                     ? $"/api/published/mcp?pubId={publishedGuide.Id}"
@@ -175,6 +177,7 @@ public static class PublishedGuidesEndpoints
                 collapsible = publishedGuide.Collapsible,
                 showConversationStarters = publishedGuide.ShowConversationStarters,
                 showAttachments = publishedGuide.ShowAttachments,
+                showSpeechToText = publishedGuide.ShowSpeechToText,
                 mcpEnabled = publishedGuide.McpEnabled,
                 mcpEndpoint = publishedGuide.McpEnabled
                     ? $"/api/published/mcp?pubId={publishedGuide.Id}"
@@ -279,43 +282,85 @@ public static class PublishedGuidesEndpoints
             };
 
             UsageResponse? usage = null;
-            JsonElement? externalToolCalls = null;
-            JsonElement? errorPayload = null;
-            var pendingClientTool = false;
 
             try
             {
-                await foreach (var ev in conversations.SendMessageStreamAsync(
-                                   conversation.Id,
-                                   messageRequest,
-                                   pubId.ToString(),
-                                   authResult.UserIdentity,
-                                   authResult.InternalUserId,
-                                   ctx.RequestAborted))
+                var stream = conversations.SendMessageStreamAsync(
+                    conversation.Id,
+                    messageRequest,
+                    pubId.ToString(),
+                    authResult.UserIdentity,
+                    authResult.InternalUserId,
+                    ctx.RequestAborted);
+
+                var result = await WireConversationExecutor.CollectWireConversationResultAsync(
+                    stream,
+                    db,
+                    conversation.Id,
+                    ctx.RequestAborted);
+
+                if (result.PendingClientTool)
                 {
-                    if (ev.EventType == StreamingEventTypes.ExternalToolCall)
-                    {
-                        externalToolCalls = TryParseJsonElement(ev.Payload);
-                        continue;
-                    }
-
-                    if (ev.EventType == StreamingEventTypes.PendingClientTool)
-                    {
-                        pendingClientTool = true;
-                        continue;
-                    }
-
-                    if (ev.EventType == StreamingEventTypes.Usage)
-                    {
-                        usage = TryParseUsage(ev.Payload);
-                        continue;
-                    }
-
-                    if (ev.EventType == StreamingEventTypes.Error)
-                    {
-                        errorPayload = TryParseJsonElement(ev.Payload);
-                    }
+                    return Results.Json(
+                        new
+                        {
+                            error = "pending_client_tool",
+                            conversationId = conversation.Id,
+                            toolCalls = result.ExternalToolCalls.Count > 0
+                                ? JsonSerializer.SerializeToElement(result.ExternalToolCalls, UsageJsonOptions)
+                                : (JsonElement?)null
+                        },
+                        statusCode: StatusCodes.Status409Conflict);
                 }
+
+                if (!string.IsNullOrWhiteSpace(result.ErrorPayload))
+                {
+                    JsonElement? errorDetails = TryParseJsonElement(result.ErrorPayload);
+                    return Results.Json(
+                        new { error = "invoke_failed", details = errorDetails },
+                        statusCode: StatusCodes.Status500InternalServerError);
+                }
+
+                if (result.PromptTokens > 0 || result.CompletionTokens > 0)
+                {
+                    usage = new UsageResponse
+                    {
+                        PromptTokens = (int)result.PromptTokens,
+                        CompletionTokens = (int)result.CompletionTokens,
+                        TotalTokens = (int)(result.PromptTokens + result.CompletionTokens)
+                    };
+                }
+
+                var assistantMessageId = result.AssistantMessageId;
+                var assistantContent = result.Text;
+                if (!assistantMessageId.HasValue || string.IsNullOrEmpty(assistantContent))
+                {
+                    var assistantMessage = await db.NotebookConversationMessages
+                        .AsNoTracking()
+                        .Where(m => m.NotebookConversationId == conversation.Id
+                                    && m.Role == ChatRole.Assistant
+                                    && m.IsStreaming != true)
+                        .OrderByDescending(m => m.TurnIndex)
+                        .ThenByDescending(m => m.MessageSequence)
+                        .Select(m => new { m.Id, m.Content })
+                        .FirstOrDefaultAsync();
+
+                    if (assistantMessage == null)
+                    {
+                        return Results.Json(
+                            new { error = "assistant_message_missing", conversationId = conversation.Id },
+                            statusCode: StatusCodes.Status500InternalServerError);
+                    }
+
+                    assistantMessageId = assistantMessage.Id;
+                    assistantContent = assistantMessage.Content;
+                }
+
+                return Results.Ok(new PublishedGuideInvokeResponse(
+                    conversation.Id,
+                    assistantMessageId.Value,
+                    assistantContent,
+                    usage));
             }
             catch (Exception ex)
             {
@@ -323,48 +368,6 @@ public static class PublishedGuidesEndpoints
                     new { error = "invoke_failed", message = ex.Message },
                     statusCode: StatusCodes.Status500InternalServerError);
             }
-
-            if (pendingClientTool)
-            {
-                return Results.Json(
-                    new
-                    {
-                        error = "pending_client_tool",
-                        conversationId = conversation.Id,
-                        toolCalls = externalToolCalls
-                    },
-                    statusCode: StatusCodes.Status409Conflict);
-            }
-
-            if (errorPayload.HasValue)
-            {
-                return Results.Json(
-                    new { error = "invoke_failed", details = errorPayload.Value },
-                    statusCode: StatusCodes.Status500InternalServerError);
-            }
-
-            var assistantMessage = await db.NotebookConversationMessages
-                .AsNoTracking()
-                .Where(m => m.NotebookConversationId == conversation.Id
-                            && m.Role == ChatRole.Assistant
-                            && m.IsStreaming != true)
-                .OrderByDescending(m => m.TurnIndex)
-                .ThenByDescending(m => m.MessageSequence)
-                .Select(m => new { m.Id, m.Content })
-                .FirstOrDefaultAsync();
-
-            if (assistantMessage == null)
-            {
-                return Results.Json(
-                    new { error = "assistant_message_missing", conversationId = conversation.Id },
-                    statusCode: StatusCodes.Status500InternalServerError);
-            }
-
-            return Results.Ok(new PublishedGuideInvokeResponse(
-                conversation.Id,
-                assistantMessage.Id,
-                assistantMessage.Content,
-                usage));
         })
         .Produces<PublishedGuideInvokeResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)

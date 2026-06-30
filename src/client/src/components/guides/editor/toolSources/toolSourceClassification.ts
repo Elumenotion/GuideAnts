@@ -37,20 +37,20 @@ export function classifySchemeFromServerUrl(serverUrl: string | null): ToolSourc
 
   try {
     const url = new URL(serverUrl);
-    switch (url.protocol.replace(':', '')) {
+    const scheme = url.protocol.replace(':', '');
+    switch (scheme) {
       case 'http':
       case 'https':
         return 'web-api';
       case 'client':
-        if (url.host.startsWith('mcp-bridge-')) {
-          return 'mcp-connection';
-        }
         return 'client-actions';
       case 'sandbox':
         return 'sandbox-module';
       case 'tool':
         return 'local-function';
       case 'mcp':
+      case 'mcp+api':
+      case 'mcp+sandbox':
         return 'mcp-connection';
       default:
         return 'unknown';
@@ -85,8 +85,8 @@ export function extractConnectorKeyFromServerUrl(serverUrl: string): string | nu
       return path ? `${host}${path.startsWith('/') ? '' : '/'}${path}` : host || null;
     }
 
-    if (kind === 'mcp-connection' && url.host.startsWith('mcp-bridge-')) {
-      return url.host.slice('mcp-bridge-'.length);
+    if (kind === 'mcp-connection') {
+      return url.host || null;
     }
 
     return url.host || null;

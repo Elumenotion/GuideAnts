@@ -24,7 +24,7 @@ public sealed class HostFolderMountKeyDeriverTests
             .Should().Be("/app/HostMounts/shared-8f3a2c");
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(@"D:\Data\Shared Reports", "Shared Reports")]
     [DataRow(@"/Users/me/Data/Shared", "Shared")]
     public void DeriveDefaultLeafName_UsesHostFolderLeaf(string hostPath, string expectedLeaf)

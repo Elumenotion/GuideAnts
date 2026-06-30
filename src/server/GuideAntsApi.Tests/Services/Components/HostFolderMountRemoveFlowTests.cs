@@ -1,6 +1,5 @@
 using System.Text.Json;
 using FluentAssertions;
-using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;

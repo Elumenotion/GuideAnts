@@ -13,6 +13,9 @@ public sealed class ToolOutputTruncatorTests
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    private static string CreateOversizedOutput(char fillCharacter) =>
+        new string(fillCharacter, ToolOutputTruncator.MaxCharacters + 10_000);
+
     [TestMethod]
     public void Truncate_NullOutput_ReturnsNotTruncated()
     {
@@ -42,7 +45,7 @@ public sealed class ToolOutputTruncatorTests
     [TestMethod]
     public void Truncate_LargeScriptExecutionResult_TruncatesStdoutAndAddsStderrNotice()
     {
-        var largeStdout = new string('x', 80_000);
+        var largeStdout = CreateOversizedOutput('x');
         var original = new ScriptExecutionResult
         {
             StandardOutput = largeStdout,
@@ -72,7 +75,7 @@ public sealed class ToolOutputTruncatorTests
     {
         var original = new ScriptExecutionResult
         {
-            StandardOutput = new string('x', 80_000),
+            StandardOutput = CreateOversizedOutput('x'),
             NewFiles = new List<string> { "a.txt", "b.txt" },
             ModifiedFiles = new List<string> { "c.txt" }
         };
@@ -89,7 +92,7 @@ public sealed class ToolOutputTruncatorTests
     [TestMethod]
     public void Truncate_LargePlainOutput_WrapsInScriptExecutionEnvelope()
     {
-        var largeOutput = new string('y', 80_000);
+        var largeOutput = CreateOversizedOutput('y');
 
         var result = ToolOutputTruncator.Truncate(largeOutput);
 

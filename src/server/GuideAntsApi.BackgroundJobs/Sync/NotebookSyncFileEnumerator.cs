@@ -65,6 +65,11 @@ public static class NotebookSyncFileEnumerator
                 continue;
             }
 
+            if (NotebookArtifactPathExclusions.IsExcludedRelativePath(relativePath))
+            {
+                continue;
+            }
+
             if (ShouldSkipProjectedOutputResourceSymlink(notebookRoot, filePath, relativePath))
             {
                 continue;
@@ -82,6 +87,11 @@ public static class NotebookSyncFileEnumerator
         {
             var relativePath = NormalizeRelativePath(Path.GetRelativePath(notebookRoot, directoryPath));
             if (IsInGuideantsFolder(relativePath))
+            {
+                continue;
+            }
+
+            if (NotebookArtifactPathExclusions.IsExcludedDirectorySegment(Path.GetFileName(directoryPath)))
             {
                 continue;
             }

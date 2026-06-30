@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Models.Settings;
-using GuideAntsApi.Services.HuggingFace;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;

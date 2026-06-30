@@ -280,6 +280,9 @@ public class Program
         // Initialize static service provider for SandboxToolService
         GuideAntsApi.Services.SandboxToolService.InitializeServiceProvider(app.Services);
 
+        // Initialize static service provider for MCP API tool execution
+        McpToolExecutionBridge.InitializeServiceProvider(app.Services);
+
         // Initialize static service provider for MemoryTools (KM queries)
         GuideAntsApi.Services.MemoryTools.InitializeServiceProvider(app.Services);
 
@@ -398,6 +401,7 @@ public class Program
         app.MapPublishedNotebookConversationsEndpoints();
         app.MapPublishedGuidesEndpoints();
         app.MapPublishedOpenAiWireEndpoints();
+        app.MapPublishedAnthropicWireEndpoints();
         app.MapSpeechEndpoints();
         app.MapPublishedSpeechEndpoints();
         app.MapNotebookEndpoints();

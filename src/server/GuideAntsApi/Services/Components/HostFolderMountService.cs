@@ -1,6 +1,5 @@
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Services.Components;

@@ -1,7 +1,7 @@
 param(
     [switch]$RebuildBase,
     [switch]$All,
-    [ValidateSet('cpu', 'cuda13', 'rocm', 'slim')]
+    [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
     [string]$Backend
 )
 
@@ -200,14 +200,16 @@ if ([string]::IsNullOrWhiteSpace($Backend)) {
     Write-Host "  2) CUDA 13"
     Write-Host "  3) ROCm"
     Write-Host "  4) Slim"
-    $choice = Read-Host "Enter choice [1, 2, 3, or 4]"
+    Write-Host "  5) Vulkan"
+    $choice = Read-Host "Enter choice [1-5]"
     switch ($choice) {
         '1' { $Backend = 'cpu' }
         '2' { $Backend = 'cuda13' }
         '3' { $Backend = 'rocm' }
         '4' { $Backend = 'slim' }
+        '5' { $Backend = 'vulkan' }
         default {
-            Write-Error "Invalid choice '$choice'. Valid values: 1, 2, 3, or 4."
+            Write-Error "Invalid choice '$choice'. Valid values: 1-5."
             exit 1
         }
     }
@@ -245,8 +247,16 @@ switch ($Backend) {
         $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311Slim\requirements.txt'
         $dockerfilePath = Join-Path $buildContext 'Dockerfile.slim'
     }
+    'vulkan' {
+        $Backend = 'vulkan'
+        $fullTarget = 'final-vulkan'
+        $depsTarget = 'deps-vulkan'
+        $depsImageArg = 'GA_DEPS_VULKAN_IMAGE'
+        $requirementsSrc = Join-Path $PSScriptRoot 'Sandboxes\python311TorchVulkan\requirements.txt'
+        $dockerfilePath = Join-Path $buildContext 'Dockerfile.vulkan'
+    }
     default {
-        Write-Error "Invalid backend '$Backend'. Valid values: cpu, cuda13, rocm, slim."
+        Write-Error "Invalid backend '$Backend'. Valid values: cpu, cuda13, rocm, slim, vulkan."
         exit 1
     }
 }
@@ -461,6 +471,7 @@ $imageEnvKey = switch ($Backend) {
     'cuda13' { 'GA_AI_CUDA_IMAGE' }
     'rocm' { 'GA_AI_ROCM_IMAGE' }
     'slim' { 'GA_AI_SLIM_IMAGE' }
+    'vulkan' { 'GA_AI_VULKAN_IMAGE' }
     default { 'GA_AI_CPU_IMAGE' }
 }
 $envLine = "$imageEnvKey=$latestImageTag"

@@ -6,7 +6,6 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;
 using System.Runtime.CompilerServices;
 using GuideAntsApi.Services.Auth;
-using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.Conversations.Attachments;
 using GuideAntsApi.Services.Conversations.Commands;
@@ -353,6 +352,14 @@ public class ConversationService : IConversationService
             }
 
             var normalizedPath = attachment.RelativePath.Replace("\\", "/").TrimStart('/');
+
+            if (attachment.UploadType == ContentUploadType.Folder)
+            {
+                var folderPath = BuildAttachmentPathForChat(normalizedPath);
+                ctx.PreviousMessages.Add(new ChatMessage(AntRunner.Chat.Abstractions.ChatRole.User, $"Attachment (folder): {folderPath}"));
+                continue;
+            }
+
             var file = await _notebookFileService.GetFileAsync(
                 ctx.Conversation.Notebook.ProjectId,
                 ctx.Conversation.NotebookId,
@@ -410,6 +417,7 @@ public class ConversationService : IConversationService
                 Instructions = ctx.Request.Instructions,
                 oAuthUserAccessToken = ctx.ExternalAuthTokens.FirstOrDefault().Value,
                 ExternalAuthTokens = ctx.ExternalAuthTokens,
+                ClientToolDefinitions = ctx.Request.ClientToolDefinitions,
                 ExecutionPolicy = ctx.ExecutionPolicy
             },
             PreviousMessages = ctx.PreviousMessages,

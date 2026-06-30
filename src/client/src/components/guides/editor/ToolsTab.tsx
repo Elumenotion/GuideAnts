@@ -8,6 +8,8 @@ interface ToolsTabProps {
   customTools: CustomToolDto[];
   contextOptions: ContextOptionDto[];
   environmentVariables: EnvironmentVariableDto[];
+  projectId?: string;
+  guideId?: string;
   onSelectedToolIdsChange: (ids: string[]) => void;
   onCustomToolsChange: (tools: CustomToolDto[]) => void;
   onEnvironmentVariablesChange: (variables: EnvironmentVariableDto[]) => void;
@@ -20,6 +22,8 @@ export function ToolsTab({
   customTools,
   contextOptions,
   environmentVariables,
+  projectId,
+  guideId,
   onSelectedToolIdsChange,
   onCustomToolsChange,
   onEnvironmentVariablesChange,
@@ -82,6 +86,8 @@ export function ToolsTab({
           <OpenApiSchemas
             customTools={customTools}
             environmentVariables={environmentVariables}
+            projectId={projectId}
+            guideId={guideId}
             onCustomToolsChange={onCustomToolsChange}
             onEnvironmentVariablesChange={onEnvironmentVariablesChange}
             onValidationChange={onValidationChange}

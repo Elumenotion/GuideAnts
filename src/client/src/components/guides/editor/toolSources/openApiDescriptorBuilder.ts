@@ -1,7 +1,8 @@
 import { CustomToolDto } from '../../../../types/guides';
 import type { ToolSourceKind } from './toolSourceClassification';
 import { extractConnectorKeyFromServerUrl } from './toolSourceClassification';
-import { buildMcpBridgeServerUrl, generateMcpBridgeId } from './mcpToolSource';
+import { buildMcpServerUrl, generateMcpBridgeId } from './mcpToolSource';
+import { defaultDiscoveryTransport } from './mcpToolSourceTypes';
 
 export type DraftSourceKind =
   | 'web-api'
@@ -31,7 +32,7 @@ const DRAFT_DEFAULTS: Record<
     connectorKey: '__init__.py',
   },
   'mcp-connection': {
-    serverUrl: 'client://mcp-bridge-new',
+    serverUrl: 'mcp+api://new',
     title: 'MCP Connection',
     connectorKey: 'new',
   },
@@ -74,10 +75,17 @@ export function buildEmptyOpenApiDescriptor(
     spec['x-guideants-tool-source'] = { kind: 'raw' };
   } else if (kind === 'mcp-connection') {
     const bridgeId = generateMcpBridgeId();
-    spec.servers = [{ url: buildMcpBridgeServerUrl(bridgeId), description: 'MCP client bridge' }];
+    const runtimeExecution = 'api';
+    spec.servers = [
+      {
+        url: buildMcpServerUrl(bridgeId, runtimeExecution),
+        description: 'MCP API execution',
+      },
+    ];
     spec['x-guideants-tool-source'] = {
       kind: 'mcp',
-      transport: 'streamable_http',
+      runtimeExecution,
+      discoveryTransport: defaultDiscoveryTransport(runtimeExecution),
       bridgeId,
       toolNamePrefix: 'mcp',
     };
@@ -130,7 +138,7 @@ export function createDraftCustomTool(
     kind === 'web-api' || kind === 'raw-openapi'
       ? 'server-url'
       : kind === 'mcp-connection'
-        ? 'mcp-bridge-id'
+        ? 'mcp-dispatch-id'
         : kind === 'client-actions'
           ? 'client-bridge-id'
           : kind === 'sandbox-module'
@@ -157,7 +165,7 @@ export function buildServerUrlForConnectorKey(
     case 'client-actions':
       return `client://${connectorKey}`;
     case 'mcp-connection':
-      return buildMcpBridgeServerUrl(connectorKey);
+      return buildMcpServerUrl(connectorKey, 'api');
     case 'sandbox-module':
       return connectorKey.startsWith('sandbox://')
         ? connectorKey

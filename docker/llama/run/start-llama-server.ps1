@@ -16,6 +16,7 @@ param(
     [int]$ModelsMax = 1,
     [string]$CudaVisibleDevices,
     [string]$LlamaCudaVisibleDevices,
+    [string]$LlamaTensorSplit,
     [string]$AsrCudaVisibleDevices,
     [string]$TtsCudaVisibleDevices,
     [string]$EmbCudaVisibleDevices,
@@ -68,6 +69,7 @@ if ([string]::IsNullOrWhiteSpace($Image)) {
 
 $CudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $CudaVisibleDevices -EnvName 'CUDA_VISIBLE_DEVICES'
 $LlamaCudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $LlamaCudaVisibleDevices -EnvName 'GA_LLAMA_CUDA_VISIBLE_DEVICES'
+$LlamaTensorSplit = Resolve-OptionalValue -ProvidedValue $LlamaTensorSplit -EnvName 'GA_LLAMA_TENSOR_SPLIT'
 $AsrCudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $AsrCudaVisibleDevices -EnvName 'GA_ASR_CUDA_VISIBLE_DEVICES'
 $TtsCudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $TtsCudaVisibleDevices -EnvName 'GA_TTS_CUDA_VISIBLE_DEVICES'
 $EmbCudaVisibleDevices = Resolve-OptionalValue -ProvidedValue $EmbCudaVisibleDevices -EnvName 'GA_EMB_CUDA_VISIBLE_DEVICES'
@@ -113,6 +115,15 @@ $dockerArgs = @(
     '-e', "GA_LLAMA_GPU_LAYERS=$GpuLayers",
     '-e', 'GA_LLAMA_KV_UNIFIED=1',
     '-e', 'GA_LLAMA_JINJA=1',
+    # Global router knobs (propagate to every spawned child instance).
+    # q8_0 KV cache halves KV VRAM (requires flash attention enabled);
+    # image-min-tokens >=1024 is needed for Qwen-VL grounding accuracy.
+    '-e', 'GA_LLAMA_FLASH_ATTN=on',
+    '-e', 'GA_LLAMA_CACHE_TYPE_K=q8_0',
+    '-e', 'GA_LLAMA_CACHE_TYPE_V=q8_0',
+    '-e', 'GA_LLAMA_IMAGE_MIN_TOKENS=1024',
+    # Per-GPU layer split (comma list, e.g. "7,1"); empty => free-VRAM heuristic.
+    '-e', "GA_LLAMA_TENSOR_SPLIT=$LlamaTensorSplit",
     '-e', "GA_LLAMA_CUDA_VISIBLE_DEVICES=$LlamaCudaVisibleDevices",
     '-e', 'GA_ASR_HOST=127.0.0.1',
     '-e', 'GA_ASR_PORT=8082',

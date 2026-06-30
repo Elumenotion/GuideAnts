@@ -41,7 +41,15 @@ internal static class McpOpenApiDescriptorGenerator
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    public static string BuildBridgeServerUrl(string bridgeId) => $"client://mcp-bridge-{bridgeId}";
+    public static string BuildMcpServerUrl(string bridgeId, string runtimeExecution) =>
+        runtimeExecution switch
+        {
+            McpRuntimeExecution.SandboxSubprocess => $"mcp+sandbox://{bridgeId}",
+            _ => $"mcp+api://{bridgeId}",
+        };
+
+    public static string BuildBridgeServerUrl(string bridgeId) =>
+        BuildMcpServerUrl(bridgeId, McpRuntimeExecution.Api);
 
     public static string SanitizeOperationId(string toolName, string? prefix)
     {
@@ -132,7 +140,8 @@ internal static class McpOpenApiDescriptorGenerator
         var metadata = new JsonObject
         {
             ["kind"] = "mcp",
-            ["transport"] = connection.Transport,
+            ["runtimeExecution"] = connection.RuntimeExecution,
+            ["discoveryTransport"] = connection.DiscoveryTransport,
         };
 
         if (!string.IsNullOrWhiteSpace(connection.Url))

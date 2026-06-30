@@ -201,7 +201,8 @@ export interface ToolDefinitionPreviewResult {
 }
 
 export type {
-  McpTransport,
+  McpRuntimeExecution,
+  McpDiscoveryTransport,
   McpConnectionPanelState,
   McpToolDiffState,
   McpToolSourceMetadata,
@@ -210,14 +211,19 @@ export type {
   McpDiscoverDiffSummary,
   McpDiscoverToolsResponse,
   McpTestConnectionResponse,
+  McpPackageDescriptor,
+  McpEnvironmentVariableRef,
 } from '../components/guides/editor/toolSources/mcpToolSourceTypes';
 
 export interface McpToolSourceConnectionDto {
-  transport: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpTransport;
+  runtimeExecution: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpRuntimeExecution;
+  discoveryTransport: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpDiscoveryTransport;
   url?: string;
   bridgeId?: string;
   headers?: Record<string, string>;
   toolNamePrefix?: string;
+  package?: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpPackageDescriptor;
+  environmentVariables?: import('../components/guides/editor/toolSources/mcpToolSourceTypes').McpEnvironmentVariableRef[];
 }
 
 export interface McpExistingToolStateDto {
@@ -229,6 +235,8 @@ export interface McpExistingToolStateDto {
 
 export interface McpTestConnectionRequest {
   connection: McpToolSourceConnectionDto;
+  projectId?: string;
+  guideId?: string;
 }
 
 export interface McpDiscoverToolsRequest {
@@ -240,6 +248,8 @@ export interface McpDiscoverToolsRequest {
     description?: string;
     inputSchema?: unknown;
   }>;
+  projectId?: string;
+  guideId?: string;
 }
 
 export interface OpenApiAuthConfig {
@@ -436,6 +446,8 @@ export interface PublishedGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  /** Whether speech-to-text (voice input) is enabled for the chat and ASR endpoint */
+  showSpeechToText?: boolean;
   /** Explicit auth mode for this published guide */
   authMode?: PublishedGuideAuthMode;
   wireApiConfig?: PublishedWireApiConfigDto;
@@ -471,6 +483,7 @@ export interface PublishGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  showSpeechToText?: boolean;
   wireApiConfig?: PublishedWireApiConfigDto;
   mcpEnabled?: boolean;
   mcpDescription?: string;
@@ -491,6 +504,7 @@ export interface UpdatePublishedGuideDto {
   collapsible?: boolean;
   showConversationStarters?: boolean;
   showAttachments?: boolean;
+  showSpeechToText?: boolean;
   wireApiConfig?: PublishedWireApiConfigDto;
   mcpEnabled?: boolean;
   mcpDescription?: string;
@@ -498,7 +512,6 @@ export interface UpdatePublishedGuideDto {
 
 export interface PublishedWireApiConfigDto {
   enabled?: boolean;
-  profile?: string;
   endpointFlags?: PublishedWireApiEndpointFlagsDto;
   aliasMap?: Record<string, string>;
   maxRequestSizes?: PublishedWireApiMaxRequestSizesDto;
@@ -508,6 +521,7 @@ export interface PublishedWireApiEndpointFlagsDto {
   models?: boolean;
   chatCompletions?: boolean;
   responses?: boolean;
+  messages?: boolean;
   embeddings?: boolean;
   imageGenerations?: boolean;
   audioTranscriptions?: boolean;
@@ -517,6 +531,7 @@ export interface PublishedWireApiEndpointFlagsDto {
 export interface PublishedWireApiMaxRequestSizesDto {
   chatCompletionsBytes?: number;
   responsesBytes?: number;
+  messagesBytes?: number;
   embeddingsBytes?: number;
   imageGenerationsBytes?: number;
   audioTranscriptionsBytes?: number;

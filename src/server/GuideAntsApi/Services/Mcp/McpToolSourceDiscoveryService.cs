@@ -2,16 +2,13 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using GuideAntsApi.Models.Guides;
 using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
 
 namespace GuideAntsApi.Services.Mcp;
 
 public sealed class McpToolSourceDiscoveryService(
+    IMcpSandboxStdioDiscoveryClient sandboxDiscoveryClient,
     ILogger<McpToolSourceDiscoveryService> logger) : IMcpToolSourceDiscoveryService
 {
-    private const string TransportStreamableHttp = "streamable_http";
-    private const string TransportClientBridge = "client_bridge";
-
     public async Task<McpTestConnectionResponse> TestConnectionAsync(
         McpTestConnectionRequest request,
         CancellationToken cancellationToken = default)
@@ -22,13 +19,34 @@ public sealed class McpToolSourceDiscoveryService(
             return new McpTestConnectionResponse(false, validationError, null, null);
         }
 
-        if (string.Equals(request.Connection.Transport, TransportClientBridge, StringComparison.Ordinal))
+        if (string.Equals(request.Connection.RuntimeExecution, McpRuntimeExecution.SandboxSubprocess, StringComparison.Ordinal))
         {
+            var scopeError = ValidateSandboxScope(request.ProjectId, request.GuideId);
+            if (scopeError is not null)
+            {
+                return new McpTestConnectionResponse(false, scopeError, null, null);
+            }
+
+            var discoverResult = await sandboxDiscoveryClient.DiscoverAsync(
+                request.ProjectId!.Value,
+                request.GuideId!.Value,
+                request.Connection,
+                cancellationToken);
+
+            if (!discoverResult.Success)
+            {
+                return new McpTestConnectionResponse(
+                    false,
+                    discoverResult.Error ?? "Failed to connect to MCP sandbox package.",
+                    null,
+                    null);
+            }
+
             return new McpTestConnectionResponse(
                 true,
-                "Client bridge configuration is valid. MCP tools execute through the client host bridge.",
-                null,
-                null);
+                $"Connected to MCP sandbox package ({discoverResult.Tools.Count} tool(s) available).",
+                discoverResult.ServerName,
+                discoverResult.ServerVersion);
         }
 
         try
@@ -45,8 +63,8 @@ public sealed class McpToolSourceDiscoveryService(
         {
             logger.LogWarning(
                 ex,
-                "MCP connection test failed for transport {Transport}",
-                LogValueSanitizer.Sanitize(request.Connection.Transport));
+                "MCP connection test failed for runtime {RuntimeExecution}",
+                LogValueSanitizer.Sanitize(request.Connection.RuntimeExecution));
             return new McpTestConnectionResponse(false, "Failed to connect to MCP server.", null, null);
         }
     }
@@ -62,21 +80,33 @@ public sealed class McpToolSourceDiscoveryService(
         }
 
         List<DiscoveredMcpToolCandidate> discovered;
-        if (string.Equals(request.Connection.Transport, TransportClientBridge, StringComparison.Ordinal))
+        if (string.Equals(request.Connection.RuntimeExecution, McpRuntimeExecution.SandboxSubprocess, StringComparison.Ordinal))
         {
-            if (request.BridgeTools is not { Count: > 0 })
+            var scopeError = ValidateSandboxScope(request.ProjectId, request.GuideId);
+            if (scopeError is not null)
+            {
+                return EmptyDiscoverResponse(false, scopeError);
+            }
+
+            var discoverResult = await sandboxDiscoveryClient.DiscoverAsync(
+                request.ProjectId!.Value,
+                request.GuideId!.Value,
+                request.Connection,
+                cancellationToken);
+
+            if (!discoverResult.Success)
             {
                 return EmptyDiscoverResponse(
                     false,
-                    "Client bridge discovery requires tool definitions from the connected client host. Connect a client and retry, or switch to streamable HTTP for server-side discovery.");
+                    discoverResult.Error ?? "MCP sandbox tool discovery failed.");
             }
 
-            discovered = request.BridgeTools
-                .Select(t => new DiscoveredMcpToolCandidate(
-                    t.Name,
-                    t.Title,
-                    t.Description,
-                    t.InputSchema ?? default))
+            discovered = discoverResult.Tools
+                .Select(tool => new DiscoveredMcpToolCandidate(
+                    tool.Name,
+                    tool.Title,
+                    tool.Description,
+                    tool.InputSchema))
                 .ToList();
         }
         else
@@ -97,12 +127,19 @@ public sealed class McpToolSourceDiscoveryService(
             {
                 logger.LogWarning(
                     ex,
-                    "MCP tool discovery failed for transport {Transport}",
-                    LogValueSanitizer.Sanitize(request.Connection.Transport));
+                    "MCP tool discovery failed for runtime {RuntimeExecution}",
+                    LogValueSanitizer.Sanitize(request.Connection.RuntimeExecution));
                 return EmptyDiscoverResponse(false, "MCP tool discovery failed. Check connection settings and retry.");
             }
         }
 
+        return BuildDiscoverResponse(request, discovered);
+    }
+
+    private static McpDiscoverToolsResponse BuildDiscoverResponse(
+        McpDiscoverToolsRequest request,
+        List<DiscoveredMcpToolCandidate> discovered)
+    {
         var existingById = (request.ExistingTools ?? [])
             .GroupBy(t => t.BackingToolId, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
@@ -215,18 +252,58 @@ public sealed class McpToolSourceDiscoveryService(
             null);
     }
 
-    private static string? ValidateConnection(McpToolSourceConnectionDto connection)
+    private static string? ValidateSandboxScope(Guid? projectId, Guid? guideId)
     {
-        if (string.IsNullOrWhiteSpace(connection.Transport))
+        if (!projectId.HasValue || projectId.Value == Guid.Empty
+            || !guideId.HasValue || guideId.Value == Guid.Empty)
         {
-            return "Transport is required.";
+            return "projectId and guideId are required for sandbox_subprocess MCP connections.";
         }
 
-        if (string.Equals(connection.Transport, TransportStreamableHttp, StringComparison.Ordinal))
+        return null;
+    }
+
+    private static string? ValidateConnection(McpToolSourceConnectionDto connection)
+    {
+        if (string.IsNullOrWhiteSpace(connection.RuntimeExecution))
+        {
+            return "runtimeExecution is required.";
+        }
+
+        if (!McpRuntimeExecution.All.Contains(connection.RuntimeExecution))
+        {
+            return $"Unsupported runtimeExecution '{connection.RuntimeExecution}'. Supported values: api, sandbox_subprocess.";
+        }
+
+        if (string.IsNullOrWhiteSpace(connection.DiscoveryTransport))
+        {
+            return "discoveryTransport is required.";
+        }
+
+        if (!McpDiscoveryTransport.All.Contains(connection.DiscoveryTransport))
+        {
+            return $"Unsupported discoveryTransport '{connection.DiscoveryTransport}'. Supported values: streamable_http, stdio.";
+        }
+
+        var expectedTransport = string.Equals(connection.RuntimeExecution, McpRuntimeExecution.SandboxSubprocess, StringComparison.Ordinal)
+            ? McpDiscoveryTransport.Stdio
+            : McpDiscoveryTransport.StreamableHttp;
+
+        if (!string.Equals(connection.DiscoveryTransport, expectedTransport, StringComparison.Ordinal))
+        {
+            return $"runtimeExecution '{connection.RuntimeExecution}' requires discoveryTransport '{expectedTransport}'.";
+        }
+
+        if (string.IsNullOrWhiteSpace(connection.BridgeId))
+        {
+            return "bridgeId is required for MCP connections.";
+        }
+
+        if (string.Equals(connection.RuntimeExecution, McpRuntimeExecution.Api, StringComparison.Ordinal))
         {
             if (string.IsNullOrWhiteSpace(connection.Url))
             {
-                return "MCP server URL is required for streamable HTTP transport.";
+                return "MCP server URL is required for api runtime execution.";
             }
 
             if (!Uri.TryCreate(connection.Url, UriKind.Absolute, out var uri)
@@ -234,21 +311,15 @@ public sealed class McpToolSourceDiscoveryService(
             {
                 return "MCP server URL must be an absolute http or https URL.";
             }
-
-            return null;
         }
 
-        if (string.Equals(connection.Transport, TransportClientBridge, StringComparison.Ordinal))
+        if (string.Equals(connection.RuntimeExecution, McpRuntimeExecution.SandboxSubprocess, StringComparison.Ordinal)
+            && connection.Package is null)
         {
-            if (string.IsNullOrWhiteSpace(connection.BridgeId))
-            {
-                return "Client bridge id is required for client bridge transport.";
-            }
-
-            return null;
+            return "package is required for sandbox_subprocess runtime execution.";
         }
 
-        return $"Unsupported MCP transport '{connection.Transport}'. Supported transports: {TransportStreamableHttp}, {TransportClientBridge}.";
+        return null;
     }
 
     private static async Task<McpClient> CreateMcpClientAsync(

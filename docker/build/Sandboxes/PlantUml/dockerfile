@@ -19,7 +19,10 @@ RUN wget https://github.com/plantuml/plantuml/releases/download/v1.2025.10/plant
 # Verify the jar file
 RUN ls -l /usr/local/lib/plantuml/plantuml.jar
 
-# Create a symbolic link or script to run PlantUML
+# ScriptExecutionAgent uses a curated PATH that omits /opt/java/openjdk/bin; symlink java into /usr/bin.
+RUN ln -sf /opt/java/openjdk/bin/java /usr/bin/java
+
+# Create a script to run PlantUML
 RUN echo '#!/bin/sh\nexec java -jar /usr/local/lib/plantuml/plantuml.jar "$@"' > /usr/local/bin/plantuml && \
     chmod +x /usr/local/bin/plantuml
 

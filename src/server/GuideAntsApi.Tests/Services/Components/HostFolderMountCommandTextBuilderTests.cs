@@ -20,7 +20,7 @@ public sealed class HostFolderMountCommandTextBuilderTests
             .Should().Be(@"'it'\''s'");
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(@"D:\Data\Shared", "D:/Data/Shared")]
     [DataRow(@"/home/me/shared", "/home/me/shared")]
     public void FormatHostPathForCompose_NormalizesSeparators(string input, string expected)

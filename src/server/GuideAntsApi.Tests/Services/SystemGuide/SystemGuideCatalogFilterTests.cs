@@ -4,7 +4,6 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Tests.BackgroundJobs;
-using Microsoft.EntityFrameworkCore;
 using Moq;
 
 namespace GuideAntsApi.Tests.Services.SystemGuide;

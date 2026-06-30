@@ -220,7 +220,9 @@ public record TurnMessageDto(
     string? FunctionName,
     DateTime Created,
     Guid? AgentInvocationId  // If this tool call triggered an agent invocation
-);/// <summary>
+);
+
+/// <summary>
 /// Response containing conversation turn messages with invocation links.
 /// </summary>
 public record TurnMessagesDto(
@@ -229,4 +231,91 @@ public record TurnMessagesDto(
     string? AssistantName,
     DateTime TurnStarted,
     List<TurnMessageDto> Messages
+);
+
+/// <summary>
+/// Prompt trace capture for a conversation turn (internal diagnostics drill-down).
+/// </summary>
+public record TurnPromptTraceDto(
+    Guid ConversationId,
+    int TurnIndex,
+    string? AssistantName,
+    DateTime TurnStarted,
+    bool HasTrace,
+    int SchemaVersion,
+    string CaptureState,
+    List<TurnPromptTraceSegmentDto> Segments
+);
+
+/// <summary>
+/// One captured run segment for a turn.
+/// </summary>
+public record TurnPromptTraceSegmentDto(
+    Guid SegmentId,
+    string Status,
+    DateTime StartedUtc,
+    DateTime? CompletedUtc,
+    string AssistantName,
+    string? ModelDeploymentId,
+    string? TerminalStatus,
+    string? ErrorMessage,
+    List<TurnPromptTraceMessageDto> SeedMessages,
+    List<TurnPromptTraceToolDefinitionDto> ToolDefinitions,
+    List<TurnPromptTraceRoundDto> Rounds,
+    List<TurnPromptTraceMessageEventDto> MessageEvents
+);
+
+/// <summary>
+/// Message snapshot in prompt trace.
+/// </summary>
+public record TurnPromptTraceMessageDto(
+    string Role,
+    string? Content,
+    string? ToolCallId,
+    string? FunctionName,
+    string? ToolCallsJson
+);
+
+/// <summary>
+/// Tool definition snapshot in prompt trace.
+/// </summary>
+public record TurnPromptTraceToolDefinitionDto(
+    string Name,
+    string? Description,
+    string? ParametersJson,
+    string Source
+);
+
+/// <summary>
+/// One model round captured in prompt trace.
+/// </summary>
+public record TurnPromptTraceRoundDto(
+    int RoundIndex,
+    DateTime CreatedUtc,
+    string? ModelDeploymentId,
+    string? ResponseFinishReason,
+    TurnPromptTraceMessageDto? ResponseMessage,
+    List<TurnPromptTraceMessageDto> RequestMessages,
+    List<TurnPromptTraceToolCallDto> ExternalToolCalls
+);
+
+/// <summary>
+/// Tool call emitted to external client in prompt trace.
+/// </summary>
+public record TurnPromptTraceToolCallDto(
+    string Id,
+    string Name,
+    string? ArgumentsJson
+);
+
+/// <summary>
+/// Message event emitted through the run message sink.
+/// </summary>
+public record TurnPromptTraceMessageEventDto(
+    DateTime CreatedUtc,
+    string Role,
+    string? Content,
+    string? ToolCallId,
+    string? FunctionName,
+    string? ToolCallsJson
 );

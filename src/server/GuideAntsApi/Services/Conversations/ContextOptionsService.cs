@@ -1,6 +1,5 @@
 using System.Text.Json;
 using AntRunner.ToolCalling.AssistantDefinitions;
-using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.UserProjectContextOptions;
@@ -12,15 +11,18 @@ public class ContextOptionsService : IContextOptionsService
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IUserProjectContextOptionsService _userProjectContextOptionsService;
+    private readonly IStoragePathResolver _pathResolver;
 
     public ContextOptionsService(
         ApplicationDbContext db,
         ICurrentUserService currentUserService,
-        IUserProjectContextOptionsService userProjectContextOptionsService)
+        IUserProjectContextOptionsService userProjectContextOptionsService,
+        IStoragePathResolver pathResolver)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _currentUserService = currentUserService ?? throw new ArgumentNullException(nameof(currentUserService));
         _userProjectContextOptionsService = userProjectContextOptionsService ?? throw new ArgumentNullException(nameof(userProjectContextOptionsService));
+        _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
     }
 
     public async Task<Dictionary<string, string>> ResolveAsync(AssistantDefinition assistant, Guid projectId, Guid notebookId, Guid conversationId, CancellationToken ct = default)
@@ -160,21 +162,15 @@ public class ContextOptionsService : IContextOptionsService
     {
         try
         {
-            // Get all files for this notebook
-            var absolutePaths = await _db.NotebookFiles
-                .Where(f => f.NotebookId == notebookId)
-                .Select(f => f.RelativePath)
-                .OrderBy(f => f)
-                .ToListAsync(ct);
+            var relativePaths = await ContextOptionFilesResolver.ResolvePathsAsync(
+                _db,
+                _pathResolver,
+                projectId,
+                notebookId,
+                isPublished: false,
+                ct);
 
-            // Private notebooks execute from Output/ so we emit filenames relative to that directory
-            var relativePaths = absolutePaths
-                .Select(p => ConvertToRelativePath(p, isPublished: false, runId: null))
-                .ToList();
-
-            var formatted = FormatFilesConsole(relativePaths);
-
-            return formatted;
+            return ContextOptionFilesFormatter.FormatConsole(relativePaths);
         }
         catch
         {
@@ -186,84 +182,17 @@ public class ContextOptionsService : IContextOptionsService
     {
         try
         {
-            // Get all files for this notebook
-            var absolutePaths = _db.NotebookFiles
-                .Where(f => f.NotebookId == notebookId)
-                .Select(f => f.RelativePath)
-                .OrderBy(f => f)
-                .ToList();
+            var relativePaths = ContextOptionFilesResolver
+                .ResolvePathsAsync(_db, _pathResolver, projectId, notebookId, isPublished: true, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
 
-            // Published guides execute from Runs/{runId}/ (two levels down from notebook root)
-            var relativePaths = absolutePaths
-                .Select(p => ConvertToRelativePath(p, isPublished: true, runId: null))
-                .ToList();
-
-            var formatted = FormatFilesConsole(relativePaths);
-
-            return formatted;
+            return ContextOptionFilesFormatter.FormatConsole(relativePaths);
         }
         catch
         {
             return JsonSerializer.Serialize(new { files = Array.Empty<string>() });
         }
-    }
-
-    /// <summary>
-    /// Converts a path (from notebook root) to a path relative to the CWD.
-    /// Private notebooks execute from Output/, published from Runs/{runId}/.
-    /// </summary>
-    /// <param name="notebookRootPath">The path from notebook root (e.g., "Output/file.png", "Resources/crew-X/api.py")</param>
-    /// <param name="isPublished">Whether this is a published notebook (uses Runs folder) or private (uses Output folder)</param>
-    /// <param name="runId">The run ID for published notebooks (unused in current implementation)</param>
-    private static string ConvertToRelativePath(string notebookRootPath, bool isPublished, string? runId)
-    {
-        if (string.IsNullOrWhiteSpace(notebookRootPath)) return notebookRootPath;
-
-        // Normalize to forward slashes and trim
-        var normalized = notebookRootPath.Replace('\\', '/').Trim().TrimStart('/');
-
-        if (isPublished)
-        {
-            // Published notebooks execute from Runs/{runId}/ (two levels down from notebook root)
-            // All files need ../../ prefix to navigate up to notebook root
-            return $"../../{normalized}";
-        }
-        else
-        {
-            // Private notebooks execute from Output/ (one level down from notebook root)
-            const string outputPrefix = "Output/";
-            if (normalized.StartsWith(outputPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                // File is inside Output/ - strip prefix since it's in CWD
-                return normalized[outputPrefix.Length..];
-            }
-            else
-            {
-                // File is at notebook root or elsewhere - prepend ../ to go up from Output/
-                return $"../{normalized}";
-            }
-        }
-    }
-
-    /// <summary>
-    /// Formats a list of relative paths to resemble console output wrapped in a markdown code fence.
-    /// This improves LLM attention compared to a JSON array.
-    /// Example:
-    /// ```console
-    /// README.md
-    /// Output/image.png
-    /// ```
-    /// </summary>
-    internal static string FormatFilesConsole(IEnumerable<string> paths)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("```console");
-        foreach (var p in paths)
-        {
-            sb.AppendLine(p);
-        }
-        sb.Append("```" /* no newline after closing fence */);
-        return sb.ToString();
     }
 
     private sealed record CurrentUserContext(Guid Id, string Name, string Email);

@@ -12,7 +12,7 @@ import {
 } from '../components/project/content';
 import { AddLinkForm } from '../components/project/content/AddLinkForm';
 import { AddFolderContent } from '../components/project/content/AddFolderContent';
-import { SectionType, CreateFolderDto } from '../types/project';
+import { SectionType, CreateFolderDto, FolderTreeDto, ProjectContentFile } from '../types/project';
 import { api } from '../services/api';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -28,7 +28,23 @@ import ProjectGuideAuthContent from '../components/project/content/ProjectGuideA
 import { useRegisterTour } from '../tour/useRegisterTour';
 import { usePublishGuideViewContext } from '../features/guideantsGuide/viewContext';
 
-
+function findMountedFileInTree(tree: FolderTreeDto | null, fileId: string): { file: ProjectContentFile; relativePath: string } | undefined {
+    if (!tree) return undefined;
+    const walk = (node: FolderTreeDto, insideMount: boolean): { file: ProjectContentFile; relativePath: string } | undefined => {
+        const mounted = insideMount || !!node.isHostMount || !!node.isLinked;
+        for (const f of node.files) {
+            if (f.id === fileId && mounted) {
+                return { file: f, relativePath: f.relativePath };
+            }
+        }
+        for (const sub of node.subFolders) {
+            const found = walk(sub, mounted);
+            if (found) return found;
+        }
+        return undefined;
+    };
+    return walk(tree, false);
+}
 
 export default function ProjectDetails() {
     const { projectId: routeProjectId } = useParams<{ projectId: string }>();
@@ -767,14 +783,16 @@ export default function ProjectDetails() {
             }
             case 'contentFiles': {
                 const fileIdSel = selectedItem.id;
+                const mountedMatch = findMountedFileInTree(sidebarFolderTree, fileIdSel);
                 return (
-                    <ContentFileContent 
+                    <ContentFileContent
                         hideHeader={isAutoHome && fileIdSel === project.homePageContentFileId}
                         fileId={fileIdSel}
                         projectId={project.id}
                         canEdit={canEdit()}
                         onDelete={handleFileDeleted}
                         resolveProjectFilePath={resolveProjectFilePath}
+                        mountedRelativePath={mountedMatch?.relativePath}
                     />
                 );
             }

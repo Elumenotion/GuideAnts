@@ -207,7 +207,6 @@ Tasks:
 - Show readiness states:
   - enabled
   - disabled
-  - missing provider/service mode
   - missing chat model
   - auth mode unsuitable for server-to-server SDK use
 - Align General/Auth/API copy so `AuthMode` remains the single source of truth.

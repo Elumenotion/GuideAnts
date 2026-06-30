@@ -73,6 +73,12 @@ public class SendMessageRequest
     
     // NEW: Optional client-provided context message (from page initialization callback)
     public string? ClientContext { get; set; }
+
+    // Optional client-provided message list to prepend to the run prompt.
+    public List<AntRunner.Chat.Abstractions.ChatMessage>? ClientMessages { get; set; }
+
+    // Optional client-exposed tools to advertise for this run only.
+    public List<AntRunner.Chat.Abstractions.ChatToolDefinition>? ClientToolDefinitions { get; set; }
 }
 
 public class EditMessageRequest
@@ -93,7 +99,8 @@ public enum ContentUploadType
     ImageUrl,
     AudioFile,
     TextFile,
-    SandboxFile
+    SandboxFile,
+    Folder
 } 
 
 public record AttachmentDto(

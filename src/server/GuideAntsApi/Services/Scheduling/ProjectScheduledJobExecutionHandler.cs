@@ -3,7 +3,6 @@ using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace GuideAntsApi.Services.Scheduling;
 

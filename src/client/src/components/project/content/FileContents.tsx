@@ -31,9 +31,10 @@ interface FileContentsProps {
     resolveProjectFilePath?: (relativePath: string) => string | undefined;
     onEditMarkdown?: () => void; // delegate to parent for identical behavior
     canEdit?: boolean;
+    mountedRelativePath?: string;
 }
 
-function FileContentsComponent({ projectId, fileId, fileName, contentType, version, inlineMode = false, resolveProjectFilePath, onEditMarkdown, canEdit = false }: FileContentsProps) {
+function FileContentsComponent({ projectId, fileId, fileName, contentType, version, inlineMode = false, resolveProjectFilePath, onEditMarkdown, canEdit = false, mountedRelativePath }: FileContentsProps) {
     const [content, setContent] = useState<{ blob: Blob; contentType: string; fileName: string } | null>(null);
     const [textContent, setTextContent] = useState<string | null>(null);
     const [isDetectedTextContent, setIsDetectedTextContent] = useState(false);
@@ -188,7 +189,9 @@ function FileContentsComponent({ projectId, fileId, fileName, contentType, versi
                     timestamp: Date.now() 
                 });
                 
-                const fileContent = await api.projects.getContentFileContent(projectId, fileId, version);
+                const fileContent = mountedRelativePath
+                    ? await api.projects.getMountedContentByPath(projectId, mountedRelativePath)
+                    : await api.projects.getContentFileContent(projectId, fileId, version);
                 
                 console.log('[TELEMETRY] ContentFile API call completed', { 
                     fileIdKey,
@@ -231,7 +234,7 @@ function FileContentsComponent({ projectId, fileId, fileName, contentType, versi
         };
 
         fetchContent();
-    }, [projectId, fileId, version, contentType, documentServerActive]);
+    }, [projectId, fileId, version, contentType, documentServerActive, mountedRelativePath]);
 
     useEffect(() => {
         let isDisposed = false;

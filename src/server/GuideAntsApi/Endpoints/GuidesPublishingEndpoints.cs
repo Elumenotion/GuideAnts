@@ -47,6 +47,7 @@ public static class GuidesPublishingEndpoints
             Collapsible = pg.Collapsible,
             ShowConversationStarters = pg.ShowConversationStarters,
             ShowAttachments = pg.ShowAttachments,
+            ShowSpeechToText = pg.ShowSpeechToText,
             WireApiConfig = DeserializeWireApiConfig(pg.WireApiConfigJson),
             HasApiKey = !string.IsNullOrWhiteSpace(pg.ApiKeyHash),
             AuthMode = pg.AuthMode,
@@ -115,7 +116,9 @@ public static class GuidesPublishingEndpoints
             Guid guideId,
             [FromBody] PublishGuideDto dto,
             [FromServices] ApplicationDbContext db,
-            [FromServices] INotebookService notebookService) =>
+            [FromServices] INotebookService notebookService,
+            [FromServices] IMcpSandboxPublishGateService mcpSandboxPublishGateService,
+            CancellationToken cancellationToken) =>
         {
             
 
@@ -127,6 +130,8 @@ var guide = await db.Assistants
 
             if (guide == null)
                 return Results.NotFound(new { error = "Guide not found or you do not own this guide" });
+
+            await McpDescriptorMigrator.BackfillGuideSchemasAsync(db, guideId);
 
             if (dto.AuthMode == PublishedGuideAuthMode.AppIdentity)
             {
@@ -182,6 +187,30 @@ var guide = await db.Assistants
                 return Results.BadRequest(new { error = "Monthly cost limit must be >= 0", field = "billingPeriodChargeLimitUsd" });
             }
 
+            var guideSchemas = await db.AssistantOpenApiSchemas
+                .AsNoTracking()
+                .Where(schema => schema.AssistantId == guideId)
+                .Select(schema => new { schema.Name, schema.SpecificationJson, schema.ApiHost })
+                .ToListAsync(cancellationToken);
+
+            var guideCustomTools = guideSchemas
+                .Select(schema => new CustomToolDto(schema.Name, schema.SpecificationJson, schema.ApiHost, null))
+                .ToList();
+
+            var sandboxPublishBlock = await mcpSandboxPublishGateService.GetPublishBlockMessageAsync(
+                dto.ProjectId,
+                guideId,
+                guideCustomTools,
+                cancellationToken);
+            if (sandboxPublishBlock is not null)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "sandbox_mcp_not_applied",
+                    message = sandboxPublishBlock,
+                });
+            }
+
             // Check if already published (same guide + project)
             var existingPublish = await db.PublishedGuides
                 .Include(pg => pg.Notebook)
@@ -222,6 +251,7 @@ var guide = await db.Assistants
                 Collapsible = dto.Collapsible,
                 ShowConversationStarters = dto.ShowConversationStarters,
                 ShowAttachments = dto.ShowAttachments,
+                ShowSpeechToText = dto.ShowSpeechToText,
                 WireApiConfigJson = SerializeWireApiConfig(dto.WireApiConfig),
                 McpEnabled = dto.McpEnabled,
                 McpDescription = dto.McpDescription
@@ -381,6 +411,7 @@ var publishedGuide = await db.PublishedGuides
             publishedGuide.Collapsible = dto.Collapsible;
             publishedGuide.ShowConversationStarters = dto.ShowConversationStarters;
             publishedGuide.ShowAttachments = dto.ShowAttachments;
+            publishedGuide.ShowSpeechToText = dto.ShowSpeechToText;
             publishedGuide.WireApiConfigJson = SerializeWireApiConfig(dto.WireApiConfig);
             publishedGuide.McpEnabled = dto.McpEnabled;
             publishedGuide.McpDescription = dto.McpDescription;

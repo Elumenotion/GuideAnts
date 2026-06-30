@@ -3,7 +3,6 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
 using GuideAntsApi.Models.Guides;
-using GuideAntsApi.Services.Guides;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Settings;
 using GuideAntsApi.Services.LlamaCpp;

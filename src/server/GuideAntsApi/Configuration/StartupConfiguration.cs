@@ -3,7 +3,6 @@ using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Any;
 using System.Reflection;
 using System.Security.Claims;
-using System.Text;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;
@@ -23,7 +22,6 @@ using GuideAntsApi.Services.Conversations.Streaming;
 using GuideAntsApi.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.Anthropic;
 using AntRunner.Chat.GoogleGemini;
@@ -429,7 +427,15 @@ public static class StartupConfiguration
         services.AddScoped<McpPublishedGuideInvokeService>();
         services.AddScoped<McpPublishedRunImageEmbedder>();
         services.AddScoped<IClaudeSkillPackService, ClaudeSkillPackService>();
+        services.AddScoped<IMcpSandboxStdioDiscoveryClient, McpSandboxStdioDiscoveryClient>();
         services.AddScoped<IMcpToolSourceDiscoveryService, McpToolSourceDiscoveryService>();
+        services.Configure<McpToolExecutorOptions>(
+            configuration.GetSection(McpToolExecutorOptions.SectionName));
+        services.AddScoped<McpSandboxAdminApiClient>();
+        services.AddScoped<IMcpSandboxSetupStagingService, McpSandboxSetupStagingService>();
+        services.AddScoped<IMcpSandboxPublishGateService, McpSandboxPublishGateService>();
+        services.AddScoped<McpSandboxExecutor>();
+        services.AddScoped<IMcpToolExecutor, McpToolExecutor>();
         services.AddMcpServer()
             .WithHttpTransport(options =>
             {

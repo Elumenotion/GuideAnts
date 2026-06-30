@@ -85,6 +85,10 @@ Python runtime state is scoped by `project + guide`:
 ```text
 {SCRIPT_EXECUTION_SCOPE_STATE_ROOT}/
   project-{projectId:N}/
+    runtime/          # shared npm/npx, uv, and other tool caches for all guides in the project
+      .npm/
+      cache/
+      config/
     guide-{guideId:N}/
       python-venv/
       requirements.txt
@@ -108,11 +112,14 @@ Validation rules:
 The child process receives a curated base environment:
 
 - `PATH`, `HOME`, `LANG`, `LC_ALL`
+- `HOME`, `XDG_CACHE_HOME`, and `XDG_CONFIG_HOME` point at the shared per-project `runtime/` directory (not the notebook `WorkingDirectory`), so npm/npx, uv, and similar tool caches are reused across all guides in the project
 - `GUIDEANTS_PROJECT_ID`, `GUIDEANTS_GUIDE_ID`
 - `VIRTUAL_ENV` when the scoped venv exists
 - selected runtime/cache variables required by GPU and model tooling, such as CUDA/ROCm visibility variables, Hugging Face/Torch cache paths, Playwright browser path, and certificate bundle variables
 
 It does not inherit the full container or agent process environment.
+
+MCP stdio children (`/mcp-stdio`, `/mcp-stdio/discover`) receive the same curated scoped environment as `/execute`. The MCP transport sets `InheritEnvironmentVariables = false`. On Linux, launches are wrapped with `env -i` so package runners such as `npx` and `uvx` cannot inherit ScriptExecutionAgent or container environment variables.
 
 ## Credential Handling
 

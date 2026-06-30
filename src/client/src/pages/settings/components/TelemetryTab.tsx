@@ -87,6 +87,12 @@ const CATEGORIES: TelemetryCategory[] = [
     defaultLevel: 'Information',
   },
   {
+    key: 'PublishedWireApi',
+    label: 'Published wire API',
+    category: 'GuideAntsApi.Endpoints.PublishedOpenAiWireHandlers',
+    defaultLevel: 'Information',
+  },
+  {
     key: 'RoutingChatCompletionClientFactory',
     label: 'Chat route resolver',
     category: 'GuideAntsApi.Services.Conversations.RoutingChatCompletionClientFactory',
@@ -205,6 +211,13 @@ const SUBSYSTEMS: TelemetrySubsystem[] = [
     summary: 'Model/provider resolution and routing problem details.',
     categoryKeys: ['GuideAntsApiServicesRouting', 'RoutingChatCompletionClientFactory'],
     presets: levelsFor(['GuideAntsApiServicesRouting', 'RoutingChatCompletionClientFactory'], 'Error', 'Information', 'Debug', 'Trace'),
+  },
+  {
+    id: 'published-wire-api',
+    label: 'Published wire API',
+    summary: 'Inbound OpenAI and Anthropic wire request diagnostics for continuation, transcript replay, and client payload shape.',
+    categoryKeys: ['PublishedWireApi'],
+    presets: levelsFor(['PublishedWireApi'], 'Error', 'Information', 'Debug', 'Trace'),
   },
   {
     id: 'chat-providers',

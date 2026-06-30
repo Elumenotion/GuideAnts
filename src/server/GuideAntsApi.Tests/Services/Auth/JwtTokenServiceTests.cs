@@ -4,7 +4,6 @@ using FluentAssertions;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Auth;
-using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Tests.Services.Auth;
 
