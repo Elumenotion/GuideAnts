@@ -58,7 +58,7 @@ public static async Task<IResult> PostChatCompletionsAsync(
 
     try
     {
-        WireConversationExecutor.WireConversationResult conversation;
+        WireConversationExecutor.WireConversationStreamHandle streamHandle;
         if (inboundToolResults.Count > 0)
         {
             var continuation = await WireToolResultContinuation.ResolvePendingToolResultConversationAsync(
@@ -77,9 +77,8 @@ public static async Task<IResult> PostChatCompletionsAsync(
                 inboundToolResults,
                 httpContext.RequestAborted);
 
-            conversation = await WireConversationExecutor.ResumeConversationAfterToolResultsAsync(
+            streamHandle = WireConversationExecutor.StartResumeConversationStream(
                 publishedConversationService,
-                db,
                 context,
                 continuation.ConversationId.Value,
                 clientToolDefinitions,
@@ -105,15 +104,61 @@ public static async Task<IResult> PostChatCompletionsAsync(
                 db,
                 httpContext.RequestAborted);
 
-            conversation = await WireConversationExecutor.ExecuteConversationAsync(
+            streamHandle = await WireConversationExecutor.StartConversationStreamAsync(
                 publishedConversationService,
-                db,
                 context,
                 instructions,
                 httpContext.RequestAborted,
                 existingConversationId: existingConversationId,
                 clientMessages: existingConversationId.HasValue ? null : clientPrompt.PrefixMessages,
                 clientToolDefinitions: clientToolDefinitions);
+        }
+
+        var publicApiOrigin = WireResponseSerializer.ResolvePublicApiOrigin(httpContext);
+
+        if (request.Stream == true)
+        {
+            var createdStream = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var completionId = $"chatcmpl_{Guid.NewGuid():N}";
+            var streamState = new WireStreamAdapter.OpenAiChatStreamState();
+            var conversationId = streamHandle.ConversationId;
+            var createdConversation = streamHandle.CreatedConversation;
+
+            return Results.Stream(async outputStream =>
+            {
+                await foreach (var sseChunk in WireStreamAdapter.WriteOpenAiChatCompletionsSseAsync(
+                                   streamHandle.Events,
+                                   completionId,
+                                   modelAlias.Alias,
+                                   createdStream,
+                                   publicApiOrigin,
+                                   streamState,
+                                   httpContext.RequestAborted))
+                {
+                    var bytes = Encoding.UTF8.GetBytes(sseChunk);
+                    await outputStream.WriteAsync(bytes, httpContext.RequestAborted);
+                    await outputStream.FlushAsync(httpContext.RequestAborted);
+                }
+
+                if (createdConversation)
+                {
+                    await WireConversationExecutor.TryGenerateWireConversationTitleAsync(db, conversationId, httpContext.RequestAborted);
+                }
+            }, contentType: "text/event-stream");
+        }
+
+        var conversation = await WireConversationExecutor.CollectWireConversationResultAsync(
+            streamHandle.Events,
+            db,
+            streamHandle.ConversationId,
+            httpContext.RequestAborted);
+
+        if (streamHandle.CreatedConversation)
+        {
+            await WireConversationExecutor.TryGenerateWireConversationTitleAsync(
+                db,
+                streamHandle.ConversationId,
+                httpContext.RequestAborted);
         }
 
         if (!string.IsNullOrWhiteSpace(conversation.ErrorPayload))
@@ -129,29 +174,9 @@ public static async Task<IResult> PostChatCompletionsAsync(
         }
 
         var finishReason = conversation.PendingClientTool ? "tool_calls" : "stop";
-        var publicApiOrigin = WireResponseSerializer.ResolvePublicApiOrigin(httpContext);
         var assistantContent = string.IsNullOrWhiteSpace(conversation.Text)
             ? null
             : WireResponseSerializer.RewritePublishedContentUrls(conversation.Text, publicApiOrigin);
-
-        if (request.Stream == true)
-        {
-            var createdStream = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            var completionId = $"chatcmpl_{Guid.NewGuid():N}";
-            var ssePayload = WireResponseSerializer.BuildOpenAiChatCompletionsSsePayload(
-                completionId,
-                modelAlias.Alias,
-                createdStream,
-                assistantContent,
-                toolCalls,
-                finishReason,
-                conversation.PromptTokens,
-                conversation.CompletionTokens);
-            return Results.Text(
-                ssePayload,
-                "text/event-stream",
-                Encoding.UTF8);
-        }
 
         var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var usage = WireStreamPayloadReader.BuildOpenAiUsage(conversation.PromptTokens, conversation.CompletionTokens);
@@ -227,7 +252,7 @@ public static async Task<IResult> PostResponsesAsync(
 
     try
     {
-        WireConversationExecutor.WireConversationResult conversation;
+        WireConversationExecutor.WireConversationStreamHandle streamHandle;
         if (inboundToolResults.Count > 0)
         {
             Guid? resumeConversationId = null;
@@ -267,9 +292,8 @@ public static async Task<IResult> PostResponsesAsync(
                 inboundToolResults,
                 httpContext.RequestAborted);
 
-            conversation = await WireConversationExecutor.ResumeConversationAfterToolResultsAsync(
+            streamHandle = WireConversationExecutor.StartResumeConversationStream(
                 publishedConversationService,
-                db,
                 context,
                 resumeConversationId.Value,
                 clientToolDefinitions,
@@ -300,15 +324,64 @@ public static async Task<IResult> PostResponsesAsync(
                 return conversationResolution.ErrorResult;
             }
 
-            conversation = await WireConversationExecutor.ExecuteConversationAsync(
+            streamHandle = await WireConversationExecutor.StartConversationStreamAsync(
                 publishedConversationService,
-                db,
                 context,
                 instructions,
                 httpContext.RequestAborted,
                 existingConversationId: conversationResolution.ConversationId,
                 clientMessages: conversationResolution.ConversationId.HasValue ? null : clientPrompt.PrefixMessages,
                 clientToolDefinitions: clientToolDefinitions);
+        }
+
+        var publicApiOrigin = WireResponseSerializer.ResolvePublicApiOrigin(httpContext);
+
+        if (request.Stream == true)
+        {
+            var streamCreated = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var streamResponseId = $"resp_{Guid.NewGuid():N}";
+            var streamState = new WireStreamAdapter.OpenAiResponsesStreamState();
+            var conversationId = streamHandle.ConversationId;
+            var createdConversation = streamHandle.CreatedConversation;
+
+            return Results.Stream(async outputStream =>
+            {
+                await foreach (var sseChunk in WireStreamAdapter.WriteOpenAiResponsesSseAsync(
+                                   streamHandle.Events,
+                                   streamResponseId,
+                                   modelAlias.Alias,
+                                   streamCreated,
+                                   publicApiOrigin,
+                                   streamState,
+                                   httpContext.RequestAborted))
+                {
+                    var bytes = Encoding.UTF8.GetBytes(sseChunk);
+                    await outputStream.WriteAsync(bytes, httpContext.RequestAborted);
+                    await outputStream.FlushAsync(httpContext.RequestAborted);
+                }
+
+                if (createdConversation)
+                {
+                    await WireConversationExecutor.TryGenerateWireConversationTitleAsync(
+                        db,
+                        conversationId,
+                        httpContext.RequestAborted);
+                }
+            }, contentType: "text/event-stream");
+        }
+
+        var conversation = await WireConversationExecutor.CollectWireConversationResultAsync(
+            streamHandle.Events,
+            db,
+            streamHandle.ConversationId,
+            httpContext.RequestAborted);
+
+        if (streamHandle.CreatedConversation)
+        {
+            await WireConversationExecutor.TryGenerateWireConversationTitleAsync(
+                db,
+                streamHandle.ConversationId,
+                httpContext.RequestAborted);
         }
 
         if (!string.IsNullOrWhiteSpace(conversation.ErrorPayload))
@@ -320,28 +393,12 @@ public static async Task<IResult> PostResponsesAsync(
         var promptTokens = conversation.PromptTokens;
         var completionTokens = conversation.CompletionTokens;
         var responseId = conversation.ResponseId ?? $"resp_{Guid.NewGuid():N}";
-        var publicApiOrigin = WireResponseSerializer.ResolvePublicApiOrigin(httpContext);
         var assistantText = WireResponseSerializer.RewritePublishedContentUrls(conversation.Text, publicApiOrigin);
         var outputItems = WireResponseSerializer.BuildOpenAiResponsesOutputItems(assistantText, conversation.ExternalToolCalls);
         if (conversation.PendingClientTool && !WireResponseSerializer.ContainsFunctionCallItem(outputItems))
         {
             return OpenAiWireErrorResults.UnsupportedFeature(
                 "This request triggered client-side tool execution, but no external tool payload was produced.");
-        }
-
-        if (request.Stream == true)
-        {
-            var ssePayload = WireResponseSerializer.BuildOpenAiResponsesSsePayload(
-                responseId,
-                modelAlias.Alias,
-                created,
-                outputItems,
-                promptTokens,
-                completionTokens);
-            return Results.Text(
-                ssePayload,
-                "text/event-stream",
-                Encoding.UTF8);
         }
 
         return Results.Json(new

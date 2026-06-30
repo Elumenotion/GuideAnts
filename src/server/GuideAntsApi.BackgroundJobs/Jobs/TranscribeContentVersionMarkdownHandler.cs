@@ -99,7 +99,7 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
                 .Where(p => p.Id == version.ContentFile.ProjectId)
                 .Select(p => p.Slug)
                 .FirstOrDefaultAsync(cancellationToken) ?? version.ContentFile.ProjectId.ToString();
-            var storagePath = GetMarkdownStoragePath(projectSlug, version.ContentFile.ProjectId, contentHash);
+            var storagePath = GetMarkdownStoragePath(projectSlug, contentHash);
 
             Directory.CreateDirectory(Path.GetDirectoryName(storagePath)!);
             if (!File.Exists(storagePath))
@@ -143,18 +143,12 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private string GetMarkdownStoragePath(string projectSlug, Guid projectId, string contentHash)
+    private string GetMarkdownStoragePath(string projectSlug, string contentHash)
     {
         var basePath = _configuration["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured");
-        var prefix = contentHash.Substring(0, 2);
-        var subdir = contentHash.Substring(2, 2);
-        var named = Path.Combine(basePath, "projects", projectSlug, "content", prefix, subdir, $"{contentHash}.md");
-        if (File.Exists(named))
-        {
-            return named;
-        }
-
-        return Path.Combine(basePath, "projects", projectId.ToString(), "content", prefix, subdir, $"{contentHash}.md");
+        var prefix = contentHash[..2];
+        var subdir = contentHash[2..4];
+        return Path.Combine(basePath, "projects", projectSlug, "content", prefix, subdir, $"{contentHash}.md");
     }
 }
 

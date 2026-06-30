@@ -9,6 +9,9 @@ import {
 } from './toolSourceClassification';
 import { extractServerUrl, extractTools, isConnectorKeyUnique } from './openApiToolSource';
 import { isCustomDescriptor, isInvalidJson, validateOpenApiSpec } from './validation';
+import { isLegacyClientBridgeMcpSource, parseMcpToolSourceMetadata } from './mcpToolSource';
+import { runtimeExecutionLabel, sandboxSetupStatusChipClassName, sandboxSetupStatusLabel } from './mcpRuntimeMode';
+import type { McpSandboxSetupStatusKind } from './mcpRuntimeMode';
 
 export interface ToolSourceCardViewModel {
   sourceKind: ToolSourceKind;
@@ -22,6 +25,10 @@ export interface ToolSourceCardViewModel {
   hasAuth: boolean;
   connectorKeyConflict: boolean;
   validationMessage: string | null;
+  mcpRuntimeSubBadge: string | null;
+  mcpConnectorKeyValue: string | null;
+  showMcpMigrationNotice: boolean;
+  mcpSandboxSetupStatus: McpSandboxSetupStatusKind | null;
 }
 
 const STATUS_LABELS: Record<ToolSourceStatus, string> = {
@@ -69,6 +76,7 @@ export function buildToolSourceCardViewModel(
   const custom = !invalidJson && isCustomDescriptor(spec);
   const status = deriveToolSourceStatus(spec, validationMessage, connectorKeyConflict, custom);
   const operations = invalidJson ? [] : extractTools(spec);
+  const mcpMeta = !invalidJson && sourceKind === 'mcp-connection' ? parseMcpToolSourceMetadata(spec) : null;
 
   return {
     sourceKind,
@@ -82,6 +90,13 @@ export function buildToolSourceCardViewModel(
     hasAuth: !!tool.authConfig,
     connectorKeyConflict,
     validationMessage,
+    mcpRuntimeSubBadge: mcpMeta ? runtimeExecutionLabel(mcpMeta.runtimeExecution) : null,
+    mcpConnectorKeyValue:
+      mcpMeta?.runtimeExecution === 'sandbox_subprocess'
+        ? mcpMeta.package?.identifier || connectorKeyValue
+        : mcpMeta?.url || connectorKeyValue,
+    showMcpMigrationNotice: !invalidJson && isLegacyClientBridgeMcpSource(spec),
+    mcpSandboxSetupStatus: mcpMeta?.runtimeExecution === 'sandbox_subprocess' ? 'unknown' : null,
   };
 }
 
@@ -97,6 +112,16 @@ export function statusChipClassName(status: ToolSourceStatus): string {
       return 'bg-red-100 text-red-800';
   }
 }
+
+export function mcpRuntimeSubBadgeClassName(): string {
+  return 'bg-teal-50 text-teal-800 border border-teal-200';
+}
+
+export function mcpMigrationNoticeClassName(): string {
+  return 'bg-blue-50 text-blue-800 border border-blue-200';
+}
+
+export { sandboxSetupStatusChipClassName, sandboxSetupStatusLabel };
 
 export function sourceKindBadgeClassName(kind: ToolSourceKind): string {
   switch (kind) {

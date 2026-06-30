@@ -120,6 +120,13 @@ RUN curl -sSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWS
     && chmod +x /usr/bin/pwsh \
     && rm /tmp/pwsh.tar.gz
 
+ARG NODE_MAJOR=22
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version \
+    && npx --version
+
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1

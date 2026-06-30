@@ -116,7 +116,9 @@ public static class GuidesPublishingEndpoints
             Guid guideId,
             [FromBody] PublishGuideDto dto,
             [FromServices] ApplicationDbContext db,
-            [FromServices] INotebookService notebookService) =>
+            [FromServices] INotebookService notebookService,
+            [FromServices] IMcpSandboxPublishGateService mcpSandboxPublishGateService,
+            CancellationToken cancellationToken) =>
         {
             
 
@@ -128,6 +130,8 @@ var guide = await db.Assistants
 
             if (guide == null)
                 return Results.NotFound(new { error = "Guide not found or you do not own this guide" });
+
+            await McpDescriptorMigrator.BackfillGuideSchemasAsync(db, guideId);
 
             if (dto.AuthMode == PublishedGuideAuthMode.AppIdentity)
             {
@@ -181,6 +185,30 @@ var guide = await db.Assistants
             if (dto.BillingPeriodChargeLimitUsd.HasValue && dto.BillingPeriodChargeLimitUsd.Value < 0m)
             {
                 return Results.BadRequest(new { error = "Monthly cost limit must be >= 0", field = "billingPeriodChargeLimitUsd" });
+            }
+
+            var guideSchemas = await db.AssistantOpenApiSchemas
+                .AsNoTracking()
+                .Where(schema => schema.AssistantId == guideId)
+                .Select(schema => new { schema.Name, schema.SpecificationJson, schema.ApiHost })
+                .ToListAsync(cancellationToken);
+
+            var guideCustomTools = guideSchemas
+                .Select(schema => new CustomToolDto(schema.Name, schema.SpecificationJson, schema.ApiHost, null))
+                .ToList();
+
+            var sandboxPublishBlock = await mcpSandboxPublishGateService.GetPublishBlockMessageAsync(
+                dto.ProjectId,
+                guideId,
+                guideCustomTools,
+                cancellationToken);
+            if (sandboxPublishBlock is not null)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "sandbox_mcp_not_applied",
+                    message = sandboxPublishBlock,
+                });
             }
 
             // Check if already published (same guide + project)

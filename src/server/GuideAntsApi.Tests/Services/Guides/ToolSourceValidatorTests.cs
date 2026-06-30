@@ -77,7 +77,31 @@ public sealed class ToolSourceValidatorTests
         }
         """;
 
-    private const string McpClientBridgeSpec = """
+    private const string McpApiSpec = """
+        {
+          "openapi": "3.0.0",
+          "info": { "title": "MCP", "version": "1.0.0" },
+          "servers": [{ "url": "mcp+api://worm" }],
+          "x-guideants-tool-source": {
+            "kind": "mcp",
+            "runtimeExecution": "api",
+            "discoveryTransport": "streamable_http",
+            "bridgeId": "worm",
+            "url": "https://mcp.example.com/mcp"
+          },
+          "paths": {
+            "/tools/search": {
+              "post": {
+                "operationId": "search",
+                "summary": "Search",
+                "responses": { "200": { "description": "ok" } }
+              }
+            }
+          }
+        }
+        """;
+
+    private const string LegacyMcpClientBridgeSpec = """
         {
           "openapi": "3.0.0",
           "info": { "title": "MCP", "version": "1.0.0" },
@@ -122,7 +146,7 @@ public sealed class ToolSourceValidatorTests
             .Should().NotContain(m => m.Severity == "error");
         ToolSourceValidator.ValidateDescriptor(ToolSpec, publishChecks: true)
             .Should().NotContain(m => m.Severity == "error");
-        ToolSourceValidator.ValidateDescriptor(McpClientBridgeSpec, publishChecks: true)
+        ToolSourceValidator.ValidateDescriptor(McpApiSpec, publishChecks: true)
             .Should().NotContain(m => m.Severity == "error");
     }
 
@@ -176,14 +200,27 @@ public sealed class ToolSourceValidatorTests
     }
 
     [TestMethod]
+    public void ValidateDescriptor_Rejects_legacy_mcp_transport()
+    {
+        ToolSourceValidator.ValidateDescriptor(LegacyMcpClientBridgeSpec, publishChecks: false)
+            .Should().Contain(m => m.Code == "legacy_mcp_transport" && m.Severity == "error");
+    }
+
+    [TestMethod]
     public void ValidateDescriptor_Rejects_unsupported_mcp_transport_at_publish()
     {
         const string spec = """
             {
               "openapi": "3.0.0",
               "info": { "title": "MCP SSE", "version": "1.0.0" },
-              "servers": [{ "url": "client://mcp-bridge-x" }],
-              "x-guideants-tool-source": { "kind": "mcp", "transport": "sse", "bridgeId": "x" },
+              "servers": [{ "url": "mcp+api://x" }],
+              "x-guideants-tool-source": {
+                "kind": "mcp",
+                "runtimeExecution": "api",
+                "discoveryTransport": "sse",
+                "bridgeId": "x",
+                "url": "https://mcp.example.com"
+              },
               "paths": {
                 "/tools/a": { "post": { "operationId": "a", "responses": { "200": { "description": "ok" } } } }
               }
@@ -191,7 +228,7 @@ public sealed class ToolSourceValidatorTests
             """;
 
         ToolSourceValidator.ValidateDescriptor(spec, publishChecks: true)
-            .Should().Contain(m => m.Code == "unsupported_mcp_transport" && m.Severity == "error");
+            .Should().Contain(m => m.Code == "unsupported_mcp_discovery_transport" && m.Severity == "error");
     }
 
     [TestMethod]
@@ -202,7 +239,13 @@ public sealed class ToolSourceValidatorTests
               "openapi": "3.0.0",
               "info": { "title": "MCP URL", "version": "1.0.0" },
               "servers": [{ "url": "mcp://my-server" }],
-              "x-guideants-tool-source": { "kind": "mcp", "transport": "streamable_http", "url": "https://mcp.example.com" },
+              "x-guideants-tool-source": {
+                "kind": "mcp",
+                "runtimeExecution": "api",
+                "discoveryTransport": "streamable_http",
+                "bridgeId": "my-server",
+                "url": "https://mcp.example.com"
+              },
               "paths": {
                 "/tools/a": { "post": { "operationId": "a", "responses": { "200": { "description": "ok" } } } }
               }
@@ -214,14 +257,44 @@ public sealed class ToolSourceValidatorTests
     }
 
     [TestMethod]
+    public void ValidateDescriptor_Rejects_runtime_scheme_mismatch()
+    {
+        const string spec = """
+            {
+              "openapi": "3.0.0",
+              "info": { "title": "MCP mismatch", "version": "1.0.0" },
+              "servers": [{ "url": "mcp+sandbox://x" }],
+              "x-guideants-tool-source": {
+                "kind": "mcp",
+                "runtimeExecution": "api",
+                "discoveryTransport": "streamable_http",
+                "bridgeId": "x",
+                "url": "https://mcp.example.com"
+              },
+              "paths": {
+                "/tools/a": { "post": { "operationId": "a", "responses": { "200": { "description": "ok" } } } }
+              }
+            }
+            """;
+
+        ToolSourceValidator.ValidateDescriptor(spec, publishChecks: false)
+            .Should().Contain(m => m.Code == "mcp_runtime_scheme_mismatch" && m.Severity == "error");
+    }
+
+    [TestMethod]
     public void ValidateDescriptor_Rejects_streamable_http_mcp_without_url_at_publish()
     {
         const string spec = """
             {
               "openapi": "3.0.0",
               "info": { "title": "MCP HTTP", "version": "1.0.0" },
-              "servers": [{ "url": "client://mcp-bridge-x" }],
-              "x-guideants-tool-source": { "kind": "mcp", "transport": "streamable_http" },
+              "servers": [{ "url": "mcp+api://x" }],
+              "x-guideants-tool-source": {
+                "kind": "mcp",
+                "runtimeExecution": "api",
+                "discoveryTransport": "streamable_http",
+                "bridgeId": "x"
+              },
               "paths": {
                 "/tools/a": { "post": { "operationId": "a", "responses": { "200": { "description": "ok" } } } }
               }
@@ -230,6 +303,18 @@ public sealed class ToolSourceValidatorTests
 
         ToolSourceValidator.ValidateDescriptor(spec, publishChecks: true)
             .Should().Contain(m => m.Code == "missing_mcp_server_url" && m.Severity == "error");
+    }
+
+    [TestMethod]
+    public void NormalizeDescriptor_Migrates_legacy_client_bridge_spec()
+    {
+        var normalized = ToolSourceValidator.NormalizeDescriptor(LegacyMcpClientBridgeSpec);
+        using var doc = System.Text.Json.JsonDocument.Parse(normalized);
+        doc.RootElement.GetProperty("servers")[0].GetProperty("url").GetString()
+            .Should().Be("mcp+api://worm");
+        normalized.Should().Contain("\"runtimeExecution\": \"api\"");
+        ToolSourceValidator.ValidateDescriptor(normalized, publishChecks: false)
+            .Should().NotContain(m => m.Code == "legacy_mcp_transport");
     }
 
     [TestMethod]
@@ -316,14 +401,14 @@ public sealed class ToolSourceValidatorTests
         ToolSourceValidator.ClassifySourceKind(ClientSpec).Should().Be("client-actions");
         ToolSourceValidator.ClassifySourceKind(SandboxSpec).Should().Be("sandbox-module");
         ToolSourceValidator.ClassifySourceKind(ToolSpec).Should().Be("local-function");
-        ToolSourceValidator.ClassifySourceKind(McpClientBridgeSpec).Should().Be("mcp-connection");
+        ToolSourceValidator.ClassifySourceKind(McpApiSpec).Should().Be("mcp-connection");
     }
 
     [TestMethod]
-    public void ResolveActionType_Maps_mcp_to_ClientHandled()
+    public void ResolveActionType_Maps_mcp_runtime_modes()
     {
-        ToolSourceValidator.ResolveActionType("mcp-connection", McpClientBridgeSpec)
-            .Should().Be("ClientHandled");
+        ToolSourceValidator.ResolveActionType("mcp-connection", McpApiSpec)
+            .Should().Be("McpApi");
         ToolSourceValidator.ResolveActionType("sandbox-module", SandboxSpec)
             .Should().Be("SandboxHandled");
     }

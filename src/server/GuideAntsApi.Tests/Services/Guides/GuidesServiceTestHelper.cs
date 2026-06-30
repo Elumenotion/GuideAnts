@@ -4,6 +4,7 @@ using GuideAntsApi.Options;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Guides;
+using GuideAntsApi.Services.Mcp;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Tests.TestUtils;
@@ -27,6 +28,7 @@ internal static class GuidesServiceTestHelper
             runtimeProfileResolver ?? Mock.Of<IRuntimeProfileResolver>(),
             new StaticOptionsMonitor<SettingsSecretsOptions>(CreateSecretsOptions()),
             catalogFilter ?? EmptySystemGuideCatalogFilter.Instance,
+            Mock.Of<IMcpSandboxSetupStagingService>(),
             NullLogger<GuidesService>.Instance);
 
     internal static GuideExportImportService CreateExportImportService(ApplicationDbContext context, DbContextOptions<ApplicationDbContext> options) =>

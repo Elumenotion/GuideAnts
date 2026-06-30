@@ -119,6 +119,13 @@ RUN curl -sSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWS
     && chmod +x /usr/bin/pwsh \
     && rm /tmp/pwsh.tar.gz
 
+ARG NODE_MAJOR=22
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version \
+    && npx --version
+
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"

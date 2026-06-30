@@ -9,12 +9,14 @@ import type {
   McpConnectionSettings,
   McpDiscoveredToolRow,
   McpHeaderRow,
+  McpRuntimeExecution,
   McpToolDiffState,
   McpToolOperationMetadata,
   McpToolSourceMetadata,
 } from './mcpToolSourceTypes';
+import { defaultDiscoveryTransport } from './mcpToolSourceTypes';
 
-const MCP_BRIDGE_PREFIX = 'mcp-bridge-';
+const LEGACY_CLIENT_MCP_HOST_PREFIX = `mcp-${'bridge'}-`;
 
 export function generateMcpBridgeId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -23,25 +25,64 @@ export function generateMcpBridgeId(): string {
   return `mcp${Date.now().toString(36)}`;
 }
 
+export function buildMcpServerUrl(bridgeId: string, runtimeExecution: McpRuntimeExecution): string {
+  const normalizedBridgeId = bridgeId.startsWith(LEGACY_CLIENT_MCP_HOST_PREFIX)
+    ? bridgeId.slice(LEGACY_CLIENT_MCP_HOST_PREFIX.length)
+    : bridgeId;
+  return runtimeExecution === 'sandbox_subprocess'
+    ? `mcp+sandbox://${normalizedBridgeId}`
+    : `mcp+api://${normalizedBridgeId}`;
+}
+
+/** @deprecated Use buildMcpServerUrl */
 export function buildMcpBridgeServerUrl(bridgeId: string): string {
-  const normalized = bridgeId.startsWith(MCP_BRIDGE_PREFIX)
-    ? bridgeId
-    : `${MCP_BRIDGE_PREFIX}${bridgeId}`;
-  return `client://${normalized}`;
+  return buildMcpServerUrl(bridgeId, 'api');
 }
 
 export function extractMcpBridgeIdFromServerUrl(serverUrl: string | null): string | null {
   if (!serverUrl) return null;
   try {
     const url = new URL(serverUrl);
-    const host = url.host;
-    if (host.startsWith(MCP_BRIDGE_PREFIX)) {
-      return host.slice(MCP_BRIDGE_PREFIX.length);
+    const scheme = url.protocol.replace(':', '');
+    if (scheme === 'mcp+api' || scheme === 'mcp+sandbox' || scheme === 'mcp') {
+      return url.host || null;
     }
-    return host || null;
+    if (scheme === 'client' && url.host.startsWith(LEGACY_CLIENT_MCP_HOST_PREFIX)) {
+      return url.host.slice(LEGACY_CLIENT_MCP_HOST_PREFIX.length);
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+function normalizeLegacyMetadata(meta: Record<string, unknown>): McpToolSourceMetadata {
+  const runtimeExecution =
+    (meta.runtimeExecution as McpRuntimeExecution | undefined) ??
+    (meta.package ? 'sandbox_subprocess' : 'api');
+  const discoveryTransport =
+    (meta.discoveryTransport as McpConnectionSettings['discoveryTransport'] | undefined) ??
+    defaultDiscoveryTransport(runtimeExecution);
+
+  return {
+    kind: 'mcp',
+    runtimeExecution,
+    discoveryTransport,
+    url: typeof meta.url === 'string' ? meta.url : undefined,
+    bridgeId: typeof meta.bridgeId === 'string' ? meta.bridgeId : undefined,
+    toolNamePrefix: typeof meta.toolNamePrefix === 'string' ? meta.toolNamePrefix : undefined,
+    headers:
+      meta.headers && typeof meta.headers === 'object'
+        ? (meta.headers as Record<string, string>)
+        : undefined,
+    package:
+      meta.package && typeof meta.package === 'object'
+        ? (meta.package as McpConnectionSettings['package'])
+        : undefined,
+    environmentVariables: Array.isArray(meta.environmentVariables)
+      ? (meta.environmentVariables as McpConnectionSettings['environmentVariables'])
+      : undefined,
+  };
 }
 
 export function parseMcpToolSourceMetadata(spec: string): McpToolSourceMetadata | null {
@@ -51,7 +92,7 @@ export function parseMcpToolSourceMetadata(spec: string): McpToolSourceMetadata 
     if (!meta || meta.kind !== 'mcp') {
       return null;
     }
-    return meta as McpToolSourceMetadata;
+    return normalizeLegacyMetadata(meta as Record<string, unknown>);
   } catch {
     return null;
   }
@@ -108,12 +149,17 @@ export function parseMcpConnectionSettings(spec: string): McpConnectionSettings 
     extractMcpBridgeIdFromServerUrl(serverUrl ?? null) ??
     generateMcpBridgeId();
 
+  const runtimeExecution = meta?.runtimeExecution ?? 'api';
+
   return {
-    transport: meta?.transport ?? 'streamable_http',
+    runtimeExecution,
+    discoveryTransport: meta?.discoveryTransport ?? defaultDiscoveryTransport(runtimeExecution),
     url: meta?.url ?? '',
     bridgeId,
     toolNamePrefix: meta?.toolNamePrefix ?? 'mcp',
     headers: meta?.headers ?? {},
+    package: meta?.package,
+    environmentVariables: meta?.environmentVariables,
   };
 }
 
@@ -160,20 +206,26 @@ export function buildResolvedMcpConnectionPayload(
   settings: McpConnectionSettings,
   environmentVariables: EnvironmentVariableDto[]
 ): {
-  transport: McpConnectionSettings['transport'];
+  runtimeExecution: McpConnectionSettings['runtimeExecution'];
+  discoveryTransport: McpConnectionSettings['discoveryTransport'];
   url?: string;
   bridgeId: string;
   headers: Record<string, string>;
   toolNamePrefix: string;
+  package?: McpConnectionSettings['package'];
+  environmentVariables?: McpConnectionSettings['environmentVariables'];
   missingSecretRefs: string[];
 } {
   const { resolved, missingRefs } = resolveHeaderValues(settings.headers, environmentVariables);
   return {
-    transport: settings.transport,
-    url: settings.transport === 'streamable_http' ? settings.url : undefined,
+    runtimeExecution: settings.runtimeExecution,
+    discoveryTransport: settings.discoveryTransport,
+    url: settings.runtimeExecution === 'api' ? settings.url : undefined,
     bridgeId: settings.bridgeId,
     headers: resolved,
     toolNamePrefix: settings.toolNamePrefix,
+    package: settings.package,
+    environmentVariables: settings.environmentVariables,
     missingSecretRefs: missingRefs,
   };
 }
@@ -184,15 +236,28 @@ export function applyMcpDiscoveryToSpec(
   tools: McpDiscoveredToolRow[]
 ): string {
   const parsed = JSON.parse(spec);
-  const serverUrl = buildMcpBridgeServerUrl(settings.bridgeId);
+  const serverUrl = buildMcpServerUrl(settings.bridgeId, settings.runtimeExecution);
 
-  parsed.servers = [{ url: serverUrl, description: 'MCP client bridge' }];
+  parsed.servers = [
+    {
+      url: serverUrl,
+      description:
+        settings.runtimeExecution === 'sandbox_subprocess'
+          ? 'MCP sandbox subprocess'
+          : 'MCP API execution',
+    },
+  ];
   parsed['x-guideants-tool-source'] = {
     kind: 'mcp',
-    transport: settings.transport,
+    runtimeExecution: settings.runtimeExecution,
+    discoveryTransport: settings.discoveryTransport,
     bridgeId: settings.bridgeId,
     toolNamePrefix: settings.toolNamePrefix || undefined,
-    ...(settings.transport === 'streamable_http' && settings.url ? { url: settings.url } : {}),
+    ...(settings.runtimeExecution === 'api' && settings.url ? { url: settings.url } : {}),
+    ...(settings.package ? { package: settings.package } : {}),
+    ...(settings.environmentVariables?.length
+      ? { environmentVariables: settings.environmentVariables }
+      : {}),
     ...(Object.keys(settings.headers).length > 0
       ? {
           headers: Object.fromEntries(
@@ -273,9 +338,18 @@ export function diffStateLabel(state: McpToolDiffState | string): string {
 }
 
 export function validateMcpConnectionSettings(settings: McpConnectionSettings): string | null {
-  if (settings.transport === 'streamable_http') {
+  if (!settings.bridgeId.trim()) {
+    return 'MCP bridge id is required.';
+  }
+
+  const expectedTransport = defaultDiscoveryTransport(settings.runtimeExecution);
+  if (settings.discoveryTransport !== expectedTransport) {
+    return `discoveryTransport must be ${expectedTransport} for runtimeExecution ${settings.runtimeExecution}.`;
+  }
+
+  if (settings.runtimeExecution === 'api') {
     if (!settings.url.trim()) {
-      return 'MCP server URL is required for streamable HTTP transport.';
+      return 'MCP server URL is required for api runtime execution.';
     }
     try {
       const uri = new URL(settings.url);
@@ -287,8 +361,52 @@ export function validateMcpConnectionSettings(settings: McpConnectionSettings): 
     }
   }
 
-  if (settings.transport === 'client_bridge' && !settings.bridgeId.trim()) {
-    return 'Client bridge id is required for client bridge transport.';
+  if (settings.runtimeExecution === 'sandbox_subprocess' && !settings.package) {
+    return 'Package metadata is required for sandbox_subprocess runtime execution.';
+  }
+
+  return null;
+}
+
+export function isLegacyClientBridgeMcpSource(spec: string): boolean {
+  try {
+    const parsed = JSON.parse(spec);
+    const serverUrl = parsed.servers?.[0]?.url as string | undefined;
+    if (typeof serverUrl === 'string') {
+      const url = new URL(serverUrl);
+      if (url.protocol.replace(':', '') === 'client' && url.host.startsWith(LEGACY_CLIENT_MCP_HOST_PREFIX)) {
+        return true;
+      }
+    }
+
+    const meta = parsed['x-guideants-tool-source'];
+    const legacyTransport = ['client', 'bridge'].join('_');
+    return meta?.transport === legacyTransport;
+  } catch {
+    return false;
+  }
+}
+
+export function validateMcpToolNamePrefixCollision(
+  customTools: Array<{ name: string; openApiSpec: string }>,
+  currentIndex: number,
+  prefix: string,
+): string | null {
+  const normalized = prefix.trim() || 'mcp';
+  for (let index = 0; index < customTools.length; index += 1) {
+    if (index === currentIndex) {
+      continue;
+    }
+
+    const meta = parseMcpToolSourceMetadata(customTools[index].openApiSpec);
+    if (!meta) {
+      continue;
+    }
+
+    const otherPrefix = meta.toolNamePrefix?.trim() || 'mcp';
+    if (otherPrefix === normalized) {
+      return `toolNamePrefix '${normalized}' is already used by source ${customTools[index].name}.`;
+    }
   }
 
   return null;

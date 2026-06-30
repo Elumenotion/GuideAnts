@@ -440,7 +440,7 @@ namespace AntRunner.Chat
                                         }
                                         else
                                         {
-                                            // WebApi, LocalFunction, and SandboxHandled are all server-side
+                                            // WebApi, LocalFunction, SandboxHandled, and McpApi are all server-side
                                             serverHandled.Add(tc);
                                         }
                                     }
@@ -965,6 +965,7 @@ namespace AntRunner.Chat
             var assistantName = assistantDef.Name!;
 
             if (ctx == null) throw new ArgumentNullException(nameof(ctx), "InvocationContext is required for tool calls");
+            var invocationContext = ctx;
             cancellationToken.ThrowIfCancellationRequested();
 
             await EnsureRequestBuilderCache(assistantName);
@@ -1094,6 +1095,52 @@ namespace AntRunner.Chat
                             else
                             {
                                 output = responseContent;
+                            }
+                        }
+                        else if (builder.ActionType == ActionType.McpApi)
+                        {
+                            try
+                            {
+                                output = await ExecuteMcpApiToolStaticAsync(
+                                    assistantName,
+                                    builder.Operation,
+                                    builder.BaseUrl,
+                                    builder.Path,
+                                    builder.MethodSchema,
+                                    builder.Params,
+                                    invocationContext,
+                                    cancellationToken);
+                            }
+                            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                            {
+                                throw;
+                            }
+                            catch (Exception ex)
+                            {
+                                output = $"ERROR: MCP tool execution failed: {ex.Message}";
+                            }
+                        }
+                        else if (builder.ActionType == ActionType.McpSandbox)
+                        {
+                            try
+                            {
+                                output = await ExecuteMcpSandboxToolStaticAsync(
+                                    assistantName,
+                                    builder.Operation,
+                                    builder.BaseUrl,
+                                    builder.Path,
+                                    builder.MethodSchema,
+                                    builder.Params,
+                                    invocationContext,
+                                    cancellationToken);
+                            }
+                            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                            {
+                                throw;
+                            }
+                            catch (Exception ex)
+                            {
+                                output = $"ERROR: MCP sandbox tool execution failed: {ex.Message}";
                             }
                         }
                         else if (builder.ActionType == ActionType.SandboxHandled)
@@ -1674,6 +1721,105 @@ namespace AntRunner.Chat
                     StandardOutput = string.Empty,
                     StandardError = $"ERROR: Failed to invoke sandbox tool: {ex.InnerException?.Message ?? ex.Message}"
                 };
+            }
+        }
+
+        /// <summary>
+        /// Executes an MCP API tool via the static McpToolExecutionBridge method.
+        /// This is a bridge from the AntRunner.Chat library to GuideAntsApi services.
+        /// </summary>
+        private static async Task<string> ExecuteMcpApiToolStaticAsync(
+            string assistantName,
+            string operationId,
+            string mcpServerUrl,
+            string toolPath,
+            JsonElement methodSchema,
+            Dictionary<string, object>? parameters,
+            InvocationContext context,
+            CancellationToken cancellationToken)
+        {
+            var paramsForMcp = parameters is null
+                ? null
+                : new Dictionary<string, object>(parameters);
+            paramsForMcp?.Remove("context");
+            paramsForMcp?.Remove("assistantDefinition");
+
+            var serviceType = Type.GetType("GuideAntsApi.Services.Mcp.McpToolExecutionBridge, GuideAntsApi");
+            if (serviceType == null)
+            {
+                return "ERROR: McpToolExecutionBridge not found. Ensure GuideAntsApi is properly referenced.";
+            }
+
+            var method = serviceType.GetMethod(
+                "ExecuteMcpApiTool",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (method == null)
+            {
+                return "ERROR: ExecuteMcpApiTool method not found on McpToolExecutionBridge.";
+            }
+
+            try
+            {
+                if (method.Invoke(null, [assistantName, operationId, mcpServerUrl, toolPath, methodSchema, paramsForMcp, context, cancellationToken])
+                    is not Task<string> task)
+                {
+                    return "ERROR: ExecuteMcpApiTool did not return expected Task type.";
+                }
+
+                return await task;
+            }
+            catch (Exception ex)
+            {
+                return $"ERROR: Failed to invoke MCP tool: {ex.InnerException?.Message ?? ex.Message}";
+            }
+        }
+
+        /// <summary>
+        /// Executes an MCP sandbox subprocess tool via the static McpToolExecutionBridge method.
+        /// </summary>
+        private static async Task<string> ExecuteMcpSandboxToolStaticAsync(
+            string assistantName,
+            string operationId,
+            string mcpServerUrl,
+            string toolPath,
+            JsonElement methodSchema,
+            Dictionary<string, object>? parameters,
+            InvocationContext context,
+            CancellationToken cancellationToken)
+        {
+            var paramsForMcp = parameters is null
+                ? null
+                : new Dictionary<string, object>(parameters);
+            paramsForMcp?.Remove("context");
+            paramsForMcp?.Remove("assistantDefinition");
+
+            var serviceType = Type.GetType("GuideAntsApi.Services.Mcp.McpToolExecutionBridge, GuideAntsApi");
+            if (serviceType == null)
+            {
+                return "ERROR: McpToolExecutionBridge not found. Ensure GuideAntsApi is properly referenced.";
+            }
+
+            var method = serviceType.GetMethod(
+                "ExecuteMcpSandboxTool",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (method == null)
+            {
+                return "ERROR: ExecuteMcpSandboxTool method not found on McpToolExecutionBridge.";
+            }
+
+            try
+            {
+                if (method.Invoke(null, [assistantName, operationId, mcpServerUrl, toolPath, methodSchema, paramsForMcp, context, cancellationToken])
+                    is not Task<string> task)
+                {
+                    return "ERROR: ExecuteMcpSandboxTool did not return expected Task type.";
+                }
+
+                return await task;
+            }
+            catch (Exception ex)
+            {
+                return $"ERROR: Failed to invoke MCP sandbox tool: {ex.InnerException?.Message ?? ex.Message}";
             }
         }
 
