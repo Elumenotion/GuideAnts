@@ -572,6 +572,7 @@ plan_pull() {
   local compose_path="$DOCKER_DIR/$1"
   local images missing=0 stale=0 img r l
   STALE_SERVICES=()
+  local -a missing_images=()
   if ! images="$(docker compose -f "$compose_path" --env-file "$ENV_FILE" config --images 2>/dev/null)"; then
     warn "Could not resolve image list; will let Compose pull what's missing."
     UPDATE_DECISION="skip"; return
@@ -581,7 +582,11 @@ plan_pull() {
   while IFS= read -r img; do
     [[ -n "$img" ]] || continue
     l="$(local_digest "$img" || true)"
-    if [[ -z "$l" ]]; then missing=$((missing+1)); continue; fi
+    if [[ -z "$l" ]]; then
+      missing=$((missing+1))
+      missing_images+=("$img")
+      continue
+    fi
     r="$(remote_digest "$img" || true)"
     if [[ -n "$r" && "$r" != "$l" ]]; then
       stale=$((stale+1))
@@ -590,6 +595,29 @@ plan_pull() {
   done <<< "$images"
 
   if [[ "$missing" -gt 0 ]]; then
+    local -a unavailable_images=()
+    for img in "${missing_images[@]}"; do
+      r="$(remote_digest "$img" || true)"
+      if [[ -z "$r" ]]; then
+        unavailable_images+=("$img")
+      fi
+    done
+    if [[ ${#unavailable_images[@]} -gt 0 ]]; then
+      if [[ "$SELECTED_BACKEND" == "vulkan" ]]; then
+        local has_vulkan=0
+        for img in "${unavailable_images[@]}"; do
+          [[ "$img" == *guideants-ai-vulkan* ]] && has_vulkan=1
+        done
+        if [[ "$has_vulkan" == "1" ]]; then
+          warn "The GHCR Vulkan AI image is not currently pullable:"
+          printf '  - %s\n' "${unavailable_images[@]}" >&2
+          fail "Build it locally, then rerun: ./docker/build/build_guideants_ai.sh --backend vulkan && ./installer/guideants.sh --backend vulkan --compose local --reconfigure"
+        fi
+      fi
+      warn "One or more Compose images are not pullable from the registry:"
+      printf '  - %s\n' "${unavailable_images[@]}" >&2
+      fail "If these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
+    fi
     log "$missing image(s) not present locally — they will be downloaded on first start."
     UPDATE_DECISION="pull"; return
   fi
@@ -888,7 +916,7 @@ apply_host_mount() {
 
   local mount_id apply_command
   mount_id="$(json_extract "$create_result" "mountId")"
-  apply_command="$(json_extract "$create_result" "applyCommand")"
+  apply_command="$(json_extract "$create_result" "command")"
 
   log "Mount created (id: $mount_id). Applying..."
 

@@ -163,7 +163,9 @@ function Resolve-ApplyPlan {
             Stop-WithError 'Compose plan host path is empty.'
         }
 
-        if (-not [string]::IsNullOrWhiteSpace($HostPathValue) -and $HostPathValue -ne $apiPlan.HostPath) {
+        $normalizedCliPath = if (-not [string]::IsNullOrWhiteSpace($HostPathValue)) { Convert-HostPathForCompose -PathValue $HostPathValue } else { '' }
+        $normalizedApiPath = Convert-HostPathForCompose -PathValue $apiPlan.HostPath
+        if (-not [string]::IsNullOrWhiteSpace($normalizedCliPath) -and $normalizedCliPath -ne $normalizedApiPath) {
             Stop-WithError 'Host path on the command line does not match the API mount plan.'
         }
 
