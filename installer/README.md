@@ -1,8 +1,8 @@
 # GuideAnts — Portable Quick Start
 
-This is one universal bundle for every operating system. It contains a single
-launcher (`guideants.sh`), a stop script (`stop_guideants.sh`), host-mount
-helper scripts, and the Docker Compose files. Docker downloads the actual
+This is one universal bundle for every operating system. It contains launcher
+scripts (`guideants.sh` and `guideants.ps1`), a stop script (`stop_guideants.sh`),
+host-mount helper scripts, and the Docker Compose files. Docker downloads the actual
 application images on first run, so the download itself is tiny.
 
 > **Requirement:** Docker must be installed and running.
@@ -28,7 +28,15 @@ xattr -d com.apple.quarantine guideants.sh
 > **Apple Silicon note:** Images run as `linux/amd64` under emulation. The
 > `slim` backend is recommended on Apple Silicon for best performance.
 
-**Windows**
+**Windows (PowerShell)**
+
+Open PowerShell in this folder and run:
+
+```powershell
+./guideants.ps1
+```
+
+**Windows (WSL / Git Bash)**
 
 Docker Desktop installs WSL2, which includes bash. Open a WSL terminal
 (or Git Bash), change into this folder, and run:
@@ -56,11 +64,20 @@ On first load you'll be sent to `/register`; the first account becomes **Admin**
 |----------|---------|----------------------|
 | `cuda13` | NVIDIA GPU (driver R580+, CUDA 13+) | Large |
 | `rocm`   | AMD GPU with ROCm 6.0+ (Linux / Windows via WSL2) | Large |
+| `vulkan` | Local AI on NVIDIA, AMD, or Intel GPUs through Vulkan | Large |
 | `cpu`    | Local AI, no GPU (slower) | ~60 GB |
 | `slim`   | Cloud AI providers only — no local model runtime | ~15 GB |
 
-The launcher auto-detects your GPU and recommends a backend. If Docker has
-limited RAM (< 16 GiB) and no GPU is found, it recommends `slim`.
+The launcher auto-detects your GPU and recommends a backend. `vulkan` is also
+available as a broad GPU path. If Docker has limited RAM (< 16 GiB) and no GPU
+is found, it recommends `slim`.
+
+If the pre-built GHCR Vulkan image is not yet pullable, build it locally first:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ..\docker\build\build_guideants_ai.ps1 -Backend vulkan
+powershell -ExecutionPolicy Bypass -File .\guideants.ps1 --backend vulkan --compose local --reconfigure
+```
 
 Your backend choice is saved in `.installer_state.env` and reused on subsequent
 runs. Pass `--reconfigure` to re-prompt.
@@ -89,7 +106,7 @@ If ROCm is below the minimum, the launcher warns and asks whether to continue.
 | Flag | What it does |
 |------|--------------|
 | `--doctor` | Run all checks, change nothing. Prints the compose command that would be used. |
-| `--backend <cpu\|cuda13\|rocm\|slim>` | Skip the interactive backend prompt. |
+| `--backend <cpu\|cuda13\|rocm\|slim\|vulkan>` | Skip the interactive backend prompt. |
 | `--compose <ghcr\|local>` | Use GHCR pre-built images (default) or local build images. |
 | `--mount /path/to/folder` | Mount a host folder into a project on startup (requires browser login). |
 | `--unmount` | Interactively remove a host folder mount (requires browser login). |
@@ -111,10 +128,10 @@ Linux / macOS:
 ./guideants.sh --mount /path/to/your/folder
 ```
 
-Windows (WSL / Git Bash):
+Windows (PowerShell):
 
-```bash
-bash guideants.sh --mount \\mntd\\path\\to\\your\\folder
+```powershell
+./guideants.ps1 --mount C:/path/to/your/folder
 ```
 
 1. The stack starts normally.
@@ -133,10 +150,10 @@ Linux / macOS:
 ./guideants.sh --unmount
 ```
 
-Windows (WSL / Git Bash):
+Windows (PowerShell):
 
-```bash
-bash guideants.sh --unmount
+```powershell
+./guideants.ps1 --unmount
 ```
 
 Follows the same authentication flow, then lets you pick an active mount to
@@ -156,8 +173,8 @@ PowerShell) handle writing this file and restarting services.
 
 Each mode has its own set of compose files:
 
-- GHCR: `docker-compose.ghcr-cpu.yml`, `docker-compose.ghcr-cuda13.yml`, `docker-compose.ghcr-rocm.yml`, `docker-compose.ghcr-slim.yml`
-- Local: `docker-compose.cpu.yml`, `docker-compose.cuda.yml`, `docker-compose.rocm.yml`, `docker-compose.slim.yml`
+- GHCR: `docker-compose.ghcr-cpu.yml`, `docker-compose.ghcr-cuda13.yml`, `docker-compose.ghcr-rocm.yml`, `docker-compose.ghcr-slim.yml`, `docker-compose.ghcr-vulkan.yml`
+- Local: `docker-compose.cpu.yml`, `docker-compose.cuda.yml`, `docker-compose.rocm.yml`, `docker-compose.slim.yml`, `docker-compose.vulkan.yml`
 
 ## Stopping
 
@@ -169,10 +186,10 @@ Linux / macOS:
 ./stop_guideants.sh
 ```
 
-Windows (WSL / Git Bash):
+Windows (PowerShell):
 
-```bash
-bash stop_guideants.sh
+```powershell
+./stop_guideants.ps1
 ```
 
 It reads the saved backend from `.installer_state.env` and runs
@@ -184,10 +201,10 @@ Linux / macOS:
 ./stop_guideants.sh --backend slim
 ```
 
-Windows (WSL / Git Bash):
+Windows (PowerShell):
 
-```bash
-bash stop_guideants.sh --backend slim
+```powershell
+./stop_guideants.ps1 --backend slim
 ```
 
 ## Services
@@ -215,6 +232,7 @@ bind mount. They persist across stops and updates.
 ```
 installer/
 ├── guideants.sh                    # Main launcher
+├── guideants.ps1                   # Main launcher (PowerShell)
 ├── stop_guideants.sh               # Stop script
 ├── .installer_state.env            # Saved backend/compose state (auto-generated)
 ├── README.md

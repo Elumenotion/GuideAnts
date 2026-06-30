@@ -12,7 +12,7 @@ Usage: build_guideants_ai.sh [options]
 Options:
   --rebuild-base         Rebuild dependency/base layers without cache
   --all                  Removed; use build_support_images.sh after backend builds
-  --backend <value>      Backend: cpu | cuda13 | rocm | slim
+  --backend <value>      Backend: cpu | cuda13 | rocm | slim | vulkan
   -h, --help             Show help
 EOF
 }
@@ -131,15 +131,17 @@ if [[ -z "$BACKEND" ]]; then
   echo "  2) CUDA 13"
   echo "  3) ROCm"
   echo "  4) Slim"
-  read -r -p "Enter choice [1, 2, 3, or 4]: " choice
+  echo "  5) Vulkan"
+  read -r -p "Enter choice [1-5]: " choice
 else
   case "$BACKEND" in
     cpu) choice="1" ;;
     cuda13) choice="2" ;;
     rocm) choice="3" ;;
     slim) choice="4" ;;
+    vulkan) choice="5" ;;
     *)
-      echo "Invalid backend: $BACKEND (expected cpu|cuda13|rocm|slim)" >&2
+      echo "Invalid backend: $BACKEND (expected cpu|cuda13|rocm|slim|vulkan)" >&2
       exit 1
       ;;
   esac
@@ -177,6 +179,14 @@ case "$choice" in
     DEPS_IMAGE_ARG="GA_DEPS_SLIM_IMAGE"
     REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311Slim/requirements.txt"
     DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.slim"
+    ;;
+  5)
+    BACKEND="vulkan"
+    FULL_TARGET="final-vulkan"
+    DEPS_TARGET="deps-vulkan"
+    DEPS_IMAGE_ARG="GA_DEPS_VULKAN_IMAGE"
+    REQUIREMENTS_SRC="$SCRIPT_DIR/Sandboxes/python311TorchVulkan/requirements.txt"
+    DOCKERFILE_PATH="$BUILD_CONTEXT/Dockerfile.vulkan"
     ;;
   *)
     echo "Invalid choice." >&2
@@ -338,6 +348,7 @@ case "$BACKEND" in
   cuda13) IMAGE_ENV_KEY="GA_AI_CUDA_IMAGE" ;;
   rocm) IMAGE_ENV_KEY="GA_AI_ROCM_IMAGE" ;;
   slim) IMAGE_ENV_KEY="GA_AI_SLIM_IMAGE" ;;
+  vulkan) IMAGE_ENV_KEY="GA_AI_VULKAN_IMAGE" ;;
   *) IMAGE_ENV_KEY="GA_AI_CPU_IMAGE" ;;
 esac
 ENV_LINE="$IMAGE_ENV_KEY=$LATEST_IMAGE_TAG"

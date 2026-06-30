@@ -158,6 +158,7 @@ get_latest_variant_image() {
     cuda13) pattern='^cuda13-([0-9]{5}\.[0-9]{4})$' ;;
     rocm) pattern='^rocm-([0-9]{5}\.[0-9]{4})$' ;;
     slim) pattern='^slim-([0-9]{5}\.[0-9]{4})$' ;;
+    vulkan) pattern='^vulkan-([0-9]{5}\.[0-9]{4})$' ;;
     *) echo "Unsupported variant: $variant" >&2; return 1 ;;
   esac
 
@@ -255,6 +256,10 @@ slim_info=""
 if ! slim_info="$(get_latest_variant_image slim 2>/dev/null)"; then
   echo "Warning: No local slim AI image found; skipping slim push. Build it first with docker/build/build_guideants_ai.sh --backend slim." >&2
 fi
+vulkan_info=""
+if ! vulkan_info="$(get_latest_variant_image vulkan 2>/dev/null)"; then
+  echo "Warning: No local Vulkan AI image found; skipping Vulkan push. Build it first with docker/build/build_guideants_ai.sh --backend vulkan." >&2
+fi
 
 CPU_SOURCE="${cpu_info%%|*}"
 CPU_BUILD="${cpu_info#*|}"
@@ -274,6 +279,11 @@ if [[ -n "$slim_info" ]]; then
   SLIM_SOURCE="${slim_info%%|*}"
   SLIM_BUILD="${slim_info#*|}"
   targets+=("slim|guideants-ai-slim|$SLIM_SOURCE|$SLIM_BUILD")
+fi
+if [[ -n "$vulkan_info" ]]; then
+  VULKAN_SOURCE="${vulkan_info%%|*}"
+  VULKAN_BUILD="${vulkan_info#*|}"
+  targets+=("vulkan|guideants-ai-vulkan|$VULKAN_SOURCE|$VULKAN_BUILD")
 fi
 
 for target in "${targets[@]}"; do
@@ -323,8 +333,9 @@ for target in "${extra_targets[@]}"; do
 done
 
 echo
-if [[ -n "$rocm_info" ]]; then
-  echo "Done. Pushed latest local CPU, CUDA13, and ROCm GuideAnts AI images plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$OWNER'."
-else
-  echo "Done. Pushed latest local CPU and CUDA13 GuideAnts AI images plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$OWNER'."
-fi
+pushed_variants=()
+for target in "${targets[@]}"; do
+  pushed_variants+=("${target%%|*}")
+done
+variant_list="$(printf '%s, ' "${pushed_variants[@]}")"
+echo "Done. Pushed local GuideAnts AI images (${variant_list%, }) plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$OWNER'."

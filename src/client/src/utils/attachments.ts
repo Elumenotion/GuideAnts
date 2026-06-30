@@ -1,4 +1,4 @@
-export type UploadType = 'image' | 'audio' | 'text' | 'other';
+export type UploadType = 'image' | 'audio' | 'text' | 'folder' | 'other';
 
 /**
  * Return simplified upload type from a filename extension
@@ -11,7 +11,7 @@ export function mapContentType(fileName: string): UploadType {
   return 'other';
 }
 
-export function uploadTypeToServer(uploadType: UploadType): 'ImageFile' | 'AudioFile' | 'TextFile' | 'SandboxFile' {
+export function uploadTypeToServer(uploadType: UploadType): 'ImageFile' | 'AudioFile' | 'TextFile' | 'SandboxFile' | 'Folder' {
   switch (uploadType) {
     case 'image':
       return 'ImageFile';
@@ -19,6 +19,8 @@ export function uploadTypeToServer(uploadType: UploadType): 'ImageFile' | 'Audio
       return 'AudioFile';
     case 'text':
       return 'TextFile';
+    case 'folder':
+      return 'Folder';
     default:
       return 'SandboxFile';
   }

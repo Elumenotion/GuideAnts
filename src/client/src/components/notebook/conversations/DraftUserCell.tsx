@@ -520,6 +520,20 @@ export default function DraftUserCell({
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     if (isReadOnly || isBusy) return;
     e.preventDefault();
+
+    const folderRelativePath = e.dataTransfer.getData('application/x-notebook-folder-relative-path');
+    if (folderRelativePath) {
+      const folderName = e.dataTransfer.getData('application/x-notebook-folder-name');
+      const normalized = folderRelativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+      addPendingAttachment({
+        notebookFileId: `path:${normalized}`,
+        relativePath: normalized,
+        fileName: folderName || normalized.split('/').pop() || normalized,
+        uploadType: 'folder',
+      });
+      return;
+    }
+
     const relativePath = e.dataTransfer.getData('application/x-notebook-file-relative-path');
     const isLinked = e.dataTransfer.getData('application/x-notebook-file-linked') === '1';
     const fileId = e.dataTransfer.getData('application/x-notebook-file-id') || e.dataTransfer.getData('text/plain');
@@ -701,6 +715,9 @@ export default function DraftUserCell({
                 {/* Pending attachments */}
                 {pendingAttachments.map((att: PendingAttachment) => (
                   <div key={att.notebookFileId} className="flex items-center bg-gray-100 rounded px-2 py-1 text-xs">
+                    {att.uploadType === 'folder' && (
+                      <svg className="w-3 h-3 mr-1 text-yellow-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" /></svg>
+                    )}
                     <span className="truncate max-w-[120px]" title={att.fileName}>{att.fileName}</span>
                     <button onClick={() => removePendingAttachment(att.notebookFileId)} className="ml-1 text-gray-400 hover:text-red-600" type="button">×</button>
                   </div>

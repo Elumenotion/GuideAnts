@@ -1,0 +1,48 @@
+name: Package Installer Release Asset
+
+on:
+  release:
+    types:
+      - published
+
+concurrency:
+  group: package-installer-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  package-installer:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Package installer
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          ASSET="dist/guideants-installer-${TAG}.zip"
+
+          mkdir -p dist
+          git archive --format=zip --prefix=installer/ --output="$ASSET" HEAD:installer
+
+          printf 'TAG=%s\n' "$TAG" >> "$GITHUB_ENV"
+          printf 'ASSET=%s\n' "$ASSET" >> "$GITHUB_ENV"
+
+      - name: Verify installer archive
+        shell: bash
+        run: unzip -t "$ASSET"
+
+      - name: Upload installer release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber

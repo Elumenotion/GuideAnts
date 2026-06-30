@@ -12,7 +12,7 @@ GuideAnts AI consolidates two prior containers into one runtime image:
 - local embeddings service (internal port 8085)
 - `nginx` gateway for single ingress (port 80)
 
-The `cpu`, `cuda13`, and `rocm` variants are full local AI images. The `slim` variant is intentionally sandbox-oriented: it starts the Python `ScriptExecutionAgent` and the non-model media service, but it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. Do not confuse `guideants-ai slim` with `guideants-webapi-ui-slim`; the latter is the existing API/UI image for split-stack deployments.
+The `cpu`, `cuda13`, `rocm`, and `vulkan` variants are full local AI images. The `vulkan` variant is vendor-neutral: a single image GPU-accelerates the LLM and image-generation paths on NVIDIA, AMD, and Intel via Vulkan (torch stays on CPU wheels, so ASR/TTS/embeddings run on CPU). See `docker/guideants-ai-vulkan.md` for the full Vulkan design and usage. The `slim` variant is intentionally sandbox-oriented: it starts the Python `ScriptExecutionAgent` and the non-model media service, but it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. Do not confuse `guideants-ai slim` with `guideants-webapi-ui-slim`; the latter is the existing API/UI image for split-stack deployments.
 
 Gateway route prefixes:
 
@@ -26,8 +26,8 @@ Gateway route prefixes:
 The build system is optimized for local iterative development:
 
 - one build script
-- backend-specific Dockerfiles (`Dockerfile.cpu`, `Dockerfile.cuda`, `Dockerfile.rocm`, `Dockerfile.slim`)
-- backend selected interactively (CPU, CUDA 13, ROCm, or slim)
+- backend-specific Dockerfiles (`Dockerfile.cpu`, `Dockerfile.cuda`, `Dockerfile.rocm`, `Dockerfile.slim`, `Dockerfile.vulkan`)
+- backend selected interactively (CPU, CUDA 13, ROCm, slim, or Vulkan)
 - deterministic dependency-image tags derived from dependency file hashes
 
 ## Build Cache Requirements
@@ -58,6 +58,7 @@ GitHub Actions publish the runtime images to GHCR as separate packages:
 - `ghcr.io/<owner>/guideants-ai-cuda13`
 - `ghcr.io/<owner>/guideants-ai-rocm`
 - `ghcr.io/<owner>/guideants-ai-slim`
+- `ghcr.io/<owner>/guideants-ai-vulkan`
 
 Workflow:
 
@@ -70,6 +71,7 @@ Manual dispatch options:
 - `cuda13` publishes only the CUDA 13 image
 - `rocm` publishes only the ROCm image
 - `slim` publishes only the sandbox-oriented AI image
+- `vulkan` publishes only the vendor-neutral Vulkan image
 
 Workflow implementation details:
 
@@ -77,7 +79,7 @@ Workflow implementation details:
 - stages that output into `docker/build/guideants-ai/ScriptExecutionAgent`
 - copies backend-specific sandbox requirements into `docker/build/guideants-ai/requirements.txt`
 - strips `torch`, `torchaudio`, `torchvision`, and `torchtext` so the Dockerfile remains the single owner of backend torch installation
-- builds `final-cpu`, `final-cuda13`, `final-rocm`, or `final-slim`
+- builds `final-cpu`, `final-cuda13`, `final-rocm`, `final-slim`, or `final-vulkan`
 - runs by manual GitHub Actions dispatch and pushes branch, `sha-*`, and `latest` tags to GHCR
 - uses GitHub Actions cache scopes per backend instead of publishing `guideants-ai-deps:*` cache images
 
@@ -85,11 +87,12 @@ Workflow implementation details:
 
 ### Backend-Specific Dockerfiles
 
-`docker/build/guideants-ai/Dockerfile.cpu`, `Dockerfile.cuda`, and `Dockerfile.rocm` contain backend-specific builder, dependency, and runtime stages:
+`docker/build/guideants-ai/Dockerfile.cpu`, `Dockerfile.cuda`, `Dockerfile.rocm`, and `Dockerfile.vulkan` contain backend-specific builder, dependency, and runtime stages:
 
 - `sd-cli-cpu-builder` -> builds CPU `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
 - `sd-cli-cuda-builder` -> builds CUDA `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
 - `sd-cli-rocm-builder` -> builds ROCm/HIP `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
+- `sd-cli-vulkan-builder` -> builds Vulkan `stable-diffusion.cpp` binaries (`sd-cli` + `sd-server`)
 - `runtime-cpu-base` -> OS/runtime base on `ghcr.io/ggml-org/llama.cpp:server`
 - `pydeps-cpu-builder` -> Python dependency build stage (includes build toolchain)
 - `deps-cpu` -> runtime dependency image (no compiler toolchain)
@@ -105,17 +108,24 @@ Workflow implementation details:
 - `deps-rocm` -> runtime dependency image (no compiler toolchain)
 - `final-rocm` -> runtime image on top of `deps-rocm` (or an externally tagged deps image)
 
+- `runtime-vulkan-base` -> OS/runtime base on `ghcr.io/ggml-org/llama.cpp:server-vulkan` (Ubuntu 26.04), plus the universal GPU driver layer (`mesa-vulkan-drivers` + libglvnd/EGL libs) that makes one image work on NVIDIA, AMD, and Intel
+- `pydeps-vulkan-builder` -> Python dependency build stage (includes build toolchain)
+- `deps-vulkan` -> runtime dependency image (no compiler toolchain)
+- `final-vulkan` -> runtime image on top of `deps-vulkan` (or an externally tagged deps image)
+
 The script builds one target with `--target` based on prompt choice:
 
 - CPU choice -> `--target final-cpu`
 - CUDA choice -> `--target final-cuda13`
 - ROCm choice -> `--target final-rocm`
+- Vulkan choice -> `--target final-vulkan`
 
 The backend choice is baked into the dependency image:
 
 - `deps-cpu` gets `sd-cli` + `sd-server` from `sd-cli-cpu-builder`
 - `deps-cuda13` gets CUDA-enabled `sd-cli` + `sd-server` from `sd-cli-cuda-builder`
 - `deps-rocm` gets HIP-enabled `sd-cli` + `sd-server` from `sd-cli-rocm-builder`
+- `deps-vulkan` gets Vulkan-enabled `sd-cli` + `sd-server` from `sd-cli-vulkan-builder`
 
 No startup toggle is used to switch stable-diffusion backend capability.
 
@@ -141,6 +151,7 @@ This removes duplicate torch/CUDA wheel installation and reduces image size.
   - `guideants-ai-deps:cpu-cache`
   - `guideants-ai-deps:cuda13-cache`
   - `guideants-ai-deps:rocm-cache`
+  - `guideants-ai-deps:vulkan-cache`
 - If the matching hash-tagged deps image exists, the final build reuses it via backend-specific build args.
 - If the deps image is missing, the script rebuilds it with the stable cache tag as `--cache-from` so unchanged deps layers can be reused across hash changes.
 - `-RebuildBase` still forces no-cache builds for dependency and final targets.
@@ -203,15 +214,15 @@ Cache note:
 
 ### Build flow
 
-1. Prompt backend (`CPU`, `CUDA 13`, `ROCm`, or `slim`)
+1. Prompt backend (`CPU`, `CUDA 13`, `ROCm`, `slim`, or `Vulkan`)
 2. Build/publish `src/server/ScriptExecutionAgent`
 3. Stage `ScriptExecutionAgent` and filtered `requirements.txt` into Docker build context
 4. Compute dependency hash from backend Dockerfile + requirement inputs
-5. Build/reuse backend-specific dependency image (`deps-cpu`, `deps-cuda13`, `deps-rocm`, or `deps-slim`)
+5. Build/reuse backend-specific dependency image (`deps-cpu`, `deps-cuda13`, `deps-rocm`, `deps-slim`, or `deps-vulkan`)
 6. Tag the deps image with both the hash tag and stable backend cache tag
-7. Build final runtime target (`final-cpu`, `final-cuda13`, `final-rocm`, or `final-slim`) using the dependency image
+7. Build final runtime target (`final-cpu`, `final-cuda13`, `final-rocm`, `final-slim`, or `final-vulkan`) using the dependency image
 8. Clean staged artifacts
-9. Write `GA_AI_CUDA_IMAGE=<final-tag>`, `GA_AI_CPU_IMAGE=<final-tag>`, `GA_AI_ROCM_IMAGE=<final-tag>`, or `GA_AI_SLIM_IMAGE=<final-tag>` to `docker/.env`
+9. Write `GA_AI_CUDA_IMAGE=<final-tag>`, `GA_AI_CPU_IMAGE=<final-tag>`, `GA_AI_ROCM_IMAGE=<final-tag>`, `GA_AI_SLIM_IMAGE=<final-tag>`, or `GA_AI_VULKAN_IMAGE=<final-tag>` to `docker/.env`
 10. Optionally build PlantUML/MSSQL and invoke `build_webapi_ui.ps1` if `-All` was passed
 
 ### Buildx Driver Recommendation
@@ -231,13 +242,16 @@ Without this setup, builds still succeed, but cache export is disabled for that 
 docker/
   .env
   docker-compose.cuda.yml
+  docker-compose.vulkan.yml
   guideants-ai-build.md
+  guideants-ai-vulkan.md
   build/
     build_guideants_ai.ps1
     guideants-ai/
       Dockerfile.cpu
       Dockerfile.cuda
       Dockerfile.rocm
+      Dockerfile.vulkan
       entrypoint.sh
       start-llama.sh
       start-asr.sh
@@ -253,6 +267,7 @@ docker/
       python311TorchCPU/requirements.txt
       python311TorchCUDA/requirements.txt
       python311TorchROCM/requirements.txt
+      python311TorchVulkan/requirements.txt
 ```
 
 ## Image Tagging
@@ -269,11 +284,13 @@ Examples:
 
 - `guideants-ai:cuda13-26096.1715`
 - `guideants-ai:cpu-26096.1715`
+- `guideants-ai:vulkan-26096.1715`
 - `guideants-ai-deps:cuda13-89ab1c2d3e4f`
 - `guideants-ai-deps:cuda13-cache`
 - `guideants-ai-deps:cpu-1a2b3c4d5e6f`
+- `guideants-ai-deps:vulkan-cache`
 
-`GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, or `GA_AI_ROCM_IMAGE` in `docker/.env` is always updated to the latest built final tag.
+`GA_AI_CUDA_IMAGE`, `GA_AI_CPU_IMAGE`, `GA_AI_ROCM_IMAGE`, or `GA_AI_VULKAN_IMAGE` in `docker/.env` is always updated to the latest built final tag.
 
 ## Running
 
@@ -613,7 +630,7 @@ Use this checklist after changing GPU routing vars. The expected behavior is:
 
 ### Add Python packages
 
-Add package install lines in both backend Python dependency builder stages (`pydeps-cpu-builder` and `pydeps-cuda13-builder`) for Python dependencies. Add OS-level runtime-only packages in both dependency runtime stages (`deps-cpu` and `deps-cuda13`).
+Add package install lines in every backend Python dependency builder stage (`pydeps-cpu-builder`, `pydeps-cuda13-builder`, `pydeps-rocm-builder`, and `pydeps-vulkan-builder`) for Python dependencies. Add OS-level runtime-only packages in every dependency runtime stage (`deps-cpu`, `deps-cuda13`, `deps-rocm`, and `deps-vulkan`).
 
 ### Add runtime services
 
@@ -627,7 +644,8 @@ Update both final stages plus `entrypoint.sh`:
 
 ## Key Constraints and Decisions
 
-- Use upstream `llama.cpp:server` / `llama.cpp:server-cuda13` (not `full`) to avoid unnecessary image bloat.
+- Use upstream `llama.cpp:server` / `llama.cpp:server-cuda13` / `llama.cpp:server-rocm` / `llama.cpp:server-vulkan` (not `full`) to avoid unnecessary image bloat.
+- The Vulkan image is vendor-neutral and runs on **both Windows (Docker Desktop) and native Linux** from one image. The image bakes all three drivers — Mesa **dzn** (Vulkan-on-D3D12, built from source), Mesa **RADV/ANV** (`mesa-vulkan-drivers`), and libglvnd/EGL for the NVIDIA ICD injection — and a single env-driven `docker-compose.vulkan.yml` selects the path per host: Windows → dzn over `/dev/dxg` (runs from git bash, no WSL distro; the nvidia runtime is *not* used there because on WSL2 it gives CUDA but no Vulkan ICD → CPU `llvmpipe`); native Linux AMD/Intel → RADV/ANV over `/dev/dri`; native Linux NVIDIA → nvidia-container-toolkit (`runtime: nvidia` + `graphics` cap). The installer's `select_vulkan_runtime()` sets the `GA_VULKAN_*` env automatically. The `server-vulkan` base is Ubuntu 26.04 and needs a few build workarounds (`pkg-config`, a GCC-14 `CFLAGS` relaxation, and a Playwright `os-release` spoof) — see `docker/guideants-ai-vulkan.md`.
 - Use one Python 3.11 venv (`/opt/venv`) for project and ASR dependencies to stay compliant with Ubuntu 24.04 PEP 668 behavior and avoid duplicate torch installation.
 - Keep stable-diffusion model weights external to image layers and load them through mounted volumes.
 - Keep shell scripts LF-only (`.gitattributes`) for Linux container compatibility.
