@@ -98,6 +98,13 @@ const mockTree: NotebookFolderTreeDto = {
   files: [],
 };
 
+const emptyLinkedMountTree: NotebookFolderTreeDto = {
+  name: 'Notebook',
+  relativePath: '',
+  subFolders: [],
+  files: [],
+};
+
 const renderTree = (overrides: Partial<React.ComponentProps<typeof NotebookFolderTree>> = {}) => {
   const props = {
     tree: mockTree,
@@ -170,6 +177,29 @@ describe('NotebookFolderTree host mounts', () => {
     expect(screen.getByTestId('host-mount-state-PendingRestart')).toBeInTheDocument();
   });
 
+  it('keeps linked mount roots expandable while scanned children are missing', async () => {
+    const user = userEvent.setup();
+    const onRefreshFiles = vi.fn();
+
+    renderTree({
+      tree: emptyLinkedMountTree,
+      onRefreshFiles,
+    });
+
+    const expandShared = screen.getByLabelText('Expand Shared');
+    expect(expandShared).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(onRefreshFiles).toHaveBeenCalledTimes(1);
+    });
+
+    onRefreshFiles.mockClear();
+    await user.click(expandShared);
+
+    expect(onRefreshFiles).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Collapse Shared')).toBeInTheDocument();
+  });
+
   it('shows remove mapped folder instead of delete on mount root', () => {
     renderTree();
 
@@ -195,7 +225,7 @@ describe('NotebookFolderTree host mounts', () => {
     expect(localStorage.getItem('hostCommand')).toBeNull();
   });
 
-  it('marks files inside mapped folders as read-only in the context menu', async () => {
+  it('hides mutating options for files inside mapped folders in the context menu', async () => {
     const user = userEvent.setup();
     renderTree({ onDeleteFile: vi.fn() });
 
@@ -214,7 +244,7 @@ describe('NotebookFolderTree host mounts', () => {
     }
 
     fireEvent.contextMenu(screen.getByTitle('host.txt'));
-    expect(screen.getByText('Linked files are read-only here.')).toBeInTheDocument();
+    expect(screen.queryByText('Linked files are read-only here.')).not.toBeInTheDocument();
     expect(screen.queryByText('Delete on host')).not.toBeInTheDocument();
   });
 

@@ -352,6 +352,14 @@ public class ConversationService : IConversationService
             }
 
             var normalizedPath = attachment.RelativePath.Replace("\\", "/").TrimStart('/');
+
+            if (attachment.UploadType == ContentUploadType.Folder)
+            {
+                var folderPath = BuildAttachmentPathForChat(normalizedPath);
+                ctx.PreviousMessages.Add(new ChatMessage(AntRunner.Chat.Abstractions.ChatRole.User, $"Attachment (folder): {folderPath}"));
+                continue;
+            }
+
             var file = await _notebookFileService.GetFileAsync(
                 ctx.Conversation.Notebook.ProjectId,
                 ctx.Conversation.NotebookId,

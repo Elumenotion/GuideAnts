@@ -418,7 +418,10 @@ FodyWeavers.xsd
 /docker/.buildx-cache
 /docker/.build-state
 /docker/.buildx-cache-deps-new
-/docker/docker-compose.host-mounts.generated.yml
+# Local-only generated host-mount Compose override (contains personal paths; never commit).
+# Template: docker/docker-compose.host-mounts.generated.example.yml. Non-anchored so it
+# also covers installer/docker/. The .example.yml template is intentionally NOT matched.
+docker-compose.host-mounts.generated.yml
 /_hf_test
 /.codeql
 /scan-recs
@@ -427,6 +430,7 @@ FodyWeavers.xsd
 /tmp
 /scan-results.txt
 
-# CLI auth token (never commit)
-installer/docker/volumes/content-files/.cli-auth-token
+# Installer
+/installer/docker/volumes/content-files/*
+!/installer/docker/volumes/content-files/.gitkeep
 *.cli-auth-token
