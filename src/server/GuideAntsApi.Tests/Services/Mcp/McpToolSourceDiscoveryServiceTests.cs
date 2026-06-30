@@ -62,7 +62,9 @@ public sealed class McpOpenApiDescriptorGeneratorTests
 [TestClass]
 public sealed class McpToolSourceDiscoveryServiceTests
 {
-    private readonly McpToolSourceDiscoveryService _service = new(NullLogger<McpToolSourceDiscoveryService>.Instance);
+    private readonly McpToolSourceDiscoveryService _service = new(
+        new NoOpSandboxStdioDiscoveryClient(),
+        NullLogger<McpToolSourceDiscoveryService>.Instance);
 
     private static McpToolSourceConnectionDto ApiConnection(
         string bridgeId = "worm-bridge",
@@ -74,6 +76,16 @@ public sealed class McpToolSourceDiscoveryServiceTests
             bridgeId,
             null,
             "mcp");
+
+    private static McpToolSourceConnectionDto SandboxConnection() =>
+        new(
+            McpRuntimeExecution.SandboxSubprocess,
+            McpDiscoveryTransport.Stdio,
+            null,
+            "worm-bridge",
+            null,
+            "mcp",
+            new McpPackageDescriptorDto("npm", "@example/mcp", "npx", ["-y", "@example/mcp"]));
 
     [TestMethod]
     public async Task TestConnection_Api_RejectsMissingBridgeId()
@@ -94,39 +106,25 @@ public sealed class McpToolSourceDiscoveryServiceTests
     }
 
     [TestMethod]
-    public async Task TestConnection_SandboxSubprocess_ValidatesPackageConfiguration()
+    public async Task TestConnection_SandboxSubprocess_RequiresGuideScope()
     {
         var result = await _service.TestConnectionAsync(new McpTestConnectionRequest(
-            new McpToolSourceConnectionDto(
-                McpRuntimeExecution.SandboxSubprocess,
-                McpDiscoveryTransport.Stdio,
-                null,
-                "worm-bridge",
-                null,
-                "mcp",
-                new McpPackageDescriptorDto("npm", "@example/mcp", "npx", ["-y", "@example/mcp"]))));
+            SandboxConnection()));
 
-        result.Connected.Should().BeTrue();
-        result.Message.Should().Contain("Sandbox subprocess");
+        result.Connected.Should().BeFalse();
+        result.Message.Should().Contain("projectId");
     }
 
     [TestMethod]
-    public async Task DiscoverTools_SandboxSubprocess_IsNotAvailableYet()
+    public async Task DiscoverTools_SandboxSubprocess_RequiresGuideScope()
     {
         var result = await _service.DiscoverToolsAsync(new McpDiscoverToolsRequest(
-            new McpToolSourceConnectionDto(
-                McpRuntimeExecution.SandboxSubprocess,
-                McpDiscoveryTransport.Stdio,
-                null,
-                "worm-bridge",
-                null,
-                "mcp",
-                new McpPackageDescriptorDto("npm", "@example/mcp", "npx", ["-y", "@example/mcp"])),
+            SandboxConnection(),
             null,
             null));
 
         result.Success.Should().BeFalse();
-        result.Message.Should().Contain("not available");
+        result.Message.Should().Contain("projectId");
     }
 
     [TestMethod]
@@ -145,5 +143,15 @@ public sealed class McpToolSourceDiscoveryServiceTests
 
         result.Success.Should().BeFalse();
         result.Message.Should().Contain("discoveryTransport");
+    }
+
+    private sealed class NoOpSandboxStdioDiscoveryClient : IMcpSandboxStdioDiscoveryClient
+    {
+        public Task<McpStdioDiscoverResponse> DiscoverAsync(
+            Guid projectId,
+            Guid guideId,
+            McpToolSourceConnectionDto connection,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(McpStdioDiscoverResponse.Succeeded("test-server", "1.0.0", []));
     }
 }

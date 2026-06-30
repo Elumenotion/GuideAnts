@@ -427,6 +427,7 @@ public static class StartupConfiguration
         services.AddScoped<McpPublishedGuideInvokeService>();
         services.AddScoped<McpPublishedRunImageEmbedder>();
         services.AddScoped<IClaudeSkillPackService, ClaudeSkillPackService>();
+        services.AddScoped<IMcpSandboxStdioDiscoveryClient, McpSandboxStdioDiscoveryClient>();
         services.AddScoped<IMcpToolSourceDiscoveryService, McpToolSourceDiscoveryService>();
         services.Configure<McpToolExecutorOptions>(
             configuration.GetSection(McpToolExecutorOptions.SectionName));

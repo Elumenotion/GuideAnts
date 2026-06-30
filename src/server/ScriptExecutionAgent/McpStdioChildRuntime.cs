@@ -6,6 +6,97 @@ namespace ScriptExecutionAgent;
 
 internal static class McpStdioChildRuntime
 {
+    public static async Task<McpStdioDiscoverResult> DiscoverToolsAsync(
+        McpStdioDiscoverRequest request,
+        string authorizedWorkingDirectory,
+        ScriptExecutionScopeOptions scopeOptions,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var projectId = Guid.Parse(request.ProjectId);
+        var guideScopeId = Guid.Parse(request.GuideId);
+        var scope = ScriptExecutionScopeRuntime.ResolveScope(projectId, guideScopeId, scopeOptions);
+        ScriptExecutionScopeRuntime.EnsureScopeDirectory(scope);
+
+        var environmentValidation = ValidateExecutionEnvironment(request.Environment);
+        if (!environmentValidation.IsValid)
+        {
+            return McpStdioDiscoverResult.Failed($"Environment validation failed: {environmentValidation.ErrorMessage}");
+        }
+
+        var scopedEnvironment = ScriptExecutionScopeRuntime.BuildScriptEnvironment(
+            scope,
+            request.Environment,
+            authorizedWorkingDirectory,
+            logger);
+
+        var command = request.Command.Trim();
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return McpStdioDiscoverResult.Failed("MCP package command is required.");
+        }
+
+        var arguments = request.Arguments?.Where(arg => arg is not null).Select(arg => arg!).ToArray()
+            ?? Array.Empty<string>();
+
+        var (commandFile, commandArgs) = ApplyPrivacyWrapper(command, arguments);
+        var transportEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in scopedEnvironment)
+        {
+            if (value is not null)
+            {
+                transportEnvironment[key] = value;
+            }
+        }
+
+        var timeout = TimeSpan.FromSeconds(Math.Max(1, request.TimeoutSeconds));
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeout);
+
+        try
+        {
+            var transport = new StdioClientTransport(new StdioClientTransportOptions
+            {
+                Command = commandFile,
+                Arguments = commandArgs,
+                WorkingDirectory = authorizedWorkingDirectory,
+                EnvironmentVariables = transportEnvironment,
+                ShutdownTimeout = TimeSpan.FromSeconds(5),
+            });
+
+            await using var client = await McpClient.CreateAsync(transport, cancellationToken: timeoutCts.Token);
+            var serverInfo = client.ServerInfo;
+            var tools = await client.ListToolsAsync(cancellationToken: timeoutCts.Token);
+            var discovered = tools
+                .Select(tool => new McpStdioDiscoveredTool(
+                    tool.Name,
+                    tool.Title,
+                    tool.Description,
+                    tool.ProtocolTool.InputSchema))
+                .ToList();
+
+            return McpStdioDiscoverResult.Succeeded(
+                serverInfo?.Name,
+                serverInfo?.Version,
+                discovered);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return McpStdioDiscoverResult.Failed(
+                $"MCP stdio discovery timed out after {timeout.TotalSeconds:0} seconds.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "MCP stdio discovery failed. projectId={ProjectId} guideId={GuideId}",
+                projectId,
+                guideScopeId);
+
+            return McpStdioDiscoverResult.Failed($"MCP stdio discovery failed: {ex.Message}");
+        }
+    }
+
     public static async Task<McpStdioExecutionResult> ExecuteToolCallAsync(
         McpStdioExecutionRequest request,
         string authorizedWorkingDirectory,
@@ -90,6 +181,57 @@ internal static class McpStdioChildRuntime
             var message = ex.Message;
             return McpStdioExecutionResult.Failed($"MCP stdio tool call failed: {message}");
         }
+    }
+
+    public static ValidationResult ValidateMcpStdioDiscoverRequest(McpStdioDiscoverRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Command))
+        {
+            return ValidationResult.Failure("Command is required.");
+        }
+
+        if (request.Command.Length > 512)
+        {
+            return ValidationResult.Failure("Command exceeds maximum length.");
+        }
+
+        if (request.Arguments is not null)
+        {
+            if (request.Arguments.Count > 128)
+            {
+                return ValidationResult.Failure("Too many command arguments.");
+            }
+
+            foreach (var argument in request.Arguments)
+            {
+                if (argument is null)
+                {
+                    return ValidationResult.Failure("Command arguments cannot contain null entries.");
+                }
+
+                if (argument.Length > 4096)
+                {
+                    return ValidationResult.Failure("A command argument exceeds maximum length.");
+                }
+            }
+        }
+
+        if (!Guid.TryParse(request.ProjectId, out var projectId) || projectId == Guid.Empty)
+        {
+            return ValidationResult.Failure("ProjectId must be a non-empty GUID.");
+        }
+
+        if (!Guid.TryParse(request.GuideId, out var guideId) || guideId == Guid.Empty)
+        {
+            return ValidationResult.Failure("GuideId must be a non-empty GUID.");
+        }
+
+        if (request.TimeoutSeconds < 1 || request.TimeoutSeconds > 600)
+        {
+            return ValidationResult.Failure("TimeoutSeconds must be between 1 and 600.");
+        }
+
+        return ValidateExecutionEnvironment(request.Environment);
     }
 
     public static ValidationResult ValidateMcpStdioRequest(McpStdioExecutionRequest request)
@@ -259,6 +401,46 @@ internal static class McpStdioResultFormatter
             ? "ERROR: MCP tool call returned an error with no content."
             : string.Empty;
     }
+}
+
+public sealed record McpStdioDiscoverRequest
+{
+    public string ProjectId { get; init; } = string.Empty;
+    public string GuideId { get; init; } = string.Empty;
+    public string Command { get; init; } = string.Empty;
+    public IReadOnlyList<string>? Arguments { get; init; }
+    public IReadOnlyDictionary<string, string>? Environment { get; init; }
+    public int TimeoutSeconds { get; init; } = 30;
+}
+
+public sealed record McpStdioDiscoveredTool(
+    string Name,
+    string? Title,
+    string? Description,
+    JsonElement InputSchema);
+
+public sealed class McpStdioDiscoverResult
+{
+    public bool Success { get; init; }
+    public string? ServerName { get; init; }
+    public string? ServerVersion { get; init; }
+    public IReadOnlyList<McpStdioDiscoveredTool>? Tools { get; init; }
+    public string? Error { get; init; }
+
+    public static McpStdioDiscoverResult Succeeded(
+        string? serverName,
+        string? serverVersion,
+        IReadOnlyList<McpStdioDiscoveredTool> tools) =>
+        new()
+        {
+            Success = true,
+            ServerName = serverName,
+            ServerVersion = serverVersion,
+            Tools = tools,
+        };
+
+    public static McpStdioDiscoverResult Failed(string error) =>
+        new() { Success = false, Error = error };
 }
 
 public sealed record McpStdioExecutionRequest

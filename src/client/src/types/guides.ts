@@ -235,6 +235,8 @@ export interface McpExistingToolStateDto {
 
 export interface McpTestConnectionRequest {
   connection: McpToolSourceConnectionDto;
+  projectId?: string;
+  guideId?: string;
 }
 
 export interface McpDiscoverToolsRequest {
@@ -246,6 +248,8 @@ export interface McpDiscoverToolsRequest {
     description?: string;
     inputSchema?: unknown;
   }>;
+  projectId?: string;
+  guideId?: string;
 }
 
 export interface OpenApiAuthConfig {

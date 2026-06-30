@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../../../services/api';
 import type { CustomToolDto, EnvironmentVariableDto } from '../../../../types/guides';
 import {
@@ -25,6 +25,7 @@ import type {
   McpConnectionSettings,
   McpDiscoveredToolRow,
   McpHeaderRow,
+  McpPackageDescriptor,
   McpRuntimeExecution,
 } from './mcpToolSourceTypes';
 import {
@@ -32,9 +33,13 @@ import {
   defaultPackageDescriptor,
   deriveDiscoveryTransport,
   mapSetupStatusFromResponse,
+  sandboxPackagesFingerprint,
   type McpSandboxSetupStatusKind,
 } from './mcpRuntimeMode';
-import { stageSandboxSetupForGuide } from './mcpSandboxSetupComposer';
+import {
+  collectSandboxPackagesForToolUpdate,
+  stageSandboxSetupForGuide,
+} from './mcpSandboxSetupComposer';
 
 export interface UseMcpConnectionOptions {
   tool: CustomToolDto;
@@ -68,8 +73,13 @@ export function useMcpConnection({
   const [setupStatus, setSetupStatus] = useState<McpSandboxSetupStatusKind>('unknown');
   const [showApplyConfirm, setShowApplyConfirm] = useState(false);
   const [applyTrigger, setApplyTrigger] = useState<'test' | 'install' | null>(null);
+  const lastStagedPackagesFingerprintRef = useRef<string | null>(null);
+  const lastSyncedOpenApiSpecRef = useRef(tool.openApiSpec);
 
-  const scope = projectId && guideId ? { projectId, guideId } : null;
+  const scope = useMemo(
+    () => (projectId && guideId ? { projectId, guideId } : null),
+    [projectId, guideId],
+  );
   const validationError = validateMcpConnectionSettings(settings);
   const dispatchUrl = buildMcpDispatchUrl(settings.bridgeId, settings.runtimeExecution);
 
@@ -114,23 +124,23 @@ export function useMcpConnection({
   );
 
   const refreshSetupStatus = useCallback(async () => {
-    if (!scope || settings.runtimeExecution !== 'sandbox_subprocess') {
+    if (!projectId || !guideId || settings.runtimeExecution !== 'sandbox_subprocess') {
       return;
     }
 
-    const result = await sandboxAdminGetSetupStatus(scope);
+    const result = await sandboxAdminGetSetupStatus({ projectId, guideId });
     if (result.status === 'ok') {
       setSetupStatus(mapSetupStatusFromResponse(result.data));
     }
-  }, [scope, settings.runtimeExecution]);
+  }, [guideId, projectId, settings.runtimeExecution]);
 
   const stageSandboxSetup = useCallback(
-    async (next: McpConnectionSettings) => {
-      if (!scope || next.runtimeExecution !== 'sandbox_subprocess' || !next.package) {
+    async (packages: McpPackageDescriptor[]) => {
+      if (!scope || settings.runtimeExecution !== 'sandbox_subprocess' || packages.length === 0) {
         return null;
       }
 
-      return stageSandboxSetupForGuide(scope, [next.package], {
+      return stageSandboxSetupForGuide(scope, packages, {
         setRequirements: async (guideScope, content) => {
           const result = await sandboxAdminSetRequirements(guideScope, content);
           return { status: result.status, message: result.message };
@@ -149,7 +159,31 @@ export function useMcpConnection({
         },
       });
     },
-    [scope],
+    [scope, settings.runtimeExecution],
+  );
+
+  const maybeStageSandboxPackages = useCallback(
+    async (packages: McpPackageDescriptor[]) => {
+      if (!scope || settings.runtimeExecution !== 'sandbox_subprocess' || packages.length === 0) {
+        return;
+      }
+
+      const fingerprint = sandboxPackagesFingerprint(packages);
+      if (fingerprint === lastStagedPackagesFingerprintRef.current) {
+        return;
+      }
+
+      const stageError = await stageSandboxSetup(packages);
+      if (stageError) {
+        setErrorMessage(stageError);
+        setSetupStatus('drift');
+        return;
+      }
+
+      lastStagedPackagesFingerprintRef.current = fingerprint;
+      await refreshSetupStatus();
+    },
+    [refreshSetupStatus, scope, settings.runtimeExecution, stageSandboxSetup],
   );
 
   const updateSettings = useCallback(
@@ -158,17 +192,12 @@ export function useMcpConnection({
       setSettings(next);
       syncSettingsToSpec(next);
 
-      if (next.runtimeExecution === 'sandbox_subprocess' && next.package && scope) {
-        const stageError = await stageSandboxSetup(next);
-        if (stageError) {
-          setErrorMessage(stageError);
-          setSetupStatus('drift');
-        } else {
-          await refreshSetupStatus();
-        }
+      if (next.runtimeExecution === 'sandbox_subprocess' && scope) {
+        const packages = collectSandboxPackagesForToolUpdate(allTools, toolIndex, next);
+        await maybeStageSandboxPackages(packages);
       }
     },
-    [refreshSetupStatus, scope, settings, stageSandboxSetup, syncSettingsToSpec],
+    [allTools, maybeStageSandboxPackages, scope, settings, syncSettingsToSpec, toolIndex],
   );
 
   const updateHeaders = (rows: McpHeaderRow[]) => {
@@ -211,12 +240,15 @@ export function useMcpConnection({
     setErrorMessage(null);
     setStatusMessage(null);
 
-    const stageError = await stageSandboxSetup(settings);
+    const packages = collectSandboxPackagesForToolUpdate(allTools, toolIndex, settings);
+    const stageError = await stageSandboxSetup(packages);
     if (stageError) {
       setPanelState('apply-failed');
       setErrorMessage(stageError);
       return;
     }
+
+    lastStagedPackagesFingerprintRef.current = sandboxPackagesFingerprint(packages);
 
     const applyResult = await sandboxAdminApply(scope);
     if (applyResult.status === 'error') {
@@ -256,10 +288,10 @@ export function useMcpConnection({
     await refreshSetupStatus();
     setPanelState('connected');
     setStatusMessage('Sandbox packages applied for this guide scope.');
-  }, [refreshSetupStatus, scope, settings, stageSandboxSetup]);
+  }, [allTools, refreshSetupStatus, scope, settings, stageSandboxSetup, toolIndex]);
 
   const handleTestConnection = async () => {
-    if (settings.runtimeExecution === 'sandbox_subprocess') {
+    if (settings.runtimeExecution === 'sandbox_subprocess' && setupStatus !== 'applied') {
       setApplyTrigger('test');
       setShowApplyConfirm(true);
       return;
@@ -298,6 +330,8 @@ export function useMcpConnection({
           package: payload.package,
           environmentVariables: payload.environmentVariables,
         },
+        projectId: scope?.projectId,
+        guideId: scope?.guideId,
       });
       if (result.connected) {
         setPanelState('connected');
@@ -360,6 +394,8 @@ export function useMcpConnection({
           environmentVariables: payload.environmentVariables,
         },
         existingTools,
+        projectId: scope?.projectId,
+        guideId: scope?.guideId,
       });
 
       if (!result.success) {
@@ -433,6 +469,17 @@ export function useMcpConnection({
   useEffect(() => {
     void refreshSetupStatus();
   }, [refreshSetupStatus]);
+
+  useEffect(() => {
+    if (lastSyncedOpenApiSpecRef.current === tool.openApiSpec) {
+      return;
+    }
+
+    lastSyncedOpenApiSpecRef.current = tool.openApiSpec;
+    const parsed = parseMcpConnectionSettings(tool.openApiSpec);
+    setSettings(parsed);
+    setHeaderRows(parseMcpHeaderRows(parsed.headers));
+  }, [tool.openApiSpec]);
 
   const displayTools = pendingDiscovery ?? discoveredTools;
   const showDiffReview = pendingDiscovery !== null;

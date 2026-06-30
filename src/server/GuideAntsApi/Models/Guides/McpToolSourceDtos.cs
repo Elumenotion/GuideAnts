@@ -27,7 +27,10 @@ public record McpBridgeToolInputDto(
     JsonElement? InputSchema
 );
 
-public record McpTestConnectionRequest(McpToolSourceConnectionDto Connection);
+public record McpTestConnectionRequest(
+    McpToolSourceConnectionDto Connection,
+    Guid? ProjectId = null,
+    Guid? GuideId = null);
 
 public record McpTestConnectionResponse(
     bool Connected,
@@ -39,8 +42,9 @@ public record McpTestConnectionResponse(
 public record McpDiscoverToolsRequest(
     McpToolSourceConnectionDto Connection,
     List<McpExistingToolStateDto>? ExistingTools,
-    List<McpBridgeToolInputDto>? BridgeTools
-);
+    List<McpBridgeToolInputDto>? BridgeTools,
+    Guid? ProjectId = null,
+    Guid? GuideId = null);
 
 public record McpDiscoveredToolDto(
     string BackingToolId,

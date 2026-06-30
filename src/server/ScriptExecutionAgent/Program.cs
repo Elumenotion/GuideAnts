@@ -283,6 +283,78 @@ app.MapPost("/mcp-stdio", async (HttpContext context, ILogger<Program> logger) =
     }
 });
 
+app.MapPost("/mcp-stdio/discover", async (HttpContext context, ILogger<Program> logger) =>
+{
+    try
+    {
+        if (!AuthorizeAgentRequest(context, securityOptions, logger))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var request = await JsonSerializer.DeserializeAsync<McpStdioDiscoverRequest>(
+            context.Request.Body,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+            context.RequestAborted);
+
+        if (request is null)
+        {
+            logger.LogWarning("SECURITY: /mcp-stdio/discover rejected because request JSON was missing or invalid.");
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid request body");
+            return;
+        }
+
+        var validationResult = McpStdioChildRuntime.ValidateMcpStdioDiscoverRequest(request);
+        if (!validationResult.IsValid)
+        {
+            logger.LogWarning(
+                "SECURITY: /mcp-stdio/discover rejected due to invalid request. reason={Reason}",
+                LogValueSanitizer.Sanitize(validationResult.ErrorMessage));
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync($"Validation failed: {validationResult.ErrorMessage}");
+            return;
+        }
+
+        var projectId = Guid.Parse(request.ProjectId);
+        var guideScopeId = Guid.Parse(request.GuideId);
+        var scope = ScriptExecutionScopeRuntime.ResolveScope(projectId, guideScopeId, scopeOptions);
+        ScriptExecutionScopeRuntime.EnsureScopeDirectory(scope);
+        var authorizedWorkingDirectory = scope.ScopeRootPath;
+
+        logger.LogInformation(
+            "Discovering MCP stdio tools. projectId={ProjectId} guideId={GuideId}",
+            projectId,
+            guideScopeId);
+
+        var result = await McpStdioChildRuntime.DiscoverToolsAsync(
+            request,
+            authorizedWorkingDirectory,
+            scopeOptions,
+            logger,
+            context.RequestAborted);
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(
+            result,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+    }
+    catch (JsonException jsonEx)
+    {
+        logger.LogError(jsonEx, "/mcp-stdio/discover JSON parsing exception");
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsync($"JSON parsing error: {jsonEx.Message}");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "/mcp-stdio/discover unexpected exception");
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsync($"Internal server error: {ex.Message}");
+    }
+});
+
 app.MapGet("/health", () => "OK");
 
 app.MapGet("/files", async (HttpContext context, ILogger<Program> logger) =>

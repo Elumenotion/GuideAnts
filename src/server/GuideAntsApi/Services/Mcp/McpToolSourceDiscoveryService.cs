@@ -6,6 +6,7 @@ using ModelContextProtocol.Client;
 namespace GuideAntsApi.Services.Mcp;
 
 public sealed class McpToolSourceDiscoveryService(
+    IMcpSandboxStdioDiscoveryClient sandboxDiscoveryClient,
     ILogger<McpToolSourceDiscoveryService> logger) : IMcpToolSourceDiscoveryService
 {
     public async Task<McpTestConnectionResponse> TestConnectionAsync(
@@ -20,11 +21,32 @@ public sealed class McpToolSourceDiscoveryService(
 
         if (string.Equals(request.Connection.RuntimeExecution, McpRuntimeExecution.SandboxSubprocess, StringComparison.Ordinal))
         {
+            var scopeError = ValidateSandboxScope(request.ProjectId, request.GuideId);
+            if (scopeError is not null)
+            {
+                return new McpTestConnectionResponse(false, scopeError, null, null);
+            }
+
+            var discoverResult = await sandboxDiscoveryClient.DiscoverAsync(
+                request.ProjectId!.Value,
+                request.GuideId!.Value,
+                request.Connection,
+                cancellationToken);
+
+            if (!discoverResult.Success)
+            {
+                return new McpTestConnectionResponse(
+                    false,
+                    discoverResult.Error ?? "Failed to connect to MCP sandbox package.",
+                    null,
+                    null);
+            }
+
             return new McpTestConnectionResponse(
                 true,
-                "Sandbox subprocess configuration is valid. Package execution lands in a later phase.",
-                null,
-                null);
+                $"Connected to MCP sandbox package ({discoverResult.Tools.Count} tool(s) available).",
+                discoverResult.ServerName,
+                discoverResult.ServerVersion);
         }
 
         try
@@ -57,35 +79,67 @@ public sealed class McpToolSourceDiscoveryService(
             return EmptyDiscoverResponse(false, validationError);
         }
 
+        List<DiscoveredMcpToolCandidate> discovered;
         if (string.Equals(request.Connection.RuntimeExecution, McpRuntimeExecution.SandboxSubprocess, StringComparison.Ordinal))
         {
-            return EmptyDiscoverResponse(
-                false,
-                "Sandbox subprocess discovery is not available until stdio package execution ships.");
-        }
+            var scopeError = ValidateSandboxScope(request.ProjectId, request.GuideId);
+            if (scopeError is not null)
+            {
+                return EmptyDiscoverResponse(false, scopeError);
+            }
 
-        List<DiscoveredMcpToolCandidate> discovered;
-        try
-        {
-            await using var client = await CreateMcpClientAsync(request.Connection, cancellationToken);
-            var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
-            discovered = tools
-                .Select(t => new DiscoveredMcpToolCandidate(
-                    t.Name,
-                    t.Title,
-                    t.Description,
-                    t.ProtocolTool.InputSchema))
+            var discoverResult = await sandboxDiscoveryClient.DiscoverAsync(
+                request.ProjectId!.Value,
+                request.GuideId!.Value,
+                request.Connection,
+                cancellationToken);
+
+            if (!discoverResult.Success)
+            {
+                return EmptyDiscoverResponse(
+                    false,
+                    discoverResult.Error ?? "MCP sandbox tool discovery failed.");
+            }
+
+            discovered = discoverResult.Tools
+                .Select(tool => new DiscoveredMcpToolCandidate(
+                    tool.Name,
+                    tool.Title,
+                    tool.Description,
+                    tool.InputSchema))
                 .ToList();
         }
-        catch (Exception ex)
+        else
         {
-            logger.LogWarning(
-                ex,
-                "MCP tool discovery failed for runtime {RuntimeExecution}",
-                LogValueSanitizer.Sanitize(request.Connection.RuntimeExecution));
-            return EmptyDiscoverResponse(false, "MCP tool discovery failed. Check connection settings and retry.");
+            try
+            {
+                await using var client = await CreateMcpClientAsync(request.Connection, cancellationToken);
+                var tools = await client.ListToolsAsync(cancellationToken: cancellationToken);
+                discovered = tools
+                    .Select(t => new DiscoveredMcpToolCandidate(
+                        t.Name,
+                        t.Title,
+                        t.Description,
+                        t.ProtocolTool.InputSchema))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "MCP tool discovery failed for runtime {RuntimeExecution}",
+                    LogValueSanitizer.Sanitize(request.Connection.RuntimeExecution));
+                return EmptyDiscoverResponse(false, "MCP tool discovery failed. Check connection settings and retry.");
+            }
         }
 
+        return BuildDiscoverResponse(request, discovered);
+    }
+
+    private static McpDiscoverToolsResponse BuildDiscoverResponse(
+        McpDiscoverToolsRequest request,
+        List<DiscoveredMcpToolCandidate> discovered)
+    {
         var existingById = (request.ExistingTools ?? [])
             .GroupBy(t => t.BackingToolId, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
@@ -196,6 +250,17 @@ public sealed class McpToolSourceDiscoveryService(
             outputTools,
             diff,
             null);
+    }
+
+    private static string? ValidateSandboxScope(Guid? projectId, Guid? guideId)
+    {
+        if (!projectId.HasValue || projectId.Value == Guid.Empty
+            || !guideId.HasValue || guideId.Value == Guid.Empty)
+        {
+            return "projectId and guideId are required for sandbox_subprocess MCP connections.";
+        }
+
+        return null;
     }
 
     private static string? ValidateConnection(McpToolSourceConnectionDto connection)

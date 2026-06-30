@@ -1,5 +1,5 @@
 import type { CustomToolDto } from '../../../../types/guides';
-import type { McpPackageDescriptor } from './mcpToolSourceTypes';
+import type { McpPackageDescriptor, McpConnectionSettings } from './mcpToolSourceTypes';
 import { parseMcpToolSourceMetadata } from './mcpToolSource';
 
 export interface McpSandboxStagingArtifacts {
@@ -72,6 +72,28 @@ export function collectSandboxPackagesFromTools(customTools: CustomToolDto[]): M
   const packages: McpPackageDescriptor[] = [];
   for (const tool of customTools) {
     const meta = parseMcpToolSourceMetadata(tool.openApiSpec);
+    if (meta?.runtimeExecution === 'sandbox_subprocess' && meta.package) {
+      packages.push(meta.package);
+    }
+  }
+  return packages;
+}
+
+export function collectSandboxPackagesForToolUpdate(
+  allTools: CustomToolDto[],
+  toolIndex: number,
+  nextSettings: Pick<McpConnectionSettings, 'runtimeExecution' | 'package'>,
+): McpPackageDescriptor[] {
+  const packages: McpPackageDescriptor[] = [];
+  for (let index = 0; index < allTools.length; index += 1) {
+    if (index === toolIndex) {
+      if (nextSettings.runtimeExecution === 'sandbox_subprocess' && nextSettings.package) {
+        packages.push(nextSettings.package);
+      }
+      continue;
+    }
+
+    const meta = parseMcpToolSourceMetadata(allTools[index].openApiSpec);
     if (meta?.runtimeExecution === 'sandbox_subprocess' && meta.package) {
       packages.push(meta.package);
     }

@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		},
+		{
+			"path": "../../../GuideAntsChat"
+		},
+		{
+			"path": "../../../llama.cpp"
+		}
+	],
+	"settings": {}
+}

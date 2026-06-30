@@ -47,6 +47,17 @@ export function defaultPackageDescriptor(): McpPackageDescriptor {
   };
 }
 
+export function sandboxPackagesFingerprint(packages: McpPackageDescriptor[]): string {
+  return JSON.stringify(
+    packages.map((pkg) => ({
+      registryType: pkg.registryType.trim().toLowerCase(),
+      identifier: pkg.identifier.trim(),
+      command: pkg.command.trim(),
+      args: pkg.args ?? [],
+    })),
+  );
+}
+
 export type McpSandboxSetupStatusKind = 'staged' | 'applied' | 'drift' | 'unknown';
 
 export function mapSetupStatusFromResponse(data: unknown): McpSandboxSetupStatusKind {
