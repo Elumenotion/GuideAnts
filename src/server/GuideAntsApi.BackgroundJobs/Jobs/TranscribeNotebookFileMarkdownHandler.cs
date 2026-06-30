@@ -121,7 +121,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
             }
 
             var contentHash = ComputeSha256(markdown);
-            var storagePath = GetNotebookMarkdownStoragePath(projectSlug, notebookSlug, originalFile.Notebook.ProjectId, originalFile.NotebookId, contentHash);
+            var storagePath = GetNotebookMarkdownStoragePath(projectSlug, notebookSlug, contentHash);
 
             Directory.CreateDirectory(Path.GetDirectoryName(storagePath)!);
             if (!File.Exists(storagePath))
@@ -191,18 +191,12 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private string GetNotebookMarkdownStoragePath(string projectSlug, string notebookSlug, Guid projectId, Guid notebookId, string contentHash)
+    private string GetNotebookMarkdownStoragePath(string projectSlug, string notebookSlug, string contentHash)
     {
         var basePath = _configuration["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured");
-        var prefix = contentHash.Substring(0, 2);
-        var subdir = contentHash.Substring(2, 2);
-        var named = Path.Combine(basePath, "projects", projectSlug, notebookSlug, "markdown", prefix, subdir, $"{contentHash}.md");
-        if (File.Exists(named))
-        {
-            return named;
-        }
-
-        return Path.Combine(basePath, "projects", projectId.ToString(), "notebooks", notebookId.ToString(), "markdown", prefix, subdir, $"{contentHash}.md");
+        var prefix = contentHash[..2];
+        var subdir = contentHash[2..4];
+        return Path.Combine(basePath, "projects", projectSlug, notebookSlug, "markdown", prefix, subdir, $"{contentHash}.md");
     }
 }
 

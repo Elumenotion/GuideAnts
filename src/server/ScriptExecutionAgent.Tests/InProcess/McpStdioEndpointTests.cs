@@ -67,6 +67,57 @@ public sealed class McpStdioEndpointTests
     }
 
     [TestMethod]
+    public async Task McpStdio_does_not_inherit_agent_token_environment()
+    {
+        var client = _factory.CreateAuthenticatedClient();
+        var body = BuildRequest(command: "python", args: [_mockServerPath], toolName: "env_probe");
+
+        var response = await client.PostAsJsonAsync("/mcp-stdio", body);
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        payload.GetProperty("success").GetBoolean().Should().BeTrue();
+        payload.GetProperty("result").GetString().Should().Be("missing");
+    }
+
+    [TestMethod]
+    public async Task McpStdio_child_environment_matches_curated_scoped_variables()
+    {
+        Environment.SetEnvironmentVariable("GA_TTS_HOST", "container-only");
+        Environment.SetEnvironmentVariable("SCRIPT_EXECUTION_ADMIN_API_ENABLED", "true");
+
+        try
+        {
+            var client = _factory.CreateAuthenticatedClient();
+            var body = BuildRequest(command: "python", args: [_mockServerPath], toolName: "env_dump");
+
+            var response = await client.PostAsJsonAsync("/mcp-stdio", body);
+            response.EnsureSuccessStatusCode();
+
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            payload.GetProperty("success").GetBoolean().Should().BeTrue();
+
+            var env = JsonSerializer.Deserialize<Dictionary<string, string>>(
+                payload.GetProperty("result").GetString()!)
+                ?? throw new InvalidOperationException("env_dump returned invalid JSON.");
+
+            env.Should().NotContainKey("SCRIPT_EXECUTION_AGENT_TOKEN");
+            env.Should().NotContainKey("SCRIPT_EXECUTION_ADMIN_API_ENABLED");
+            env.Should().NotContainKey("GA_TTS_HOST");
+            env.Should().ContainKey("GUIDEANTS_PROJECT_ID");
+            env.Should().ContainKey("GUIDEANTS_GUIDE_ID");
+            env.Should().ContainKey("HOME");
+            env.Should().ContainKey("PATH");
+            env.Values.Should().NotContain(string.Empty);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GA_TTS_HOST", null);
+            Environment.SetEnvironmentVariable("SCRIPT_EXECUTION_ADMIN_API_ENABLED", null);
+        }
+    }
+
+    [TestMethod]
     public async Task McpStdio_scopes_guideId_in_request()
     {
         var client = _factory.CreateAuthenticatedClient();

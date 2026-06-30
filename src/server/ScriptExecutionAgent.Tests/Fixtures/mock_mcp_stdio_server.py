@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Minimal MCP stdio mock server for ScriptExecutionAgent tests."""
 import json
+import os
 import sys
 
 
@@ -35,7 +36,20 @@ def handle_request(request):
             {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": {"tools": []},
+                "result": {
+                    "tools": [
+                        {
+                            "name": "env_probe",
+                            "description": "Reports whether agent tokens leaked into MCP child env.",
+                            "inputSchema": {"type": "object", "properties": {}},
+                        },
+                        {
+                            "name": "env_dump",
+                            "description": "Returns sorted process environment keys as JSON.",
+                            "inputSchema": {"type": "object", "properties": {}},
+                        }
+                    ]
+                },
             }
         )
         return
@@ -43,6 +57,13 @@ def handle_request(request):
     if method == "tools/call":
         params = request.get("params") or {}
         tool_name = params.get("name")
+        if tool_name == "env_probe":
+            leaked = bool(os.environ.get("SCRIPT_EXECUTION_AGENT_TOKEN"))
+            text = "leaked" if leaked else "missing"
+        elif tool_name == "env_dump":
+            text = json.dumps(dict(sorted(os.environ.items())))
+        else:
+            text = f"mock-result:{tool_name}"
         write_message(
             {
                 "jsonrpc": "2.0",
@@ -51,7 +72,7 @@ def handle_request(request):
                     "content": [
                         {
                             "type": "text",
-                            "text": f"mock-result:{tool_name}",
+                            "text": text,
                         }
                     ]
                 },

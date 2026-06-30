@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
@@ -13,7 +14,10 @@ var app = builder.Build();
 
 var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 var asmVersion = typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown";
-startupLogger.LogInformation("ScriptExecutionAgent starting. Assembly version: {Version}", asmVersion);
+AgentLogEvent.Emit("script_agent_startup", new Dictionary<string, object?>
+{
+    ["version"] = asmVersion,
+});
 
 var scriptConfig = new ScriptExecutionConfig
 {
@@ -156,12 +160,16 @@ app.MapPost("/execute", async (HttpContext context, ILogger<Program> logger) =>
             return;
         }
 
-        logger.LogInformation(
-            "Executing script type {ScriptType} in authorized working directory {WorkingDirectory}. projectId={ProjectId} notebookId={NotebookId}",
-            request.ScriptType,
-            LogValueSanitizer.Sanitize(authorizedWorkingDirectory),
-            projectId,
-            notebookId);
+        var guideId = ResolveGuideScopeId(request);
+        var executionStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        AgentLogEvent.Emit("script_execution_start", new Dictionary<string, object?>
+        {
+            ["projectId"] = projectId.ToString("D"),
+            ["notebookId"] = notebookId.ToString("D"),
+            ["guideId"] = guideId.ToString("D"),
+            ["scriptType"] = request.ScriptType.ToString(),
+            ["workingDirectory"] = LogValueSanitizer.Sanitize(authorizedWorkingDirectory),
+        });
 
         var executionIdentity = await NotebookExecutionIdentityProvider.PrepareAsync(
             projectId,
@@ -173,7 +181,14 @@ app.MapPost("/execute", async (HttpContext context, ILogger<Program> logger) =>
             context.RequestAborted);
 
         var normalizedRequest = request with { WorkingDirectory = authorizedWorkingDirectory };
-        var result = await ExecuteScriptAsync(normalizedRequest, scriptConfig, logger, executionIdentity, scopeOptions, adminOptions);
+        var result = await ExecuteScriptAsync(
+            normalizedRequest,
+            scriptConfig,
+            logger,
+            executionIdentity,
+            scopeOptions,
+            adminOptions,
+            executionStopwatch);
 
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(result));
@@ -1030,13 +1045,16 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     ILogger logger,
     NotebookExecutionIdentity? executionIdentity,
     ScriptExecutionScopeOptions scopeOptions,
-    AdminApiOptions adminOptions)
+    AdminApiOptions adminOptions,
+    System.Diagnostics.Stopwatch executionStopwatch)
 {
     var stdOutBuffer = new StringBuilder();
     var stdErrBuffer = new StringBuilder();
     HashSet<string> preExistingFiles = new(StringComparer.OrdinalIgnoreCase);
     var preSnapshotSucceeded = false;
     int? exitCode = null;
+    var injectedEnvEntries = request.Environment?.Count ?? 0;
+    var timedOut = false;
 
     try
     {
@@ -1052,7 +1070,6 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
                 .EnumerateFiles(request.WorkingDirectory, "*", SearchOption.AllDirectories)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             preSnapshotSucceeded = true;
-            logger.LogInformation("Captured {Count} pre-existing files before script execution", preExistingFiles.Count);
         }
         catch (Exception ex)
         {
@@ -1155,6 +1172,7 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     }
     catch (OperationCanceledException)
     {
+        timedOut = true;
         stdErrBuffer.AppendLine("Script execution timed out");
     }
     catch (Exception ex)
@@ -1226,6 +1244,21 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
     {
         cleanedOutput = "The operation completed successfully";
     }
+
+    var guideId = ResolveGuideScopeId(request);
+    AgentLogEvent.Emit("script_execution_complete", new Dictionary<string, object?>
+    {
+        ["projectId"] = request.ProjectId,
+        ["notebookId"] = request.NotebookId,
+        ["guideId"] = guideId.ToString("D"),
+        ["scriptType"] = request.ScriptType.ToString(),
+        ["durationMs"] = executionStopwatch.ElapsedMilliseconds,
+        ["exitCode"] = exitCode,
+        ["success"] = exitCode == 0,
+        ["preExistingFileCount"] = preExistingFiles.Count,
+        ["injectedEnvEntries"] = injectedEnvEntries,
+        ["timedOut"] = timedOut,
+    });
 
     return new ScriptExecutionResult
     {
@@ -1370,10 +1403,16 @@ internal sealed record ScriptProcessResult(
     string StandardOutput,
     string StandardError);
 
+internal sealed record IsolatedProcessLaunchPlan(
+    string Command,
+    string[] Arguments,
+    IReadOnlyDictionary<string, string?>? ProcessEnvironment);
+
 internal sealed record ScriptExecutionScope(
     Guid ProjectId,
     Guid GuideScopeId,
     string ScopeRootPath,
+    string ProjectRuntimeRootPath,
     string PythonVenvPath,
     string RequirementsFilePath,
     string AppliedStateFilePath)
@@ -1404,6 +1443,13 @@ internal static class ScriptExecutionScopeRuntime
         "SCRIPT_EXECUTION_SCOPE_CREDENTIALS_FILE",
         "PATH",
         "HOME",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "NPM_CONFIG_CACHE",
+        "npm_config_cache",
+        "UV_CACHE_DIR",
+        "PIP_CACHE_DIR",
         "USER",
         "USERNAME",
         "SHELL",
@@ -1451,18 +1497,25 @@ internal static class ScriptExecutionScopeRuntime
     {
         var venvRelativePath = NormalizeRelativePath(options.PythonVenvRelativePath, "python-venv");
 
-        var scopeRoot = Path.Combine(
-            options.StateRootPath,
-            $"project-{projectId:N}",
-            $"guide-{guideScopeId:N}");
+        var projectRoot = Path.Combine(options.StateRootPath, $"project-{projectId:N}");
+        var scopeRoot = Path.Combine(projectRoot, $"guide-{guideScopeId:N}");
+        var projectRuntimeRoot = Path.Combine(projectRoot, "runtime");
 
         return new ScriptExecutionScope(
             projectId,
             guideScopeId,
             scopeRoot,
+            projectRuntimeRoot,
             Path.Combine(scopeRoot, venvRelativePath),
             Path.Combine(scopeRoot, "requirements.txt"),
             Path.Combine(scopeRoot, "applied-state.json"));
+    }
+
+    public static void EnsureProjectRuntimeDirectory(ScriptExecutionScope scope)
+    {
+        Directory.CreateDirectory(scope.ProjectRuntimeRootPath);
+        Directory.CreateDirectory(Path.Combine(scope.ProjectRuntimeRootPath, "cache"));
+        Directory.CreateDirectory(Path.Combine(scope.ProjectRuntimeRootPath, "config"));
     }
 
     public static void EnsureScopeDirectory(ScriptExecutionScope scope)
@@ -2118,10 +2171,16 @@ internal static class ScriptExecutionScopeRuntime
         string workingDirectory,
         ILogger logger)
     {
+        EnsureProjectRuntimeDirectory(scope);
+        var projectRuntimeRoot = scope.ProjectRuntimeRootPath;
+        var cacheRoot = Path.Combine(projectRuntimeRoot, "cache");
+
         var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["PATH"] = BuildDefaultPath(scope),
-            ["HOME"] = workingDirectory,
+            ["HOME"] = projectRuntimeRoot,
+            ["XDG_CACHE_HOME"] = cacheRoot,
+            ["XDG_CONFIG_HOME"] = Path.Combine(projectRuntimeRoot, "config"),
             ["LANG"] = Environment.GetEnvironmentVariable("LANG") ?? "C.UTF-8",
             ["LC_ALL"] = Environment.GetEnvironmentVariable("LC_ALL") ?? "C.UTF-8",
             ["GUIDEANTS_PROJECT_ID"] = scope.ProjectId.ToString("D"),
@@ -2149,11 +2208,60 @@ internal static class ScriptExecutionScopeRuntime
             }
         }
 
-        logger.LogInformation(
-            "Built script environment for project={ProjectId} guide={GuideId}. injectedEntries={InjectedCount}",
-            scope.ProjectId,
-            scope.GuideScopeId,
-            requestEnvironment?.Count ?? 0);
+        return environment;
+    }
+
+    /// <summary>
+    /// Builds a process launch plan that matches <c>/execute</c> isolation. On Linux this uses
+    /// <c>env -i</c> so package runners cannot inherit ScriptExecutionAgent container variables.
+    /// </summary>
+    public static IsolatedProcessLaunchPlan BuildIsolatedProcessLaunchPlan(
+        string commandFile,
+        IReadOnlyList<string> commandArgs,
+        IReadOnlyDictionary<string, string?> scopedEnvironment)
+    {
+        var curated = BuildTransportEnvironment(scopedEnvironment);
+
+        if (OperatingSystem.IsLinux())
+        {
+            var envExecutable = ResolveEnvExecutable();
+            if (envExecutable is not null)
+            {
+                var envArgs = new List<string>(curated.Count + commandArgs.Count + 2) { "-i" };
+                foreach (var (key, value) in curated)
+                {
+                    envArgs.Add($"{key}={value}");
+                }
+
+                envArgs.Add(commandFile);
+                envArgs.AddRange(commandArgs);
+                return new IsolatedProcessLaunchPlan(envExecutable, envArgs.ToArray(), null);
+            }
+        }
+
+        return new IsolatedProcessLaunchPlan(commandFile, commandArgs.ToArray(), curated);
+    }
+
+    private static string? ResolveEnvExecutable() =>
+        File.Exists("/usr/bin/env") ? "/usr/bin/env" : null;
+
+    /// <summary>
+    /// Builds the MCP stdio child environment to match <c>/execute</c>: only the curated
+    /// scoped variables, with no ScriptExecutionAgent container inheritance.
+    /// </summary>
+    public static Dictionary<string, string?> BuildTransportEnvironment(
+        IReadOnlyDictionary<string, string?> scopedEnvironment)
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (key, value) in scopedEnvironment)
+        {
+            if (value is not null)
+            {
+                environment[key] = value;
+            }
+        }
+
         return environment;
     }
 

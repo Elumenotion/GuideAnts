@@ -40,31 +40,26 @@ internal static class McpStdioChildRuntime
             ?? Array.Empty<string>();
 
         var (commandFile, commandArgs) = ApplyPrivacyWrapper(command, arguments);
-        var transportEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, value) in scopedEnvironment)
-        {
-            if (value is not null)
-            {
-                transportEnvironment[key] = value;
-            }
-        }
+        var launch = ScriptExecutionScopeRuntime.BuildIsolatedProcessLaunchPlan(
+            commandFile,
+            commandArgs,
+            scopedEnvironment);
 
         var timeout = TimeSpan.FromSeconds(Math.Max(1, request.TimeoutSeconds));
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeout);
 
+        await using var child = TryStartIsolatedChild(launch, authorizedWorkingDirectory, logger, out var startError);
+        if (child is null)
+        {
+            return McpStdioDiscoverResult.Failed(startError!);
+        }
+
         try
         {
-            var transport = new StdioClientTransport(new StdioClientTransportOptions
-            {
-                Command = commandFile,
-                Arguments = commandArgs,
-                WorkingDirectory = authorizedWorkingDirectory,
-                EnvironmentVariables = transportEnvironment,
-                ShutdownTimeout = TimeSpan.FromSeconds(5),
-            });
-
-            await using var client = await McpClient.CreateAsync(transport, cancellationToken: timeoutCts.Token);
+            await using var client = await McpClient.CreateAsync(
+                child.CreateTransport(),
+                cancellationToken: timeoutCts.Token);
             var serverInfo = client.ServerInfo;
             var tools = await client.ListToolsAsync(cancellationToken: timeoutCts.Token);
             var discovered = tools
@@ -131,31 +126,26 @@ internal static class McpStdioChildRuntime
             ?? Array.Empty<string>();
 
         var (commandFile, commandArgs) = ApplyPrivacyWrapper(command, arguments);
-        var transportEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, value) in scopedEnvironment)
-        {
-            if (value is not null)
-            {
-                transportEnvironment[key] = value;
-            }
-        }
+        var launch = ScriptExecutionScopeRuntime.BuildIsolatedProcessLaunchPlan(
+            commandFile,
+            commandArgs,
+            scopedEnvironment);
 
         var timeout = TimeSpan.FromSeconds(Math.Max(1, request.TimeoutSeconds));
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeout);
 
+        await using var child = TryStartIsolatedChild(launch, authorizedWorkingDirectory, logger, out var startError);
+        if (child is null)
+        {
+            return McpStdioExecutionResult.Failed(startError!);
+        }
+
         try
         {
-            var transport = new StdioClientTransport(new StdioClientTransportOptions
-            {
-                Command = commandFile,
-                Arguments = commandArgs,
-                WorkingDirectory = authorizedWorkingDirectory,
-                EnvironmentVariables = transportEnvironment,
-                ShutdownTimeout = TimeSpan.FromSeconds(5),
-            });
-
-            await using var client = await McpClient.CreateAsync(transport, cancellationToken: timeoutCts.Token);
+            await using var client = await McpClient.CreateAsync(
+                child.CreateTransport(),
+                cancellationToken: timeoutCts.Token);
             var callArguments = ConvertToolArguments(request.ToolArguments);
             var result = await client.CallToolAsync(
                 request.ToolName,
@@ -345,6 +335,24 @@ internal static class McpStdioChildRuntime
         var raw = toolArguments.Value.GetRawText();
         return JsonSerializer.Deserialize<Dictionary<string, object?>>(raw)
             ?? new Dictionary<string, object?>();
+    }
+
+    private static McpIsolatedChildProcess? TryStartIsolatedChild(
+        IsolatedProcessLaunchPlan launch,
+        string workingDirectory,
+        ILogger logger,
+        out string? error)
+    {
+        try
+        {
+            error = null;
+            return McpIsolatedChildProcess.Start(launch, workingDirectory, logger);
+        }
+        catch (Exception ex)
+        {
+            error = $"MCP stdio child process failed to start: {ex.Message}";
+            return null;
+        }
     }
 
     private static (string FileName, string[] Arguments) ApplyPrivacyWrapper(string commandFile, string[] commandArgs)

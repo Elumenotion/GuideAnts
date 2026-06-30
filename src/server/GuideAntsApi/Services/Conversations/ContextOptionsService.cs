@@ -170,7 +170,7 @@ public class ContextOptionsService : IContextOptionsService
                 isPublished: false,
                 ct);
 
-            return FormatFilesConsole(relativePaths);
+            return ContextOptionFilesFormatter.FormatConsole(relativePaths);
         }
         catch
         {
@@ -187,33 +187,12 @@ public class ContextOptionsService : IContextOptionsService
                 .GetAwaiter()
                 .GetResult();
 
-            return FormatFilesConsole(relativePaths);
+            return ContextOptionFilesFormatter.FormatConsole(relativePaths);
         }
         catch
         {
             return JsonSerializer.Serialize(new { files = Array.Empty<string>() });
         }
-    }
-
-    /// <summary>
-    /// Formats a list of relative paths to resemble console output wrapped in a markdown code fence.
-    /// This improves LLM attention compared to a JSON array.
-    /// Example:
-    /// ```console
-    /// README.md
-    /// Output/image.png
-    /// ```
-    /// </summary>
-    internal static string FormatFilesConsole(IEnumerable<string> paths)
-    {
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("```console");
-        foreach (var p in paths)
-        {
-            sb.AppendLine(p);
-        }
-        sb.Append("```" /* no newline after closing fence */);
-        return sb.ToString();
     }
 
     private sealed record CurrentUserContext(Guid Id, string Name, string Email);
