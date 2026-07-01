@@ -21,7 +21,8 @@ override generator.
 
 - **Base compose files** live in `docker/` (selected by `start_*`):
   `docker-compose.ghcr-cpu.yml` (default), `…ghcr-cuda13.yml`, `…ghcr-rocm.yml`,
-  `…ghcr-slim.yml`, and the local-build variants (`docker-compose.cpu.yml`, etc.).
+  `…ghcr-vulkan.yml`, `…ghcr-slim.yml`, and the local-build variants
+  (`docker-compose.cpu.yml`, `docker-compose.vulkan.yml`, etc.).
 - **Generated override** (new): `docker/docker-compose.host-mounts.generated.yml`.
   It mounts each configured source into the **affected services**
   (DECISIONS D2; default `guideants-webapi-ui;guideants-ai;plantuml`) at

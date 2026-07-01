@@ -145,17 +145,24 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
                 CatalogModelIds: catalogIds,
                 NotebookReferenceCount: notebookCount,
                 RouterContextSize: entry?.ContextSize,
-                RouterCacheRamMib: entry?.CacheRamMib));
+                RouterCacheRamMib: entry?.CacheRamMib,
+                RuntimeFailed: runtimeRow?.Failed ?? false,
+                RuntimeExitCode: runtimeRow?.ExitCode));
         }
 
         return results;
     }
 
-    private static string MapRuntimeState(LlamaModelData? data)
+    internal static string MapRuntimeState(LlamaModelData? data)
     {
         if (data is null)
         {
             return "unloaded";
+        }
+
+        if (data.Failed)
+        {
+            return "failed";
         }
 
         if (!string.IsNullOrWhiteSpace(data.Status?.Value))

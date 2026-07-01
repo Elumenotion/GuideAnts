@@ -74,6 +74,7 @@ services:
       # to the NVIDIA discrete GPU; set "Radeon"/"Intel" or use
       # GGML_VK_VISIBLE_DEVICES to target another GPU. Ignored by non-dzn ICDs.
       - MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-NVIDIA}
+      - GGML_VK_VISIBLE_DEVICES=${GGML_VK_VISIBLE_DEVICES:-}
       # Used only when GA_VULKAN_RUNTIME=nvidia (native-Linux NVIDIA); harmless otherwise.
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-graphics,compute,utility}
@@ -95,7 +96,13 @@ services:
       - GA_LLAMA_THREADS=16
       - GA_LLAMA_PARALLEL=5
       - GA_LLAMA_CACHE_RAM=8192
-      - GA_LLAMA_KV_UNIFIED=1
+      # Vulkan currently trips llama.cpp's scheduler for some model families when
+      # KV cache tensors are placed on Vulkan buffers. Keep KV offload disabled
+      # by default; LLAMA_ARG_* lets current images pick this up without rebuild.
+      - GA_LLAMA_KV_OFFLOAD=${GA_LLAMA_KV_OFFLOAD:-0}
+      - LLAMA_ARG_KV_OFFLOAD=${GA_LLAMA_KV_OFFLOAD:-0}
+      # Keep unified KV opt-in for Vulkan as a separate conservative default.
+      - GA_LLAMA_KV_UNIFIED=${GA_LLAMA_KV_UNIFIED:-0}
       - GA_LLAMA_JINJA=1
       - GA_LLAMA_CONT_BATCH=1
       - GA_LLAMA_NO_MMAP=0
@@ -158,6 +165,9 @@ services:
       - GA_SD_STRENGTH=0.75
       - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
       - GA_SD_DIFFUSION_FA=1
+      # Optional SD-only Vulkan device selector. Empty means inherit the
+      # container-wide GGML_VK_VISIBLE_DEVICES value used by llama too.
+      - GA_SD_VK_VISIBLE_DEVICES=${GA_SD_VK_VISIBLE_DEVICES:-}
       - GA_SD_AUTO_LOAD_ON_STARTUP=${GA_SD_AUTO_LOAD_ON_STARTUP:-0}
       - GA_SD_WARMUP_PROMPT=${GA_SD_WARMUP_PROMPT:-startup-warmup}
       - GA_SD_WARMUP_SIZE=${GA_SD_WARMUP_SIZE:-512x512}

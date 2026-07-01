@@ -185,10 +185,14 @@ GuideAnts runs locally with Docker Compose. OS-specific quickstart scripts are i
 ```bash
 # Windows
 .\quickstart.ps1
+# or: start_windows.cmd
 
 # Linux / macOS
 ./quickstart.sh
+# or: start_linux.sh / start_macos.sh
 ```
+
+Backends: `cuda13` (NVIDIA), `rocm` (AMD), `vulkan` (NVIDIA/AMD/Intel via Vulkan), `cpu`, and `slim` (sandbox-only, no local models). The root launchers auto-detect GPU where possible; on Windows, NVIDIA drivers below the CUDA 13 minimum (R580) fall back to `vulkan` instead of CPU.
 
 See the [setup guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/setup-guide.md) for full instructions and the [developer config guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/developer-config-guide.md) for configuration options.
 
@@ -202,6 +206,7 @@ All documentation lives in the repository:
 - [Project and notebook files system](https://github.com/Elumenotion/GuideAnts/blob/main/docs/project-and-notebook-files-system.md) – file and content management
 - [LLaMA model management](https://github.com/Elumenotion/GuideAnts/blob/main/docs/llama-model-download-and-runtime-management.md) – local model lifecycle
 - [Docker build guide](https://github.com/Elumenotion/GuideAnts/blob/main/docker/guideants-ai-build.md) – building the runtime service
+- [Vulkan backend guide](https://github.com/Elumenotion/GuideAnts/blob/main/docker/guideants-ai-vulkan.md) – vendor-neutral GPU (llama + image gen) on Docker Desktop and native Linux
 - [Full docs directory](https://github.com/Elumenotion/GuideAnts/tree/main/docs) – architecture, features, test plans, and more
 
 ## Development Entry Points
