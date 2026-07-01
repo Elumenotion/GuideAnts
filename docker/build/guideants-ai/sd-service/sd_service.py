@@ -251,9 +251,7 @@ class DownloadBundleRequest(BaseModel):
     @field_validator("bundle_id")
     @classmethod
     def _validate_bundle_id(cls, value: str) -> str:
-        if not BUNDLE_ID_RE.fullmatch(value):
-            raise ValueError("bundle_id must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-        return value
+        return validate_bundle_id(value)
 
     @field_validator("diffusion_file", "vae_file", "text_encoder_file")
     @classmethod
@@ -321,6 +319,23 @@ def validate_bundle_filename(value: str) -> str:
     ):
         raise ValueError("must be a single filename with no path separators")
     return filename
+
+
+def validate_bundle_id(value: str) -> str:
+    candidate = (value or "").strip()
+    if not BUNDLE_ID_RE.fullmatch(candidate):
+        raise ValueError("bundle_id must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    return candidate
+
+
+def resolve_bundle_dir(model_dir: str, bundle_id: str) -> str:
+    safe_bundle_id = validate_bundle_id(bundle_id)
+    root_real = os.path.realpath(bundle_root_dir(model_dir))
+    bundle_path = os.path.realpath(os.path.join(root_real, safe_bundle_id))
+    root_prefix = root_real if root_real.endswith(os.sep) else root_real + os.sep
+    if not bundle_path.startswith(root_prefix):
+        raise ValueError("resolved bundle path escapes the permitted bundle directory")
+    return bundle_path
 
 
 def resolve_runtime_config() -> SdRuntimeConfig:
@@ -450,13 +465,13 @@ def read_active_bundle(model_dir: str) -> str | None:
         with open(marker, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
             bundle_id = payload.get("bundleId")
-            return str(bundle_id) if bundle_id else None
+            return validate_bundle_id(str(bundle_id)) if bundle_id else None
     except Exception:
         return None
 
 
 def expected_bundle_paths(model_dir: str, bundle_id: str) -> dict[str, str]:
-    base = os.path.join(bundle_root_dir(model_dir), bundle_id)
+    base = resolve_bundle_dir(model_dir, bundle_id)
     return {
         "diffusion": os.path.join(base, "diffusion"),
         "vae": os.path.join(base, "vae"),
@@ -465,17 +480,11 @@ def expected_bundle_paths(model_dir: str, bundle_id: str) -> dict[str, str]:
 
 
 def bundle_definition_file(model_dir: str, bundle_id: str) -> str:
-    return os.path.join(bundle_root_dir(model_dir), bundle_id, "bundle-definition.json")
+    return os.path.join(resolve_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
 
 
 def write_bundle_definition_payload(model_dir: str, bundle_id: str, payload: dict[str, Any]) -> None:
-    candidate_bundle_id = (bundle_id or "").strip()
-    if not BUNDLE_ID_RE.fullmatch(candidate_bundle_id):
-        raise ValueError("invalid bundle_id")
-    root_real = os.path.realpath(bundle_root_dir(model_dir))
-    bundle_path = os.path.realpath(os.path.join(root_real, candidate_bundle_id))
-    if not bundle_path.startswith(root_real + os.sep):
-        raise ValueError("resolved bundle path escapes the permitted bundle directory")
+    bundle_path = resolve_bundle_dir(model_dir, bundle_id)
     os.makedirs(bundle_path, exist_ok=True)
     target = os.path.join(bundle_path, "bundle-definition.json")
     temp = f"{target}.{uuid.uuid4().hex}.tmp"
@@ -484,9 +493,10 @@ def write_bundle_definition_payload(model_dir: str, bundle_id: str, payload: dic
     os.replace(temp, target)
 
 
-def bundle_definition_payload(request: DownloadBundleRequest) -> dict[str, Any]:
+def bundle_definition_payload(request: DownloadBundleRequest, bundle_id: str | None = None) -> dict[str, Any]:
+    safe_bundle_id = validate_bundle_id(bundle_id or request.bundle_id)
     return {
-        "bundleId": request.bundle_id,
+        "bundleId": safe_bundle_id,
         "revision": request.revision,
         "updatedAtUtc": utc_now_iso(),
         "roles": {
@@ -500,8 +510,9 @@ def bundle_definition_payload(request: DownloadBundleRequest) -> dict[str, Any]:
     }
 
 
-def write_bundle_definition(model_dir: str, request: DownloadBundleRequest) -> None:
-    write_bundle_definition_payload(model_dir, request.bundle_id, bundle_definition_payload(request))
+def write_bundle_definition(model_dir: str, request: DownloadBundleRequest, bundle_id: str | None = None) -> None:
+    safe_bundle_id = validate_bundle_id(bundle_id or request.bundle_id)
+    write_bundle_definition_payload(model_dir, safe_bundle_id, bundle_definition_payload(request, safe_bundle_id))
 
 
 def _normalize_bundle_definition(payload: Any) -> dict[str, Any] | None:
@@ -767,7 +778,8 @@ def resolve_role_file_path(target_path: str, filename: str) -> str:
     safe_filename = validate_bundle_filename(filename)
     role_dir = os.path.realpath(target_path)
     candidate = os.path.realpath(os.path.join(role_dir, safe_filename))
-    if os.path.commonpath([role_dir, candidate]) != role_dir:
+    role_prefix = role_dir if role_dir.endswith(os.sep) else role_dir + os.sep
+    if not candidate.startswith(role_prefix):
         raise ValueError("resolved role file path escapes the permitted role directory")
     return candidate
 
@@ -819,12 +831,13 @@ def resolve_initial_bundle_role_states(
 
 
 def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dict[str, Any]:
-    previous_definition = read_bundle_definition(model_dir, request.bundle_id)
-    paths = expected_bundle_paths(model_dir, request.bundle_id)
+    bundle_id = validate_bundle_id(request.bundle_id)
+    previous_definition = read_bundle_definition(model_dir, bundle_id)
+    paths = expected_bundle_paths(model_dir, bundle_id)
     operation_id = uuid.uuid4().hex
     operation = {
         "operationId": operation_id,
-        "bundleId": request.bundle_id,
+        "bundleId": bundle_id,
         "status": "queued",
         "roles": resolve_initial_bundle_role_states(previous_definition, request, paths),
         "error": None,
@@ -834,11 +847,11 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
     try:
         # Persist the declared bundle recipe up front so operators can read and
         # edit the definition even if a download fails mid-way.
-        write_bundle_definition(model_dir, request)
+        write_bundle_definition(model_dir, request, bundle_id)
     except Exception as exc:
         log_event(
             "sd_bundle_definition_write_failed",
-            bundleId=request.bundle_id,
+            bundleId=bundle_id,
             error=truncate_text(str(exc), 2048),
         )
 
@@ -1876,10 +1889,10 @@ def _require_model_dir() -> str:
 
 
 def require_valid_bundle_id(bundle_id: str) -> str:
-    candidate = (bundle_id or "").strip()
-    if not BUNDLE_ID_RE.fullmatch(candidate):
+    try:
+        return validate_bundle_id(bundle_id)
+    except ValueError:
         raise HTTPException(status_code=400, detail="invalid bundle_id")
-    return candidate
 
 
 @APP.get("/admin/bundles")
@@ -2110,15 +2123,13 @@ async def admin_unload() -> JSONResponse:
 @APP.delete("/admin/bundles/{bundle_id}")
 async def admin_delete_bundle(bundle_id: str) -> JSONResponse:
     model_dir = _require_model_dir()
-    bundle_id = (bundle_id or "").strip()
-    if not BUNDLE_ID_RE.fullmatch(bundle_id):
-        raise HTTPException(status_code=400, detail="invalid bundle_id")
+    bundle_id = require_valid_bundle_id(bundle_id)
     if read_active_bundle(model_dir) == bundle_id:
         raise HTTPException(status_code=409, detail="cannot remove active bundle")
 
-    root_real = os.path.realpath(bundle_root_dir(model_dir))
-    target = os.path.realpath(os.path.join(root_real, bundle_id))
-    if not target.startswith(root_real + os.sep):
+    try:
+        target = resolve_bundle_dir(model_dir, bundle_id)
+    except ValueError:
         raise HTTPException(status_code=400, detail="invalid bundle_id")
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="bundle not found")
