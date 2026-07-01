@@ -4,7 +4,11 @@ interface LoadingSpinnerProps {
   message?: string;
 }
 
-const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ message = 'Loading your content...' }) => {
+const LoadingSpinner: React.FC<LoadingSpinnerProps> = (props) => {
+  const displayMessage = 'message' in props
+    ? (props.message ?? '')
+    : 'Loading your content...';
+
   return (
     <div className="flex flex-col items-center justify-center w-full min-h-[200px] p-4">
       <img 
@@ -12,7 +16,9 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ message = 'Loading your
         alt="Loading..." 
         className="w-16 h-16 animate-bounce"
       />
-      <p className="mt-4 text-gray-600 text-sm font-medium">{message}</p>
+      {displayMessage && (
+        <p className="mt-4 text-gray-600 text-sm font-medium">{displayMessage}</p>
+      )}
     </div>
   );
 };

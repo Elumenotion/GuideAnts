@@ -71,7 +71,28 @@ describe('LlamaRuntimeModal', () => {
 
     expect(screen.getByText('Loading Local Models...')).toBeInTheDocument();
     expect(screen.getByText('Loading new models into VRAM...')).toBeInTheDocument();
+    expect(screen.queryByText('Loading your content...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Please wait while the required models are loaded into the local runtime.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+  });
+
+  it('shows external startup loading hint when polling external operation', () => {
+    render(
+      <LlamaRuntimeModal
+        isOpen
+        onClose={onClose}
+        status={{
+          ...baseStatus,
+          activeOperation: { operationId: '__external_loading__', state: 'loading' },
+        }}
+        onStartLoad={onStartLoad}
+        isPolling
+      />
+    );
+
+    expect(
+      screen.getByText('Models are already loading from startup or another session — no action needed.')
+    ).toBeInTheDocument();
   });
 
   it('shows failed state with retry', async () => {

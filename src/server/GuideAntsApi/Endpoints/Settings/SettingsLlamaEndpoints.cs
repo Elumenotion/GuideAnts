@@ -165,7 +165,11 @@ public static class SettingsLlamaEndpoints
                     RouterModelId: item.RouterModelId,
                     LastLoadStartedAt: null,
                     LastLoadDurationMs: null,
-                    LastError: null));
+                    LastError: item.RuntimeFailed
+                        ? item.RuntimeExitCode is int exitCode
+                            ? $"llama-server child exited with status {exitCode}."
+                            : "llama-server child exited during model load."
+                        : null));
             }
 
             return Results.Ok((IReadOnlyList<LlamaRuntimeAliasStatusDto>)statuses);

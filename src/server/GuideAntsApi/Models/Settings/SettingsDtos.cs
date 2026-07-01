@@ -303,7 +303,9 @@ public sealed record LlamaRuntimeInventoryItemDto(
     IReadOnlyList<string> CatalogModelIds,
     int NotebookReferenceCount,
     int? RouterContextSize = null,
-    int? RouterCacheRamMib = null);
+    int? RouterCacheRamMib = null,
+    bool RuntimeFailed = false,
+    int? RuntimeExitCode = null);
 
 public sealed record StartModelDownloadRequest(
     string Repository,

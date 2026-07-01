@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -31,6 +32,14 @@ public class LlamaModelData
     // Kept for compatibility with older payloads that used a flat state field.
     [JsonPropertyName("state")]
     public string State { get; set; } = string.Empty;
+
+    // Router mode marks a child process that exited during load with these
+    // fields while status.value may still be "unloaded".
+    [JsonPropertyName("failed")]
+    public bool Failed { get; set; }
+
+    [JsonPropertyName("exit_code")]
+    public int? ExitCode { get; set; }
 
     [JsonPropertyName("meta")]
     public LlamaModelMeta? Meta { get; set; }
@@ -68,6 +77,16 @@ public class LlamaOpenAiModelData
 
 public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
 {
+    private static readonly TimeSpan[] TransientRetryDelays =
+    [
+        TimeSpan.FromMilliseconds(250),
+        TimeSpan.FromMilliseconds(500),
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(4),
+        TimeSpan.FromSeconds(5)
+    ];
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<LlamaServerRuntimeClient> _logger;
 
@@ -79,25 +98,13 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
 
     public async Task<LlamaModelsResponse> ListModelsAsync(CancellationToken cancellationToken = default)
     {
-        var requestPath = "models";
-        var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
-        
-        var response = await _httpClient.GetAsync(requestUri, cancellationToken);
-        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        
-        response.EnsureSuccessStatusCode();
+        var responseContent = await GetStringWithTransientRetryAsync("models", cancellationToken);
         return JsonSerializer.Deserialize<LlamaModelsResponse>(responseContent) ?? new LlamaModelsResponse();
     }
 
     public async Task<LlamaOpenAiModelsResponse> ListOpenAiModelsAsync(CancellationToken cancellationToken = default)
     {
-        var requestPath = "v1/models";
-        var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
-        
-        var response = await _httpClient.GetAsync(requestUri, cancellationToken);
-        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        
-        response.EnsureSuccessStatusCode();
+        var responseContent = await GetStringWithTransientRetryAsync("v1/models", cancellationToken);
         return JsonSerializer.Deserialize<LlamaOpenAiModelsResponse>(responseContent) ?? new LlamaOpenAiModelsResponse();
     }
 
@@ -120,54 +127,18 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         }
 
         var requestPath = "models/load";
-        var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
         var requestJson = requestBody.ToJsonString();
         
-        using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
-        {
-            Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
-        };
-
-        var response = await _httpClient.SendAsync(request, cancellationToken);
-        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogError(
-                "Llama runtime POST failed. Url: {RequestUri}. Status: {StatusCode}. RequestBody: {RequestBody}. ResponseBody: {ResponseBody}",
-                requestUri.ToString(),
-                (int)response.StatusCode,
-                requestJson,
-                responseContent);
-        }
-        response.EnsureSuccessStatusCode();
+        await PostJsonWithTransientRetryAsync(requestPath, requestJson, cancellationToken);
     }
 
     public async Task UnloadModelAsync(string routerModelId, CancellationToken cancellationToken = default)
     {
         var requestBody = new { model = routerModelId };
         var requestPath = "models/unload";
-        var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
         var requestJson = JsonSerializer.Serialize(requestBody);
         
-        using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
-        {
-            Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
-        };
-
-        var response = await _httpClient.SendAsync(request, cancellationToken);
-        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-        
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogError(
-                "Llama runtime POST failed. Url: {RequestUri}. Status: {StatusCode}. RequestBody: {RequestBody}. ResponseBody: {ResponseBody}",
-                requestUri.ToString(),
-                (int)response.StatusCode,
-                requestJson,
-                responseContent);
-        }
-        response.EnsureSuccessStatusCode();
+        await PostJsonWithTransientRetryAsync(requestPath, requestJson, cancellationToken);
     }
 
     internal static Uri BuildEndpointUri(Uri? baseAddress, string relativePath)
@@ -180,5 +151,160 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         var normalizedBaseUrl = baseAddress.AbsoluteUri.TrimEnd('/') + "/";
         var normalizedRelativePath = relativePath.TrimStart('/');
         return new Uri(new Uri(normalizedBaseUrl), normalizedRelativePath);
+    }
+
+    private static string LimitForException(string value)
+    {
+        const int maxChars = 2000;
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return value.Length <= maxChars ? value : value[..maxChars] + "...";
+    }
+
+    private async Task<string> GetStringWithTransientRetryAsync(
+        string requestPath,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    return responseContent;
+                }
+
+                if (ShouldRetryStatus(response.StatusCode, attempt))
+                {
+                    await DelayBeforeRetryAsync(
+                        "GET",
+                        requestUri,
+                        attempt,
+                        $"HTTP {(int)response.StatusCode} ({response.ReasonPhrase ?? "<none>"})",
+                        cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                _logger.LogError(
+                    "Llama runtime GET failed. Url: {RequestUri}. Status: {StatusCode}. ResponseBody: {ResponseBody}",
+                    requestUri.ToString(),
+                    (int)response.StatusCode,
+                    responseContent);
+                throw new HttpRequestException(
+                    $"Llama runtime GET {requestPath} failed with HTTP {(int)response.StatusCode} ({response.ReasonPhrase ?? "<none>"}). ResponseBody={LimitForException(responseContent)}",
+                    null,
+                    response.StatusCode);
+            }
+            catch (Exception ex) when (ShouldRetryException(ex, cancellationToken, attempt))
+            {
+                await DelayBeforeRetryAsync(
+                    "GET",
+                    requestUri,
+                    attempt,
+                    ex.Message,
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task PostJsonWithTransientRetryAsync(
+        string requestPath,
+        string requestJson,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = BuildEndpointUri(_httpClient.BaseAddress, requestPath);
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
+                {
+                    Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
+                };
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    return;
+                }
+
+                if (ShouldRetryStatus(response.StatusCode, attempt))
+                {
+                    await DelayBeforeRetryAsync(
+                        "POST",
+                        requestUri,
+                        attempt,
+                        $"HTTP {(int)response.StatusCode} ({response.ReasonPhrase ?? "<none>"})",
+                        cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                _logger.LogError(
+                    "Llama runtime POST failed. Url: {RequestUri}. Status: {StatusCode}. RequestBody: {RequestBody}. ResponseBody: {ResponseBody}",
+                    requestUri.ToString(),
+                    (int)response.StatusCode,
+                    requestJson,
+                    responseContent);
+                throw new HttpRequestException(
+                    $"Llama runtime POST {requestPath} failed with HTTP {(int)response.StatusCode} ({response.ReasonPhrase ?? "<none>"}). ResponseBody={LimitForException(responseContent)}",
+                    null,
+                    response.StatusCode);
+            }
+            catch (Exception ex) when (ShouldRetryException(ex, cancellationToken, attempt))
+            {
+                await DelayBeforeRetryAsync(
+                    "POST",
+                    requestUri,
+                    attempt,
+                    ex.Message,
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private bool ShouldRetryStatus(HttpStatusCode statusCode, int attempt)
+    {
+        return attempt < TransientRetryDelays.Length
+            && (statusCode == HttpStatusCode.RequestTimeout
+                || statusCode == HttpStatusCode.BadGateway
+                || statusCode == HttpStatusCode.ServiceUnavailable
+                || statusCode == HttpStatusCode.GatewayTimeout);
+    }
+
+    private static bool ShouldRetryException(Exception ex, CancellationToken cancellationToken, int attempt)
+    {
+        return attempt < TransientRetryDelays.Length
+            && !cancellationToken.IsCancellationRequested
+            && (ex is HttpRequestException { StatusCode: null }
+                || ex is TaskCanceledException);
+    }
+
+    private async Task DelayBeforeRetryAsync(
+        string method,
+        Uri requestUri,
+        int attempt,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var delay = TransientRetryDelays[attempt];
+        _logger.LogWarning(
+            "Transient llama runtime {Method} failure. Url: {RequestUri}. Attempt: {Attempt}/{MaxAttempts}. Retrying in {DelayMs} ms. Reason: {Reason}",
+            method,
+            requestUri.ToString(),
+            attempt + 1,
+            TransientRetryDelays.Length + 1,
+            (int)delay.TotalMilliseconds,
+            LimitForException(reason));
+        await Task.Delay(delay, cancellationToken);
     }
 }

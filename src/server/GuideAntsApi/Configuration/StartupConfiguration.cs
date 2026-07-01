@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Any;
+using System.Net.Http;
 using System.Reflection;
 using System.Security.Claims;
 using GuideAntsApi.DataModel;
@@ -149,6 +150,12 @@ public static class StartupConfiguration
             var baseUrl = config["BaseUrl"]
                 ?? throw new InvalidOperationException("LlamaCpp:BaseUrl is required.");
             client.BaseAddress = new Uri(baseUrl);
+        })
+        .SetHandlerLifetime(TimeSpan.FromMinutes(1))
+        .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromSeconds(30),
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(15)
         });
         services.AddHttpClient<ILlamaRuntimeAdminClient, LlamaRuntimeAdminClient>(client =>
         {

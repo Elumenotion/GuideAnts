@@ -1,6 +1,6 @@
 # GuideAnts Setup Guide
 
-Last updated: 2026-06-05
+Last updated: 2026-06-30
 
 This is the setup-first operator guide for GuideAnts.
 Use it to get a working environment from zero to usable chat/services, then use linked docs for deeper architecture details.
@@ -21,7 +21,7 @@ Use the root launcher script for your OS:
 What these scripts do:
 
 - Validate Docker + Docker Compose.
-- Auto-detect backend (`cuda13` when NVIDIA is available, `rocm` when AMD/ROCm is available, otherwise `cpu`). The `slim` backend is explicit only.
+- Auto-detect backend (`cuda13` when NVIDIA + R580+ drivers are available, `rocm` when AMD/ROCm is available, `vulkan` on Windows when NVIDIA is present but below R580, otherwise `cpu`). The `slim` and `vulkan` backends are also available via explicit `--backend`.
 - Choose compose stack (`ghcr` by default, `local` optional).
 - Start the stack and wait for `http://localhost:5107/`.
 
@@ -29,7 +29,7 @@ Useful options:
 
 - `--doctor` (checks only, no startup)
 - `--fix` (limited auto-remediation)
-- `--backend cpu|cuda13|rocm|slim` (force backend; `slim` is the sandbox-oriented stack)
+- `--backend cpu|cuda13|rocm|slim|vulkan` (force backend; `slim` is sandbox-only; `vulkan` is vendor-neutral GPU for llama + image gen)
 - `--compose ghcr|local` (prebuilt GHCR vs local images)
 
 If the launcher gets you to `http://localhost:5107/`, skip to section 5 for first-user auth bootstrap and initial wizard flow.
@@ -38,13 +38,14 @@ If the launcher gets you to `http://localhost:5107/`, skip to section 5 for firs
 
 GuideAnts runs as a Docker Compose stack on a single host. Pick the stack by deciding two things:
 
-1. Whether model runtimes should run locally (`cpu`, `cuda13`, `rocm`) or elsewhere (`slim`).
+1. Whether model runtimes should run locally (`cpu`, `cuda13`, `rocm`, `vulkan`) or elsewhere (`slim`).
 2. Whether images should be pulled from GHCR (`--compose ghcr`) or built locally first (`--compose local`).
 
 | Backend | Best for | Compose files | Web/API/SQL shape | AI runtime shape |
 |---------|----------|---------------|-------------------|------------------|
-| `cuda13` | Local AI on NVIDIA GPUs. | `docker-compose.ghcr-cuda13.yml` or `docker-compose.cuda.yml` | Split stack: API/UI plus separate SQL Server. | Full local AI services. |
-| `rocm` | Experimental local AI on AMD/ROCm. | `docker-compose.ghcr-rocm.yml` or `docker-compose.rocm.yml` | Split stack: API/UI plus separate SQL Server. | Full local AI services. |
+| `cuda13` | Local AI on NVIDIA GPUs (CUDA 13, driver R580+). | `docker-compose.ghcr-cuda13.yml` or `docker-compose.cuda.yml` | Split stack: API/UI plus separate SQL Server. | Full local AI services (CUDA). |
+| `rocm` | Local AI on AMD/ROCm. | `docker-compose.ghcr-rocm.yml` or `docker-compose.rocm.yml` | Split stack: API/UI plus separate SQL Server. | Full local AI services (HIP for llama/SD; CPU torch for ASR/TTS/emb). |
+| `vulkan` | Local AI on NVIDIA, AMD, or Intel via Vulkan (one image). Best on Docker Desktop (Windows/macOS) and native Linux. | `docker-compose.ghcr-vulkan.yml` or `docker-compose.vulkan.yml` | Split stack: API/UI plus separate SQL Server. | Full local AI services (Vulkan GPU for llama + SD; CPU torch for ASR/TTS/emb). Includes Node.js 22 for `mcp+sandbox://` MCP servers. |
 | `cpu` | Local AI without GPU acceleration. | `docker-compose.ghcr-cpu.yml` or `docker-compose.cpu.yml` | Split stack: API/UI plus separate SQL Server. | Full local AI services. |
 | `slim` | Python sandbox users who use cloud/provider AI for model calls. | `docker-compose.ghcr-slim.yml` or `docker-compose.slim.yml` | Combined `guideants-webapi-ui-mssql`; no separate `mssql-express` service. | `guideants-ai slim`: sandbox/media only. |
 
@@ -52,8 +53,8 @@ The services you see depend on that stack:
 
 | Service | Image/source | Role |
 |---------|---------------|------|
-| `mssql-express` | `mssql2025-express-fts` | SQL Server database for split-stack `cpu`, `cuda13`, and `rocm` deployments. Not present in the slim stack because SQL Server is bundled into `guideants-webapi-ui-mssql`. |
-| `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13,rocm}:latest` (or local tag); `guideants-ai-slim` for the slim stack | Full variants are the local AI gateway: llama.cpp, ASR, TTS, image generation, embeddings, media, script execution. The slim AI variant is for Python sandbox/script execution without starting local model runtime services. |
+| `mssql-express` | `mssql2025-express-fts` | SQL Server database for split-stack `cpu`, `cuda13`, `rocm`, and `vulkan` deployments. Not present in the slim stack because SQL Server is bundled into `guideants-webapi-ui-mssql`. |
+| `guideants-ai` | `ghcr.io/elumenotion/guideants-ai-{cpu,cuda13,rocm,vulkan}:latest` (or local tag); `guideants-ai-slim` for the slim stack | Full variants are the local AI gateway: llama.cpp, ASR, TTS, image generation, embeddings, media, script execution (with Node.js 22 for package MCP). The slim AI variant is for Python sandbox/script execution without starting local model runtime services. |
 | `docling-serve` | `quay.io/docling-project/docling-serve-cpu:v1.21.0` by default | Local document intelligence / markdown extraction. The `cpu` in this image tag is Docling's CPU image variant, not the GuideAnts backend selection. Healthcheck: `GET /version`. |
 | `documentserver` | `${GA_DOCUMENTSERVER_IMAGE}` from `docker/.env` | DocumentServer used for in-app Office document display and full editing in project/notebook file flows. |
 | `guideants-webapi-ui` / `guideants-webapi-ui-slim` / `guideants-webapi-ui-mssql` | Stack-specific API/UI image | Main API plus bundled browser UI at `http://localhost:5107`. `guideants-webapi-ui-slim` is API/UI-only for split stacks; it is not the slim AI stack. |
@@ -94,7 +95,8 @@ Settings top-level tab order (current):
 
 - Docker Desktop (Windows/macOS) or Docker Engine 24+ with Compose plugin.
 - Windows PowerShell 7+ for `docker/llama/run/*.ps1` helper scripts.
-- For CUDA local AI: NVIDIA drivers + container runtime support.
+- For CUDA local AI: NVIDIA drivers (R580+) + container runtime support.
+- For Vulkan local AI: Vulkan-capable GPU; Docker Desktop on Windows/macOS (Mesa dzn over D3D12), or Mesa RADV/ANV or nvidia-container-toolkit on native Linux. See [`docker/guideants-ai-vulkan.md`](../docker/guideants-ai-vulkan.md).
 - Disk budget: ~60 GB minimum for common local model sets.
 
 ### Images and compose mode
@@ -102,7 +104,7 @@ Settings top-level tab order (current):
 You can run in either mode:
 
 - `ghcr` mode (default in launcher): pulls prebuilt images via `docker/docker-compose.ghcr-*.yml`.
-- `local` mode: uses `docker/docker-compose.{cpu,cuda,rocm,slim}.yml`; build GuideAnts local images first when needed. Third-party images such as Docling or DocumentServer may still be pulled if the exact tag is not already present locally.
+- `local` mode: uses `docker/docker-compose.{cpu,cuda,rocm,vulkan,slim}.yml`; build GuideAnts local images first when needed. Third-party images such as Docling or DocumentServer may still be pulled if the exact tag is not already present locally.
 
 The slim stack is selected with `--backend slim` and uses `docker/docker-compose.slim.yml` locally or `docker/docker-compose.ghcr-slim.yml` in GHCR mode. It uses the combined Web/API/SQL image (`guideants-webapi-ui-mssql`) plus the sandbox-oriented AI image (`guideants-ai slim`). It does not use `guideants-webapi-ui-slim`; that image is orthogonal and remains the API/UI image for split-stack deployments.
 
@@ -143,6 +145,7 @@ Local images:
 - CUDA: `docker/docker-compose.cuda.yml`
 - CPU: `docker/docker-compose.cpu.yml`
 - ROCm: `docker/docker-compose.rocm.yml`
+- Vulkan: `docker/docker-compose.vulkan.yml`
 - Slim: `docker/docker-compose.slim.yml`
 
 GHCR images:
@@ -150,6 +153,7 @@ GHCR images:
 - CUDA: `docker/docker-compose.ghcr-cuda13.yml`
 - CPU: `docker/docker-compose.ghcr-cpu.yml`
 - ROCm: `docker/docker-compose.ghcr-rocm.yml`
+- Vulkan: `docker/docker-compose.ghcr-vulkan.yml`
 - Slim: `docker/docker-compose.ghcr-slim.yml`
 
 ### Example startup commands
@@ -172,6 +176,12 @@ GHCR images:
 
 # GHCR ROCm
  docker compose -f docker/docker-compose.ghcr-rocm.yml up -d
+
+# local Vulkan
+ docker compose -f docker/docker-compose.vulkan.yml up -d
+
+# GHCR Vulkan
+ docker compose -f docker/docker-compose.ghcr-vulkan.yml up -d
 
 # local slim
  docker compose -f docker/docker-compose.slim.yml up -d
@@ -628,4 +638,5 @@ Read in this order:
 8. [`llama-model-download-and-runtime-management.md`](llama-model-download-and-runtime-management.md)
 9. [`telemetry-configuration.md`](telemetry-configuration.md)
 10. [`../docker/guideants-ai-build.md`](../docker/guideants-ai-build.md)
-11. [`../docker/build-processes.md`](../docker/build-processes.md)
+11. [`../docker/guideants-ai-vulkan.md`](../docker/guideants-ai-vulkan.md)
+12. [`../docker/build-processes.md`](../docker/build-processes.md)
