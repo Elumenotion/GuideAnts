@@ -4,6 +4,8 @@ Last validated: 2026-05-05
 
 This guide configures GuideAnts for fully local AI using the Setup Wizard only. If you only need Python sandbox/script execution and plan to use cloud/provider AI for model calls, use the explicit `--backend slim` stack instead of this local model setup.
 
+For GPU acceleration without CUDA 13 or ROCm, start the stack with `--backend vulkan` (see [`docker/guideants-ai-vulkan.md`](../docker/guideants-ai-vulkan.md)). Vulkan GPU-accelerates llama and image generation; ASR, TTS, and embeddings still run on CPU inside the image.
+
 ## Prerequisites
 
 1. GuideAnts is running at `http://localhost:5107`.

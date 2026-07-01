@@ -75,6 +75,7 @@ public sealed class PublishedGuideCostLimitServiceTests
         var notebookId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         var dayStart = new DateTime(now.Year, now.Month, now.Day, 0, 0, 0, DateTimeKind.Utc);
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
 
         await using (var seed = new ApplicationDbContext(options))
         {
@@ -88,7 +89,7 @@ public sealed class PublishedGuideCostLimitServiceTests
                 NotebookId = notebookId,
                 Active = true,
                 DailyChargeLimitUsd = 0.50m,
-                BillingPeriodChargeLimitUsd = 1.00m
+                BillingPeriodChargeLimitUsd = 0.50m
             });
             seed.UsageEvents.AddRange(
                 new UsageEvent
@@ -109,8 +110,8 @@ public sealed class PublishedGuideCostLimitServiceTests
                 {
                     NotebookId = notebookId,
                     ProjectId = projectId,
-                    Created = dayStart.AddDays(-2),
-                    ChargeUsd = 0.70m
+                    Created = monthStart.AddTicks(-1),
+                    ChargeUsd = 9.99m
                 });
             await seed.SaveChangesAsync();
         }
@@ -123,6 +124,6 @@ public sealed class PublishedGuideCostLimitServiceTests
         result.Allowed.Should().BeFalse();
         result.Reason.Should().Be("daily_limit_exceeded");
         result.DailyChargeUsd.Should().Be(0.70m);
-        result.BillingPeriodChargeUsd.Should().Be(1.40m);
+        result.BillingPeriodChargeUsd.Should().Be(0.70m);
     }
 }

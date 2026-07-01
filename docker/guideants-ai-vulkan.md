@@ -23,6 +23,9 @@ present, falling back to CPU for everything else.
 | **`vulkan`** | **Vulkan** | **NVIDIA + AMD + Intel** | **CPU wheels** |
 | `slim` | — | any (no local model runtime) | CPU wheels |
 
+Like the other full `guideants-ai` images, the Vulkan image bakes in **Node.js 22**
+(`node` / `npx`) so `mcp+sandbox://` package MCP servers can run inside the container.
+
 ## How the GPU is reached
 
 The Vulkan binaries are vendor-neutral; what differs per host is **which device node** the
@@ -135,6 +138,13 @@ environment:
 With no env set (Windows) this resolves to the dzn/`/dev/dxg` path. The `NVIDIA_*` vars matter
 only when `GA_VULKAN_RUNTIME=nvidia` (native-Linux NVIDIA) and are harmless otherwise.
 
+Vulkan leaves llama.cpp KV-cache offload disabled by default
+(`GA_LLAMA_KV_OFFLOAD=0`, propagated as `LLAMA_ARG_KV_OFFLOAD=0`) because current
+Vulkan router child processes can abort during startup for some model families when
+KV tensors are placed on a Vulkan buffer. Unified KV is also kept opt-in on this backend
+(`GA_LLAMA_KV_UNIFIED=0`). Set `GA_LLAMA_KV_OFFLOAD=1` or `GA_LLAMA_KV_UNIFIED=1`
+explicitly to retest either path with a newer upstream llama.cpp build.
+
 > **Note:** the bare-file default targets Windows. On a native-Linux host *without* the
 > `GA_VULKAN_*` env set, `${GA_VULKAN_DEVICE:-/dev/dxg}` resolves to `/dev/dxg`, which doesn't
 > exist there — so use the installer (which sets the env) or export the Linux values yourself.
@@ -220,6 +230,12 @@ docker logs guideants-ai 2>&1 | grep -i vulkan
 
 On Windows, `MESA_D3D12_DEFAULT_ADAPTER_NAME` (default `NVIDIA`) sets which adapter dzn lists
 first; `GGML_VK_VISIBLE_DEVICES` picks/splits among enumerated devices on any platform.
+
+Stable Diffusion can be pinned independently from llama with `GA_SD_VK_VISIBLE_DEVICES`.
+Leave it empty to inherit the container-wide `GGML_VK_VISIBLE_DEVICES`; set it when SD should
+use a different Vulkan device. For example, `GGML_VK_VISIBLE_DEVICES=1` and
+`GA_SD_VK_VISIBLE_DEVICES=0` keeps llama on Vulkan device 1 while the SD `sd-server`
+subprocess uses Vulkan device 0.
 
 ## Publishing
 

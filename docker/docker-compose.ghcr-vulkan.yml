@@ -1,30 +1,30 @@
 name: guideants
 
 services:
-  # SQL Server Database
   mssql-express:
-    image: mssql2025-express-fts
+    image: ${GA_MSSQL_IMAGE:-ghcr.io/elumenotion/mssql2025-express-fts:main}
+    pull_policy: always
+    container_name: mssql-express
     environment:
       - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=YourStrong!Passw0rd
+      - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'YourStrong!Passw0rd' -Q 'SELECT 1' -C -No | grep -q 1"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}' -Q 'SELECT 1' -C -No | grep -q 1"]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 30s
-    ports:
-      - "1434:1433"
     cpus: "4.0"
     volumes:
       - mssql_runtime_state:/var/opt/mssql
       - mssql_data:/var/opt/mssql/data
       - mssql_ftdata:/var/opt/mssql/FTData
       - mssql_log:/var/opt/mssql/log
+    restart: unless-stopped
 
-  # GuideAnts AI: consolidated llama-server + ScriptExecutionAgent
   guideants-ai:
-    image: ${GA_AI_VULKAN_IMAGE:-ghcr.io/elumenotion/guideants-ai-vulkan:latest}
+    image: ${GA_AI_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-vulkan:main}
+    pull_policy: always
     container_name: guideants-ai
     cap_drop:
       - SYS_PTRACE
@@ -40,22 +40,10 @@ services:
       - render
     devices:
       - ${GA_VULKAN_DEVICE:-/dev/dxg}         # Windows: /dev/dxg ; Linux AMD/Intel: /dev/dri
-    ports:
-      - "8110:80"      # gateway (/sandbox, /llama-cpp, /asr, /sd, /tts, /emb)
     shm_size: "8gb"
     volumes:
-      # WSL D3D12 runtime libs (libd3d12core.so / libdxcore.so) that Mesa dzn
-      # loads at runtime, supplied by the docker-desktop VM. On native Linux the
-      # installer points GA_VULKAN_DRIVER_LIBS at a harmless existing dir (the
-      # in-image Mesa / toolkit-injected NVIDIA drivers are used there, not these).
       - ${GA_VULKAN_DRIVER_LIBS:-/usr/lib/wsl}:/usr/lib/wsl:ro
-      # Single named volume backs every local AI model (llama GGUFs,
-      # Whisper/Qwen ASR, SD bundles, TTS weights, embeddings). Each
-      # service reads its own subdir (/models-local/<service>) via its
-      # GA_*_MODEL_DIR env var below. Populated by
-      # docker/scripts/migrate-local-models-to-single-volume.ps1 before
-      # the stack is started for the first time on this host.
-      - ai_local_models:/models-local
+      - ai_local_models-new:/models-local
       - script_agent_admin_state:/var/lib/guideants/script-agent-admin
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
@@ -70,23 +58,17 @@ services:
       - LD_LIBRARY_PATH=${GA_VULKAN_LD_LIBRARY_PATH:-/usr/lib/wsl/lib}
       - VK_DRIVER_FILES=${GA_VULKAN_ICD:-/usr/share/vulkan/icd.d/dzn_icd.json}
       - VK_ICD_FILENAMES=${GA_VULKAN_ICD:-/usr/share/vulkan/icd.d/dzn_icd.json}
-      # Which D3D12 adapter dzn picks first on Windows (substring match). Defaults
-      # to the NVIDIA discrete GPU; set "Radeon"/"Intel" or use
-      # GGML_VK_VISIBLE_DEVICES to target another GPU. Ignored by non-dzn ICDs.
       - MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-NVIDIA}
       - GGML_VK_VISIBLE_DEVICES=${GGML_VK_VISIBLE_DEVICES:-}
       # Used only when GA_VULKAN_RUNTIME=nvidia (native-Linux NVIDIA); harmless otherwise.
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-graphics,compute,utility}
-      # Optional: host .env HF_TOKEN for docker exec / scripted hf downloads (download-*.ps1). Not used by llama inference.
       - HF_TOKEN=${HF_TOKEN:-}
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_ADMIN_TOKEN=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
       - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
       - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
-      # Router aliases live on the named volume (with GGUF trees), not a host bind.
-      # GuideAnts API + llama-admin HTTP update this file; optional seed on first boot in entrypoint.sh.
       - GA_LLAMA_MODELS_PRESET=/models-local/router-models.ini
       - GA_LLAMA_MODEL_DIR=/models-local/llama
       - GA_LLAMA_ADMIN_PORT=8086
@@ -111,7 +93,7 @@ services:
       - GA_ASR_MODEL_DIR=/models-local/asr
       - GA_ASR_DEFAULT_MODEL_PATH=Qwen3-ASR-0.6B
       - GA_ASR_DEFAULT_MODEL_ID=Qwen/Qwen3-ASR-0.6B
-      - GA_ASR_AUTO_LOAD_ON_STARTUP=${GA_ASR_AUTO_LOAD_ON_STARTUP:-0}
+      - GA_ASR_AUTO_LOAD_ON_STARTUP=${GA_ASR_AUTO_LOAD_ON_STARTUP:-1}
       - GA_ASR_WAIT_FOR_READY_ON_STARTUP=${GA_ASR_WAIT_FOR_READY_ON_STARTUP:-0}
       - GA_ASR_READY_TIMEOUT_SECONDS=${GA_ASR_READY_TIMEOUT_SECONDS:-1800}
       - GA_ASR_DEVICE_MAP=auto
@@ -124,26 +106,26 @@ services:
       - GA_TTS_HOST=127.0.0.1
       - GA_TTS_PORT=8084
       - GA_TTS_MODEL_DIR=/models-local/tts
-      - GA_TTS_DEFAULT_MODEL_PATH=Kokoro-82M
-      - GA_TTS_DEFAULT_MODEL_ID=hexgrad/Kokoro-82M
-      - GA_TTS_AUTO_LOAD_ON_STARTUP=${GA_TTS_AUTO_LOAD_ON_STARTUP:-0}
+      - GA_TTS_DEFAULT_MODEL_PATH=VibeVoice-1.5B
+      - GA_TTS_DEFAULT_MODEL_ID=microsoft/VibeVoice-1.5B
+      - GA_TTS_TOKENIZER_PATH=Qwen2.5-1.5B-tokenizer
+      - GA_TTS_TOKENIZER_ID=Qwen/Qwen2.5-1.5B
+      - GA_TTS_AUTO_LOAD_ON_STARTUP=${GA_TTS_AUTO_LOAD_ON_STARTUP:-1}
       - GA_TTS_WAIT_FOR_READY_ON_STARTUP=${GA_TTS_WAIT_FOR_READY_ON_STARTUP:-0}
       - GA_TTS_READY_TIMEOUT_SECONDS=${GA_TTS_READY_TIMEOUT_SECONDS:-1800}
       - GA_TTS_DEVICE_MAP=auto
-      - GA_TTS_DTYPE=float32
+      - GA_TTS_DTYPE=bfloat16
       - GA_TTS_TIMEOUT_SECONDS=300
       - GA_TTS_MAX_NEW_TOKENS=512
       - GA_TTS_SAMPLE_RATE=24000
-      - GA_TTS_VOICE=af_heart
-      - GA_TTS_LANG_CODE=a
-      - GA_TTS_SPEED=1.0
+      - GA_TTS_DEFAULT_VOICE_SECONDS=1.0
       - GA_EMB_HOST=127.0.0.1
       - GA_EMB_PORT=8085
       - GA_EMB_MODEL_DIR=/models-local/emb
       - GA_EMB_DEFAULT_MODEL_PATH=${GA_EMB_DEFAULT_MODEL_PATH}
       - GA_EMB_DEVICE=${GA_EMB_DEVICE:-cpu}
       - GA_EMB_FIX_MISTRAL_REGEX=${GA_EMB_FIX_MISTRAL_REGEX:-1}
-      - GA_EMB_AUTO_LOAD_ON_STARTUP=${GA_EMB_AUTO_LOAD_ON_STARTUP:-0}
+      - GA_EMB_AUTO_LOAD_ON_STARTUP=${GA_EMB_AUTO_LOAD_ON_STARTUP}
       - GA_EMB_WARMUP_ON_LOAD=${GA_EMB_WARMUP_ON_LOAD}
       - GA_EMB_WAIT_FOR_READY_ON_STARTUP=${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}
       - GA_EMB_READY_TIMEOUT_SECONDS=${GA_EMB_READY_TIMEOUT_SECONDS:-1800}
@@ -152,12 +134,6 @@ services:
       - GA_SD_HOST=127.0.0.1
       - GA_SD_PORT=8083
       - GA_SD_MODEL_DIR=/models-local/sd
-      # Diffusion / VAE / text-encoder paths come from the SD service's
-      # active bundle (bundles/<id>/{diffusion,vae,text-encoder}/<file>).
-      # There is no GA_SD_DIFFUSION_MODEL_PATH / GA_SD_VAE_PATH /
-      # GA_SD_LLM_PATH env seam any more — bundle = single source of
-      # truth, set via the UI (Settings > Image generation > Set active)
-      # or the admin API (PUT /admin/bundles/{id}/active).
       - GA_SD_TIMEOUT_SECONDS=900
       - GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=${GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS:-120}
       - GA_SD_STEPS=4
@@ -168,7 +144,7 @@ services:
       # Optional SD-only Vulkan device selector. Empty means inherit the
       # container-wide GGML_VK_VISIBLE_DEVICES value used by llama too.
       - GA_SD_VK_VISIBLE_DEVICES=${GA_SD_VK_VISIBLE_DEVICES:-}
-      - GA_SD_AUTO_LOAD_ON_STARTUP=${GA_SD_AUTO_LOAD_ON_STARTUP:-0}
+      - GA_SD_AUTO_LOAD_ON_STARTUP=${GA_SD_AUTO_LOAD_ON_STARTUP:-1}
       - GA_SD_WARMUP_PROMPT=${GA_SD_WARMUP_PROMPT:-startup-warmup}
       - GA_SD_WARMUP_SIZE=${GA_SD_WARMUP_SIZE:-512x512}
       - GA_SD_WARMUP_STEPS=${GA_SD_WARMUP_STEPS:-1}
@@ -182,33 +158,13 @@ services:
     restart: unless-stopped
 
   docling-serve:
-    image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.21.0}
+    image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.16.1}
+    pull_policy: always
     container_name: docling-serve
     environment:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
-      - DOCLING_SERVE_MAX_FILE_SIZE=${DOCLING_SERVE_MAX_FILE_SIZE:-524288000}
-      - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=${DOCLING_SERVE_ENG_LOC_NUM_WORKERS:-2}
-      - DOCLING_SERVE_ENG_LOC_SHARE_MODELS=${DOCLING_SERVE_ENG_LOC_SHARE_MODELS:-false}
-      - DOCLING_NUM_THREADS=${DOCLING_NUM_THREADS:-4}
-      - DOCLING_SERVE_LOAD_MODELS_AT_BOOT=${DOCLING_SERVE_LOAD_MODELS_AT_BOOT:-true}
-      - DOCLING_SERVE_OPTIONS_CACHE_SIZE=${DOCLING_SERVE_OPTIONS_CACHE_SIZE:-2}
-      - DOCLING_SERVE_LOG_LEVEL=${DOCLING_SERVE_LOG_LEVEL:-WARNING}
-      - DOCLING_SERVE_LOG_FORMAT=${DOCLING_SERVE_LOG_FORMAT:-text}
-      - DOCLING_SERVE_OTEL_ENABLE_METRICS=${DOCLING_SERVE_OTEL_ENABLE_METRICS:-true}
-      - DOCLING_SERVE_OTEL_ENABLE_TRACES=${DOCLING_SERVE_OTEL_ENABLE_TRACES:-false}
-      - DOCLING_DEBUG_PROFILE_PIPELINE_TIMINGS=${DOCLING_DEBUG_PROFILE_PIPELINE_TIMINGS:-false}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/version"]
-      interval: 30s
-      retries: 5
-      start_period: 120s
-      timeout: 10s
-    ports:
-      - "5001:5001"
     networks:
-      guideants-network:
-        aliases:
-          - docling-serve
+      - guideants-network
     restart: unless-stopped
 
   documentserver:
@@ -220,8 +176,6 @@ services:
       - JWT_HEADER=${GA_DOCUMENTSERVER_JWT_HEADER:-Authorization}
       - JWT_IN_BODY=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}
       - ALLOW_PRIVATE_IP_ADDRESS=true
-    ports:
-      - "127.0.0.1:${GA_DOCUMENTSERVER_PORT:-8082}:80"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/info/info.json"]
       interval: 30s
@@ -232,10 +186,9 @@ services:
       - guideants-network
     restart: unless-stopped
 
-
-  # Unified API + browser UI service (single image for web app entrypoint)
   guideants-webapi-ui:
-    image: ${GA_WEBAPI_UI_IMAGE:-guideants-webapi-ui:latest}
+    image: ${GA_WEBAPI_UI_SLIM_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-webapi-ui-slim:main}
+    pull_policy: always
     container_name: guideants-webapi-ui
     depends_on:
       mssql-express:
@@ -254,8 +207,8 @@ services:
       # Idle session window (minutes). Default 30 days; the sliding renewal re-issues
       # the cookie past the halfway point so active sessions never hard-expire.
       - Jwt__LifetimeMinutes=${GA_JWT_LIFETIME_MINUTES:-43200}
-      - API_RUNTIME_CONTEXT=compose
-      - ConnectionStrings__DefaultConnection=Server=mssql-express,1433;Initial Catalog=${GA_DB_NAME:-guideants-dev};Persist Security Info=False;User ID=sa;Password=YourStrong!Passw0rd;MultipleActiveResultSets=True;Encrypt=False;TrustServerCertificate=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;
+      - API_RUNTIME_CONTEXT=compose-ghcr-vulkan
+      - ConnectionStrings__DefaultConnection=Server=mssql-express,1433;Initial Catalog=${GA_DB_NAME:-guideants-dev};Persist Security Info=False;User ID=sa;Password=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd};MultipleActiveResultSets=True;Encrypt=False;TrustServerCertificate=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;
       - FileStorage__Path=/app/ContentFiles
       - Ui__RootPath=/app/ui
       - Ui__DevServerUrl=
@@ -277,12 +230,9 @@ services:
       - DocumentServer__JwtInBody=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}
       - ScriptExecution__AgentToken=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - ScriptExecution__AdminToken=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
-
       - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
       - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox
       - ServiceRouting__Containers__plantuml__BaseUrl=http://plantuml:80
-      # Optional: HF CLI/scripts and Hugging Face downloads can read HF_TOKEN. Prefer storing the token in
-      # Settings → Providers → Llama.cpp (Hugging Face token, DB-backed) for in-app downloads.
       - HF_TOKEN=${HF_TOKEN:-}
       - SettingsSecrets__ActiveKeyId=local-dev
       - SettingsSecrets__Keys__local-dev=MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
@@ -293,17 +243,15 @@ services:
       - default
     restart: unless-stopped
 
-  # PlantUML service
   plantuml:
-    image: plantuml-1.2025.2
+    image: ${GA_PLANTUML_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-plantuml:main}
+    pull_policy: always
     container_name: plantuml
     environment:
       - FILE_STORAGE_ROOT=/app/ContentFiles
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
       - PLANTUML_LIMIT_SIZE=8192
-    ports:
-      - "8111:80"
     volumes:
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
@@ -313,11 +261,10 @@ services:
     restart: unless-stopped
 
   searxng:
+    image: ${GA_SEARXNG_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-searxng:main}
+    pull_policy: always
     container_name: readweb-searxng
-    image: ${GA_SEARXNG_IMAGE:-guideants-searxng:latest}
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8091:8080"
     volumes:
       - type: bind
         source: ${GA_SEARXNG_CONFIG_HOST_PATH:-./volumes/searxng/config}
@@ -336,10 +283,10 @@ volumes:
   mssql_data:
   mssql_ftdata:
   mssql_log:
-  ai_local_models:
-
+  ai_local_models-new:
   script_agent_admin_state:
 
 networks:
   guideants-network:
     driver: bridge
+
