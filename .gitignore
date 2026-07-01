@@ -434,3 +434,4 @@ docker-compose.host-mounts.generated.yml
 /installer/docker/volumes/content-files/*
 !/installer/docker/volumes/content-files/.gitkeep
 *.cli-auth-token
+/src/client/GuideAnts.code-workspace

@@ -48,7 +48,7 @@ call :fail Unknown option: %~1
 :args_done
 if /I not "%COMPOSE_MODE%"=="ghcr" if /I not "%COMPOSE_MODE%"=="local" call :fail --compose must be ghcr or local
 if not "%BACKEND_OVERRIDE%"=="" (
-  if /I not "%BACKEND_OVERRIDE%"=="cpu" if /I not "%BACKEND_OVERRIDE%"=="cuda13" if /I not "%BACKEND_OVERRIDE%"=="rocm" if /I not "%BACKEND_OVERRIDE%"=="slim" call :fail --backend must be cpu, cuda13, rocm, or slim
+  if /I not "%BACKEND_OVERRIDE%"=="cpu" if /I not "%BACKEND_OVERRIDE%"=="cuda13" if /I not "%BACKEND_OVERRIDE%"=="rocm" if /I not "%BACKEND_OVERRIDE%"=="slim" if /I not "%BACKEND_OVERRIDE%"=="vulkan" call :fail --backend must be cpu, cuda13, rocm, slim, or vulkan
 )
 
 call :log Running preflight checks...
@@ -68,6 +68,7 @@ call :check_wsl
 call :detect_backend
 call :validate_backend
 call :select_compose_file
+call :select_vulkan_runtime
 
 call :log Selected backend: %SELECTED_BACKEND%
 call :log Compose file: docker\%COMPOSE_FILE%
@@ -158,8 +159,8 @@ if not defined NVIDIA_DRIVER_VERSION (
   if not "%BACKEND_OVERRIDE%"=="" (
     call :fail Could not read NVIDIA driver version from nvidia-smi. Remove --backend cuda13 or fix NVIDIA driver/runtime.
   )
-  call :warn Could not read NVIDIA driver version from nvidia-smi. Falling back to cpu backend.
-  set "SELECTED_BACKEND=cpu"
+  call :warn Could not read NVIDIA driver version from nvidia-smi. Falling back to vulkan backend.
+  set "SELECTED_BACKEND=vulkan"
   exit /b 0
 )
 
@@ -171,8 +172,8 @@ if errorlevel 1 (
     call :fail Could not parse NVIDIA driver version "%NVIDIA_DRIVER_VERSION%". Remove --backend cuda13 or fix NVIDIA drivers.
     exit /b 1
   )
-  call :warn Could not parse NVIDIA driver version "%NVIDIA_DRIVER_VERSION%". Falling back to cpu backend.
-  set "SELECTED_BACKEND=cpu"
+  call :warn Could not parse NVIDIA driver version "%NVIDIA_DRIVER_VERSION%". Falling back to vulkan backend.
+  set "SELECTED_BACKEND=vulkan"
   exit /b 0
 )
 
@@ -182,8 +183,8 @@ if %NVIDIA_DRIVER_MAJOR_NUM% LSS 580 (
     call :fail NVIDIA driver %NVIDIA_DRIVER_VERSION% is too old for cuda13. Install R580+ driver or use --backend cpu.
     exit /b 1
   )
-  call :warn NVIDIA driver %NVIDIA_DRIVER_VERSION% is below the CUDA 13 minimum ^(R580^). Falling back to cpu backend.
-  set "SELECTED_BACKEND=cpu"
+  call :warn NVIDIA driver %NVIDIA_DRIVER_VERSION% is below the CUDA 13 minimum ^(R580^). Falling back to vulkan backend.
+  set "SELECTED_BACKEND=vulkan"
   exit /b 0
 )
 
@@ -198,6 +199,8 @@ if /I "%COMPOSE_MODE%"=="local" (
     set "COMPOSE_FILE=docker-compose.cuda.yml"
   ) else if /I "%SELECTED_BACKEND%"=="rocm" (
     set "COMPOSE_FILE=docker-compose.rocm.yml"
+  ) else if /I "%SELECTED_BACKEND%"=="vulkan" (
+    set "COMPOSE_FILE=docker-compose.vulkan.yml"
   ) else (
     set "COMPOSE_FILE=docker-compose.cpu.yml"
   )
@@ -208,10 +211,17 @@ if /I "%COMPOSE_MODE%"=="local" (
     set "COMPOSE_FILE=docker-compose.ghcr-cuda13.yml"
   ) else if /I "%SELECTED_BACKEND%"=="rocm" (
     set "COMPOSE_FILE=docker-compose.ghcr-rocm.yml"
+  ) else if /I "%SELECTED_BACKEND%"=="vulkan" (
+    set "COMPOSE_FILE=docker-compose.ghcr-vulkan.yml"
   ) else (
     set "COMPOSE_FILE=docker-compose.ghcr-cpu.yml"
   )
 )
+exit /b 0
+
+:select_vulkan_runtime
+if /I not "%SELECTED_BACKEND%"=="vulkan" exit /b 0
+call :log Vulkan: Docker Desktop -^> Mesa dzn over D3D12 (/dev/dxg). Using built-in defaults (no env).
 exit /b 0
 
 :wait_for_health
@@ -254,7 +264,7 @@ echo.
 echo Options:
 echo   --doctor               Run checks only, do not change anything.
 echo   --fix                  Attempt limited auto-remediation where possible.
-echo   --backend cpu^|cuda13^|rocm^|slim   Force backend selection. slim is explicit only and is not auto-detected.
+echo   --backend cpu^|cuda13^|rocm^|slim^|vulkan   Force backend selection. slim and vulkan are explicit only and are not auto-detected.
 echo   --compose ghcr^|local   Use GHCR compose files ^(default^) or local build files.
 echo   --help                 Show this help.
 exit /b 0

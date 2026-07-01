@@ -424,6 +424,8 @@ export interface LlamaRuntimeInventoryItemDto {
   routerContextSize?: number | null;
   /** Per-alias `cache-ram` (MiB) in router-models.ini when set. */
   routerCacheRamMib?: number | null;
+  runtimeFailed?: boolean;
+  runtimeExitCode?: number | null;
 }
 
 /**

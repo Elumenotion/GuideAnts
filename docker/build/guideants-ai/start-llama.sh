@@ -70,6 +70,11 @@ fi
 [ -n "$GA_LLAMA_THREADS" ]        && ARGS="$ARGS --threads $GA_LLAMA_THREADS"
 [ -n "$GA_LLAMA_PARALLEL" ]       && ARGS="$ARGS --parallel $GA_LLAMA_PARALLEL"
 [ -n "$GA_LLAMA_GPU_LAYERS" ]     && ARGS="$ARGS --n-gpu-layers $GA_LLAMA_GPU_LAYERS"
+# Vulkan can fail scheduler reservation when KV-cache tensors are placed on
+# the GPU for some model families. Keep this as an explicit env-controlled
+# base preset because router mode propagates it to child instances.
+[ "$GA_LLAMA_KV_OFFLOAD" = "0" ]  && ARGS="$ARGS --no-kv-offload"
+[ "$GA_LLAMA_KV_OFFLOAD" = "1" ]  && ARGS="$ARGS --kv-offload"
 [ "$GA_LLAMA_KV_UNIFIED" = "1" ]  && ARGS="$ARGS --kv-unified"
 [ "$GA_LLAMA_JINJA" = "1" ]       && ARGS="$ARGS --jinja"
 [ "$GA_LLAMA_CONT_BATCH" = "1" ]  && ARGS="$ARGS --cont-batching"
@@ -78,11 +83,12 @@ fi
 # preset into every spawned child instance (unlike ctx-size/cache-ram, which
 # are left per-alias). --flash-attn takes a literal value (on|off|auto);
 # cache-type-v quantization requires flash attention to be enabled. The
-# image-min-tokens knob only affects vision (mmproj) models.
+# image-min-tokens is per-alias in router-models.ini (Qwen-VL only). Do not set
+# GA_LLAMA_IMAGE_MIN_TOKENS globally — it propagates to every child and breaks
+# models whose mmproj image_max_pixels is below the 1024-token floor.
 [ -n "$GA_LLAMA_FLASH_ATTN" ]     && ARGS="$ARGS --flash-attn $GA_LLAMA_FLASH_ATTN"
 [ -n "$GA_LLAMA_CACHE_TYPE_K" ]   && ARGS="$ARGS --cache-type-k $GA_LLAMA_CACHE_TYPE_K"
 [ -n "$GA_LLAMA_CACHE_TYPE_V" ]   && ARGS="$ARGS --cache-type-v $GA_LLAMA_CACHE_TYPE_V"
-[ -n "$GA_LLAMA_IMAGE_MIN_TOKENS" ] && ARGS="$ARGS --image-min-tokens $GA_LLAMA_IMAGE_MIN_TOKENS"
 # --tensor-split sets the per-GPU layer proportion (comma list, e.g. "7,1").
 # Indices follow this process's visible-device order: with
 # GA_LLAMA_CUDA_VISIBLE_DEVICES=1,0 the FIRST proportion targets physical GPU 1

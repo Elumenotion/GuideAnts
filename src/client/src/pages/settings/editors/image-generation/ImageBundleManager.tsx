@@ -811,8 +811,8 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
                               : bundleExportBusy
                               ? 'Wait for definition download to finish.'
                               : b.definition
-                              ? 'Edit the saved bundle recipe and re-download this bundle.'
-                              : 'Edit this bundle recipe and re-download. No saved recipe metadata is present yet.'
+                              ? 'Edit the saved bundle recipe; only changed roles are re-downloaded.'
+                              : 'Edit this bundle recipe; changed roles are re-downloaded. No saved recipe metadata is present yet.'
                           }
                         />
                         <IconActionButton
@@ -1281,7 +1281,7 @@ function DownloadBundleDialog({
               onClick={() => void submit()}
               disabled={submitting || loadingBundle}
             >
-              {submitting ? 'Starting…' : mode === 'edit' ? 'Save & re-download' : 'Download snapshot'}
+              {submitting ? 'Starting…' : mode === 'edit' ? 'Save & update' : 'Download snapshot'}
             </TextActionButton>
           </>
         )
@@ -1300,7 +1300,7 @@ function DownloadBundleDialog({
               </>
             )
             : mode === 'edit'
-            ? 'Editing reuses the same bundle id and re-downloads the role files into that bundle. Each role keeps exactly one file.'
+            ? 'Editing reuses the same bundle id. Only roles whose repo, file, or revision changed are re-downloaded; unchanged files on disk are kept. Use Delete bundle to remove everything and start over.'
             : 'Read-only view of the bundle recipe and role readiness on disk.'}
         </p>
         {mode !== 'create' && bundle ? (

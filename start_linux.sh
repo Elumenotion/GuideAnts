@@ -7,7 +7,7 @@ DOCKER_DIR="$ROOT_DIR/docker"
 
 MODE="install"          # install | doctor
 FIX_MODE="0"            # 0 | 1
-BACKEND_OVERRIDE=""     # cpu | cuda13 | rocm | slim
+BACKEND_OVERRIDE=""     # cpu | cuda13 | rocm | slim | vulkan
 COMPOSE_MODE="ghcr"     # ghcr | local
 HEALTH_URL="http://localhost:5107/"
 HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
@@ -21,7 +21,7 @@ Usage: ./start_linux.sh [options]
 Options:
   --doctor               Run checks only, do not change anything.
   --fix                  Attempt limited auto-remediation where possible.
-  --backend cpu|cuda13|rocm|slim   Force backend selection. slim is explicit only and is not auto-detected.
+  --backend cpu|cuda13|rocm|slim|vulkan   Force backend selection. slim and vulkan are explicit only and are not auto-detected.
   --compose ghcr|local   Use GHCR compose files (default) or local build files.
   --help                 Show this help.
 EOF
@@ -101,6 +101,7 @@ select_compose_file() {
       slim) COMPOSE_FILE="docker-compose.slim.yml" ;;
       cuda13) COMPOSE_FILE="docker-compose.cuda.yml" ;;
       rocm) COMPOSE_FILE="docker-compose.rocm.yml" ;;
+      vulkan) COMPOSE_FILE="docker-compose.vulkan.yml" ;;
       *) COMPOSE_FILE="docker-compose.cpu.yml" ;;
     esac
   else
@@ -108,8 +109,49 @@ select_compose_file() {
       slim) COMPOSE_FILE="docker-compose.ghcr-slim.yml" ;;
       cuda13) COMPOSE_FILE="docker-compose.ghcr-cuda13.yml" ;;
       rocm) COMPOSE_FILE="docker-compose.ghcr-rocm.yml" ;;
+      vulkan) COMPOSE_FILE="docker-compose.ghcr-vulkan.yml" ;;
       *) COMPOSE_FILE="docker-compose.ghcr-cpu.yml" ;;
     esac
+  fi
+}
+
+select_vulkan_runtime() {
+  [[ "$SELECTED_BACKEND" == "vulkan" ]] || return 0
+
+  if docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
+    log "Vulkan: Docker Desktop → Mesa dzn over D3D12 (/dev/dxg). Using built-in defaults (no env)."
+    return 0
+  fi
+
+  local dev="/dev/null"
+  [[ -e /dev/dri ]] && dev="/dev/dri"
+  export GA_VULKAN_DEVICE="$dev"
+  export GA_VULKAN_DRIVER_LIBS="/usr/lib"
+  export GA_VULKAN_LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu"
+
+  if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; then
+    export GA_VULKAN_RUNTIME="nvidia"
+    export GA_VULKAN_ICD="/usr/share/vulkan/icd.d/nvidia_icd.json"
+    log "Vulkan: native Linux NVIDIA → nvidia runtime injects the Vulkan ICD (device $dev)."
+  elif [[ -e /dev/dri ]]; then
+    local icd=""
+    for v in /sys/class/drm/renderD*/device/vendor; do
+      [[ -r "$v" ]] || continue
+      case "$(cat "$v" 2>/dev/null)" in
+        0x1002) icd="/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"; break ;;
+        0x8086) icd="/usr/share/vulkan/icd.d/intel_icd.x86_64.json";  break ;;
+      esac
+    done
+    if [[ -n "$icd" ]]; then
+      export GA_VULKAN_ICD="$icd"
+      log "Vulkan: native Linux Mesa via /dev/dri (ICD $(basename "$icd"))."
+    else
+      export GA_VULKAN_ICD="/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"
+      warn "Vulkan: /dev/dri present but GPU vendor undetermined; assuming AMD RADV. Override GA_VULKAN_ICD if this is an Intel GPU."
+    fi
+  else
+    warn "Vulkan: native Linux with no nvidia runtime and no /dev/dri — no GPU device found."
+    warn "        LLM and image generation will run on CPU. Install Mesa (AMD/Intel) or the nvidia-container-toolkit (NVIDIA)."
   fi
 }
 
@@ -151,11 +193,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$COMPOSE_MODE" == "ghcr" || "$COMPOSE_MODE" == "local" ]] || fail "--compose must be ghcr or local"
-[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" == "cpu" || "$BACKEND_OVERRIDE" == "cuda13" || "$BACKEND_OVERRIDE" == "rocm" || "$BACKEND_OVERRIDE" == "slim" ]] || fail "--backend must be cpu, cuda13, rocm, or slim"
+[[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" == "cpu" || "$BACKEND_OVERRIDE" == "cuda13" || "$BACKEND_OVERRIDE" == "rocm" || "$BACKEND_OVERRIDE" == "slim" || "$BACKEND_OVERRIDE" == "vulkan" ]] || fail "--backend must be cpu, cuda13, rocm, slim, or vulkan"
 
 check_prereqs
 detect_backend
 select_compose_file
+select_vulkan_runtime
 
 log "Selected backend: $SELECTED_BACKEND"
 log "Compose file: docker/$COMPOSE_FILE"

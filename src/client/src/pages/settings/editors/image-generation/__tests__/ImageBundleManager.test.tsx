@@ -636,7 +636,7 @@ describe('ImageBundleManager', () => {
       operationId: 'op-edit',
       bundleId: 'bundle-a',
       status: 'queued',
-      roles: { diffusion: 'queued', vae: 'queued', textEncoder: 'queued' },
+      roles: { diffusion: 'queued', vae: 'ready', textEncoder: 'ready' },
     });
     (api.settings.localModels.getOperation as any).mockResolvedValue({
       operationId: 'op-edit',
@@ -662,7 +662,7 @@ describe('ImageBundleManager', () => {
     });
     fireEvent.change(diffusionFileInput, { target: { value: 'new-diff.gguf' } });
 
-    const saveButton = screen.getByRole('button', { name: /Save & re-download/i });
+    const saveButton = screen.getByRole('button', { name: /Save & update/i });
     await waitFor(() => {
       expect((saveButton as HTMLButtonElement).disabled).toBe(false);
     });
