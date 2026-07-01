@@ -257,12 +257,8 @@ class DownloadBundleRequest(BaseModel):
 
     @field_validator("diffusion_file", "vae_file", "text_encoder_file")
     @classmethod
-    def _reject_globs(cls, value: str) -> str:
-        if "*" in value or "?" in value:
-            raise ValueError(
-                "must be a single filename (no '*' or '?' glob metacharacters)"
-            )
-        return value
+    def _validate_bundle_filename(cls, value: str) -> str:
+        return validate_bundle_filename(value)
 
 
 class SdRuntimeState:
@@ -306,6 +302,25 @@ BUNDLE_OPERATIONS: dict[str, dict[str, Any]] = {}
 # by lifecycle callers; inference endpoints do not acquire this lock so a
 # long-running generation does not block a later unload request.
 ENGINE_LOCK = threading.Lock()
+
+
+def validate_bundle_filename(value: str) -> str:
+    filename = (value or "").strip()
+    if not filename:
+        raise ValueError("must be a non-empty string")
+    if "*" in filename or "?" in filename:
+        raise ValueError(
+            "must be a single filename (no '*' or '?' glob metacharacters)"
+        )
+    if (
+        filename in {".", ".."}
+        or os.path.isabs(filename)
+        or os.path.basename(filename) != filename
+        or "/" in filename
+        or "\\" in filename
+    ):
+        raise ValueError("must be a single filename with no path separators")
+    return filename
 
 
 def resolve_runtime_config() -> SdRuntimeConfig:
@@ -748,8 +763,21 @@ def bundle_role_download_needed(
     return previous != (repo, filename)
 
 
+def resolve_role_file_path(target_path: str, filename: str) -> str:
+    safe_filename = validate_bundle_filename(filename)
+    role_dir = os.path.realpath(target_path)
+    candidate = os.path.realpath(os.path.join(role_dir, safe_filename))
+    if os.path.commonpath([role_dir, candidate]) != role_dir:
+        raise ValueError("resolved role file path escapes the permitted role directory")
+    return candidate
+
+
 def role_expected_file_ready(target_path: str, filename: str) -> bool:
-    return os.path.isfile(os.path.join(target_path, filename))
+    try:
+        expected_file = resolve_role_file_path(target_path, filename)
+    except ValueError:
+        return False
+    return os.path.isfile(expected_file)
 
 
 def clear_stale_role_files(target_path: str, filename: str) -> None:
@@ -759,10 +787,11 @@ def clear_stale_role_files(target_path: str, filename: str) -> None:
     """
     if not os.path.isdir(target_path):
         return
+    safe_filename = validate_bundle_filename(filename)
     try:
         for name in os.listdir(target_path):
             file_path = os.path.join(target_path, name)
-            if os.path.isfile(file_path) and name != filename:
+            if os.path.isfile(file_path) and name != safe_filename:
                 os.remove(file_path)
     except OSError:
         shutil.rmtree(target_path)
@@ -857,7 +886,7 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
                 # snapshot_download with allow_patterns silently produces an
                 # empty directory if the filename does not exist in the repo.
                 # Turn that into a loud failure so the operator sees it.
-                expected_file = os.path.join(target_path, filename)
+                expected_file = resolve_role_file_path(target_path, filename)
                 if not os.path.isfile(expected_file):
                     raise RuntimeError(
                         f"Expected file '{filename}' was not produced by "
