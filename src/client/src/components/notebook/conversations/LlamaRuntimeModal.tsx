@@ -10,6 +10,21 @@ interface LlamaRuntimeModalProps {
   isPolling: boolean;
 }
 
+function getActiveOperationMessage(state?: string): string {
+  switch (state) {
+    case 'unloading':
+      return 'Unloading current models...';
+    case 'loading':
+      return 'Loading new models into VRAM...';
+    case 'verifying':
+      return 'Verifying model readiness...';
+    case 'queued':
+      return 'Waiting to start...';
+    default:
+      return 'Loading new models into VRAM...';
+  }
+}
+
 export const LlamaRuntimeModal: React.FC<LlamaRuntimeModalProps> = ({
   isOpen,
   onClose,
@@ -37,10 +52,11 @@ export const LlamaRuntimeModal: React.FC<LlamaRuntimeModalProps> = ({
              isInvalid ? 'Incompatible Models' : 
              'Local Models Required'}
           </h2>
-          <p className="text-sm text-gray-600 mt-2">
-            {isPolling && 'Please wait while the required models are loaded into the local runtime.'}
-            {!isPolling && !isFailed && !isInvalid && 'The selected assistant requires local models that are not currently loaded.'}
-          </p>
+          {!isPolling && !isFailed && !isInvalid && (
+            <p className="text-sm text-gray-600 mt-2">
+              The selected assistant requires local models that are not currently loaded.
+            </p>
+          )}
           {isPolling && status.activeOperation?.operationId === '__external_loading__' && (
             <p className="text-sm text-slate-500 mt-1">
               Models are already loading from startup or another session — no action needed.
@@ -50,15 +66,7 @@ export const LlamaRuntimeModal: React.FC<LlamaRuntimeModalProps> = ({
 
         <div className="px-6 pb-6">
           {isPolling ? (
-            <div className="flex flex-col items-center justify-center space-y-4 py-8">
-              <LoadingSpinner />
-              <p className="text-sm text-slate-500">
-                {status.activeOperation?.state === 'unloading' && 'Unloading current models...'}
-                {status.activeOperation?.state === 'loading' && 'Loading new models into VRAM...'}
-                {status.activeOperation?.state === 'verifying' && 'Verifying model readiness...'}
-                {status.activeOperation?.state === 'queued' && 'Waiting to start...'}
-              </p>
-            </div>
+            <LoadingSpinner message={getActiveOperationMessage(status.activeOperation?.state)} />
           ) : isInvalid ? (
             <div className="space-y-4">
               <div className="p-4 bg-red-50 text-red-700 rounded-md text-sm">

@@ -108,7 +108,7 @@ Workflow implementation details:
 - `deps-rocm` -> runtime dependency image (no compiler toolchain)
 - `final-rocm` -> runtime image on top of `deps-rocm` (or an externally tagged deps image)
 
-- `runtime-vulkan-base` -> OS/runtime base on `ghcr.io/ggml-org/llama.cpp:server-vulkan` (Ubuntu 26.04), plus the universal GPU driver layer (`mesa-vulkan-drivers` + libglvnd/EGL libs) that makes one image work on NVIDIA, AMD, and Intel
+- `runtime-vulkan-base` -> OS/runtime base on `ghcr.io/ggml-org/llama.cpp:server-vulkan` (Ubuntu 26.04), plus the universal GPU driver layer (`mesa-vulkan-drivers` + libglvnd/EGL libs) that makes one image work on NVIDIA, AMD, and Intel; also installs Node.js 22 (`npx`) for `mcp+sandbox://` MCP servers, matching the other full AI images
 - `pydeps-vulkan-builder` -> Python dependency build stage (includes build toolchain)
 - `deps-vulkan` -> runtime dependency image (no compiler toolchain)
 - `final-vulkan` -> runtime image on top of `deps-vulkan` (or an externally tagged deps image)
@@ -588,6 +588,7 @@ Startup loading behavior is configurable per service through environment variabl
   - `0`: skip SD readiness monitoring on startup
 - `GA_SD_READY_TIMEOUT_SECONDS` (default `1800`)
 - `GA_SD_CUDA_VISIBLE_DEVICES` (optional explicit SD physical GPU pinning; empty value means inherit global ordering)
+- `GA_SD_VK_VISIBLE_DEVICES` (optional SD-only Vulkan device selector; empty value means inherit `GGML_VK_VISIBLE_DEVICES`)
 - `GA_EMB_TARGET_DEVICES` (default `cuda:0,cuda:1`; logical indices interpreted after CUDA remapping)
 
 Default compose behavior starts gateway-backed services in parallel. Optional readiness checks are non-blocking monitors so one service startup does not block others.

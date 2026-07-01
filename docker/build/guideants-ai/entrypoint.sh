@@ -142,6 +142,92 @@ PY
 
 sanitize_router_preset "$ROUTER_PRESET"
 
+# Qwen-VL needs image-min-tokens=1024 for grounding accuracy, but that value breaks
+# other vision models (e.g. Gemma mmproj max pixels). Apply it per-alias only.
+normalize_router_image_min_tokens() {
+    local preset_path="$1"
+    if [ -z "$preset_path" ] || [ ! -f "$preset_path" ]; then
+        return
+    fi
+
+    local tmp_path="${preset_path}.image-tokens.$$"
+    if ! python3 - "$preset_path" "$tmp_path" <<'PY'
+import re
+import sys
+
+source_path = sys.argv[1]
+output_path = sys.argv[2]
+
+with open(source_path, "r", encoding="utf-8") as src:
+    lines = src.read().splitlines()
+
+output: list[str] = []
+current_alias: str | None = None
+section_lines: list[str] = []
+
+def flush_section() -> None:
+    global section_lines, current_alias
+    if current_alias is None:
+        return
+
+    cleaned: list[str] = []
+    for raw_line in section_lines:
+        stripped = raw_line.strip()
+        if stripped.startswith("#") or stripped.startswith(";"):
+            cleaned.append(raw_line)
+            continue
+        if "=" in stripped:
+            key = stripped.split("=", 1)[0].strip().lower()
+            if key == "image-min-tokens":
+                continue
+        cleaned.append(raw_line)
+
+  # Qwen-VL aliases only; global router --image-min-tokens breaks Gemma loads.
+    if re.search(r"(?i)qwen", current_alias):
+        insert_at = 1 if cleaned and cleaned[0].strip().startswith("[") else 0
+        cleaned.insert(insert_at, "image-min-tokens = 1024")
+
+    output.extend(cleaned)
+    section_lines = []
+    current_alias = None
+
+for raw_line in lines:
+    stripped = raw_line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        flush_section()
+        current_alias = stripped[1:-1].strip()
+        section_lines = [raw_line]
+        continue
+
+    if current_alias is None:
+        output.append(raw_line)
+        continue
+
+    section_lines.append(raw_line)
+
+flush_section()
+
+with open(output_path, "w", encoding="utf-8", newline="\n") as dst:
+    dst.write("\n".join(output))
+    if output:
+        dst.write("\n")
+PY
+    then
+        echo "WARNING: router preset image-min-tokens normalization failed for '${preset_path}'; continuing unchanged." >&2
+        rm -f "$tmp_path" 2>/dev/null || true
+        return
+    fi
+
+    if cmp -s "$preset_path" "$tmp_path"; then
+        rm -f "$tmp_path" 2>/dev/null || true
+        return
+    fi
+
+    mv -f "$tmp_path" "$preset_path"
+}
+
+normalize_router_image_min_tokens "$ROUTER_PRESET"
+
 SCRIPT_EXECUTION_REQUIRE_TOKEN="${SCRIPT_EXECUTION_REQUIRE_TOKEN:-true}"
 SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION="${SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION:-true}"
 

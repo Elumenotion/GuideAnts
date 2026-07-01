@@ -50,9 +50,10 @@ NuGet packages restore automatically on `dotnet build` / `dotnet run`.
 - **NVIDIA driver R580+** plus the **NVIDIA Container Toolkit** — enables the `cuda13` backend. The Windows launcher enforces driver major ≥ 580 via `nvidia-smi`.
   - Driver: <https://www.nvidia.com/Download/index.aspx>
   - Container Toolkit: <https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html>
-- **AMD GPU + ROCm-capable driver** — enables the experimental `rocm` backend.
+- **AMD GPU + ROCm-capable driver** — enables the `rocm` backend.
   - <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>
-- With neither installed, the launcher auto-selects the `cpu` backend.
+- **Vulkan-capable GPU** (NVIDIA, AMD, or Intel) — enables the `vulkan` backend for GPU-accelerated llama + image generation on Docker Desktop (Windows/macOS) and native Linux. On Windows, when NVIDIA is detected but the driver is below R580 (CUDA 13 minimum), the launcher falls back to `vulkan` instead of `cpu`. See [`docker/guideants-ai-vulkan.md`](../docker/guideants-ai-vulkan.md).
+- With none of the above, the launcher auto-selects the `cpu` backend.
 
 ## Optional secrets
 
@@ -92,8 +93,9 @@ These are needed regardless of which lane you work in.
 
 Optional accelerators:
 
-- **NVIDIA driver R580+** (with NVIDIA Container Toolkit) → enables `cuda13` backend. `start_windows.cmd` enforces driver major ≥ 580 via `nvidia-smi`.
-- **AMD GPU + ROCm-capable driver** → enables experimental `rocm` backend.
+- **NVIDIA driver R580+** (with NVIDIA Container Toolkit) → enables `cuda13` backend. `start_windows.cmd` enforces driver major ≥ 580 via `nvidia-smi`; below R580 on Windows, the launcher selects `vulkan` instead.
+- **AMD GPU + ROCm-capable driver** → enables `rocm` backend.
+- **Vulkan GPU** (any vendor) → use `--backend vulkan` for vendor-neutral llama + SD acceleration; Linux launchers set `GA_VULKAN_*` automatically when needed.
 - Otherwise → `cpu` backend is selected automatically.
 
 Optional secrets:
@@ -261,7 +263,7 @@ Already covered above: Docker, Compose plugin, optional GPU runtime, ~60 GB disk
 | Image | Build tool | Extra pre-requisites |
 |---|---|---|
 | `guideants-webapi-ui` (`docker/build/webapi-ui/Dockerfile`) | `build_webapi_ui.ps1` / `.sh` | Requires the client UI to be built first via `npm run browser:build:docker` (produces `src/client/dist-browser/`). Multi-stage uses `mcr.microsoft.com/dotnet/sdk:8.0`. |
-| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm,slim}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage) and BuildKit (`DOCKER_BUILDKIT=1`). CPU/CUDA/ROCm are full local AI variants; `slim` is the sandbox-oriented AI image for Python script execution without starting local model runtime services. The AI image also bakes the script-agent admin assets and `ga-script-exec` privacy wrapper. For cache export (`--cache-to`), use `desktop-linux` context and enable Docker Desktop containerd image store. |
+| `guideants-ai` (`docker/build/guideants-ai/Dockerfile.{cpu,cuda,rocm,vulkan,slim}`) | `build_guideants_ai.ps1` / `.sh` | Requires `dotnet publish` of `ScriptExecutionAgent` (so a host .NET 8 SDK is needed even though Dockerfiles also have an SDK stage) and BuildKit (`DOCKER_BUILDKIT=1`). CPU/CUDA/ROCm/Vulkan are full local AI variants; each bakes Node.js 22 for `mcp+sandbox://` package MCP. `slim` is the sandbox-oriented AI image for Python script execution without starting local model runtime services. The AI image also bakes the script-agent admin assets and `ga-script-exec` privacy wrapper. For cache export (`--cache-to`), use `desktop-linux` context and enable Docker Desktop containerd image store. |
 | `mssql2025-express-fts` (`docker/build/mssql-fts/Dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `plantuml-1.2025.2` (`docker/build/Sandboxes/PlantUml/dockerfile`) | `-All` switch on the AI build script | Standard Docker build. |
 | `guideants-searxng` | `docker compose build searxng` | Repo-root build context. |
@@ -316,6 +318,7 @@ GA_SEARXNG_DATA_HOST_PATH=./volumes/searxng/data
 GA_AI_CUDA_IMAGE=guideants-ai:cuda13-26132.1047
 GA_AI_CPU_IMAGE=guideants-ai:cpu-26126.1012
 GA_AI_ROCM_IMAGE=guideants-ai:rocm-26131.2226
+GA_AI_VULKAN_IMAGE=guideants-ai:vulkan-latest
 GA_EMB_DEFAULT_MODEL_PATH=harrier-oss-v1-0.6b
 GA_EMB_AUTO_LOAD_ON_STARTUP=1
 GA_EMB_WARMUP_ON_LOAD=1
@@ -353,7 +356,7 @@ Conflicts with local dev API on `5106` and Vite dev server on `5173` — both ar
 2. Run `start_windows.cmd` (or the `.sh` equivalent).
 3. Wait for `http://localhost:5107/` — launcher opens browser.
 
-The launcher auto-picks `cuda13`, `rocm`, or `cpu` and pulls GHCR images. No SDKs required.
+The launcher auto-picks `cuda13`, `rocm`, `vulkan` (Windows NVIDIA below R580), or `cpu` and pulls GHCR images. No SDKs required. Use `--backend vulkan` to force the vendor-neutral GPU stack.
 
 ### 5b) Client-only dev (UI work against dockerized API)
 
@@ -379,7 +382,7 @@ The launcher auto-picks `cuda13`, `rocm`, or `cpu` and pulls GHCR images. No SDK
 
 1. Everything in 5c.
 2. BuildKit enabled (`DOCKER_BUILDKIT=1` — the build scripts set this).
-3. For CUDA AI image builds: NVIDIA container runtime + enough disk for multi-stage CUDA 13 images.
+3. For CUDA AI image builds: NVIDIA container runtime + enough disk for multi-stage CUDA 13 images. For Vulkan builds: see [`docker/guideants-ai-vulkan.md`](../docker/guideants-ai-vulkan.md).
 4. PowerShell scripts at `docker/build/build_guideants_ai.ps1` for AI backends and `docker/build/build_support_images.ps1` for MSSQL FTS, PlantUML, SearXNG, and WebAPI/UI.
 
 ---
@@ -392,9 +395,9 @@ A few items worth confirming explicitly before onboarding a new dev:
 - **No pinned Node engine** in `src/client/package.json` — pin to avoid drift (Vite 6 + Vitest 4 + Electron 41 → Node 20.x or 22.x).
 - **`appsettings.example.json` is not auto-copied** to `appsettings.json` — first-time devs must do this manually and replace the `SettingsSecrets` key.
 - **`docker/.env` ships with stale-style local image tags** (`guideants-ai:cuda13-26132.1047` etc.) — irrelevant if you use the GHCR compose files but will fail `docker compose up` on the `local` compose files unless you build them first.
-- **CUDA 13 needs NVIDIA R580+ drivers** — the Windows launcher enforces this; manual `docker compose` does not.
+- **CUDA 13 needs NVIDIA R580+ drivers** — the Windows launcher enforces this for `cuda13` and falls back to `vulkan` when the driver is older; manual `docker compose` does not auto-select.
 - **HF token must be set in UI** (`Settings → Connections → HuggingFace`); the API does *not* accept per-request token overrides per the setup guide.
-- **Python**: there is no required host Python install. `src/python/pptx` runs inside the `ScriptExecutionAgent`/sandbox containers; Python 3.11 is baked into the `guideants-ai` images, including the sandbox-oriented `slim` AI variant. Script executions use per-`project + guide` venvs in the `script_agent_admin_state` volume, layered over the image's `/opt/venv` packages. Only install Python on the host if you specifically want to iterate on `src/python/pptx` outside Docker.
+- **Python**: there is no required host Python install. `src/python/pptx` runs inside the `ScriptExecutionAgent`/sandbox containers; Python 3.11 and Node.js 22 are baked into the full `guideants-ai` images (cpu/cuda/rocm/vulkan), including `npx` for package MCP. The sandbox-oriented `slim` AI variant also includes Node.js. Script executions use per-`project + guide` venvs in the `script_agent_admin_state` volume, layered over the image's `/opt/venv` packages. Only install Python on the host if you specifically want to iterate on `src/python/pptx` outside Docker.
 
 ---
 
@@ -402,10 +405,10 @@ A few items worth confirming explicitly before onboarding a new dev:
 
 | Lane | Mandatory | Optional |
 |---|---|---|
-| **Run only** | Docker + Compose, ~60 GB disk, curl, WSL2 (Win) | NVIDIA R580+ or AMD ROCm GPU, HF token |
+| **Run only** | Docker + Compose, ~60 GB disk, curl, WSL2 (Win) | NVIDIA R580+, AMD ROCm GPU, Vulkan GPU (`--backend vulkan`), HF token |
 | **Client dev** | Node 20+/22+, npm, `.env.*` files, a running API | Electron 41 (desktop), ANALYZE=true tooling |
 | **Server dev** | .NET 8 SDK, PowerShell 7+ (cross-platform), `appsettings*.json`, SQL Server (containerized) | EF CLI tools for migrations, Azure Speech key (if testing Azure speech path), local/admin test accounts for role-gated endpoint checks |
-| **Docker builds** | All of the above + BuildKit, GPU runtime for CUDA/ROCm image builds, dotnet publish for ScriptExecutionAgent | GHCR write access (only for publish workflows) |
+| **Docker builds** | All of the above + BuildKit, GPU runtime for CUDA/ROCm/Vulkan image builds, dotnet publish for ScriptExecutionAgent | GHCR write access (only for publish workflows) |
 
 ---
 

@@ -97,6 +97,14 @@ def parse_positive_float(value: str | None, default: float) -> float:
     return parsed if parsed > 0 else default
 
 
+def optional_env_value(name: str) -> str | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value or None
+
+
 def parse_size(size: str) -> tuple[int, int]:
     value = (size or "").strip().lower()
     if "x" not in value:
@@ -176,6 +184,7 @@ class SdRuntimeConfig:
     sampling_method: str
     offload_to_cpu: bool
     diffusion_fa: bool
+    vulkan_visible_devices: str | None
     default_output_format: str
     startup_warmup_fail_open: bool
 
@@ -368,6 +377,7 @@ def resolve_runtime_config() -> SdRuntimeConfig:
     sampling_method = (os.getenv("GA_SD_SAMPLING_METHOD") or "euler").strip() or "euler"
     offload_to_cpu = env_flag("GA_SD_OFFLOAD_TO_CPU", False)
     diffusion_fa = env_flag("GA_SD_DIFFUSION_FA", True)
+    vulkan_visible_devices = optional_env_value("GA_SD_VK_VISIBLE_DEVICES")
     default_output_format = normalize_output_format(os.getenv("GA_SD_DEFAULT_OUTPUT_FORMAT"), "png")
     startup_warmup_fail_open = env_flag("GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP", True)
 
@@ -401,6 +411,7 @@ def resolve_runtime_config() -> SdRuntimeConfig:
         sampling_method=sampling_method,
         offload_to_cpu=offload_to_cpu,
         diffusion_fa=diffusion_fa,
+        vulkan_visible_devices=vulkan_visible_devices,
         default_output_format=default_output_format,
         startup_warmup_fail_open=startup_warmup_fail_open,
     )
@@ -687,17 +698,106 @@ def list_bundles(model_dir: str) -> list[dict[str, Any]]:
     return bundles
 
 
+def _normalize_bundle_revision(revision: str | None) -> str | None:
+    text = (revision or "").strip()
+    return text or None
+
+
+def _previous_role_spec(
+    previous_definition: dict[str, Any] | None, role: str
+) -> tuple[str, str] | None:
+    if previous_definition is None:
+        return None
+    roles = previous_definition.get("roles")
+    if not isinstance(roles, dict):
+        return None
+    role_payload = roles.get(role)
+    if not isinstance(role_payload, dict):
+        return None
+    repo = str(role_payload.get("repo") or "").strip()
+    filename = str(role_payload.get("file") or "").strip()
+    if not repo or not filename:
+        return None
+    return repo, filename
+
+
+def _bundle_revision_unchanged(
+    previous_definition: dict[str, Any] | None, request: DownloadBundleRequest
+) -> bool:
+    if previous_definition is None:
+        return False
+    previous = _normalize_bundle_revision(previous_definition.get("revision"))
+    incoming = _normalize_bundle_revision(request.revision)
+    return previous == incoming
+
+
+def bundle_role_download_needed(
+    previous_definition: dict[str, Any] | None,
+    request: DownloadBundleRequest,
+    role: str,
+    repo: str,
+    filename: str,
+) -> bool:
+    if previous_definition is None:
+        return True
+    if not _bundle_revision_unchanged(previous_definition, request):
+        return True
+    previous = _previous_role_spec(previous_definition, role)
+    if previous is None:
+        return True
+    return previous != (repo, filename)
+
+
+def role_expected_file_ready(target_path: str, filename: str) -> bool:
+    return os.path.isfile(os.path.join(target_path, filename))
+
+
+def clear_stale_role_files(target_path: str, filename: str) -> None:
+    """
+    Remove files left by a prior recipe (e.g. a renamed gguf) without wiping
+    the role directory so huggingface_hub can resume interrupted downloads.
+    """
+    if not os.path.isdir(target_path):
+        return
+    try:
+        for name in os.listdir(target_path):
+            file_path = os.path.join(target_path, name)
+            if os.path.isfile(file_path) and name != filename:
+                os.remove(file_path)
+    except OSError:
+        shutil.rmtree(target_path)
+
+
+def resolve_initial_bundle_role_states(
+    previous_definition: dict[str, Any] | None,
+    request: DownloadBundleRequest,
+    paths: dict[str, str],
+) -> dict[str, str]:
+    roles = {
+        "diffusion": (request.diffusion_repo, request.diffusion_file),
+        "vae": (request.vae_repo, request.vae_file),
+        "textEncoder": (request.text_encoder_repo, request.text_encoder_file),
+    }
+    states: dict[str, str] = {}
+    for role, (repo, filename) in roles.items():
+        if bundle_role_download_needed(previous_definition, request, role, repo, filename):
+            states[role] = "queued"
+        elif role_expected_file_ready(paths[role], filename):
+            states[role] = "ready"
+        else:
+            states[role] = "queued"
+    return states
+
+
 def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dict[str, Any]:
+    previous_definition = read_bundle_definition(model_dir, request.bundle_id)
+    paths = expected_bundle_paths(model_dir, request.bundle_id)
     operation_id = uuid.uuid4().hex
     operation = {
         "operationId": operation_id,
         "bundleId": request.bundle_id,
         "status": "queued",
-        "roles": {
-            "diffusion": "queued",
-            "vae": "queued",
-            "textEncoder": "queued",
-        },
+        "roles": resolve_initial_bundle_role_states(previous_definition, request, paths),
         "error": None,
     }
     with BUNDLE_OPS_LOCK:
@@ -730,19 +830,20 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
                 "vae": (request.vae_repo, request.vae_file),
                 "textEncoder": (request.text_encoder_repo, request.text_encoder_file),
             }
-            paths = expected_bundle_paths(model_dir, request.bundle_id)
             for role, (repo, filename) in roles.items():
+                target_path = paths[role]
+                if (
+                    not bundle_role_download_needed(previous_definition, request, role, repo, filename)
+                    and role_expected_file_ready(target_path, filename)
+                ):
+                    with BUNDLE_OPS_LOCK:
+                        BUNDLE_OPERATIONS[operation_id]["roles"][role] = "ready"
+                    continue
+
                 with BUNDLE_OPS_LOCK:
                     BUNDLE_OPERATIONS[operation_id]["status"] = "running"
                     BUNDLE_OPERATIONS[operation_id]["roles"][role] = "downloading"
-                target_path = paths[role]
-                # Replacing an existing bundle definition must leave exactly one
-                # file per role. Clear the role directory first so a filename
-                # change cannot leave stale files behind.
-                if os.path.isdir(target_path):
-                    shutil.rmtree(target_path)
-                elif os.path.exists(target_path):
-                    os.remove(target_path)
+                clear_stale_role_files(target_path, filename)
                 os.makedirs(target_path, exist_ok=True)
                 snapshot_download(
                     repo_id=repo,
@@ -806,6 +907,13 @@ def build_sd_server_command(config: SdRuntimeConfig) -> list[str]:
         command.append("--diffusion-fa")
 
     return command
+
+
+def build_sd_server_environment(config: SdRuntimeConfig) -> dict[str, str]:
+    env = os.environ.copy()
+    if config.vulkan_visible_devices is not None:
+        env["GGML_VK_VISIBLE_DEVICES"] = config.vulkan_visible_devices
+    return env
 
 
 def is_engine_process_alive() -> bool:
@@ -987,11 +1095,12 @@ def start_engine() -> tuple[bool, str | None]:
         vaePath=config.vae_path,
         llmPath=config.llm_path,
         bundleId=STATE.loaded_bundle_id,
+        vulkanVisibleDevices=config.vulkan_visible_devices,
         command=command,
     )
 
     try:
-        STATE.engine_process = subprocess.Popen(command)
+        STATE.engine_process = subprocess.Popen(command, env=build_sd_server_environment(config))
         STATE.engine_started_at_utc = utc_now_iso()
         wait_for_engine_ready(config)
         STATE.loaded_at_utc = utc_now_iso()
@@ -1671,6 +1780,7 @@ async def health() -> dict[str, Any]:
             "samplingMethod": config.sampling_method,
             "offloadToCpu": config.offload_to_cpu,
             "diffusionFa": config.diffusion_fa,
+            "vulkanVisibleDevices": config.vulkan_visible_devices,
         },
         "engine": {
             "startedAtUtc": STATE.engine_started_at_utc,
