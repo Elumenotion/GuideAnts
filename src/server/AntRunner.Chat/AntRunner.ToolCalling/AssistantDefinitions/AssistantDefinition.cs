@@ -127,4 +127,12 @@ public class AssistantDefinition
     [JsonPropertyName("context_options")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, string>? ContextOptions { get; set; }
+
+    /// <summary>
+    /// Tier-1 skill descriptors (name, description, locator, gating metadata, file inventory).
+    /// Skill bodies are loaded on demand via <c>skills.read</c> — never embedded here.
+    /// </summary>
+    [JsonPropertyName("skills")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<SkillDescriptor>? Skills { get; set; }
 }

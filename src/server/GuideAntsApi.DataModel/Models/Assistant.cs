@@ -158,6 +158,11 @@ namespace GuideAntsApi.DataModel.Models
         public ICollection<AssistantFile> Files { get; set; } = [];
 
         /// <summary>
+        /// Metadata-only sidecar rows for skills (listing/enable/order). Bodies stay in Files.
+        /// </summary>
+        public ICollection<AssistantSkillMeta> SkillMetas { get; set; } = [];
+
+        /// <summary>
         /// Context options key/value pairs from HostExtensions/UI/contextOptions.json.
         /// Stored as flattened records for queryability.
         /// </summary>

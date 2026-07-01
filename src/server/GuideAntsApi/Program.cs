@@ -286,6 +286,9 @@ public class Program
         // Initialize static service provider for MemoryTools (KM queries)
         GuideAntsApi.Services.MemoryTools.InitializeServiceProvider(app.Services);
 
+        // Initialize static service provider for SkillTools (skills.list/skills.read)
+        GuideAntsApi.Services.SkillTools.InitializeServiceProvider(app.Services);
+
         // Initialize static service provider for ReadWeb tools
         GuideAntsApi.Services.ReadWebTools.InitializeServiceProvider(app.Services);
 

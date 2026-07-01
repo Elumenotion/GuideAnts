@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useToast } from '../../common/Toast';
 import { api } from '../../../services/api';
-import { GuideDetailsDto, AssistantDetailsDto, CreateGuideDto, UpdateGuideDto, CreateAssistantDto, UpdateAssistantDto, ContextOptionDto, CustomToolDto, FileUploadDto, FileDto, AuthProviderDto, ModelDto, EnvironmentVariableDto } from '../../../types/guides';
+import { GuideDetailsDto, AssistantDetailsDto, CreateGuideDto, UpdateGuideDto, CreateAssistantDto, UpdateAssistantDto, ContextOptionDto, CustomToolDto, FileUploadDto, FileDto, AuthProviderDto, ModelDto, EnvironmentVariableDto, AssistantSkillDto, AssistantSkillSaveDto, ToolAssignmentDto } from '../../../types/guides';
 import LoadingSpinner from '../../LoadingSpinner';
 import { API_BASE_URL, getApiOrigin } from '../../../config/apiConfig';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
@@ -16,6 +16,9 @@ import { FilesTab } from './FilesTab';
 import { CrewTab } from './CrewTab';
 import { AuthConfig } from './AuthConfig';
 import { EnvironmentConfig } from './EnvironmentConfig';
+import { SkillsTab } from './skills/SkillsTab';
+import { toSkillSaveDto } from './skills/skillImportHelpers';
+import { guideHasSandboxGatingPayload, guideHasSkillScriptsPayload } from './executablePayload';
 import { MarkdownPreviewModal } from './MarkdownPreviewModal';
 import { useRegisterTour } from '../../../tour/useRegisterTour';
 import {
@@ -55,6 +58,9 @@ interface FormData {
   environmentVariables: EnvironmentVariableDto[];
   existingFiles: FileDto[]; // Files already on the server
   newFiles: FileUploadDto[]; // New files to be uploaded
+  skills: AssistantSkillDto[];
+  pendingSkillUploads: AssistantSkillSaveDto[];
+  toolAssignments: ToolAssignmentDto[];
   conversationStarters: string[];
   crewMemberIds: string[]; // Only used for guides
 }
@@ -75,6 +81,9 @@ const defaultFormData: FormData = {
   environmentVariables: [],
   existingFiles: [],
   newFiles: [],
+  skills: [],
+  pendingSkillUploads: [],
+  toolAssignments: [],
   conversationStarters: [],
   crewMemberIds: [],
 };
@@ -103,6 +112,35 @@ function areFormValuesEqual<T>(left: T, right: T): boolean {
   return false;
 }
 
+function buildSkillsSavePayload(
+  skills: AssistantSkillDto[],
+  pendingSkillUploads: AssistantSkillSaveDto[],
+): AssistantSkillSaveDto[] | undefined {
+  const saves = skills.map((skill) => {
+    const pending = pendingSkillUploads.find((item) => item.name === skill.name);
+    if (pending) {
+      return {
+        ...pending,
+        enabled: skill.enabled,
+        displayOrder: skill.displayOrder,
+      };
+    }
+
+    return {
+      ...toSkillSaveDto(skill),
+      enabled: skill.enabled,
+      displayOrder: skill.displayOrder,
+    };
+  });
+
+  const extraPending = pendingSkillUploads.filter(
+    (pending) => !skills.some((skill) => skill.name === pending.name),
+  );
+
+  const all = [...saves, ...extraPending];
+  return all.length > 0 ? all : undefined;
+}
+
 interface BaseEntityEditorProps {
   entityType: 'assistant' | 'guide';
   entityId?: string;
@@ -111,13 +149,14 @@ interface BaseEntityEditorProps {
 
 export default function BaseEntityEditor({ entityType, entityId, projectId }: BaseEntityEditorProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { showToast } = useToast();
   const isEditing = !!entityId;
   const isGuide = entityType === 'guide';
 
   // Persist active tab in URL for navigation stability
-  const activeTab = (searchParams.get('tab') || 'general') as 'general' | 'configuration' | 'tools' | 'files' | 'environment' | 'crew' | 'auth';
+  const activeTab = (searchParams.get('tab') || 'general') as 'general' | 'configuration' | 'tools' | 'files' | 'skills' | 'environment' | 'crew' | 'auth';
 
   const [formData, setFormData] = useState<FormData>(defaultFormData);
   const [isDirty, setIsDirty] = useState(false);
@@ -134,6 +173,26 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
   const instructionsListenerRegistered = useRef(false);
   const homePageListenerRegistered = useRef(false);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const payloadParams = useMemo(
+    () => ({
+      existingFiles: formData.existingFiles,
+      newFiles: formData.newFiles,
+      skills: formData.skills,
+      pendingSkillUploads: formData.pendingSkillUploads,
+    }),
+    [formData.existingFiles, formData.newFiles, formData.skills, formData.pendingSkillUploads],
+  );
+
+  const requiresRunPython = useMemo(
+    () => guideHasSkillScriptsPayload(payloadParams),
+    [payloadParams],
+  );
+
+  const hasSandboxGatingPayload = useMemo(
+    () => guideHasSandboxGatingPayload(payloadParams),
+    [payloadParams],
+  );
   
   // Register tours per active area
   useRegisterTour('guideBuilder.general', [
@@ -406,7 +465,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     }
   ]);
 
-  const setActiveTab = useCallback((tab: 'general' | 'configuration' | 'tools' | 'files' | 'environment' | 'crew' | 'auth') => {
+  const setActiveTab = useCallback((tab: 'general' | 'configuration' | 'tools' | 'files' | 'skills' | 'environment' | 'crew' | 'auth') => {
     setSearchParams((prev) => {
       const newParams = new URLSearchParams(prev);
       newParams.set('tab', tab);
@@ -497,6 +556,54 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     return () => window.removeEventListener('beforeunload', handler);
   }, [isDirty]);
 
+  useEffect(() => {
+    if (isEditing) {
+      return;
+    }
+
+    const state = location.state as {
+      fromSkills?: {
+        name: string;
+        description: string;
+        instructions: string;
+        toolIds: string[];
+        skills: AssistantSkillSaveDto[];
+        files: FileUploadDto[];
+      };
+    } | null;
+
+    if (!state?.fromSkills) {
+      return;
+    }
+
+    const fromSkills = state.fromSkills;
+    setFormData((prev) => ({
+      ...prev,
+      name: fromSkills.name,
+      description: fromSkills.description,
+      instructions: fromSkills.instructions,
+      selectedToolIds: fromSkills.toolIds,
+      pendingSkillUploads: fromSkills.skills,
+      newFiles: fromSkills.files,
+      skills: fromSkills.skills.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        enabled: skill.enabled,
+        displayOrder: skill.displayOrder,
+        source: skill.source,
+        requiresToolsets: [],
+        requiresTools: [],
+        files: (skill.filesToAdd ?? []).map((file, index) => ({
+          id: `pending-${skill.name}-${index}`,
+          folderKind: file.folderKind,
+          relativePath: file.relativePath,
+          created: new Date().toISOString(),
+        })),
+      })),
+    }));
+    setIsDirty(true);
+  }, [isEditing, location.state]);
+
   const loadEntity = async (id: string) => {
     try {
       if (isGuide) {
@@ -519,6 +626,9 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           environmentVariables: data.environmentVariables || [],
           existingFiles: data.files || [],
           newFiles: [],
+          skills: data.skills || [],
+          pendingSkillUploads: [],
+          toolAssignments: data.tools,
           conversationStarters: data.conversationStarters.map((cs) => cs.prompt),
           crewMemberIds: data.crews.flatMap((crew) => crew.members.map((m) => m.assistantId)),
           samplingOverrides: {},
@@ -548,6 +658,9 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           environmentVariables: data.environmentVariables || [],
           existingFiles: data.files || [],
           newFiles: [],
+          skills: data.skills || [],
+          pendingSkillUploads: [],
+          toolAssignments: data.tools,
           conversationStarters: data.conversationStarters.map((cs) => cs.prompt),
           crewMemberIds: [],
         });
@@ -667,6 +780,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     // - Files not in fileIdsToKeep will be deleted
     const fileIdsToKeep = formData.existingFiles.map(f => f.id);
     const filesToAdd = formData.newFiles.length > 0 ? formData.newFiles : undefined;
+    const skillsToSave = buildSkillsSavePayload(formData.skills, formData.pendingSkillUploads);
 
     const samplingParametersJson =
       Object.keys(formData.samplingOverrides).length > 0
@@ -703,6 +817,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             environmentVariables: formData.environmentVariables,
             fileIdsToKeep,
             filesToAdd,
+            skills: skillsToSave,
             conversationStarters: formData.conversationStarters,
             crewMemberIds: formData.crewMemberIds,
           };
@@ -732,6 +847,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             contextOptions: contextOptionsToSave,
             fileIdsToKeep,
             filesToAdd,
+            skills: skillsToSave,
             conversationStarters: formData.conversationStarters,
           };
 
@@ -768,6 +884,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             authProviders: formData.authProviders,
             environmentVariables: formData.environmentVariables,
             files: formData.newFiles.length > 0 ? formData.newFiles : undefined,
+            skills: skillsToSave,
             conversationStarters: formData.conversationStarters,
             crewMemberIds: formData.crewMemberIds,
           };
@@ -798,6 +915,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             customTools: formData.customTools,
             contextOptions: contextOptionsToSave,
             files: formData.newFiles.length > 0 ? formData.newFiles : undefined,
+            skills: skillsToSave,
             conversationStarters: formData.conversationStarters,
           };
 
@@ -1025,6 +1143,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               customTools={formData.customTools}
               contextOptions={formData.contextOptions}
               environmentVariables={formData.environmentVariables}
+              requiresRunPython={requiresRunPython}
               projectId={projectId}
               guideId={isGuide && isEditing ? entityId : undefined}
               onSelectedToolIdsChange={(selectedToolIds) => updateForm({ selectedToolIds })}
@@ -1043,6 +1162,23 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               onNewFilesChange={(newFiles) => updateForm({ newFiles })}
               onPreviewMarkdown={handlePreviewMarkdown}
               onDownloadFile={handleDownloadFile}
+            />
+          )}
+
+          {activeTab === 'skills' && (
+            <SkillsTab
+              projectId={projectId}
+              assistantId={isEditing ? entityId : undefined}
+              skills={formData.skills}
+              pendingSkillUploads={formData.pendingSkillUploads}
+              selectedToolTypes={formData.toolAssignments
+                .filter((tool) => formData.selectedToolIds.includes(tool.toolId))
+                .map((tool) => tool.toolType)}
+              hasCodeInterpreterFiles={hasSandboxGatingPayload}
+              toolAssignments={formData.toolAssignments}
+              onSkillsChange={(skills) => updateForm({ skills })}
+              onPendingSkillUploadsChange={(pendingSkillUploads) => updateForm({ pendingSkillUploads })}
+              onDownloadFile={isEditing ? handleDownloadFile : undefined}
             />
           )}
 

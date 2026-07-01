@@ -1,0 +1,136 @@
+import { useRef, useState } from 'react';
+import LexicalEditor from '../../../notebook/conversations/LexicalEditor';
+import type { LexicalEditorRef } from '../../../notebook/conversations/LexicalEditor';
+import type { AssistantSkillSaveDto } from '../../../../types/guides';
+import { buildAuthoredSkillSave } from './skillImportHelpers';
+
+interface AuthorSkillEditorProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onAuthored: (skill: AssistantSkillSaveDto) => void;
+}
+
+export function AuthorSkillEditor({ isOpen, onClose, onAuthored }: AuthorSkillEditorProps) {
+  const editorRef = useRef<LexicalEditorRef>(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const handleSave = async () => {
+    setError(null);
+    if (!name.trim()) {
+      setError('Skill name is required.');
+      return;
+    }
+
+    if (!description.trim()) {
+      setError('Skill description is required.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const body = editorRef.current?.getValue() ?? '';
+      const skill = await buildAuthoredSkillSave({
+        name: name.trim(),
+        description: description.trim(),
+        body,
+        enabled: true,
+        displayOrder: 0,
+      });
+      onAuthored(skill);
+      setName('');
+      setDescription('');
+      editorRef.current?.setValue('');
+      onClose();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to author skill.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="author-skill-title"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-6 shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="author-skill-title" className="text-lg font-semibold text-gray-900">
+          Author skill
+        </h2>
+
+        <div className="mt-4 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700" htmlFor="skill-name">
+              Name
+            </label>
+            <input
+              id="skill-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700" htmlFor="skill-description">
+              Description
+            </label>
+            <input
+              id="skill-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Body</label>
+            <div className="mt-1 min-h-[220px] rounded-md border border-gray-300">
+              <LexicalEditor
+                ref={editorRef}
+                placeholder="Write the skill instructions in markdown..."
+                showToolbar
+                className="min-h-[220px]"
+              />
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleSave}
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save skill'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

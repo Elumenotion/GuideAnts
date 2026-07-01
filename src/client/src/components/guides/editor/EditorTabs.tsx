@@ -1,8 +1,8 @@
 interface EditorTabsProps {
-  activeTab: 'general' | 'configuration' | 'tools' | 'files' | 'environment' | 'crew' | 'auth';
+  activeTab: 'general' | 'configuration' | 'tools' | 'files' | 'skills' | 'environment' | 'crew' | 'auth';
   showCrew: boolean; // Control whether to show Crew tab (guides only)
   showAuth: boolean; // Control whether to show Auth tab (guides only)
-  onTabChange: (tab: 'general' | 'configuration' | 'tools' | 'files' | 'environment' | 'crew' | 'auth') => void;
+  onTabChange: (tab: 'general' | 'configuration' | 'tools' | 'files' | 'skills' | 'environment' | 'crew' | 'auth') => void;
 }
 
 export function EditorTabs({ activeTab, showCrew, showAuth, onTabChange }: EditorTabsProps) {
@@ -11,6 +11,7 @@ export function EditorTabs({ activeTab, showCrew, showAuth, onTabChange }: Edito
     { id: 'configuration' as const, label: 'Configuration' },
     { id: 'tools' as const, label: 'Tools' },
     { id: 'files' as const, label: 'Files' },
+    { id: 'skills' as const, label: 'Skills' },
     { id: 'environment' as const, label: 'Environment' },
     ...(showAuth ? [{ id: 'auth' as const, label: 'Authentication' }] : []),
     ...(showCrew ? [{ id: 'crew' as const, label: 'Crew' }] : []),
@@ -35,6 +36,7 @@ export function EditorTabs({ activeTab, showCrew, showAuth, onTabChange }: Edito
                 tab.id === 'configuration' ? 'guide.tabs.configuration' :
                 tab.id === 'tools' ? 'guide.tabs.tools' :
                 tab.id === 'files' ? 'guide.tabs.files' :
+                tab.id === 'skills' ? 'guide.tabs.skills' :
                 tab.id === 'environment' ? 'guide.tabs.environment' :
                 tab.id === 'auth' ? 'guide.tabs.auth' :
                 'guide.tabs.crew'

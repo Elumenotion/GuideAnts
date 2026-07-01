@@ -247,32 +247,13 @@ namespace AntRunner.Chat
             
             if (hasVectorStores)
             {
-                // Check if SearchAssistantFiles is registered in ToolContractRegistry
-                var allToolOperations = ToolContractRegistry.GetAllToolOperations();
-                var searchAssistantFilesOperation = allToolOperations.FirstOrDefault(kvp => 
-                    kvp.Key.Equals("SearchAssistantFiles", StringComparison.OrdinalIgnoreCase));
-                
-                if (!string.IsNullOrEmpty(searchAssistantFilesOperation.Key))
-                {
-                    try
-                    {
-                        var schema = ToolContractRegistry.GenerateOpenApiSchema(searchAssistantFilesOperation.Value);
-                        var toolDefinitions = OpenApiHelper.GetToolDefinitionsFromJson(schema);
-                        
-                        foreach (var def in toolDefinitions)
-                        {
-                            if (def.Function?.AsObject?.Name == "SearchAssistantFiles")
-                            {
-                                options.Tools!.Add(def);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        // Log warning but continue - non-critical failure
-                        Console.WriteLine($"Warning: Failed to inject SearchAssistantFiles tool: {ex.Message}");
-                    }
-                }
+                TryInjectRegisteredTool(options, "SearchAssistantFiles");
+            }
+
+            if (options.Skills is { Count: > 0 })
+            {
+                TryInjectRegisteredTool(options, "skills.list");
+                TryInjectRegisteredTool(options, "skills.read");
             }
 
             // ---------------------------------------------------------------------
@@ -326,13 +307,37 @@ namespace AntRunner.Chat
             }
         }
 
+        private static void TryInjectRegisteredTool(AssistantDefinition options, string operationId)
+        {
+            var allToolOperations = ToolContractRegistry.GetAllToolOperations();
+            var operation = allToolOperations.FirstOrDefault(kvp =>
+                kvp.Key.Equals(operationId, StringComparison.OrdinalIgnoreCase));
+
+            if (string.IsNullOrEmpty(operation.Key))
+            {
+                return;
+            }
+
+            try
+            {
+                var schema = ToolContractRegistry.GenerateOpenApiSchema(operation.Value);
+                var toolDefinitions = OpenApiHelper.GetToolDefinitionsFromJson(schema);
+
+                foreach (var def in toolDefinitions)
+                {
+                    if (def.Function?.AsObject?.Name == operationId)
+                    {
+                        options.Tools!.Add(def);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Failed to inject {operationId} tool: {ex.Message}");
+            }
+        }
+
         // -----------------------------
-        // Helper methods
-        // -----------------------------
-        
-        /// <summary>
-        /// Gets OpenAPI tool definitions for an assistant from database-backed metadata.
-        /// </summary>
         private static async Task<List<ToolDefinition>> GetOpenApiToolDefinitions(string assistantName)
         {
             var toolDefinitions = new List<ToolDefinition>();

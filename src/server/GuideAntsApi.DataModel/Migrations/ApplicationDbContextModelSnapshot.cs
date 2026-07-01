@@ -594,6 +594,52 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.ToTable("AssistantOpenApiSchemas");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantSkillMeta", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssistantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("Created")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("SkillName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime?>("Updated")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssistantId", "SkillName")
+                        .IsUnique();
+
+                    b.ToTable("AssistantSkillMetas");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantTool", b =>
                 {
                     b.Property<Guid>("AssistantId")
@@ -3155,6 +3201,17 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("AuthProvider");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantSkillMeta", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.Assistant", "Assistant")
+                        .WithMany("SkillMetas")
+                        .HasForeignKey("AssistantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Assistant");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.AssistantTool", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.Assistant", "Assistant")
@@ -3822,6 +3879,8 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("GuideMemberships");
 
                     b.Navigation("OpenApiSchemas");
+
+                    b.Navigation("SkillMetas");
 
                     b.Navigation("Tools");
                 });

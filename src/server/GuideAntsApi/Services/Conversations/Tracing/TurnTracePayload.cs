@@ -76,7 +76,7 @@ public sealed class TurnTraceToolDefinition
     public string? ParametersJson { get; set; }
 
     /// <summary>
-    /// Tool source: guide or client.
+    /// Tool source: guide, client, or skills.
     /// </summary>
     public string Source { get; set; } = "guide";
 }
