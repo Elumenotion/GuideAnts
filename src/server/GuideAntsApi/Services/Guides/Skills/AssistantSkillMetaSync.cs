@@ -105,8 +105,14 @@ public sealed class AssistantSkillMetaSync(ApplicationDbContext context) : IAssi
             .ToListAsync(cancellationToken);
 
         var savesByManifestId = new Dictionary<Guid, AssistantSkillSaveDto>();
+        var savesByName = new Dictionary<string, AssistantSkillSaveDto>(StringComparer.OrdinalIgnoreCase);
         foreach (var skill in skills)
         {
+            if (!string.IsNullOrWhiteSpace(skill.Name))
+            {
+                savesByName[skill.Name] = skill;
+            }
+
             if (skill.FileIdsToKeep is not { Count: > 0 })
             {
                 continue;
@@ -149,7 +155,8 @@ public sealed class AssistantSkillMetaSync(ApplicationDbContext context) : IAssi
 
             var enabled = frontmatter.Enabled;
             var displayOrder = frontmatter.DisplayOrder;
-            if (savesByManifestId.TryGetValue(manifest.Id, out var save))
+            if (savesByManifestId.TryGetValue(manifest.Id, out var save)
+                || savesByName.TryGetValue(frontmatter.Name, out save))
             {
                 enabled = save.Enabled;
                 displayOrder = save.DisplayOrder;

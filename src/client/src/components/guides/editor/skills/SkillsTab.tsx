@@ -278,6 +278,7 @@ export function SkillsTab({
       />
       <AuthorSkillEditor
         isOpen={showAuthor}
+        nextDisplayOrder={nextSkillDisplayOrder(skills)}
         onClose={() => setShowAuthor(false)}
         onAuthored={handleImported}
       />

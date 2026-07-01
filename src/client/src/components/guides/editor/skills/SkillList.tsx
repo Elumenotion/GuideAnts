@@ -40,6 +40,7 @@ export function SkillList({
           canMoveUp={index > 0}
           canMoveDown={index < sortedSkills.length - 1}
           showOrdering={sortedSkills.length > 1}
+          discoveryOrder={index + 1}
           onEnabledChange={(enabled) => onSkillChange(skill.name, { ...skill, enabled })}
           onMoveUp={() => onMoveSkill(skill.name, 'up')}
           onMoveDown={() => onMoveSkill(skill.name, 'down')}

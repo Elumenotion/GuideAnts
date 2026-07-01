@@ -45,8 +45,8 @@ public sealed class GuideExecutablePayloadTests
 
         GuideExecutablePayload.EnsureRunPythonToolForSkillPayload(assistant);
 
-        assistant.Tools.Should().ContainSingle();
-        assistant.Tools[0].ToolId.Should().Be(GuideExecutablePayload.RunPythonToolId);
+        assistant.Tools.Should().ContainSingle()
+            .Which.ToolId.Should().Be(GuideExecutablePayload.RunPythonToolId);
     }
 
     [TestMethod]

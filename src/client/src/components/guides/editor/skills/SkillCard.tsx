@@ -21,6 +21,7 @@ interface SkillCardProps {
   canMoveUp: boolean;
   canMoveDown: boolean;
   showOrdering: boolean;
+  discoveryOrder: number;
   onEnabledChange: (enabled: boolean) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -36,6 +37,7 @@ export function SkillCard({
   canMoveUp,
   canMoveDown,
   showOrdering,
+  discoveryOrder,
   onEnabledChange,
   onMoveUp,
   onMoveDown,
@@ -105,7 +107,7 @@ export function SkillCard({
                   <FaArrowUp className="h-3 w-3" />
                 </button>
                 <span className="w-6 text-center text-sm font-medium text-gray-800">
-                  {skill.displayOrder + 1}
+                  {discoveryOrder}
                 </span>
                 <button
                   type="button"

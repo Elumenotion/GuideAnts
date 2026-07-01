@@ -169,6 +169,43 @@ describe('skillOrdering', () => {
     expect(moved.map((skill) => skill.name)).toEqual(['beta', 'alpha']);
     expect(reindexSkillDisplayOrders(moved).map((skill) => skill.displayOrder)).toEqual([0, 1]);
   });
+
+  it('reindexes duplicate display orders to unique sequence', () => {
+    const skills: AssistantSkillDto[] = [
+      {
+        name: 'arxiv',
+        description: 'A',
+        enabled: true,
+        displayOrder: 0,
+        source: 'Imported',
+        files: [],
+        requiresToolsets: [],
+        requiresTools: [],
+      },
+      {
+        name: 'qa-authored-a8',
+        description: 'B',
+        enabled: true,
+        displayOrder: 0,
+        source: 'Authored',
+        files: [],
+        requiresToolsets: [],
+        requiresTools: [],
+      },
+      {
+        name: 'kanban-video-orchestrator',
+        description: 'C',
+        enabled: true,
+        displayOrder: 1,
+        source: 'Imported',
+        files: [],
+        requiresToolsets: [],
+        requiresTools: [],
+      },
+    ];
+
+    expect(reindexSkillDisplayOrders(skills).map((skill) => skill.displayOrder)).toEqual([0, 1, 2]);
+  });
 });
 
 describe('skillFileTree', () => {

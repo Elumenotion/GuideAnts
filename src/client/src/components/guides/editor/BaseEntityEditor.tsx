@@ -18,6 +18,7 @@ import { AuthConfig } from './AuthConfig';
 import { EnvironmentConfig } from './EnvironmentConfig';
 import { SkillsTab } from './skills/SkillsTab';
 import { toSkillSaveDto } from './skills/skillImportHelpers';
+import { reindexSkillDisplayOrders } from './skills/skillOrdering';
 import { guideHasSandboxGatingPayload, guideHasSkillScriptsPayload } from './executablePayload';
 import { MarkdownPreviewModal } from './MarkdownPreviewModal';
 import { useRegisterTour } from '../../../tour/useRegisterTour';
@@ -626,7 +627,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           environmentVariables: data.environmentVariables || [],
           existingFiles: data.files || [],
           newFiles: [],
-          skills: data.skills || [],
+          skills: reindexSkillDisplayOrders(data.skills || []),
           pendingSkillUploads: [],
           toolAssignments: data.tools,
           conversationStarters: data.conversationStarters.map((cs) => cs.prompt),
@@ -658,7 +659,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           environmentVariables: data.environmentVariables || [],
           existingFiles: data.files || [],
           newFiles: [],
-          skills: data.skills || [],
+          skills: reindexSkillDisplayOrders(data.skills || []),
           pendingSkillUploads: [],
           toolAssignments: data.tools,
           conversationStarters: data.conversationStarters.map((cs) => cs.prompt),
@@ -780,7 +781,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     // - Files not in fileIdsToKeep will be deleted
     const fileIdsToKeep = formData.existingFiles.map(f => f.id);
     const filesToAdd = formData.newFiles.length > 0 ? formData.newFiles : undefined;
-    const skillsToSave = buildSkillsSavePayload(formData.skills, formData.pendingSkillUploads);
+    const normalizedSkills = reindexSkillDisplayOrders(formData.skills);
+    const skillsToSave = buildSkillsSavePayload(normalizedSkills, formData.pendingSkillUploads);
 
     const samplingParametersJson =
       Object.keys(formData.samplingOverrides).length > 0
@@ -824,6 +826,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
 
           await api.guides.guides.update(entityId, updateDto);
           showToast({ type: 'success', title: 'Guide updated successfully' });
+          updateForm({ skills: normalizedSkills, pendingSkillUploads: [] });
         } else {
           const updateDto: UpdateAssistantDto = {
             projectId,

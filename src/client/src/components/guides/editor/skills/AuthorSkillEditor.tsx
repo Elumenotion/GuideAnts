@@ -6,11 +6,12 @@ import { buildAuthoredSkillSave } from './skillImportHelpers';
 
 interface AuthorSkillEditorProps {
   isOpen: boolean;
+  nextDisplayOrder: number;
   onClose: () => void;
   onAuthored: (skill: AssistantSkillSaveDto) => void;
 }
 
-export function AuthorSkillEditor({ isOpen, onClose, onAuthored }: AuthorSkillEditorProps) {
+export function AuthorSkillEditor({ isOpen, nextDisplayOrder, onClose, onAuthored }: AuthorSkillEditorProps) {
   const editorRef = useRef<LexicalEditorRef>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -41,7 +42,7 @@ export function AuthorSkillEditor({ isOpen, onClose, onAuthored }: AuthorSkillEd
         description: description.trim(),
         body,
         enabled: true,
-        displayOrder: 0,
+        displayOrder: nextDisplayOrder,
       });
       onAuthored(skill);
       setName('');
