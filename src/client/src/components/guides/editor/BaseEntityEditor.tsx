@@ -594,6 +594,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
         source: skill.source,
         requiresToolsets: [],
         requiresTools: [],
+        fallbackForToolsets: [],
+        fallbackForTools: [],
         files: (skill.filesToAdd ?? []).map((file, index) => ({
           id: `pending-${skill.name}-${index}`,
           folderKind: file.folderKind,

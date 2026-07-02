@@ -4,6 +4,25 @@ export const TOOLSET_TO_TOOLS: Record<string, string[]> = {
   web: ['WebSearch', 'ReadWeb'],
 };
 
+export function isToolsetAvailable(
+  toolset: string,
+  availableToolTypes: Set<string>,
+  hasCodeInterpreterFiles: boolean,
+): boolean {
+  const mapped = TOOLSET_TO_TOOLS[toolset.toLowerCase()];
+  if (!mapped) {
+    return false;
+  }
+
+  return mapped.some((toolType) => {
+    if (toolType === 'code_interpreter') {
+      return hasCodeInterpreterFiles || availableToolTypes.has('code_interpreter');
+    }
+
+    return availableToolTypes.has(toolType);
+  });
+}
+
 export const CATALOG_TOOL_IDS: Record<string, string> = {
   WebSearch: 'b0000000-0000-0000-0000-00000000000d',
   ReadWeb: 'b0000000-0000-0000-0000-00000000000e',
