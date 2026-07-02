@@ -10,6 +10,15 @@ vi.mock('../../../../services/api');
 describe('ToolsSelector', () => {
   const tools = [
     {
+      id: 'b0000000-0000-0000-0000-000000000009',
+      toolType: 'run_python',
+      displayName: 'Run Python',
+      description: 'Execute Python in a container.',
+      category: 'Code',
+      isActive: true,
+      displayOrder: 3,
+    },
+    {
       id: 'b0000000-0000-0000-0000-00000000000a',
       toolType: 'search_notebook',
       displayName: 'Search Notebook',
@@ -57,6 +66,7 @@ describe('ToolsSelector', () => {
       <ToolsSelector
         selectedToolIds={[]}
         contextOptions={[]}
+        requiresRunPython={false}
         onSelectedToolIdsChange={() => {}}
       />
     );
@@ -89,6 +99,7 @@ describe('ToolsSelector', () => {
           <ToolsSelector
             selectedToolIds={selected}
             contextOptions={[]}
+            requiresRunPython={false}
             onSelectedToolIdsChange={setSelected}
           />
           <div data-testid="selected-tools">{selected.join(',')}</div>
@@ -102,5 +113,33 @@ describe('ToolsSelector', () => {
     await user.click(checkbox);
 
     expect(screen.getByTestId('selected-tools').textContent).toContain('b0000000-0000-0000-0000-00000000000d');
+  });
+
+  it('auto-enables and locks Run Python when executable payload is required', async () => {
+    function Harness() {
+      const [selected, setSelected] = useState<string[]>([]);
+      return (
+        <>
+          <ToolsSelector
+            selectedToolIds={selected}
+            contextOptions={[]}
+            requiresRunPython
+            onSelectedToolIdsChange={setSelected}
+          />
+          <div data-testid="selected-tools">{selected.join(',')}</div>
+        </>
+      );
+    }
+
+    render(<Harness />);
+
+    const checkbox = await screen.findByRole('checkbox', { name: /Run Python/i });
+    await waitFor(() => {
+      expect(checkbox).toBeChecked();
+      expect(screen.getByTestId('selected-tools').textContent).toContain('b0000000-0000-0000-0000-000000000009');
+    });
+    expect(checkbox).toBeDisabled();
+    expect(screen.getByText('Required')).toBeInTheDocument();
+    expect(screen.getByText(/skill scripts or assets to run/i)).toBeInTheDocument();
   });
 });

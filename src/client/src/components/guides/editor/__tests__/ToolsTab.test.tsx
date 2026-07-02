@@ -19,6 +19,7 @@ describe('ToolsTab', () => {
         customTools={[]}
         contextOptions={[]}
         environmentVariables={[]}
+        requiresRunPython={false}
         onSelectedToolIdsChange={() => {}}
         onCustomToolsChange={() => {}}
         onEnvironmentVariablesChange={() => {}}
@@ -37,6 +38,7 @@ describe('ToolsTab', () => {
         customTools={[]}
         contextOptions={[]}
         environmentVariables={[]}
+        requiresRunPython={false}
         onSelectedToolIdsChange={() => {}}
         onCustomToolsChange={() => {}}
         onEnvironmentVariablesChange={() => {}}

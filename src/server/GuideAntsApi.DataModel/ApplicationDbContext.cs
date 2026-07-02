@@ -68,6 +68,7 @@ namespace GuideAntsApi.DataModel
         public DbSet<AssistantOpenApiOperation> AssistantOpenApiOperations { get; set; } = null!;
         public DbSet<AssistantFile> AssistantFiles { get; set; } = null!;
         public DbSet<AssistantFileMarkdownShadow> AssistantFileMarkdownShadows { get; set; } = null!;
+        public DbSet<AssistantSkillMeta> AssistantSkillMetas { get; set; } = null!;
         public DbSet<AssistantContextOption> AssistantContextOptions { get; set; } = null!;
         public DbSet<AssistantAuthProvider> AssistantAuthProviders { get; set; } = null!;
         public DbSet<AssistantAuthScope> AssistantAuthScopes { get; set; } = null!;
@@ -199,6 +200,16 @@ namespace GuideAntsApi.DataModel
 
             modelBuilder.Entity<AssistantFileMarkdownShadow>()
                 .HasIndex(afs => afs.Status);
+
+            modelBuilder.Entity<AssistantSkillMeta>()
+                .HasIndex(m => new { m.AssistantId, m.SkillName })
+                .IsUnique();
+
+            modelBuilder.Entity<AssistantSkillMeta>()
+                .HasOne(m => m.Assistant)
+                .WithMany(a => a.SkillMetas)
+                .HasForeignKey(m => m.AssistantId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             // ------------------------------------------------------------
             // DocumentChunk configuration

@@ -5,6 +5,7 @@ using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Guides;
+using GuideAntsApi.Services.Guides.Skills;
 using GuideAntsApi.Tests.BackgroundJobs;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.EntityFrameworkCore;
@@ -27,7 +28,8 @@ public sealed class GuideExportImportServiceDeep2Tests
         var service = new GuideExportImportService(
             context,
             new TestDbContextFactory(options),
-            new BackgroundJobTestHelpers.CapturingJobQueueService());
+            new BackgroundJobTestHelpers.CapturingJobQueueService(),
+            new AssistantSkillMetaSync(context));
 
         var name = $"Reasoning {numeric} {Guid.NewGuid():N}";
         await using var zip = CreateAssistantZip(name, reasoningEffort: numeric);
@@ -47,7 +49,8 @@ public sealed class GuideExportImportServiceDeep2Tests
         var service = new GuideExportImportService(
             context,
             new TestDbContextFactory(options),
-            new BackgroundJobTestHelpers.CapturingJobQueueService());
+            new BackgroundJobTestHelpers.CapturingJobQueueService(),
+            new AssistantSkillMetaSync(context));
 
         var name = $"Reasoning String {Guid.NewGuid():N}";
         await using var zip = CreateAssistantZip(name, reasoningEffortString: "high");
@@ -78,7 +81,8 @@ public sealed class GuideExportImportServiceDeep2Tests
         var service = new GuideExportImportService(
             context,
             new TestDbContextFactory(options),
-            new BackgroundJobTestHelpers.CapturingJobQueueService());
+            new BackgroundJobTestHelpers.CapturingJobQueueService(),
+            new AssistantSkillMetaSync(context));
 
         var name = $"Model Found {Guid.NewGuid():N}";
         await using var zip = CreateAssistantZip(name, model: "gpt-real");
@@ -99,7 +103,8 @@ public sealed class GuideExportImportServiceDeep2Tests
         var service = new GuideExportImportService(
             context,
             new TestDbContextFactory(options),
-            new BackgroundJobTestHelpers.CapturingJobQueueService());
+            new BackgroundJobTestHelpers.CapturingJobQueueService(),
+            new AssistantSkillMetaSync(context));
 
         await using var zip = CreateAssistantZipWithOAuth($"OAuth Assistant {Guid.NewGuid():N}");
 
@@ -122,7 +127,8 @@ public sealed class GuideExportImportServiceDeep2Tests
         var service = new GuideExportImportService(
             context,
             new TestDbContextFactory(options),
-            new BackgroundJobTestHelpers.CapturingJobQueueService());
+            new BackgroundJobTestHelpers.CapturingJobQueueService(),
+            new AssistantSkillMetaSync(context));
 
         var guideName = $"Content Types {Guid.NewGuid():N}";
         await using var zip = CreateGuideZipWithVariedFiles(guideName);
