@@ -73,21 +73,65 @@ body
 describe('skillGating', () => {
   it('reports satisfied when required tools are present', () => {
     const result = computeSkillGating(
-      { requiresToolsets: ['web'], requiresTools: [] },
+      {
+        requiresToolsets: ['web'],
+        requiresTools: [],
+        fallbackForToolsets: [],
+        fallbackForTools: [],
+      },
       new Set(['WebSearch', 'ReadWeb']),
       false,
     );
     expect(result.satisfied).toBe(true);
+    expect(result.statusLabel).toBe('Prerequisites met');
   });
 
   it('reports unsatisfied honestly', () => {
     const result = computeSkillGating(
-      { requiresToolsets: ['web'], requiresTools: [] },
+      {
+        requiresToolsets: ['web'],
+        requiresTools: [],
+        fallbackForToolsets: [],
+        fallbackForTools: [],
+      },
       new Set([]),
       false,
     );
     expect(result.satisfied).toBe(false);
+    expect(result.statusLabel).toBe('Gated');
     expect(result.summary).toContain('Will not be offered');
+  });
+
+  it('suppresses fallback skills when the primary toolset is available', () => {
+    const result = computeSkillGating(
+      {
+        requiresToolsets: [],
+        requiresTools: [],
+        fallbackForToolsets: ['web'],
+        fallbackForTools: [],
+      },
+      new Set(['WebSearch']),
+      false,
+    );
+    expect(result.satisfied).toBe(false);
+    expect(result.statusLabel).toBe('Suppressed');
+    expect(result.summary).toContain('web');
+  });
+
+  it('offers fallback skills when the primary toolset is unavailable', () => {
+    const result = computeSkillGating(
+      {
+        requiresToolsets: [],
+        requiresTools: [],
+        fallbackForToolsets: ['web'],
+        fallbackForTools: [],
+      },
+      new Set([]),
+      false,
+    );
+    expect(result.satisfied).toBe(true);
+    expect(result.statusLabel).toBe('Prerequisites met');
+    expect(result.summary).toContain('fallback');
   });
 });
 
@@ -108,7 +152,12 @@ describe('skillToolsetMapping', () => {
 describe('skillCardViewModel', () => {
   it('builds source and gating badges', () => {
     const gating = computeSkillGating(
-      { requiresToolsets: [], requiresTools: [] },
+      {
+        requiresToolsets: [],
+        requiresTools: [],
+        fallbackForToolsets: [],
+        fallbackForTools: [],
+      },
       new Set(['WebSearch']),
       false,
     );
@@ -147,6 +196,8 @@ describe('skillOrdering', () => {
       files: [],
       requiresToolsets: [],
       requiresTools: [],
+      fallbackForToolsets: [],
+      fallbackForTools: [],
     },
     {
       name: 'beta',
@@ -157,6 +208,8 @@ describe('skillOrdering', () => {
       files: [],
       requiresToolsets: [],
       requiresTools: [],
+      fallbackForToolsets: [],
+      fallbackForTools: [],
     },
   ];
 
@@ -181,6 +234,8 @@ describe('skillOrdering', () => {
         files: [],
         requiresToolsets: [],
         requiresTools: [],
+        fallbackForToolsets: [],
+        fallbackForTools: [],
       },
       {
         name: 'qa-authored-a8',
@@ -191,6 +246,8 @@ describe('skillOrdering', () => {
         files: [],
         requiresToolsets: [],
         requiresTools: [],
+        fallbackForToolsets: [],
+        fallbackForTools: [],
       },
       {
         name: 'kanban-video-orchestrator',
@@ -201,6 +258,8 @@ describe('skillOrdering', () => {
         files: [],
         requiresToolsets: [],
         requiresTools: [],
+        fallbackForToolsets: [],
+        fallbackForTools: [],
       },
     ];
 

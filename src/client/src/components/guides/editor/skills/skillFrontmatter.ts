@@ -8,6 +8,8 @@ export interface ParsedSkillFrontmatter {
   displayOrder: number;
   requiresToolsets: string[];
   requiresTools: string[];
+  fallbackForToolsets: string[];
+  fallbackForTools: string[];
   source?: string;
 }
 
@@ -164,6 +166,14 @@ export function parseSkillFrontmatter(markdown: string): SkillFrontmatterParseRe
       getStringList(guideants, 'requires_tools'),
       getStringList(hermes, 'requires_tools'),
       getStringList(root, 'allowed-tools'),
+    ),
+    fallbackForToolsets: coalesceLists(
+      getStringList(guideants, 'fallback_for_toolsets'),
+      getStringList(hermes, 'fallback_for_toolsets'),
+    ),
+    fallbackForTools: coalesceLists(
+      getStringList(guideants, 'fallback_for_tools'),
+      getStringList(hermes, 'fallback_for_tools'),
     ),
     source: getString(guideants, 'source') ?? getString(hermes, 'source'),
   };

@@ -1,14 +1,18 @@
-import { TOOLSET_TO_TOOLS } from './skillToolsetMapping';
+import { isToolsetAvailable, TOOLSET_TO_TOOLS } from './skillToolsetMapping';
 
 export interface SkillGatingInput {
   requiresToolsets: string[];
   requiresTools: string[];
+  fallbackForToolsets: string[];
+  fallbackForTools: string[];
 }
 
 export interface SkillGatingResult {
   satisfied: boolean;
   missingCapabilities: string[];
+  suppressedByCapabilities: string[];
   summary: string;
+  statusLabel: string;
 }
 
 export function computeSkillGating(
@@ -44,18 +48,61 @@ export function computeSkillGating(
     }
   }
 
-  if (missing.size === 0) {
+  if (missing.size > 0) {
+    const labels = [...missing].map((item) => item.replace(/^toolset:|^tool:/, ''));
     return {
-      satisfied: true,
-      missingCapabilities: [],
-      summary: 'All prerequisites satisfied by the current assistant tools.',
+      satisfied: false,
+      missingCapabilities: labels,
+      suppressedByCapabilities: [],
+      summary: `Will not be offered to the model until ${labels.join(', ')} is added.`,
+      statusLabel: 'Gated',
     };
   }
 
-  const labels = [...missing].map((item) => item.replace(/^toolset:|^tool:/, ''));
+  const suppressed = new Set<string>();
+
+  for (const toolset of skill.fallbackForToolsets) {
+    if (isToolsetAvailable(toolset, availableToolTypes, hasCodeInterpreterFiles)) {
+      suppressed.add(toolset);
+    }
+  }
+
+  for (const tool of skill.fallbackForTools) {
+    if (availableToolTypes.has(tool)) {
+      suppressed.add(tool);
+    }
+  }
+
+  if (suppressed.size > 0) {
+    const labels = [...suppressed];
+    return {
+      satisfied: false,
+      missingCapabilities: [],
+      suppressedByCapabilities: labels,
+      summary: `Will not be offered while ${labels.join(', ')} is available (primary capability replaces this fallback skill).`,
+      statusLabel: 'Suppressed',
+    };
+  }
+
+  if (skill.fallbackForToolsets.length > 0 || skill.fallbackForTools.length > 0) {
+    const fallbackLabels = [
+      ...skill.fallbackForToolsets,
+      ...skill.fallbackForTools,
+    ];
+    return {
+      satisfied: true,
+      missingCapabilities: [],
+      suppressedByCapabilities: [],
+      summary: `Offered as a fallback when ${fallbackLabels.join(', ')} is unavailable.`,
+      statusLabel: 'Prerequisites met',
+    };
+  }
+
   return {
-    satisfied: false,
-    missingCapabilities: labels,
-    summary: `Will not be offered to the model until ${labels.join(', ')} is added.`,
+    satisfied: true,
+    missingCapabilities: [],
+    suppressedByCapabilities: [],
+    summary: 'All prerequisites satisfied by the current assistant tools.',
+    statusLabel: 'Prerequisites met',
   };
 }
