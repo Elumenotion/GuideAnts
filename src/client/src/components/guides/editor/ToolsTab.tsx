@@ -8,6 +8,7 @@ interface ToolsTabProps {
   customTools: CustomToolDto[];
   contextOptions: ContextOptionDto[];
   environmentVariables: EnvironmentVariableDto[];
+  requiresRunPython: boolean;
   projectId?: string;
   guideId?: string;
   onSelectedToolIdsChange: (ids: string[]) => void;
@@ -22,6 +23,7 @@ export function ToolsTab({
   customTools,
   contextOptions,
   environmentVariables,
+  requiresRunPython,
   projectId,
   guideId,
   onSelectedToolIdsChange,
@@ -76,6 +78,7 @@ export function ToolsTab({
           <ToolsSelector
             selectedToolIds={selectedToolIds}
             contextOptions={contextOptions}
+            requiresRunPython={requiresRunPython}
             onSelectedToolIdsChange={onSelectedToolIdsChange}
           />
           </div>

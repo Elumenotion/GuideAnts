@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
+using AntRunner.ToolCalling.AssistantDefinitions;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Endpoints;
@@ -158,7 +159,7 @@ using var scope = CreateDbScope();
             _logger.LogError(ex, "Failed to apply project-scoped host folder mounts to notebook {NotebookId}", notebook.Id);
         }
 
-        // Copy CodeInterpreter files from guide and its crew into notebook Resourcess and create Output/ symlinks
+        // Copy CodeInterpreter and skill scripts/assets from guide and crew into Resources/ + Output/ symlinks
         try
         {
             await CopyGuideFilesToNotebookAsync(context, guideId, projectId, notebook.Id);
@@ -407,8 +408,8 @@ using var scope = CreateDbScope();
     }
 
     /// <summary>
-    /// Copies CodeInterpreter files from the guide and its crew into the notebook's Resources/ directory
-    /// and creates symlinks in the Output/ directory. Also creates NotebookFile records with correct metadata.
+    /// Copies CodeInterpreter files and materializable skill scripts/assets from the guide and its crew
+    /// into the notebook's Resources/ directory, creates symlinks in Output/, and stages NotebookFile rows.
     /// </summary>
     private async Task CopyGuideFilesToNotebookAsync(
         ApplicationDbContext context,
@@ -421,6 +422,13 @@ using var scope = CreateDbScope();
             .Where(f => f.AssistantId == guideId && f.FolderKind == "CodeInterpreter")
             .ToListAsync();
 
+        var guideSkillPayloadFiles = await context.AssistantFiles
+            .Where(f => f.AssistantId == guideId && f.FolderKind == "Skill")
+            .ToListAsync();
+        guideSkillPayloadFiles = guideSkillPayloadFiles
+            .Where(f => SkillNotebookMaterializer.IsMaterializablePayloadPath(f.RelativePath))
+            .ToList();
+
         // Gather crew members and their files
         var crewMembers = await context.GuideMembers
             .Include(gm => gm.Assistant)
@@ -429,6 +437,7 @@ using var scope = CreateDbScope();
 
         var crewAssistantIds = crewMembers.Select(cm => cm.AssistantId).Distinct().ToList();
         var crewFiles = new List<(AssistantFile File, string CrewName)>();
+        var crewSkillPayloadFiles = new List<(AssistantFile File, string CrewName)>();
         if (crewAssistantIds.Count > 0)
         {
             var crewAssistantIdToName = crewMembers
@@ -441,11 +450,19 @@ using var scope = CreateDbScope();
 
             crewFiles = cf.Select(f => (f, crewAssistantIdToName.TryGetValue(f.AssistantId, out var n) ? n : "unknown"))
                           .ToList();
+
+            var crewSkillRaw = await context.AssistantFiles
+                .Where(f => crewAssistantIds.Contains(f.AssistantId) && f.FolderKind == "Skill")
+                .ToListAsync();
+            crewSkillPayloadFiles = crewSkillRaw
+                .Where(f => SkillNotebookMaterializer.IsMaterializablePayloadPath(f.RelativePath))
+                .Select(f => (f, crewAssistantIdToName.TryGetValue(f.AssistantId, out var n) ? n : "unknown"))
+                .ToList();
         }
 
-        if (!guideFiles.Any() && !crewFiles.Any())
+        if (!guideFiles.Any() && !crewFiles.Any() && !guideSkillPayloadFiles.Any() && !crewSkillPayloadFiles.Any())
         {
-            _logger.LogInformation("No CodeInterpreter files to copy for guide {GuideId}", guideId);
+            _logger.LogInformation("No guide payload files to copy for guide {GuideId}", guideId);
             return;
         }
 
@@ -541,12 +558,80 @@ using var scope = CreateDbScope();
             await CreateSymlinkAsync(Path.Combine(outputDir, finalName), $"../{relPath.Replace("\\", "/")}");
         }
 
+        var usedSkillOutputPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var f in guideSkillPayloadFiles)
+        {
+            await StageSkillPayloadFileAsync(
+                f,
+                crewSafeName: null,
+                notebookRoot,
+                outputDir,
+                usedSkillOutputPaths,
+                WriteFileAndStage);
+        }
+
+        foreach (var (file, crewName) in crewSkillPayloadFiles)
+        {
+            var safeCrew = crewName
+                .Replace(" ", "-")
+                .Replace("/", "-")
+                .Replace("\\", "-");
+
+            await StageSkillPayloadFileAsync(
+                file,
+                safeCrew,
+                notebookRoot,
+                outputDir,
+                usedSkillOutputPaths,
+                WriteFileAndStage);
+        }
+
         if (notebookFilesToAdd.Count > 0)
         {
             context.NotebookFiles.AddRange(notebookFilesToAdd);
             await context.SaveChangesAsync();
             _logger.LogInformation("Added {Count} notebook files to notebook {NotebookId}", notebookFilesToAdd.Count, notebookId);
         }
+    }
+
+    private async Task StageSkillPayloadFileAsync(
+        AssistantFile file,
+        string? crewSafeName,
+        string notebookRoot,
+        string outputDir,
+        HashSet<string> usedSkillOutputPaths,
+        Action<string, byte[]> writeFileAndStage)
+    {
+        if (file.ContentBytes == null || file.ContentBytes.Length == 0)
+        {
+            return;
+        }
+
+        var resourceRelPath = SkillNotebookMaterializer.ToNotebookResourcePath(file.RelativePath, crewSafeName);
+        writeFileAndStage(resourceRelPath, file.ContentBytes);
+
+        var outputRelPath = SkillNotebookMaterializer.ToOutputProjectionPath(resourceRelPath);
+        if (!usedSkillOutputPaths.Add(outputRelPath))
+        {
+            _logger.LogWarning(
+                "Skill output projection conflict at {Path}; skipping symlink for {Source}",
+                outputRelPath,
+                file.RelativePath);
+            return;
+        }
+
+        var outputPhysicalPath = Path.Combine(
+            notebookRoot,
+            outputRelPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        var outputParent = Path.GetDirectoryName(outputPhysicalPath);
+        if (!string.IsNullOrEmpty(outputParent))
+        {
+            Directory.CreateDirectory(outputParent);
+        }
+
+        var targetRelative = SkillNotebookMaterializer.SymlinkTargetFromOutputFile(outputRelPath, resourceRelPath);
+        await CreateSymlinkAsync(outputPhysicalPath, targetRelative);
     }
 
     private static async Task<string> GenerateUniqueNotebookSlugAsync(ApplicationDbContext context, Guid projectId, string title, Guid? excludeNotebookId = null)

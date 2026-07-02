@@ -13,6 +13,8 @@ using GuideAntsApi.Settings;
 using AntRunner.ToolCalling.Functions;
 using AntRunner.Chat;
 using Microsoft.Extensions.Options;
+using GuideAntsApi.Services.Guides.Skills;
+using AntRunner.ToolCalling.AssistantDefinitions;
 
 namespace GuideAntsApi.Services.Guides;
 
@@ -23,6 +25,7 @@ public class GuidesService(
     IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions,
     ISystemGuideCatalogFilter systemGuideCatalogFilter,
     IMcpSandboxSetupStagingService mcpSandboxSetupStagingService,
+    IAssistantSkillMetaSync assistantSkillMetaSync,
     ILogger<GuidesService> logger) : IGuidesService
 {
     private readonly ApplicationDbContext _context = context;
@@ -31,6 +34,7 @@ public class GuidesService(
     private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptions = settingsSecretsOptions;
     private readonly ISystemGuideCatalogFilter _systemGuideCatalogFilter = systemGuideCatalogFilter;
     private readonly IMcpSandboxSetupStagingService _mcpSandboxSetupStagingService = mcpSandboxSetupStagingService;
+    private readonly IAssistantSkillMetaSync _assistantSkillMetaSync = assistantSkillMetaSync;
     private readonly ILogger<GuidesService> _logger = logger;
 
     private static readonly JsonSerializerOptions JsonCaseInsensitiveOptions = new()
@@ -81,6 +85,7 @@ public class GuidesService(
             .Include(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider).ThenInclude(ap => ap!.Scopes)
             .Include(a => a.OpenApiSchemas).ThenInclude(s => s.Operations)
             .Include(a => a.Files)
+            .Include(a => a.SkillMetas)
             .Include(a => a.ConversationStarters)
             .Include(a => a.CrewMembers).ThenInclude(ga => ga.Assistant)
             .Where(a => a.Id == guideId && a.Kind == AssistantKind.Guide)
@@ -155,13 +160,11 @@ public class GuidesService(
             );
         }).ToList();
 
-        // Load files with markdown shadows (guides use same file structure as assistants)
         var files = new List<FileDto>();
-        foreach (var f in guide.Files)
+        foreach (var f in guide.Files.Where(file =>
+                     !string.Equals(file.FolderKind, "Skill", StringComparison.OrdinalIgnoreCase)))
         {
             AssistantFileMarkdownShadowDto? shadowDto = null;
-            
-            // Load markdown shadow for VectorStore files
             if (f.FolderKind == "VectorStore")
             {
                 var shadow = await _markdownExtractionService.GetAssistantFileMarkdownShadowAsync(f.Id);
@@ -179,7 +182,7 @@ public class GuidesService(
                     );
                 }
             }
-            
+
             files.Add(new FileDto(
                 f.Id,
                 f.FolderKind,
@@ -190,6 +193,8 @@ public class GuidesService(
                 shadowDto
             ));
         }
+
+        var skills = SkillDtoBuilder.BuildFromAssistantFiles(guide.Files, guide.SkillMetas);
 
         var conversationStarters = guide.ConversationStarters
             .OrderBy(cs => cs.OrderIndex)
@@ -258,7 +263,8 @@ public class GuidesService(
             crews
         )
         {
-            EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null
+            EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null,
+            Skills = skills.Count > 0 ? skills : null
         };
     }
 
@@ -435,6 +441,8 @@ public class GuidesService(
             throw new InvalidOperationException(string.Join(" ", validation.Conflicts));
         }
 
+        var mergedFiles = MergeCreateFiles(dto.Files, dto.Skills);
+
         var guide = CreateAssistantEntity(
             AssistantKind.Guide,
             dto.Name,
@@ -451,7 +459,7 @@ public class GuidesService(
             dto.ToolIds,
             dto.CustomTools,
             dto.ContextOptions,
-            dto.Files,
+            mergedFiles,
             dto.ConversationStarters,
             dto.CrewMemberIds  // guides have crews
         );
@@ -546,7 +554,8 @@ public class GuidesService(
             dto.CustomTools,
             dto.ContextOptions,
             dto.FileIdsToKeep,
-            dto.FilesToAdd,
+            MergeUpdateFiles(dto.FilesToAdd, dto.Skills),
+            dto.Skills,
             dto.ConversationStarters,
             dto.CrewMemberIds  // guides have crews
         );
@@ -641,6 +650,7 @@ public class GuidesService(
             .Include(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider).ThenInclude(ap => ap!.Scopes)
             .Include(a => a.OpenApiSchemas).ThenInclude(s => s.Operations)
             .Include(a => a.Files)
+            .Include(a => a.SkillMetas)
             .Include(a => a.ConversationStarters)
             .Include(a => a.GuideMemberships).ThenInclude(ga => ga.Guide)
             .Where(a => a.Id == assistantId && a.Kind == AssistantKind.Assistant)
@@ -715,13 +725,12 @@ public class GuidesService(
             );
         }).ToList();
 
-        // Load files with markdown shadows
+        // Load non-skill files with markdown shadows
         var files = new List<FileDto>();
-        foreach (var f in assistant.Files)
+        foreach (var f in assistant.Files.Where(file =>
+                     !string.Equals(file.FolderKind, "Skill", StringComparison.OrdinalIgnoreCase)))
         {
             AssistantFileMarkdownShadowDto? shadowDto = null;
-            
-            // Load markdown shadow for VectorStore files
             if (f.FolderKind == "VectorStore")
             {
                 var shadow = await _markdownExtractionService.GetAssistantFileMarkdownShadowAsync(f.Id);
@@ -739,7 +748,7 @@ public class GuidesService(
                     );
                 }
             }
-            
+
             files.Add(new FileDto(
                 f.Id,
                 f.FolderKind,
@@ -750,6 +759,8 @@ public class GuidesService(
                 shadowDto
             ));
         }
+
+        var skills = SkillDtoBuilder.BuildFromAssistantFiles(assistant.Files, assistant.SkillMetas);
 
         var conversationStarters = assistant.ConversationStarters
             .OrderBy(cs => cs.OrderIndex)
@@ -774,7 +785,8 @@ public class GuidesService(
             conversationStarters
         )
         {
-            EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null
+            EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null,
+            Skills = skills.Count > 0 ? skills : null
         };
     }
 
@@ -786,6 +798,8 @@ public class GuidesService(
             dto.TopP,
             dto.ReasoningEffort,
             dto.SamplingParametersJson);
+
+        var mergedFiles = MergeCreateFiles(dto.Files, dto.Skills);
 
         var assistant = CreateAssistantEntity(
             AssistantKind.Assistant,
@@ -803,7 +817,7 @@ public class GuidesService(
             dto.ToolIds,
             dto.CustomTools,
             dto.ContextOptions,
-            dto.Files,
+            mergedFiles,
             dto.ConversationStarters,
             null  // crewMemberIds - assistants don't have crews
         );
@@ -904,7 +918,8 @@ public class GuidesService(
             dto.CustomTools,
             dto.ContextOptions,
             dto.FileIdsToKeep,
-            dto.FilesToAdd,
+            MergeUpdateFiles(dto.FilesToAdd, dto.Skills),
+            dto.Skills,
             dto.ConversationStarters,
             null  // crewMemberIds - assistants don't have crews
         );
@@ -1573,6 +1588,8 @@ public class GuidesService(
             }
         }
 
+        GuideExecutablePayload.EnsureRunPythonToolForSkillPayload(assistant);
+
         // Add conversation starters
         if (conversationStarters != null)
         {
@@ -1628,6 +1645,7 @@ public class GuidesService(
         List<ContextOptionDto>? contextOptions,
         List<Guid>? fileIdsToKeep,
         List<FileUploadDto>? filesToAdd,
+        List<AssistantSkillSaveDto>? skills,
         List<string>? conversationStarters,
         List<Guid>? crewMemberIds) // Only used for guides
     {
@@ -1895,26 +1913,41 @@ public class GuidesService(
             }
         }
 
-        // Update Files incrementally
-        if (fileIdsToKeep != null || filesToAdd != null)
+        // Update Files incrementally (non-skill files via fileIdsToKeep; skills via skills DTO)
+        if (fileIdsToKeep != null || filesToAdd != null || skills != null)
         {
-            if (fileIdsToKeep != null)
+            SkillDtoBuilder.ValidateSkillSavePayload(skills);
+
+            if (fileIdsToKeep != null || skills != null)
             {
-                // Get the IDs of files that will be deleted
-                var fileIdsToDelete = await _context.AssistantFiles
-                    .Where(f => f.AssistantId == assistantId && !fileIdsToKeep.Contains(f.Id))
-                    .Select(f => f.Id)
+                var skillFileIdsToKeep = SkillDtoBuilder.CollectSkillFileIdsToKeep(skills);
+                var existingFiles = await _context.AssistantFiles
+                    .Where(f => f.AssistantId == assistantId)
+                    .Select(f => new { f.Id, f.FolderKind })
                     .ToListAsync();
+
+                var fileIdsToDelete = existingFiles
+                    .Where(f =>
+                    {
+                        var isSkill = string.Equals(
+                            f.FolderKind, "Skill", StringComparison.OrdinalIgnoreCase);
+                        if (isSkill)
+                        {
+                            return skills != null && !skillFileIdsToKeep.Contains(f.Id);
+                        }
+
+                        return fileIdsToKeep != null && !fileIdsToKeep.Contains(f.Id);
+                    })
+                    .Select(f => f.Id)
+                    .ToList();
 
                 if (fileIdsToDelete.Count > 0)
                 {
-                    // Delete DocumentChunks that reference these AssistantFiles first
-                    // (required because FK doesn't cascade)
                     await _context.DocumentChunks
-                        .Where(dc => dc.AssistantFileId.HasValue && fileIdsToDelete.Contains(dc.AssistantFileId.Value))
+                        .Where(dc => dc.AssistantFileId.HasValue
+                                     && fileIdsToDelete.Contains(dc.AssistantFileId.Value))
                         .ExecuteDeleteAsync();
 
-                    // Now delete the AssistantFiles
                     await _context.AssistantFiles
                         .Where(f => fileIdsToDelete.Contains(f.Id))
                         .ExecuteDeleteAsync();
@@ -1989,6 +2022,15 @@ public class GuidesService(
                     }
                 }
             }
+
+            if (skills is { Count: > 0 })
+            {
+                await _assistantSkillMetaSync.SyncFromSkillSavesAsync(assistantId, skills);
+            }
+            else
+            {
+                await _assistantSkillMetaSync.SyncAssistantAsync(assistantId);
+            }
         }
 
         // Delete and recreate Conversation Starters
@@ -2020,6 +2062,8 @@ public class GuidesService(
                 });
             }
         }
+
+        await GuideExecutablePayload.EnsureRunPythonToolForSkillPayloadAsync(_context, assistantId);
 
         await _context.SaveChangesAsync();
 
@@ -2145,6 +2189,36 @@ public class GuidesService(
         }
 
         return operations;
+    }
+
+    private static List<FileUploadDto>? MergeCreateFiles(
+        List<FileUploadDto>? files,
+        List<AssistantSkillSaveDto>? skills)
+    {
+        SkillDtoBuilder.ValidateSkillSavePayload(skills);
+        var merged = new List<FileUploadDto>();
+        if (files is { Count: > 0 })
+        {
+            merged.AddRange(files);
+        }
+
+        merged.AddRange(SkillDtoBuilder.FlattenSkillUploads(skills));
+        return merged.Count > 0 ? merged : null;
+    }
+
+    private static List<FileUploadDto>? MergeUpdateFiles(
+        List<FileUploadDto>? filesToAdd,
+        List<AssistantSkillSaveDto>? skills)
+    {
+        SkillDtoBuilder.ValidateSkillSavePayload(skills);
+        var merged = new List<FileUploadDto>();
+        if (filesToAdd is { Count: > 0 })
+        {
+            merged.AddRange(filesToAdd);
+        }
+
+        merged.AddRange(SkillDtoBuilder.FlattenSkillUploads(skills));
+        return merged.Count > 0 ? merged : null;
     }
 
     #endregion
