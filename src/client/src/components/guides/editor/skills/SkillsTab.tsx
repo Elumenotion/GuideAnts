@@ -103,12 +103,16 @@ export function SkillsTab({
     const manifest = skill.filesToAdd?.find((file) => file.relativePath.endsWith('/SKILL.md'));
     let requiresToolsets: string[] = [];
     let requiresTools: string[] = [];
+    let fallbackForToolsets: string[] = [];
+    let fallbackForTools: string[] = [];
     if (manifest?.contentBytes) {
       try {
         const markdown = decodePendingFileContent(manifest.contentBytes);
         const parsed = parseSkillFrontmatter(markdown);
         requiresToolsets = parsed.frontmatter.requiresToolsets;
         requiresTools = parsed.frontmatter.requiresTools;
+        fallbackForToolsets = parsed.frontmatter.fallbackForToolsets;
+        fallbackForTools = parsed.frontmatter.fallbackForTools;
       } catch {
         // display without gating metadata if parse fails
       }
@@ -122,6 +126,8 @@ export function SkillsTab({
       source: skill.source,
       requiresToolsets,
       requiresTools,
+      fallbackForToolsets,
+      fallbackForTools,
       files: (skill.filesToAdd ?? []).map((file, index) => ({
         id: `pending-${skill.name}-${index}`,
         folderKind: file.folderKind,

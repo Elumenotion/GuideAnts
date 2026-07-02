@@ -14,6 +14,8 @@ interface SkillCardProps {
     source: import('../../../../types/guides').SkillSourceKind;
     requiresToolsets: string[];
     requiresTools: string[];
+    fallbackForToolsets: string[];
+    fallbackForTools: string[];
     files: FileDto[];
   };
   availableToolTypes: Set<string>;
@@ -50,6 +52,8 @@ export function SkillCard({
     {
       requiresToolsets: skill.requiresToolsets,
       requiresTools: skill.requiresTools,
+      fallbackForToolsets: skill.fallbackForToolsets,
+      fallbackForTools: skill.fallbackForTools,
     },
     availableToolTypes,
     hasCodeInterpreterFiles,
@@ -71,7 +75,7 @@ export function SkillCard({
                 {skill.source}
               </span>
               <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${viewModel.gatingClassName}`}>
-                {gating.satisfied ? 'Prerequisites met' : 'Gated'}
+                {gating.statusLabel}
               </span>
             </div>
             <p className="text-sm text-gray-700">{skill.description}</p>

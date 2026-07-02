@@ -342,6 +342,8 @@ export interface AssistantSkillDto {
   files: FileDto[];
   requiresToolsets: string[];
   requiresTools: string[];
+  fallbackForToolsets: string[];
+  fallbackForTools: string[];
 }
 
 export interface AssistantSkillSaveDto {

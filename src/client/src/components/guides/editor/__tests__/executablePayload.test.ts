@@ -39,6 +39,8 @@ describe('guideHasSkillScriptsPayload', () => {
         source: 'Imported',
         requiresToolsets: [],
         requiresTools: [],
+        fallbackForToolsets: [],
+        fallbackForTools: [],
         files: [{ id: '1', folderKind: 'Skill', relativePath: 'Skills/kanban/scripts/monitor.py', created: '' }],
       }],
       pendingSkillUploads: [],

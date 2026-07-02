@@ -19,7 +19,7 @@ plumbing) is explicitly out of scope here.
 | Fixture location | `src/client/playwright/fixtures/skills/` (vendored, see its `README.md` for provenance/licensing). Chosen over `e2e/` naming; anticipates a future durable Playwright suite under `src/client/playwright/`. |
 | Test workspace | A new, dedicated project (**"Skills QA"**) so test artifacts don't mix with real project data. Created fresh, not reused. |
 | Chat/runtime backend | The local llama runtime model already configured in this dev environment (no cloud provider calls). |
-| First execution step | Not started yet — this plan is for review first. Once approved, start with the smallest smoke scenario (A1) before the full matrix. |
+| First execution step | Started 2026-07-01 — exploratory pass via `playwright-cli --extension` on the **Skills QA** project. See §6 execution log. |
 
 ## 2. Fixture inventory
 
@@ -117,3 +117,40 @@ not graded on response quality — local model output isn't asserted verbatim.
 - Whether any of these scenarios graduate into a durable `@playwright/test`
   suite under `src/client/playwright/` is a decision for after this
   exploratory pass, once we know which assertions are stable enough for CI.
+
+## 6. Execution log
+
+Workspace: project **Skills QA** (`a976c272-931f-47ee-8d92-34a5374a1199`).
+
+| Guide | ID | Purpose |
+|---|---|---|
+| Skills QA Guide | `aab4c5fd-27bb-4774-a457-6abcfa13c50d` | Main import + runtime tool-calling |
+| Skills QA Gating | `c4164aaf-ea21-4940-b88e-e21bb4f6d91a` | `requires_toolsets` + `fallback_for_toolsets` gating |
+
+### Runtime / chat (section C + tool-calling extensions)
+
+| # | Result | Notes |
+|---|---|---|
+| C1 | PASS | Discovery lists enabled skills; disabled `arxiv` omitted |
+| C2 | PASS | `skills.read` on ocr skill; trace `Source=skills` |
+| C3 / T19 | PASS | `docker-management` hidden from discovery when terminal tools off |
+| T1–T8 | PASS | `skills.list`, progressive `skills.read`, path traversal, disabled skill |
+| T13 | PASS | PDF extraction via `ocr-and-documents` script + `[@files]` |
+| T20–T22 | PASS | Gated docker skill: empty list → explicit read works → listed after Run Python/Bash enabled |
+| T24 | PASS | Disabled `arxiv` not claimed when asked directly |
+| T18 runtime | PASS | Web off → `searxng-search` listed; Web on → suppressed (only `docker-management`) |
+| T18 / A10 UI | **FAIL → fixed** | UI showed “Prerequisites met” for `searxng-search` while Web Search was on. Root cause: client `computeSkillGating` ignored `fallback_for_toolsets`. Fixed in `skillGating.ts` + DTO wiring; badge now **Suppressed** with explanatory summary. Re-verify in browser after rebuild. |
+
+### Authoring (section A) — partial
+
+| # | Result | Notes |
+|---|---|---|
+| A9 | PASS | `docker-management` card **Gated** without terminal; **Prerequisites met** after Run Python/Bash |
+| A10 | FAIL (pre-fix) | See T18 UI row above |
+| A1–A8, A11–A14, B | Not run / deferred | |
+
+### Bugs found during pass
+
+1. **SkillManifestUpdater** corrupted SKILL.md frontmatter on save — removed; sidecar-only sync (`AssistantSkillMetaSync`).
+2. **Fallback gating UI gap** — Skills tab did not mirror server `SkillVisibilityFilter` for `fallback_for_toolsets` (fixed this session).
+3. **Fixture README** — `searxng-search` gating description was inverted (fixed).
