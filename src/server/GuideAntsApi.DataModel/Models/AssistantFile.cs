@@ -20,12 +20,12 @@ namespace GuideAntsApi.DataModel.Models
 
         /// <summary>
         /// Logical folder kind to mirror disk locations.
-        /// Valid values: CodeInterpreter | VectorStore | HostExtensions
+        /// Valid values: CodeInterpreter | VectorStore | HostExtensions | Skill
         /// NOTE: "OpenAPI" is NO LONGER valid - OpenAPI schemas use AssistantOpenApiSchema entity.
         /// </summary>
         [Required]
         [StringLength(32)]
-        public string FolderKind { get; set; } = string.Empty; // CodeInterpreter | VectorStore | HostExtensions
+        public string FolderKind { get; set; } = string.Empty; // CodeInterpreter | VectorStore | HostExtensions | Skill
 
         /// <summary>
         /// For VectorStore files, stores the vector store identifier from path.

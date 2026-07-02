@@ -29,7 +29,10 @@ public record GuideDetailsDto(
     List<FileDto> Files,
     List<ConversationStarterDto> ConversationStarters,
     List<CrewSummaryDto> Crews
-) { public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; } }
+) {
+    public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<AssistantSkillDto>? Skills { get; init; }
+}
 
 // Create guide request
 public record CreateGuideDto(
@@ -54,6 +57,7 @@ public record CreateGuideDto(
 ) {
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<AssistantSkillSaveDto>? Skills { get; init; }
 }
 
 // Update guide request
@@ -80,6 +84,7 @@ public record UpdateGuideDto(
 ) {
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<AssistantSkillSaveDto>? Skills { get; init; }
 }
 
 // Supporting DTOs
@@ -198,4 +203,33 @@ public record GuideRuntimeValidationDto(
     List<string> Profiles,
     List<string> Conflicts,
     List<string> Warnings
+);
+
+public record AssistantSkillDto(
+    string Name,
+    string Description,
+    bool Enabled,
+    int DisplayOrder,
+    string Source,
+    List<FileDto> Files,
+    List<string> RequiresToolsets,
+    List<string> RequiresTools,
+    List<string> FallbackForToolsets,
+    List<string> FallbackForTools
+);
+
+public record AssistantSkillSaveDto(
+    string Name,
+    string Description,
+    bool Enabled,
+    int DisplayOrder,
+    string Source,
+    List<Guid>? FileIdsToKeep,
+    List<FileUploadDto>? FilesToAdd
+);
+
+public record SkillPrerequisiteMappingDto(
+    string Requirement,
+    string MappedCapability,
+    string Reason
 );

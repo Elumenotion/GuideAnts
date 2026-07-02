@@ -28,6 +28,7 @@ export interface GuideDetailsDto {
   files: FileDto[];
   conversationStarters: ConversationStarterDto[];
   crews: CrewSummaryDto[];
+  skills?: AssistantSkillDto[];
 }
 
 export interface CreateGuideDto {
@@ -49,6 +50,7 @@ export interface CreateGuideDto {
   authProviders?: AuthProviderDto[];
   environmentVariables?: EnvironmentVariableDto[];
   files?: FileUploadDto[];
+  skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
   crewMemberIds?: string[];
 }
@@ -73,6 +75,7 @@ export interface UpdateGuideDto {
   environmentVariables?: EnvironmentVariableDto[];
   fileIdsToKeep?: string[]; // IDs of existing files to keep (omitted files are deleted)
   filesToAdd?: FileUploadDto[]; // New files to upload
+  skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
   crewMemberIds?: string[];
 }
@@ -102,6 +105,7 @@ export interface AssistantDetailsDto {
   customTools: CustomToolDto[];
   files: FileDto[];
   conversationStarters: ConversationStarterDto[];
+  skills?: AssistantSkillDto[];
 }
 
 export interface CreateAssistantDto {
@@ -122,6 +126,7 @@ export interface CreateAssistantDto {
   authProviders?: AuthProviderDto[];
   environmentVariables?: EnvironmentVariableDto[];
   files?: FileUploadDto[];
+  skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
 }
 
@@ -144,6 +149,7 @@ export interface UpdateAssistantDto {
   environmentVariables?: EnvironmentVariableDto[];
   fileIdsToKeep?: string[]; // IDs of existing files to keep (omitted files are deleted)
   filesToAdd?: FileUploadDto[]; // New files to upload
+  skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
 }
 
@@ -323,6 +329,37 @@ export interface FileUploadDto {
   relativePath: string;
   contentBytes: string; // Base64-encoded file content
   contentType?: string;
+}
+
+export type SkillSourceKind = 'Imported' | 'Authored' | 'Bootstrap';
+
+export interface AssistantSkillDto {
+  name: string;
+  description: string;
+  enabled: boolean;
+  displayOrder: number;
+  source: SkillSourceKind;
+  files: FileDto[];
+  requiresToolsets: string[];
+  requiresTools: string[];
+  fallbackForToolsets: string[];
+  fallbackForTools: string[];
+}
+
+export interface AssistantSkillSaveDto {
+  name: string;
+  description: string;
+  enabled: boolean;
+  displayOrder: number;
+  source: SkillSourceKind;
+  fileIdsToKeep?: string[];
+  filesToAdd?: FileUploadDto[];
+}
+
+export interface SkillPrerequisiteMappingDto {
+  requirement: string;
+  mappedCapability: string;
+  reason: string;
 }
 
 export interface ConversationStarterDto {

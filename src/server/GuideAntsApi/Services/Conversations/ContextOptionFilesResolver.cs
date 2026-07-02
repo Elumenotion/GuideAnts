@@ -73,20 +73,20 @@ internal static class ContextOptionFilesResolver
             return;
         }
 
-        foreach (var filePath in Directory.EnumerateFiles(outputDir))
+        foreach (var filePath in Directory.EnumerateFiles(outputDir, "*", SearchOption.AllDirectories))
         {
             if (!TryGetReparsePoint(filePath, out var isReparsePoint) || !isReparsePoint)
             {
                 continue;
             }
 
-            var fileName = Path.GetFileName(filePath);
-            if (string.IsNullOrWhiteSpace(fileName))
+            var relativeFromOutput = Path.GetRelativePath(outputDir, filePath).Replace('\\', '/');
+            if (string.IsNullOrWhiteSpace(relativeFromOutput))
             {
                 continue;
             }
 
-            paths.Add(ToCwdRelativePath($"Output/{fileName}", isPublished));
+            paths.Add(ToCwdRelativePath($"Output/{relativeFromOutput}", isPublished));
         }
     }
 

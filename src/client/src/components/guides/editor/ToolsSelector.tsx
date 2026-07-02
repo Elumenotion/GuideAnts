@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
 import { ToolDto, ContextOptionDto } from '../../../types/guides';
 import { api } from '../../../services/api';
+import { RUN_PYTHON_TOOL_ID } from './skills/skillToolsetMapping';
 
 interface ToolsSelectorProps {
   selectedToolIds: string[];
   contextOptions: ContextOptionDto[];
+  requiresRunPython: boolean;
   onSelectedToolIdsChange: (toolIds: string[]) => void;
 }
 
 export function ToolsSelector({
   selectedToolIds,
   contextOptions,
+  requiresRunPython,
   onSelectedToolIdsChange,
 }: ToolsSelectorProps) {
   const [globalTools, setGlobalTools] = useState<ToolDto[]>([]);
@@ -43,6 +46,10 @@ export function ToolsSelector({
       return;
     }
 
+    if (toolId === RUN_PYTHON_TOOL_ID && requiresRunPython) {
+      return;
+    }
+
     if (selectedToolIds.includes(toolId)) {
       onSelectedToolIdsChange(selectedToolIds.filter((id: string) => id !== toolId));
     } else {
@@ -56,6 +63,13 @@ export function ToolsSelector({
       onSelectedToolIdsChange([...selectedToolIds, SET_CONTEXT_OPTIONS_TOOL_ID]);
     }
   }, [hasEmptyContextOptions, selectedToolIds, onSelectedToolIdsChange]);
+
+  // Auto-enable Run Python when the guide has executable payload (CI files or skill scripts/assets)
+  useEffect(() => {
+    if (requiresRunPython && !selectedToolIds.includes(RUN_PYTHON_TOOL_ID)) {
+      onSelectedToolIdsChange([...selectedToolIds, RUN_PYTHON_TOOL_ID]);
+    }
+  }, [requiresRunPython, selectedToolIds, onSelectedToolIdsChange]);
 
   // Group tools by category
   const toolsByCategory = globalTools.reduce((acc, tool) => {
@@ -95,13 +109,16 @@ export function ToolsSelector({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {toolsByCategory[category].map((tool) => {
                   const isSetContextOptionsTool = tool.id === SET_CONTEXT_OPTIONS_TOOL_ID;
+                  const isRunPythonTool = tool.id === RUN_PYTHON_TOOL_ID;
                   const isLockedDueToEmptyOptions = isSetContextOptionsTool && hasEmptyContextOptions;
+                  const isLockedDueToExecutablePayload = isRunPythonTool && requiresRunPython;
+                  const isLocked = isLockedDueToEmptyOptions || isLockedDueToExecutablePayload;
 
                   return (
                     <label
                       key={tool.id}
                       className={`flex items-start p-3 border rounded-md ${
-                        isLockedDueToEmptyOptions
+                        isLocked
                           ? 'border-amber-400 bg-amber-50 cursor-not-allowed'
                           : 'border-gray-300 hover:bg-gray-50 cursor-pointer'
                       }`}
@@ -110,13 +127,13 @@ export function ToolsSelector({
                         type="checkbox"
                         checked={selectedToolIds.includes(tool.id)}
                         onChange={() => handleToolToggle(tool.id)}
-                        disabled={isLockedDueToEmptyOptions}
+                        disabled={isLocked}
                         className="mt-1 mr-3"
                       />
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <div className="text-sm font-medium text-gray-900">{tool.displayName}</div>
-                          {isLockedDueToEmptyOptions && (
+                          {isLocked && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
                               Required
                             </span>
@@ -127,7 +144,12 @@ export function ToolsSelector({
                         )}
                         {isLockedDueToEmptyOptions && (
                           <div className="text-xs text-amber-700 mt-1 font-medium">
-                            ⚠️ Automatically enabled because you have context options with empty values
+                            Automatically enabled because you have context options with empty values
+                          </div>
+                        )}
+                        {isLockedDueToExecutablePayload && (
+                          <div className="text-xs text-amber-700 mt-1 font-medium">
+                            Automatically enabled because this guide has skill scripts or assets to run
                           </div>
                         )}
                       </div>
