@@ -57,7 +57,9 @@ internal static class SkillDtoBuilder
                 source,
                 files,
                 frontmatter.RequiresToolsets,
-                frontmatter.RequiresTools));
+                frontmatter.RequiresTools,
+                frontmatter.FallbackForToolsets,
+                frontmatter.FallbackForTools));
         }
 
         return skills

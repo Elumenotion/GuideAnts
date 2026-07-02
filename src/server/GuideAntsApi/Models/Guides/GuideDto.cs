@@ -213,7 +213,9 @@ public record AssistantSkillDto(
     string Source,
     List<FileDto> Files,
     List<string> RequiresToolsets,
-    List<string> RequiresTools
+    List<string> RequiresTools,
+    List<string> FallbackForToolsets,
+    List<string> FallbackForTools
 );
 
 public record AssistantSkillSaveDto(
