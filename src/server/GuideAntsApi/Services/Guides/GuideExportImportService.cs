@@ -7,7 +7,9 @@ using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
+using AntRunner.ToolCalling.AssistantDefinitions;
 using AntRunner.ToolCalling.Functions;
+using GuideAntsApi.Services.Guides.Skills;
 
 namespace GuideAntsApi.Services.Guides;
 
@@ -16,15 +18,18 @@ public class GuideExportImportService : IGuideExportImportService
     private readonly ApplicationDbContext _context;
     private readonly IDbContextFactory<ApplicationDbContext> _dbFactory;
     private readonly BackgroundJobs.IJobQueueService _jobQueue;
+    private readonly IAssistantSkillMetaSync _assistantSkillMetaSync;
 
     public GuideExportImportService(
         ApplicationDbContext context,
         IDbContextFactory<ApplicationDbContext> dbFactory,
-        BackgroundJobs.IJobQueueService jobQueue)
+        BackgroundJobs.IJobQueueService jobQueue,
+        IAssistantSkillMetaSync assistantSkillMetaSync)
     {
         _context = context;
         _dbFactory = dbFactory;
         _jobQueue = jobQueue;
+        _assistantSkillMetaSync = assistantSkillMetaSync;
     }
 
     /// <summary>
@@ -910,6 +915,39 @@ public class GuideExportImportService : IGuideExportImportService
                 }
             }
 
+            var skillEntries = archive.Entries
+                .Where(e => e.FullName.StartsWith("Skills/") && !e.FullName.EndsWith("/"))
+                .ToList();
+
+            foreach (var fileEntry in skillEntries)
+            {
+                var relativePath = SkillPathSafety.NormalizePath(fileEntry.FullName);
+                ValidateImportedSkillRelativePath(relativePath);
+
+                using var fileStream = fileEntry.Open();
+                using var memStream = new MemoryStream();
+                await fileStream.CopyToAsync(memStream);
+
+                var skillFile = new AssistantFile
+                {
+                    Id = Guid.NewGuid(),
+                    AssistantId = guide.Id,
+                    FolderKind = "Skill",
+                    RelativePath = relativePath,
+                    ContentBytes = memStream.ToArray(),
+                    ContentType = GetContentTypeFromExtension(Path.GetExtension(relativePath)),
+                    Created = DateTime.UtcNow
+                };
+                if (isUpdate)
+                {
+                    await _context.AssistantFiles.AddAsync(skillFile);
+                }
+                else
+                {
+                    guide.Files.Add(skillFile);
+                }
+            }
+
             // Import tools from guide manifest
             if (manifest.TryGetProperty("tools", out var toolsElement) && toolsElement.ValueKind == JsonValueKind.Array)
             {
@@ -1040,9 +1078,11 @@ public class GuideExportImportService : IGuideExportImportService
 
         // Create markdown shadows and enqueue indexing jobs for the guide and all custom assistants (idempotent)
         await CreateMarkdownShadowsForAssistantAsync(guideId);
+        await _assistantSkillMetaSync.SyncAssistantAsync(guideId);
         foreach (var assistantId in customAssistantIds.Values)
         {
             await CreateMarkdownShadowsForAssistantAsync(assistantId);
+            await _assistantSkillMetaSync.SyncAssistantAsync(assistantId);
         }
 
         return new ImportGuideResultDto(
@@ -1134,6 +1174,7 @@ public class GuideExportImportService : IGuideExportImportService
 
         // Create markdown shadows and enqueue indexing jobs for imported files
         await CreateMarkdownShadowsForAssistantAsync(assistantId);
+        await _assistantSkillMetaSync.SyncAssistantAsync(assistantId);
 
         return new ImportGuideResultDto(
             true,
@@ -1592,6 +1633,33 @@ public class GuideExportImportService : IGuideExportImportService
             });
         }
 
+        var skillsPrefix = $"{basePath}/Skills/".TrimStart('/');
+        var skillEntries = archive.Entries
+            .Where(e => e.FullName.StartsWith(skillsPrefix) && !e.FullName.EndsWith("/"))
+            .ToList();
+
+        foreach (var fileEntry in skillEntries)
+        {
+            var relativePath = SkillPathSafety.NormalizePath(
+                $"Skills/{fileEntry.FullName.Substring(skillsPrefix.Length)}");
+            ValidateImportedSkillRelativePath(relativePath);
+
+            using var fileStream = fileEntry.Open();
+            using var memStream = new MemoryStream();
+            await fileStream.CopyToAsync(memStream);
+
+            assistant.Files.Add(new AssistantFile
+            {
+                Id = Guid.NewGuid(),
+                AssistantId = assistant.Id,
+                FolderKind = "Skill",
+                RelativePath = relativePath,
+                ContentBytes = memStream.ToArray(),
+                ContentType = GetContentTypeFromExtension(Path.GetExtension(relativePath)),
+                Created = DateTime.UtcNow
+            });
+        }
+
         return assistant;
     }
 
@@ -1710,6 +1778,29 @@ public class GuideExportImportService : IGuideExportImportService
         }
 
         return operations;
+    }
+
+    private static void ValidateImportedSkillRelativePath(string relativePath)
+    {
+        var normalized = SkillPathSafety.NormalizePath(relativePath);
+        if (SkillPathSafety.SkillFolderKey(normalized) == null)
+        {
+            throw new InvalidOperationException(
+                $"Imported skill file path must be under 'Skills/<name>/': '{relativePath}'.");
+        }
+
+        var segments = normalized.Split('/');
+        if (segments.Length < 3)
+        {
+            throw new InvalidOperationException(
+                $"Imported skill file path must include a file under 'Skills/<name>/': '{relativePath}'.");
+        }
+
+        if (segments.Any(segment => segment == ".."))
+        {
+            throw new InvalidOperationException(
+                $"Path traversal is not allowed in skill paths: '{relativePath}'.");
+        }
     }
 
     private static string GetContentTypeFromExtension(string extension)

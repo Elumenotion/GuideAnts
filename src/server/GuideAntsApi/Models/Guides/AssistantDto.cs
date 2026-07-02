@@ -26,7 +26,10 @@ public record AssistantDetailsDto(
     List<CustomToolDto> CustomTools,
     List<FileDto> Files,
     List<ConversationStarterDto> ConversationStarters
-) { public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; } }
+) {
+    public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<AssistantSkillDto>? Skills { get; init; }
+}
 
 // Create assistant request
 public record CreateAssistantDto(
@@ -48,6 +51,7 @@ public record CreateAssistantDto(
 ) {
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<AssistantSkillSaveDto>? Skills { get; init; }
 }
 
 // Update assistant request
@@ -71,4 +75,5 @@ public record UpdateAssistantDto(
 ) {
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
+    public List<AssistantSkillSaveDto>? Skills { get; init; }
 }

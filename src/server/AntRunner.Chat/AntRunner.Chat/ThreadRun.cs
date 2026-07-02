@@ -292,7 +292,7 @@ namespace AntRunner.Chat
                             function.Name!,
                             function.Description,
                             functionParametersJsonNode?.ToJsonString(),
-                            "guide"));
+                            ResolveToolTraceSource(function.Name!)));
                     }
                 }
             }
@@ -319,6 +319,20 @@ namespace AntRunner.Chat
                         clientTool.Function?.Description,
                         clientTool.Function?.Parameters?.ToJsonString(),
                         "client"));
+                }
+            }
+
+            if (assistantDef.Skills is { Count: > 0 })
+            {
+                var visibleSkills = SkillVisibilityFilter.FilterVisibleSkills(assistantDef);
+                if (visibleSkills.Count > 0
+                    && !string.IsNullOrWhiteSpace(SkillDiscoveryBlockBuilder.BuildDiscoveryBlock(visibleSkills)))
+                {
+                    traceTools.Add(new ThreadRunTraceToolDefinitionSnapshot(
+                        "skills.discovery",
+                        "Tier-1 skills discovery block",
+                        null,
+                        "skills"));
                 }
             }
 
@@ -552,6 +566,9 @@ namespace AntRunner.Chat
                 throw new ChatConversationException(ex, runResults);
             }
         }
+
+        private static string ResolveToolTraceSource(string toolName) =>
+            toolName is "skills.list" or "skills.read" ? "skills" : "guide";
 
         private static IReadOnlyList<ThreadRunTraceMessageSnapshot> BuildTraceMessageSnapshots(IEnumerable<ChatMessage> messages)
         {
@@ -1020,8 +1037,8 @@ namespace AntRunner.Chat
                             builder.Params["context"] = isolatedCtx;
                         }
 
-                        // For SearchAssistantFiles, also inject the AssistantDefinition
-                        if (toolName == "SearchAssistantFiles")
+                        // For SearchAssistantFiles and skills tools, inject the AssistantDefinition
+                        if (toolName is "SearchAssistantFiles" or "skills.list" or "skills.read")
                         {
                             builder.Params["assistantDefinition"] = assistantDef;
                         }

@@ -17,6 +17,8 @@ public sealed class ScriptExecutionAgentProcessHost : IAsyncDisposable
 
     private Process? _process;
     private HttpClient? _client;
+    private Task? _stdoutDrain;
+    private Task? _stderrDrain;
     private string _baseAddress = string.Empty;
 
     public async Task StartAsync()
@@ -43,11 +45,17 @@ public sealed class ScriptExecutionAgentProcessHost : IAsyncDisposable
         startInfo.Environment["SCRIPT_EXECUTION_AGENT_TOKEN"] = AgentToken;
         startInfo.Environment["SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION"] = "false";
         startInfo.Environment["SCRIPT_EXECUTION_ALLOW_OWNERSHIP_FALLBACK"] = "true";
+        startInfo.Environment["SCRIPT_EXECUTION_REQUIRE_SCOPED_VENV"] = "false";
+        startInfo.Environment["SCRIPT_EXECUTION_ADMIN_API_ENABLED"] = "false";
         startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         startInfo.Environment["ASPNETCORE_URLS"] = _baseAddress;
 
         _process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start ScriptExecutionAgent process.");
+
+        // Draining redirected streams avoids deadlocks when the agent logs verbose output during /execute.
+        _stdoutDrain = DrainProcessStreamAsync(_process.StandardOutput);
+        _stderrDrain = DrainProcessStreamAsync(_process.StandardError);
 
         await WaitForHealthAsync(TimeSpan.FromSeconds(30));
 
@@ -105,6 +113,20 @@ public sealed class ScriptExecutionAgentProcessHost : IAsyncDisposable
         }
 
         throw new TimeoutException($"ScriptExecutionAgent did not become healthy within {timeout.TotalSeconds}s.");
+    }
+
+    private static async Task DrainProcessStreamAsync(StreamReader reader)
+    {
+        try
+        {
+            while (await reader.ReadLineAsync() is not null)
+            {
+            }
+        }
+        catch
+        {
+            // Best-effort drain while the agent process is running.
+        }
     }
 
     private static int GetFreeTcpPort()

@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Text;
 using System.Threading;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
@@ -12,6 +13,8 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
     /// </summary>
     public class DatabaseStorage
     {
+        public const int MaxSkillsPerAssistant = 50;
+
         /// <summary>
         /// Creates a new ApplicationDbContext instance using connection string from environment.
         /// The connection string must be set in environment variables (done in Program.cs).
@@ -141,6 +144,7 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                     .Include(a => a.OpenApiSchemas).ThenInclude(s => s.Operations)
                     .Include(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider)
                     .Include(a => a.Files)
+                    .Include(a => a.SkillMetas)
                     .Include(a => a.ContextOptions)
                     .Include(a => a.ConversationStarters)
                     .Include(a => a.CrewMembers).ThenInclude(m => m.Assistant)
@@ -237,6 +241,7 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                 invocation_evaluator = assistant.InvocationEvaluator,
                 tools = BuildToolsArray(assistant),
                 tool_resources = BuildToolResources(assistant),
+                skills = BuildSkills(assistant),
                 metadata = ParseMetadataJson(assistant.MetadataJson)
             };
 
@@ -366,6 +371,83 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
             return trimmed;
         }
 
+        private static List<SkillDescriptor> BuildSkills(Assistant assistant)
+        {
+            var skillFiles = assistant.Files.Where(f => f.FolderKind == "Skill").ToList();
+            if (skillFiles.Count == 0)
+            {
+                return [];
+            }
+
+            var descriptors = new List<SkillDescriptor>();
+
+            foreach (var group in skillFiles
+                         .GroupBy(f => SkillPathSafety.SkillFolderKey(f.RelativePath))
+                         .Where(g => g.Key is not null))
+            {
+                var manifest = group.FirstOrDefault(f =>
+                    f.RelativePath.EndsWith("/SKILL.md", StringComparison.OrdinalIgnoreCase)
+                    || f.RelativePath.EndsWith("\\SKILL.md", StringComparison.OrdinalIgnoreCase));
+                if (manifest?.ContentBytes is null)
+                {
+                    continue;
+                }
+
+                SkillFrontmatter frontmatter;
+                SkillTier1Fields tier1;
+                try
+                {
+                    frontmatter = SkillFrontmatter.Parse(
+                        Encoding.UTF8.GetString(manifest.ContentBytes));
+                    tier1 = SkillTier1Resolver.Resolve(
+                        manifest.ContentBytes,
+                        assistant.SkillMetas.FirstOrDefault(m =>
+                            string.Equals(m.SkillName, frontmatter.Name, StringComparison.OrdinalIgnoreCase)));
+                }
+                catch (InvalidOperationException ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to parse skill frontmatter at '{manifest.RelativePath}': {ex.Message}",
+                        ex);
+                }
+
+                if (!tier1.Enabled)
+                {
+                    continue;
+                }
+
+                descriptors.Add(new SkillDescriptor
+                {
+                    Name = tier1.Name,
+                    Description = tier1.Description,
+                    FolderPath = group.Key!,
+                    Locator = $"skill://{assistant.Id}/{tier1.Name}",
+                    RequiresTools = frontmatter.RequiresTools.Count > 0 ? frontmatter.RequiresTools : null,
+                    RequiresToolsets = frontmatter.RequiresToolsets.Count > 0 ? frontmatter.RequiresToolsets : null,
+                    FallbackForTools = frontmatter.FallbackForTools.Count > 0 ? frontmatter.FallbackForTools : null,
+                    FallbackForToolsets = frontmatter.FallbackForToolsets.Count > 0 ? frontmatter.FallbackForToolsets : null,
+                    Platforms = frontmatter.Platforms.Count > 0 ? frontmatter.Platforms : null,
+                    DisplayOrder = tier1.DisplayOrder,
+                    Files = group
+                        .Select(f => SkillPathSafety.NormalizePath(f.RelativePath))
+                        .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                });
+            }
+
+            if (descriptors.Count > MaxSkillsPerAssistant)
+            {
+                throw new InvalidOperationException(
+                    $"Assistant '{assistant.Name}' has {descriptors.Count} enabled skills, " +
+                    $"which exceeds the maximum of {MaxSkillsPerAssistant}.");
+            }
+
+            return descriptors
+                .OrderBy(d => d.DisplayOrder)
+                .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         private static List<object> BuildToolsArray(Assistant assistant)
         {
             var tools = new List<object>();
@@ -379,8 +461,9 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                 }
             }
 
-            // Add code_interpreter if there are code interpreter files
-            if (assistant.Files.Any(f => f.FolderKind == "CodeInterpreter"))
+            // Add code_interpreter when notebook-executable payload exists (CI files or skill scripts/assets).
+            if (assistant.Files.Any(f => f.FolderKind == "CodeInterpreter")
+                || SkillNotebookMaterializer.AssistantHasMaterializableSkillPayload(assistant.Files))
             {
                 tools.Add(new { type = "code_interpreter" });
             }

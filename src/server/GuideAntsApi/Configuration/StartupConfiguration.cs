@@ -118,6 +118,8 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.Guides.ICatalogService, GuideAntsApi.Services.Guides.CatalogService>();
         services.AddScoped<GuideAntsApi.Services.Guides.IGuidesService, GuideAntsApi.Services.Guides.GuidesService>();
         services.AddScoped<GuideAntsApi.Services.Guides.IGuideExportImportService, GuideAntsApi.Services.Guides.GuideExportImportService>();
+        services.AddScoped<GuideAntsApi.Services.Guides.Skills.ISkillImportService, GuideAntsApi.Services.Guides.Skills.SkillImportService>();
+        services.AddScoped<GuideAntsApi.Services.Guides.Skills.IAssistantSkillMetaSync, GuideAntsApi.Services.Guides.Skills.AssistantSkillMetaSync>();
         services.AddScoped<GuideAntsApi.Services.Guides.IGuideUsageService, GuideAntsApi.Services.Guides.GuideUsageService>();
 
         // Component Services
@@ -449,7 +451,9 @@ public static class StartupConfiguration
                 options.Stateless = true;
             })
             .WithListToolsHandler(McpPublishedGuideToolHandlers.ListToolsAsync)
-            .WithCallToolHandler(McpPublishedGuideToolHandlers.CallToolAsync);
+            .WithCallToolHandler(McpPublishedGuideToolHandlers.CallToolAsync)
+            .WithListResourcesHandler(McpPublishedSkillResourceHandlers.ListResourcesAsync)
+            .WithReadResourceHandler(McpPublishedSkillResourceHandlers.ReadResourceAsync);
         phaseLogger?.Invoke("ConfigureServices.RegisterServices.PodcastAndMcp");
 
     }

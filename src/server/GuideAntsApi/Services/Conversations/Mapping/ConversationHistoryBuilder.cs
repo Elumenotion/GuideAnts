@@ -1,5 +1,6 @@
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat;
+using AntRunner.ToolCalling.AssistantDefinitions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations.Attachments;
@@ -119,6 +120,8 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
             {
                 messages.Add(new ChatMessage(ChatMessageRole.System, ctxMsg));
             }
+
+            AddSkillsDiscoveryMessage(messages, assistantDef);
         }
 
         if (isNewConversation)
@@ -410,6 +413,8 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
                 {
                     list.Add(new ChatMessage(ChatMessageRole.System, clientContext));
                 }
+
+                AddSkillsDiscoveryMessage(list, assistantDef);
             }
         }
         catch { /* ignore */ }
@@ -614,5 +619,24 @@ public class ConversationHistoryBuilder : IConversationHistoryBuilder
         }
 
         return validToolCallIds;
+    }
+
+    private static void AddSkillsDiscoveryMessage(
+        List<ChatMessage> messages,
+        AssistantDefinition? assistantDef)
+    {
+        if (assistantDef?.Skills is not { Count: > 0 })
+        {
+            return;
+        }
+
+        var visibleSkills = SkillVisibilityFilter.FilterVisibleSkills(assistantDef);
+        var discoveryBlock = SkillDiscoveryBlockBuilder.BuildDiscoveryBlock(visibleSkills);
+        if (string.IsNullOrWhiteSpace(discoveryBlock))
+        {
+            return;
+        }
+
+        messages.Add(new ChatMessage(ChatMessageRole.System, discoveryBlock));
     }
 }

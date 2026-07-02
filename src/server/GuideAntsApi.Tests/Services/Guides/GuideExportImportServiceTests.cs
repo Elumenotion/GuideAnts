@@ -184,7 +184,7 @@ public sealed class GuideExportImportServiceTests
         var guideName = $"Imported {Guid.NewGuid():N}";
         var jobQueue = new BackgroundJobTestHelpers.CapturingJobQueueService();
         await using var context = new ApplicationDbContext(options);
-        var service = new GuideExportImportService(context, new TestDbContextFactory(options), jobQueue);
+        var service = new GuideExportImportService(context, new TestDbContextFactory(options), jobQueue, new GuideAntsApi.Services.Guides.Skills.AssistantSkillMetaSync(context));
 
         await using var zip = CreateGuideZip(guideName);
 
@@ -272,7 +272,7 @@ public sealed class GuideExportImportServiceTests
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"import-asst-{Guid.NewGuid():N}");
         var jobQueue = new BackgroundJobTestHelpers.CapturingJobQueueService();
         await using var context = new ApplicationDbContext(options);
-        var service = new GuideExportImportService(context, new TestDbContextFactory(options), jobQueue);
+        var service = new GuideExportImportService(context, new TestDbContextFactory(options), jobQueue, new GuideAntsApi.Services.Guides.Skills.AssistantSkillMetaSync(context));
         var name = $"New Assistant {Guid.NewGuid():N}";
         await using var zip = CreateAssistantZip(name);
 
@@ -289,7 +289,7 @@ public sealed class GuideExportImportServiceTests
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"import-asst-reasoning-{Guid.NewGuid():N}");
         var jobQueue = new BackgroundJobTestHelpers.CapturingJobQueueService();
         await using var context = new ApplicationDbContext(options);
-        var service = new GuideExportImportService(context, new TestDbContextFactory(options), jobQueue);
+        var service = new GuideExportImportService(context, new TestDbContextFactory(options), jobQueue, new GuideAntsApi.Services.Guides.Skills.AssistantSkillMetaSync(context));
         var name = $"Reasoning Assistant {Guid.NewGuid():N}";
         await using var zip = CreateAssistantZip(name, reasoningEffort: 4);
 
@@ -608,7 +608,7 @@ public sealed class GuideExportImportServiceTests
         }
 
         await using var context = new ApplicationDbContext(options);
-        var service = new GuideExportImportService(context, new TestDbContextFactory(options), queue);
+        var service = new GuideExportImportService(context, new TestDbContextFactory(options), queue, new GuideAntsApi.Services.Guides.Skills.AssistantSkillMetaSync(context));
         var guideName = $"Imported Guide {Guid.NewGuid():N}";
 
         await using var zip = CreateGuideImportZipWithNestedAssistant(
@@ -662,7 +662,7 @@ public sealed class GuideExportImportServiceTests
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"import-assistant-masked-{Guid.NewGuid():N}");
         var queue = new BackgroundJobTestHelpers.CapturingJobQueueService();
         await using var context = new ApplicationDbContext(options);
-        var service = new GuideExportImportService(context, new TestDbContextFactory(options), queue);
+        var service = new GuideExportImportService(context, new TestDbContextFactory(options), queue, new GuideAntsApi.Services.Guides.Skills.AssistantSkillMetaSync(context));
 
         await using var zip = CreateAssistantZipWithMaskedServiceHttpAuth("Masked Assistant");
 

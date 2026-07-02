@@ -73,7 +73,15 @@ A stable `DocumentId` is generated from `NotebookId` + `RelativePath` (SHA-256, 
 
 ### 2.7 AssistantFile
 
-Binary file resources attached to an assistant or guide. Categorized by `FolderKind` (CodeInterpreter, VectorStore, HostExtensions). Small files may store content inline via `ContentBytes`; larger binaries are stored on disk.
+Binary file resources attached to an assistant or guide. Categorized by `FolderKind` (CodeInterpreter, VectorStore, HostExtensions, Skill). Small files may store content inline via `ContentBytes`; larger binaries are stored on disk.
+
+`FolderKind = "Skill"` files live under a `Skills/<skill-name>/...` relative-path convention (a `SKILL.md` manifest plus optional `references/`, `scripts/`, `assets/`). Unlike `VectorStore` files, `Skill` files are **inert to the markdown-shadow/indexing pipeline by construction** — the `ExtractAssistantFileMarkdownHandler`/`IndexAssistantFileMarkdownShadowHandler` enqueue sites (§11.3) are gated on `FolderKind == "VectorStore"`, so a `Skill` file never gets a shadow row and never enters `file_search`/`DocumentChunk` (§4).
+
+At **definition** time, skills are inert to `BuildToolResources`. Tier-1 discovery (`name` + `description` + `skill://` locator) is injected into the prompt; `SKILL.md` bodies and `references/` load on demand via the server-handled `skills.read` tool. Assistants with skill `scripts/` or `assets/` also enable `code_interpreter` (same trigger as `CodeInterpreter` files).
+
+At **notebook creation**, skill `scripts/` and `assets/` are materialized like `CodeInterpreter` notebook files (see §7.5): copied into `Resources/`, symlinked under `Output/` for sandbox CWD access, and mirrored as `NotebookFile` rows. `SKILL.md` and `references/` are **not** copied — they stay definition-only and load via `skills.read`. Materialized skill payload is hidden from the user-facing file tree (same policy as guide `Resources/`).
+
+See `docs/skills-support-proposal.md` and `docs/skills-execution/` for the full design and execution record.
 
 - Server model: `src/server/GuideAntsApi.DataModel/Models/AssistantFile.cs`
 
@@ -153,7 +161,8 @@ The current browsable layout uses slugs:
 │   ├── files/{contentFileId}/v{n}/{fileName}
 │   └── {notebookSlug}/
 │       ├── .guideants/notebook.json
-│       ├── Output/
+│       ├── Resources/          # guide/crew bootstrap payload (hidden from file tree)
+│       ├── Output/             # sandbox CWD; symlinks into Resources/
 │       ├── Runs/{runId}/
 │       └── ...
 └── projects/
@@ -192,7 +201,29 @@ For Docker-based script execution, the host content-file root is mounted into co
 
 Before returning the container path, `NotebookPathHelper` resolves the local notebook root so `.guideants/notebook.json` exists for script-agent authorization.
 
-### 7.4 Legacy Path Compatibility
+### 7.4 Guide payload materialization (`Resources/` + `Output/`)
+
+When a notebook is created for a guide, `NotebookService.CopyGuideFilesToNotebookAsync` copies definition-time `AssistantFile` payload into the notebook filesystem. This is how crew Python modules, theme JSON, and skill scripts become runnable in the sandbox without user upload.
+
+| Source (`AssistantFile`) | Copied at notebook create? | Notebook `Resources/` path | `Output/` projection (sandbox CWD) |
+|--------------------------|----------------------------|----------------------------|-------------------------------------|
+| `FolderKind = "CodeInterpreter"` (guide) | Yes | `Resources/{basename}` | `Output/{basename}` → symlink |
+| `FolderKind = "CodeInterpreter"` (crew) | Yes | `Resources/crew-{name}/{basename}` | `Output/{basename}` → symlink |
+| `FolderKind = "Skill"` — `scripts/`, `assets/` (guide) | Yes | `Resources/Skills/{skill}/{scripts\|assets}/...` | `Output/Skills/{skill}/...` → symlink |
+| `FolderKind = "Skill"` — `scripts/`, `assets/` (crew) | Yes | `Resources/crew-{name}/Skills/{skill}/...` | `Output/crew-{name}/Skills/{skill}/...` → symlink |
+| `FolderKind = "Skill"` — `SKILL.md`, `references/` | No | — (on-demand via `skills.read`) | — |
+
+Implementation: `SkillNotebookMaterializer` (`AntRunner.ToolCalling.AssistantDefinitions`) maps assistant paths; `NotebookService` writes bytes and creates symlinks (Linux). `NotebookFile` rows are created for `Resources/` paths only.
+
+**Visibility:** `Resources/` paths and `Output/` symlinks that resolve into `Resources/` are hidden from the sidebar file tree and protected from user delete/rename via the notebook files API. The model can still see projected paths via the `[@files]` context option (recursive `Output/` symlink scan) and run scripts with `run_python` / `code_interpreter` / `run_bash`.
+
+**Note:** Payload is copied once at notebook creation. Existing notebooks created before a guide's skills were added (or before this materialization shipped) need a new notebook to pick up skill scripts on disk.
+
+- Server: `src/server/GuideAntsApi/Services/Components/NotebookService.cs` (`CopyGuideFilesToNotebookAsync`)
+- Server: `src/server/AntRunner.Chat/AntRunner.ToolCalling/AssistantDefinitions/SkillNotebookMaterializer.cs`
+- Server: `src/server/GuideAntsApi/Services/Conversations/ContextOptionFilesResolver.cs` (`[@files]` symlink listing)
+
+### 7.5 Legacy Path Compatibility
 
 Historical rows may still reference GUID-based paths such as `{storage}/{projectGuid}/notebooks/{notebookGuid}/...` or `{storage}/projects/{projectGuid}/...`. Content retrieval uses `StoragePathCompatibility` where needed to resolve legacy `StoragePath` and `Path` values after migration.
 
@@ -238,10 +269,9 @@ Manages CRUD operations for project content files. Handles version creation, con
 
 ### 9.4 NotebookService
 
-High-level notebook lifecycle management including creation, update, delete, copy, and template-based initialization.
+High-level notebook lifecycle management including creation, update, delete, copy, and template-based initialization. On create, copies guide and crew `CodeInterpreter` files and materializable skill `scripts/`/`assets/` into `Resources/` with `Output/` symlinks (§7.4).
 
-- Server: `src/server/GuideAntsApi/Services/Core/ProjectService.cs` (project-level operations)
-- Server: `src/server/GuideAntsApi/Services/NotebookTemplateService.cs` (template and assistant list resolution)
+- Server: `src/server/GuideAntsApi/Services/Components/NotebookService.cs`
 
 ### 9.5 NotebookCopyService
 
