@@ -188,12 +188,6 @@ describe('api.settings (table-driven)', () => {
       urlPart: '/settings/services/SpeechTranscription/local-models/load',
       method: 'POST',
     },
-    {
-      name: 'localModels.unload',
-      call: () => api.settings.localModels.unload('ImageGeneration'),
-      urlPart: '/settings/services/ImageGeneration/local-models/unload',
-      method: 'POST',
-    },
   ];
 
   it.each(mutateCases)('$name sends $method to correct endpoint', async ({ call, urlPart, method }) => {
@@ -304,6 +298,30 @@ describe('api.settings (table-driven)', () => {
         expect(result.message).toContain('500');
         expect(result.message).toContain('internal');
       }
+    });
+  });
+
+  describe('localModels.catalogOutcome', () => {
+    it('returns available on 200 with JSON', async () => {
+      const payload = { version: 1, entries: [{ id: 'chatterbox', displayName: 'Chatterbox' }] };
+      mockFetch.mockResolvedValue(fetchAuthText(200, JSON.stringify(payload)));
+      const result = await api.settings.localModels.catalogOutcome('SpeechSynthesis');
+      expect(result).toEqual({ kind: 'available', payload });
+      expect(mockFetch.mock.calls[0]?.[0]).toEqual(
+        expect.stringContaining('/settings/services/SpeechSynthesis/local-models/catalog')
+      );
+    });
+
+    it('returns error on invalid JSON body', async () => {
+      mockFetch.mockResolvedValue(fetchAuthText(200, 'not-json'));
+      const result = await api.settings.localModels.catalogOutcome('Embeddings');
+      expect(result.kind).toBe('error');
+    });
+
+    it('returns network error on fetch rejection', async () => {
+      mockFetch.mockRejectedValue(new Error('offline'));
+      const result = await api.settings.localModels.catalogOutcome('SpeechTranscription');
+      expect(result).toEqual({ kind: 'error', message: 'offline' });
     });
   });
 });

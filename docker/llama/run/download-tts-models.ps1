@@ -1,7 +1,7 @@
 param(
     [string]$ModelsDir,
-    [string]$ModelRepository = "hexgrad/Kokoro-82M",
-    [string]$ModelSubdirectory = "Kokoro-82M",
+    [string]$ModelRepository = "ResembleAI/chatterbox",
+    [string]$ModelSubdirectory = "chatterbox",
     [string]$TokenizerRepository = "",
     [string]$TokenizerSubdirectory = ""
 )

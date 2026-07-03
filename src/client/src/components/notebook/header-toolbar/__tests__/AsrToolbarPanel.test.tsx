@@ -14,8 +14,6 @@ vi.mock('../../../../services/api', () => ({
       },
       localModels: {
         selectActive: vi.fn(async () => ({})),
-        load: vi.fn(async () => ({})),
-        unload: vi.fn(async () => ({})),
       },
     },
   },
@@ -186,49 +184,6 @@ describe('AsrToolbarPanel', () => {
       'SpeechTranscription.Google.SpeechToText'
     );
     expect(onRefresh).toHaveBeenCalled();
-  });
-
-  it('loads and unloads local runtime when power controls are used', async () => {
-    const user = userEvent.setup();
-    const onRefresh = vi.fn(async () => {});
-    render(
-      <AsrToolbarPanel
-        service={{
-          serviceId: 'SpeechTranscription',
-          displayName: 'Speech Transcription',
-          kind: 'asr',
-          status: 'ready',
-          summary: 'ready',
-          activeProviderId: 'SpeechTranscription.LocalAsr.Http',
-          activeProviderLabel: 'Local',
-          supportsLocalRuntimePower: true,
-          localRuntimeOn: false,
-          providerOptions: [],
-          selection: null,
-          blockers: [],
-          localModelOptions: [
-            { modelRef: 'asr-1', displayLabel: 'asr-1', isComplete: true, isActive: true },
-          ],
-          inProgressOperationId: null,
-          inProgressState: null,
-        }}
-        projectId="p1"
-        notebookId="n1"
-        conversationId="c1"
-        inFlight={false}
-        setInFlight={vi.fn()}
-        onRefresh={onRefresh}
-        onOpenSettings={vi.fn()}
-      />
-    );
-
-    await user.click(screen.getByRole('button', { name: /turn asr runtime on/i }));
-    expect(api.settings.localModels.load).toHaveBeenCalledWith('SpeechTranscription', {
-      model_path: 'asr-1',
-    });
-
-    await user.click(screen.getByRole('button', { name: /turn asr runtime off/i }));
-    expect(api.settings.localModels.unload).toHaveBeenCalledWith('SpeechTranscription');
   });
 
   it('renders service blockers and opens settings', async () => {

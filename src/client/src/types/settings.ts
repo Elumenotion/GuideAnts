@@ -149,6 +149,38 @@ export type LocalModelsListOutcome =
   | LocalModelsAvailableOutcome
   | LocalModelsErrorOutcome;
 
+export interface LocalModelCatalogEntryDto {
+  id: string;
+  displayName?: string | null;
+  license?: string | null;
+  multilingual?: boolean;
+  producedDimension?: number;
+  default?: boolean;
+  family?: string | null;
+  /** TTS only: how voice selection works for this model. */
+  voiceInput?: 'voice_pack' | 'builtin' | 'instruct' | 'optional_ref' | 'none' | null;
+  gated?: boolean;
+  releaseStatus?: string | null;
+}
+
+export interface LocalModelCatalogResponseDto {
+  version?: number;
+  entries?: LocalModelCatalogEntryDto[];
+}
+
+export interface VoicePackVoiceDto {
+  voiceId: string;
+  displayName?: string | null;
+  language?: string | null;
+  accent?: string | null;
+}
+
+export interface VoicePackResponseDto {
+  path?: string;
+  count?: number;
+  voices?: VoicePackVoiceDto[];
+}
+
 export interface SetActiveProviderRequest {
   providerId: string;
 }

@@ -14,8 +14,6 @@ vi.mock('../../../../services/api', () => ({
       },
       localModels: {
         selectActive: vi.fn(async () => ({})),
-        load: vi.fn(async () => ({})),
-        unload: vi.fn(async () => ({})),
       },
     },
   },
@@ -129,7 +127,7 @@ describe('TtsToolbarPanel', () => {
     expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });
 
-  it('switches cloud provider and powers local runtime on/off', async () => {
+  it('switches cloud provider when selecting an available cloud option', async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn(async () => {});
     render(
@@ -178,14 +176,7 @@ describe('TtsToolbarPanel', () => {
       'SpeechSynthesis',
       'SpeechSynthesis.Google.TextToSpeech'
     );
-
-    await user.click(screen.getByRole('button', { name: /turn tts runtime on/i }));
-    expect(api.settings.localModels.load).toHaveBeenCalledWith('SpeechSynthesis', {
-      model_path: 'voice-1',
-    });
-
-    await user.click(screen.getByRole('button', { name: /turn tts runtime off/i }));
-    expect(api.settings.localModels.unload).toHaveBeenCalledWith('SpeechSynthesis');
+    expect(onRefresh).toHaveBeenCalled();
   });
 
   it('disables incomplete local model options', () => {

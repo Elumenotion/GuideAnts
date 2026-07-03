@@ -1,20 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { FaDownload, FaPlay, FaSpinner, FaStop, FaTimes, FaTrash } from 'react-icons/fa';
+import { FaDownload, FaPlay, FaSpinner, FaTimes, FaTrash } from 'react-icons/fa';
 import { ConfirmationDialog } from '../../../../components/common/ConfirmationDialog';
 import { api } from '../../../../services/api';
 import { IconActionButton, TextActionButton } from '../../components/shared/ActionButtons';
 import { LocalCapabilityFrame, type LocalCapabilityPhase } from '../../components/shared/LocalCapabilityFrame';
-import { SettingsModal } from '../../components/shared/SettingsModal';
+import { CatalogDownloadModelDialog } from '../common/CatalogDownloadModelDialog';
 import type {
-  HuggingFaceRepositoryFileDto,
-  HuggingFaceRepositoryListingDto,
   LocalModelsUpstreamFailure,
+  VoicePackResponseDto,
+  VoicePackVoiceDto,
 } from '../../../../types/settings';
-import {
-  RepositoryFilePicker,
-  snapshotPreviewClassifier,
-  withSnapshotExtraBadges,
-} from '../common';
 import { isSelectableLocalVoiceModelEntry } from '../common/localModelSelection';
 import {
   isOperationFailedStatus,
@@ -49,6 +44,10 @@ type TtsReadiness = {
   voice?: string | null;
   langCode?: string | null;
   speed?: number | null;
+  warmupEnabled?: boolean;
+  warmupRan?: boolean;
+  warmupSucceeded?: boolean;
+  warmupError?: string | null;
 };
 
 type DownloadOp = {
@@ -60,7 +59,6 @@ type DownloadOp = {
 };
 
 const SERVICE_ID = 'SpeechSynthesis';
-const KOKORO_MODEL_ID = 'hexgrad/Kokoro-82M';
 
 interface TtsModelManagerProps {
   enabled: boolean;
@@ -79,7 +77,8 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
   const [pendingRemove, setPendingRemove] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [activeDownload, setActiveDownload] = useState<DownloadOp | null>(null);
-  const [engineBusy, setEngineBusy] = useState<null | { op: 'load' | 'unload'; modelRef?: string }>(null);
+  const [engineBusy, setEngineBusy] = useState<null | { op: 'load'; modelRef?: string }>(null);
+  const [voicePack, setVoicePack] = useState<VoicePackVoiceDto[] | null>(null);
 
   const pollRef = useRef<number | null>(null);
   const hasInFlightDownload = activeDownload !== null && isOperationInFlight(activeDownload.status);
@@ -140,6 +139,18 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
       return;
     }
     void refresh();
+    // Voice-pack presets are catalog-driven (voiceInput: voice_pack), served
+    // from the baked pack — never a hardcoded list. A failure here just hides
+    // the panel; it does not block model management.
+    void (async () => {
+      const outcome = await api.settings.localModels.voicePackOutcome(SERVICE_ID);
+      if (outcome.kind === 'available') {
+        const payload = outcome.payload as VoicePackResponseDto;
+        setVoicePack(Array.isArray(payload.voices) ? payload.voices : []);
+      } else {
+        setVoicePack(null);
+      }
+    })();
   }, [enabled]);
 
   useEffect(() => {
@@ -283,25 +294,6 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
     }
   };
 
-  const handleUnload = async () => {
-    if (engineBusy !== null || hasInFlightDownload) return;
-    setActionError(null);
-    setEngineBusy({ op: 'unload' });
-    try {
-      await api.settings.localModels.unload(SERVICE_ID);
-      await refresh();
-    } catch (e) {
-      const err = e as { status?: number };
-      if (err?.status === 409) {
-        setActionError('Another load or unload is already in progress. Try again.');
-      } else {
-        setActionError(e instanceof Error ? e.message : 'Unload failed.');
-      }
-    } finally {
-      setEngineBusy(null);
-    }
-  };
-
   const removeConfirmed = async () => {
     if (!pendingRemove) return;
     setRemoving(true);
@@ -328,11 +320,7 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
         upstream={errorUpstream}
         onRefresh={phase === 'available' || phase === 'error' ? () => void refresh() : undefined}
       >
-        <EngineStatusPanel
-          readiness={readiness}
-          engineBusy={engineBusy}
-          onUnload={() => void handleUnload()}
-        />
+        <EngineStatusPanel readiness={readiness} />
 
         {activeDownload ? (
           <DownloadOperationStatus
@@ -346,6 +334,8 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
             Model directory on the TTS container: <span className="font-mono">{list.modelDir}</span>
           </p>
         ) : null}
+
+        {voicePack && voicePack.length > 0 ? <VoicePackPanel voices={voicePack} /> : null}
 
         <div className="overflow-hidden rounded border border-gray-200">
           <table className="w-full table-fixed text-sm">
@@ -367,7 +357,7 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
               {items.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-3 py-4 text-center text-sm text-gray-500">
-                    No TTS models installed. Click <span className="font-medium">Add model</span> to fetch one from Hugging Face.
+                    No TTS models installed. Click <span className="font-medium">Add model</span> to download one from the catalog.
                   </td>
                 </tr>
               ) : null}
@@ -444,7 +434,7 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
             title={
               engineBusy !== null || hasInFlightDownload
                 ? 'Wait for the current operation to finish or cancel it first.'
-                : 'Add a new TTS model from Hugging Face.'
+                : 'Add a curated catalog TTS model.'
             }
           >
             Add model
@@ -454,10 +444,15 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
         {actionError ? <div className="text-xs text-red-700">{actionError}</div> : null}
       </LocalCapabilityFrame>
 
-      <DownloadModelDialog
+      <CatalogDownloadModelDialog
+        serviceId="SpeechSynthesis"
         isOpen={downloadOpen}
         onClose={() => setDownloadOpen(false)}
         onSubmit={startDownload}
+        title="Download curated TTS model"
+        description="Local TTS is constrained to the curated catalog. Voice selection uses the baked voice pack in provider settings; this dialog downloads only the model weights."
+        submitLabel="Download snapshot"
+        submitTitle="Download the selected catalog snapshot from its allowlisted Hugging Face source."
       />
 
       <ConfirmationDialog
@@ -479,12 +474,8 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
 
 function EngineStatusPanel({
   readiness,
-  engineBusy,
-  onUnload,
 }: {
   readiness: TtsReadiness | undefined;
-  engineBusy: null | { op: 'load' | 'unload'; modelRef?: string };
-  onUnload: () => void;
 }) {
   if (!readiness) {
     return (
@@ -493,7 +484,7 @@ function EngineStatusPanel({
       </div>
     );
   }
-  const readyLabel = readiness.ready ? 'Ready' : readiness.loaded ? 'Loaded' : 'Not loaded';
+  const readyLabel = readiness.ready ? 'Ready' : readiness.loaded ? 'Loaded, warmup pending' : 'Not loaded';
   const color = readiness.ready
     ? 'bg-green-100 text-green-800'
     : readiness.loaded
@@ -529,19 +520,40 @@ function EngineStatusPanel({
             <span className="text-gray-500">No model loaded.</span>
           )}
         </div>
-        <div className="flex gap-1">
-          <TextActionButton
-            tone="neutral"
-            icon={engineBusy?.op === 'unload' ? <FaSpinner className="animate-spin" /> : <FaStop />}
-            disabled={engineBusy !== null || !readiness.loaded}
-            onClick={onUnload}
-            title={readiness.loaded ? 'Drop the loaded TTS model to release GPU / RAM.' : 'No model is currently loaded.'}
-          >
-            Unload
-          </TextActionButton>
-        </div>
       </div>
+      {readiness.warmupEnabled ? (
+        <p className="mt-1 text-[11px] text-gray-600">
+          Warmup: {readiness.warmupSucceeded ? 'succeeded' : readiness.warmupRan ? 'failed' : 'pending'}
+          {readiness.warmupError ? <span className="ml-1 font-mono text-red-700">— {readiness.warmupError}</span> : null}
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+function VoicePackPanel({ voices }: { voices: VoicePackVoiceDto[] }) {
+  return (
+    <details className="rounded border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+      <summary className="cursor-pointer font-semibold text-gray-800">
+        Voice pack ({voices.length} presets)
+      </summary>
+      <p className="mt-1 text-gray-500">
+        For models whose voice selection is <span className="font-mono">voice_pack</span> (e.g. Chatterbox),
+        set the provider <span className="font-mono">VoiceName</span> to one of these baked preset ids. These
+        come from the container voice pack, not a Hugging Face download.
+      </p>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {voices.map((v) => (
+          <span
+            key={v.voiceId}
+            className="inline-flex items-center rounded bg-white px-2 py-0.5 font-mono text-[11px] text-gray-800 ring-1 ring-gray-200"
+            title={[v.displayName, v.language, v.accent].filter(Boolean).join(' · ')}
+          >
+            {v.voiceId}
+          </span>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -570,150 +582,5 @@ function DownloadOperationStatus({ operation, onCancel }: { operation: DownloadO
       </div>
       {operation.error ? <div className="mt-1 font-mono">{operation.error}</div> : null}
     </div>
-  );
-}
-
-function voiceBadgesFor(file: HuggingFaceRepositoryFileDto): string[] {
-  const path = file.path.toLowerCase();
-  const leaf = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
-  if (
-    path.startsWith('voices/')
-    || path.includes('/voices/')
-    || leaf.endsWith('.npz')
-    || leaf.endsWith('.pt')
-    || leaf.includes('voice')
-  ) {
-    return ['voice'];
-  }
-  return [];
-}
-
-const ttsModelPreviewClassifier = withSnapshotExtraBadges(
-  snapshotPreviewClassifier,
-  voiceBadgesFor,
-);
-
-function DownloadModelDialog({
-  isOpen,
-  onClose,
-  onSubmit,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  onSubmit: (values: { modelId: string; revision: string }) => Promise<void>;
-}) {
-  const [modelId, setModelId] = useState(KOKORO_MODEL_ID);
-  const [revision, setRevision] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [modelListing, setModelListing] = useState<HuggingFaceRepositoryListingDto | null>(null);
-
-  useEffect(() => {
-    if (isOpen) {
-      setModelId(KOKORO_MODEL_ID);
-      setRevision('');
-      setErr(null);
-      setSubmitting(false);
-      setModelListing(null);
-    }
-  }, [isOpen]);
-
-  const submit = async () => {
-    if (!modelListing) {
-      setErr('Browse the model repository first so the snapshot can be previewed.');
-      return;
-    }
-    setSubmitting(true);
-    setErr(null);
-    try {
-      await onSubmit({
-        modelId: KOKORO_MODEL_ID,
-        revision,
-      });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Download failed to start.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const disableSubmit = submitting || !modelListing;
-  return (
-    <SettingsModal
-      isOpen={isOpen}
-      title="Add TTS model from Hugging Face"
-      onClose={onClose}
-      disableDismiss={submitting}
-      footer={
-        <>
-          <TextActionButton tone="neutral" disabled={submitting} onClick={onClose}>
-            Cancel
-          </TextActionButton>
-          <TextActionButton
-            tone="primary"
-            icon={submitting ? <FaSpinner className="animate-spin" /> : <FaDownload />}
-            disabled={disableSubmit}
-            onClick={() => void submit()}
-            title={
-              modelListing
-                ? 'Download the Hugging Face snapshot to this TTS service.'
-                : 'Browse the model repository before starting the download.'
-            }
-          >
-            Download snapshot
-          </TextActionButton>
-        </>
-      }
-    >
-      <div className="space-y-3 text-sm">
-        <p className="text-xs text-gray-600">
-          Local TTS is fixed to Kokoro for now. Browse the locked Kokoro snapshot before download; voice selection is
-          handled by the Kokoro voice dropdown in the provider settings.
-        </p>
-
-        <RepositoryFilePicker
-          repository={modelId}
-          onRepositoryChange={(next) => {
-            void next;
-            setModelId(KOKORO_MODEL_ID);
-            setModelListing(null);
-          }}
-          previewOnly
-          classifyPreview={ttsModelPreviewClassifier}
-          onBrowseResolved={(listing) => {
-            setModelListing(listing);
-            setErr(null);
-          }}
-          onBrowseError={(e) => {
-            if (e) {
-              setModelListing(null);
-            }
-          }}
-          serviceOrigin="SpeechSynthesis.model"
-          repoInputLabel="Kokoro model repository"
-          repoInputPlaceholder="hexgrad/Kokoro-82M"
-          repoInputHint="Local TTS downloads only hexgrad/Kokoro-82M until TTS runtimes become pluggable."
-          repoInputReadOnly
-          disabled={submitting}
-        />
-
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-700">Revision (optional)</span>
-          <input
-            type="text"
-            value={revision}
-            onChange={(e) => setRevision(e.target.value)}
-            disabled={submitting}
-            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm disabled:bg-gray-100"
-            placeholder="main"
-          />
-          <span className="mt-1 block text-[11px] text-gray-500">
-            Hugging Face revision / branch. Blank uses the default branch.
-          </span>
-        </label>
-
-        {err ? <p className="text-xs text-red-700">{err}</p> : null}
-      </div>
-    </SettingsModal>
   );
 }

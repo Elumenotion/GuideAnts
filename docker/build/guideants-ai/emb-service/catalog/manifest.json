@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "qwen3_embedding_0_6b",
+      "task": "emb",
+      "displayName": "Qwen3-Embedding-0.6B",
+      "license": "Apache-2.0",
+      "multilingual": true,
+      "producedDimension": 1024,
+      "pooling": "last",
+      "arch": "qwen3",
+      "default": true,
+      "queryPrefixTemplate": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: {text}",
+      "documentPrefixTemplate": null,
+      "sourceRepos": [
+        {
+          "repoId": "Qwen/Qwen3-Embedding-0.6B-GGUF",
+          "revision": "main",
+          "filename": "Qwen3-Embedding-0.6B-Q8_0.gguf"
+        }
+      ]
+    },
+    {
+      "id": "embedding_gemma_300m",
+      "task": "emb",
+      "displayName": "EmbeddingGemma-300M",
+      "license": "Gemma",
+      "multilingual": true,
+      "producedDimension": 768,
+      "pooling": "mean",
+      "arch": "gemma",
+      "default": false,
+      "queryPrefixTemplate": "task: search result | query: {text}",
+      "documentPrefixTemplate": "title: none | text: {text}",
+      "sourceRepos": [
+        {
+          "repoId": "ggml-org/embeddinggemma-300m-GGUF",
+          "revision": "main",
+          "filename": "embeddinggemma-300m-Q8_0.gguf"
+        }
+      ]
+    },
+    {
+      "id": "bge_m3",
+      "task": "emb",
+      "displayName": "bge-m3",
+      "license": "MIT",
+      "multilingual": true,
+      "producedDimension": 1024,
+      "pooling": "mean",
+      "arch": "xlm-roberta",
+      "default": false,
+      "queryPrefixTemplate": null,
+      "documentPrefixTemplate": null,
+      "sourceRepos": [
+        {
+          "repoId": "bge-m3-gguf",
+          "revision": "pinned",
+          "filename": "bge-m3-Q8_0.gguf",
+          "note": "Pinned trusted community GGUF — validate in Phase 1 inclusion gate"
+        }
+      ]
+    }
+  ]
+}

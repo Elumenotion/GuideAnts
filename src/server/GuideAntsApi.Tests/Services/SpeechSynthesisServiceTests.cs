@@ -63,9 +63,13 @@ public sealed class SpeechSynthesisServiceTests
             handler.LastRequestUri!.ToString().Should().Be("http://guideants-ai/tts/synthesize");
             handler.LastRequestHeaders.Should().ContainKey("x-request-id");
             handler.LastRequestBody.Should().Contain("\"text\":\"Hello world\"");
-            handler.LastRequestBody.Should().Contain("\"voice\":\"af_heart\"");
-            handler.LastRequestBody.Should().Contain("\"lang_code\":\"a\"");
             handler.LastRequestBody.Should().Contain("\"speed\":1");
+            // Wire contract (RULES I5): no lang_code from .NET — the engine
+            // derives it from the active catalog entry / voice pack.
+            handler.LastRequestBody.Should().NotContain("lang_code");
+            // No voice configured for this mode, so the field is omitted and the
+            // engine uses the active model's default voice (no hardcoded default).
+            handler.LastRequestBody.Should().NotContain("\"voice\"");
         }
         finally
         {

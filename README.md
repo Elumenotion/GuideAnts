@@ -40,6 +40,7 @@ For teams who want to go further, GuideAnts lets you encode repeatable ways of w
 | **Files and documents** | View, edit, and collaborate on Office docs (DOCX, PPTX, XLSX), ODF formats, and Markdown directly in notebooks. Track versions, lineage, and markdown shadows for efficient indexing and RAG. |
 | **Context and grounding** | Ground conversations in your actual files, past work, and project knowledge–not just what you remember to paste in. |
 | **Guides and assistants** | Reusable AI workflows that package instructions, tools, files, model choices, and context options into assets anyone on the team can use–even just for yourself. |
+| **Skills** | Import or author portable `SKILL.md` packages (the agentskills.io / Claude / Codex dialect) on a guide or assistant. Bodies and references load on demand; `scripts/` and `assets/` materialize into the notebook sandbox at creation (like crew CodeInterpreter files). |
 | **Telemetry** | Usage events, cost tracking, invocation traces, model attribution, and runtime observability. |
 
 ### Shared and published work
@@ -75,6 +76,8 @@ Most teams have a few people who know the right prompt, the right model, and the
 GuideAnts packages instructions, tools, files, context options, conversation starters, model choices, and validation rules into **guides and assistants**–reusable assets that encode how work gets done. Anyone on the team can use them without needing to understand the underlying models or prompts.
 
 You don't have to publish a guide to benefit from one. Guides work inside notebooks, conversations, and internal workflows. Publishing is optional–and only makes sense when the workflow is ready to be shared.
+
+Guides and assistants can also carry **skills**–portable `SKILL.md` packages in the same dialect used by Claude and the OpenAI Codex CLI. Import an existing skill, author a new one in the Guide Builder, or spin up a new assistant directly from one or more skills. Skill bodies and references load on demand rather than being stuffed into every prompt; `scripts/` and `assets/` copy into the notebook sandbox when a notebook is created so the model can run them with the same tools as crew CodeInterpreter files. Published guide skills are also available to external agents as resources over the wire (`/api/published/mcp`).
 
 ---
 

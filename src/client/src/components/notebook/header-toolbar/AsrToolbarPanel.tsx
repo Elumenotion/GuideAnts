@@ -1,4 +1,4 @@
-import { FaCog, FaPlay, FaStop } from 'react-icons/fa';
+import { FaCog } from 'react-icons/fa';
 import { api } from '../../../services/api';
 import { textButtonClassName } from '../../../pages/settings/components/shared/ActionButtons';
 import type { ServicePanelCommonProps } from './types';
@@ -46,28 +46,6 @@ export function AsrToolbarPanel({
         }
       }
       await api.settings.localModels.selectActive(service.serviceId, modelRef);
-      await onRefresh();
-    } finally {
-      setInFlight(false);
-    }
-  };
-
-  const powerOn = async () => {
-    const activeModel = service.localModelOptions.find((item) => item.isActive) ?? service.localModelOptions[0];
-    if (!activeModel) return;
-    setInFlight(true);
-    try {
-      await api.settings.localModels.load(service.serviceId, { model_path: activeModel.modelRef });
-      await onRefresh();
-    } finally {
-      setInFlight(false);
-    }
-  };
-
-  const powerOff = async () => {
-    setInFlight(true);
-    try {
-      await api.settings.localModels.unload(service.serviceId);
       await onRefresh();
     } finally {
       setInFlight(false);
@@ -127,28 +105,6 @@ export function AsrToolbarPanel({
           );
         })}
       </div>
-
-      {service.supportsLocalRuntimePower && (
-        <div className="border-t pt-2 flex items-center gap-2">
-          <span className="text-xs">Runtime</span>
-          <button
-            type="button"
-            className="p-1.5 rounded border border-emerald-300 text-emerald-700"
-            aria-label="Turn ASR runtime on"
-            onClick={() => void powerOn()}
-          >
-            <FaPlay className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            className="p-1.5 rounded border border-slate-300 text-slate-700"
-            aria-label="Turn ASR runtime off"
-            onClick={() => void powerOff()}
-          >
-            <FaStop className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
 
       <button
         type="button"
