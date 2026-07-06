@@ -3,7 +3,9 @@ using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
+using GuideAntsApi.Services.Guides;
 using GuideAntsApi.Services.Guides.Skills;
+using GuideAntsApi.Tests.Services.Guides;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Tests.Services.Skills;
@@ -104,5 +106,75 @@ metadata:
         var act = () => SkillDtoBuilder.FlattenSkillUploads(skills);
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*FolderKind 'Skill'*");
+    }
+
+    [TestMethod]
+    public async Task CreateAssistantAsync_FromSkillPayload_PersistsScriptsWithoutSkillPackage()
+    {
+        const string skillMarkdown = """
+---
+name: searxng-search
+description: SearXNG meta-search.
+---
+# SearXNG Search
+""";
+        const string scriptContent = "#!/bin/bash\necho searxng";
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"create-from-skill-{Guid.NewGuid():N}")
+            .Options;
+
+        await using var context = new ApplicationDbContext(options);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
+
+        var dto = new CreateAssistantDto(
+            Name: "searxng-search",
+            Description: "SearXNG meta-search.",
+            Instructions: skillMarkdown.Trim(),
+            ModelId: null,
+            Temperature: null,
+            TopP: null,
+            ReasoningEffort: null,
+            SamplingParametersJson: null,
+            AvatarImageBytes: null,
+            AvatarContentType: null,
+            ToolIds: null,
+            CustomTools: null,
+            ContextOptions: null,
+            Files:
+            [
+                new FileUploadDto(
+                    "Skill",
+                    null,
+                    "Skills/searxng-search/scripts/searxng.sh",
+                    Encoding.UTF8.GetBytes(scriptContent),
+                    "application/x-sh"),
+            ],
+            ConversationStarters: null);
+
+        var created = await service.CreateAssistantAsync(dto);
+
+        var persistedFiles = await context.AssistantFiles
+            .Where(f => f.AssistantId == created.Id && f.FolderKind == "Skill")
+            .ToListAsync();
+        persistedFiles.Should().ContainSingle();
+        persistedFiles[0].RelativePath.Should().Be("Skills/searxng-search/scripts/searxng.sh");
+        Encoding.UTF8.GetString(persistedFiles[0].ContentBytes!).Should().Be(scriptContent);
+        persistedFiles.Should().NotContain(f => f.RelativePath.EndsWith("SKILL.md"));
+
+        (await context.AssistantSkillMetas.CountAsync(m => m.AssistantId == created.Id)).Should().Be(0);
+
+        var assistant = await context.Assistants
+            .Include(a => a.Files)
+            .SingleAsync(a => a.Id == created.Id);
+        assistant.Instructions.Should().Contain("SearXNG Search");
+
+        var guideSkills = SkillDtoBuilder.BuildFromAssistantFiles(assistant.Files, assistant.SkillMetas);
+        guideSkills.Should().BeEmpty();
+
+        var filesContextOption = await context.AssistantContextOptions
+            .SingleAsync(o => o.AssistantId == created.Id);
+        filesContextOption.Key.Should().Be(GuideExecutablePayload.FilesContextOptionKey);
+        filesContextOption.Value.Should().Be(GuideExecutablePayload.FilesContextOptionValue);
     }
 }

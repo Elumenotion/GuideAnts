@@ -1,11 +1,13 @@
-import { API_BASE_URL } from '../../../../config/apiConfig';
+import { api } from '../../../../services/api';
 import type {
   AssistantSkillDto,
   AssistantSkillSaveDto,
+  CreateAssistantDto,
   FileUploadDto,
 } from '../../../../types/guides';
-import { parseSkillFrontmatter } from './skillFrontmatter';
 import { decodePendingFileContent } from './skillFileTreeModel';
+import { mapSkillPrerequisites } from './skillToolsetMapping';
+import { withSuggestedFilesContextOption } from '../executablePayload';
 
 export interface CreateFromSkillSelection {
   primarySkillName: string;
@@ -25,8 +27,13 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binaryString);
 }
 
-function isSkillManifestPath(relativePath: string): boolean {
+export function isSkillManifestPath(relativePath: string): boolean {
   return relativePath.endsWith('/SKILL.md') || relativePath.endsWith('SKILL.md');
+}
+
+/** Payload files copied onto a new assistant; SKILL.md content lives in instructions only. */
+export function filterSkillPayloadFilesForAssistant(files: FileUploadDto[]): FileUploadDto[] {
+  return files.filter((file) => !isSkillManifestPath(file.relativePath));
 }
 
 function findPendingSkillMarkdown(
@@ -42,28 +49,8 @@ function findPendingSkillMarkdown(
   return decodePendingFileContent(manifest.contentBytes);
 }
 
-async function downloadAssistantFile(
-  assistantId: string,
-  fileId: string,
-): Promise<Blob> {
-  const response = await fetch(
-    `${API_BASE_URL}/assistants/${assistantId}/files/${fileId}/download`,
-  );
-  if (!response.ok) {
-    throw new Error('Failed to download skill file content.');
-  }
-
-  return response.blob();
-}
-
 export function buildAssistantInstructionsFromSkillMarkdown(markdown: string): string {
-  const parsed = parseSkillFrontmatter(markdown);
-  const body = parsed.body.trim();
-  if (body.length > 0) {
-    return body;
-  }
-
-  return parsed.originalMarkdown.trim();
+  return markdown.trim();
 }
 
 export async function resolveSkillMarkdown(
@@ -78,39 +65,41 @@ export async function resolveSkillMarkdown(
 
   const manifest = skill.files.find((file) => isSkillManifestPath(file.relativePath));
   if (!manifest || manifest.id.startsWith('pending-')) {
-    throw new Error(`Save ${skill.name} before creating an assistant from it.`);
+    throw new Error(`Skill '${skill.name}' is not saved yet. Save the guide first.`);
   }
 
   if (!assistantId) {
-    throw new Error(`Save the guide before creating an assistant from ${skill.name}.`);
+    throw new Error('Save the guide before creating an assistant from saved skills.');
   }
 
-  const blob = await downloadAssistantFile(assistantId, manifest.id);
+  const blob = await api.guides.assistants.downloadFile(assistantId, manifest.id);
   return blob.text();
 }
 
-async function buildSkillFilesToAdd(
+async function buildSkillPayloadFiles(
   skill: AssistantSkillDto,
   pendingSkillUploads: AssistantSkillSaveDto[],
   assistantId?: string,
 ): Promise<FileUploadDto[]> {
   const pending = pendingSkillUploads.find((item) => item.name === skill.name);
   if (pending?.filesToAdd && pending.filesToAdd.length > 0) {
-    return pending.filesToAdd;
+    return filterSkillPayloadFilesForAssistant(pending.filesToAdd);
   }
 
-  const persistedFiles = skill.files.filter((file) => !file.id.startsWith('pending-'));
-  if (persistedFiles.length === 0) {
-    throw new Error(`Skill '${skill.name}' has no files to copy. Save it first.`);
+  const persistedPayloadFiles = skill.files.filter(
+    (file) => !file.id.startsWith('pending-') && !isSkillManifestPath(file.relativePath),
+  );
+  if (persistedPayloadFiles.length === 0) {
+    return [];
   }
 
   if (!assistantId) {
-    throw new Error(`Save the guide before creating an assistant from ${skill.name}.`);
+    throw new Error('Save the guide before creating an assistant from saved skills.');
   }
 
   const uploads: FileUploadDto[] = [];
-  for (const file of persistedFiles) {
-    const blob = await downloadAssistantFile(assistantId, file.id);
+  for (const file of persistedPayloadFiles) {
+    const blob = await api.guides.assistants.downloadFile(assistantId, file.id);
     uploads.push({
       folderKind: 'Skill',
       relativePath: file.relativePath,
@@ -122,28 +111,48 @@ async function buildSkillFilesToAdd(
   return uploads;
 }
 
-export async function buildCreateFromSkillUploads(
+export async function buildCreateAssistantFromSkillPayload(
+  projectId: string,
   skills: AssistantSkillDto[],
   pendingSkillUploads: AssistantSkillSaveDto[],
   assistantId: string | undefined,
   selection: CreateFromSkillSelection,
-): Promise<AssistantSkillSaveDto[]> {
+): Promise<CreateAssistantDto> {
+  const primary = skills.find((skill) => skill.name === selection.primarySkillName);
+  if (!primary) {
+    throw new Error('Primary skill not found.');
+  }
+
   const selectedSkills = skills.filter((skill) => selection.selectedSkillNames.includes(skill.name));
-  const uploads: AssistantSkillSaveDto[] = [];
+  const mapping = mapSkillPrerequisites(
+    selectedSkills.flatMap((skill) => skill.requiresToolsets),
+    selectedSkills.flatMap((skill) => skill.requiresTools),
+  );
+  const primaryMarkdown = await resolveSkillMarkdown(primary, pendingSkillUploads, assistantId);
+  const instructions = buildAssistantInstructionsFromSkillMarkdown(primaryMarkdown);
 
+  const files: FileUploadDto[] = [];
   for (const skill of selectedSkills) {
-    const filesToAdd = await buildSkillFilesToAdd(skill, pendingSkillUploads, assistantId);
-    const pending = pendingSkillUploads.find((item) => item.name === skill.name);
-
-    uploads.push({
-      name: skill.name,
-      description: skill.description,
-      enabled: skill.enabled,
-      displayOrder: skill.displayOrder,
-      source: pending?.source ?? skill.source,
-      filesToAdd,
+    files.push(...await buildSkillPayloadFiles(skill, pendingSkillUploads, assistantId));
+  }
+  if (mapping.needsCodeInterpreter) {
+    files.push({
+      folderKind: 'CodeInterpreter',
+      relativePath: `skills-${primary.name}-sandbox-placeholder.txt`,
+      contentBytes: btoa(`# Sandbox placeholder for skill '${primary.name}'\n`),
+      contentType: 'text/plain',
     });
   }
 
-  return uploads;
+  return {
+    projectId,
+    name: primary.name,
+    description: primary.description,
+    instructions,
+    toolIds: mapping.toolIds,
+    files: files.length > 0 ? files : undefined,
+    contextOptions: files.length > 0
+      ? withSuggestedFilesContextOption([], files)
+      : undefined,
+  };
 }

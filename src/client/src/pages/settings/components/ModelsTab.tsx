@@ -296,20 +296,30 @@ export function ModelsTab({
             </div>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+          <div className="overflow-hidden">
+            <table className="w-full table-fixed divide-y divide-gray-200 text-sm">
+              <colgroup>
+                <col className="w-[18%]" />
+                <col className="w-[12%]" />
+                <col className="w-[11%]" />
+                <col className="w-[5%]" />
+                <col className="w-[12%]" />
+                <col className="w-[8%]" />
+                <col className="w-[9%]" />
+                <col className="w-[12%]" />
+                <col className="w-[13%]" />
+              </colgroup>
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Model ID</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Display</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Provider</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Order</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Active</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Updated</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Readiness</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Local runtime</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Profile</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wide text-gray-500">Actions</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Model ID</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Display</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Provider</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Active</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Updated</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Readiness</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Local runtime</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Profile</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium uppercase tracking-wide text-gray-500">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white">
@@ -333,16 +343,25 @@ export function ModelsTab({
                     }}
                     className={highlighted ? 'bg-amber-50 transition-colors duration-500' : 'transition-colors duration-500'}
                   >
-                    <td className="whitespace-nowrap px-4 py-3 text-sm font-mono text-gray-900">{model.modelId}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{model.displayName}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">{getCatalogProviderDisplayName(model.provider)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">{model.displayOrder ?? '-'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">{model.isActive ? 'Yes' : 'No'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(model.updated ?? model.created)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-3 py-3" title={model.modelId}>
+                      <span className="block truncate font-mono text-gray-900">{model.modelId}</span>
+                    </td>
+                    <td className="px-3 py-3" title={model.displayName}>
+                      <span className="block truncate text-gray-900">{model.displayName}</span>
+                    </td>
+                    <td className="px-3 py-3 text-gray-700">
+                      <span className="block truncate" title={getCatalogProviderDisplayName(model.provider)}>
+                        {getCatalogProviderDisplayName(model.provider)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-gray-700">{model.isActive ? 'Yes' : 'No'}</td>
+                    <td className="px-3 py-3 text-gray-700" title={formatDateTime(model.updated ?? model.created)}>
+                      <span className="block truncate">{formatDateTime(model.updated ?? model.created)}</span>
+                    </td>
+                    <td className="px-3 py-3 text-gray-700">
                       <ReadinessBadge readiness={readinessByModel[model.modelId]} loading={readinessLoading} />
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-3 py-3 text-gray-700">
                       {llamaBadge ? (
                         <span
                           className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${badgeToneClasses[llamaBadge.tone]}`}
@@ -358,10 +377,10 @@ export function ModelsTab({
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-3 py-3 text-gray-700">
                       {profileId ? (
-                        <div className="flex flex-col gap-0.5">
-                          <span className="font-mono text-xs text-gray-900">{profileId}</span>
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <span className="truncate font-mono text-xs text-gray-900" title={profileId}>{profileId}</span>
                           {othersUsing.length > 0 && (
                             <span className="text-xs text-gray-500" title={othersUsing.join(', ')}>
                               Also used by {othersUsing.length} model(s)
@@ -372,7 +391,7 @@ export function ModelsTab({
                         '—'
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right text-sm">
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
                       <div
                         className="flex items-center justify-end gap-1.5"
                         role="group"
@@ -400,7 +419,7 @@ export function ModelsTab({
                 })}
                 {orderedModels.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-sm text-gray-600">
+                    <td colSpan={9} className="px-3 py-8 text-center text-gray-600">
                       No models configured yet.
                     </td>
                   </tr>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ConfirmationDialog } from '../../../common/ConfirmationDialog';
-import { mapSkillPrerequisites } from './skillToolsetMapping';
 import type { CreateFromSkillSelection } from './createFromSkillHelpers';
+import { mapSkillPrerequisites } from './skillToolsetMapping';
 
 interface CreateFromSkillSkillOption {
   name: string;
@@ -12,6 +12,7 @@ interface CreateFromSkillSkillOption {
 
 interface CreateFromSkillDialogProps {
   isOpen: boolean;
+  initialPrimarySkillName?: string;
   skills: CreateFromSkillSkillOption[];
   isConfirming?: boolean;
   onConfirm: (selection: CreateFromSkillSelection) => void;
@@ -20,6 +21,7 @@ interface CreateFromSkillDialogProps {
 
 export function CreateFromSkillDialog({
   isOpen,
+  initialPrimarySkillName,
   skills,
   isConfirming = false,
   onConfirm,
@@ -33,9 +35,15 @@ export function CreateFromSkillDialog({
       return;
     }
 
+    if (initialPrimarySkillName && skills.some((skill) => skill.name === initialPrimarySkillName)) {
+      setSelectedNames([initialPrimarySkillName]);
+      setPrimarySkillName(initialPrimarySkillName);
+      return;
+    }
+
     setSelectedNames(skills.map((skill) => skill.name));
     setPrimarySkillName(skills[0]?.name ?? '');
-  }, [isOpen, skills]);
+  }, [isOpen, initialPrimarySkillName, skills]);
 
   const mapping = useMemo(() => {
     const selected = skills.filter((skill) => selectedNames.includes(skill.name));
@@ -63,8 +71,9 @@ export function CreateFromSkillDialog({
   };
 
   const message = [
-    'Choose which skills to attach to the new assistant and which skill seeds its name, description, and instructions.',
+    'Choose which skills to attach to the new assistant and which skill seeds its name, description, and instructions from SKILL.md.',
     '',
+    'Confirming will create the assistant immediately with copied skill files and mapped tools.',
     'The following capabilities will be added based on explicit prerequisite mapping:',
     ...mapping.mappings.map(
       (item) => `• ${item.requirement} → ${item.mappedCapability}: ${item.reason}`,

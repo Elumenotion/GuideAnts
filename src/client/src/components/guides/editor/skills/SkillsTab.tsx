@@ -5,20 +5,18 @@ import type {
   AssistantSkillDto,
   AssistantSkillSaveDto,
   FileDto,
-  FileUploadDto,
   ToolAssignmentDto,
 } from '../../../../types/guides';
+import { api } from '../../../../services/api';
+import { useToast } from '../../../common/Toast';
 import { SkillList } from './SkillList';
 import { ImportSkillDialog } from './ImportSkillDialog';
 import { AuthorSkillEditor } from './AuthorSkillEditor';
 import { CreateFromSkillDialog } from './CreateFromSkillDialog';
 import { SkillFilePreviewModal } from './SkillFilePreviewModal';
-import { mapSkillPrerequisites } from './skillToolsetMapping';
 import { parseSkillFrontmatter } from './skillFrontmatter';
 import {
-  buildAssistantInstructionsFromSkillMarkdown,
-  buildCreateFromSkillUploads,
-  resolveSkillMarkdown,
+  buildCreateAssistantFromSkillPayload,
   type CreateFromSkillSelection,
 } from './createFromSkillHelpers';
 import {
@@ -78,9 +76,11 @@ export function SkillsTab({
   onDownloadFile,
 }: SkillsTabProps) {
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [showImport, setShowImport] = useState(false);
   const [showAuthor, setShowAuthor] = useState(false);
   const [showCreateFromSkill, setShowCreateFromSkill] = useState(false);
+  const [createFromSkillInitial, setCreateFromSkillInitial] = useState<string | undefined>();
   const [isCreatingFromSkill, setIsCreatingFromSkill] = useState(false);
   const [createFromSkillError, setCreateFromSkillError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -90,17 +90,45 @@ export function SkillsTab({
     [selectedToolTypes, toolAssignments],
   );
 
-  const createFromSkillMappingForSelection = (selection: CreateFromSkillSelection) => {
-    const selectedSkills = skills.filter((skill) => selection.selectedSkillNames.includes(skill.name));
-    const toolsets = selectedSkills.flatMap((skill) => skill.requiresToolsets);
-    const tools = selectedSkills.flatMap((skill) => skill.requiresTools);
-    return mapSkillPrerequisites(toolsets, tools);
-  };
-
   const updateSkills = (nextSkills: AssistantSkillDto[]) => {
     const reindexed = reindexSkillDisplayOrders(nextSkills);
     onSkillsChange(reindexed);
     onPendingSkillUploadsChange(syncPendingUploadOrders(pendingSkillUploads, reindexed));
+  };
+
+  const openCreateFromSkill = (primarySkillName?: string) => {
+    setCreateFromSkillError(null);
+    setCreateFromSkillInitial(primarySkillName);
+    setShowCreateFromSkill(true);
+  };
+
+  const handleCreateFromSkill = async (selection: CreateFromSkillSelection) => {
+    setIsCreatingFromSkill(true);
+    setCreateFromSkillError(null);
+
+    try {
+      const payload = await buildCreateAssistantFromSkillPayload(
+        projectId,
+        skills,
+        pendingSkillUploads,
+        assistantId,
+        selection,
+      );
+      const created = await api.guides.assistants.create(payload);
+      showToast({
+        type: 'success',
+        title: 'Assistant created from skill',
+        message: `"${created.name}" is ready to use.`,
+      });
+      setShowCreateFromSkill(false);
+      navigate(`/projects/${projectId}/guides/assistant/${created.id}?tab=general`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create assistant from skill.';
+      setCreateFromSkillError(message);
+      showToast({ type: 'error', title: 'Create assistant failed', message });
+    } finally {
+      setIsCreatingFromSkill(false);
+    }
   };
 
   const handleImported = (skill: AssistantSkillSaveDto) => {
@@ -164,60 +192,6 @@ export function SkillsTab({
     setPreview({ skillName, file });
   };
 
-  const handleCreateFromSkill = async (selection: CreateFromSkillSelection) => {
-    const primary = skills.find((skill) => skill.name === selection.primarySkillName);
-    if (!primary) {
-      return;
-    }
-
-    setIsCreatingFromSkill(true);
-    setCreateFromSkillError(null);
-
-    try {
-      const mapping = createFromSkillMappingForSelection(selection);
-      const skillUploads = await buildCreateFromSkillUploads(
-        skills,
-        pendingSkillUploads,
-        assistantId,
-        selection,
-      );
-      const primaryMarkdown = await resolveSkillMarkdown(primary, pendingSkillUploads, assistantId);
-      const instructions = buildAssistantInstructionsFromSkillMarkdown(primaryMarkdown);
-
-      const placeholderFiles: FileUploadDto[] = [];
-      if (mapping.needsCodeInterpreter) {
-        placeholderFiles.push({
-          folderKind: 'CodeInterpreter',
-          relativePath: `skills-${primary.name}-sandbox-placeholder.txt`,
-          contentBytes: btoa(
-            `# Sandbox placeholder for skill '${primary.name}'\n`,
-          ),
-          contentType: 'text/plain',
-        });
-      }
-
-      navigate(`/projects/${projectId}/guides/assistant/new`, {
-        state: {
-          fromSkills: {
-            name: primary.name,
-            description: primary.description,
-            instructions,
-            toolIds: mapping.toolIds,
-            skills: skillUploads,
-            files: placeholderFiles,
-          },
-        },
-      });
-      setShowCreateFromSkill(false);
-    } catch (error) {
-      setCreateFromSkillError(
-        error instanceof Error ? error.message : 'Failed to prepare assistant from skill.',
-      );
-    } finally {
-      setIsCreatingFromSkill(false);
-    }
-  };
-
   return (
     <div className="space-y-6" data-tour-id="guide.skills.section">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -251,10 +225,7 @@ export function SkillsTab({
           {skills.length > 0 && (
             <button
               type="button"
-              onClick={() => {
-                setCreateFromSkillError(null);
-                setShowCreateFromSkill(true);
-              }}
+              onClick={() => openCreateFromSkill()}
               className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
               <FaRobot className="h-3 w-3" />
@@ -295,6 +266,7 @@ export function SkillsTab({
           }}
           onPreviewFile={handlePreviewFile}
           onDownloadFile={onDownloadFile}
+          onCreateAssistantFromSkill={openCreateFromSkill}
         />
       )}
 
@@ -323,6 +295,7 @@ export function SkillsTab({
       />
       <CreateFromSkillDialog
         isOpen={showCreateFromSkill}
+        initialPrimarySkillName={createFromSkillInitial}
         skills={skills.map((skill) => ({
           name: skill.name,
           description: skill.description,

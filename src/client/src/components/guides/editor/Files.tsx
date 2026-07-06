@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { FaFile, FaCode, FaTimes, FaPlus, FaEye, FaSpinner, FaExclamationTriangle, FaCheckCircle, FaDownload } from 'react-icons/fa';
 import { FileUploadDto, FileDto, MarkdownExtractionStatus } from '../../../types/guides';
 import { isMarkdownExtractionSupported, SUPPORTED_MARKDOWN_EXTRACTION_EXTENSIONS } from '../../../utils/fileTypeSupport';
+import { isMaterializableSkillPayloadPath } from './executablePayload';
 
 interface FilesProps {
   existingFiles: FileDto[]; // Files already on the server
@@ -144,6 +145,12 @@ export function Files({ existingFiles, newFiles, onExistingFilesChange, onNewFil
   const newVectorStore = newFiles.filter((f) => f.folderKind === 'VectorStore');
   const existingCodeInterpreter = existingFiles.filter((f) => f.folderKind === 'CodeInterpreter');
   const newCodeInterpreter = newFiles.filter((f) => f.folderKind === 'CodeInterpreter');
+  const existingSkillOrigin = existingFiles.filter(
+    (f) => f.folderKind === 'Skill',
+  );
+  const newSkillOrigin = newFiles.filter((f) => f.folderKind === 'Skill');
+  const existingNotebookFiles = [...existingCodeInterpreter, ...existingSkillOrigin];
+  const newNotebookFiles = [...newCodeInterpreter, ...newSkillOrigin];
 
   return (
     <div className="space-y-6" data-tour-id="guide.files.section">
@@ -252,14 +259,17 @@ export function Files({ existingFiles, newFiles, onExistingFilesChange, onNewFil
           These files are copied into notebooks based on the guide and its crew members. They can be used as attachments and memories in chats and accessed, analyzed, and modified by code the assistant writes (e.g., data files, spreadsheets, documents to process).
         </p>
 
-        {(existingCodeInterpreter.length > 0 || newCodeInterpreter.length > 0) && (
+        {(existingNotebookFiles.length > 0 || newNotebookFiles.length > 0) && (
           <div className="space-y-2">
             {/* Existing files from server */}
-            {existingCodeInterpreter.map((file) => (
+            {existingNotebookFiles.map((file) => (
               <div key={file.id} className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-md">
                 <div className="flex items-center gap-2">
                   <FaCode className="w-5 h-5 text-green-600" />
                   <span className="text-sm font-medium text-gray-900">{file.relativePath}</span>
+                  {file.folderKind === 'Skill' && isMaterializableSkillPayloadPath(file.relativePath) && (
+                    <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded">skill payload</span>
+                  )}
                   <span className="text-xs text-gray-500 ml-2">(saved)</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -285,7 +295,7 @@ export function Files({ existingFiles, newFiles, onExistingFilesChange, onNewFil
               </div>
             ))}
             {/* New files to upload */}
-            {newCodeInterpreter.map((file, index) => (
+            {newNotebookFiles.map((file, index) => (
               <div key={`new-${index}`} className="flex items-center justify-between p-3 bg-green-100 border border-green-300 rounded-md border-dashed">
                 <div className="flex items-center gap-2">
                   <FaCode className="w-5 h-5 text-green-600" />

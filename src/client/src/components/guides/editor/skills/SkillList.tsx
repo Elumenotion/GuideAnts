@@ -11,6 +11,7 @@ interface SkillListProps {
   onMoveSkill: (skillName: string, direction: 'up' | 'down') => void;
   onPreviewFile: (skillName: string, file: FileDto) => void;
   onDownloadFile?: (fileId: string, fileName: string) => void;
+  onCreateAssistantFromSkill?: (skillName: string) => void;
 }
 
 export function SkillList({
@@ -22,6 +23,7 @@ export function SkillList({
   onMoveSkill,
   onPreviewFile,
   onDownloadFile,
+  onCreateAssistantFromSkill,
 }: SkillListProps) {
   const sortedSkills = sortSkillsByDisplayOrder(skills);
 
@@ -47,6 +49,7 @@ export function SkillList({
           onRemove={() => onSkillRemove(skill.name)}
           onPreviewFile={(file) => onPreviewFile(skill.name, file)}
           onDownloadFile={onDownloadFile}
+          onCreateAssistant={() => onCreateAssistantFromSkill?.(skill.name)}
         />
       ))}
     </div>
