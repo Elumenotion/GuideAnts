@@ -68,6 +68,65 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+VOICE_PACK_UNAVAILABLE_MESSAGE = "Voice pack is not available."
+MODEL_FILES_NOT_FOUND_MESSAGE = "Required model files were not found. Download the model first."
+
+
+def model_load_client_message(exc: ValueError) -> str:
+    detail = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ""
+    if detail == "model_path must be a simple local model name.":
+        return detail
+    if detail == "resolved model_path escapes the permitted model directory.":
+        return detail
+    if detail == "TTS catalog does not declare a default entry (default: true).":
+        return detail
+    if detail == "voice_pack models require GA_TTS_VOICE or a selected default voice preset.":
+        return detail
+    catalog_match = re.fullmatch(
+        r"model_id '([^']+)' is not in the curated TTS catalog\. Only manifest entries are allowed\.",
+        detail,
+    )
+    if catalog_match:
+        return detail
+    local_dir_match = re.fullmatch(
+        r"Local model directory '([^']+)' is not a catalog-listed artifact\.",
+        detail,
+    )
+    if local_dir_match and MODEL_PATH_RE.fullmatch(local_dir_match.group(1)):
+        return detail
+    default_voice_match = re.fullmatch(
+        r"default voice preset '([^']+)' is not in the voice pack\.",
+        detail,
+    )
+    if default_voice_match and MODEL_PATH_RE.fullmatch(default_voice_match.group(1)):
+        return detail
+    return "Invalid model request."
+
+
+def voice_request_client_error(exc: ValueError) -> tuple[str, str]:
+    detail = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ""
+    lang_match = re.fullmatch(r"unsupported lang_code: ([a-z])", detail)
+    if lang_match:
+        return "unsupported_lang_code", detail
+    if re.fullmatch(
+        r"lang_code '[a-z]' is unsupported: Japanese and Chinese are not available in Chatterbox",
+        detail,
+    ):
+        return "unsupported_lang_code", "Unsupported language code."
+    if detail.startswith("unknown voice preset id:"):
+        voice_id = detail.split(":", 1)[1].strip()
+        if voice_id and MODEL_PATH_RE.fullmatch(voice_id):
+            return "invalid_voice", f"unknown voice preset id: {voice_id}"
+        return "invalid_voice", "Unknown voice preset id."
+    if detail.startswith("no language mapping for voice language:"):
+        return "unsupported_lang_code", "Unsupported language for the selected voice."
+    if detail.startswith("no lang_code mapping for voice language:"):
+        return "unsupported_lang_code", "Unsupported language for the selected voice."
+    if detail == "speed must be positive":
+        return "invalid_voice", detail
+    return "invalid_voice", "Invalid voice request."
+
+
 def env_flag(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -1272,9 +1331,10 @@ async def admin_voice_pack() -> JSONResponse:
     try:
         voice_pack = load_voice_pack()
     except (FileNotFoundError, ValueError) as exc:
+        log_event("voice_pack_unavailable", errorType=type(exc).__name__, error=str(exc))
         return JSONResponse(
             status_code=503,
-            content={"error": "voice_pack_unavailable", "message": str(exc)},
+            content={"error": "voice_pack_unavailable", "message": VOICE_PACK_UNAVAILABLE_MESSAGE},
         )
 
     voices = [
@@ -1365,14 +1425,36 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
             status_code=200,
             content={"requestId": request_id, "status": "loaded", **details},
         )
-    except (ValueError, FileNotFoundError) as exc:
+    except ValueError as exc:
+        log_event(
+            "tts_model_load_validation_failed",
+            requestId=request_id,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
         return JSONResponse(
             status_code=400,
             content={
                 "requestId": request_id,
                 "status": "failed",
                 "error": "invalid_model_request",
-                "message": str(exc),
+                "message": model_load_client_message(exc),
+            },
+        )
+    except FileNotFoundError as exc:
+        log_event(
+            "tts_model_load_not_found",
+            requestId=request_id,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        return JSONResponse(
+            status_code=400,
+            content={
+                "requestId": request_id,
+                "status": "failed",
+                "error": "invalid_model_request",
+                "message": MODEL_FILES_NOT_FOUND_MESSAGE,
             },
         )
     except Exception as exc:
@@ -1576,13 +1658,18 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
             config, requested_voice or None, payload.lang_code
         )
     except FileNotFoundError as exc:
+        log_event(
+            "tts_voice_pack_unavailable",
+            requestId=request_id,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
         return JSONResponse(
             status_code=500,
-            content={"requestId": request_id, "error": "voice_pack_unavailable", "message": str(exc)},
+            content={"requestId": request_id, "error": "voice_pack_unavailable", "message": VOICE_PACK_UNAVAILABLE_MESSAGE},
         )
     except ValueError as exc:
-        message = str(exc)
-        error_code = "unsupported_lang_code" if "lang_code" in message else "invalid_voice"
+        error_code, message = voice_request_client_error(exc)
         return JSONResponse(
             status_code=400,
             content={"requestId": request_id, "error": error_code, "message": message},

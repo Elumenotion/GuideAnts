@@ -131,7 +131,8 @@ def get_audio_duration_seconds(path: str) -> float:
 
 
 def decode_audio_to_wav_16k_mono(input_path: str) -> str:
-    output_path = tempfile.mktemp(suffix=".wav")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
+        output_path = temp_file.name
     subprocess.run(
         [
             "ffmpeg",
@@ -298,18 +299,23 @@ def resolve_weight_type() -> str | None:
     return value or None
 
 
+def resolve_path_within_model_dir(model_dir: str, requested: str) -> str:
+    if not MODEL_PATH_RE.fullmatch(requested):
+        raise ValueError("model_path must be a simple local model name (letters, digits, dot, underscore, hyphen).")
+    base_real = os.path.realpath(model_dir)
+    candidate = os.path.realpath(os.path.join(base_real, requested))
+    if not candidate.startswith(base_real + os.sep):
+        raise ValueError("resolved model_path escapes the permitted model directory.")
+    return candidate
+
+
 def resolve_model_target(request: LoadModelRequest) -> tuple[str, str, dict[str, Any] | None]:
     model_dir = get_model_dir()
     os.makedirs(model_dir, exist_ok=True)
 
     if request.model_path:
         requested = request.model_path.strip()
-        if not MODEL_PATH_RE.fullmatch(requested):
-            raise ValueError("model_path must be a simple local model name (letters, digits, dot, underscore, hyphen).")
-        base_real = os.path.realpath(model_dir)
-        candidate = os.path.realpath(os.path.join(base_real, requested))
-        if not candidate.startswith(base_real + os.sep):
-            raise ValueError("resolved model_path escapes the permitted model directory.")
+        candidate = resolve_path_within_model_dir(model_dir, requested)
         if not os.path.exists(candidate):
             raise FileNotFoundError(
                 f"Configured model_path '{requested}' does not exist under GA_ASR_MODEL_DIR."
@@ -335,9 +341,11 @@ def resolve_model_target(request: LoadModelRequest) -> tuple[str, str, dict[str,
             return candidate, entry.get("targetDirectory") or os.path.basename(candidate), entry
         except ValueError:
             leaf = model_id.split("/")[-1].strip()
-            candidate = os.path.join(model_dir, leaf)
+            if not leaf:
+                raise
+            candidate = resolve_path_within_model_dir(model_dir, leaf)
             if os.path.exists(candidate):
-                return os.path.realpath(candidate), leaf, None
+                return candidate, leaf, None
             raise
 
     default_model_path = os.getenv("GA_ASR_DEFAULT_MODEL_PATH", "").strip()

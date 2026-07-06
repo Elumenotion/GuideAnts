@@ -206,21 +206,26 @@ def resolve_n_gpu_layers() -> tuple[str, int]:
     return device, -1
 
 
+def resolve_permitted_gguf_path(model_dir: str, requested: str) -> str:
+    requested = requested.strip()
+    if not MODEL_PATH_RE.fullmatch(requested) and not requested.endswith(".gguf"):
+        raise ValueError("model_path must be a simple local model name.")
+    base_real = os.path.realpath(model_dir)
+    candidate = os.path.realpath(os.path.join(base_real, requested))
+    if not candidate.startswith(base_real + os.sep) and candidate != base_real:
+        raise ValueError("resolved model_path escapes the permitted model directory.")
+    if not os.path.isfile(candidate):
+        raise FileNotFoundError(f"GGUF file '{requested}' does not exist.")
+    return candidate
+
+
 def resolve_gguf_target(request: LoadModelRequest) -> tuple[str, str, dict[str, Any]]:
     model_dir = get_model_dir()
     os.makedirs(model_dir, exist_ok=True)
 
     if request.model_path:
         requested = request.model_path.strip()
-        if not MODEL_PATH_RE.fullmatch(requested) and not requested.endswith(".gguf"):
-            if not MODEL_PATH_RE.fullmatch(requested):
-                raise ValueError("model_path must be a simple local model name.")
-        base_real = os.path.realpath(model_dir)
-        candidate = os.path.realpath(os.path.join(base_real, requested))
-        if not candidate.startswith(base_real + os.sep) and candidate != base_real:
-            raise ValueError("resolved model_path escapes the permitted model directory.")
-        if not os.path.isfile(candidate):
-            raise FileNotFoundError(f"GGUF file '{requested}' does not exist.")
+        candidate = resolve_permitted_gguf_path(model_dir, requested)
         ref = os.path.basename(candidate)
         for entry in CATALOG["entries"].values():
             if int(entry.get("producedDimension", 0)) == 0:
