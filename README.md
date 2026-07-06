@@ -40,6 +40,7 @@ For teams who want to go further, GuideAnts lets you encode repeatable ways of w
 | **Files and documents** | View, edit, and collaborate on Office docs (DOCX, PPTX, XLSX), ODF formats, and Markdown directly in notebooks. Track versions, lineage, and markdown shadows for efficient indexing and RAG. |
 | **Context and grounding** | Ground conversations in your actual files, past work, and project knowledge–not just what you remember to paste in. |
 | **Guides and assistants** | Reusable AI workflows that package instructions, tools, files, model choices, and context options into assets anyone on the team can use–even just for yourself. |
+| **Skills** | Import or author portable `SKILL.md` packages (the agentskills.io / Claude / Codex dialect) on a guide or assistant. Bodies and references load on demand; `scripts/` and `assets/` materialize into the notebook sandbox at creation (like crew CodeInterpreter files). |
 | **Telemetry** | Usage events, cost tracking, invocation traces, model attribution, and runtime observability. |
 
 ### Shared and published work
@@ -75,6 +76,8 @@ Most teams have a few people who know the right prompt, the right model, and the
 GuideAnts packages instructions, tools, files, context options, conversation starters, model choices, and validation rules into **guides and assistants**–reusable assets that encode how work gets done. Anyone on the team can use them without needing to understand the underlying models or prompts.
 
 You don't have to publish a guide to benefit from one. Guides work inside notebooks, conversations, and internal workflows. Publishing is optional–and only makes sense when the workflow is ready to be shared.
+
+Guides and assistants can also carry **skills**–portable `SKILL.md` packages in the same dialect used by Claude and the OpenAI Codex CLI. Import an existing skill, author a new one in the Guide Builder, or spin up a new assistant directly from one or more skills. Skill bodies and references load on demand rather than being stuffed into every prompt; `scripts/` and `assets/` copy into the notebook sandbox when a notebook is created so the model can run them with the same tools as crew CodeInterpreter files. Published guide skills are also available to external agents as resources over the wire (`/api/published/mcp`).
 
 ---
 
@@ -170,7 +173,8 @@ GuideAnts is a full-stack platform:
 
 - **Backend:** .NET solution with modular API, usage recording, sandbox execution, and provider-routed AI services.
 - **Frontend:** React 19 + Vite application with the GuideAnts UI.
-- **Runtime:** [`guideants-ai`](https://github.com/Elumenotion/GuideAnts/tree/main/docker) Docker service for scoped tool execution, document intelligence, and local AI workloads.
+- **Runtime:** [`guideants-ai`](https://github.com/Elumenotion/GuideAnts/tree/main/docker) Docker service for scoped tool execution, document intelligence, and local AI workloads. Local inference uses native runtimes–[llama.cpp](https://github.com/ggml-org/llama.cpp) for chat and embeddings, [audio.cpp](https://github.com/0xShug0/audio.cpp) for speech transcription and synthesis, and [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) for image generation–with Python facades and an nginx gateway.
+- **Local model catalogs:** Curated per-service manifests drive which models appear in settings, what files get downloaded, and how voice or speaker controls render (for example, TTS voice-pack presets vs. built-in speaker ids). See [`docs/native-ai-migration/`](docs/native-ai-migration/README.md) for the contributor architecture.
 - **Document workspace:** Built-in viewer and collaborative editor–open many formats in the notebook. Office (DOCX, PPTX, XLSX) and ODF (ODT, ODP, ODS) support real-time co-editing; Markdown has a full-featured editor; many more open for viewing, annotation, and versioning. Changes are tracked as part of your project's content lineage.
 - **Embedding:** [`guideants`](https://www.npmjs.com/package/guideants) npm package for embedding published guides into any web application.
 
@@ -201,10 +205,12 @@ See the [setup guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/se
 All documentation lives in the repository:
 
 - [Setup guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/setup-guide.md) – installation and configuration
+- [Local AI setup guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/local-ai-setup-guide.md) – wizard-driven fully local configuration (ASR, TTS, embeddings, image gen)
 - [Developer config guide](https://github.com/Elumenotion/GuideAnts/blob/main/docs/developer-config-guide.md) – configuration reference
 - [Auth flow](https://github.com/Elumenotion/GuideAnts/blob/main/docs/auth-flow.md) – authentication architecture
 - [Project and notebook files system](https://github.com/Elumenotion/GuideAnts/blob/main/docs/project-and-notebook-files-system.md) – file and content management
 - [LLaMA model management](https://github.com/Elumenotion/GuideAnts/blob/main/docs/llama-model-download-and-runtime-management.md) – local model lifecycle
+- [Native local AI migration](https://github.com/Elumenotion/GuideAnts/blob/main/docs/native-ai-migration/README.md) – curated catalog manifests, voice packs, and contributor workflow
 - [Docker build guide](https://github.com/Elumenotion/GuideAnts/blob/main/docker/guideants-ai-build.md) – building the runtime service
 - [Vulkan backend guide](https://github.com/Elumenotion/GuideAnts/blob/main/docker/guideants-ai-vulkan.md) – vendor-neutral GPU (llama + image gen) on Docker Desktop and native Linux
 - [Full docs directory](https://github.com/Elumenotion/GuideAnts/tree/main/docs) – architecture, features, test plans, and more
@@ -225,18 +231,16 @@ Typical work splits into one of three lanes:
 
 - frontend/product work in `src/client`
 - API/domain/runtime work in `src/server`
-- local infrastructure/runtime work in `docker`
+- local infrastructure/runtime work in `docker` (see [`docs/native-ai-migration/`](docs/native-ai-migration/README.md) when changing ASR/TTS/emb catalogs or local model settings UI)
 
 ## Big Thanks To Upstream Projects
 
 GuideAnts is built on top of excellent open source work. Huge thanks to the teams and contributors behind these projects:
 
-- [llama.cpp](https://github.com/ggml-org/llama.cpp) for local LLM inference/runtime foundations.
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) for local chat inference and GGUF embeddings in `guideants-ai`.
+- [audio.cpp](https://github.com/0xShug0/audio.cpp) for local speech transcription and synthesis in `guideants-ai`.
 - [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) for the local image-generation engine used in `guideants-ai`.
-- [Transformers](https://github.com/huggingface/transformers) for model loading and inference integration across local services.
-- [sentence-transformers](https://github.com/UKPLab/sentence-transformers) for local embeddings support.
-- [Hugging Face Hub](https://github.com/huggingface/huggingface_hub) for model download and management workflows.
-- [PyTorch](https://github.com/pytorch/pytorch) for tensor/runtime acceleration across ASR, TTS, and embeddings.
+- [Hugging Face Hub](https://github.com/huggingface/huggingface_hub) for curated model download and management workflows.
 - [FastAPI](https://github.com/fastapi/fastapi) and [Uvicorn](https://github.com/encode/uvicorn) for the local Python service APIs.
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg) for media extraction/transcoding.
 - [Playwright](https://github.com/microsoft/playwright-python) for browser automation used in local service workflows.

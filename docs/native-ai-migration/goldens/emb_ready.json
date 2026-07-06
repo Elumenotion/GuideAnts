@@ -1,0 +1,6 @@
+{
+  "path": "/emb/ready",
+  "method": "GET",
+  "body": "{\"ready\":true,\"loaded\":true,\"loading\":false,\"modelRef\":\"Qwen3-Embedding-0.6B-Q8_0.gguf\",\"catalogEntryId\":\"qwen3_embedding_0_6b\",\"device\":\"cuda\",\"dimensions\":1024,\"loadedAtUtc\":\"2026-07-03T13:40:09.291584+00:00\",\"loadError\":null,\"autoloadEnabled\":false,\"warmupEnabled\":true,\"warmupRan\":true,\"warmupSucceeded\":true,\"warmupLatencyMs\":65,\"warmupError\":null,\"warmupCompletedAtUtc\":\"2026-07-03T13:40:09.357231+00:00\",\"engineAlive\":true}",
+  "status": 200
+}

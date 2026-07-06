@@ -20,17 +20,18 @@ const route = `/projects/${projectId}/notebooks/${notebookId}`;
 let mockProjectContext: Record<string, unknown>;
 let mockNotebookContext: Record<string, unknown>;
 let mockAuth: { role: string; status: string };
-let mockChatReadiness: { data: Record<string, unknown> | null; isLoading: boolean };
-let mockFolderTree: Record<string, unknown>;
-let mockFileTreeLastUpdated: Date;
-let mockPreviewByPathTarget = 'doc.md';
-let mockHeaderToolbar: {
-  data: Record<string, unknown> | null;
-  isLoading: boolean;
+let mockWorkspaceControls: {
+  chat: Record<string, unknown> | null;
+  chatIsLoading: boolean;
+  toolbar: Record<string, unknown> | null;
+  toolbarIsLoading: boolean;
   refresh: ReturnType<typeof vi.fn>;
   inFlight: boolean;
   setInFlight: ReturnType<typeof vi.fn>;
 };
+let mockFolderTree: Record<string, unknown>;
+let mockFileTreeLastUpdated: Date;
+let mockPreviewByPathTarget = 'doc.md';
 const mockShowToast = vi.fn();
 const mockRefreshProject = vi.fn();
 const mockNavigate = vi.fn();
@@ -85,12 +86,8 @@ vi.mock('../../hooks/useNotebookFilesPolling', () => ({
   }),
 }));
 
-vi.mock('../../hooks/useNotebookHeaderToolbar', () => ({
-  useNotebookHeaderToolbar: () => mockHeaderToolbar,
-}));
-
-vi.mock('../../hooks/useNotebookChatReadiness', () => ({
-  useNotebookChatReadiness: () => mockChatReadiness,
+vi.mock('../../hooks/useNotebookWorkspaceControls', () => ({
+  useNotebookWorkspaceControls: () => mockWorkspaceControls,
 }));
 
 vi.mock('../../tour/useRegisterTour', () => ({
@@ -542,10 +539,12 @@ function createTextBlob(content: string): Blob {
   return { text: () => Promise.resolve(content) } as Blob;
 }
 
-function defaultHeaderToolbar() {
+function defaultWorkspaceControls() {
   return {
-    data: null,
-    isLoading: false,
+    chat: { effectiveModelId: 'model-1' },
+    chatIsLoading: false,
+    toolbar: null,
+    toolbarIsLoading: false,
     refresh: vi.fn(),
     inFlight: false,
     setInFlight: vi.fn(),
@@ -662,11 +661,10 @@ describe('NotebookDetails page', () => {
     window.history.replaceState({}, '', route);
     Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1024 });
     mockAuth = { role: 'User', status: 'authenticated' };
-    mockChatReadiness = { data: { effectiveModelId: 'model-1' }, isLoading: false };
+    mockWorkspaceControls = defaultWorkspaceControls();
     mockFolderTree = defaultFolderTree();
     mockFileTreeLastUpdated = new Date('2024-06-01T12:00:00Z');
     mockPreviewByPathTarget = 'doc.md';
-    mockHeaderToolbar = defaultHeaderToolbar();
 
     createReadyContexts();
     vi.mocked(api.projects.notebookTemplates.getById).mockResolvedValue({
@@ -1030,7 +1028,15 @@ describe('NotebookDetails page', () => {
   });
 
   it('shows no-chat-model dialog when readiness reports missing model', async () => {
-    mockChatReadiness = { data: { effectiveModelId: null, blockers: ['No model'] }, isLoading: false };
+    mockWorkspaceControls = {
+      chat: { effectiveModelId: null, blockers: ['No model'] },
+      chatIsLoading: false,
+      toolbar: null,
+      toolbarIsLoading: false,
+      refresh: vi.fn(),
+      inFlight: false,
+      setInFlight: vi.fn(),
+    };
     window.history.replaceState({}, '', `${route}?c=conv-123`);
 
     renderNotebook(`${route}?c=conv-123`);
@@ -1921,7 +1927,15 @@ describe('NotebookDetails page', () => {
   });
 
   it('navigates to settings from no-chat-model dialog', async () => {
-    mockChatReadiness = { data: { effectiveModelId: null, blockers: ['No model'] }, isLoading: false };
+    mockWorkspaceControls = {
+      chat: { effectiveModelId: null, blockers: ['No model'] },
+      chatIsLoading: false,
+      toolbar: null,
+      toolbarIsLoading: false,
+      refresh: vi.fn(),
+      inFlight: false,
+      setInFlight: vi.fn(),
+    };
     window.history.replaceState({}, '', `${route}?c=conv-123`);
     renderNotebook(`${route}?c=conv-123`);
 
@@ -1935,9 +1949,14 @@ describe('NotebookDetails page', () => {
 
   it('shows contributor runtime loading for non-admin when chat readiness loading', async () => {
     mockAuth = { role: 'User', status: 'authenticated' };
-    mockChatReadiness = {
-      data: { effectiveModelId: 'model-1', inProgressState: 'loading' },
-      isLoading: false,
+    mockWorkspaceControls = {
+      chat: { effectiveModelId: 'model-1', inProgressState: 'loading' },
+      chatIsLoading: false,
+      toolbar: null,
+      toolbarIsLoading: false,
+      refresh: vi.fn(),
+      inFlight: false,
+      setInFlight: vi.fn(),
     };
     window.history.replaceState({}, '', `${route}?c=conv-123`);
     renderNotebook(`${route}?c=conv-123`);
@@ -2309,7 +2328,15 @@ describe('NotebookDetails page', () => {
   });
 
   it('shows chat model missing flag on conversation panel', async () => {
-    mockChatReadiness = { data: { effectiveModelId: null }, isLoading: false };
+    mockWorkspaceControls = {
+      chat: { effectiveModelId: null },
+      chatIsLoading: false,
+      toolbar: null,
+      toolbarIsLoading: false,
+      refresh: vi.fn(),
+      inFlight: false,
+      setInFlight: vi.fn(),
+    };
     window.history.replaceState({}, '', `${route}?c=conv-123`);
     renderNotebook(`${route}?c=conv-123`);
 

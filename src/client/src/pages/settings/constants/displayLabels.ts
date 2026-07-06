@@ -22,7 +22,7 @@ const SERVICE_PROVIDER_LABELS: Record<string, string> = {
   'Embeddings.AzureOpenAI.Embedding': 'Microsoft Foundry Embeddings',
   'DocumentIntelligence.Azure.DocumentIntelligence': 'Microsoft Foundry Document Intelligence',
   'SpeechTranscription.LocalAsr.Http': 'Local ASR HTTP',
-  'SpeechSynthesis.LocalTts.Http': 'Local Kokoro TTS',
+  'SpeechSynthesis.LocalTts.Http': 'Local TTS HTTP',
   'ImageGeneration.LocalSd.Http': 'Local Stable Diffusion HTTP',
   'Embeddings.LocalEmb.Http': 'Local Embedding HTTP',
   'DocumentIntelligence.LocalDocling.Http': 'Local Docling HTTP',
@@ -107,7 +107,9 @@ const PROVIDER_FIELD_LABEL_OVERRIDES: Record<string, Record<string, string>> = {
   'SpeechTranscription.HuggingFace.Inference': { ModelId: 'ASR Model ID' },
   'SpeechTranscription.OpenRouter.Audio': { ModelId: 'Transcription Model ID' },
   'SpeechSynthesis.Google.TextToSpeech': { ModelId: 'TTS Model ID' },
-  'SpeechSynthesis.LocalTts.Http': { VoiceName: 'Kokoro Voice' },
+  'SpeechSynthesis.LocalTts.Http': {
+    VoiceName: 'Reference voice',
+  },
   'SpeechSynthesis.HuggingFace.Inference': { ModelId: 'TTS Model ID' },
   'SpeechSynthesis.OpenRouter.Tts': { ModelId: 'TTS Model ID' },
   'SpeechTranscription.OpenAI.Audio': { ModelId: 'Transcription Model ID' },
@@ -138,7 +140,8 @@ const COMMON_FIELD_HELP_TEXT: Record<string, string> = {
 
 const PROVIDER_FIELD_HELP_OVERRIDES: Record<string, Record<string, string>> = {
   'SpeechSynthesis.LocalTts.Http': {
-    VoiceName: 'Local TTS uses Kokoro. The language is inferred from the selected voice.',
+    VoiceName:
+      'Select a voice pack preset for models that use reference clips. Other loaded models may use built-in speaker, optional reference, or voice-design text per catalog.',
   },
 };
 

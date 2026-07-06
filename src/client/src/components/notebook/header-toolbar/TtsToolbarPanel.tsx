@@ -1,8 +1,9 @@
-import { FaCog, FaPlay, FaStop } from 'react-icons/fa';
+import { FaCog } from 'react-icons/fa';
 import { api } from '../../../services/api';
 import { textButtonClassName } from '../../../pages/settings/components/shared/ActionButtons';
 import type { ServicePanelCommonProps } from './types';
-import { WORKSPACE_CONTROLS_COPY, serviceSummaryLine, statusToneClass, toolbarProviderOptionLabel } from './toolbarFormatters';
+import { WORKSPACE_CONTROLS_COPY, serviceStatusHeadline, statusToneClass, toolbarProviderOptionLabel } from './toolbarFormatters';
+import { ServiceLocalRuntimePowerSection } from './ServiceLocalRuntimePowerSection';
 
 export function TtsToolbarPanel({
   service,
@@ -52,32 +53,10 @@ export function TtsToolbarPanel({
     }
   };
 
-  const powerOn = async () => {
-    const activeModel = service.localModelOptions.find((item) => item.isActive) ?? service.localModelOptions[0];
-    if (!activeModel) return;
-    setInFlight(true);
-    try {
-      await api.settings.localModels.load(service.serviceId, { model_path: activeModel.modelRef });
-      await onRefresh();
-    } finally {
-      setInFlight(false);
-    }
-  };
-
-  const powerOff = async () => {
-    setInFlight(true);
-    try {
-      await api.settings.localModels.unload(service.serviceId);
-      await onRefresh();
-    } finally {
-      setInFlight(false);
-    }
-  };
-
   return (
     <div className="space-y-2">
       {showWorkspaceCopy ? <div className="text-xs text-slate-500">{WORKSPACE_CONTROLS_COPY}</div> : null}
-      <div className={`text-sm font-medium ${statusToneClass(service.status)}`}>{serviceSummaryLine(service)}</div>
+      <div className={`text-sm font-medium ${statusToneClass(service.status)}`}>{serviceStatusHeadline(service)}</div>
       {service.blockers.length > 0 && (
         <div className="text-xs text-red-700">{service.blockers[0]}</div>
       )}
@@ -128,27 +107,11 @@ export function TtsToolbarPanel({
         })}
       </div>
 
-      {service.supportsLocalRuntimePower && (
-        <div className="border-t pt-2 flex items-center gap-2">
-          <span className="text-xs">Runtime</span>
-          <button
-            type="button"
-            className="p-1.5 rounded border border-emerald-300 text-emerald-700"
-            aria-label="Turn TTS runtime on"
-            onClick={() => void powerOn()}
-          >
-            <FaPlay className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            className="p-1.5 rounded border border-slate-300 text-slate-700"
-            aria-label="Turn TTS runtime off"
-            onClick={() => void powerOff()}
-          >
-            <FaStop className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
+      <ServiceLocalRuntimePowerSection
+        service={service}
+        setInFlight={setInFlight}
+        onRefresh={onRefresh}
+      />
 
       <button
         type="button"

@@ -6,7 +6,7 @@ This folder contains scripts and Docker assets for running local `llama.cpp` rou
 
 - `run/download-model.ps1` - Download Q6 or Q8 GGUF model from Hugging Face (Qwen helper workflow).
 - `run/download-sd-models.ps1` - Download FLUX2 + VAE + Qwen3-4B assets for local stable-diffusion.cpp testing.
-- `run/download-tts-models.ps1` - Download Kokoro-82M assets and voice packs for local TTS testing.
+- `run/download-tts-models.ps1` - Download Chatterbox catalog assets for local TTS testing.
 - `run/download-emb-models.ps1` - Download Harrier embedding model assets for local embeddings testing.
 - `run/start-llama-server.ps1` - Start persistent GPU server container.
 - `run/stop-llama-server.ps1` - Stop or remove container.

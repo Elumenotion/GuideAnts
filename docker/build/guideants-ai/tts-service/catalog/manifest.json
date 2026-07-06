@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "sourceAudioCppRef": "c48e2a5",
+  "entries": [
+    {
+      "id": "chatterbox",
+      "task": "tts",
+      "family": "chatterbox",
+      "voiceInput": "voice_pack",
+      "displayName": "Chatterbox",
+      "targetDirectory": "chatterbox",
+      "license": "MIT",
+      "multilingual": true,
+      "default": true,
+      "sourceRepos": [
+        {
+          "repoId": "ResembleAI/chatterbox",
+          "revision": "main"
+        }
+      ],
+      "requiredFiles": [
+        "ve.safetensors",
+        "t3_cfg.safetensors",
+        "t3_mtl23ls_v2.safetensors",
+        "t3_mtl23ls_v3.safetensors",
+        "s3gen.safetensors",
+        "tokenizer.json",
+        "grapheme_mtl_merged_expanded_v1.json",
+        "Cangjie5_TC.json",
+        "conds.pt"
+      ],
+      "layout": "hf_snapshot",
+      "format": "safetensors",
+      "gated": false,
+      "releaseStatus": "released",
+      "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "hi", "it", "ko", "ms", "nl", "no", "pl", "pt", "sv", "sw", "tr"],
+      "capabilities": {
+        "nativeSpeed": false,
+        "deterministic": false,
+        "requiresReferenceText": false
+      }
+    },
+    {
+      "id": "qwen3_tts_0_6b_base",
+      "task": "tts",
+      "family": "qwen3_tts",
+      "voiceInput": "voice_pack",
+      "displayName": "Qwen3 TTS 0.6B Base",
+      "targetDirectory": "Qwen3-TTS-12Hz-0.6B-Base",
+      "license": "Apache-2.0",
+      "multilingual": true,
+      "default": false,
+      "sourceRepos": [
+        {
+          "repoId": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+          "revision": "main"
+        }
+      ],
+      "requiredFiles": [
+        "config.json",
+        "generation_config.json",
+        "model.safetensors",
+        "speech_tokenizer/config.json",
+        "speech_tokenizer/model.safetensors",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt"
+      ],
+      "layout": "hf_snapshot",
+      "format": "safetensors",
+      "gated": false,
+      "releaseStatus": "released"
+    },
+    {
+      "id": "qwen3_tts_1_7b_base",
+      "task": "tts",
+      "family": "qwen3_tts",
+      "voiceInput": "voice_pack",
+      "displayName": "Qwen3 TTS 1.7B Base",
+      "targetDirectory": "Qwen3-TTS-12Hz-1.7B-Base",
+      "license": "Apache-2.0",
+      "multilingual": true,
+      "default": false,
+      "sourceRepos": [
+        {
+          "repoId": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+          "revision": "main"
+        }
+      ],
+      "requiredFiles": [
+        "config.json",
+        "generation_config.json",
+        "model.safetensors",
+        "speech_tokenizer/config.json",
+        "speech_tokenizer/model.safetensors",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt"
+      ],
+      "layout": "hf_snapshot",
+      "format": "safetensors",
+      "gated": false,
+      "releaseStatus": "released"
+    },
+    {
+      "id": "qwen3_tts_1_7b_voice_design",
+      "task": "tts",
+      "family": "qwen3_tts",
+      "voiceInput": "instruct",
+      "displayName": "Qwen3 TTS 1.7B VoiceDesign",
+      "targetDirectory": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+      "license": "Apache-2.0",
+      "multilingual": true,
+      "default": false,
+      "sourceRepos": [
+        {
+          "repoId": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+          "revision": "main"
+        }
+      ],
+      "requiredFiles": [
+        "config.json",
+        "generation_config.json",
+        "model.safetensors",
+        "speech_tokenizer/config.json",
+        "speech_tokenizer/model.safetensors",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt"
+      ],
+      "layout": "hf_snapshot",
+      "format": "safetensors",
+      "gated": false,
+      "releaseStatus": "released"
+    },
+    {
+      "id": "omnivoice",
+      "task": "tts",
+      "family": "omnivoice",
+      "voiceInput": "voice_pack",
+      "displayName": "OmniVoice",
+      "targetDirectory": "OmniVoice",
+      "license": "Apache-2.0",
+      "multilingual": true,
+      "default": false,
+      "sourceRepos": [
+        {
+          "repoId": "k2-fsa/OmniVoice",
+          "revision": "main"
+        }
+      ],
+      "requiredFiles": [
+        "config.json",
+        "model.safetensors",
+        "tokenizer.json",
+        "audio_tokenizer/config.json",
+        "audio_tokenizer/model.safetensors"
+      ],
+      "layout": "hf_snapshot",
+      "format": "safetensors",
+      "gated": false,
+      "releaseStatus": "released"
+    }
+  ]
+}

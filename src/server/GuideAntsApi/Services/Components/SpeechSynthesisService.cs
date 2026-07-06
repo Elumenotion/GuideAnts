@@ -683,16 +683,22 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
             }
 
             var endpoint = $"{localHosts.SpeechSynthesisBaseUrl.TrimEnd('/')}/tts/synthesize";
-            var voiceName = ResolveLocalKokoroVoiceName(mode);
-            var languageCode = ResolveLocalKokoroLanguageCode(voiceName);
-            var speed = ResolveLocalKokoroSpeed();
-            var payload = JsonSerializer.Serialize(new
+            var voiceName = ResolveLocalTtsVoiceName(mode);
+            var speed = ResolveLocalTtsSpeed();
+
+            // Wire contract (RULES I5/I9): .NET sends only { text, voice?, speed? }.
+            // The TTS engine derives lang_code and any family-specific voice
+            // semantics from the active catalog entry. No language map here.
+            var payloadObject = new Dictionary<string, object>
             {
-                text = plainText,
-                voice = voiceName,
-                lang_code = languageCode,
-                speed
-            });
+                ["text"] = plainText,
+                ["speed"] = speed,
+            };
+            if (!string.IsNullOrWhiteSpace(voiceName))
+            {
+                payloadObject["voice"] = voiceName;
+            }
+            var payload = JsonSerializer.Serialize(payloadObject);
 
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
             {
@@ -705,12 +711,11 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
 
             var startedAt = DateTime.UtcNow;
             _logger.LogInformation(
-                "tts_api_request_start provider={Provider} requestId={RequestId} textLength={TextLength} voice={VoiceName} langCode={LanguageCode} speed={Speed}",
+                "tts_api_request_start provider={Provider} requestId={RequestId} textLength={TextLength} voice={VoiceName} speed={Speed}",
                 LocalProviderSection,
                 requestId,
                 plainText.Length,
-                voiceName,
-                languageCode,
+                string.IsNullOrWhiteSpace(voiceName) ? "(engine-default)" : voiceName,
                 speed);
 
             using var response = await _httpClient.SendAsync(request, timeoutCts.Token);
@@ -812,20 +817,21 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
     private static string? ResolveGoogleGeminiVoiceName(ServiceMode mode)
         => ResolveServiceModePresetString(mode, "VoiceName");
 
-    private string ResolveLocalKokoroVoiceName(ServiceMode mode)
+    // Returns the operator/user-configured voice selection for the local TTS
+    // provider, or null when none is configured. When null, the engine uses
+    // the active catalog entry's default voice. The meaning of the string
+    // (voice-pack preset id, builtin speaker id, or design text) is resolved
+    // by tts_service.py per the loaded family — .NET does not interpret it and
+    // keeps no hardcoded voice enum or language map.
+    private string? ResolveLocalTtsVoiceName(ServiceMode mode)
     {
         var voiceName = ResolveServiceModePresetString(mode, "VoiceName")
             ?? _configuration["SpeechSynthesis:VoiceName"]
             ?? _configuration["GA_TTS_VOICE"];
-        return string.IsNullOrWhiteSpace(voiceName) ? "af_heart" : voiceName.Trim();
+        return string.IsNullOrWhiteSpace(voiceName) ? null : voiceName.Trim();
     }
 
-    private static string ResolveLocalKokoroLanguageCode(string voiceName)
-    {
-        return !string.IsNullOrWhiteSpace(voiceName) ? voiceName.Trim()[0].ToString().ToLowerInvariant() : "a";
-    }
-
-    private double ResolveLocalKokoroSpeed()
+    private double ResolveLocalTtsSpeed()
     {
         var raw = _configuration["SpeechSynthesis:Speed"]
             ?? _configuration["GA_TTS_SPEED"];
@@ -872,7 +878,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
         if (!string.IsNullOrWhiteSpace(mode.ModelId)
             && mode.ModelId.Contains("kokoro", StringComparison.OrdinalIgnoreCase))
         {
-            // Kokoro voices are prefixed voice ids; af_alloy is the closest default to generic "alloy".
+            // OpenRouter Kokoro models use prefixed voice ids; af_alloy is the closest default to generic "alloy".
             return "af_alloy";
         }
 
@@ -926,7 +932,7 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
             return bytes;
         }
 
-        // OpenRouter defaults to raw 16-bit mono PCM at 24 kHz (Kokoro and compatible models).
+        // OpenRouter defaults to raw 16-bit mono PCM at 24 kHz for compatible TTS models.
         return WrapPcm16Mono24KhzAsWav(bytes);
     }
 

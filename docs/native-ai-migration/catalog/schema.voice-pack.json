@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guideants.local/schemas/voice-pack.json",
+  "title": "GuideAnts TTS reference voice pack",
+  "description": "Baked image assets for voice-clone TTS families. Canonical: docker/build/guideants-ai/voice-pack/manifest.json",
+  "type": "object",
+  "required": ["schemaVersion", "voices"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "packVersion": { "type": "string" },
+    "generatedFrom": { "type": "string" },
+    "generationNote": { "type": "string" },
+    "referenceText": { "type": "string" },
+    "voices": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/voiceEntry" }
+    }
+  },
+  "$defs": {
+    "voiceEntry": {
+      "type": "object",
+      "required": [
+        "voiceId",
+        "language",
+        "sourceDataset",
+        "sourceClipRef",
+        "licence",
+        "clipPath",
+        "sampleRate",
+        "durationSec",
+        "modified"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "voiceId": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]{3,64}$"
+        },
+        "displayName": { "type": "string" },
+        "language": { "type": "string", "minLength": 2 },
+        "gender": { "enum": ["female", "male", "neutral"] },
+        "accent": { "type": ["string", "null"] },
+        "sourceDataset": {
+          "enum": ["common_voice", "globe", "vctk", "libritts_r", "librivox_pd"]
+        },
+        "sourceClipRef": { "type": "string", "minLength": 1 },
+        "licence": { "enum": ["CC0-1.0", "CC-BY-4.0"] },
+        "clipPath": { "type": "string", "pattern": "^clips/.+\\.wav$" },
+        "sampleRate": { "type": "integer", "minimum": 8000 },
+        "durationSec": { "type": "number", "minimum": 0 },
+        "checksumSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "modified": {
+          "type": "object",
+          "required": ["changed"],
+          "properties": {
+            "changed": { "type": "boolean" },
+            "changes": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "attribution": {
+          "type": "object",
+          "properties": {
+            "creator": { "type": "string" },
+            "sourceUrl": { "type": "string" },
+            "licenceUrl": { "type": "string" },
+            "modificationNote": { "type": "string" },
+            "title": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

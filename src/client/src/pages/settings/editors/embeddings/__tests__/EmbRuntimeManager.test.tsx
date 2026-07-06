@@ -7,9 +7,9 @@ vi.mock('../../../../../services/api', () => ({
     settings: {
       localModels: {
         listOutcome: vi.fn(),
+        catalogOutcome: vi.fn(),
         runtimeReadinessOutcome: vi.fn(),
         load: vi.fn(),
-        unload: vi.fn(),
         startDownload: vi.fn(),
         getOperation: vi.fn(),
         cancelOperation: vi.fn(),
@@ -47,6 +47,17 @@ import { startLocalOperationPoll } from '../../common/localOperationPolling';
 
 const mockStartPoll = vi.mocked(startLocalOperationPoll);
 
+function mockAvailableCatalog(
+  entries: Array<{ id: string; displayName?: string; producedDimension?: number; default?: boolean }> = [
+    { id: 'qwen3_embedding_0_6b', displayName: 'Qwen3-Embedding-0.6B', producedDimension: 1024, default: true },
+  ]
+) {
+  (api.settings.localModels.catalogOutcome as any).mockResolvedValue({
+    kind: 'available',
+    payload: { version: 1, entries },
+  });
+}
+
 function mockAvailableList(items: unknown[] = [], modelDir = '/models-local/emb') {
   (api.settings.localModels.listOutcome as any).mockResolvedValue({
     kind: 'available',
@@ -61,9 +72,19 @@ function mockAvailableReadiness(payload: Record<string, unknown> = { ready: fals
   });
 }
 
+const DEFAULT_CATALOG_MODEL_ID = 'qwen3_embedding_0_6b';
+
+async function openCatalogDownloadDialog() {
+  fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: /Download GGUF/i })).not.toBeDisabled();
+  });
+}
+
 describe('EmbRuntimeManager', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockAvailableCatalog();
   });
 
   afterEach(() => {
@@ -120,7 +141,7 @@ describe('EmbRuntimeManager', () => {
     });
   });
 
-  it('opens add-model dialog and starts HF download only after browse resolves', async () => {
+  it('opens add-model dialog and starts catalog download immediately', async () => {
     (api.settings.localModels.listOutcome as any)
       .mockResolvedValueOnce({
         kind: 'available',
@@ -139,16 +160,9 @@ describe('EmbRuntimeManager', () => {
         kind: 'available',
         payload: { ready: false, loaded: false, modelRef: null },
       });
-    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/emb',
-      gated: false,
-      tokenUsed: false,
-      modelCardUrl: null,
-      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
-    });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-1',
-      modelId: 'acme/emb',
+      modelId: DEFAULT_CATALOG_MODEL_ID,
       status: 'queued',
       error: null,
     });
@@ -158,22 +172,13 @@ describe('EmbRuntimeManager', () => {
     await waitFor(() => {
       expect(screen.getByText(/No embedding models installed/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-
-    const downloadButton = screen.getByRole('button', { name: /Download snapshot/i });
-    expect(downloadButton).toBeDisabled();
-
-    fireEvent.change(screen.getByPlaceholderText(/microsoft\/harrier/i), { target: { value: 'acme/emb' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
+    await openCatalogDownloadDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Download GGUF/i }));
 
     await waitFor(() => {
-      expect(downloadButton).not.toBeDisabled();
-    });
-
-    fireEvent.click(downloadButton);
-
-    await waitFor(() => {
-      expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('Embeddings', { model_id: 'acme/emb' });
+      expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('Embeddings', {
+        model_id: DEFAULT_CATALOG_MODEL_ID,
+      });
     });
   });
 
@@ -190,16 +195,9 @@ describe('EmbRuntimeManager', () => {
       kind: 'available',
       payload: { ready: false, loaded: false, modelRef: null },
     });
-    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/emb',
-      gated: false,
-      tokenUsed: false,
-      modelCardUrl: null,
-      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
-    });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-1',
-      modelId: 'acme/emb',
+      modelId: DEFAULT_CATALOG_MODEL_ID,
       modelRef: 'acme--emb',
       status: 'queued',
       error: null,
@@ -211,14 +209,8 @@ describe('EmbRuntimeManager', () => {
     await waitFor(() => {
       expect(screen.getByText(/Add model/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/microsoft\/harrier/i), { target: { value: 'acme/emb' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled();
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
+    await openCatalogDownloadDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Download GGUF/i }));
 
     await waitFor(() => {
       expect(api.settings.localModels.load).toHaveBeenCalledWith('Embeddings', { model_path: 'acme--emb' });
@@ -242,45 +234,6 @@ describe('EmbRuntimeManager', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/probe blew up/i)).toBeInTheDocument();
-    });
-  });
-
-  it('unloads the active embedding model', async () => {
-    (api.settings.localModels.listOutcome as any)
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/emb',
-          items: [{ modelRef: 'acme--emb', isDirectory: true, sizeBytes: 0, active: true }],
-        },
-      })
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/emb',
-          items: [{ modelRef: 'acme--emb', isDirectory: true, sizeBytes: 0, active: false }],
-        },
-      });
-    (api.settings.localModels.runtimeReadinessOutcome as any)
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: { ready: true, loaded: true, modelRef: '/models-local/emb/acme--emb', warmupEnabled: true, warmupSucceeded: true },
-      })
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: { ready: false, loaded: false, modelRef: null },
-      });
-    (api.settings.localModels.unload as any).mockResolvedValueOnce({ status: 'unloaded' });
-
-    render(<EmbRuntimeManager enabled />);
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Unload/i })).toBeEnabled();
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Unload/i }));
-
-    await waitFor(() => {
-      expect(api.settings.localModels.unload).toHaveBeenCalledWith('Embeddings');
     });
   });
 
@@ -413,11 +366,8 @@ describe('EmbRuntimeManager', () => {
 
     render(<EmbRuntimeManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/microsoft\/harrier/i), { target: { value: 'acme/emb' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
+    await openCatalogDownloadDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Download GGUF/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }));
     await waitFor(() => {
@@ -442,60 +392,50 @@ describe('EmbRuntimeManager', () => {
       files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
     });
     (api.settings.localModels.cancelOperation as any).mockRejectedValueOnce(new Error('cancel denied'));
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/microsoft\/harrier/i), { target: { value: 'acme/emb' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
+    await openCatalogDownloadDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Download GGUF/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }));
     await waitFor(() => expect(screen.getByText(/cancel denied/i)).toBeInTheDocument());
   });
 
-  it('surfaces browse errors, download failures, and revision in add-model dialog', async () => {
+  it('surfaces catalog errors, download failures, and revision in add-model dialog', async () => {
     mockAvailableList();
     mockAvailableReadiness();
-    (api.settings.browseHuggingFaceRepository as any).mockRejectedValueOnce(
-      Object.assign(new Error('Repo missing.'), { code: 'NOT_FOUND', status: 404 })
-    );
+    (api.settings.localModels.catalogOutcome as any).mockResolvedValueOnce({
+      kind: 'error',
+      message: 'catalog offline',
+    });
     (api.settings.localModels.startDownload as any).mockRejectedValueOnce(new Error('queue full'));
 
     render(<EmbRuntimeManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/microsoft\/harrier/i), { target: { value: 'acme/emb' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByText(/Browse reported: Repo missing/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/catalog offline/i)).toBeInTheDocument());
 
-    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/emb',
-      gated: false,
-      tokenUsed: false,
-      modelCardUrl: null,
-      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
-    fireEvent.change(screen.getByPlaceholderText('main'), { target: { value: 'main' } });
-    fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /^Cancel$/i })[0]!);
+    mockAvailableCatalog();
+    await openCatalogDownloadDialog();
+    fireEvent.change(screen.getByLabelText(/Revision \(optional\)/i), { target: { value: 'main' } });
+    fireEvent.click(screen.getByRole('button', { name: /Download GGUF/i }));
     await waitFor(() => expect(screen.getByText(/queue full/i)).toBeInTheDocument());
 
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-rev',
-      modelId: 'acme/emb',
+      modelId: DEFAULT_CATALOG_MODEL_ID,
       status: 'queued',
       error: null,
     });
     mockStartPoll.mockImplementationOnce(({ onUpdate, onTerminal }) => {
-      const terminal = { operationId: 'op-rev', modelId: 'acme/emb', status: 'completed', error: null };
+      const terminal = { operationId: 'op-rev', modelId: DEFAULT_CATALOG_MODEL_ID, status: 'completed', error: null };
       onUpdate(terminal);
       onTerminal?.(terminal);
       return 1;
     });
-    fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Download GGUF/i }));
     await waitFor(() => {
       expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('Embeddings', {
-        model_id: 'acme/emb',
+        model_id: DEFAULT_CATALOG_MODEL_ID,
         revision: 'main',
       });
     });
@@ -525,15 +465,12 @@ describe('EmbRuntimeManager', () => {
 
     render(<EmbRuntimeManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/microsoft\/harrier/i), { target: { value: 'acme/emb' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
+    await openCatalogDownloadDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Download GGUF/i }));
     await waitFor(() => expect(screen.getAllByText(/no longer reachable/i).length).toBeGreaterThan(0));
   });
 
-  it('surfaces load, remove, and unload conflict failures', async () => {
+  it('surfaces load and remove failures', async () => {
     mockAvailableList([{ modelRef: 'acme--emb', isDirectory: true, sizeBytes: 0, active: false }]);
     mockAvailableReadiness();
     (api.settings.localModels.load as any).mockRejectedValueOnce(new Error('load failed'));
@@ -547,17 +484,6 @@ describe('EmbRuntimeManager', () => {
     (api.settings.localModels.remove as any).mockRejectedValueOnce(new Error('remove blocked'));
     fireEvent.click(screen.getByTestId('confirm'));
     await waitFor(() => expect(screen.getByText(/remove blocked/i)).toBeInTheDocument());
-  });
-
-  it('surfaces unload conflicts from the API', async () => {
-    mockAvailableList([{ modelRef: 'acme--emb', isDirectory: true, sizeBytes: 0, active: true }]);
-    mockAvailableReadiness({ ready: true, loaded: true, modelRef: '/models-local/emb/acme--emb' });
-    (api.settings.localModels.unload as any).mockRejectedValueOnce({ status: 409 });
-
-    render(<EmbRuntimeManager enabled />);
-    await waitFor(() => expect(screen.getByRole('button', { name: /Unload/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Unload/i }));
-    await waitFor(() => expect(screen.getByText(/already in progress/i)).toBeInTheDocument());
   });
 
   it('shows engine device, dimensions, warmup failure, and load errors', async () => {
@@ -611,17 +537,14 @@ describe('EmbRuntimeManager', () => {
 
     render(<EmbRuntimeManager enabled onDownloadOperationChange={onDownloadOperationChange} />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    await openCatalogDownloadDialog();
     fireEvent.click(screen.getAllByRole('button', { name: /^Cancel$/i })[0]!);
     await waitFor(() => {
-      expect(screen.queryByText(/Add embedding model from Hugging Face/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Download curated embedding model/i)).not.toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/microsoft\/harrier/i), { target: { value: 'acme/emb' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
+    await openCatalogDownloadDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Download GGUF/i }));
     await waitFor(() => {
       expect(onDownloadOperationChange).toHaveBeenCalledWith(
         expect.objectContaining({ serviceId: 'Embeddings', operationId: 'op-4', inFlight: true })

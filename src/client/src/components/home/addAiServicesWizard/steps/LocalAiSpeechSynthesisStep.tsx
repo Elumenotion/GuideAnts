@@ -35,7 +35,7 @@ export const LocalAiSpeechSynthesisStep = forwardRef<LocalAiServiceStepHandle, L
                 Local TTS strips SSML to plain text before calling <span className="font-mono">POST /tts/synthesize</span>.
               </li>
               <li>
-                Use <span className="font-mono">SpeechSynthesis:TimeoutSeconds</span> for the local HTTP client. Use the <span className="font-medium">Local TTS model</span> manager above to download and load Kokoro voices in-app.
+                Use <span className="font-mono">SpeechSynthesis:TimeoutSeconds</span> for the local HTTP client. Use the <span className="font-medium">Reference voice</span> field below to pick a voice from the baked pack.
               </li>
             </ul>
           </div>

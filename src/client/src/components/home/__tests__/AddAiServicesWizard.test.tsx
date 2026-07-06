@@ -803,7 +803,7 @@ describe('AddAiServicesWizard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
     await screen.findByRole('heading', { name: /Hugging Face chat models \(required\)/i });
-    fireEvent.change(screen.getByLabelText(/^Model$/i), { target: { value: 'deepseek-ai/DeepSeek-V4-Pro' } });
+    fireEvent.change(screen.getByLabelText(/^Model$/i), { target: { value: 'zai-org/GLM-5.2' } });
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
@@ -811,7 +811,7 @@ describe('AddAiServicesWizard', () => {
       expect(api.settings.addModel).toHaveBeenCalledWith(
         expect.objectContaining({
           provider: 'hf-inference-chat',
-          catalog: expect.objectContaining({ modelId: 'deepseek-ai/DeepSeek-V4-Pro' }),
+          catalog: expect.objectContaining({ modelId: 'zai-org/GLM-5.2' }),
         })
       )
     );

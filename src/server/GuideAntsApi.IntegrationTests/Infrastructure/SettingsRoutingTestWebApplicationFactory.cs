@@ -62,5 +62,16 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
         public Task EnsureAuxiliaryServicesLoadedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task UnloadAuxiliaryServicesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<LocalServiceReconcileResult> ReconcileLocalServiceAsync(
+            string serviceId,
+            string? requestedModelRef = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Warm));
+
+        public Task<LocalServiceReconcileResult> PowerOffLocalServiceEngineAsync(
+            string serviceId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle));
     }
 }

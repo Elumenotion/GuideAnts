@@ -25,8 +25,8 @@ After completion, these local providers and values should be active:
 Deterministic model choices used in this flow:
 
 - ASR: `Qwen/Qwen3-ASR-0.6B`
-- TTS: `hexgrad/Kokoro-82M` with Kokoro voice `af_heart`
-- Embeddings: `microsoft/harrier-oss-v1-0.6b`
+- TTS: catalog model `chatterbox` with reference voice `en_us_cv_001`
+- Embeddings: catalog model `qwen3_embedding_0_6b` (Qwen3-Embedding-0.6B GGUF)
 - Image bundle:
   - Diffusion: `unsloth/FLUX.2-klein-4B-GGUF` + `flux-2-klein-4b-Q4_K_S.gguf`
   - VAE: `black-forest-labs/FLUX.2-small-decoder` + `full_encoder_small_decoder.safetensors`
@@ -74,7 +74,7 @@ Set `TimeoutSeconds=900`, keep output format `png`, install/activate the exact b
 
 ### 7. Speech Synthesis
 
-Confirm provider is Local Kokoro TTS, `TimeoutSeconds=300`, model `hexgrad/Kokoro-82M`, Kokoro voice `af_heart`, and readiness `Ready`. Local TTS infers language from the selected Kokoro voice.
+Confirm provider is Local TTS HTTP, `TimeoutSeconds=300`, catalog model `chatterbox`, reference voice `en_us_cv_001`, and readiness `Ready`. Local TTS infers language from the selected voice-pack voice.
 
 ![TTS ready](images/local-ai-wizard/wizard-07-tts-ready.png)
 

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Models.Settings;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Endpoints.Settings;
@@ -52,11 +53,24 @@ public static class SettingsServiceEditorEndpoints
             string serviceId,
             [FromBody] SetActiveProviderRequest request,
             IApplicationSettingsService settingsService,
+            ILocalAiStartupWarmupService localAiWarmup,
+            ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
             try
             {
                 var updated = await settingsService.SetServiceActiveProviderAsync(serviceId, request.ProviderId, cancellationToken);
+                try
+                {
+                    await localAiWarmup.WarmupAllAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    loggerFactory
+                        .CreateLogger("ServiceModesRuntimeReload")
+                        .LogWarning(ex, "Failed to reconcile local AI stack after service routing change.");
+                }
+
                 return Results.Ok(updated);
             }
             catch (InvalidOperationException ex)

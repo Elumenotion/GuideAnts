@@ -4,6 +4,7 @@
 # ROCm-only stable-diffusion.cpp builder
 # =============================================================================
 ARG SDCPP_REF=master
+ARG AUDIOCPP_REF=release-0.1
 ARG SD_AMDGPU_TARGETS="gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
 ARG GA_DEPS_ROCM_IMAGE=deps-rocm
 ARG GA_UBUNTU_MIRROR_URL=http://archive.ubuntu.com/ubuntu
@@ -50,6 +51,47 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} h
        else echo "sd-server binary was not produced by stable-diffusion.cpp ROCm build" && exit 1; fi \
     && strip /out/sd-cli /out/sd-server || true
 
+# D4: ROCm image uses Vulkan build for audiocpp_server (not HIP).
+FROM ubuntu:24.04 AS audiocpp-vulkan-builder
+ARG AUDIOCPP_REF
+ARG GA_UBUNTU_MIRROR_URL
+RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi \
+    && if [ -f /etc/apt/sources.list ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
+            /etc/apt/sources.list; \
+    fi
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common \
+    && add-apt-repository -y universe \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates cmake git \
+        libvulkan-dev glslang-tools glslc spirv-headers \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --recursive --depth 1 --shallow-submodules --branch ${AUDIOCPP_REF} https://github.com/0xShug0/audio.cpp /src/audio.cpp \
+    && cmake -S /src/audio.cpp -B /src/audio.cpp/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DENGINE_ENABLE_CUDA=OFF \
+        -DENGINE_ENABLE_VULKAN=ON \
+        -DGGML_VULKAN=ON \
+        -DENGINE_ENABLE_NATIVE_CPU=OFF \
+        -DENGINE_BUILD_EXAMPLES=OFF \
+        -DENGINE_BUILD_TESTS=OFF \
+        -DENGINE_BUILD_WARMBENCH=OFF \
+    && cmake --build /src/audio.cpp/build --target audiocpp_server --config Release -j"$(nproc)" \
+    && mkdir -p /out \
+    && if [ -f /src/audio.cpp/build/bin/audiocpp_server ]; then cp /src/audio.cpp/build/bin/audiocpp_server /out/audiocpp_server; \
+       else echo "audiocpp_server binary was not produced by audio.cpp Vulkan build" && exit 1; fi \
+    && (strip /out/audiocpp_server || true)
+
 FROM python:${PYTHON311_VERSION}-slim-bookworm AS python311-runtime
 ARG PYTHON311_VERSION
 
@@ -71,8 +113,19 @@ RUN gcc -O2 -Wall -Wextra -o /usr/local/bin/ga-script-exec /tmp/ga-script-exec.c
 # =============================================================================
 # ROCm backend (runtime base + python deps builder + dependency image)
 # =============================================================================
-FROM ghcr.io/ggml-org/llama.cpp:server-rocm AS runtime-rocm-base
+# Reference-only stage: we take the llama-server binary + its sibling libggml-hip.so
+# etc. from upstream, but do NOT `FROM` this image. Its own Dockerfile installs the
+# `rocm-dev`+`rocm-libs` meta-packages, which pull in the ENTIRE ROCm SDK (compiler
+# toolchain, MIOpen, rocFFT, rocRAND, RCCL, rocSPARSE, rocALUTION, hipTensor,
+# hipSPARSELt, ...) — none of which llama.cpp/sd.cpp/audio.cpp actually link against.
+# That one layer alone is ~22GB and is why the rocm flavor was ~38GB vs. ~8-14GB for
+# every other flavor. See below for the actual (verified via `ldd`) minimal set.
+FROM ghcr.io/ggml-org/llama.cpp:server-rocm AS llama-rocm-upstream
+
+FROM ubuntu:24.04 AS runtime-rocm-base
 ARG GA_UBUNTU_MIRROR_URL
+ARG ROCM_VERSION=7.2.1
+ARG AMDGPU_VERSION=30.30.1
 ENV DEBIAN_FRONTEND=noninteractive
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
         sed -i \
@@ -86,6 +139,34 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
             -e "s|http://security.ubuntu.com/ubuntu|${GA_UBUNTU_MIRROR_URL}|g" \
             /etc/apt/sources.list; \
     fi
+
+# Minimal ROCm *runtime* packages only (no rocm-dev, no rocm-libs meta-package).
+# Repo/key setup mirrors what ghcr.io/ggml-org/llama.cpp:server-rocm's own image
+# does internally, but we install only the packages that `ldd` on the actual
+# binaries in this image (sd-cli, sd-server, libggml-hip.so) resolve to — verified
+# 2026-07-03 against a real build, no MIOpen/rocFFT/rocRAND/RCCL/rocSPARSE/etc.
+# needed because nothing in this image links against them.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg libnuma1 \
+    && curl -sL https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - \
+    && printf "deb [arch=amd64] https://repo.radeon.com/rocm/apt/%s/ noble main" "$ROCM_VERSION" \
+        | tee /etc/apt/sources.list.d/rocm.list \
+    && printf "deb [arch=amd64] https://repo.radeon.com/amdgpu/%s/ubuntu noble main" "$AMDGPU_VERSION" \
+        | tee /etc/apt/sources.list.d/amdgpu.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libelf1 \
+        hip-runtime-amd rocblas rocsolver hipblas hipblaslt \
+        rocprofiler-register roctracer comgr hsa-rocr \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# The llama.cpp release binaries resolve their sibling libllama*.so/libggml*.so via
+# a $ORIGIN-relative rpath (verified via `ldd` run from within /app), so copying the
+# whole directory tree as-is preserves resolution regardless of the base image.
+COPY --from=llama-rocm-upstream /app /app
+WORKDIR /app
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
@@ -149,25 +230,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 RUN python3.11 -m venv $VIRTUAL_ENV
 
+COPY emb-requirements.txt /tmp/emb-requirements.txt
 COPY asr-requirements.txt /tmp/asr-requirements.txt
 COPY tts-requirements.txt /tmp/tts-requirements.txt
-COPY emb-requirements.txt /tmp/emb-requirements.txt
 COPY requirements.txt /tmp/requirements.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip "setuptools<82" wheel \
-    && pip install \
-        torch==2.11.0 torchaudio==2.11.0 torchvision==0.26.0 \
-        --index-url https://download.pytorch.org/whl/cpu \
+    && pip install -r /tmp/emb-requirements.txt \
     && pip install -r /tmp/asr-requirements.txt \
     && pip install -r /tmp/tts-requirements.txt \
-    && pip install accelerate==1.12.0 transformers==4.57.6 tokenizers==0.22.2 \
-    && pip install -r /tmp/emb-requirements.txt \
     && pip install -r /tmp/requirements.txt \
     && pip uninstall -y jupyterlab-tensorboard-pro basemap basemap-data \
     && pip install tornado==6.5.7 wheel==0.46.2 \
     && pip check \
-    && rm -f /tmp/asr-requirements.txt /tmp/tts-requirements.txt /tmp/emb-requirements.txt /tmp/requirements.txt
+    && rm -f /tmp/emb-requirements.txt /tmp/asr-requirements.txt /tmp/tts-requirements.txt /tmp/requirements.txt
 
 FROM runtime-rocm-base AS deps-rocm
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -182,7 +259,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY --from=pydeps-rocm-builder /opt/venv /opt/venv
 COPY --from=sd-cli-rocm-builder /out/sd-cli /usr/local/bin/sd-cli
 COPY --from=sd-cli-rocm-builder /out/sd-server /usr/local/bin/sd-server
-RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server
+COPY --from=audiocpp-vulkan-builder /out/audiocpp_server /usr/local/bin/audiocpp_server
+RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server /usr/local/bin/audiocpp_server
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install playwright \
@@ -200,19 +278,23 @@ COPY --from=script-agent-exec-builder /usr/local/bin/ga-script-exec /usr/local/b
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY entrypoint.sh /entrypoint.sh
 COPY start-llama.sh /app/start-llama.sh
-COPY start-llama-admin.sh /app/start-llama-admin.sh
+COPY start-ga-admin.sh /app/start-ga-admin.sh
 COPY start-asr.sh /app/start-asr.sh
-COPY start-sd.sh /app/start-sd.sh
 COPY start-tts.sh /app/start-tts.sh
 COPY start-emb.sh /app/start-emb.sh
 COPY start-media.sh /app/start-media.sh
 COPY router-models.seed.ini /opt/seed/router-models.ini
-RUN chmod +x /entrypoint.sh /opt/guideants/script-agent-admin/reconcile.sh /app/start-llama.sh /app/start-llama-admin.sh /app/start-asr.sh /app/start-sd.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
+RUN chmod +x /entrypoint.sh /opt/guideants/script-agent-admin/reconcile.sh /app/start-llama.sh /app/start-ga-admin.sh /app/start-asr.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
+
+COPY admin-service/ /app/admin-service/
 
 COPY llama-admin-service/ /app/llama-admin-service/
 COPY asr-service/ /app/asr-service/
 COPY sd-service/ /app/sd-service/
 COPY tts-service/ /app/tts-service/
+COPY voice-pack/ /opt/guideants/voice-pack/
+COPY scripts/check-voice-pack-attribution.py /opt/guideants/scripts/check-voice-pack-attribution.py
+RUN python3 /opt/guideants/scripts/check-voice-pack-attribution.py /opt/guideants/voice-pack
 COPY emb-service/ /app/emb-service/
 COPY media-service/ /app/media-service/
 

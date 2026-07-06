@@ -830,6 +830,11 @@ def resolve_initial_bundle_role_states(
     return states
 
 
+def _status_is_terminal(status: str | None) -> bool:
+    normalized = (status or "").strip().lower()
+    return normalized in {"completed", "failed", "error", "cancelled", "canceled"}
+
+
 def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dict[str, Any]:
     bundle_id = validate_bundle_id(request.bundle_id)
     previous_definition = read_bundle_definition(model_dir, bundle_id)
@@ -841,6 +846,8 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
         "status": "queued",
         "roles": resolve_initial_bundle_role_states(previous_definition, request, paths),
         "error": None,
+        "cancelRequested": False,
+        "completedAtUtc": None,
     }
     with BUNDLE_OPS_LOCK:
         BUNDLE_OPERATIONS[operation_id] = operation
@@ -855,8 +862,26 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
             error=truncate_text(str(exc), 2048),
         )
 
+    def _cancel_requested() -> bool:
+        with BUNDLE_OPS_LOCK:
+            current = BUNDLE_OPERATIONS.get(operation_id)
+            return bool(current and current.get("cancelRequested"))
+
+    def _mark_cancelled() -> None:
+        with BUNDLE_OPS_LOCK:
+            current = BUNDLE_OPERATIONS.get(operation_id)
+            if current is None:
+                return
+            current["status"] = "cancelled"
+            current["error"] = "Cancelled by operator."
+            current["completedAtUtc"] = utc_now_iso()
+
     def _run() -> None:
         try:
+            if _cancel_requested():
+                _mark_cancelled()
+                return
+
             from huggingface_hub import snapshot_download
 
             # Single-source HF token: whatever the .NET layer stamped in.
@@ -873,6 +898,13 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
                 "textEncoder": (request.text_encoder_repo, request.text_encoder_file),
             }
             for role, (repo, filename) in roles.items():
+                # Cooperative cancellation checkpoint before each role's blocking
+                # download. A partially-downloaded bundle stays "incomplete" and
+                # is rejected by the select-active completeness gate.
+                if _cancel_requested():
+                    _mark_cancelled()
+                    return
+
                 target_path = paths[role]
                 if (
                     not bundle_role_download_needed(previous_definition, request, role, repo, filename)
@@ -910,12 +942,25 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
                 with BUNDLE_OPS_LOCK:
                     BUNDLE_OPERATIONS[operation_id]["roles"][role] = "ready"
 
+            if _cancel_requested():
+                _mark_cancelled()
+                return
+
             with BUNDLE_OPS_LOCK:
                 BUNDLE_OPERATIONS[operation_id]["status"] = "completed"
+                BUNDLE_OPERATIONS[operation_id]["completedAtUtc"] = utc_now_iso()
         except Exception as exc:
             with BUNDLE_OPS_LOCK:
-                BUNDLE_OPERATIONS[operation_id]["status"] = "failed"
-                BUNDLE_OPERATIONS[operation_id]["error"] = str(exc)
+                current = BUNDLE_OPERATIONS.get(operation_id)
+                if current is None:
+                    return
+                if current.get("cancelRequested"):
+                    current["status"] = "cancelled"
+                    current["error"] = "Cancelled by operator."
+                else:
+                    current["status"] = "failed"
+                    current["error"] = str(exc)
+                current["completedAtUtc"] = utc_now_iso()
 
     threading.Thread(target=_run, daemon=True).start()
     return operation
@@ -1635,105 +1680,6 @@ def run_startup_warmup(
         STATE.startup_warmup_running = False
 
 
-def run_startup_autoload_flow() -> None:
-    """
-    Background startup worker that performs the existing SD startup lifecycle
-    (engine autoload + optional warmup) without blocking FastAPI startup.
-    """
-    try:
-        if not env_flag("GA_SD_AUTO_LOAD_ON_STARTUP", False):
-            log_event(
-                "sd_service_startup_unloaded",
-                reason="autoload_disabled",
-                modelDir=STATE.model_dir,
-            )
-            return
-
-        # Auto-start the engine if an active bundle exists, but never take the
-        # control plane down on failure: operators still need /admin/bundles
-        # and /admin/load to recover.
-        with ENGINE_LOCK:
-            ok, err = start_engine()
-
-        if not ok:
-            log_event(
-                "sd_service_startup_unloaded",
-                reason=err,
-                modelDir=STATE.model_dir,
-            )
-            return
-
-        config = STATE.config
-        if config is None:
-            # start_engine reported success but cleared config — should not
-            # happen; log and bail out so we don't NPE below.
-            log_event("sd_service_startup_unloaded", reason="config missing after start_engine ok")
-            return
-
-        log_event(
-            "sd_service_startup",
-            serverPath=config.server_path,
-            engineHost=config.engine_host,
-            enginePort=config.engine_port,
-            modelDir=config.model_dir,
-            diffusionModelPath=config.diffusion_model_path,
-            vaePath=config.vae_path,
-            llmPath=config.llm_path,
-            timeoutSeconds=config.timeout_seconds,
-            engineRequestTimeoutSeconds=config.engine_request_timeout_seconds,
-            warmupRequestTimeoutSeconds=config.warmup_request_timeout_seconds,
-            offloadToCpu=config.offload_to_cpu,
-            diffusionFa=config.diffusion_fa,
-            startupWarmupEnabled=STATE.startup_warmup_enabled,
-            startupWarmupFailOpen=config.startup_warmup_fail_open,
-            bundleId=STATE.loaded_bundle_id,
-        )
-
-        if not STATE.startup_warmup_enabled:
-            return
-
-        # Serialize startup warmup with /admin/warmup so we never run two
-        # warmups against the same engine at once.
-        if not WARMUP_LOCK.acquire(blocking=False):
-            log_event("sd_startup_warmup_skipped", reason="warmup already in progress")
-            return
-        try:
-            warmup_result = run_startup_warmup(config=config, request_id_prefix="sd-startup")
-        finally:
-            WARMUP_LOCK.release()
-
-        if warmup_result.get("ok", False):
-            return
-
-        warmup_error = str(warmup_result.get("error") or "Startup warmup failed.")
-        if not config.startup_warmup_fail_open:
-            # Preserve fail-closed intent without taking the control plane
-            # down: unload the engine and surface the warmup error for
-            # operator recovery via /admin/load and /admin/warmup.
-            with ENGINE_LOCK:
-                stop_engine()
-                STATE.config_error = warmup_error
-            log_event(
-                "sd_startup_warmup_failed_fatal",
-                requestId=warmup_result.get("requestId"),
-                error=warmup_error,
-                action="engine-unloaded",
-            )
-            return
-
-        log_event(
-            "sd_startup_warmup_failed_nonfatal",
-            requestId=warmup_result.get("requestId"),
-            error=warmup_error,
-        )
-    except Exception as exc:
-        log_event(
-            "sd_service_startup_worker_failed",
-            errorType=type(exc).__name__,
-            error=truncate_text(str(exc), 2048),
-        )
-
-
 @APP.on_event("startup")
 async def on_startup() -> None:
     # Control plane is always up. The admin bundle / engine-lifecycle
@@ -1741,17 +1687,13 @@ async def on_startup() -> None:
     # there is no bundle yet (otherwise there is no way to create the first
     # one) or when the last load failed.
     STATE.model_dir = os.getenv("GA_SD_MODEL_DIR", "/models-local/sd")
-    STATE.startup_warmup_enabled = env_flag("GA_SD_AUTO_LOAD_ON_STARTUP", False)
+    STATE.startup_warmup_enabled = False
     STATE.startup_warmup_completed_at_utc = None
     STATE.startup_warmup_last_attempt_at_utc = None
     STATE.startup_warmup_last_error = None
     STATE.startup_warmup_running = False
     STATE.engine_started_at_utc = None
     STATE.loaded_bundle_id = None
-
-    # Keep the control-plane API reachable immediately and run startup engine
-    # autoload / warmup in the background.
-    threading.Thread(target=run_startup_autoload_flow, name="sd-startup", daemon=True).start()
 
 
 @APP.on_event("shutdown")
@@ -1945,6 +1887,24 @@ async def admin_bundle_operation(operation_id: str) -> JSONResponse:
         operation = BUNDLE_OPERATIONS.get(operation_id)
         if operation is None:
             raise HTTPException(status_code=404, detail="operation not found")
+        return JSONResponse(status_code=200, content=dict(operation))
+
+
+@APP.post("/admin/bundles/operations/{operation_id}/cancel")
+async def admin_cancel_bundle_operation(operation_id: str) -> JSONResponse:
+    with BUNDLE_OPS_LOCK:
+        operation = BUNDLE_OPERATIONS.get(operation_id)
+        if operation is None:
+            raise HTTPException(status_code=404, detail="operation not found")
+        if _status_is_terminal(operation.get("status")):
+            return JSONResponse(status_code=200, content=dict(operation))
+        operation["cancelRequested"] = True
+        if operation.get("status") == "queued":
+            operation["status"] = "cancelled"
+            operation["error"] = "Cancelled by operator."
+            operation["completedAtUtc"] = utc_now_iso()
+        elif operation.get("status") in {"running", "downloading"}:
+            operation["status"] = "cancelling"
         return JSONResponse(status_code=200, content=dict(operation))
 
 

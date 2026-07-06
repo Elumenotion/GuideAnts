@@ -114,6 +114,33 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId))
                 .ToHashSet();
 
+            var failedRequiredModels = routerState.Data
+                .Where(m => requiredRouterIds.Contains(NormalizeRouterModelId(m.Id)) && IsRouterModelFailed(m))
+                .ToList();
+            if (failedRequiredModels.Count > 0)
+            {
+                status.State = "failed";
+                foreach (var failedModel in failedRequiredModels)
+                {
+                    var failure = DescribeRouterModelFailure(failedModel);
+                    if (!string.IsNullOrWhiteSpace(failure))
+                    {
+                        status.Conflicts.Add(failure);
+                    }
+                }
+
+                status.ActiveOperation = new ModelLoadOperationDto
+                {
+                    OperationId = ExternalLoadingOperationId,
+                    State = "failed",
+                    StartedAt = DateTime.UtcNow,
+                    CompletedAt = DateTime.UtcNow,
+                    ErrorDetails = status.Conflicts.FirstOrDefault()
+                        ?? "One or more required local models failed to load."
+                };
+                return status;
+            }
+
             // Treat "required models are already loaded" as the highest-priority truth.
             // We intentionally prefer this over an in-flight operation marker because
             // operation state can remain "loading" while auxiliary services are still
@@ -225,7 +252,8 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             };
         }
 
-        if (status.State == "loading" && status.ActiveOperation != null)
+        if (status.ActiveOperation != null
+            && (status.State == "loading" || status.State == "failed"))
         {
             return status.ActiveOperation;
         }
@@ -583,8 +611,46 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         return false;
     }
 
+    private static bool IsRouterModelFailed(LlamaModelData model)
+    {
+        if (model.Failed)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.Status?.Value))
+        {
+            var status = model.Status.Value;
+            return string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "error", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.State))
+        {
+            return string.Equals(model.State, "failed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(model.State, "error", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static string DescribeRouterModelFailure(LlamaModelData model)
+    {
+        var exitCodeSuffix = model.ExitCode.HasValue
+            ? $" (exit code {model.ExitCode.Value})"
+            : string.Empty;
+        return $"Local model '{model.Id}' failed to load{exitCodeSuffix}. Check guideants-ai logs for details.";
+    }
+
     private bool IsExternalLoadInProgress(HashSet<string> requiredRouterIds, LlamaModelsResponse routerState)
     {
+        if (routerState.Data.Any(m =>
+                requiredRouterIds.Contains(NormalizeRouterModelId(m.Id))
+                && IsRouterModelFailed(m)))
+        {
+            return false;
+        }
+
         if (_localAiWarmupService.IsWarmupInProgress)
         {
             return true;

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Router preset: persisted on the ai_local_models volume (atomic updates from llama-admin).
+# Router preset: persisted on the ai_local_models volume (atomic updates from ga-admin).
 # First boot of an empty volume: copy baked defaults so llama-server has aliases before UI use.
 ROUTER_PRESET="${GA_LLAMA_MODELS_PRESET:-/models-local/router-models.ini}"
 if [ -n "$ROUTER_PRESET" ] && [ ! -f "$ROUTER_PRESET" ] && [ -f /opt/seed/router-models.ini ]; then
@@ -366,8 +366,8 @@ monitor_service_readiness() {
 }
 
 # Start all services without serial wait dependencies.
-/app/start-sd.sh &
-SD_PID=$!
+/app/start-ga-admin.sh &
+GA_ADMIN_PID=$!
 
 truncate_llama_log_tail
 # Tee stdout+stderr to the host-visible ring log (capped above) AND keep it flowing to the
@@ -381,9 +381,6 @@ LLAMA_PID=$!
 LLAMA_PID_FILE="/run/llama-server.pid"
 mkdir -p "$(dirname "$LLAMA_PID_FILE")" 2>/dev/null || true
 echo "$LLAMA_PID" > "$LLAMA_PID_FILE"
-
-/app/start-llama-admin.sh &
-LLAMA_ADMIN_PID=$!
 
 env \
     ASPNETCORE_URLS="http://127.0.0.1:8081" \
@@ -412,13 +409,13 @@ NGINX_PID=$!
 if [ "${GA_SD_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
     monitor_service_readiness \
         "SD service" \
-        "$SD_PID" \
-        "${GA_SD_PORT:-8083}" \
-        "/health" \
+        "$GA_ADMIN_PID" \
+        "${GA_ADMIN_PORT:-${GA_LLAMA_ADMIN_PORT:-8086}}" \
+        "/sd/health" \
         "${GA_SD_READY_TIMEOUT_SECONDS:-1800}" &
 fi
 
-if [ "${GA_ASR_AUTO_LOAD_ON_STARTUP:-1}" = "1" ] && [ "${GA_ASR_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
+if [ "${GA_ASR_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
     monitor_service_readiness \
         "ASR service" \
         "$ASR_PID" \
@@ -427,7 +424,7 @@ if [ "${GA_ASR_AUTO_LOAD_ON_STARTUP:-1}" = "1" ] && [ "${GA_ASR_WAIT_FOR_READY_O
         "${GA_ASR_READY_TIMEOUT_SECONDS:-1800}" &
 fi
 
-if [ "${GA_TTS_AUTO_LOAD_ON_STARTUP:-1}" = "1" ] && [ "${GA_TTS_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
+if [ "${GA_TTS_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
     monitor_service_readiness \
         "TTS service" \
         "$TTS_PID" \
@@ -436,7 +433,7 @@ if [ "${GA_TTS_AUTO_LOAD_ON_STARTUP:-1}" = "1" ] && [ "${GA_TTS_WAIT_FOR_READY_O
         "${GA_TTS_READY_TIMEOUT_SECONDS:-1800}" &
 fi
 
-if [ "${GA_EMB_AUTO_LOAD_ON_STARTUP:-0}" = "1" ] && [ "${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
+if [ "${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
     monitor_service_readiness \
         "Embeddings service" \
         "$EMB_PID" \
@@ -446,19 +443,18 @@ if [ "${GA_EMB_AUTO_LOAD_ON_STARTUP:-0}" = "1" ] && [ "${GA_EMB_WAIT_FOR_READY_O
 fi
 
 shutdown_all() {
-    kill "$LLAMA_PID" "$LLAMA_ADMIN_PID" "$AGENT_PID" "$ASR_PID" "$TTS_PID" "$EMB_PID" "$MEDIA_PID" "$SD_PID" "$NGINX_PID" 2>/dev/null || true
+    kill "$LLAMA_PID" "$GA_ADMIN_PID" "$AGENT_PID" "$ASR_PID" "$TTS_PID" "$EMB_PID" "$MEDIA_PID" "$NGINX_PID" 2>/dev/null || true
 }
 
 trap "shutdown_all; exit" SIGTERM SIGINT
 
 LLAMA_REPORTED_EXIT=0
-LLAMA_ADMIN_REPORTED_EXIT=0
+GA_ADMIN_REPORTED_EXIT=0
 AGENT_REPORTED_EXIT=0
 ASR_REPORTED_EXIT=0
 TTS_REPORTED_EXIT=0
 EMB_REPORTED_EXIT=0
 MEDIA_REPORTED_EXIT=0
-SD_REPORTED_EXIT=0
 
 while true; do
     if [ -n "${LLAMA_PID:-}" ] && ! kill -0 "$LLAMA_PID" 2>/dev/null; then
@@ -488,12 +484,12 @@ while true; do
         LLAMA_REPORTED_EXIT=0
         echo "Respawned llama-server as PID $LLAMA_PID" >&2
     fi
-    if [ -n "${LLAMA_ADMIN_PID:-}" ] && ! kill -0 "$LLAMA_ADMIN_PID" 2>/dev/null; then
-        if [ "$LLAMA_ADMIN_REPORTED_EXIT" = "0" ]; then
-            echo "llama-admin service (PID $LLAMA_ADMIN_PID) exited; continuing with remaining services" >&2
-            LLAMA_ADMIN_REPORTED_EXIT=1
+    if [ -n "${GA_ADMIN_PID:-}" ] && ! kill -0 "$GA_ADMIN_PID" 2>/dev/null; then
+        if [ "$GA_ADMIN_REPORTED_EXIT" = "0" ]; then
+            echo "ga-admin service (PID $GA_ADMIN_PID) exited; continuing with remaining services" >&2
+            GA_ADMIN_REPORTED_EXIT=1
         fi
-        LLAMA_ADMIN_PID=""
+        GA_ADMIN_PID=""
     fi
     if [ -n "${AGENT_PID:-}" ] && ! kill -0 "$AGENT_PID" 2>/dev/null; then
         if [ "$AGENT_REPORTED_EXIT" = "0" ]; then
@@ -530,14 +526,6 @@ while true; do
         fi
         MEDIA_PID=""
     fi
-    if [ -n "${SD_PID:-}" ] && ! kill -0 "$SD_PID" 2>/dev/null; then
-        if [ "$SD_REPORTED_EXIT" = "0" ]; then
-            echo "SD service (PID $SD_PID) exited; continuing with remaining services" >&2
-            SD_REPORTED_EXIT=1
-        fi
-        SD_PID=""
-    fi
-
     if ! kill -0 "$NGINX_PID" 2>/dev/null; then
         echo "nginx (PID $NGINX_PID) exited; shutting down container" >&2
         shutdown_all

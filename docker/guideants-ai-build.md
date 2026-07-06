@@ -469,15 +469,15 @@ Default location inside the `ai_local_models` volume:
 
 `/models-local/tts`
 
-Default expected subdirectories:
+Default expected subdirectory:
 
-- `Kokoro-82M` (from `hexgrad/Kokoro-82M`)
+- `chatterbox` (catalog entry; downloaded from `ResembleAI/chatterbox` via Settings → Speech)
 
 If these files are missing, the `/tts/admin/load` and `/tts/synthesize`
 endpoints fail until artifacts are present. On a fresh host, either run
 the migration script or register the models through Settings → Speech.
-The Settings UI currently locks local TTS to `hexgrad/Kokoro-82M`; users
-choose from known Kokoro voices, and language is inferred from the voice.
+Local TTS uses the curated Chatterbox catalog; reference voices come from
+the baked voice pack (`VoiceName` enum in settings).
 
 ## Local Embeddings Model Bootstrap (Pre-test, External Artifacts)
 
@@ -529,6 +529,7 @@ Startup loading behavior is configurable per service through environment variabl
   - `0`: skip ASR readiness monitoring on startup
 - `GA_ASR_READY_TIMEOUT_SECONDS` (default `1800`)
 - `GA_ASR_DEVICE_MAP` (default `auto`)
+- `GA_ASR_BACKEND` (default `cuda`; must be `cpu`/`cuda`/`vulkan` and must match the `ENGINE_ENABLE_*` flags the image's `audiocpp_server` was built with — `cpu` for the CPU flavor, `vulkan` for the Vulkan/ROCm flavors, `cuda` for the CUDA flavor)
 - `GA_ASR_WARMUP_ON_LOAD` (`1`/`0`, default `1`)
   - `1`: runs a representative warmup transcription using `GA_ASR_WARMUP_AUDIO_PATH`
   - `0`: skips warmup (first real ASR call may be slower)
@@ -542,15 +543,16 @@ Startup loading behavior is configurable per service through environment variabl
   - `1`: run a TTS readiness monitor (`/tts/ready`) in background when autoload is enabled
   - `0`: skip TTS readiness monitoring on startup
 - `GA_TTS_READY_TIMEOUT_SECONDS` (default `1800`)
-- `GA_TTS_DEFAULT_MODEL_PATH` (default `Kokoro-82M`)
-- `GA_TTS_DEFAULT_MODEL_ID` (default `hexgrad/Kokoro-82M`)
-- `GA_TTS_DEVICE_MAP` (default `auto`)
-- `GA_TTS_DTYPE` (default `float32`)
-- `GA_TTS_VOICE` (default `af_heart`)
-- `GA_TTS_LANG_CODE` (default `a`)
+- `GA_TTS_DEFAULT_MODEL_PATH` (default `chatterbox`)
+- `GA_TTS_DEFAULT_MODEL_ID` (default `chatterbox` catalog id; download resolves to `ResembleAI/chatterbox`)
+- `GA_TTS_DEVICE_MAP` (legacy; native engine ignores)
+- `GA_TTS_BACKEND` (default `cuda`; must be `cpu`/`cuda`/`vulkan` and must match the `ENGINE_ENABLE_*` flags the image's `audiocpp_server` was built with — `cpu` for the CPU flavor, `vulkan` for the Vulkan/ROCm flavors, `cuda` for the CUDA flavor)
+- `GA_TTS_DTYPE` (legacy; native engine ignores)
+- `GA_TTS_VOICE` (default reference voice from voice pack, e.g. `en_us_cv_001`)
+- `GA_TTS_LANG_CODE` (inferred from voice pack selection)
 - `GA_TTS_SPEED` (default `1.0`)
-  - These are runtime defaults for the Kokoro service. The product UI only
-    exposes Kokoro voice selection for local TTS.
+  - Local TTS runs Chatterbox via `audiocpp_server`. Voice selection uses the
+    curated reference-voice pack exposed in the settings UI.
 - `GA_EMB_AUTO_LOAD_ON_STARTUP` (`1`/`0`)
   - `1`: autoload embeddings model on startup
   - `0`: do not autoload embeddings model
