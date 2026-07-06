@@ -385,7 +385,7 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         },
         // Single source of truth for the Hugging Face token used by every HF
         // download path in the app (llama quants + mmproj, Stable Diffusion
-        // bundles, Whisper ASR, Kokoro TTS). Stored encrypted in the DB and
+        // bundles, ASR/TTS/emb catalog downloads). Stored encrypted in the DB and
         // edited on Settings → Connections → Hugging Face.
         new()
         {

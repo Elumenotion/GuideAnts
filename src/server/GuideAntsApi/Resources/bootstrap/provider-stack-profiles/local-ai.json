@@ -16,7 +16,7 @@
     },
     "SpeechSynthesis": {
       "TimeoutSeconds": "{{local-synthesis-timeout-seconds}}",
-      "VoiceName": "af_heart"
+      "VoiceName": "af_alloy"
     },
     "DocumentIntelligence": {
       "TimeoutSeconds": "{{local-doc-int-timeout-seconds}}",
@@ -118,7 +118,7 @@
       "setAsDefault": true,
       "providerFields": {
         "TimeoutSeconds": "{{local-synthesis-timeout-seconds}}",
-        "VoiceName": "af_heart"
+        "VoiceName": "af_alloy"
       }
     },
     {

@@ -1,0 +1,6 @@
+{
+  "path": "/sd/health",
+  "method": "GET",
+  "body": "{\"status\":\"ok\",\"loadedAtUtc\":\"2026-07-03T13:40:15.095841+00:00\",\"loadedBundleId\":\"FLUX.2-dev-GGUF-Q5_K_M\",\"config\":{\"serverPath\":\"/usr/local/bin/sd-server\",\"engineHost\":\"127.0.0.1\",\"enginePort\":18083,\"modelDir\":\"/models-local/sd\",\"diffusionModelPath\":\"/models-local/sd/bundles/FLUX.2-dev-GGUF-Q5_K_M/diffusion/flux2-dev-Q5_K_M.gguf\",\"vaePath\":\"/models-local/sd/bundles/FLUX.2-dev-GGUF-Q5_K_M/vae/full_encoder_small_decoder.safetensors\",\"llmPath\":\"/models-local/sd/bundles/FLUX.2-dev-GGUF-Q5_K_M/text-encoder/Mistral-Small-3.2-24B-Instruct-2506-Q2_K_L.gguf\",\"timeoutSeconds\":900,\"engineRequestTimeoutSeconds\":120,\"warmupRequestTimeoutSeconds\":180,\"steps\":4,\"cfgScale\":1.0,\"strength\":0.75,\"samplingMethod\":\"euler\",\"offloadToCpu\":true,\"diffusionFa\":true,\"vulkanVisibleDevices\":null},\"engine\":{\"startedAtUtc\":\"2026-07-03T13:40:14.073173+00:00\",\"processAlive\":true,\"healthy\":true,\"pid\":33103,\"exitCode\":null},\"startupWarmup\":{\"enabled\":false,\"running\":false,\"completedAtUtc\":null,\"lastAttemptAtUtc\":null,\"lastError\":null,\"failOpenOnStartup\":true}}",
+  "status": 200
+}

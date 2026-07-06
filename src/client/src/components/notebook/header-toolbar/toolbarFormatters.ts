@@ -105,7 +105,19 @@ export function serviceSummaryLine(service: NotebookToolbarServiceDto): string {
     const activeModel = service.localModelOptions.find(m => m.isActive);
     if (activeModel) return `${activeModel.displayLabel} — ${service.status}`;
   }
+  if (label === 'Local') {
+    return `Local — ${service.status}`;
+  }
   return `${label} — ${service.status}`;
+}
+
+export function serviceStatusHeadline(service: NotebookToolbarServiceDto): string {
+  const active = service.providerOptions.find(p => p.providerId === service.activeProviderId);
+  const activeModel = service.localModelOptions.find(m => m.isActive);
+  if (active && toolbarProviderLabel(active.providerSection) === 'Local' && activeModel) {
+    return `${activeModel.displayLabel} — ${service.status}`;
+  }
+  return serviceSummaryLine(service);
 }
 
 const TOOLBAR_PROVIDER_NAMES: Record<string, string> = {

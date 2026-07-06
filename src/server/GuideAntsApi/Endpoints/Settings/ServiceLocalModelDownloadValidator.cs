@@ -13,7 +13,20 @@ internal static class ServiceLocalModelDownloadValidator
 
         if (!LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_id", out _))
         {
-            return Results.BadRequest(new { error = "model_id is required (Hugging Face repo id)." });
+            return Results.BadRequest(new { error = "model_id is required." });
+        }
+
+        return null;
+    }
+
+    public static IResult? ValidateCatalogMembership(string modelId, IReadOnlySet<string> catalogIds)
+    {
+        if (!catalogIds.Contains(modelId))
+        {
+            return Results.BadRequest(new
+            {
+                error = $"model_id '{modelId}' is not in the curated model catalog.",
+            });
         }
 
         return null;

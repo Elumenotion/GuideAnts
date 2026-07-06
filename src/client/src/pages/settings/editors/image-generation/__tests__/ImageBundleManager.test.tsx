@@ -61,7 +61,6 @@ vi.mock('../../../../../services/api', () => ({
         remove: vi.fn(),
         cancelOperation: vi.fn(),
         load: vi.fn(),
-        unload: vi.fn(),
       },
     },
   },
@@ -243,121 +242,6 @@ describe('ImageBundleManager', () => {
     });
     expect(screen.queryByText(/restart the/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Active bundle changed to/i)).not.toBeInTheDocument();
-  });
-
-  it('loads the SD engine when the Load engine button is clicked and surfaces the new loaded state', async () => {
-    (api.settings.localModels.listOutcome as any)
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/sd',
-          activeBundleId: 'bundle-a',
-          loadedBundleId: null,
-          engine: { processAlive: false, loadedBundleId: null },
-          items: [
-            {
-              bundleId: 'bundle-a',
-              active: true,
-              complete: true,
-              loaded: false,
-              roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
-            },
-          ],
-        },
-      })
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/sd',
-          activeBundleId: 'bundle-a',
-          loadedBundleId: 'bundle-a',
-          engine: { processAlive: true, loadedBundleId: 'bundle-a', pid: 999 },
-          items: [
-            {
-              bundleId: 'bundle-a',
-              active: true,
-              complete: true,
-              loaded: true,
-              roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
-            },
-          ],
-        },
-      });
-    (api.settings.localModels.load as any).mockResolvedValueOnce({ ok: true, action: 'loaded' });
-
-    render(<ImageBundleManager enabled />);
-
-    await screen.findByText('bundle-a');
-    // Exact-string match because /Load engine/i would also match "Unload engine".
-    const loadButton = screen.getByRole('button', { name: 'Load engine' });
-    expect((loadButton as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(loadButton);
-
-    await waitFor(() => {
-      expect(api.settings.localModels.load).toHaveBeenCalledWith('ImageGeneration', {});
-    });
-    await waitFor(() => {
-      const unload = screen.getByRole('button', { name: 'Unload engine' });
-      expect((unload as HTMLButtonElement).disabled).toBe(false);
-    });
-  });
-
-  it('unloads the SD engine when the Unload engine button is clicked', async () => {
-    (api.settings.localModels.listOutcome as any)
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/sd',
-          activeBundleId: 'bundle-a',
-          loadedBundleId: 'bundle-a',
-          engine: { processAlive: true, loadedBundleId: 'bundle-a', pid: 1 },
-          items: [
-            {
-              bundleId: 'bundle-a',
-              active: true,
-              complete: true,
-              loaded: true,
-              roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
-            },
-          ],
-        },
-      })
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/sd',
-          activeBundleId: 'bundle-a',
-          loadedBundleId: null,
-          engine: { processAlive: false, loadedBundleId: null },
-          items: [
-            {
-              bundleId: 'bundle-a',
-              active: true,
-              complete: true,
-              loaded: false,
-              roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
-            },
-          ],
-        },
-      });
-    (api.settings.localModels.unload as any).mockResolvedValueOnce({ ok: true, action: 'unloaded' });
-
-    render(<ImageBundleManager enabled />);
-
-    // "bundle-a" appears both in the engine panel ("bundle bundle-a") and in
-    // the table row, so findAllByText is required.
-    await screen.findAllByText('bundle-a');
-    const unloadButton = screen.getByRole('button', { name: 'Unload engine' });
-    expect((unloadButton as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(unloadButton);
-
-    await waitFor(() => {
-      expect(api.settings.localModels.unload).toHaveBeenCalledWith('ImageGeneration');
-    });
-    await waitFor(() => {
-      const loadButton = screen.getByRole('button', { name: 'Load engine' });
-      expect((loadButton as HTMLButtonElement).disabled).toBe(false);
-    });
   });
 
   it('submits a download request with three (repo, file) pairs and surfaces the initial operation status', async () => {

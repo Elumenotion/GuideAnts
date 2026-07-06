@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using GuideAntsApi.Endpoints.Settings;
@@ -87,6 +88,81 @@ public sealed class SettingsSupportTests
     }
 
     [TestMethod]
+    public async Task ValidateCatalogMembership_RejectsUnknownModelId()
+    {
+        var catalogIds = new HashSet<string>(StringComparer.Ordinal) { "qwen3_asr_0_6b" };
+        var result = ServiceLocalModelDownloadValidator.ValidateCatalogMembership("whisper-large-v3", catalogIds);
+
+        result.Should().NotBeNull();
+        (await ExecuteResultAsync(result!)).Should().Be(StatusCodes.Status400BadRequest);
+    }
+
+    [TestMethod]
+    public void ValidateCatalogMembership_AcceptsKnownModelId()
+    {
+        var catalogIds = new HashSet<string>(StringComparer.Ordinal) { "qwen3_asr_0_6b" };
+        var result = ServiceLocalModelDownloadValidator.ValidateCatalogMembership("qwen3_asr_0_6b", catalogIds);
+
+        result.Should().BeNull();
+    }
+
+    [TestMethod]
+    public void TryParseCatalogIds_ReadsEntryIds()
+    {
+        using var doc = JsonDocument.Parse(
+            """
+            {
+              "version": "1",
+              "entries": [
+                { "id": "qwen3_asr_0_6b", "displayName": "Qwen3 ASR" },
+                { "id": "chatterbox", "displayName": "Chatterbox" }
+              ]
+            }
+            """);
+
+        ServiceLocalModelCatalogSupport.TryParseCatalogIds(doc.RootElement, out var ids, out var error)
+            .Should().BeTrue();
+        error.Should().BeEmpty();
+        ids.Should().BeEquivalentTo(["qwen3_asr_0_6b", "chatterbox"]);
+    }
+
+    [TestMethod]
+    public async Task GetCatalogIdsAsync_FetchesFreshCatalogEachCall()
+    {
+        var handler = new StaticCatalogHandler(
+            """
+            {
+              "version": "1",
+              "entries": [{ "id": "qwen3_asr_0_6b" }]
+            }
+            """);
+        var httpClient = new HttpClient(handler);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LocalServiceHosts:SpeechTranscriptionBaseUrl"] = "http://guideants-ai:80",
+            })
+            .Build();
+
+        var first = await ServiceLocalModelCatalogSupport.GetCatalogIdsAsync(
+            "SpeechTranscription",
+            configuration,
+            httpClient,
+            CancellationToken.None);
+        var second = await ServiceLocalModelCatalogSupport.GetCatalogIdsAsync(
+            "SpeechTranscription",
+            configuration,
+            httpClient,
+            CancellationToken.None);
+
+        first.Error.Should().BeNull();
+        first.Ids.Should().ContainSingle().Which.Should().Be("qwen3_asr_0_6b");
+        second.Error.Should().BeNull();
+        second.Ids.Should().BeEquivalentTo(first.Ids);
+        handler.RequestCount.Should().Be(2);
+    }
+
+    [TestMethod]
     public void InferChatTargetReferenceKind_OverrideAll_ReturnsOverriddenToDefault()
     {
         var configuration = new ConfigurationBuilder()
@@ -144,5 +220,21 @@ public sealed class SettingsSupportTests
 
         await result.ExecuteAsync(ctx);
         return ctx.Response.StatusCode;
+    }
+
+    private sealed class StaticCatalogHandler(string catalogJson) : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(catalogJson, System.Text.Encoding.UTF8, "application/json"),
+            });
+        }
     }
 }

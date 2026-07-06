@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.HuggingFace;
 
 namespace GuideAntsApi.Endpoints.Settings;
@@ -30,6 +31,84 @@ public static class SettingsServiceLocalModelsEndpoints
                 httpClientFactory.CreateClient(), request, cancellationToken);
         })
         .WithName("GetServiceLocalModels");
+
+        serviceEditorsGroup.MapGet("/{serviceId}/local-models/catalog", async (
+            string serviceId,
+            IHttpClientFactory httpClientFactory,
+            IConfiguration configuration,
+            CancellationToken cancellationToken) =>
+        {
+            if (!string.Equals(serviceId, "SpeechTranscription", StringComparison.Ordinal)
+                && !string.Equals(serviceId, "SpeechSynthesis", StringComparison.Ordinal)
+                && !string.Equals(serviceId, "Embeddings", StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose a curated model catalog." });
+            }
+
+            var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
+            if (string.IsNullOrWhiteSpace(adminBase))
+            {
+                return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}/admin/catalog");
+            return await LocalServiceAdminRouting.ProxyAsync(
+                httpClientFactory.CreateClient(), request, cancellationToken);
+        })
+        .WithName("GetServiceLocalModelCatalog");
+
+        // Baked voice-pack presets for TTS models whose catalog voiceInput is
+        // voice_pack (e.g. chatterbox). Not a Hugging Face download — the pack
+        // ships in the image. The client uses this to populate the voice picker
+        // instead of any hardcoded enum.
+        serviceEditorsGroup.MapGet("/{serviceId}/local-models/voice-pack", async (
+            string serviceId,
+            IHttpClientFactory httpClientFactory,
+            IConfiguration configuration,
+            CancellationToken cancellationToken) =>
+        {
+            if (!string.Equals(serviceId, "SpeechSynthesis", StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose a voice pack." });
+            }
+
+            var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
+            if (string.IsNullOrWhiteSpace(adminBase))
+            {
+                return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}/admin/voice-pack");
+            return await LocalServiceAdminRouting.ProxyAsync(
+                httpClientFactory.CreateClient(), request, cancellationToken);
+        })
+        .WithName("GetServiceLocalModelVoicePack");
+
+        // Runtime speaker ids / server preset names for the loaded TTS model
+        // (audiocpp_server GET /v1/audio/voices). Used for catalog voiceInput
+        // builtin entries in the settings UI.
+        serviceEditorsGroup.MapGet("/{serviceId}/local-models/voices", async (
+            string serviceId,
+            IHttpClientFactory httpClientFactory,
+            IConfiguration configuration,
+            CancellationToken cancellationToken) =>
+        {
+            if (!string.Equals(serviceId, "SpeechSynthesis", StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose runtime voices." });
+            }
+
+            var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
+            if (string.IsNullOrWhiteSpace(adminBase))
+            {
+                return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}/admin/voices");
+            return await LocalServiceAdminRouting.ProxyAsync(
+                httpClientFactory.CreateClient(), request, cancellationToken);
+        })
+        .WithName("GetServiceLocalModelVoices");
 
         // Readiness / runtime snapshot for local services that expose /ready
         // (ASR, TTS, Embeddings). Image Generation's SD wrapper exposes
@@ -76,6 +155,28 @@ public static class SettingsServiceLocalModelsEndpoints
             if (validationError is not null)
             {
                 return validationError;
+            }
+
+            if (ServiceLocalModelCatalogSupport.ExposesCuratedCatalog(serviceId)
+                && LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_id", out var modelId))
+            {
+                var catalogResult = await ServiceLocalModelCatalogSupport.GetCatalogIdsAsync(
+                    serviceId,
+                    configuration,
+                    httpClientFactory.CreateClient(),
+                    cancellationToken);
+                if (catalogResult.Error is not null)
+                {
+                    return catalogResult.Error;
+                }
+
+                var catalogMembershipError = ServiceLocalModelDownloadValidator.ValidateCatalogMembership(
+                    modelId,
+                    catalogResult.Ids!);
+                if (catalogMembershipError is not null)
+                {
+                    return catalogMembershipError;
+                }
             }
 
             var path = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal)
@@ -141,23 +242,24 @@ public static class SettingsServiceLocalModelsEndpoints
         })
         .WithName("CancelServiceLocalModelOperation");
 
-        // Load / activate a model for ASR, TTS, or Image Generation.
+        // Load / activate a model for an auxiliary local service (ASR, TTS, Embeddings,
+        // Image Generation).
         //
-        // ASR / TTS: the request body must carry model_id or model_path plus
-        //            optional runtime knobs, which the sub-service loads into
-        //            memory. The HF token is stamped in because model_id can
-        //            trigger an implicit snapshot download.
-        // Image Generation: the active bundle is authoritative on disk (set
-        //            via /local-models/{bundleId}/select-active), so the load
-        //            endpoint only tells the SD service to start / ensure the
-        //            sd-server subprocess is running against that bundle. The
-        //            request body is ignored.
+        // SINGLE LOADING AUTHORITY: this endpoint does NOT talk to the engine's
+        // /admin/load directly. It hands the desired model to the reconciler
+        // (LocalAiStartupWarmupService), which is the one place that decides — from
+        // routing (active provider) — what gets loaded and unloads the rest. A load
+        // requested while the service is not the active provider is refused (409), per
+        // the rule that a non-active local service must load nothing.
+        //
+        //  - ASR / TTS / Embeddings: optional model_path selects a specific downloaded
+        //    model; omit it to (re)load the resolved active/default model.
+        //  - Image Generation: the request body is ignored; the active bundle on disk is
+        //    authoritative (set via /local-models/{bundleId}/select-active).
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/load", async (
             string serviceId,
             [FromBody] JsonElement payload,
-            IHttpClientFactory httpClientFactory,
-            IConfiguration configuration,
-            IHuggingFaceTokenResolver hfTokenResolver,
+            ILocalAiStartupWarmupService warmup,
             CancellationToken cancellationToken) =>
         {
             var isImageGeneration = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal);
@@ -169,100 +271,60 @@ public static class SettingsServiceLocalModelsEndpoints
                 return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose a local model load endpoint." });
             }
 
-            var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
-            if (string.IsNullOrWhiteSpace(adminBase))
+            string? requestedModelRef = null;
+            if (!isImageGeneration)
             {
-                return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
-            }
-
-            HttpContent? content = null;
-            if (isAsr || isTts)
-            {
-                var hasModelId = LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_id", out _);
-                var hasModelPath = LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_path", out _);
-                if (!hasModelId && !hasModelPath)
+                if (LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_path", out var modelPath))
                 {
-                    return Results.BadRequest(new { error = "Either model_id or model_path is required." });
+                    requestedModelRef = modelPath;
                 }
-
-                var resolvedHfToken = hfTokenResolver.Resolve();
-                content = LocalServiceAdminRouting.BuildForwardedBodyWithHfToken(payload, resolvedHfToken);
-            }
-            else if (isEmbeddings)
-            {
-                var hasModelId = LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_id", out _);
-                var hasModelPath = LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_path", out _);
-                if (!hasModelId && !hasModelPath)
+                else if (LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_id", out var modelId))
                 {
-                    return Results.BadRequest(new { error = "Either model_id or model_path is required." });
+                    requestedModelRef = modelId;
                 }
-
-                var resolvedHfToken = hfTokenResolver.Resolve();
-                content = LocalServiceAdminRouting.BuildForwardedBodyWithHfToken(payload, resolvedHfToken);
             }
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{adminBase}/admin/load")
-            {
-                Content = content,
-            };
-            return await LocalServiceAdminRouting.ProxyAsync(
-                httpClientFactory.CreateClient(), request, cancellationToken);
+            var result = await warmup
+                .ReconcileLocalServiceAsync(serviceId, requestedModelRef, cancellationToken)
+                .ConfigureAwait(false);
+            return MapReconcileResult(serviceId, result);
         })
         .WithName("LoadServiceLocalModel");
 
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/unload", async (
             string serviceId,
-            IHttpClientFactory httpClientFactory,
-            IConfiguration configuration,
+            ILocalAiStartupWarmupService warmup,
             CancellationToken cancellationToken) =>
         {
-            var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
-            if (string.IsNullOrWhiteSpace(adminBase))
+            var isImageGeneration = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal);
+            var isAsr = string.Equals(serviceId, "SpeechTranscription", StringComparison.Ordinal);
+            var isTts = string.Equals(serviceId, "SpeechSynthesis", StringComparison.Ordinal);
+            var isEmbeddings = string.Equals(serviceId, "Embeddings", StringComparison.Ordinal);
+            if (!isImageGeneration && !isAsr && !isTts && !isEmbeddings)
             {
-                return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
+                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose a local model unload endpoint." });
             }
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{adminBase}/admin/unload");
-            return await LocalServiceAdminRouting.ProxyAsync(
-                httpClientFactory.CreateClient(), request, cancellationToken);
+
+            var result = await warmup
+                .PowerOffLocalServiceEngineAsync(serviceId, cancellationToken)
+                .ConfigureAwait(false);
+            return MapReconcileResult(serviceId, result);
         })
         .WithName("UnloadServiceLocalModel");
 
+        // Select which downloaded model/bundle should be the active one for an aux
+        // service, then reconcile. Same single-authority path as /load: the reconciler
+        // loads it only if the service is the active provider, otherwise refuses (409).
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/{modelRef}/select-active", async (
             string serviceId,
             string modelRef,
-            IHttpClientFactory httpClientFactory,
-            IConfiguration configuration,
+            ILocalAiStartupWarmupService warmup,
             CancellationToken cancellationToken) =>
         {
-            var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
-            if (string.IsNullOrWhiteSpace(adminBase))
-            {
-                return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
-            }
-
-            HttpRequestMessage request;
-            if (string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal))
-            {
-                request = new HttpRequestMessage(
-                    HttpMethod.Post,
-                    $"{adminBase}/admin/bundles/{Uri.EscapeDataString(modelRef)}/select-active");
-            }
-            else
-            {
-                request = new HttpRequestMessage(HttpMethod.Post, $"{adminBase}/admin/load")
-                {
-                    Content = new StringContent(
-                        JsonSerializer.Serialize(new { model_path = modelRef }),
-                        System.Text.Encoding.UTF8,
-                        "application/json")
-                };
-            }
-
-            using (request)
-            {
-                return await LocalServiceAdminRouting.ProxyAsync(
-                    httpClientFactory.CreateClient(), request, cancellationToken);
-            }
+            var result = await warmup
+                .ReconcileLocalServiceAsync(serviceId, modelRef, cancellationToken)
+                .ConfigureAwait(false);
+            return MapReconcileResult(serviceId, result);
         })
         .WithName("SelectServiceLocalModel");
 
@@ -309,5 +371,29 @@ public static class SettingsServiceLocalModelsEndpoints
                 httpClientFactory.CreateClient(), request, cancellationToken);
         })
         .WithName("DeleteServiceLocalModel");
+    }
+
+    private static IResult MapReconcileResult(string serviceId, LocalServiceReconcileResult result)
+    {
+        return result.Outcome switch
+        {
+            LocalServiceReconcileOutcome.Warm => Results.Ok(new { serviceId, status = "loaded" }),
+            LocalServiceReconcileOutcome.Idle => Results.Ok(new { serviceId, status = "unloaded" }),
+            LocalServiceReconcileOutcome.NotActiveProvider => Results.Conflict(new
+            {
+                error = result.Detail ?? $"'{serviceId}' is not the active provider; nothing was loaded.",
+            }),
+            LocalServiceReconcileOutcome.Unavailable => SettingsGroupFactory.LocalServiceUnavailable(serviceId),
+            LocalServiceReconcileOutcome.RoutingUnknown => Results.Conflict(new
+            {
+                error = result.Detail ?? $"Routing for '{serviceId}' could not be resolved.",
+            }),
+            LocalServiceReconcileOutcome.Timeout => Results.Json(
+                new { error = result.Detail ?? $"'{serviceId}' did not reach the desired state in time." },
+                statusCode: StatusCodes.Status504GatewayTimeout),
+            _ => Results.Json(
+                new { error = result.Detail ?? $"Reconcile for '{serviceId}' failed." },
+                statusCode: StatusCodes.Status502BadGateway),
+        };
     }
 }

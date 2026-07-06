@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { FaDownload, FaEdit, FaEye, FaPlay, FaSpinner, FaStop, FaTrash, FaUpload, FaTimes } from 'react-icons/fa';
+import { FaDownload, FaEdit, FaEye, FaPlay, FaSpinner, FaTrash, FaUpload, FaTimes } from 'react-icons/fa';
 import { ConfirmationDialog } from '../../../../components/common/ConfirmationDialog';
 import { api } from '../../../../services/api';
 import { IconActionButton, TextActionButton } from '../../components/shared/ActionButtons';
@@ -261,10 +261,6 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [activeOperation, setActiveOperation] = useState<OperationState | null>(null);
-  // Engine lifecycle pending states. At most one can be true at a time because
-  // the SD service serializes lifecycle ops behind a lock and we disable the
-  // other controls while a request is in flight.
-  const [engineBusy, setEngineBusy] = useState<null | 'load' | 'unload'>(null);
 
   const pollRef = useRef<number | null>(null);
   const definitionUploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -363,14 +359,6 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
       });
       return;
     }
-    if (engineBusy !== null) {
-      onRuntimeReadinessChange({
-        serviceId: SERVICE_ID,
-        ready: false,
-        status: engineBusy === 'load' ? 'Loading engine' : 'Unloading engine',
-      });
-      return;
-    }
     if (engineAlive && loadedBundleId) {
       onRuntimeReadinessChange({
         serviceId: SERVICE_ID,
@@ -418,7 +406,6 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
     enabled,
     engine?.lastError,
     engineAlive,
-    engineBusy,
     errorMessage,
     hasInFlightOperation,
     loadedBundleId,
@@ -587,38 +574,6 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
     }
   };
 
-  const handleLoadEngine = async () => {
-    if (hasInFlightOperation) {
-      return;
-    }
-    setActionError(null);
-    setEngineBusy('load');
-    try {
-      await api.settings.localModels.load(SERVICE_ID, {});
-      await refresh();
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Load failed.');
-    } finally {
-      setEngineBusy(null);
-    }
-  };
-
-  const handleUnloadEngine = async () => {
-    if (hasInFlightOperation) {
-      return;
-    }
-    setActionError(null);
-    setEngineBusy('unload');
-    try {
-      await api.settings.localModels.unload(SERVICE_ID);
-      await refresh();
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Unload failed.');
-    } finally {
-      setEngineBusy(null);
-    }
-  };
-
   const handleRemoveConfirmed = async () => {
     if (!pendingRemoveId) {
       return;
@@ -671,10 +626,6 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
         <EngineStatusPanel
           engine={engine}
           loadedBundleId={loadedBundleId}
-          engineBusy={engineBusy}
-          blockedByDownload={hasInFlightOperation}
-          onLoad={() => void handleLoadEngine()}
-          onUnload={() => void handleUnloadEngine()}
         />
 
         {activeOperation ? (
@@ -825,7 +776,6 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
                             || bundleOperationBusy
                             || bundleExportBusy
                             || busyBundleId === b.bundleId
-                            || engineBusy !== null
                           }
                           onClick={() => void handleActivate(b.bundleId)}
                           title={
@@ -844,7 +794,7 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
                           label="Remove bundle"
                           tone="danger"
                           icon={<FaTrash />}
-                          disabled={bundleOperationBusy || bundleExportBusy || b.active || b.loaded || engineBusy !== null}
+                          disabled={bundleOperationBusy || bundleExportBusy || b.active || b.loaded}
                           onClick={() => setPendingRemoveId(b.bundleId)}
                           title={
                             bundleOperationBusy
@@ -929,25 +879,14 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
 function EngineStatusPanel({
   engine,
   loadedBundleId,
-  engineBusy,
-  blockedByDownload,
-  onLoad,
-  onUnload,
 }: {
   engine: EngineState | undefined;
   loadedBundleId: string | null | undefined;
-  engineBusy: null | 'load' | 'unload';
-  blockedByDownload: boolean;
-  onLoad: () => void;
-  onUnload: () => void;
 }) {
-  // Three display states:
-  //   1. Loaded — sd-server subprocess is alive, loadedBundleId is set. Show
-  //      which bundle is in memory and an Unload button.
-  //   2. Unloaded (clean) — no subprocess, no last error. Show Load button.
-  //   3. Unloaded (errored) — no subprocess but a previous load failed. Show
-  //      Load button plus the error so operators see why the engine is down
-  //      without digging through container logs.
+  // Read-only status: whether the sd-server subprocess is alive, which bundle
+  // is loaded, and the last engine error if a previous load failed. The engine
+  // is warmed by activating a bundle (selectActive) through the server
+  // reconciler — there is no standalone load/unload control here.
   const alive = Boolean(engine?.processAlive);
   const lastError = engine?.lastError ?? null;
 
@@ -977,34 +916,6 @@ function EngineStatusPanel({
           {alive && typeof engine?.pid === 'number' ? (
             <span className="text-gray-500">pid {engine.pid}</span>
           ) : null}
-        </div>
-        <div className="flex gap-1">
-          <TextActionButton
-            tone="primary"
-            icon={engineBusy === 'load' ? <FaSpinner className="animate-spin" /> : <FaPlay />}
-            disabled={alive || engineBusy !== null || blockedByDownload}
-            onClick={onLoad}
-            title={
-              blockedByDownload
-                ? 'Wait for the current bundle operation to finish or cancel it first.'
-                : 'Start the sd-server subprocess and load the active bundle into memory.'
-            }
-          >
-            {engineBusy === 'load' ? 'Loading…' : 'Load engine'}
-          </TextActionButton>
-          <TextActionButton
-            tone="neutral"
-            icon={engineBusy === 'unload' ? <FaSpinner className="animate-spin" /> : <FaStop />}
-            disabled={!alive || engineBusy !== null || blockedByDownload}
-            onClick={onUnload}
-            title={
-              blockedByDownload
-                ? 'Wait for the current bundle operation to finish or cancel it first.'
-                : 'Stop the sd-server subprocess and release its GPU / RAM.'
-            }
-          >
-            {engineBusy === 'unload' ? 'Unloading…' : 'Unload engine'}
-          </TextActionButton>
         </div>
       </div>
       {lastError ? (

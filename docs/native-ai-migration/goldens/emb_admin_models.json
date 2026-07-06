@@ -1,0 +1,6 @@
+{
+  "path": "/emb/admin/models",
+  "method": "GET",
+  "body": "{\"modelDir\":\"/models-local/emb\",\"items\":[{\"modelRef\":\".cache\",\"path\":\"/models-local/emb/.cache\",\"isDirectory\":true,\"sizeBytes\":0,\"active\":false},{\"modelRef\":\"Qwen3-Embedding-0.6B-Q8_0.gguf\",\"path\":\"/models-local/emb/Qwen3-Embedding-0.6B-Q8_0.gguf\",\"isDirectory\":false,\"sizeBytes\":639150592,\"active\":true}]}",
+  "status": 200
+}

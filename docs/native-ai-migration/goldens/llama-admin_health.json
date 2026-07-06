@@ -1,0 +1,6 @@
+{
+  "path": "/llama-admin/health",
+  "method": "GET",
+  "body": "{\"status\":\"ok\",\"routerConfigPath\":\"/models-local/router-models.ini\",\"modelStoreRoot\":\"/models-local/llama\"}",
+  "status": 200
+}
