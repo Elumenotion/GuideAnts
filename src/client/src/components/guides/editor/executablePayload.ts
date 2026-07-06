@@ -71,3 +71,43 @@ export function guideHasSandboxGatingPayload(params: {
 
   return guideHasSkillScriptsPayload(params);
 }
+
+export const FILES_CONTEXT_OPTION_KEY = 'files';
+export const FILES_CONTEXT_OPTION_VALUE = '[@files]';
+
+export function hasFilesContextOption(
+  contextOptions: Array<{ value?: string }>,
+): boolean {
+  return contextOptions.some((option) =>
+    option.value?.toLowerCase().includes('[@files]') ?? false,
+  );
+}
+
+export function isNotebookPayloadUpload(file: {
+  folderKind: string;
+  relativePath: string;
+}): boolean {
+  if (file.folderKind === 'CodeInterpreter') {
+    return true;
+  }
+
+  return file.folderKind === 'Skill' && isMaterializableSkillPayloadPath(file.relativePath);
+}
+
+export function withSuggestedFilesContextOption<T extends { key: string; value?: string }>(
+  contextOptions: T[],
+  payloadFiles: Array<{ folderKind: string; relativePath: string }>,
+): T[] {
+  if (hasFilesContextOption(contextOptions)) {
+    return contextOptions;
+  }
+
+  if (!payloadFiles.some(isNotebookPayloadUpload)) {
+    return contextOptions;
+  }
+
+  return [
+    ...contextOptions,
+    { key: FILES_CONTEXT_OPTION_KEY, value: FILES_CONTEXT_OPTION_VALUE } as T,
+  ];
+}

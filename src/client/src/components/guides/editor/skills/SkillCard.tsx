@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FaArrowDown, FaArrowUp, FaTimes, FaBook } from 'react-icons/fa';
+import { FaArrowDown, FaArrowUp, FaRobot, FaTimes, FaBook } from 'react-icons/fa';
 import type { FileDto } from '../../../../types/guides';
 import { buildSkillCardViewModel } from './skillCardViewModel';
 import { computeSkillGating } from './skillGating';
@@ -30,6 +30,7 @@ interface SkillCardProps {
   onRemove: () => void;
   onPreviewFile: (file: FileDto) => void;
   onDownloadFile?: (fileId: string, fileName: string) => void;
+  onCreateAssistant?: () => void;
 }
 
 export function SkillCard({
@@ -46,6 +47,7 @@ export function SkillCard({
   onRemove,
   onPreviewFile,
   onDownloadFile,
+  onCreateAssistant,
 }: SkillCardProps) {
   const [filesExpanded, setFilesExpanded] = useState(false);
   const gating = computeSkillGating(
@@ -123,6 +125,17 @@ export function SkillCard({
                   <FaArrowDown className="h-3 w-3" />
                 </button>
               </div>
+            )}
+
+            {onCreateAssistant && (
+              <button
+                type="button"
+                onClick={onCreateAssistant}
+                className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-sm text-blue-700 hover:bg-blue-100"
+              >
+                <FaRobot className="h-3 w-3" />
+                Create assistant
+              </button>
             )}
 
             <button

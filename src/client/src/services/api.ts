@@ -1834,7 +1834,15 @@ export const api = {
                 }
                 return response.json();
             },
-            
+            downloadFile: async (assistantId: string, fileId: string): Promise<Blob> => {
+                const response = await fetchWithAuth(
+                    `${API_BASE_URL}/assistants/${assistantId}/files/${fileId}/download`,
+                );
+                if (!response.ok) {
+                    throw new Error('Failed to download file');
+                }
+                return response.blob();
+            },
             getFileMarkdownShadow: async (assistantId: string, fileId: string) =>
                 callApi<import('../types/guides').AssistantFileMarkdownShadowDto>(
                     `/assistants/${assistantId}/files/${fileId}/markdown`
