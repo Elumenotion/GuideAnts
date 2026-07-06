@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import threading
@@ -18,7 +17,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-MODEL_PATH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 MAX_PRODUCED_DIMENSION = 1536
 CATALOG_PATH = os.path.join(os.path.dirname(__file__), "catalog", "manifest.json")
 
@@ -206,17 +204,33 @@ def resolve_n_gpu_layers() -> tuple[str, int]:
     return device, -1
 
 
-def resolve_permitted_gguf_path(model_dir: str, requested: str) -> str:
-    requested = requested.strip()
-    if not MODEL_PATH_RE.fullmatch(requested) and not requested.endswith(".gguf"):
-        raise ValueError("model_path must be a simple local model name.")
+def resolve_permitted_gguf_path(model_dir: str, catalog_filename: str) -> str:
+    """Resolve a catalog-listed GGUF filename under model_dir.
+
+    ``catalog_filename`` must come from the baked manifest (see
+    ``catalog_entry_for_gguf_filename``), not from raw request input.
+    """
     base_real = os.path.realpath(model_dir)
-    candidate = os.path.realpath(os.path.join(base_real, requested))
-    if not candidate.startswith(base_real + os.sep) and candidate != base_real:
+    candidate = os.path.realpath(os.path.join(base_real, catalog_filename))
+    if not candidate.startswith(base_real + os.sep):
         raise ValueError("resolved model_path escapes the permitted model directory.")
     if not os.path.isfile(candidate):
-        raise FileNotFoundError(f"GGUF file '{requested}' does not exist.")
+        raise FileNotFoundError(f"GGUF file '{catalog_filename}' does not exist.")
     return candidate
+
+
+def catalog_entry_for_gguf_filename(requested: str) -> tuple[str, dict[str, Any]] | None:
+    requested = requested.strip()
+    if not requested or "/" in requested or "\\" in requested or requested in {".", ".."}:
+        return None
+    for entry in CATALOG["entries"].values():
+        if int(entry.get("producedDimension", 0)) == 0:
+            continue
+        for src in entry.get("sourceRepos", []):
+            catalog_filename = str(src.get("filename") or "").strip()
+            if catalog_filename and catalog_filename == requested:
+                return catalog_filename, entry
+    return None
 
 
 def resolve_gguf_target(request: LoadModelRequest) -> tuple[str, str, dict[str, Any]]:
@@ -225,14 +239,12 @@ def resolve_gguf_target(request: LoadModelRequest) -> tuple[str, str, dict[str, 
 
     if request.model_path:
         requested = request.model_path.strip()
-        candidate = resolve_permitted_gguf_path(model_dir, requested)
-        ref = os.path.basename(candidate)
-        for entry in CATALOG["entries"].values():
-            if int(entry.get("producedDimension", 0)) == 0:
-                continue
-            if ref in {src.get("filename") for src in entry.get("sourceRepos", [])}:
-                return candidate, ref, entry
-        raise ValueError(f"Local GGUF '{ref}' is not a catalog-listed artifact.")
+        match = catalog_entry_for_gguf_filename(requested)
+        if match is None:
+            raise ValueError(f"Local GGUF '{requested}' is not a catalog-listed artifact.")
+        catalog_filename, entry = match
+        candidate = resolve_permitted_gguf_path(model_dir, catalog_filename)
+        return candidate, catalog_filename, entry
 
     catalog_id = (request.model_id or os.getenv("GA_EMB_DEFAULT_MODEL_PATH") or "").strip()
     if not catalog_id:
@@ -240,13 +252,14 @@ def resolve_gguf_target(request: LoadModelRequest) -> tuple[str, str, dict[str, 
 
     entry = resolve_catalog_entry(catalog_id)
     source = entry["sourceRepos"][0]
-    filename = source["filename"]
-    gguf_path = os.path.join(model_dir, filename)
-    if not os.path.isfile(gguf_path):
+    catalog_filename = str(source["filename"]).strip()
+    try:
+        gguf_path = resolve_permitted_gguf_path(model_dir, catalog_filename)
+    except FileNotFoundError as exc:
         raise FileNotFoundError(
-            f"Catalog model '{catalog_id}' expects '{filename}' under {model_dir}. Download it first."
-        )
-    return gguf_path, filename, entry
+            f"Catalog model '{catalog_id}' expects '{catalog_filename}'. Download it first."
+        ) from exc
+    return gguf_path, catalog_filename, entry
 
 
 def build_runtime_config(gguf_path: str, model_ref: str, entry: dict[str, Any]) -> EmbRuntimeConfig:
