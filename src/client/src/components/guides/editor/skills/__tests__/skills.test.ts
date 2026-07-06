@@ -2,10 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { parseSkillFrontmatter, buildCanonicalSkillMarkdown } from '../skillFrontmatter';
 import { computeSkillGating } from '../skillGating';
 import { mapSkillPrerequisites } from '../skillToolsetMapping';
-import { buildAssistantInstructionsFromSkillMarkdown } from '../createFromSkillHelpers';
 import { buildSkillCardViewModel } from '../skillCardViewModel';
 import { moveSkill, nextSkillDisplayOrder, reindexSkillDisplayOrders } from '../skillOrdering';
 import { buildSkillFileTree, skillPackagePath } from '../skillFileTreeModel';
+import {
+  buildAssistantInstructionsFromSkillMarkdown,
+  filterSkillPayloadFilesForAssistant,
+  isSkillManifestPath,
+} from '../createFromSkillHelpers';
 import type { AssistantSkillDto } from '../../../../../types/guides';
 
 const agentskillsYaml = `---
@@ -269,20 +273,34 @@ describe('skillOrdering', () => {
 });
 
 describe('createFromSkillHelpers', () => {
-  it('uses the SKILL.md body for assistant instructions', () => {
+  it('uses the full SKILL.md file for assistant instructions', () => {
     const instructions = buildAssistantInstructionsFromSkillMarkdown(agentskillsYaml);
-    expect(instructions).toBe('# Body');
+    expect(instructions).toContain('name: pptx-author');
+    expect(instructions).toContain('# Body');
     expect(instructions).not.toContain('Use the');
   });
 
-  it('falls back to full markdown when the body is empty', () => {
-    const markdown = `---
-name: empty-body
-description: No body content.
----
-`;
-    const instructions = buildAssistantInstructionsFromSkillMarkdown(markdown);
-    expect(instructions).toContain('name: empty-body');
+  it('excludes SKILL.md from assistant payload files', () => {
+    expect(isSkillManifestPath('Skills/demo/SKILL.md')).toBe(true);
+    expect(isSkillManifestPath('Skills/demo/scripts/run.sh')).toBe(false);
+
+    const filtered = filterSkillPayloadFilesForAssistant([
+      {
+        folderKind: 'Skill',
+        relativePath: 'Skills/searxng-search/SKILL.md',
+        contentBytes: btoa('# skill'),
+        contentType: 'text/markdown',
+      },
+      {
+        folderKind: 'Skill',
+        relativePath: 'Skills/searxng-search/scripts/searxng.sh',
+        contentBytes: btoa('#!/bin/bash'),
+        contentType: 'application/x-sh',
+      },
+    ]);
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].relativePath).toBe('Skills/searxng-search/scripts/searxng.sh');
   });
 });
 

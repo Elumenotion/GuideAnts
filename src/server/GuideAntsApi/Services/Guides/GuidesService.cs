@@ -760,7 +760,25 @@ public class GuidesService(
             ));
         }
 
-        var skills = SkillDtoBuilder.BuildFromAssistantFiles(assistant.Files, assistant.SkillMetas);
+        var skills = assistant.Kind == AssistantKind.Guide
+            ? SkillDtoBuilder.BuildFromAssistantFiles(assistant.Files, assistant.SkillMetas)
+            : [];
+
+        if (assistant.Kind == AssistantKind.Assistant)
+        {
+            foreach (var f in assistant.Files.Where(file =>
+                         string.Equals(file.FolderKind, "Skill", StringComparison.OrdinalIgnoreCase)))
+            {
+                files.Add(new FileDto(
+                    f.Id,
+                    f.FolderKind,
+                    f.VectorStoreName,
+                    f.RelativePath,
+                    f.ContentType,
+                    f.Created,
+                    null));
+            }
+        }
 
         var conversationStarters = assistant.ConversationStarters
             .OrderBy(cs => cs.OrderIndex)
@@ -824,6 +842,11 @@ public class GuidesService(
         _context.Assistants.Add(assistant);
         await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
+
+        if (dto.Skills is { Count: > 0 })
+        {
+            await _assistantSkillMetaSync.SyncFromSkillSavesAsync(assistant.Id, dto.Skills);
+        }
 
         // Create markdown shadows for vector store files
         var vectorStoreFiles = assistant.Files.Where(f => f.FolderKind == "VectorStore").ToList();
@@ -1589,6 +1612,7 @@ public class GuidesService(
         }
 
         GuideExecutablePayload.EnsureRunPythonToolForSkillPayload(assistant);
+        GuideExecutablePayload.EnsureFilesContextOption(assistant);
 
         // Add conversation starters
         if (conversationStarters != null)
@@ -1933,6 +1957,11 @@ public class GuidesService(
                             f.FolderKind, "Skill", StringComparison.OrdinalIgnoreCase);
                         if (isSkill)
                         {
+                            if (kind == AssistantKind.Assistant)
+                            {
+                                return fileIdsToKeep != null && !fileIdsToKeep.Contains(f.Id);
+                            }
+
                             return skills != null && !skillFileIdsToKeep.Contains(f.Id);
                         }
 
@@ -2061,6 +2090,12 @@ public class GuidesService(
                     DisplayOrder = i
                 });
             }
+        }
+
+        if (filesToAdd is { Count: > 0 }
+            && GuideExecutablePayload.NewUploadsHaveNotebookPayload(filesToAdd))
+        {
+            await GuideExecutablePayload.EnsureFilesContextOptionAsync(_context, assistantId);
         }
 
         await GuideExecutablePayload.EnsureRunPythonToolForSkillPayloadAsync(_context, assistantId);

@@ -2,16 +2,17 @@ interface EditorTabsProps {
   activeTab: 'general' | 'configuration' | 'tools' | 'files' | 'skills' | 'environment' | 'crew' | 'auth';
   showCrew: boolean; // Control whether to show Crew tab (guides only)
   showAuth: boolean; // Control whether to show Auth tab (guides only)
+  showSkills: boolean; // Skill packages are guide orchestrator surface only
   onTabChange: (tab: 'general' | 'configuration' | 'tools' | 'files' | 'skills' | 'environment' | 'crew' | 'auth') => void;
 }
 
-export function EditorTabs({ activeTab, showCrew, showAuth, onTabChange }: EditorTabsProps) {
+export function EditorTabs({ activeTab, showCrew, showAuth, showSkills, onTabChange }: EditorTabsProps) {
   const tabs = [
     { id: 'general' as const, label: 'General' },
     { id: 'configuration' as const, label: 'Configuration' },
     { id: 'tools' as const, label: 'Tools' },
     { id: 'files' as const, label: 'Files' },
-    { id: 'skills' as const, label: 'Skills' },
+    ...(showSkills ? [{ id: 'skills' as const, label: 'Skills' }] : []),
     { id: 'environment' as const, label: 'Environment' },
     ...(showAuth ? [{ id: 'auth' as const, label: 'Authentication' }] : []),
     ...(showCrew ? [{ id: 'crew' as const, label: 'Crew' }] : []),

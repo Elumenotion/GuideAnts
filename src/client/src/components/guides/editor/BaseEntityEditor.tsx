@@ -19,7 +19,7 @@ import { EnvironmentConfig } from './EnvironmentConfig';
 import { SkillsTab } from './skills/SkillsTab';
 import { toSkillSaveDto } from './skills/skillImportHelpers';
 import { reindexSkillDisplayOrders } from './skills/skillOrdering';
-import { guideHasSandboxGatingPayload, guideHasSkillScriptsPayload } from './executablePayload';
+import { guideHasSandboxGatingPayload, guideHasSkillScriptsPayload, isNotebookPayloadUpload, withSuggestedFilesContextOption } from './executablePayload';
 import { MarkdownPreviewModal } from './MarkdownPreviewModal';
 import { useRegisterTour } from '../../../tour/useRegisterTour';
 import {
@@ -158,6 +158,12 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
 
   // Persist active tab in URL for navigation stability
   const activeTab = (searchParams.get('tab') || 'general') as 'general' | 'configuration' | 'tools' | 'files' | 'skills' | 'environment' | 'crew' | 'auth';
+
+  useEffect(() => {
+    if (!isGuide && activeTab === 'skills') {
+      setSearchParams({ tab: 'general' }, { replace: true });
+    }
+  }, [isGuide, activeTab, setSearchParams]);
 
   const [formData, setFormData] = useState<FormData>(defaultFormData);
   const [isDirty, setIsDirty] = useState(false);
@@ -852,7 +858,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             contextOptions: contextOptionsToSave,
             fileIdsToKeep,
             filesToAdd,
-            skills: skillsToSave,
+            skills: isGuide ? skillsToSave : undefined,
             conversationStarters: formData.conversationStarters,
           };
 
@@ -920,7 +926,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             customTools: formData.customTools,
             contextOptions: contextOptionsToSave,
             files: formData.newFiles.length > 0 ? formData.newFiles : undefined,
-            skills: skillsToSave,
             conversationStarters: formData.conversationStarters,
           };
 
@@ -1091,6 +1096,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
         activeTab={activeTab}
         showCrew={isGuide}
         showAuth={isGuide}
+        showSkills={isGuide}
         onTabChange={setActiveTab}
       />
 
@@ -1164,7 +1170,21 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               existingFiles={formData.existingFiles}
               newFiles={formData.newFiles}
               onExistingFilesChange={(existingFiles) => updateForm({ existingFiles })}
-              onNewFilesChange={(newFiles) => updateForm({ newFiles })}
+              onNewFilesChange={(newFiles) => {
+                const addedPayloadUpload = newFiles.some((file) =>
+                  isNotebookPayloadUpload(file)
+                  && !formData.newFiles.some((existing) =>
+                    existing.relativePath === file.relativePath
+                    && existing.folderKind === file.folderKind,
+                  ),
+                );
+                updateForm({
+                  newFiles,
+                  contextOptions: addedPayloadUpload
+                    ? withSuggestedFilesContextOption(formData.contextOptions, newFiles)
+                    : formData.contextOptions,
+                });
+              }}
               onPreviewMarkdown={handlePreviewMarkdown}
               onDownloadFile={handleDownloadFile}
             />

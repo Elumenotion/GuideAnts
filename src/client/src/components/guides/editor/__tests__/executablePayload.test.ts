@@ -3,6 +3,9 @@ import {
   guideHasSandboxGatingPayload,
   guideHasSkillScriptsPayload,
   isMaterializableSkillPayloadPath,
+  withSuggestedFilesContextOption,
+  FILES_CONTEXT_OPTION_KEY,
+  FILES_CONTEXT_OPTION_VALUE,
 } from '../executablePayload';
 
 describe('isMaterializableSkillPayloadPath', () => {
@@ -56,5 +59,29 @@ describe('guideHasSandboxGatingPayload', () => {
       skills: [],
       pendingSkillUploads: [],
     })).toBe(true);
+  });
+});
+
+describe('withSuggestedFilesContextOption', () => {
+  it('adds files context option when notebook payload files are present', () => {
+    const result = withSuggestedFilesContextOption([], [{
+      folderKind: 'Skill',
+      relativePath: 'Skills/searxng-search/scripts/searxng.sh',
+    }]);
+
+    expect(result).toEqual([{
+      key: FILES_CONTEXT_OPTION_KEY,
+      value: FILES_CONTEXT_OPTION_VALUE,
+    }]);
+  });
+
+  it('does not duplicate when [@files] is already configured', () => {
+    const existing = [{ key: 'workspace', value: '[@files]' }];
+    const result = withSuggestedFilesContextOption(existing, [{
+      folderKind: 'Skill',
+      relativePath: 'Skills/demo/scripts/run.py',
+    }]);
+
+    expect(result).toBe(existing);
   });
 });
