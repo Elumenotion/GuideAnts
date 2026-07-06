@@ -1,0 +1,6 @@
+{
+  "path": "/asr/health",
+  "method": "GET",
+  "body": "{\"status\":\"ok\",\"loaded\":true,\"loading\":false,\"modelRef\":\"Qwen3-ASR-0.6B\",\"loadedAtUtc\":\"2026-07-03T13:40:07.766523+00:00\",\"loadError\":null,\"warmupEnabled\":true,\"warmupRan\":true,\"warmupSucceeded\":true,\"warmupLatencyMs\":948,\"warmupError\":null,\"warmupAudioPath\":\"/app/asr-service/warmup.webm\",\"warmupCompletedAtUtc\":\"2026-07-03T13:40:07.766397+00:00\"}",
+  "status": 200
+}

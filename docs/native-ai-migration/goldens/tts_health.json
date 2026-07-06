@@ -1,0 +1,6 @@
+{
+  "path": "/tts/health",
+  "method": "GET",
+  "body": "{\"status\":\"ok\",\"backend\":\"cuda\",\"loaded\":true,\"loading\":false,\"modelRef\":\"chatterbox\",\"tokenizerRef\":null,\"catalogEntryId\":\"chatterbox\",\"loadedAtUtc\":\"2026-07-03T13:40:09.867945+00:00\",\"loadError\":null,\"pipelineTask\":\"chatterbox-tts\",\"device\":\"cuda\",\"maxNewTokens\":0,\"voice\":\"en_us_cv_001\",\"langCode\":\"a\",\"speed\":1.0,\"sampleRate\":24000,\"autoloadEnabled\":false,\"warmupEnabled\":true,\"warmupRan\":true,\"warmupSucceeded\":true,\"warmupLatencyMs\":4197,\"warmupError\":null,\"warmupCompletedAtUtc\":\"2026-07-03T13:40:14.066342+00:00\",\"engineAlive\":true}",
+  "status": 200
+}

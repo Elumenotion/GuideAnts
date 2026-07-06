@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { FaDownload, FaPlay, FaSpinner, FaStop, FaTimes, FaTrash } from 'react-icons/fa';
+import { FaDownload, FaPlay, FaSpinner, FaTimes, FaTrash } from 'react-icons/fa';
 import { ConfirmationDialog } from '../../../../components/common/ConfirmationDialog';
 import { api } from '../../../../services/api';
 import { IconActionButton, TextActionButton } from '../../components/shared/ActionButtons';
 import { LocalCapabilityFrame, type LocalCapabilityPhase } from '../../components/shared/LocalCapabilityFrame';
-import { SettingsModal } from '../../components/shared/SettingsModal';
+import { CatalogDownloadModelDialog } from '../common/CatalogDownloadModelDialog';
 import type {
-  HuggingFaceRepositoryListingDto,
   LocalModelsUpstreamFailure,
 } from '../../../../types/settings';
-import { RepositoryFilePicker, snapshotPreviewClassifier } from '../common';
 import { isSelectableLocalVoiceModelEntry } from '../common/localModelSelection';
 import {
   isOperationFailedStatus,
@@ -75,7 +73,7 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
   const [pendingRemove, setPendingRemove] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [activeDownload, setActiveDownload] = useState<DownloadOp | null>(null);
-  const [engineBusy, setEngineBusy] = useState<null | { op: 'load' | 'unload'; modelRef?: string }>(null);
+  const [engineBusy, setEngineBusy] = useState<null | { op: 'load'; modelRef?: string }>(null);
 
   const pollRef = useRef<number | null>(null);
   const hasInFlightDownload = activeDownload !== null && isOperationInFlight(activeDownload.status);
@@ -286,25 +284,6 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
     }
   };
 
-  const handleUnload = async () => {
-    if (engineBusy !== null || hasInFlightDownload) return;
-    setActionError(null);
-    setEngineBusy({ op: 'unload' });
-    try {
-      await api.settings.localModels.unload(SERVICE_ID);
-      await refresh();
-    } catch (e) {
-      const err = e as { status?: number };
-      if (err?.status === 409) {
-        setActionError('Another load or unload is already in progress. Try again.');
-      } else {
-        setActionError(e instanceof Error ? e.message : 'Unload failed.');
-      }
-    } finally {
-      setEngineBusy(null);
-    }
-  };
-
   const removeConfirmed = async () => {
     if (!pendingRemove) return;
     setRemoving(true);
@@ -331,11 +310,7 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
         upstream={errorUpstream}
         onRefresh={phase === 'available' || phase === 'error' ? () => void refresh() : undefined}
       >
-        <EngineStatusPanel
-          readiness={readiness}
-          engineBusy={engineBusy}
-          onUnload={() => void handleUnload()}
-        />
+        <EngineStatusPanel readiness={readiness} />
 
         {activeDownload ? (
           <DownloadOperationStatus
@@ -370,7 +345,7 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
               {items.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-3 py-4 text-center text-sm text-gray-500">
-                    No ASR models installed. Click <span className="font-medium">Add model</span> to fetch one from Hugging Face.
+                    No ASR models installed. Click <span className="font-medium">Add model</span> to download one from the catalog.
                   </td>
                 </tr>
               ) : null}
@@ -442,7 +417,7 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
             title={
               engineBusy !== null || hasInFlightDownload
                 ? 'Wait for the current operation to finish or cancel it first.'
-                : 'Add a new ASR model from Hugging Face.'
+                : 'Add a curated catalog ASR model.'
             }
           >
             Add model
@@ -452,10 +427,15 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
         {actionError ? <div className="text-xs text-red-700">{actionError}</div> : null}
       </LocalCapabilityFrame>
 
-      <DownloadModelDialog
+      <CatalogDownloadModelDialog
+        serviceId="SpeechTranscription"
         isOpen={downloadOpen}
         onClose={() => setDownloadOpen(false)}
         onSubmit={startDownload}
+        title="Download curated ASR model"
+        description="ASR models are constrained to the curated catalog. Only verified audio.cpp loaders are offered."
+        submitLabel="Download snapshot"
+        submitTitle="Download the selected allowlisted ASR snapshot."
       />
 
       <ConfirmationDialog
@@ -477,12 +457,8 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
 
 function EngineStatusPanel({
   readiness,
-  engineBusy,
-  onUnload,
 }: {
   readiness: AsrReadiness | undefined;
-  engineBusy: null | { op: 'load' | 'unload'; modelRef?: string };
-  onUnload: () => void;
 }) {
   if (!readiness) {
     return (
@@ -520,17 +496,6 @@ function EngineStatusPanel({
           ) : (
             <span className="text-gray-500">No model loaded.</span>
           )}
-        </div>
-        <div className="flex gap-1">
-          <TextActionButton
-            tone="neutral"
-            icon={engineBusy?.op === 'unload' ? <FaSpinner className="animate-spin" /> : <FaStop />}
-            disabled={engineBusy !== null || !readiness.loaded}
-            onClick={onUnload}
-            title={readiness.loaded ? 'Drop the loaded ASR model to release GPU / RAM.' : 'No model is currently loaded.'}
-          >
-            Unload
-          </TextActionButton>
         </div>
       </div>
       {readiness.warmupEnabled ? (
@@ -571,138 +536,6 @@ function DownloadOperationStatus({ operation, onCancel }: { operation: DownloadO
       </div>
       {operation.error ? <div className="mt-1 font-mono">{operation.error}</div> : null}
     </div>
-  );
-}
-
-function DownloadModelDialog({
-  isOpen,
-  onClose,
-  onSubmit,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  onSubmit: (values: { modelId: string; revision: string }) => Promise<void>;
-}) {
-  const [modelId, setModelId] = useState('');
-  const [revision, setRevision] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [browsed, setBrowsed] = useState<HuggingFaceRepositoryListingDto | null>(null);
-  const [browseError, setBrowseError] = useState<{ code: string | null; message: string } | null>(null);
-
-  useEffect(() => {
-    if (isOpen) {
-      setModelId('');
-      setRevision('');
-      setErr(null);
-      setSubmitting(false);
-      setBrowsed(null);
-      setBrowseError(null);
-    }
-  }, [isOpen]);
-
-  const submit = async () => {
-    // Preview-only browse flow: the operator cannot submit until a browse
-    // has resolved, because the resolved `listing.repository` is what we
-    // send to the server. This catches typos and gated-access failures
-    // before the download queue starts.
-    if (!browsed) {
-      setErr('Browse the repository first so the listing can be previewed.');
-      return;
-    }
-    setSubmitting(true);
-    setErr(null);
-    try {
-      await onSubmit({ modelId: browsed.repository, revision });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Download failed to start.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const disableSubmit = submitting || !browsed;
-  return (
-    <SettingsModal
-      isOpen={isOpen}
-      title="Add ASR model from Hugging Face"
-      onClose={onClose}
-      disableDismiss={submitting}
-      footer={
-        <>
-          <TextActionButton tone="neutral" disabled={submitting} onClick={onClose}>
-            Cancel
-          </TextActionButton>
-          <TextActionButton
-            tone="primary"
-            icon={submitting ? <FaSpinner className="animate-spin" /> : <FaDownload />}
-            disabled={disableSubmit}
-            onClick={() => void submit()}
-            title={
-              browsed
-                ? 'Download the Hugging Face snapshot to this ASR service.'
-                : 'Browse the repository first — the ASR service refuses to download without a verified listing.'
-            }
-          >
-            Download snapshot
-          </TextActionButton>
-        </>
-      }
-    >
-      <div className="space-y-3 text-sm">
-        <p className="text-xs text-gray-600">
-          The ASR service downloads the whole Hugging Face snapshot into its model directory. Browse a repo (for example{' '}
-          <span className="font-mono">openai/whisper-large-v3</span>), confirm the file list, then start the download.
-        </p>
-
-        <RepositoryFilePicker
-          repository={modelId}
-          onRepositoryChange={(next) => {
-            setModelId(next);
-            setBrowsed(null);
-          }}
-          previewOnly
-          classifyPreview={snapshotPreviewClassifier}
-          onBrowseResolved={(listing) => {
-            setBrowsed(listing);
-            setErr(null);
-          }}
-          onBrowseError={(e) => {
-            setBrowseError(e);
-            if (e) {
-              setBrowsed(null);
-            }
-          }}
-          serviceOrigin="SpeechTranscription"
-          repoInputLabel="Hugging Face model id"
-          repoInputPlaceholder="openai/whisper-large-v3"
-          repoInputHint="Paste owner/repo or a Hugging Face model URL."
-          disabled={submitting}
-        />
-
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-gray-700">Revision (optional)</span>
-          <input
-            type="text"
-            value={revision}
-            onChange={(e) => setRevision(e.target.value)}
-            disabled={submitting}
-            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm disabled:bg-gray-100"
-            placeholder="main"
-          />
-          <span className="mt-1 block text-[11px] text-gray-500">
-            Leave blank to use the default branch.
-          </span>
-        </label>
-
-        {err ? <p className="text-xs text-red-700">{err}</p> : null}
-        {browseError && !err ? (
-          <p className="text-xs text-red-700">
-            Browse reported: {browseError.message} Fix the repository before starting the download.
-          </p>
-        ) : null}
-      </div>
-    </SettingsModal>
   );
 }
 

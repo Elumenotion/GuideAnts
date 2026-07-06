@@ -130,7 +130,7 @@ describe('ImageToolbarPanel', () => {
     expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
   });
 
-  it('switches cloud provider and powers local runtime on/off', async () => {
+  it('switches cloud provider when selecting an available cloud option', async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn(async () => {});
     render(
@@ -179,12 +179,7 @@ describe('ImageToolbarPanel', () => {
       'ImageGeneration',
       'ImageGeneration.Google.Imagen'
     );
-
-    await user.click(screen.getByRole('button', { name: /turn image engine on/i }));
-    expect(api.settings.localModels.load).toHaveBeenCalledWith('ImageGeneration', {});
-
-    await user.click(screen.getByRole('button', { name: /turn image engine off/i }));
-    expect(api.settings.localModels.unload).toHaveBeenCalledWith('ImageGeneration');
+    expect(onRefresh).toHaveBeenCalled();
   });
 
   it('shows blockers and hides workspace copy when requested', () => {

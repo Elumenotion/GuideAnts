@@ -347,15 +347,10 @@ if (Test-Path $agentDest) {
 }
 Copy-Item -Path $publishOutput -Destination $agentDest -Recurse -Force
 
-$torchPackages = @('torch', 'torchaudio', 'torchvision', 'torchtext')
-Get-Content $requirementsSrc |
-    Where-Object {
-        $line = $_.Trim()
-        if ($line -eq '' -or $line.StartsWith('#')) { return $true }
-        $pkg = ($line -split '[=<>!~\[]')[0].Trim().ToLower()
-        $pkg -notin $torchPackages
-    } |
-    Set-Content -Path $reqDest -Encoding UTF8
+# Sandbox requirements.txt is copied as-is: torch/torchaudio/torchvision/torchtext were
+# removed from the sandbox requirements files (Tier B torch removal, 2026-07-02); the AI
+# services never depended on torch (facades over native audio.cpp/llama.cpp/sd.cpp binaries).
+Copy-Item -Path $requirementsSrc -Destination $reqDest -Force
 
 Write-Host "Build context staged." -ForegroundColor Green
 

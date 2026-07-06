@@ -14,7 +14,7 @@ namespace GuideAntsApi.Tests.Settings;
 public sealed class ServiceEditorMetadataProviderTests
 {
     [TestMethod]
-    public void GetProviderFields_LocalSpeechSynthesis_ExposesOnlyKokoroVoiceSelection()
+    public void GetProviderFields_LocalSpeechSynthesis_VoiceNameIsCatalogDrivenNotHardcodedEnum()
     {
         var metadataProvider = new ServiceEditorMetadataProvider();
 
@@ -22,11 +22,13 @@ public sealed class ServiceEditorMetadataProviderTests
 
         fields.Select(field => field.Name).Should().Equal("TimeoutSeconds", "VoiceName");
         var voiceField = fields.Single(field => field.Name == "VoiceName");
-        voiceField.Kind.Should().Be("enum");
-        voiceField.EnumOptions.Should().Contain("af_heart");
-        voiceField.EnumOptions.Should().Contain("bf_alice");
-        voiceField.EnumOptions.Should().Contain("jm_kumo");
-        voiceField.EnumOptions.Should().Contain("zf_xiaobei");
+
+        // Voice options are catalog-driven (voiceInput -> voice-pack API /
+        // runtime speaker list / instruct text), not a static server enum.
+        // The old hardcoded en_us_cv_001/en_gb_cv_002/es_cv_001/fr_cv_001
+        // list has been removed (RULES I4).
+        voiceField.Kind.Should().Be("text");
+        voiceField.EnumOptions.Should().BeNullOrEmpty();
         fields.Should().NotContain(field => field.Name == "LanguageCode" || field.Name == "Speed");
     }
 

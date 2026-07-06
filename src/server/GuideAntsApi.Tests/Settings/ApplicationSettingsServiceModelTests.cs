@@ -59,7 +59,7 @@ public sealed class ApplicationSettingsServiceModelTests
         var service = CreateService(db, BuildConfiguration());
 
         var created = await service.CreateModelAsync(new CreateSettingsModelRequest(
-            ModelId: "deepseek-ai/DeepSeek-V4-Pro",
+            ModelId: "zai-org/GLM-5.2",
             DisplayName: "DeepSeek",
             Provider: "hf-inference-chat",
             Description: null,
@@ -69,7 +69,7 @@ public sealed class ApplicationSettingsServiceModelTests
             DisplayOrder: null));
 
         var updated = await service.UpdateModelAsync(
-            "deepseek-ai/DeepSeek-V4-Pro",
+            "zai-org/GLM-5.2",
             new UpdateSettingsModelRequest(
                 ModelId: "some-other-id",
                 DisplayName: "DeepSeek Updated",
@@ -81,7 +81,7 @@ public sealed class ApplicationSettingsServiceModelTests
                 DisplayOrder: created.DisplayOrder));
 
         updated.Should().NotBeNull();
-        updated!.ModelId.Should().Be("deepseek-ai/DeepSeek-V4-Pro");
+        updated!.ModelId.Should().Be("zai-org/GLM-5.2");
         updated.DisplayName.Should().Be("DeepSeek Updated");
     }
 

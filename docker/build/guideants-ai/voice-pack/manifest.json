@@ -1,0 +1,1197 @@
+{
+  "schemaVersion": 1,
+  "packVersion": "0.3.0",
+  "generatedFrom": "kokoro-local-2026-07-03",
+  "generationNote": "Manifest regenerated from local Kokoro voice clips in clips/. Language for j*/z* voices is mapped to en for Local TTS compatibility.",
+  "voices": [
+    {
+      "voiceId": "af_alloy",
+      "displayName": "af alloy",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_alloy:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_alloy.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.475,
+      "checksumSha256": "34d86a717b35e3afcef0560f98db5cdbf6959118e472598d9ba9109feb42fc32"
+    },
+    {
+      "voiceId": "af_aoede",
+      "displayName": "af aoede",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_aoede:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_aoede.wav",
+      "sampleRate": 24000,
+      "durationSec": 2.925,
+      "checksumSha256": "45616e81cd4baec9793ba8c19974333bdbddcdce21958b87dca034913524d5a7"
+    },
+    {
+      "voiceId": "af_bella",
+      "displayName": "af bella",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_bella:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_bella.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.225,
+      "checksumSha256": "4ede11f2b3f3c5452c9881699fb8e71f3a22e475c5e73fd6f20e4a8e532fceac"
+    },
+    {
+      "voiceId": "af_heart",
+      "displayName": "af heart",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_heart:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_heart.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.0,
+      "checksumSha256": "12870605cf348d41da8232386db6f181980d6af2af16e87334fcc48c24ea5ced"
+    },
+    {
+      "voiceId": "af_jessica",
+      "displayName": "af jessica",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_jessica:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_jessica.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.05,
+      "checksumSha256": "6acd168321ba5e4ad9e35aa7a371f3e01a6c13657b65ec093aeca9071bc6f09e"
+    },
+    {
+      "voiceId": "af_kore",
+      "displayName": "af kore",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_kore:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_kore.wav",
+      "sampleRate": 24000,
+      "durationSec": 2.975,
+      "checksumSha256": "fd8420f1cced6f735fc32f2d755cbc8f1956fb46e53177ed9664563bcdd1dda3"
+    },
+    {
+      "voiceId": "af_nicole",
+      "displayName": "af nicole",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_nicole:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_nicole.wav",
+      "sampleRate": 24000,
+      "durationSec": 4.175,
+      "checksumSha256": "63f0a4df60bb99a813c56c9756ba92b5f77b02390c1dae49579979b9efe099db"
+    },
+    {
+      "voiceId": "af_nova",
+      "displayName": "af nova",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_nova:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_nova.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.45,
+      "checksumSha256": "512f72691515fa75bd84ce14c48302f7ce3a582940bdb8a41addbe8a1642466b"
+    },
+    {
+      "voiceId": "af_river",
+      "displayName": "af river",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_river:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_river.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.0,
+      "checksumSha256": "03f398db6e4a89f9d1d5cc432ac5cdca3cd7dfb012a7b387b1b83fabfffc53d8"
+    },
+    {
+      "voiceId": "af_sarah",
+      "displayName": "af sarah",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_sarah:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_sarah.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.5,
+      "checksumSha256": "6017ff97f3dd7b21991e9584373d5aa7e537fa5929a4e34d8cf001c8333c7eda"
+    },
+    {
+      "voiceId": "af_sky",
+      "displayName": "af sky",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:af_sky:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/af_sky.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.35,
+      "checksumSha256": "3a73b72d64465c55d33df203798d85841ce6f05b5ae61d5d4bffc5a1424b83e0"
+    },
+    {
+      "voiceId": "am_adam",
+      "displayName": "am adam",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:am_adam:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/am_adam.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.1,
+      "checksumSha256": "53d337300e4930066b7dd7f983547420376354cb9ac79d96433e04abb1534775"
+    },
+    {
+      "voiceId": "am_echo",
+      "displayName": "am echo",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:am_echo:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/am_echo.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.45,
+      "checksumSha256": "cc33f3ee5ecac0ace071093cb722b61250a9b3fcd1e77a81e3bf2a6ccbe56eb1"
+    },
+    {
+      "voiceId": "am_eric",
+      "displayName": "am eric",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:am_eric:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/am_eric.wav",
+      "sampleRate": 24000,
+      "durationSec": 2.975,
+      "checksumSha256": "f609b97b2955d1042bb2bae34ec0a59b8d81efe30275ee6bb9b39b3fd223b9ba"
+    },
+    {
+      "voiceId": "am_fenrir",
+      "displayName": "am fenrir",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:am_fenrir:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/am_fenrir.wav",
+      "sampleRate": 24000,
+      "durationSec": 2.825,
+      "checksumSha256": "03bbe7adc739168748010565a17235af58b9ce5330a825acf7acc1a6f266189d"
+    },
+    {
+      "voiceId": "am_liam",
+      "displayName": "am liam",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:am_liam:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/am_liam.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.1,
+      "checksumSha256": "200aa04124360d9d069e8d5233cf1c565f6999d2b32e6d71c509c967606d69cc"
+    },
+    {
+      "voiceId": "am_michael",
+      "displayName": "am michael",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:am_michael:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/am_michael.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.425,
+      "checksumSha256": "1bea89d2329001007af004921f5b055f1e30fe78bf3a4f02cd33c33b298a72f3"
+    },
+    {
+      "voiceId": "am_onyx",
+      "displayName": "am onyx",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:am_onyx:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/am_onyx.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.425,
+      "checksumSha256": "42690c0453fbf88c1345210d47fca358479f8b7504a39b3197d6ebf87e43fbb3"
+    },
+    {
+      "voiceId": "am_puck",
+      "displayName": "am puck",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:am_puck:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/am_puck.wav",
+      "sampleRate": 24000,
+      "durationSec": 2.825,
+      "checksumSha256": "45f70dd5e4c3c3c707ca76b92c8cbae53fc1cd76e3f48299249b749a3a54a720"
+    },
+    {
+      "voiceId": "am_santa",
+      "displayName": "am santa",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:am_santa:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/am_santa.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.075,
+      "checksumSha256": "fd57840c8b65755f547dcf42a83183bf0967dae4105cfcd8ecad55504938900d"
+    },
+    {
+      "voiceId": "bf_alice",
+      "displayName": "bf alice",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-GB",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:bf_alice:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/bf_alice.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.2,
+      "checksumSha256": "82668d74279c7924d68fe4506f69d749ac32e4695d3c8cef91a5f552c93b0f19"
+    },
+    {
+      "voiceId": "bf_emma",
+      "displayName": "bf emma",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-GB",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:bf_emma:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/bf_emma.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.2,
+      "checksumSha256": "0c625cbfb49599e3ebbaadbbc13c43016a975da9c8ad26585a59fd097bad8a2a"
+    },
+    {
+      "voiceId": "bf_isabella",
+      "displayName": "bf isabella",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-GB",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:bf_isabella:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/bf_isabella.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.35,
+      "checksumSha256": "b2511e34c787bad1ae07c779129144c570b41c160f7f3d9e0b4ef0095481cc68"
+    },
+    {
+      "voiceId": "bf_lily",
+      "displayName": "bf lily",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-GB",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:bf_lily:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/bf_lily.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.3,
+      "checksumSha256": "d00febb7f324b12db2c869abdf3974c8db15e448aabed81121b496003ca72935"
+    },
+    {
+      "voiceId": "bm_daniel",
+      "displayName": "bm daniel",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-GB",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:bm_daniel:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/bm_daniel.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.15,
+      "checksumSha256": "2d958f23f759943a0ce726e6f9aabbdf085674e059b00d2c2f811465c1ae4986"
+    },
+    {
+      "voiceId": "bm_fable",
+      "displayName": "bm fable",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-GB",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:bm_fable:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/bm_fable.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.425,
+      "checksumSha256": "da44eef96dcd754a477bc0b6596cf5ee3b5ca1b07dd927e93567cbafb946d297"
+    },
+    {
+      "voiceId": "bm_george",
+      "displayName": "bm george",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-GB",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:bm_george:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/bm_george.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.525,
+      "checksumSha256": "d69b6b83614b2de7c2bc883645f0159b5105d9065718c1ec046dc7e2e08fd237"
+    },
+    {
+      "voiceId": "bm_lewis",
+      "displayName": "bm lewis",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-GB",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:bm_lewis:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/bm_lewis.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.675,
+      "checksumSha256": "d883cc5cd57d5e9f8ecb04aada5b9a07a79b8d9d9f30f86d9e05412fa509403b"
+    },
+    {
+      "voiceId": "ef_dora",
+      "displayName": "ef dora",
+      "language": "es",
+      "gender": "female",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:ef_dora:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/ef_dora.wav",
+      "sampleRate": 24000,
+      "durationSec": 2.925,
+      "checksumSha256": "0725b18f81c2f93f602eac60083ef20c2684131cb29612b58b1fcf8ff07f0110"
+    },
+    {
+      "voiceId": "em_alex",
+      "displayName": "em alex",
+      "language": "es",
+      "gender": "male",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:em_alex:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/em_alex.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.0,
+      "checksumSha256": "3c2a5cb0b5f346d07b76986a54792265424b2f52283e163a5521d084ad4979c8"
+    },
+    {
+      "voiceId": "em_santa",
+      "displayName": "em santa",
+      "language": "es",
+      "gender": "male",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:em_santa:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/em_santa.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.025,
+      "checksumSha256": "413532f30e812b7e651d9f88fca5041d8dbec972d5ca67f357b1f81df973dc89"
+    },
+    {
+      "voiceId": "ff_siwis",
+      "displayName": "ff siwis",
+      "language": "fr",
+      "gender": "female",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:ff_siwis:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/ff_siwis.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.075,
+      "checksumSha256": "0df5eb6cb4856ad7eca00d37a485cf76e2ac1eab3d4f27cca25a0094995caf05"
+    },
+    {
+      "voiceId": "hf_alpha",
+      "displayName": "hf alpha",
+      "language": "hi",
+      "gender": "female",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:hf_alpha:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/hf_alpha.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.575,
+      "checksumSha256": "24844109540cb586f5403ac8f97e7bca1e574b11d824f1ac0c834f005a3fb665"
+    },
+    {
+      "voiceId": "hf_beta",
+      "displayName": "hf beta",
+      "language": "hi",
+      "gender": "female",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:hf_beta:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/hf_beta.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.25,
+      "checksumSha256": "025eb489fae1bbf96445461109c5dd60c510fbc1e0be02881fe025b6925e0d9c"
+    },
+    {
+      "voiceId": "hm_omega",
+      "displayName": "hm omega",
+      "language": "hi",
+      "gender": "male",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:hm_omega:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/hm_omega.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.575,
+      "checksumSha256": "576edb9efe3d7c5ae1147639a4129ce2340adbeb022ce7a7a43d8d812ee57d44"
+    },
+    {
+      "voiceId": "hm_psi",
+      "displayName": "hm psi",
+      "language": "hi",
+      "gender": "male",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:hm_psi:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/hm_psi.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.5,
+      "checksumSha256": "947c2b3d5f6f99b3355b77044480d2f525ec4f00d2c97107dc427399170263eb"
+    },
+    {
+      "voiceId": "if_sara",
+      "displayName": "if sara",
+      "language": "it",
+      "gender": "female",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:if_sara:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/if_sara.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.2,
+      "checksumSha256": "c8d5e7fc244e3044636470bd44a2228ed00a2e4fe13d65c3f2d060a5fae5b8df"
+    },
+    {
+      "voiceId": "im_nicola",
+      "displayName": "im nicola",
+      "language": "it",
+      "gender": "male",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:im_nicola:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/im_nicola.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.25,
+      "checksumSha256": "f34d17faa15e10ee88c3c0c18f1f628353d07ce2a2af635c03d0c7ffb35d030b"
+    },
+    {
+      "voiceId": "jf_alpha",
+      "displayName": "jf alpha",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:jf_alpha:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/jf_alpha.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.4,
+      "checksumSha256": "38a0ae272c834f7c7fa41c9269a521f847b02647fcb40809a413bb5ecdde1f8e"
+    },
+    {
+      "voiceId": "jf_gongitsune",
+      "displayName": "jf gongitsune",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:jf_gongitsune:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/jf_gongitsune.wav",
+      "sampleRate": 24000,
+      "durationSec": 4.525,
+      "checksumSha256": "577b6d224bf6f7b691d0ac9b882fe3bcbee8db534c673fab4698be80faa2e8e7"
+    },
+    {
+      "voiceId": "jf_nezumi",
+      "displayName": "jf nezumi",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:jf_nezumi:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/jf_nezumi.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.75,
+      "checksumSha256": "0b6c530124cb323d70f7b6b062ecc8e2bde701832f6161aa2156f6f3179dd457"
+    },
+    {
+      "voiceId": "jf_tebukuro",
+      "displayName": "jf tebukuro",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:jf_tebukuro:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/jf_tebukuro.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.9,
+      "checksumSha256": "9b7700079140dc23122d90484be373baf09499bd0544b59ae352e78e0c91596f"
+    },
+    {
+      "voiceId": "jm_kumo",
+      "displayName": "jm kumo",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:jm_kumo:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/jm_kumo.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.5,
+      "checksumSha256": "0fc9da17328ba9e28996505e625e7b6d4ec9ec6a23bd84a3b550b751b2b36a61"
+    },
+    {
+      "voiceId": "pf_dora",
+      "displayName": "pf dora",
+      "language": "pt",
+      "gender": "female",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:pf_dora:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/pf_dora.wav",
+      "sampleRate": 24000,
+      "durationSec": 2.925,
+      "checksumSha256": "586bf687ea0fade2ccb495917d284a77fef4325fffc687c708f17e52063a4fbf"
+    },
+    {
+      "voiceId": "pm_alex",
+      "displayName": "pm alex",
+      "language": "pt",
+      "gender": "male",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:pm_alex:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/pm_alex.wav",
+      "sampleRate": 24000,
+      "durationSec": 2.975,
+      "checksumSha256": "a1368facbee58c29b442b2e6578c91670adb4864185ce598254d281ac701f22a"
+    },
+    {
+      "voiceId": "pm_santa",
+      "displayName": "pm santa",
+      "language": "pt",
+      "gender": "male",
+      "accent": null,
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:pm_santa:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/pm_santa.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.0,
+      "checksumSha256": "96eb2022d6cae4d9b0b824b63ef8e355ad3d9451a6c6fc41221c6121013d51d9"
+    },
+    {
+      "voiceId": "zf_xiaobei",
+      "displayName": "zf xiaobei",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:zf_xiaobei:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/zf_xiaobei.wav",
+      "sampleRate": 24000,
+      "durationSec": 4.25,
+      "checksumSha256": "19a2c44bf632f61ae502544b0c7a8cafb0ee6a504f9ed95987e973bf32cfeb55"
+    },
+    {
+      "voiceId": "zf_xiaoni",
+      "displayName": "zf xiaoni",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:zf_xiaoni:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/zf_xiaoni.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.85,
+      "checksumSha256": "b37bfce7be77169b62946a5c46179603f707f794c6198a46a54c6beca3f6c253"
+    },
+    {
+      "voiceId": "zf_xiaoxiao",
+      "displayName": "zf xiaoxiao",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:zf_xiaoxiao:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/zf_xiaoxiao.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.575,
+      "checksumSha256": "73e43c3f860cbdb058a71fc139828487808d5647e57c3121faa719773609af6c"
+    },
+    {
+      "voiceId": "zf_xiaoyi",
+      "displayName": "zf xiaoyi",
+      "language": "en",
+      "gender": "female",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:zf_xiaoyi:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/zf_xiaoyi.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.675,
+      "checksumSha256": "775238b7e82d555a348e06fd77eb5c80b74772595796e1b74405fa305b79e5dc"
+    },
+    {
+      "voiceId": "zm_yunjian",
+      "displayName": "zm yunjian",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:zm_yunjian:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/zm_yunjian.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.775,
+      "checksumSha256": "19649113ed531b5f6584cb31cf7c396204aa0e71ab3d091c4a084e0eb9ce73f3"
+    },
+    {
+      "voiceId": "zm_yunxi",
+      "displayName": "zm yunxi",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:zm_yunxi:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/zm_yunxi.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.675,
+      "checksumSha256": "d200c7384c86c6ec20a2500615ffa97769185778f014cbf6593fc1f30a32872c"
+    },
+    {
+      "voiceId": "zm_yunxia",
+      "displayName": "zm yunxia",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:zm_yunxia:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/zm_yunxia.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.825,
+      "checksumSha256": "1d399aec530116139eab2f0f6dd881adf6f110e8b13fad4941bb80a28dc29c92"
+    },
+    {
+      "voiceId": "zm_yunyang",
+      "displayName": "zm yunyang",
+      "language": "en",
+      "gender": "male",
+      "accent": "en-US",
+      "sourceDataset": "kokoro_synthetic",
+      "sourceClipRef": "synthetic:kokoro-82m:zm_yunyang:\"This is the reference transcript for voices\"",
+      "licence": "CC0-1.0",
+      "modified": {
+        "changed": true,
+        "changes": [
+          "tts_synthesis",
+          "resample_24k",
+          "mono"
+        ]
+      },
+      "clipPath": "clips/zm_yunyang.wav",
+      "sampleRate": 24000,
+      "durationSec": 3.55,
+      "checksumSha256": "d1a6d1b133adc6a4991e8db136a4c9d35bcfa915339b5a73c9a98b82be6172e7"
+    }
+  ],
+  "referenceText": "This is the reference transcript for voices"
+}

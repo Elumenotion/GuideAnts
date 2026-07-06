@@ -115,7 +115,7 @@ Clarification: `gpt-5.2-codex` is Responses; the other Foundry models in this pa
 
 ### 7.4 Hugging Face
 
-1. `deepseek-ai/DeepSeek-V4-Pro`
+1. `zai-org/GLM-5.2`
 
 ### 7.5 OpenRouter
 

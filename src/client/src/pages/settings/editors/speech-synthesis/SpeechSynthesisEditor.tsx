@@ -74,8 +74,9 @@ export function SpeechSynthesisEditor() {
                   Local TTS strips SSML to plain text before calling <span className="font-mono">POST /tts/synthesize</span>.
                 </li>
                 <li>
-                  Use <span className="font-mono">SpeechSynthesis:TimeoutSeconds</span> for the local HTTP client. Use the{' '}
-                  <span className="font-medium">Local TTS model</span> section above to download and load Kokoro voices in-app.
+                  Use <span className="font-mono">SpeechSynthesis:TimeoutSeconds</span> for the local HTTP client. The{' '}
+                  <span className="font-medium">Voice</span> field below follows the loaded model (reference preset, built-in
+                  speaker, optional reference clip, or voice-design text).
                 </li>
               </ul>
             )}

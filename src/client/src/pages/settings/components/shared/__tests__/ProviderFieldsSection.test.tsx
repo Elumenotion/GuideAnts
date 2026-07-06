@@ -1,8 +1,24 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ProviderEditorStateDto } from '@/types/settings';
 import { ProviderFieldsSection } from '../ProviderFieldsSection';
+
+vi.mock('../../../../../services/api', () => ({
+  api: {
+    settings: {
+      localModels: {
+        voicePackOutcome: vi.fn(),
+        catalogOutcome: vi.fn(),
+        runtimeReadinessOutcome: vi.fn(),
+        voicesOutcome: vi.fn(),
+      },
+    },
+  },
+}));
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+import { api } from '../../../../../services/api';
 
 function createProvider(overrides: Partial<ProviderEditorStateDto> = {}): ProviderEditorStateDto {
   return {
@@ -152,6 +168,56 @@ describe('ProviderFieldsSection', () => {
 
     await user.selectOptions(screen.getByDisplayValue('gpt-4'), 'gpt-4o');
     expect(onPatch).toHaveBeenCalledWith({ ModelId: 'gpt-4o' });
+  });
+
+  it('renders voice-pack picker for local TTS reference voice', async () => {
+    const user = userEvent.setup();
+    const onPatch = vi.fn();
+    (api.settings.localModels.catalogOutcome as any).mockResolvedValue({
+      kind: 'available',
+      payload: {
+        entries: [{ id: 'chatterbox', voiceInput: 'voice_pack' }],
+      },
+    });
+    (api.settings.localModels.runtimeReadinessOutcome as any).mockResolvedValue({
+      kind: 'available',
+      payload: { catalogEntryId: 'chatterbox' },
+    });
+    (api.settings.localModels.voicePackOutcome as any).mockResolvedValue({
+      kind: 'available',
+      payload: {
+        referenceText: 'This is the reference transcript for voices',
+        voices: [
+          { voiceId: 'af_alloy', displayName: 'af alloy' },
+          { voiceId: 'am_adam', displayName: 'am adam' },
+        ],
+      },
+    });
+
+    render(
+      <ProviderFieldsSection
+        provider={createProvider({
+          providerId: 'SpeechSynthesis.LocalTts.Http',
+          operativeFields: ['VoiceName'],
+          fields: {
+            VoiceName: { name: 'VoiceName', value: 'af_alloy', isSecret: false, hasValue: true },
+          },
+          fieldMetadata: [{ name: 'VoiceName', kind: 'text', required: false, operative: true }],
+        })}
+        draft={{}}
+        fieldErrors={{}}
+        onPatch={onPatch}
+      />
+    );
+
+    expect(screen.getByText('Reference voice')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /am_adam — am adam/i })).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByRole('combobox', { name: /Reference voice/i }), 'am_adam');
+    expect(onPatch).toHaveBeenCalledWith({ VoiceName: 'am_adam' });
   });
 
   it('renders default text field with error styling', async () => {

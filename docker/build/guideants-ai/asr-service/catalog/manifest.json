@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "sourceAudioCppRef": "c48e2a5",
+  "entries": [
+    {
+      "id": "qwen3_asr_0_6b",
+      "task": "asr",
+      "family": "qwen3_asr",
+      "displayName": "Qwen3 ASR 0.6B",
+      "targetDirectory": "Qwen3-ASR-0.6B",
+      "license": "Apache-2.0",
+      "multilingual": true,
+      "default": true,
+      "sourceRepos": [
+        {
+          "repoId": "Qwen/Qwen3-ASR-0.6B",
+          "revision": "main"
+        }
+      ],
+      "requiredFiles": [
+        "config.json",
+        "generation_config.json",
+        "model.safetensors",
+        "preprocessor_config.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt"
+      ],
+      "layout": "hf_snapshot",
+      "format": "safetensors",
+      "gated": false,
+      "releaseStatus": "released"
+    },
+    {
+      "id": "citrinet_asr",
+      "task": "asr",
+      "family": "citrinet_asr",
+      "displayName": "Citrinet 256 (English)",
+      "targetDirectory": "citrinet",
+      "license": "NVIDIA NeMo",
+      "multilingual": false,
+      "default": false,
+      "sourceRepos": [
+        {
+          "repoId": "ngc:nvidia/nemo/stt_en_citrinet_256",
+          "url": "https://api.ngc.nvidia.com/v2/models/nvidia/nemo/stt_en_citrinet_256/versions/1.0.0rc1/files/stt_en_citrinet_256.nemo",
+          "converterKind": "nemo_archive",
+          "outputWeightsFile": "citrinet_256.safetensors",
+          "configKind": "citrinet",
+          "note": "NGC NeMo archive converted to safetensors by the model_manager converter path."
+        }
+      ],
+      "requiredFiles": [
+        "citrinet_256.safetensors",
+        "citrinet_256_config.json",
+        "citrinet_256_tokenizer.model",
+        "citrinet_256_vocab.txt"
+      ],
+      "layout": "converter",
+      "format": "safetensors",
+      "gated": false,
+      "releaseStatus": "released",
+      "notes": "English-only ASR via NeMo converter (not an HF snapshot)."
+    }
+  ]
+}

@@ -36,7 +36,7 @@ export const CONNECTION_OWNERSHIP_CATEGORIES: readonly ConnectionOwnershipCatego
   {
     key: 'huggingface',
     label: 'Hugging Face',
-    description: 'Single token used for every Hugging Face download in the app (llama, Stable Diffusion bundles, Whisper ASR, Kokoro TTS).',
+    description: 'Single token used for every Hugging Face download in the app (llama, Stable Diffusion bundles, ASR, TTS, embeddings).',
     sectionNames: ['HuggingFace'],
   },
 ] as const;

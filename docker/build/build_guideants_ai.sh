@@ -241,22 +241,10 @@ trap cleanup EXIT
 rm -rf "$AGENT_DEST"
 cp -R "$PUBLISH_OUTPUT" "$AGENT_DEST"
 
-awk '
-BEGIN {
-  ignore["torch"]=1
-  ignore["torchaudio"]=1
-  ignore["torchvision"]=1
-  ignore["torchtext"]=1
-}
-{
-  line=$0
-  gsub(/^[ \t]+|[ \t]+$/, "", line)
-  if (line == "" || substr(line,1,1) == "#") { print $0; next }
-  split(line, parts, /[=<>!~\[]/)
-  pkg=tolower(parts[1])
-  if (!(pkg in ignore)) { print $0 }
-}
-' "$REQUIREMENTS_SRC" > "$REQ_DEST"
+# Sandbox requirements.txt is copied as-is: torch/torchaudio/torchvision/torchtext were
+# removed from the sandbox requirements files (Tier B torch removal, 2026-07-02); the AI
+# services never depended on torch (facades over native audio.cpp/llama.cpp/sd.cpp binaries).
+cp "$REQUIREMENTS_SRC" "$REQ_DEST"
 
 echo "Build context staged."
 

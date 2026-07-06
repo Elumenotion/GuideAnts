@@ -3,7 +3,7 @@ namespace GuideAntsApi.Services.HuggingFace;
 /// <summary>
 /// Single source of truth for the Hugging Face token used by every HF
 /// download path in the app (llama quants + mmproj, Stable Diffusion bundles,
-/// Whisper ASR, Kokoro TTS).
+/// ASR, TTS, embeddings catalog downloads).
 ///
 /// <para>
 /// The value lives in the <c>HuggingFace</c> application-settings section as

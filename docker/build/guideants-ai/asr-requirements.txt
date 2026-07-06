@@ -1,7 +1,6 @@
 fastapi==0.136.3
 starlette==1.3.1
 python-multipart==0.0.31
-qwen-asr
-sentencepiece==0.2.1
 soundfile==0.12.1
 uvicorn[standard]==0.30.6
+huggingface_hub>=0.26.0
