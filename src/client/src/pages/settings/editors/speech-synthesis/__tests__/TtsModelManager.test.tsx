@@ -73,15 +73,6 @@ function mockAvailableReadiness(payload: Record<string, unknown> = { ready: fals
   });
 }
 
-function mockAvailableVoicePack(
-  voices: Array<{ voiceId: string; displayName?: string; language?: string; accent?: string }> = []
-) {
-  (api.settings.localModels.voicePackOutcome as any).mockResolvedValue({
-    kind: 'available',
-    payload: { path: '/opt/guideants/voice-pack', count: voices.length, voices },
-  });
-}
-
 const DEFAULT_CATALOG_MODEL_ID = 'chatterbox';
 
 async function openCatalogDownloadDialog() {
@@ -95,7 +86,6 @@ describe('TtsModelManager', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAvailableCatalog();
-    mockAvailableVoicePack();
   });
 
   afterEach(() => {
@@ -321,24 +311,6 @@ describe('TtsModelManager', () => {
     expect(screen.getByText(/curated catalog/i)).toBeInTheDocument();
     expect(api.settings.localModels.catalogOutcome).toHaveBeenCalledWith('SpeechSynthesis');
     expect(screen.queryByRole('button', { name: /Tokenizer repository/i })).not.toBeInTheDocument();
-  });
-
-  it('shows catalog-driven voice-pack presets from the API (no hardcoded list)', async () => {
-    mockAvailableList();
-    mockAvailableReadiness();
-    mockAvailableVoicePack([
-      { voiceId: 'af_alloy', displayName: 'af alloy', language: 'en', accent: 'en-US' },
-      { voiceId: 'am_adam', displayName: 'am adam', language: 'en', accent: 'en-US' },
-    ]);
-
-    render(<TtsModelManager enabled />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/Voice pack \(2 presets\)/i)).toBeInTheDocument();
-    });
-    expect(api.settings.localModels.voicePackOutcome).toHaveBeenCalledWith('SpeechSynthesis');
-    expect(screen.getByText('af_alloy')).toBeInTheDocument();
-    expect(screen.getByText('am_adam')).toBeInTheDocument();
   });
 
   it('reports loaded-but-not-ready runtime status', async () => {

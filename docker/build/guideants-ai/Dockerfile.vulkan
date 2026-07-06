@@ -83,6 +83,7 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${AUDIOCPP_REF
         -DENGINE_ENABLE_CUDA=OFF \
         -DENGINE_ENABLE_VULKAN=ON \
         -DGGML_VULKAN=ON \
+        -DENGINE_ENABLE_NATIVE_CPU=OFF \
         -DENGINE_BUILD_EXAMPLES=OFF \
         -DENGINE_BUILD_TESTS=OFF \
         -DENGINE_BUILD_WARMBENCH=OFF \

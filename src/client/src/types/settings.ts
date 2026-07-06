@@ -178,7 +178,13 @@ export interface VoicePackVoiceDto {
 export interface VoicePackResponseDto {
   path?: string;
   count?: number;
+  referenceText?: string;
   voices?: VoicePackVoiceDto[];
+}
+
+export interface RuntimeVoicesResponseDto {
+  modelId?: string;
+  voices?: string[];
 }
 
 export interface SetActiveProviderRequest {

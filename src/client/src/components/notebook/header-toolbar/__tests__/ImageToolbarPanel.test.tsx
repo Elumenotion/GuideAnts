@@ -14,6 +14,8 @@ vi.mock('../../../../services/api', () => ({
       },
       localModels: {
         selectActive: vi.fn(async () => ({})),
+        load: vi.fn(async () => ({})),
+        unload: vi.fn(async () => ({})),
       },
     },
   },

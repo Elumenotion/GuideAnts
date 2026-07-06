@@ -297,6 +297,32 @@ async function fetchLocalModelVoicePackOutcome(serviceId: string): Promise<Local
     return buildLocalModelsFailureFromResponse(response, rawBody, contentType);
 }
 
+async function fetchLocalModelVoicesOutcome(serviceId: string): Promise<LocalModelsListOutcome> {
+    let response: Response;
+    try {
+        response = await fetchWithAuth(
+            `${API_BASE_URL}/settings/services/${encodeURIComponent(serviceId)}/local-models/voices`,
+            {
+                headers: { 'Content-Type': 'application/json' },
+            }
+        );
+    } catch (e) {
+        const message = e instanceof Error ? e.message : 'Network error';
+        return { kind: 'error', message };
+    }
+    const contentType = response.headers.get('content-type') || '';
+    const rawBody = await response.text();
+    if (response.status === 200) {
+        try {
+            return { kind: 'available', payload: rawBody ? JSON.parse(rawBody) : {} };
+        } catch (e) {
+            const message = e instanceof Error ? e.message : 'Invalid JSON from voices endpoint.';
+            return { kind: 'error', message };
+        }
+    }
+    return buildLocalModelsFailureFromResponse(response, rawBody, contentType);
+}
+
 /**
  * Probe the runtime-readiness endpoint (ASR/TTS/Embeddings). The upstream /ready
  * returns 200 when the service is loaded and 503 with the same JSON shape
@@ -1592,6 +1618,12 @@ export const api = {
                     body: JSON.stringify(request),
                 }),
 
+            unload: (serviceId: string) =>
+                callApi<any>(`/settings/services/${encodeURIComponent(serviceId)}/local-models/unload`, {
+                    method: 'POST',
+                    body: JSON.stringify({}),
+                }),
+
             /** ASR / TTS / Embeddings: curated catalog from engine /admin/catalog. */
             catalogOutcome: (serviceId: string) => fetchLocalModelCatalogOutcome(serviceId),
 
@@ -1602,6 +1634,13 @@ export const api = {
              * voice picker instead of any hardcoded list.
              */
             voicePackOutcome: (serviceId: string) => fetchLocalModelVoicePackOutcome(serviceId),
+
+            /**
+             * SpeechSynthesis only: runtime speaker ids from the loaded TTS model
+             * (audiocpp_server GET /v1/audio/voices). Used for catalog voiceInput
+             * builtin entries.
+             */
+            voicesOutcome: (serviceId: string) => fetchLocalModelVoicesOutcome(serviceId),
 
             /** ASR / TTS only: /ready passthrough. */
             runtimeReadinessOutcome: (serviceId: string) => fetchRuntimeReadinessOutcome(serviceId),

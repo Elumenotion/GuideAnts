@@ -7,8 +7,6 @@ import { LocalCapabilityFrame, type LocalCapabilityPhase } from '../../component
 import { CatalogDownloadModelDialog } from '../common/CatalogDownloadModelDialog';
 import type {
   LocalModelsUpstreamFailure,
-  VoicePackResponseDto,
-  VoicePackVoiceDto,
 } from '../../../../types/settings';
 import { isSelectableLocalVoiceModelEntry } from '../common/localModelSelection';
 import {
@@ -78,7 +76,6 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
   const [removing, setRemoving] = useState(false);
   const [activeDownload, setActiveDownload] = useState<DownloadOp | null>(null);
   const [engineBusy, setEngineBusy] = useState<null | { op: 'load'; modelRef?: string }>(null);
-  const [voicePack, setVoicePack] = useState<VoicePackVoiceDto[] | null>(null);
 
   const pollRef = useRef<number | null>(null);
   const hasInFlightDownload = activeDownload !== null && isOperationInFlight(activeDownload.status);
@@ -139,18 +136,6 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
       return;
     }
     void refresh();
-    // Voice-pack presets are catalog-driven (voiceInput: voice_pack), served
-    // from the baked pack — never a hardcoded list. A failure here just hides
-    // the panel; it does not block model management.
-    void (async () => {
-      const outcome = await api.settings.localModels.voicePackOutcome(SERVICE_ID);
-      if (outcome.kind === 'available') {
-        const payload = outcome.payload as VoicePackResponseDto;
-        setVoicePack(Array.isArray(payload.voices) ? payload.voices : []);
-      } else {
-        setVoicePack(null);
-      }
-    })();
   }, [enabled]);
 
   useEffect(() => {
@@ -335,8 +320,6 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
           </p>
         ) : null}
 
-        {voicePack && voicePack.length > 0 ? <VoicePackPanel voices={voicePack} /> : null}
-
         <div className="overflow-hidden rounded border border-gray-200">
           <table className="w-full table-fixed text-sm">
             <colgroup>
@@ -450,7 +433,7 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
         onClose={() => setDownloadOpen(false)}
         onSubmit={startDownload}
         title="Download curated TTS model"
-        description="Local TTS is constrained to the curated catalog. Voice selection uses the baked voice pack in provider settings; this dialog downloads only the model weights."
+        description="Local TTS is constrained to the curated catalog. Voice selection in provider settings follows the loaded model's voiceInput (reference pack, built-in speaker, optional reference, or voice-design text)."
         submitLabel="Download snapshot"
         submitTitle="Download the selected catalog snapshot from its allowlisted Hugging Face source."
       />
@@ -528,32 +511,6 @@ function EngineStatusPanel({
         </p>
       ) : null}
     </div>
-  );
-}
-
-function VoicePackPanel({ voices }: { voices: VoicePackVoiceDto[] }) {
-  return (
-    <details className="rounded border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
-      <summary className="cursor-pointer font-semibold text-gray-800">
-        Voice pack ({voices.length} presets)
-      </summary>
-      <p className="mt-1 text-gray-500">
-        For models whose voice selection is <span className="font-mono">voice_pack</span> (e.g. Chatterbox),
-        set the provider <span className="font-mono">VoiceName</span> to one of these baked preset ids. These
-        come from the container voice pack, not a Hugging Face download.
-      </p>
-      <div className="mt-2 flex flex-wrap gap-1">
-        {voices.map((v) => (
-          <span
-            key={v.voiceId}
-            className="inline-flex items-center rounded bg-white px-2 py-0.5 font-mono text-[11px] text-gray-800 ring-1 ring-gray-200"
-            title={[v.displayName, v.language, v.accent].filter(Boolean).join(' · ')}
-          >
-            {v.voiceId}
-          </span>
-        ))}
-      </div>
-    </details>
   );
 }
 

@@ -14,6 +14,8 @@ vi.mock('../../../../services/api', () => ({
       },
       localModels: {
         selectActive: vi.fn(async () => ({})),
+        load: vi.fn(async () => ({})),
+        unload: vi.fn(async () => ({})),
       },
     },
   },
@@ -212,5 +214,52 @@ describe('TtsToolbarPanel', () => {
     );
 
     expect(screen.getByRole('option', { name: /voice-partial/i })).toBeDisabled();
+  });
+
+  it('shows loading state and load control for local runtime power', () => {
+    render(
+      <TtsToolbarPanel
+        service={{
+          serviceId: 'SpeechSynthesis',
+          displayName: 'Speech Synthesis',
+          kind: 'tts',
+          status: 'inProgress',
+          summary: 'loading',
+          activeProviderId: 'SpeechSynthesis.LocalTts.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          providerOptions: [
+            {
+              providerId: 'SpeechSynthesis.LocalTts.Http',
+              displayName: 'LocalServiceHosts:SpeechSynthesisBaseUrl',
+              providerKind: 'LocalHttp',
+              canActivate: true,
+              blockers: [],
+              providerSection: 'LocalServiceHosts:SpeechSynthesisBaseUrl',
+              modelId: null,
+            },
+          ],
+          selection: { resourceId: 'chatterbox', summary: 'chatterbox' },
+          blockers: [],
+          localModelOptions: [
+            { modelRef: 'chatterbox', displayLabel: 'chatterbox', isComplete: true, isActive: true },
+          ],
+          inProgressOperationId: 'local-runtime',
+          inProgressState: 'loading',
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('chatterbox — inProgress')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /load selected local local model/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /load selected local local model/i })).toHaveTextContent('Loading...');
   });
 });

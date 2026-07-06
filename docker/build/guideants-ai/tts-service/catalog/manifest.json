@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "sourceAudioCppRef": "c48e2a5",
   "entries": [
     {
       "id": "chatterbox",
@@ -43,7 +44,7 @@
       "id": "qwen3_tts_0_6b_base",
       "task": "tts",
       "family": "qwen3_tts",
-      "voiceInput": "optional_ref",
+      "voiceInput": "voice_pack",
       "displayName": "Qwen3 TTS 0.6B Base",
       "targetDirectory": "Qwen3-TTS-12Hz-0.6B-Base",
       "license": "Apache-2.0",
@@ -74,7 +75,7 @@
       "id": "qwen3_tts_1_7b_base",
       "task": "tts",
       "family": "qwen3_tts",
-      "voiceInput": "optional_ref",
+      "voiceInput": "voice_pack",
       "displayName": "Qwen3 TTS 1.7B Base",
       "targetDirectory": "Qwen3-TTS-12Hz-1.7B-Base",
       "license": "Apache-2.0",
@@ -83,37 +84,6 @@
       "sourceRepos": [
         {
           "repoId": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
-          "revision": "main"
-        }
-      ],
-      "requiredFiles": [
-        "config.json",
-        "generation_config.json",
-        "model.safetensors",
-        "speech_tokenizer/config.json",
-        "speech_tokenizer/model.safetensors",
-        "tokenizer_config.json",
-        "vocab.json",
-        "merges.txt"
-      ],
-      "layout": "hf_snapshot",
-      "format": "safetensors",
-      "gated": false,
-      "releaseStatus": "released"
-    },
-    {
-      "id": "qwen3_tts_1_7b_custom_voice",
-      "task": "tts",
-      "family": "qwen3_tts",
-      "voiceInput": "builtin",
-      "displayName": "Qwen3 TTS 1.7B CustomVoice",
-      "targetDirectory": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
-      "license": "Apache-2.0",
-      "multilingual": true,
-      "default": false,
-      "sourceRepos": [
-        {
-          "repoId": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
           "revision": "main"
         }
       ],
@@ -164,38 +134,10 @@
       "releaseStatus": "released"
     },
     {
-      "id": "pocket_tts",
-      "task": "tts",
-      "family": "pocket_tts",
-      "voiceInput": "builtin",
-      "displayName": "PocketTTS",
-      "targetDirectory": "pocket-tts",
-      "license": "Apache-2.0",
-      "multilingual": false,
-      "default": false,
-      "sourceRepos": [
-        {
-          "repoId": "kyutai/pocket-tts",
-          "revision": "main",
-          "note": "Download scoped to languages/english/ prefix."
-        }
-      ],
-      "requiredFiles": [
-        "languages/english/model.safetensors",
-        "languages/english/tokenizer.model",
-        "languages/english/embeddings/alba.safetensors"
-      ],
-      "layout": "hf_snapshot",
-      "format": "safetensors",
-      "gated": true,
-      "releaseStatus": "released",
-      "languages": ["en"]
-    },
-    {
       "id": "omnivoice",
       "task": "tts",
       "family": "omnivoice",
-      "voiceInput": "builtin",
+      "voiceInput": "voice_pack",
       "displayName": "OmniVoice",
       "targetDirectory": "OmniVoice",
       "license": "Apache-2.0",
@@ -218,165 +160,6 @@
       "format": "safetensors",
       "gated": false,
       "releaseStatus": "released"
-    },
-    {
-      "id": "miotts_1_7b",
-      "task": "tts",
-      "family": "miotts",
-      "voiceInput": "builtin",
-      "displayName": "MioTTS 1.7B",
-      "targetDirectory": "MioTTS-1.7B",
-      "license": "Apache-2.0",
-      "multilingual": true,
-      "default": false,
-      "sourceRepos": [
-        {
-          "repoId": "Aratako/MioTTS-1.7B",
-          "revision": "main"
-        },
-        {
-          "repoId": "Aratako/MioCodec-25Hz-44.1kHz-v2",
-          "revision": "main",
-          "targetSubdir": "../MioCodec-25Hz-44.1kHz-v2"
-        },
-        {
-          "repoId": "mlx-community/wavlm-base-plus-mlx",
-          "revision": "main",
-          "targetSubdir": "../MioCodec-25Hz-44.1kHz-v2/wavlm-base-plus-mlx"
-        }
-      ],
-      "requiredFiles": [
-        "config.json",
-        "generation_config.json",
-        "tokenizer_config.json",
-        "tokenizer.json",
-        "vocab.json",
-        "merges.txt",
-        "model.safetensors"
-      ],
-      "layout": "composite_snapshot",
-      "format": "safetensors",
-      "gated": false,
-      "releaseStatus": "released",
-      "languages": ["en", "ja"],
-      "notes": "Composite download: MioTTS plus MioCodec and WavLM sibling dependencies."
-    },
-    {
-      "id": "voxcpm2",
-      "task": "tts",
-      "family": "voxcpm2",
-      "voiceInput": "builtin",
-      "displayName": "VoxCPM2",
-      "targetDirectory": "VoxCPM2",
-      "license": "Apache-2.0",
-      "multilingual": true,
-      "default": false,
-      "sourceRepos": [
-        {
-          "repoId": "OpenBMB/VoxCPM2",
-          "revision": "main"
-        }
-      ],
-      "requiredFiles": [
-        "config.json",
-        "model.safetensors",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "audiovae.pth",
-        "audiovae.safetensors"
-      ],
-      "layout": "hf_snapshot",
-      "format": "safetensors",
-      "gated": false,
-      "releaseStatus": "released",
-      "notes": "Post-download: audiovae.pth is converted to audiovae.safetensors per model_manager."
-    },
-    {
-      "id": "vibevoice_1_5b",
-      "task": "tts",
-      "family": "vibevoice",
-      "voiceInput": "builtin",
-      "displayName": "VibeVoice 1.5B",
-      "targetDirectory": "VibeVoice-1.5B",
-      "license": "MIT",
-      "multilingual": true,
-      "default": false,
-      "sourceRepos": [
-        {
-          "repoId": "microsoft/VibeVoice-1.5B",
-          "revision": "main"
-        }
-      ],
-      "requiredFiles": [
-        "config.json",
-        "model.safetensors.index.json",
-        "model-00001-of-00003.safetensors",
-        "model-00002-of-00003.safetensors",
-        "model-00003-of-00003.safetensors",
-        "preprocessor_config.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "vocab.json",
-        "merges.txt"
-      ],
-      "layout": "composite_snapshot",
-      "format": "safetensors",
-      "gated": false,
-      "releaseStatus": "released",
-      "languages": ["en", "zh"],
-      "notes": "Tokenizer assets may be supplied from image-bundled model_manager/vibevoice_1_5b when absent from HF snapshot."
-    },
-    {
-      "id": "vevo2",
-      "task": "tts",
-      "family": "vevo2",
-      "voiceInput": "builtin",
-      "displayName": "Vevo2",
-      "targetDirectory": "Vevo2",
-      "license": "Apache-2.0",
-      "multilingual": true,
-      "default": false,
-      "sourceRepos": [
-        {
-          "repoId": "RMSnow/Vevo2",
-          "revision": "main"
-        }
-      ],
-      "requiredFiles": [
-        "acoustic_modeling/fm_emilia101k_singnet7k_repa/config.json",
-        "acoustic_modeling/fm_emilia101k_singnet7k_repa/model.safetensors",
-        "acoustic_modeling/fm_emilia101k_singnet7k_repa/whisper_stats.safetensors",
-        "acoustic_modeling/fm_emilia101k_singnet7k_repa_text/config.json",
-        "acoustic_modeling/fm_emilia101k_singnet7k_repa_text/model.safetensors",
-        "acoustic_modeling/fm_emilia101k_singnet7k_repa_text/whisper_stats.safetensors",
-        "contentstyle_modeling/posttrained/amphion_config.json",
-        "contentstyle_modeling/posttrained/config.json",
-        "contentstyle_modeling/posttrained/generation_config.json",
-        "contentstyle_modeling/posttrained/merges.txt",
-        "contentstyle_modeling/posttrained/model.safetensors",
-        "contentstyle_modeling/posttrained/tokenizer.json",
-        "contentstyle_modeling/posttrained/tokenizer_config.json",
-        "contentstyle_modeling/posttrained/vocab.json",
-        "contentstyle_modeling/pretrained/config.json",
-        "contentstyle_modeling/pretrained/generation_config.json",
-        "contentstyle_modeling/pretrained/merges.txt",
-        "contentstyle_modeling/pretrained/model.safetensors",
-        "contentstyle_modeling/pretrained/tokenizer.json",
-        "contentstyle_modeling/pretrained/tokenizer_config.json",
-        "contentstyle_modeling/pretrained/vocab.json",
-        "tokenizer/contentstyle_fvq16384_12.5hz/model.safetensors",
-        "tokenizer/prosody_fvq512_6.25hz/model.safetensors",
-        "vocoder/config.json",
-        "vocoder/model.safetensors",
-        "vocoder/model_1.safetensors",
-        "vocoder/model_2.safetensors"
-      ],
-      "layout": "composite_snapshot",
-      "format": "safetensors",
-      "gated": false,
-      "releaseStatus": "released",
-      "languages": ["en", "zh"],
-      "notes": "Large composite layout; whisper_stats.pt converted to safetensors during install per model_manager."
     }
   ]
 }

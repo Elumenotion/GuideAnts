@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guideants.local/schemas/model-catalog.json",
+  "title": "GuideAnts local model catalog manifest",
+  "description": "Curated emb/asr/tts models. Canonical copies live under docker/build/guideants-ai/*-service/catalog/manifest.json",
+  "type": "object",
+  "required": ["version", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sourceAudioCppRef": {
+      "type": "string",
+      "description": "audio.cpp git ref used to derive asr/tts entries"
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/catalogEntry" }
+    }
+  },
+  "$defs": {
+    "sourceRepo": {
+      "type": "object",
+      "required": ["repoId"],
+      "additionalProperties": true,
+      "properties": {
+        "repoId": { "type": "string", "minLength": 3 },
+        "revision": { "type": "string" },
+        "filename": {
+          "type": "string",
+          "description": "Single GGUF file for emb entries"
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "catalogEntry": {
+      "type": "object",
+      "required": ["id", "task", "displayName", "sourceRepos"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "minLength": 2
+        },
+        "task": {
+          "enum": ["emb", "asr", "tts"]
+        },
+        "family": {
+          "type": "string",
+          "description": "audio.cpp family name (required for asr/tts runtime)"
+        },
+        "displayName": { "type": "string", "minLength": 1 },
+        "targetDirectory": { "type": "string" },
+        "license": { "type": "string" },
+        "multilingual": { "type": "boolean" },
+        "default": { "type": "boolean" },
+        "gated": { "type": "boolean" },
+        "releaseStatus": {
+          "enum": ["released", "integration", "deprecated"]
+        },
+        "layout": {
+          "enum": ["hf_snapshot", "composite_snapshot", "gguf_single_file", "converter"]
+        },
+        "format": {
+          "enum": ["gguf", "safetensors", "ggml"]
+        },
+        "requiredFiles": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "sourceRepos": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sourceRepo" }
+        },
+        "producedDimension": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1536,
+          "description": "emb only — native output width"
+        },
+        "pooling": {
+          "enum": ["last", "mean", "cls"]
+        },
+        "arch": { "type": "string" },
+        "queryPrefixTemplate": { "type": ["string", "null"] },
+        "documentPrefixTemplate": { "type": ["string", "null"] },
+        "languages": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "voiceInput": {
+          "enum": ["voice_pack", "builtin", "instruct", "optional_ref", "none"],
+          "description": "How TTS voice selection works for this family. voice_pack = baked reference WAVs; builtin = model speaker ids; instruct = design prompt; optional_ref = clone optional; none = no voice knob"
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "Family-specific flags for UI/runtime",
+          "additionalProperties": true,
+          "properties": {
+            "nativeSpeed": { "type": "boolean" },
+            "deterministic": { "type": "boolean" },
+            "requiresReferenceText": { "type": "boolean" }
+          }
+        },
+        "notes": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "task": { "const": "emb" } } },
+          "then": {
+            "required": ["producedDimension", "pooling"],
+            "properties": {
+              "sourceRepos": {
+                "items": {
+                  "required": ["repoId", "filename"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "task": { "const": "tts" } } },
+          "then": {
+            "required": ["family", "voiceInput"]
+          }
+        },
+        {
+          "if": { "properties": { "task": { "const": "asr" } } },
+          "then": {
+            "required": ["family"]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -63,6 +63,14 @@ public interface ILocalAiStartupWarmupService
         string serviceId,
         string? requestedModelRef = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Unloads the local engine for <paramref name="serviceId"/> without changing
+    /// which provider is active. Used by toolbar power-off while local routing stays selected.
+    /// </summary>
+    Task<LocalServiceReconcileResult> PowerOffLocalServiceEngineAsync(
+        string serviceId,
+        CancellationToken cancellationToken = default);
 }
 
 public enum LocalServiceReconcileOutcome
@@ -350,6 +358,21 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
             _logger.LogDebug(ex, "Failed to list llama models.");
             return null;
         }
+    }
+
+    public async Task<LocalServiceReconcileResult> PowerOffLocalServiceEngineAsync(
+        string serviceId,
+        CancellationToken cancellationToken = default)
+    {
+        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
+        if (string.IsNullOrWhiteSpace(adminBase))
+        {
+            return new LocalServiceReconcileResult(
+                LocalServiceReconcileOutcome.Unavailable,
+                $"Local admin base URL is not configured for '{serviceId}'.");
+        }
+
+        return await ReconcileIdleAsync(serviceId, adminBase, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<LocalServiceReconcileResult> ReconcileLocalServiceAsync(

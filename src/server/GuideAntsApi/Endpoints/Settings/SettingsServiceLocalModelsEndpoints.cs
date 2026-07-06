@@ -84,6 +84,32 @@ public static class SettingsServiceLocalModelsEndpoints
         })
         .WithName("GetServiceLocalModelVoicePack");
 
+        // Runtime speaker ids / server preset names for the loaded TTS model
+        // (audiocpp_server GET /v1/audio/voices). Used for catalog voiceInput
+        // builtin entries in the settings UI.
+        serviceEditorsGroup.MapGet("/{serviceId}/local-models/voices", async (
+            string serviceId,
+            IHttpClientFactory httpClientFactory,
+            IConfiguration configuration,
+            CancellationToken cancellationToken) =>
+        {
+            if (!string.Equals(serviceId, "SpeechSynthesis", StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose runtime voices." });
+            }
+
+            var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
+            if (string.IsNullOrWhiteSpace(adminBase))
+            {
+                return SettingsGroupFactory.LocalServiceUnavailable(serviceId);
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}/admin/voices");
+            return await LocalServiceAdminRouting.ProxyAsync(
+                httpClientFactory.CreateClient(), request, cancellationToken);
+        })
+        .WithName("GetServiceLocalModelVoices");
+
         // Readiness / runtime snapshot for local services that expose /ready
         // (ASR, TTS, Embeddings). Image Generation's SD wrapper exposes
         // /health but its "active bundle" state is observable via
@@ -264,6 +290,27 @@ public static class SettingsServiceLocalModelsEndpoints
             return MapReconcileResult(serviceId, result);
         })
         .WithName("LoadServiceLocalModel");
+
+        serviceEditorsGroup.MapPost("/{serviceId}/local-models/unload", async (
+            string serviceId,
+            ILocalAiStartupWarmupService warmup,
+            CancellationToken cancellationToken) =>
+        {
+            var isImageGeneration = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal);
+            var isAsr = string.Equals(serviceId, "SpeechTranscription", StringComparison.Ordinal);
+            var isTts = string.Equals(serviceId, "SpeechSynthesis", StringComparison.Ordinal);
+            var isEmbeddings = string.Equals(serviceId, "Embeddings", StringComparison.Ordinal);
+            if (!isImageGeneration && !isAsr && !isTts && !isEmbeddings)
+            {
+                return Results.BadRequest(new { error = $"Service '{serviceId}' does not expose a local model unload endpoint." });
+            }
+
+            var result = await warmup
+                .PowerOffLocalServiceEngineAsync(serviceId, cancellationToken)
+                .ConfigureAwait(false);
+            return MapReconcileResult(serviceId, result);
+        })
+        .WithName("UnloadServiceLocalModel");
 
         // Select which downloaded model/bundle should be the active one for an aux
         // service, then reconcile. Same single-authority path as /load: the reconciler

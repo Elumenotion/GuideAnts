@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
@@ -58,7 +59,8 @@ def resolve_engine_model_options(entry: dict[str, Any]) -> dict[str, Any]:
     if family == "chatterbox":
         return {"language": "en"}
     if family == "pocket_tts":
-        return {"language": "english"}
+        language = (entry.get("pocketTtsLanguage") or "english").strip() or "english"
+        return {"language": language}
     return {}
 
 
@@ -148,6 +150,7 @@ class VoicePackEntry:
     language: str
     accent: str | None
     clip_path: str
+    source_clip_ref: str
 
 
 class VoicePackManifest:
@@ -160,10 +163,15 @@ class VoicePackManifest:
         with open(manifest_path, encoding="utf-8") as handle:
             data = json.load(handle)
 
+        reference_text = str(data.get("referenceText") or "").strip()
+        if not reference_text:
+            raise ValueError("voice pack manifest requires non-empty referenceText")
+
         voices = data.get("voices")
         if not isinstance(voices, list) or not voices:
             raise ValueError("voice pack manifest requires a non-empty voices array")
 
+        self.reference_text = reference_text
         self.voices: dict[str, VoicePackEntry] = {}
         for item in voices:
             voice_id = str(item.get("voiceId") or "").strip()
@@ -172,6 +180,9 @@ class VoicePackManifest:
             clip_rel = str(item.get("clipPath") or "").strip()
             if not clip_rel:
                 raise ValueError(f"voice pack entry '{voice_id}' is missing clipPath")
+            source_clip_ref = str(item.get("sourceClipRef") or "").strip()
+            if not source_clip_ref:
+                raise ValueError(f"voice pack entry '{voice_id}' is missing sourceClipRef")
             clip_path = os.path.realpath(os.path.join(self.pack_root, clip_rel))
             if not clip_path.startswith(self.pack_root + os.sep):
                 raise ValueError(f"voice pack clipPath escapes pack root for voice {voice_id}")
@@ -186,6 +197,7 @@ class VoicePackManifest:
                 language=str(item.get("language") or "").strip(),
                 accent=str(accent).strip() if accent else None,
                 clip_path=clip_path,
+                source_clip_ref=source_clip_ref,
             )
 
         if not self.voices:
@@ -196,6 +208,21 @@ class VoicePackManifest:
         if entry is None:
             raise ValueError(f"unknown voice preset id: {voice_id}")
         return entry
+
+    def reference_text_for(self, entry: VoicePackEntry) -> str:
+        quoted = re.search(r':"([^"]+)"\s*$', entry.source_clip_ref)
+        if quoted and quoted.group(1).strip():
+            return quoted.group(1).strip()
+        return self.reference_text
+
+    def server_voice_presets(self) -> dict[str, dict[str, str]]:
+        presets: dict[str, dict[str, str]] = {}
+        for voice_id, entry in self.voices.items():
+            presets[voice_id] = {
+                "voice_ref": entry.clip_path,
+                "reference_text": self.reference_text_for(entry),
+            }
+        return presets
 
 
 class LoadModelRequest(BaseModel):
@@ -405,6 +432,27 @@ def resolve_model_target(request: LoadModelRequest) -> tuple[str, str, dict[str,
     return model_path, target_name, entry
 
 
+def build_server_voice_preset_config(
+    entry: dict[str, Any],
+    default_voice: str,
+) -> dict[str, Any]:
+    voice_input = (entry.get("voiceInput") or "").strip()
+    if voice_input not in ("voice_pack", "optional_ref"):
+        return {}
+
+    pack = load_voice_pack()
+    presets = pack.server_voice_presets()
+    config: dict[str, Any] = {"voice_presets": presets}
+    if voice_input == "voice_pack":
+        default_id = (default_voice or "").strip()
+        if not default_id:
+            raise ValueError("voice_pack models require GA_TTS_VOICE or a selected default voice preset.")
+        if default_id not in presets:
+            raise ValueError(f"default voice preset '{default_id}' is not in the voice pack.")
+        config["default_voice_preset"] = default_id
+    return config
+
+
 def build_server_config_json(config: TtsRuntimeConfig) -> dict[str, Any]:
     entry = resolve_catalog_entry(config.catalog_entry_id)
     task = resolve_engine_task(entry)
@@ -422,6 +470,7 @@ def build_server_config_json(config: TtsRuntimeConfig) -> dict[str, Any]:
     if options:
         model_config["load_options"] = dict(options)
         model_config["session_options"] = dict(options)
+    model_config.update(build_server_voice_preset_config(entry, config.default_voice))
     return {
         "host": config.engine_host,
         "port": config.engine_port,
@@ -795,14 +844,15 @@ def resolve_voice_fields(
     """Build the family-appropriate voice fields for /v1/audio/speech.
 
     Grounded in audio.cpp app/server/runtime.cpp build_openai_speech_request:
-      - `voice`        -> VoiceReference.cached_voice_id (builtin speaker id)
-      - `voice_ref`    -> reference audio clip path (cloning / voice pack)
-      - `instructions` -> options["instruct"] (voice design text)
+      - `voice`        -> configured server preset name OR model-native cached_voice_id
+      - `voice_ref`    -> reference audio clip path (only when server presets are not used)
+      - `reference_text` -> transcript for reference audio (injected by server presets)
+
+    voice_pack / optional_ref models register server voice_presets at load time
+    (voice_ref + reference_text per preset). Synthesis passes the preset id in
+    `voice` and lets audiocpp_server resolve clip + transcript.
 
     Returns (payload voice fields, resolved voice label, resolved lang_code).
-    Only voice_pack derives a language/lang_code from the pack entry; other
-    families let the engine apply its own default unless the caller passes an
-    explicit lang_code. No fabricated per-family defaults.
     """
     voice_input = (config.voice_input or "").strip()
     requested = (requested_voice or "").strip()
@@ -811,16 +861,14 @@ def resolve_voice_fields(
         pack = load_voice_pack()
         entry = pack.resolve_voice(requested or config.default_voice)
         lang_code, language = resolve_language(requested_lang_code, entry)
-        return {"voice_ref": entry.clip_path, "language": language}, entry.voice_id, lang_code
+        return {"voice": entry.voice_id, "language": language}, entry.voice_id, lang_code
 
     if voice_input == "optional_ref":
-        # Optional reference clip: a supplied voice-pack id becomes the reference
-        # clip; otherwise the model synthesizes with its own default speaker.
         fields: dict[str, Any] = {}
         if requested:
             pack = load_voice_pack()
             entry = pack.resolve_voice(requested)
-            fields["voice_ref"] = entry.clip_path
+            fields["voice"] = entry.voice_id
             label = entry.voice_id
         else:
             label = None
@@ -1241,7 +1289,68 @@ async def admin_voice_pack() -> JSONResponse:
     voices.sort(key=lambda item: item["voiceId"])
     return JSONResponse(
         status_code=200,
-        content={"path": get_voice_pack_path(), "count": len(voices), "voices": voices},
+        content={
+            "path": get_voice_pack_path(),
+            "count": len(voices),
+            "referenceText": voice_pack.reference_text,
+            "voices": voices,
+        },
+    )
+
+
+@APP.get("/admin/voices")
+async def admin_voices() -> JSONResponse:
+    """Runtime speaker ids and server voice preset names for the loaded TTS model.
+
+    Proxies audiocpp_server GET /v1/audio/voices?model=<catalog_entry_id>.
+    """
+    snapshot = STATE.snapshot()
+    if not snapshot["loaded"]:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "model_not_loaded",
+                "message": "Load a model with /admin/load before listing voices.",
+            },
+        )
+
+    config = STATE.config
+    if config is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "model_not_loaded", "message": "TTS engine is not loaded."},
+        )
+
+    status_code, parsed, _ = engine_json_request(
+        config,
+        "GET",
+        f"/v1/audio/voices?model={urllib.parse.quote(config.catalog_entry_id)}",
+        min(10, config.request_timeout_seconds),
+    )
+    if status_code != 200:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": "engine_voices_failed",
+                "message": f"audiocpp_server /v1/audio/voices returned HTTP {status_code}.",
+            },
+        )
+    if not isinstance(parsed, dict):
+        return JSONResponse(
+            status_code=502,
+            content={"error": "engine_voices_failed", "message": "Unexpected voices payload."},
+        )
+
+    voices = parsed.get("voices")
+    if not isinstance(voices, list):
+        voices = []
+    voice_ids = [str(item) for item in voices if str(item).strip()]
+    return JSONResponse(
+        status_code=200,
+        content={
+            "modelId": config.catalog_entry_id,
+            "voices": voice_ids,
+        },
     )
 
 

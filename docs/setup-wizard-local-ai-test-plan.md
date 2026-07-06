@@ -77,11 +77,11 @@ Use the following exact choices in wizard:
 - `Qwen/Qwen3-ASR-0.6B`
 
 2. TTS model:
-- `hexgrad/Kokoro-82M`
-- Kokoro voice: `af_heart`
+- `chatterbox` (catalog)
+- Reference voice: `en_us_cv_001`
 
 3. Embeddings model:
-- `microsoft/harrier-oss-v1-0.6b`
+- `qwen3_embedding_0_6b` (Qwen3-Embedding-0.6B GGUF)
 
 4. Image bundle:
 - Diffusion repo: `unsloth/FLUX.2-klein-4B-GGUF`
@@ -226,8 +226,8 @@ Actions:
 
 1. Confirm provider is fixed to `SpeechSynthesis.LocalTts.Http`.
 2. Set `TimeoutSeconds=300`.
-3. Download/install the locked model `hexgrad/Kokoro-82M`.
-4. Keep Kokoro voice default `af_heart`; no language or speed fields should be shown.
+3. Download/install catalog model `chatterbox`.
+4. Keep reference voice default `en_us_cv_001`; no language or speed fields should be shown.
 5. Load/select active model.
 6. Wait until readiness is ready.
 7. Click `Next`.

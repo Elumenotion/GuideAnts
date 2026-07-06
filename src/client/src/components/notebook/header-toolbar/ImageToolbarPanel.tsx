@@ -2,7 +2,8 @@ import { FaCog } from 'react-icons/fa';
 import { api } from '../../../services/api';
 import { textButtonClassName } from '../../../pages/settings/components/shared/ActionButtons';
 import type { ServicePanelCommonProps } from './types';
-import { WORKSPACE_CONTROLS_COPY, serviceSummaryLine, statusToneClass, toolbarProviderOptionLabel } from './toolbarFormatters';
+import { WORKSPACE_CONTROLS_COPY, serviceStatusHeadline, statusToneClass, toolbarProviderOptionLabel } from './toolbarFormatters';
+import { ServiceLocalRuntimePowerSection } from './ServiceLocalRuntimePowerSection';
 
 export function ImageToolbarPanel({
   service,
@@ -55,7 +56,7 @@ export function ImageToolbarPanel({
   return (
     <div className="space-y-2">
       {showWorkspaceCopy ? <div className="text-xs text-slate-500">{WORKSPACE_CONTROLS_COPY}</div> : null}
-      <div className={`text-sm font-medium ${statusToneClass(service.status)}`}>{serviceSummaryLine(service)}</div>
+      <div className={`text-sm font-medium ${statusToneClass(service.status)}`}>{serviceStatusHeadline(service)}</div>
       {service.blockers.length > 0 && (
         <div className="text-xs text-red-700">{service.blockers[0]}</div>
       )}
@@ -105,6 +106,13 @@ export function ImageToolbarPanel({
           );
         })}
       </div>
+
+      <ServiceLocalRuntimePowerSection
+        service={service}
+        setInFlight={setInFlight}
+        onRefresh={onRefresh}
+        resourceLabel="Local bundle"
+      />
 
       <button
         type="button"

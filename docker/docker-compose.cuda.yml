@@ -3,6 +3,7 @@ name: guideants
 services:
   # SQL Server Database
   mssql-express:
+    restart: unless-stopped
     image: mssql2025-express-fts
     environment:
       - ACCEPT_EULA=Y

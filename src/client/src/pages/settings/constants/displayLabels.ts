@@ -107,7 +107,9 @@ const PROVIDER_FIELD_LABEL_OVERRIDES: Record<string, Record<string, string>> = {
   'SpeechTranscription.HuggingFace.Inference': { ModelId: 'ASR Model ID' },
   'SpeechTranscription.OpenRouter.Audio': { ModelId: 'Transcription Model ID' },
   'SpeechSynthesis.Google.TextToSpeech': { ModelId: 'TTS Model ID' },
-  'SpeechSynthesis.LocalTts.Http': { VoiceName: 'Reference voice' },
+  'SpeechSynthesis.LocalTts.Http': {
+    VoiceName: 'Reference voice',
+  },
   'SpeechSynthesis.HuggingFace.Inference': { ModelId: 'TTS Model ID' },
   'SpeechSynthesis.OpenRouter.Tts': { ModelId: 'TTS Model ID' },
   'SpeechTranscription.OpenAI.Audio': { ModelId: 'Transcription Model ID' },
@@ -138,7 +140,8 @@ const COMMON_FIELD_HELP_TEXT: Record<string, string> = {
 
 const PROVIDER_FIELD_HELP_OVERRIDES: Record<string, Record<string, string>> = {
   'SpeechSynthesis.LocalTts.Http': {
-    VoiceName: 'Voice id from the curated reference-voice pack. Language is inferred from the selected voice.',
+    VoiceName:
+      'Select a voice pack preset for models that use reference clips. Other loaded models may use built-in speaker, optional reference, or voice-design text per catalog.',
   },
 };
 

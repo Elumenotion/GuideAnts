@@ -176,5 +176,10 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
             string? requestedModelRef = null,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Warm));
+
+        public Task<LocalServiceReconcileResult> PowerOffLocalServiceEngineAsync(
+            string serviceId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle));
     }
 }

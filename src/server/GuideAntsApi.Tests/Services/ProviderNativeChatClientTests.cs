@@ -238,7 +238,7 @@ public sealed class ProviderNativeChatClientTests
                 Token = "hf-token",
                 RouterBaseUrl = "https://router.huggingface.co/v1"
             },
-            "deepseek-ai/DeepSeek-V4-Pro");
+            "zai-org/GLM-5.2");
 
         var toolCall = new ChatToolCall
         {

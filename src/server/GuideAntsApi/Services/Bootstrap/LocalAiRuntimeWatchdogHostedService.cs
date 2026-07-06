@@ -53,7 +53,8 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
             try
             {
                 if (!_warmupService.IsWarmupInProgress
-                    && !await IsConfiguredDefaultLlamaLoadedAsync(stoppingToken).ConfigureAwait(false))
+                    && !await IsConfiguredDefaultLlamaLoadedAsync(stoppingToken).ConfigureAwait(false)
+                    && !await IsConfiguredDefaultLlamaFailedAsync(stoppingToken).ConfigureAwait(false))
                 {
                     _logger.LogInformation(
                         "Configured default llama model is not loaded; re-running full local AI warmup.");
@@ -143,6 +144,57 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
             && IsRouterModelLoaded(m));
     }
 
+    private async Task<bool> IsConfiguredDefaultLlamaFailedAsync(CancellationToken cancellationToken)
+    {
+        var defaultModelId = (_configuration["ChatDefaults:DefaultModelId"] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(defaultModelId))
+        {
+            return false;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GuideAntsApi.DataModel.ApplicationDbContext>();
+        var row = await db.Models
+            .AsNoTracking()
+            .Where(m => m.ModelId == defaultModelId)
+            .Select(m => new { m.Provider, m.RuntimeConfigJson, m.IsActive })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (row is null
+            || !row.IsActive
+            || !string.Equals(row.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
+        {
+            return false;
+        }
+
+        string routerAlias;
+        try
+        {
+            routerAlias = LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson).RouterModelId;
+        }
+        catch
+        {
+            return false;
+        }
+
+        var llamaClient = scope.ServiceProvider.GetRequiredService<ILlamaServerRuntimeClient>();
+        LlamaModelsResponse models;
+        try
+        {
+            models = await llamaClient.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            return false;
+        }
+
+        return models.Data.Any(m =>
+            string.Equals(m.Id, routerAlias, StringComparison.Ordinal)
+            && IsRouterModelFailed(m));
+    }
+
     private static bool IsRouterModelLoaded(LlamaModelData model)
     {
         if (!string.IsNullOrWhiteSpace(model.Status?.Value))
@@ -153,6 +205,29 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
         if (!string.IsNullOrWhiteSpace(model.State))
         {
             return string.Equals(model.State, "loaded", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static bool IsRouterModelFailed(LlamaModelData model)
+    {
+        if (model.Failed)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.Status?.Value))
+        {
+            var status = model.Status.Value;
+            return string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "error", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.State))
+        {
+            return string.Equals(model.State, "failed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(model.State, "error", StringComparison.OrdinalIgnoreCase);
         }
 
         return false;

@@ -169,7 +169,7 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                     // Voice options are catalog-driven, not a static enum. The
                     // client populates them from the loaded model's voiceInput:
                     // voice_pack -> GET .../local-models/voice-pack, builtin ->
-                    // runtime speaker list, instruct -> free-text design field.
+                    // GET .../local-models/voices, instruct -> free-text design field.
                     Field("VoiceName", "text", false, operative: true),
                 ],
                 [ServiceProviderIds.SpeechSynthesisGoogleTextToSpeech] =
