@@ -1,12 +1,14 @@
-import gc
 import json
 import logging
 import os
-import re
 import shutil
+import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,14 +16,9 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sentence_transformers import SentenceTransformer
 
-MODEL_PATH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-
-try:
-    import torch
-except Exception:  # pragma: no cover - torch is an indirect dep; guard anyway.
-    torch = None  # type: ignore[assignment]
+MAX_PRODUCED_DIMENSION = 1536
+CATALOG_PATH = os.path.join(os.path.dirname(__file__), "catalog", "manifest.json")
 
 
 def utc_now_iso() -> str:
@@ -60,32 +57,28 @@ def configure_uvicorn_access_log_filters(ignore_health_requests: bool) -> None:
 
 
 def log_event(event: str, **fields: Any) -> None:
-    payload = {
-        "event": event,
-        "ts": utc_now_iso(),
-    }
+    payload = {"event": event, "ts": utc_now_iso()}
     payload.update(fields)
     print(json.dumps(payload, ensure_ascii=True, sort_keys=True), flush=True)
+
+
+def load_catalog() -> dict[str, Any]:
+    with open(CATALOG_PATH, encoding="utf-8") as handle:
+        data = json.load(handle)
+    entries = {entry["id"]: entry for entry in data.get("entries", []) if entry.get("task") == "emb"}
+    return {"version": data.get("version", 1), "entries": entries}
+
+
+CATALOG = load_catalog()
 
 
 class LoadModelRequest(BaseModel):
     model_id: str | None = None
     model_path: str | None = None
-    # Single, server-resolved Hugging Face token stamped in by the .NET web
-    # layer. Used when `model_id` triggers an implicit HF download. Not read
-    # from env — the web API is the only source.
     hf_token: str | None = None
 
 
 class DownloadModelRequest(BaseModel):
-    """
-    Request body for an explicit admin model download.
-
-    ``hf_token`` is the single server-resolved token from the top-level
-    ``HuggingFace:Token`` application setting, stamped in by the .NET web
-    layer. This service does not consult ``HF_TOKEN`` env directly; whatever
-    the web API passes is the one token used for every HF call.
-    """
     model_id: str
     revision: str | None = None
     hf_token: str | None = None
@@ -96,19 +89,37 @@ class EmbedRequest(BaseModel):
     purpose: str = "document"
 
 
+@dataclass
+class EmbRuntimeConfig:
+    server_path: str
+    model_dir: str
+    gguf_path: str
+    model_ref: str
+    catalog_entry_id: str
+    produced_dimension: int
+    engine_host: str
+    engine_port: int
+    engine_base_url: str
+    engine_ready_timeout_seconds: int
+    request_timeout_seconds: int
+    n_gpu_layers: int
+    pooling: str
+
+
 class EmbRuntimeState:
     def __init__(self) -> None:
         self.lock = threading.RLock()
-        self.model: SentenceTransformer | None = None
-        self.multi_process_pool: dict[str, Any] | None = None
+        self.config: EmbRuntimeConfig | None = None
+        self.engine_process: subprocess.Popen[Any] | None = None
+        self.engine_started_at_utc: str | None = None
         self.model_ref: str | None = None
-        self.device: str = "cpu"
-        self.target_devices: list[str] = []
+        self.catalog_entry_id: str | None = None
         self.dimension: int = 0
+        self.device: str = "cpu"
         self.loaded_at_utc: str | None = None
         self.loading: bool = False
         self.load_error: str | None = None
-        self.autoload_enabled: bool = env_flag("GA_EMB_AUTO_LOAD_ON_STARTUP", default=False)
+        self.autoload_enabled: bool = False
         self.warmup_enabled: bool = env_flag("GA_EMB_WARMUP_ON_LOAD", default=True)
         self.warmup_ran: bool = False
         self.warmup_succeeded: bool = False
@@ -118,12 +129,13 @@ class EmbRuntimeState:
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
+            loaded = self.config is not None and is_engine_process_alive()
             return {
-                "loaded": self.model is not None,
+                "loaded": loaded,
                 "loading": self.loading,
                 "modelRef": self.model_ref,
+                "catalogEntryId": self.catalog_entry_id,
                 "device": self.device,
-                "targetDevices": self.target_devices,
                 "dimensions": self.dimension,
                 "loadedAtUtc": self.loaded_at_utc,
                 "loadError": self.load_error,
@@ -134,18 +146,461 @@ class EmbRuntimeState:
                 "warmupLatencyMs": self.warmup_latency_ms,
                 "warmupError": self.warmup_error,
                 "warmupCompletedAtUtc": self.warmup_completed_at_utc,
+                "engineAlive": is_engine_process_alive(),
             }
 
 
 STATE = EmbRuntimeState()
-APP = FastAPI(title="GuideAnts Embeddings Service", version="1.0.0")
-MODEL_LOAD_LOCK = threading.Lock()
+APP = FastAPI(title="GuideAnts Embeddings Service", version="2.0.0")
+ENGINE_LOCK = threading.Lock()
 MODEL_OPS_LOCK = threading.Lock()
 MODEL_DOWNLOAD_OPERATIONS: dict[str, dict[str, Any]] = {}
 
 
 def get_model_dir() -> str:
     return os.getenv("GA_EMB_MODEL_DIR", "/models-local/emb")
+
+
+def resolve_catalog_entry(model_id: str) -> dict[str, Any]:
+    entry = CATALOG["entries"].get(model_id.strip())
+    if entry is None:
+        raise ValueError(
+            f"model_id '{model_id}' is not in the curated embeddings catalog. "
+            "Only manifest entries are allowed."
+        )
+    dim = int(entry.get("producedDimension", 0))
+    if dim <= 0 or dim > MAX_PRODUCED_DIMENSION:
+        raise ValueError(
+            f"Catalog entry '{model_id}' has invalid producedDimension {dim}; "
+            f"must be > 0 and <= {MAX_PRODUCED_DIMENSION}."
+        )
+    return entry
+
+
+def resolve_server_path() -> str:
+    configured = (os.getenv("GA_EMB_SERVER_PATH") or "").strip()
+    if configured:
+        return configured if os.path.isabs(configured) else (shutil.which(configured) or configured)
+    for candidate in ("/app/llama-server", shutil.which("llama-server")):
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    raise RuntimeError("llama-server binary not found; set GA_EMB_SERVER_PATH.")
+
+
+def resolve_n_gpu_layers() -> tuple[str, int]:
+    device = (os.getenv("GA_EMB_DEVICE") or "cpu").strip().lower()
+    if device in {"cuda-multi"}:
+        device = "cuda"
+    if device in {"hip", "rocm", "amd", "hip-multi", "rocm-multi", "amd-multi"}:
+        device = "cuda"
+    if device == "cpu":
+        return device, 0
+    override = os.getenv("GA_EMB_NGL")
+    if override is not None and override.strip() != "":
+        try:
+            return device, int(override.strip())
+        except ValueError as exc:
+            raise ValueError("GA_EMB_NGL must be an integer.") from exc
+    return device, -1
+
+
+def resolve_permitted_gguf_path(model_dir: str, catalog_filename: str) -> str:
+    """Resolve a catalog-listed GGUF filename under model_dir.
+
+    ``catalog_filename`` must come from the baked manifest (see
+    ``catalog_entry_for_gguf_filename``), not from raw request input.
+    """
+    base_real = os.path.realpath(model_dir)
+    candidate = os.path.realpath(os.path.join(base_real, catalog_filename))
+    if not candidate.startswith(base_real + os.sep):
+        raise ValueError("resolved model_path escapes the permitted model directory.")
+    if not os.path.isfile(candidate):
+        raise FileNotFoundError(f"GGUF file '{catalog_filename}' does not exist.")
+    return candidate
+
+
+def catalog_entry_for_gguf_filename(requested: str) -> tuple[str, dict[str, Any]] | None:
+    requested = requested.strip()
+    if not requested or "/" in requested or "\\" in requested or requested in {".", ".."}:
+        return None
+    for entry in CATALOG["entries"].values():
+        if int(entry.get("producedDimension", 0)) == 0:
+            continue
+        for src in entry.get("sourceRepos", []):
+            catalog_filename = str(src.get("filename") or "").strip()
+            if catalog_filename and catalog_filename == requested:
+                return catalog_filename, entry
+    return None
+
+
+def resolve_gguf_target(request: LoadModelRequest) -> tuple[str, str, dict[str, Any]]:
+    model_dir = get_model_dir()
+    os.makedirs(model_dir, exist_ok=True)
+
+    if request.model_path:
+        requested = request.model_path.strip()
+        match = catalog_entry_for_gguf_filename(requested)
+        if match is None:
+            raise ValueError(f"Local GGUF '{requested}' is not a catalog-listed artifact.")
+        catalog_filename, entry = match
+        candidate = resolve_permitted_gguf_path(model_dir, catalog_filename)
+        return candidate, catalog_filename, entry
+
+    catalog_id = (request.model_id or os.getenv("GA_EMB_DEFAULT_MODEL_PATH") or "").strip()
+    if not catalog_id:
+        raise ValueError("model_id or model_path is required, or set GA_EMB_DEFAULT_MODEL_PATH.")
+
+    entry = resolve_catalog_entry(catalog_id)
+    source = entry["sourceRepos"][0]
+    catalog_filename = str(source["filename"]).strip()
+    try:
+        gguf_path = resolve_permitted_gguf_path(model_dir, catalog_filename)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"Catalog model '{catalog_id}' expects '{catalog_filename}'. Download it first."
+        ) from exc
+    return gguf_path, catalog_filename, entry
+
+
+def build_runtime_config(gguf_path: str, model_ref: str, entry: dict[str, Any]) -> EmbRuntimeConfig:
+    device, n_gpu_layers = resolve_n_gpu_layers()
+    engine_host = os.getenv("GA_EMB_ENGINE_HOST", "127.0.0.1")
+    engine_port = parse_positive_int(os.getenv("GA_EMB_ENGINE_PORT"), 18085)
+    return EmbRuntimeConfig(
+        server_path=resolve_server_path(),
+        model_dir=get_model_dir(),
+        gguf_path=gguf_path,
+        model_ref=model_ref,
+        catalog_entry_id=entry["id"],
+        produced_dimension=int(entry["producedDimension"]),
+        engine_host=engine_host,
+        engine_port=engine_port,
+        engine_base_url=f"http://{engine_host}:{engine_port}",
+        engine_ready_timeout_seconds=parse_positive_int(
+            os.getenv("GA_EMB_ENGINE_READY_TIMEOUT_SECONDS"),
+            parse_positive_int(os.getenv("GA_EMB_READY_TIMEOUT_SECONDS"), 1800),
+        ),
+        request_timeout_seconds=parse_positive_int(os.getenv("GA_EMB_ENGINE_REQUEST_TIMEOUT_SECONDS"), 120),
+        n_gpu_layers=n_gpu_layers,
+        pooling=str(entry.get("pooling") or "last"),
+    )
+
+
+def build_llama_server_command(config: EmbRuntimeConfig) -> list[str]:
+    return [
+        config.server_path,
+        "--embeddings",
+        "--pooling",
+        config.pooling,
+        "-m",
+        config.gguf_path,
+        "--host",
+        config.engine_host,
+        "--port",
+        str(config.engine_port),
+        "-ngl",
+        str(config.n_gpu_layers),
+    ]
+
+
+def is_engine_process_alive() -> bool:
+    process = STATE.engine_process
+    return process is not None and process.poll() is None
+
+
+def perform_http_request(
+    method: str,
+    url: str,
+    timeout_seconds: int,
+    headers: dict[str, str] | None = None,
+    body: bytes | None = None,
+) -> tuple[int, bytes]:
+    request = urllib.request.Request(url=url, data=body, method=method)
+    for name, value in (headers or {}).items():
+        request.add_header(name, value)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            return int(response.status), response.read()
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), exc.read()
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        raise RuntimeError(f"Failed to reach llama-server at {url}: {reason}") from exc
+
+
+def llama_json_request(
+    config: EmbRuntimeConfig,
+    method: str,
+    path: str,
+    timeout_seconds: int,
+    payload: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    headers: dict[str, str] = {"Accept": "application/json"}
+    body: bytes | None = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        body = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    status_code, response_body = perform_http_request(
+        method=method,
+        url=f"{config.engine_base_url}{path}",
+        timeout_seconds=timeout_seconds,
+        headers=headers,
+        body=body,
+    )
+    if not response_body:
+        return status_code, {}
+    parsed = json.loads(response_body.decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"Unexpected JSON from llama-server {method} {path}")
+    return status_code, parsed
+
+
+def wait_for_engine_ready(config: EmbRuntimeConfig) -> None:
+    deadline = time.monotonic() + config.engine_ready_timeout_seconds
+    while time.monotonic() < deadline:
+        if not is_engine_process_alive():
+            process = STATE.engine_process
+            exit_code = process.poll() if process is not None else None
+            raise RuntimeError(f"llama-server exited before readiness (exit code: {exit_code}).")
+        try:
+            status_code, _ = llama_json_request(
+                config, "GET", "/health", min(5, config.request_timeout_seconds)
+            )
+            if status_code == 200:
+                return
+        except Exception:
+            pass
+        time.sleep(0.5)
+    raise RuntimeError(
+        f"Timed out waiting for llama-server readiness after {config.engine_ready_timeout_seconds}s."
+    )
+
+
+def stop_engine_process() -> None:
+    process = STATE.engine_process
+    STATE.engine_process = None
+    if process is None:
+        return
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def stop_engine() -> None:
+    stop_engine_process()
+    STATE.config = None
+    STATE.model_ref = None
+    STATE.catalog_entry_id = None
+    STATE.dimension = 0
+    STATE.loaded_at_utc = None
+    STATE.warmup_ran = False
+    STATE.warmup_succeeded = False
+    STATE.warmup_latency_ms = 0
+    STATE.warmup_error = None
+    STATE.warmup_completed_at_utc = None
+
+
+def probe_embedding_dimension(config: EmbRuntimeConfig) -> int:
+    status_code, parsed = llama_json_request(
+        config,
+        "POST",
+        "/v1/embeddings",
+        config.request_timeout_seconds,
+        payload={"input": ["dimension probe"]},
+    )
+    if status_code != 200:
+        raise RuntimeError(f"Dimension probe failed with HTTP {status_code}.")
+    data = parsed.get("data")
+    if not isinstance(data, list) or not data:
+        raise RuntimeError("Dimension probe returned no embedding data.")
+    embedding = data[0].get("embedding")
+    if not isinstance(embedding, list) or not embedding:
+        raise RuntimeError("Dimension probe returned an empty embedding.")
+    return len(embedding)
+
+
+def start_engine(request: LoadModelRequest) -> dict[str, Any]:
+    gguf_path, model_ref, entry = resolve_gguf_target(request)
+    config = build_runtime_config(gguf_path, model_ref, entry)
+    device, _ = resolve_n_gpu_layers()
+
+    if STATE.config and STATE.config.gguf_path == gguf_path and is_engine_process_alive():
+        return {
+            "modelRef": STATE.model_ref,
+            "catalogEntryId": STATE.catalog_entry_id,
+            "dimensions": STATE.dimension,
+            "action": "noop-already-loaded",
+        }
+
+    stop_engine()
+    command = build_llama_server_command(config)
+    log_event("emb_engine_start", command=command, modelRef=model_ref)
+    STATE.engine_process = subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=os.environ.copy(),
+    )
+    STATE.engine_started_at_utc = utc_now_iso()
+    wait_for_engine_ready(config)
+    actual_dim = probe_embedding_dimension(config)
+    expected_dim = config.produced_dimension
+    if actual_dim != expected_dim:
+        stop_engine()
+        raise RuntimeError(
+            f"GGUF produced dimension {actual_dim} != catalog declared {expected_dim}."
+        )
+
+    STATE.config = config
+    STATE.model_ref = model_ref
+    STATE.catalog_entry_id = entry["id"]
+    STATE.dimension = actual_dim
+    STATE.device = device
+    STATE.loaded_at_utc = utc_now_iso()
+    return {"modelRef": model_ref, "catalogEntryId": entry["id"], "dimensions": actual_dim}
+
+
+def normalize_purpose(raw: str) -> str:
+    purpose = (raw or "").strip().lower()
+    if purpose in {"document", "query"}:
+        return purpose
+    raise ValueError("purpose must be either 'document' or 'query'.")
+
+
+def apply_input_prefix(text: str, purpose: str, entry_id: str | None) -> str:
+    if not entry_id:
+        return text
+    entry = CATALOG["entries"].get(entry_id)
+    if entry is None:
+        return text
+    template_key = "queryPrefixTemplate" if purpose == "query" else "documentPrefixTemplate"
+    template = entry.get(template_key)
+    if not template:
+        return text
+    return str(template).replace("{text}", text)
+
+
+def embed_via_engine(inputs: list[str], purpose: str) -> list[list[float]]:
+    config = STATE.config
+    if config is None:
+        raise RuntimeError("Embeddings engine is not loaded.")
+    prefixed = [apply_input_prefix(value, purpose, STATE.catalog_entry_id) for value in inputs]
+    status_code, parsed = llama_json_request(
+        config,
+        "POST",
+        "/v1/embeddings",
+        config.request_timeout_seconds,
+        payload={"input": prefixed},
+    )
+    if status_code != 200:
+        raise RuntimeError(f"llama-server /v1/embeddings returned HTTP {status_code}.")
+    data = parsed.get("data")
+    if not isinstance(data, list):
+        raise RuntimeError("llama-server returned no embedding data.")
+    vectors: list[list[float]] = []
+    for item in sorted(data, key=lambda row: int(row.get("index", 0))):
+        embedding = item.get("embedding")
+        if not isinstance(embedding, list):
+            raise RuntimeError("Malformed embedding row from llama-server.")
+        vectors.append([float(value) for value in embedding])
+    if len(vectors) != len(inputs):
+        raise RuntimeError(f"Expected {len(inputs)} vectors, got {len(vectors)}.")
+    return vectors
+
+
+def run_model_warmup(force: bool = False) -> dict[str, Any]:
+    warmup_enabled = env_flag("GA_EMB_WARMUP_ON_LOAD", default=True)
+    if not warmup_enabled and not force:
+        return {
+            "warmupEnabled": False,
+            "warmupRan": False,
+            "warmupSucceeded": False,
+            "warmupLatencyMs": 0,
+            "dimensions": STATE.dimension,
+        }
+
+    started = time.perf_counter()
+    log_event("emb_model_warmup_start", modelRef=STATE.model_ref)
+    try:
+        query_vectors = embed_via_engine(["startup warmup query"], "query")
+        document_vectors = embed_via_engine(["startup warmup document"], "document")
+        query_dim = len(query_vectors[0])
+        document_dim = len(document_vectors[0])
+        if query_dim <= 0 or query_dim != document_dim:
+            raise RuntimeError(
+                f"Warmup produced inconsistent dimensions query={query_dim}, document={document_dim}."
+            )
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return {
+            "warmupEnabled": True,
+            "warmupRan": True,
+            "warmupSucceeded": True,
+            "warmupLatencyMs": latency_ms,
+            "dimensions": query_dim,
+            "warmupCompletedAtUtc": utc_now_iso(),
+        }
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        log_event(
+            "emb_model_warmup_failed",
+            modelRef=STATE.model_ref,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        return {
+            "warmupEnabled": True,
+            "warmupRan": True,
+            "warmupSucceeded": False,
+            "warmupLatencyMs": latency_ms,
+            "warmupError": str(exc),
+            "dimensions": 0,
+        }
+
+
+def load_model_serialized(request: LoadModelRequest, force_warmup: bool = False) -> dict[str, Any]:
+    if not ENGINE_LOCK.acquire(blocking=False):
+        raise RuntimeError("model lifecycle operation already in progress")
+    try:
+        with STATE.lock:
+            STATE.loading = True
+            STATE.load_error = None
+        try:
+            hf_token = (request.hf_token or "").strip()
+            if hf_token:
+                os.environ["HF_TOKEN"] = hf_token
+            details = start_engine(request)
+            warmup = run_model_warmup(force=force_warmup)
+            if force_warmup and not warmup.get("warmupSucceeded", False):
+                raise RuntimeError(str(warmup.get("warmupError") or "Embeddings warmup failed."))
+            with STATE.lock:
+                STATE.warmup_ran = bool(warmup.get("warmupRan"))
+                STATE.warmup_succeeded = bool(warmup.get("warmupSucceeded"))
+                STATE.warmup_latency_ms = int(warmup.get("warmupLatencyMs") or 0)
+                STATE.warmup_error = warmup.get("warmupError")
+                STATE.warmup_completed_at_utc = warmup.get("warmupCompletedAtUtc")
+            return {**details, **warmup}
+        except Exception as exc:
+            with STATE.lock:
+                STATE.load_error = str(exc)
+            raise
+        finally:
+            with STATE.lock:
+                STATE.loading = False
+    finally:
+        ENGINE_LOCK.release()
+
+
+def unload_model() -> dict[str, Any]:
+    with STATE.lock:
+        previous_ref = STATE.model_ref
+        had_model = STATE.config is not None
+    stop_engine()
+    return {"wasLoaded": had_model, "previousModelRef": previous_ref}
 
 
 def list_model_entries() -> list[dict[str, Any]]:
@@ -176,31 +631,20 @@ def _status_is_terminal(status: str | None) -> bool:
     return normalized in {"completed", "failed", "error", "cancelled", "canceled"}
 
 
-def canonical_model_folder_name(model_id: str) -> str:
-    normalized = (model_id or "").strip().strip("/")
-    if not normalized:
-        raise ValueError("model_id is required")
-
-    # Keep local folder naming aligned with GA_EMB_DEFAULT_MODEL_PATH expectations
-    # (leaf repo name, e.g. microsoft/harrier-oss-v1-0.6b -> harrier-oss-v1-0.6b).
-    leaf = normalized.split("/")[-1].strip()
-    if not leaf:
-        raise ValueError("model_id must include a repository name")
-
-    if any(sep in leaf for sep in ("/", "\\", "..")):
-        raise ValueError("model_id resolved to an invalid local folder name")
-
-    return leaf
-
-
 def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
+    entry = resolve_catalog_entry(request.model_id)
+    source = entry["sourceRepos"][0]
+    repo_id = source["repoId"]
+    filename = source["filename"]
+    revision = request.revision or source.get("revision")
+
     operation_id = uuid.uuid4().hex
     operation = {
         "operationId": operation_id,
         "status": "queued",
         "modelId": request.model_id,
         "error": None,
-        "modelRef": None,
+        "modelRef": filename,
         "cancelRequested": False,
         "startedAtUtc": utc_now_iso(),
         "completedAtUtc": None,
@@ -211,8 +655,7 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
     def _run() -> None:
         model_dir = get_model_dir()
         os.makedirs(model_dir, exist_ok=True)
-        target_name = canonical_model_folder_name(request.model_id)
-        target_path = os.path.join(model_dir, target_name)
+        target_path = os.path.join(model_dir, filename)
         with MODEL_OPS_LOCK:
             current = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)
             if current is None:
@@ -224,30 +667,32 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
                 return
             current["status"] = "running"
         try:
-            from huggingface_hub import snapshot_download
+            from huggingface_hub import hf_hub_download
 
             hf_token = (request.hf_token or "").strip() or None
-            snapshot_download(
-                repo_id=request.model_id,
-                revision=request.revision,
-                local_dir=target_path,
+            downloaded = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                revision=revision,
+                local_dir=model_dir,
                 local_dir_use_symlinks=False,
-                resume_download=True,
                 token=hf_token,
             )
+            if not os.path.isfile(downloaded):
+                raise RuntimeError(f"Expected GGUF file was not produced: {filename}")
             with MODEL_OPS_LOCK:
                 current = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)
                 if current is None:
                     return
                 if current.get("cancelRequested"):
                     if os.path.exists(target_path):
-                        shutil.rmtree(target_path, ignore_errors=True)
+                        os.remove(target_path)
                     current["status"] = "cancelled"
                     current["error"] = "Cancelled by operator."
                     current["completedAtUtc"] = utc_now_iso()
                     return
                 current["status"] = "completed"
-                current["modelRef"] = target_name
+                current["modelRef"] = filename
                 current["completedAtUtc"] = utc_now_iso()
         except Exception as exc:
             with MODEL_OPS_LOCK:
@@ -266,391 +711,38 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
     return operation
 
 
-def unload_model() -> dict[str, Any]:
-    """
-    Drop the loaded sentence-transformer, stop any multi-process pool, and
-    release CUDA memory. Caller must hold MODEL_LOAD_LOCK. Safe to call when
-    nothing is loaded.
-    """
-    with STATE.lock:
-        had_model = STATE.model is not None
-        previous_ref = STATE.model_ref
-        model = STATE.model
-        pool = STATE.multi_process_pool
-        STATE.model = None
-        STATE.multi_process_pool = None
-        STATE.model_ref = None
-        STATE.device = "cpu"
-        STATE.target_devices = []
-        STATE.dimension = 0
-        STATE.loaded_at_utc = None
-        STATE.load_error = None
-        STATE.warmup_ran = False
-        STATE.warmup_succeeded = False
-        STATE.warmup_latency_ms = 0
-        STATE.warmup_error = None
-        STATE.warmup_completed_at_utc = None
-    if model is not None and pool is not None:
-        try:
-            model.stop_multi_process_pool(pool)
-        except Exception:
-            pass
-    del model
-    del pool
-    gc.collect()
-    try:
-        if torch is not None and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
-    return {"wasLoaded": had_model, "previousModelRef": previous_ref}
-
-
-def resolve_model_target(request: LoadModelRequest) -> str:
-    model_dir = os.getenv("GA_EMB_MODEL_DIR", "/models-local/emb")
-    default_model_path = (os.getenv("GA_EMB_DEFAULT_MODEL_PATH") or "").strip()
-
-    if request.model_path:
-        requested = request.model_path.strip()
-        if not MODEL_PATH_RE.fullmatch(requested):
-            raise ValueError("model_path must be a simple local model name (letters, digits, dot, underscore, hyphen).")
-        base_real = os.path.realpath(model_dir)
-        candidate = os.path.realpath(os.path.join(base_real, requested))
-        if not candidate.startswith(base_real + os.sep):
-            raise ValueError("resolved model_path escapes the permitted model directory.")
-        if os.path.exists(candidate):
-            return candidate
-        raise FileNotFoundError(
-            f"Configured model_path '{requested}' does not exist on disk. "
-            "Download the model into the embeddings model directory first."
-        )
-
-    if request.model_id:
-        return request.model_id.strip()
-
-    if default_model_path:
-        candidate = default_model_path
-        if not os.path.isabs(candidate):
-            candidate = os.path.join(model_dir, candidate)
-        if os.path.exists(candidate):
-            return candidate
-        raise FileNotFoundError(
-            f"GA_EMB_DEFAULT_MODEL_PATH points to '{default_model_path}', but that file/directory is not present."
-        )
-
-    raise ValueError(
-        "No default local embeddings model is configured. Set GA_EMB_DEFAULT_MODEL_PATH to an existing local model "
-        "or load explicitly via model_path / model_id."
-    )
-
-
-def resolve_device() -> str:
-    requested = (os.getenv("GA_EMB_DEVICE", "cpu") or "cpu").strip().lower().replace("_", "-")
-    if requested in {"multi-gpu", "multigpu"}:
-        requested = "cuda-multi"
-    if requested in {"hip", "rocm", "amd"}:
-        requested = "cuda"
-    if requested in {"hip-multi", "rocm-multi", "amd-multi"}:
-        requested = "cuda-multi"
-    if requested in {"cuda", "cuda-multi"}:
-        try:
-            if torch is None or not torch.cuda.is_available():
-                return "cpu"
-        except Exception:
-            return "cpu"
-    if requested in {"cpu", "cuda", "mps", "cuda-multi"}:
-        return requested
-    return "cpu"
-
-
-def resolve_target_devices(device: str) -> list[str]:
-    if device != "cuda-multi":
-        return []
-
-    configured = os.getenv("GA_EMB_TARGET_DEVICES", "cuda:0,cuda:1") or "cuda:0,cuda:1"
-    devices = [value.strip() for value in configured.split(",") if value.strip()]
-    return devices or ["cuda:0", "cuda:1"]
-
-
-def resolve_fix_mistral_regex() -> bool:
-    return env_flag("GA_EMB_FIX_MISTRAL_REGEX", default=True)
-
-
-def normalize_purpose(raw: str) -> str:
-    purpose = (raw or "").strip().lower()
-    if purpose in {"document", "query"}:
-        return purpose
-    raise ValueError("purpose must be either 'document' or 'query'.")
-
-
-def embed_vectors(
-    model: SentenceTransformer,
-    inputs: list[str],
-    purpose: str,
-    pool: dict[str, Any] | None = None,
-) -> list[list[float]]:
-    if pool is not None:
-        if purpose == "query":
-            vectors = model.encode_multi_process(inputs, pool, prompt_name="web_search_query")
-        else:
-            vectors = model.encode_multi_process(inputs, pool)
-    else:
-        if purpose == "query":
-            vectors = model.encode(inputs, prompt_name="web_search_query", convert_to_numpy=True)
-        else:
-            vectors = model.encode(inputs, convert_to_numpy=True)
-
-    normalized: list[list[float]] = []
-    if hasattr(vectors, "tolist"):
-        raw_vectors = vectors.tolist()
-    else:
-        raw_vectors = vectors
-
-    for row in raw_vectors:
-        normalized.append([float(value) for value in row])
-    return normalized
-
-
-def run_model_warmup(
-    model: SentenceTransformer,
-    model_ref: str,
-    pool: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    warmup_enabled = env_flag("GA_EMB_WARMUP_ON_LOAD", default=True)
-    if not warmup_enabled:
-        return {
-            "warmupEnabled": False,
-            "warmupRan": False,
-            "warmupSucceeded": False,
-            "warmupLatencyMs": 0,
-            "dimensions": model.get_sentence_embedding_dimension() or 0,
-        }
-
-    started = time.perf_counter()
-    query_text = "startup warmup query"
-    document_text = "startup warmup document"
-
-    log_event("emb_model_warmup_start", modelRef=model_ref)
-    try:
-        query_vectors = embed_vectors(model, [query_text], "query", pool=pool)
-        document_vectors = embed_vectors(model, [document_text], "document", pool=pool)
-
-        if len(query_vectors) != 1 or len(document_vectors) != 1:
-            raise RuntimeError("Warmup did not return exactly one query and one document vector.")
-
-        query_dim = len(query_vectors[0])
-        document_dim = len(document_vectors[0])
-        if query_dim <= 0 or query_dim != document_dim:
-            raise RuntimeError(
-                f"Warmup produced inconsistent vector dimensions query={query_dim}, document={document_dim}.")
-
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        log_event(
-            "emb_model_warmup_success",
-            modelRef=model_ref,
-            warmupLatencyMs=latency_ms,
-            dimensions=query_dim,
-            warmupCompletedAtUtc=utc_now_iso(),
-        )
-        return {
-            "warmupEnabled": True,
-            "warmupRan": True,
-            "warmupSucceeded": True,
-            "warmupLatencyMs": latency_ms,
-            "dimensions": query_dim,
-            "warmupCompletedAtUtc": utc_now_iso(),
-        }
-    except Exception as exc:
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        log_event(
-            "emb_model_warmup_failed",
-            modelRef=model_ref,
-            warmupLatencyMs=latency_ms,
-            errorType=type(exc).__name__,
-            error=str(exc),
-        )
-        return {
-            "warmupEnabled": True,
-            "warmupRan": True,
-            "warmupSucceeded": False,
-            "warmupLatencyMs": latency_ms,
-            "warmupError": str(exc),
-            "dimensions": 0,
-        }
-
-
-def load_model(request: LoadModelRequest, force_warmup: bool = False) -> dict[str, Any]:
-    # transformers / huggingface_hub pick up the HF token from the process
-    # environment. When the .NET layer resolved a token for this request we
-    # install it here before from_pretrained triggers any implicit download,
-    # so the single configured token is what gets used.
-    hf_token = (getattr(request, "hf_token", None) or "").strip()
-    if hf_token:
-        os.environ["HF_TOKEN"] = hf_token
-
-    target = resolve_model_target(request)
-    device = resolve_device()
-    target_devices = resolve_target_devices(device)
-    fix_mistral_regex = resolve_fix_mistral_regex()
-    started = time.perf_counter()
-
-    model_device = "cuda" if device == "cuda-multi" else device
-    tokenizer_kwargs = {"fix_mistral_regex": True} if fix_mistral_regex else None
-    model = SentenceTransformer(target, device=model_device, tokenizer_kwargs=tokenizer_kwargs)
-    pool: dict[str, Any] | None = None
-    try:
-        if target_devices:
-            log_event("emb_multi_gpu_pool_start", modelRef=target, targetDevices=target_devices)
-            pool = model.start_multi_process_pool(target_devices=target_devices)
-            log_event(
-                "emb_multi_gpu_pool_started",
-                modelRef=target,
-                targetDevices=target_devices,
-                workerCount=len(pool.get("processes", [])),
-            )
-
-        warmup_details = run_model_warmup(model, target, pool=pool)
-    except Exception:
-        if pool is not None:
-            try:
-                model.stop_multi_process_pool(pool)
-            except Exception:
-                pass
-        raise
-
-    if force_warmup and not warmup_details.get("warmupEnabled"):
-        # Autoload must always perform warmup.
-        with_warmup_env = os.environ.get("GA_EMB_WARMUP_ON_LOAD")
-        os.environ["GA_EMB_WARMUP_ON_LOAD"] = "1"
-        try:
-            warmup_details = run_model_warmup(model, target, pool=pool)
-        finally:
-            if with_warmup_env is None:
-                del os.environ["GA_EMB_WARMUP_ON_LOAD"]
-            else:
-                os.environ["GA_EMB_WARMUP_ON_LOAD"] = with_warmup_env
-
-    if force_warmup and not warmup_details.get("warmupSucceeded", False):
-        raise RuntimeError(str(warmup_details.get("warmupError") or "Embeddings warmup failed."))
-
-    load_latency_ms = int((time.perf_counter() - started) * 1000)
-    resolved_dimensions = int(warmup_details.get("dimensions") or model.get_sentence_embedding_dimension() or 0)
-
-    old_model: SentenceTransformer | None = None
-    old_pool: dict[str, Any] | None = None
-    with STATE.lock:
-        old_model = STATE.model
-        old_pool = STATE.multi_process_pool
-        STATE.model = model
-        STATE.multi_process_pool = pool
-        STATE.model_ref = target
-        STATE.device = device
-        STATE.target_devices = target_devices
-        STATE.dimension = resolved_dimensions
-        STATE.loaded_at_utc = utc_now_iso()
-        STATE.autoload_enabled = env_flag("GA_EMB_AUTO_LOAD_ON_STARTUP", default=False)
-        STATE.warmup_enabled = bool(warmup_details.get("warmupEnabled", False))
-        STATE.warmup_ran = bool(warmup_details.get("warmupRan", False))
-        STATE.warmup_succeeded = bool(warmup_details.get("warmupSucceeded", False))
-        STATE.warmup_latency_ms = int(warmup_details.get("warmupLatencyMs", 0) or 0)
-        STATE.warmup_error = warmup_details.get("warmupError")
-        STATE.warmup_completed_at_utc = warmup_details.get("warmupCompletedAtUtc")
-
-    if old_pool is not None and old_model is not None and old_pool is not pool:
-        try:
-            old_model.stop_multi_process_pool(old_pool)
-        except Exception:
-            pass
-
-    return {
-        "modelRef": target,
-        "device": device,
-        "targetDevices": target_devices,
-        "dimensions": resolved_dimensions,
-        "loadLatencyMs": load_latency_ms,
-        "loadedAtUtc": STATE.loaded_at_utc,
-        **warmup_details,
-    }
-
-
-def load_model_serialized(request: LoadModelRequest, force_warmup: bool = False) -> dict[str, Any]:
-    with MODEL_LOAD_LOCK:
-        with STATE.lock:
-            STATE.loading = True
-            STATE.load_error = None
-        try:
-            return load_model(request, force_warmup=force_warmup)
-        except Exception as exc:
-            with STATE.lock:
-                STATE.load_error = str(exc)
-            raise
-        finally:
-            with STATE.lock:
-                STATE.loading = False
-
-
 @APP.on_event("startup")
 async def on_startup() -> None:
-    resolved_device = resolve_device()
-    resolved_target_devices = resolve_target_devices(resolved_device)
+    fix_mistral = os.getenv("GA_EMB_FIX_MISTRAL_REGEX")
+    if fix_mistral is not None and fix_mistral.strip():
+        log_event(
+            "emb_deprecated_env",
+            name="GA_EMB_FIX_MISTRAL_REGEX",
+            message="Retired under llama-server embeddings; value ignored.",
+        )
+
+    device, ngl = resolve_n_gpu_layers()
     startup_details = {
         "host": os.getenv("GA_EMB_HOST", "127.0.0.1"),
-        "port": parse_positive_int(os.getenv("GA_EMB_PORT"), 8085),
-        "modelDir": os.getenv("GA_EMB_MODEL_DIR", "/models-local/emb"),
-        "device": resolved_device,
-        "targetDevices": resolved_target_devices,
+        "port": os.getenv("GA_EMB_PORT", "8085"),
+        "modelDir": get_model_dir(),
+        "defaultModelPath": os.getenv("GA_EMB_DEFAULT_MODEL_PATH"),
+        "device": device,
+        "nGpuLayers": ngl,
+        "catalogVersion": CATALOG.get("version"),
     }
     log_event("emb_service_startup", **startup_details)
-
-    if env_flag("GA_EMB_AUTO_LOAD_ON_STARTUP", default=False):
-        startup_request = LoadModelRequest()
-        try:
-            startup_target = resolve_model_target(startup_request)
-        except Exception as exc:
-            log_event(
-                "emb_model_autoload_failed",
-                modelTarget=None,
-                errorType=type(exc).__name__,
-                error=str(exc),
-            )
-            return
-        log_event("emb_model_autoload_start", modelTarget=startup_target, **startup_details)
-
-        def _autoload_worker() -> None:
-            try:
-                details = load_model_serialized(startup_request, force_warmup=True)
-                log_event("emb_model_autoload_success", **details)
-            except Exception as exc:
-                log_event(
-                    "emb_model_autoload_failed",
-                    modelTarget=startup_target,
-                    errorType=type(exc).__name__,
-                    error=str(exc),
-                )
-
-        threading.Thread(target=_autoload_worker, name="emb-autoload", daemon=True).start()
 
 
 @APP.on_event("shutdown")
 async def on_shutdown() -> None:
-    with STATE.lock:
-        model = STATE.model
-        pool = STATE.multi_process_pool
-        STATE.model = None
-        STATE.multi_process_pool = None
-    if model is not None and pool is not None:
-        try:
-            model.stop_multi_process_pool(pool)
-        except Exception:
-            pass
+    with ENGINE_LOCK:
+        stop_engine()
 
 
 @APP.get("/health")
 async def health() -> dict[str, Any]:
-    return {
-        "status": "ok",
-        **STATE.snapshot(),
-    }
+    return {"status": "ok", **STATE.snapshot()}
 
 
 @APP.get("/ready")
@@ -658,7 +750,7 @@ async def ready() -> JSONResponse:
     snapshot = STATE.snapshot()
     if not snapshot["loaded"]:
         return JSONResponse(status_code=503, content={"ready": False, **snapshot})
-    if snapshot["autoloadEnabled"] and not snapshot.get("warmupSucceeded"):
+    if snapshot.get("warmupEnabled") and not snapshot.get("warmupSucceeded"):
         return JSONResponse(
             status_code=503,
             content={
@@ -670,25 +762,41 @@ async def ready() -> JSONResponse:
     return JSONResponse(status_code=200, content={"ready": True, **snapshot})
 
 
+@APP.get("/admin/catalog")
+async def admin_catalog() -> JSONResponse:
+    entries = [
+        {
+            "id": entry["id"],
+            "displayName": entry.get("displayName"),
+            "license": entry.get("license"),
+            "multilingual": entry.get("multilingual"),
+            "producedDimension": entry.get("producedDimension"),
+            "default": entry.get("default", False),
+        }
+        for entry in CATALOG["entries"].values()
+    ]
+    return JSONResponse(status_code=200, content={"version": CATALOG["version"], "entries": entries})
+
+
 @APP.post("/admin/load")
 async def admin_load(request: Request, payload: LoadModelRequest) -> JSONResponse:
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     log_event("emb_model_load_start", requestId=request_id, payload=payload.model_dump())
     try:
-        details = load_model_serialized(
-            payload,
-            force_warmup=env_flag("GA_EMB_WARMUP_ON_LOAD", default=True))
+        details = load_model_serialized(payload, force_warmup=env_flag("GA_EMB_WARMUP_ON_LOAD", default=True))
         log_event("emb_model_load_success", requestId=request_id, **details)
-        return JSONResponse(status_code=200, content={"requestId": request_id, "status": "loaded", **details})
+        return JSONResponse(
+            status_code=200,
+            content={"requestId": request_id, "status": "loaded", **details},
+        )
     except (ValueError, FileNotFoundError) as exc:
-        log_event("emb_model_load_failed", requestId=request_id, errorType=type(exc).__name__, error=str(exc))
         return JSONResponse(
             status_code=400,
             content={
                 "requestId": request_id,
                 "status": "failed",
                 "error": "invalid_model_request",
-                "message": "Model load request is invalid. Check request parameters.",
+                "message": str(exc),
             },
         )
     except Exception as exc:
@@ -706,13 +814,8 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
 
 @APP.post("/admin/unload")
 async def admin_unload(request: Request) -> JSONResponse:
-    """
-    Drop the loaded embedding model so the container releases GPU/RAM without
-    a restart. Serialized with /admin/load via MODEL_LOAD_LOCK; if a load is
-    already in flight, this returns 409 rather than blocking a worker.
-    """
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
-    if not MODEL_LOAD_LOCK.acquire(blocking=False):
+    if not ENGINE_LOCK.acquire(blocking=False):
         return JSONResponse(
             status_code=409,
             content={
@@ -723,26 +826,13 @@ async def admin_unload(request: Request) -> JSONResponse:
             },
         )
     try:
-        with STATE.lock:
-            already_unloaded = STATE.model is None
-        if already_unloaded:
-            log_event("emb_model_unload_noop", requestId=request_id)
+        snapshot = STATE.snapshot()
+        if not snapshot["loaded"]:
             return JSONResponse(
                 status_code=200,
-                content={
-                    "requestId": request_id,
-                    "ok": True,
-                    "action": "noop-already-unloaded",
-                    **STATE.snapshot(),
-                },
+                content={"requestId": request_id, "ok": True, "action": "noop-already-unloaded", **snapshot},
             )
-        log_event("emb_model_unload_start", requestId=request_id)
         result = unload_model()
-        log_event(
-            "emb_model_unload_success",
-            requestId=request_id,
-            previousModelRef=result.get("previousModelRef"),
-        )
         return JSONResponse(
             status_code=200,
             content={
@@ -754,17 +844,14 @@ async def admin_unload(request: Request) -> JSONResponse:
             },
         )
     finally:
-        MODEL_LOAD_LOCK.release()
+        ENGINE_LOCK.release()
 
 
 @APP.get("/admin/models")
 async def admin_list_models() -> JSONResponse:
     return JSONResponse(
         status_code=200,
-        content={
-            "modelDir": get_model_dir(),
-            "items": list_model_entries(),
-        },
+        content={"modelDir": get_model_dir(), "items": list_model_entries()},
     )
 
 
@@ -772,6 +859,10 @@ async def admin_list_models() -> JSONResponse:
 async def admin_download_model(payload: DownloadModelRequest) -> JSONResponse:
     if not payload.model_id.strip():
         raise HTTPException(status_code=400, detail="model_id is required")
+    try:
+        resolve_catalog_entry(payload.model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     operation = start_download_operation(payload)
     return JSONResponse(status_code=202, content=operation)
 
@@ -807,18 +898,15 @@ async def admin_cancel_download(operation_id: str) -> JSONResponse:
 async def admin_delete_model(model_ref: str) -> JSONResponse:
     if not model_ref:
         raise HTTPException(status_code=400, detail="model_ref is required")
-
     active_ref = STATE.snapshot().get("modelRef")
     if active_ref and (active_ref == model_ref or str(active_ref).endswith(model_ref)):
         raise HTTPException(status_code=409, detail="cannot delete active model")
-
     model_dir = os.path.abspath(get_model_dir())
     target = os.path.abspath(os.path.join(model_dir, model_ref))
-    if not target.startswith(model_dir):
+    if not target.startswith(model_dir + os.sep) and target != model_dir:
         raise HTTPException(status_code=400, detail="invalid model_ref")
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="model not found")
-
     if os.path.isdir(target):
         shutil.rmtree(target, ignore_errors=False)
     else:
@@ -837,7 +925,7 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
             content={
                 "requestId": request_id,
                 "error": "invalid_purpose",
-                "message": "Invalid purpose. Use one of: query, document, or default.",
+                "message": "Invalid purpose. Use one of: query, document.",
             },
         )
 
@@ -851,18 +939,18 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
                 "message": "Load a model with /admin/load before requesting embeddings.",
             },
         )
-    if snapshot["autoloadEnabled"] and not snapshot.get("warmupSucceeded"):
+    if snapshot.get("warmupEnabled") and not snapshot.get("warmupSucceeded"):
         return JSONResponse(
             status_code=503,
             content={
                 "requestId": request_id,
                 "error": "model_not_ready",
-                "message": "Embeddings warmup is incomplete. Retry after /ready is healthy.",
+                "message": "Embeddings warmup is incomplete.",
                 "warmupError": snapshot.get("warmupError"),
             },
         )
 
-    if len(payload.inputs) == 0:
+    if not payload.inputs:
         return JSONResponse(
             status_code=200,
             content={
@@ -874,61 +962,25 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
         )
 
     started = time.perf_counter()
-    with STATE.lock:
-        model = STATE.model
-        pool = STATE.multi_process_pool
-        model_ref = STATE.model_ref
-
-    if model is None:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "requestId": request_id,
-                "error": "model_not_loaded",
-                "message": "Load a model with /admin/load before requesting embeddings.",
-            },
-        )
-
     try:
-        vectors = embed_vectors(model, payload.inputs, purpose, pool=pool)
-        if len(vectors) != len(payload.inputs):
-            raise RuntimeError(f"Model returned {len(vectors)} vectors for {len(payload.inputs)} inputs.")
-
+        vectors = embed_via_engine(payload.inputs, purpose)
         dimensions = len(vectors[0]) if vectors else int(snapshot.get("dimensions") or 0)
-        for idx, vector in enumerate(vectors):
-            if len(vector) != dimensions:
-                raise RuntimeError(f"Embedding vector at index {idx} has inconsistent dimension {len(vector)}.")
-
+        data = [{"index": idx, "embedding": vector} for idx, vector in enumerate(vectors)]
         latency_ms = int((time.perf_counter() - started) * 1000)
-        log_event(
-            "emb_embed_success",
-            requestId=request_id,
-            purpose=purpose,
-            inputCount=len(payload.inputs),
-            dimensions=dimensions,
-            modelRef=model_ref,
-            latencyMs=latency_ms,
-        )
-
         return JSONResponse(
             status_code=200,
             content={
                 "requestId": request_id,
-                "data": [{"index": idx, "embedding": vector} for idx, vector in enumerate(vectors)],
+                "data": data,
                 "dimensions": dimensions,
-                "modelRef": model_ref,
+                "modelRef": snapshot.get("modelRef"),
                 "latencyMs": latency_ms,
             },
         )
     except Exception as exc:
-        latency_ms = int((time.perf_counter() - started) * 1000)
         log_event(
-            "emb_embed_failed",
+            "emb_inference_failed",
             requestId=request_id,
-            purpose=purpose,
-            inputCount=len(payload.inputs),
-            modelRef=model_ref,
-            latencyMs=latency_ms,
             errorType=type(exc).__name__,
             error=str(exc),
         )
@@ -937,18 +989,19 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
             content={
                 "requestId": request_id,
                 "error": "embedding_failed",
-                "message": "Embedding generation failed. Check service logs for details.",
+                "message": "Embedding inference failed. Check service logs for details.",
             },
         )
 
 
-if __name__ == "__main__":
+def main() -> None:
     host = os.getenv("GA_EMB_HOST", "127.0.0.1")
     port = parse_positive_int(os.getenv("GA_EMB_PORT"), 8085)
-    log_level = os.getenv("GA_EMB_LOG_LEVEL", "info").lower()
-    access_log_enabled = env_flag("GA_EMB_UVICORN_ACCESS_LOG", default=False)
-    if access_log_enabled:
-        configure_uvicorn_access_log_filters(
-            ignore_health_requests=env_flag("GA_EMB_SUPPRESS_HEALTH_ACCESS_LOGS", default=True)
-        )
-    uvicorn.run(APP, host=host, port=port, log_level=log_level, access_log=access_log_enabled)
+    log_level = (os.getenv("GA_EMB_LOG_LEVEL") or "info").lower()
+    access_log = env_flag("GA_EMB_UVICORN_ACCESS_LOG", default=False)
+    configure_uvicorn_access_log_filters(env_flag("GA_EMB_SUPPRESS_HEALTH_ACCESS_LOGS", default=True))
+    uvicorn.run(APP, host=host, port=port, log_level=log_level, access_log=access_log)
+
+
+if __name__ == "__main__":
+    main()

@@ -255,8 +255,8 @@ describe('addAiServicesWizard utils', () => {
   it('filters to hf chat models', () => {
     const models = toExistingHuggingFaceModels([
       {
-        modelId: 'deepseek-ai/DeepSeek-V4-Pro',
-        displayName: 'deepseek-ai/DeepSeek-V4-Pro',
+        modelId: 'zai-org/GLM-5.2',
+        displayName: 'zai-org/GLM-5.2',
         provider: HUGGINGFACE_CHAT_MODEL_PROVIDER_ID,
         isActive: true,
         created: '2026-04-29T00:00:00Z',
@@ -271,11 +271,11 @@ describe('addAiServicesWizard utils', () => {
     ]);
 
     expect(models).toHaveLength(1);
-    expect(models[0]?.modelId).toBe('deepseek-ai/DeepSeek-V4-Pro');
+    expect(models[0]?.modelId).toBe('zai-org/GLM-5.2');
   });
 
   it('builds hf add-model request with runtime profile id', () => {
-    const request = buildAddHuggingFaceModelRequest('deepseek-ai/DeepSeek-V4-Pro');
+    const request = buildAddHuggingFaceModelRequest('zai-org/GLM-5.2');
     expect(request.provider).toBe(HUGGINGFACE_CHAT_MODEL_PROVIDER_ID);
     expect(request.providerConfig).toEqual({
       runtimeProfileId: HUGGINGFACE_DEFAULT_RUNTIME_PROFILE_ID,

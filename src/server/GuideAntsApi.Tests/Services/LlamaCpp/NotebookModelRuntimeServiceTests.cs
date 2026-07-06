@@ -228,6 +228,50 @@ public class NotebookModelRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task GetRuntimeStatusAsync_RequiredRouterModelFailed_ReturnsFailedEvenDuringWarmup()
+    {
+        var notebookId = Guid.NewGuid();
+        var guide = new Assistant { Id = Guid.NewGuid(), Kind = AssistantKind.Guide, ModelId = "qwen-local" };
+        var notebook = new Notebook { Id = notebookId, GuideId = guide.Id, Guide = guide };
+
+        _context.Assistants.Add(guide);
+        _context.Notebooks.Add(notebook);
+
+        var model = new Model
+        {
+            ModelId = "qwen-local",
+            Provider = "llama-cpp",
+            IsActive = true,
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+        };
+        _context.Models.Add(model);
+        await _context.SaveChangesAsync();
+
+        _mockLocalAiWarmupService.Setup(s => s.IsWarmupInProgress).Returns(true);
+        _mockLlamaClient.Setup(c => c.ListModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlamaModelsResponse
+            {
+                Data = new List<LlamaModelData>
+                {
+                    new()
+                    {
+                        Id = "qwen-model",
+                        Status = new LlamaModelStatus { Value = "unloaded" },
+                        Failed = true,
+                        ExitCode = 1
+                    }
+                }
+            });
+
+        var status = await _service.GetRuntimeStatusAsync(notebookId);
+
+        Assert.AreEqual("failed", status.State);
+        Assert.IsTrue(status.Conflicts.Any(c => c.Contains("exit code 1", StringComparison.OrdinalIgnoreCase)));
+        Assert.AreEqual("failed", status.ActiveOperation?.State);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(status.ActiveOperation?.ErrorDetails));
+    }
+
+    [TestMethod]
     public async Task GetRuntimeStatusAsync_StartupWarmupInProgress_ReturnsLoadingWithExternalOperation()
     {
         var notebookId = Guid.NewGuid();

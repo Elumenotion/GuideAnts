@@ -63,13 +63,10 @@ export const LocalAiServiceStepBase = forwardRef<LocalAiServiceStepHandle, Local
       ref,
       () => ({
         persist: async () => {
-          if (requireRuntimeReadiness) {
-            const runtime = runtimeReadiness;
-            if (!runtime || !runtime.ready) {
-              const runtimeReason = runtime?.detail?.trim() || runtime?.status || 'runtime readiness probe unavailable.';
-              throw new Error(`${title} is not ready: ${runtimeReason}`);
-            }
-          }
+          // All AI services are optional. Runtime readiness (model loaded + warmed)
+          // must NOT block wizard navigation — it is surfaced as an informational
+          // "Readiness" banner instead. Only real, user-entered field validation may
+          // block, via save() below.
           if (!localProvider) {
             throw new Error(`Local provider '${localProviderId}' is not available for ${title}.`);
           }
@@ -82,7 +79,7 @@ export const LocalAiServiceStepBase = forwardRef<LocalAiServiceStepHandle, Local
           }
         },
       }),
-      [draft, localProvider, localProviderId, requireRuntimeReadiness, runtimeReadiness, save, title]
+      [draft, localProvider, localProviderId, save, title]
     );
 
     if (loading) {

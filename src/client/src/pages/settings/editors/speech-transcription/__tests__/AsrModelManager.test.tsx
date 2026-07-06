@@ -7,9 +7,9 @@ vi.mock('../../../../../services/api', () => ({
     settings: {
       localModels: {
         listOutcome: vi.fn(),
+        catalogOutcome: vi.fn(),
         runtimeReadinessOutcome: vi.fn(),
         load: vi.fn(),
-        unload: vi.fn(),
         startDownload: vi.fn(),
         getOperation: vi.fn(),
         cancelOperation: vi.fn(),
@@ -47,6 +47,17 @@ import { startLocalOperationPoll } from '../../common/localOperationPolling';
 
 const mockStartPoll = vi.mocked(startLocalOperationPoll);
 
+function mockAvailableCatalog(
+  entries: Array<{ id: string; displayName?: string; default?: boolean }> = [
+    { id: 'qwen3_asr_0_6b', displayName: 'Qwen3-ASR-0.6B', default: true },
+  ]
+) {
+  (api.settings.localModels.catalogOutcome as any).mockResolvedValue({
+    kind: 'available',
+    payload: { version: 1, entries },
+  });
+}
+
 function mockAvailableList(items: unknown[] = [], modelDir = '/models-local/asr') {
   (api.settings.localModels.listOutcome as any).mockResolvedValue({
     kind: 'available',
@@ -61,9 +72,19 @@ function mockAvailableReadiness(payload: Record<string, unknown> = { ready: fals
   });
 }
 
+const DEFAULT_CATALOG_MODEL_ID = 'qwen3_asr_0_6b';
+
+async function openCatalogDownloadDialog() {
+  fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled();
+  });
+}
+
 describe('AsrModelManager', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockAvailableCatalog();
   });
 
   afterEach(() => {
@@ -120,7 +141,7 @@ describe('AsrModelManager', () => {
     });
   });
 
-  it('opens add-model dialog and starts HF download only after browse resolves', async () => {
+  it('opens add-model dialog and starts catalog download immediately', async () => {
     (api.settings.localModels.listOutcome as any)
       .mockResolvedValueOnce({
         kind: 'available',
@@ -139,16 +160,9 @@ describe('AsrModelManager', () => {
         kind: 'available',
         payload: { ready: false, loaded: false, modelRef: null },
       });
-    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/asr',
-      gated: false,
-      tokenUsed: false,
-      modelCardUrl: null,
-      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
-    });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-1',
-      modelId: 'acme/asr',
+      modelId: DEFAULT_CATALOG_MODEL_ID,
       status: 'queued',
       error: null,
     });
@@ -158,22 +172,13 @@ describe('AsrModelManager', () => {
     await waitFor(() => {
       expect(screen.getByText(/No ASR models installed/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-
-    const downloadButton = screen.getByRole('button', { name: /Download snapshot/i });
-    expect(downloadButton).toBeDisabled();
-
-    fireEvent.change(screen.getByPlaceholderText(/openai\/whisper-large-v3/i), { target: { value: 'acme/asr' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
+    await openCatalogDownloadDialog();
+    fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
-      expect(downloadButton).not.toBeDisabled();
-    });
-
-    fireEvent.click(downloadButton);
-
-    await waitFor(() => {
-      expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('SpeechTranscription', { model_id: 'acme/asr' });
+      expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('SpeechTranscription', {
+        model_id: DEFAULT_CATALOG_MODEL_ID,
+      });
     });
   });
 
@@ -189,16 +194,9 @@ describe('AsrModelManager', () => {
       kind: 'available',
       payload: { ready: false, loaded: false, modelRef: null },
     });
-    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/asr',
-      gated: false,
-      tokenUsed: false,
-      modelCardUrl: null,
-      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
-    });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-1',
-      modelId: 'acme/asr',
+      modelId: DEFAULT_CATALOG_MODEL_ID,
       modelRef: 'acme--asr',
       status: 'queued',
       error: null,
@@ -210,13 +208,7 @@ describe('AsrModelManager', () => {
     await waitFor(() => {
       expect(screen.getByText(/Add model/i)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/openai\/whisper-large-v3/i), { target: { value: 'acme/asr' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled();
-    });
+    await openCatalogDownloadDialog();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
@@ -238,45 +230,6 @@ describe('AsrModelManager', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/probe blew up/i)).toBeInTheDocument();
-    });
-  });
-
-  it('unloads the active model from the engine', async () => {
-    (api.settings.localModels.listOutcome as any)
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/asr',
-          items: [{ modelRef: 'acme--asr', isDirectory: true, sizeBytes: 0, active: true }],
-        },
-      })
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/asr',
-          items: [{ modelRef: 'acme--asr', isDirectory: true, sizeBytes: 0, active: false }],
-        },
-      });
-    (api.settings.localModels.runtimeReadinessOutcome as any)
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: { ready: true, loaded: true, modelRef: '/models-local/asr/acme--asr' },
-      })
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: { ready: false, loaded: false, modelRef: null },
-      });
-    (api.settings.localModels.unload as any).mockResolvedValueOnce({ status: 'unloaded' });
-
-    render(<AsrModelManager enabled />);
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Unload/i })).toBeEnabled();
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Unload/i }));
-
-    await waitFor(() => {
-      expect(api.settings.localModels.unload).toHaveBeenCalledWith('SpeechTranscription');
     });
   });
 
@@ -441,10 +394,7 @@ describe('AsrModelManager', () => {
 
     render(<AsrModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/openai\/whisper-large-v3/i), { target: { value: 'acme/asr' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
+    await openCatalogDownloadDialog();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }));
@@ -470,41 +420,30 @@ describe('AsrModelManager', () => {
       files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
     });
     (api.settings.localModels.cancelOperation as any).mockRejectedValueOnce(new Error('cancel denied'));
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/openai\/whisper-large-v3/i), { target: { value: 'acme/asr' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
+    await openCatalogDownloadDialog();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }));
     await waitFor(() => expect(screen.getByText(/cancel denied/i)).toBeInTheDocument());
   });
 
-  it('surfaces browse errors and download start failures in the add-model dialog', async () => {
+  it('surfaces catalog errors and download start failures in the add-model dialog', async () => {
     mockAvailableList();
     mockAvailableReadiness();
-    const browseErr = Object.assign(new Error('Repo gated.'), { code: 'GATED', status: 403 });
-    (api.settings.browseHuggingFaceRepository as any).mockRejectedValueOnce(browseErr);
+    (api.settings.localModels.catalogOutcome as any).mockResolvedValueOnce({
+      kind: 'error',
+      message: 'catalog offline',
+    });
     (api.settings.localModels.startDownload as any).mockRejectedValueOnce(new Error('download refused'));
 
     render(<AsrModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/openai\/whisper-large-v3/i), { target: { value: 'acme/asr' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => {
-      expect(screen.getByText(/Browse reported: Repo gated/i)).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByText(/catalog offline/i)).toBeInTheDocument());
 
-    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/asr',
-      gated: false,
-      tokenUsed: false,
-      modelCardUrl: null,
-      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
-    });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
+    fireEvent.click(screen.getAllByRole('button', { name: /^Cancel$/i })[0]!);
+    mockAvailableCatalog();
+    await openCatalogDownloadDialog();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
     await waitFor(() => expect(screen.getByText(/download refused/i)).toBeInTheDocument());
   });
@@ -512,21 +451,14 @@ describe('AsrModelManager', () => {
   it('includes revision when starting download and closes dialog on cancel', async () => {
     mockAvailableList();
     mockAvailableReadiness();
-    (api.settings.browseHuggingFaceRepository as any).mockResolvedValueOnce({
-      repository: 'acme/asr',
-      gated: false,
-      tokenUsed: false,
-      modelCardUrl: null,
-      files: [{ path: 'model.safetensors', size: 100, category: 'other', quantLabel: null, sharded: false }],
-    });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-rev',
-      modelId: 'acme/asr',
+      modelId: DEFAULT_CATALOG_MODEL_ID,
       status: 'queued',
       error: null,
     });
     mockStartPoll.mockImplementationOnce(({ onUpdate, onTerminal }) => {
-      const terminal = { operationId: 'op-rev', modelId: 'acme/asr', status: 'completed', error: null };
+      const terminal = { operationId: 'op-rev', modelId: DEFAULT_CATALOG_MODEL_ID, status: 'completed', error: null };
       onUpdate(terminal);
       onTerminal?.(terminal);
       return 1;
@@ -534,24 +466,21 @@ describe('AsrModelManager', () => {
 
     render(<AsrModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/openai\/whisper-large-v3/i), { target: { value: 'acme/asr' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
-    fireEvent.change(screen.getByPlaceholderText('main'), { target: { value: 'v2' } });
+    await openCatalogDownloadDialog();
+    fireEvent.change(screen.getByLabelText(/Revision \(optional\)/i), { target: { value: 'v2' } });
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
       expect(api.settings.localModels.startDownload).toHaveBeenCalledWith('SpeechTranscription', {
-        model_id: 'acme/asr',
+        model_id: DEFAULT_CATALOG_MODEL_ID,
         revision: 'v2',
       });
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
+    await openCatalogDownloadDialog();
     fireEvent.click(screen.getAllByRole('button', { name: /^Cancel$/i })[0]!);
     await waitFor(() => {
-      expect(screen.queryByText(/Add ASR model from Hugging Face/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Download curated ASR model/i)).not.toBeInTheDocument();
     });
   });
 
@@ -604,10 +533,7 @@ describe('AsrModelManager', () => {
 
     render(<AsrModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/openai\/whisper-large-v3/i), { target: { value: 'acme/asr' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
+    await openCatalogDownloadDialog();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => expect(screen.getAllByText(/no longer reachable/i).length).toBeGreaterThan(0));
@@ -646,10 +572,7 @@ describe('AsrModelManager', () => {
 
     render(<AsrModelManager enabled />);
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/openai\/whisper-large-v3/i), { target: { value: 'acme/asr' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
+    await openCatalogDownloadDialog();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
     await waitFor(() => {
       expect(api.settings.localModels.load).toHaveBeenCalledWith('SpeechTranscription', { model_path: 'acme--asr' });
@@ -694,10 +617,7 @@ describe('AsrModelManager', () => {
     });
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Add model/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Add model/i }));
-    fireEvent.change(screen.getByPlaceholderText(/openai\/whisper-large-v3/i), { target: { value: 'acme/asr' } });
-    fireEvent.click(screen.getByRole('button', { name: /Browse repository/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /Download snapshot/i })).not.toBeDisabled());
+    await openCatalogDownloadDialog();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
@@ -707,14 +627,4 @@ describe('AsrModelManager', () => {
     });
   });
 
-  it('surfaces generic unload failures', async () => {
-    mockAvailableList([{ modelRef: 'acme--asr', isDirectory: true, sizeBytes: 0, active: true }]);
-    mockAvailableReadiness({ ready: true, loaded: true, modelRef: '/models-local/asr/acme--asr' });
-    (api.settings.localModels.unload as any).mockRejectedValueOnce(new Error('unload exploded'));
-
-    render(<AsrModelManager enabled />);
-    await waitFor(() => expect(screen.getByRole('button', { name: /Unload/i })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: /Unload/i }));
-    await waitFor(() => expect(screen.getByText(/unload exploded/i)).toBeInTheDocument());
-  });
 });

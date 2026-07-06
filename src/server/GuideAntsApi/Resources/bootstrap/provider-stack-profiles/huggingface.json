@@ -16,8 +16,8 @@
   },
   "modelDefinitions": [
     {
-      "modelId": "deepseek-ai/DeepSeek-V4-Pro",
-      "displayName": "deepseek-ai/DeepSeek-V4-Pro",
+      "modelId": "zai-org/GLM-5.2",
+      "displayName": "zai-org/GLM-5.2",
       "provider": "hf-inference-chat",
       "isActive": true
     }

@@ -669,7 +669,8 @@ describe('LocalAiServiceStepBase', () => {
     expect(mockSwitchProvider).toHaveBeenCalledWith(LOCAL_AI_SERVICE_PROVIDER_IDS.Embeddings);
   });
 
-  it('persist handle rejects unavailable runtime', async () => {
+  it('persist handle does not block navigation when runtime is not ready (optional service)', async () => {
+    mockSave.mockResolvedValueOnce(true);
     const ref = createRef<LocalAiServiceStepHandle>();
     render(
       <LocalAiServiceStepBase
@@ -683,7 +684,10 @@ describe('LocalAiServiceStepBase', () => {
       />,
     );
 
-    await expect(ref.current?.persist()).rejects.toThrow(/not ready: offline/);
+    // Runtime readiness (model loaded + warmed) is optional and must not block the
+    // wizard; persist proceeds to save the (valid) provider config instead of throwing.
+    await expect(ref.current?.persist()).resolves.toBeUndefined();
+    expect(mockSave).toHaveBeenCalled();
   });
 
   it('persist handle rejects missing provider and failed save', async () => {

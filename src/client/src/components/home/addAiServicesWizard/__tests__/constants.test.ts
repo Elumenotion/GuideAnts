@@ -39,7 +39,7 @@ describe('Add AI Services wizard Hugging Face constants', () => {
   });
 
   it('defaults hf chat model to provider-stack profile seed', () => {
-    expect(HUGGINGFACE_DEFAULT_CHAT_MODEL_ID).toBe('deepseek-ai/DeepSeek-V4-Pro');
+    expect(HUGGINGFACE_DEFAULT_CHAT_MODEL_ID).toBe('zai-org/GLM-5.2');
   });
 
   it('defines hf default runtime profile id', () => {

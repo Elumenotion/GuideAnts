@@ -14,8 +14,13 @@ import { AuthorSkillEditor } from './AuthorSkillEditor';
 import { CreateFromSkillDialog } from './CreateFromSkillDialog';
 import { SkillFilePreviewModal } from './SkillFilePreviewModal';
 import { mapSkillPrerequisites } from './skillToolsetMapping';
-import { toSkillSaveDto } from './skillImportHelpers';
 import { parseSkillFrontmatter } from './skillFrontmatter';
+import {
+  buildAssistantInstructionsFromSkillMarkdown,
+  buildCreateFromSkillUploads,
+  resolveSkillMarkdown,
+  type CreateFromSkillSelection,
+} from './createFromSkillHelpers';
 import {
   moveSkill,
   nextSkillDisplayOrder,
@@ -76,6 +81,8 @@ export function SkillsTab({
   const [showImport, setShowImport] = useState(false);
   const [showAuthor, setShowAuthor] = useState(false);
   const [showCreateFromSkill, setShowCreateFromSkill] = useState(false);
+  const [isCreatingFromSkill, setIsCreatingFromSkill] = useState(false);
+  const [createFromSkillError, setCreateFromSkillError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
 
   const availableToolTypes = useMemo(
@@ -83,11 +90,12 @@ export function SkillsTab({
     [selectedToolTypes, toolAssignments],
   );
 
-  const createFromSkillMapping = useMemo(() => {
-    const toolsets = skills.flatMap((skill) => skill.requiresToolsets);
-    const tools = skills.flatMap((skill) => skill.requiresTools);
+  const createFromSkillMappingForSelection = (selection: CreateFromSkillSelection) => {
+    const selectedSkills = skills.filter((skill) => selection.selectedSkillNames.includes(skill.name));
+    const toolsets = selectedSkills.flatMap((skill) => skill.requiresToolsets);
+    const tools = selectedSkills.flatMap((skill) => skill.requiresTools);
     return mapSkillPrerequisites(toolsets, tools);
-  }, [skills]);
+  };
 
   const updateSkills = (nextSkills: AssistantSkillDto[]) => {
     const reindexed = reindexSkillDisplayOrders(nextSkills);
@@ -156,42 +164,58 @@ export function SkillsTab({
     setPreview({ skillName, file });
   };
 
-  const handleCreateFromSkill = () => {
-    const primary = skills[0];
+  const handleCreateFromSkill = async (selection: CreateFromSkillSelection) => {
+    const primary = skills.find((skill) => skill.name === selection.primarySkillName);
     if (!primary) {
       return;
     }
 
-    const placeholderFiles: FileUploadDto[] = [];
-    if (createFromSkillMapping.needsCodeInterpreter) {
-      placeholderFiles.push({
-        folderKind: 'CodeInterpreter',
-        relativePath: `skills-${primary.name}-sandbox-placeholder.txt`,
-        contentBytes: btoa(
-          `# Sandbox placeholder for skill '${primary.name}'\n`,
-        ),
-        contentType: 'text/plain',
-      });
-    }
+    setIsCreatingFromSkill(true);
+    setCreateFromSkillError(null);
 
-    const skillUploads = [
-      ...pendingSkillUploads,
-      ...skills.map((skill) => toSkillSaveDto(skill)),
-    ];
+    try {
+      const mapping = createFromSkillMappingForSelection(selection);
+      const skillUploads = await buildCreateFromSkillUploads(
+        skills,
+        pendingSkillUploads,
+        assistantId,
+        selection,
+      );
+      const primaryMarkdown = await resolveSkillMarkdown(primary, pendingSkillUploads, assistantId);
+      const instructions = buildAssistantInstructionsFromSkillMarkdown(primaryMarkdown);
 
-    navigate(`/projects/${projectId}/guides/assistant/new`, {
-      state: {
-        fromSkills: {
-          name: primary.name,
-          description: primary.description,
-          instructions: `Use the ${primary.name} skill when relevant.`,
-          toolIds: createFromSkillMapping.toolIds,
-          skills: skillUploads,
-          files: placeholderFiles,
+      const placeholderFiles: FileUploadDto[] = [];
+      if (mapping.needsCodeInterpreter) {
+        placeholderFiles.push({
+          folderKind: 'CodeInterpreter',
+          relativePath: `skills-${primary.name}-sandbox-placeholder.txt`,
+          contentBytes: btoa(
+            `# Sandbox placeholder for skill '${primary.name}'\n`,
+          ),
+          contentType: 'text/plain',
+        });
+      }
+
+      navigate(`/projects/${projectId}/guides/assistant/new`, {
+        state: {
+          fromSkills: {
+            name: primary.name,
+            description: primary.description,
+            instructions,
+            toolIds: mapping.toolIds,
+            skills: skillUploads,
+            files: placeholderFiles,
+          },
         },
-      },
-    });
-    setShowCreateFromSkill(false);
+      });
+      setShowCreateFromSkill(false);
+    } catch (error) {
+      setCreateFromSkillError(
+        error instanceof Error ? error.message : 'Failed to prepare assistant from skill.',
+      );
+    } finally {
+      setIsCreatingFromSkill(false);
+    }
   };
 
   return (
@@ -227,7 +251,10 @@ export function SkillsTab({
           {skills.length > 0 && (
             <button
               type="button"
-              onClick={() => setShowCreateFromSkill(true)}
+              onClick={() => {
+                setCreateFromSkillError(null);
+                setShowCreateFromSkill(true);
+              }}
               className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
               <FaRobot className="h-3 w-3" />
@@ -236,6 +263,12 @@ export function SkillsTab({
           )}
         </div>
       </div>
+
+      {createFromSkillError && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+          {createFromSkillError}
+        </div>
+      )}
 
       {skills.length === 0 ? (
         <div className="rounded-lg border border-dashed border-blue-200 bg-white p-8 text-center">
@@ -290,10 +323,21 @@ export function SkillsTab({
       />
       <CreateFromSkillDialog
         isOpen={showCreateFromSkill}
-        mapping={createFromSkillMapping}
-        skillNames={skills.map((skill) => skill.name)}
-        onConfirm={handleCreateFromSkill}
-        onCancel={() => setShowCreateFromSkill(false)}
+        skills={skills.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          requiresToolsets: skill.requiresToolsets,
+          requiresTools: skill.requiresTools,
+        }))}
+        isConfirming={isCreatingFromSkill}
+        onConfirm={(selection) => {
+          void handleCreateFromSkill(selection);
+        }}
+        onCancel={() => {
+          if (!isCreatingFromSkill) {
+            setShowCreateFromSkill(false);
+          }
+        }}
       />
     </div>
   );

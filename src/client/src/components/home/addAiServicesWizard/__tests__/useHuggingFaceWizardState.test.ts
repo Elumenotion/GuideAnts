@@ -63,7 +63,7 @@ describe('useHuggingFaceWizardState', () => {
     });
     vi.mocked(api.settings.chatDefaults.update).mockResolvedValue({
       rowVersion: '2',
-      defaultModelId: 'deepseek-ai/DeepSeek-V4-Pro',
+      defaultModelId: 'zai-org/GLM-5.2',
       overrideAllChatModels: false,
       temperature: null,
       topP: null,
@@ -79,11 +79,11 @@ describe('useHuggingFaceWizardState', () => {
     const { result } = renderHook(() => useHuggingFaceWizardState());
 
     act(() => {
-      result.current.setDraftModelId('deepseek-ai/DeepSeek-V4-Pro');
+      result.current.setDraftModelId('zai-org/GLM-5.2');
       result.current.addDraftModel(snapshot, 0, 0);
     });
     act(() => {
-      result.current.setDraftModelId('deepseek-ai/DeepSeek-V4-Pro');
+      result.current.setDraftModelId('zai-org/GLM-5.2');
       result.current.addDraftModel(snapshot, 0, 0);
     });
 
@@ -135,8 +135,8 @@ describe('useHuggingFaceWizardState', () => {
     const refreshed = createWizardSnapshot({
       models: [
         {
-          modelId: 'deepseek-ai/DeepSeek-V4-Pro',
-          displayName: 'deepseek-ai/DeepSeek-V4-Pro',
+          modelId: 'zai-org/GLM-5.2',
+          displayName: 'zai-org/GLM-5.2',
           provider: 'hf-inference-chat',
           isActive: true,
           created: '2026-04-29T00:00:00Z',
@@ -146,7 +146,7 @@ describe('useHuggingFaceWizardState', () => {
     const { result } = renderHook(() => useHuggingFaceWizardState());
 
     act(() => {
-      result.current.setDraftModelId('deepseek-ai/DeepSeek-V4-Pro');
+      result.current.setDraftModelId('zai-org/GLM-5.2');
       result.current.addDraftModel(snapshot, 0, 0);
     });
 
@@ -157,7 +157,7 @@ describe('useHuggingFaceWizardState', () => {
     expect(api.settings.addModel).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'hf-inference-chat',
-        catalog: expect.objectContaining({ modelId: 'deepseek-ai/DeepSeek-V4-Pro' }),
+        catalog: expect.objectContaining({ modelId: 'zai-org/GLM-5.2' }),
       })
     );
   });

@@ -5,6 +5,7 @@ using GuideAntsApi.Endpoints;
 using GuideAntsApi.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
@@ -22,6 +23,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
     private readonly INotebookModelRuntimeService _llamaRuntime;
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILocalAiStartupWarmupService _warmupService;
     private readonly ILogger<NotebookHeaderToolbarService> _logger;
 
     public NotebookHeaderToolbarService(
@@ -33,6 +35,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         INotebookModelRuntimeService llamaRuntime,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
+        ILocalAiStartupWarmupService warmupService,
         ILogger<NotebookHeaderToolbarService> logger)
     {
         _db = db;
@@ -43,7 +46,18 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         _llamaRuntime = llamaRuntime;
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
+        _warmupService = warmupService;
         _logger = logger;
+    }
+
+    private sealed record LocalRuntimeProbe(
+        bool Loaded,
+        bool Loading,
+        bool PostLoadWarming,
+        bool StartupWarmupRunning)
+    {
+        public bool IsOperational =>
+            Loaded && !Loading && !PostLoadWarming && !StartupWarmupRunning;
     }
 
     public async Task<NotebookHeaderToolbarDto> GetToolbarAsync(
@@ -495,22 +509,53 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             cancellationToken).ConfigureAwait(false);
 
         var selection = BuildSelectionForService(state, isImage, localModels);
-        var localOn = supportsPower && await IsLocalEngineOnAsync(serviceId, isImage, selection, cancellationToken)
-            .ConfigureAwait(false);
-        if (supportsPower && !localOn && blockers.Count == 0)
+        var runtimeProbe = supportsPower
+            ? await ProbeLocalRuntimeAsync(serviceId, isImage, cancellationToken).ConfigureAwait(false)
+            : new LocalRuntimeProbe(false, false, false, false);
+        var localOn = supportsPower && runtimeProbe.IsOperational;
+        string? inProgressOperationId = null;
+        string? inProgressState = null;
+        string summary;
+
+        if (supportsPower)
         {
-            if (string.Equals(status, "ready", StringComparison.OrdinalIgnoreCase))
+            var startupLoading = _warmupService.IsWarmupInProgress && !runtimeProbe.Loaded;
+            var operationActive = runtimeProbe.Loading
+                || runtimeProbe.PostLoadWarming
+                || runtimeProbe.StartupWarmupRunning
+                || startupLoading;
+
+            if (operationActive)
             {
-                status = "off";
+                status = "inProgress";
+                inProgressOperationId = "local-runtime";
+                inProgressState = runtimeProbe.Loading || startupLoading
+                    ? "loading"
+                    : "warming";
+                blockers = [];
+                summary = BuildAuxLocalOperationSummary(displayName, selection, inProgressState);
+            }
+            else if (localOn)
+            {
+                summary = !string.Equals(status, "blocked", StringComparison.OrdinalIgnoreCase)
+                    ? BuildAuxLocalLoadedSummary(displayName, selection, isImage)
+                    : BuildDefaultServiceSummary(activeLabel, readiness);
+            }
+            else if (blockers.Count == 0
+                && string.Equals(status, "ready", StringComparison.OrdinalIgnoreCase))
+            {
+                status = "requiresLoad";
+                summary = BuildAuxLocalRequiresLoadSummary(displayName, selection, isImage);
+                blockers = [];
+            }
+            else
+            {
+                summary = BuildDefaultServiceSummary(activeLabel, readiness);
             }
         }
-
-        var summary = string.IsNullOrWhiteSpace(state.ActiveProviderId)
-            ? "Not configured"
-            : $"{activeLabel} — {readiness.Status}";
-        if (readiness.Warnings.Count > 0)
+        else
         {
-            summary += $"; {readiness.Warnings[0]}";
+            summary = BuildDefaultServiceSummary(activeLabel, readiness);
         }
 
         return new NotebookToolbarServiceDto(
@@ -527,8 +572,63 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             selection,
             blockers,
             localModels,
-            null,
-            null);
+            inProgressOperationId,
+            inProgressState);
+    }
+
+    private static string BuildDefaultServiceSummary(string activeLabel, ServiceEditorReadinessDto readiness)
+    {
+        if (readiness.Warnings.Count > 0)
+        {
+            return $"{activeLabel} — {readiness.Status}; {readiness.Warnings[0]}";
+        }
+
+        return $"{activeLabel} — {readiness.Status}";
+    }
+
+    private static string BuildAuxLocalOperationSummary(
+        string displayName,
+        NotebookToolbarSelectionDto? selection,
+        string operationState)
+    {
+        var resource = AuxLocalResourceLabel(selection);
+        var detail = operationState switch
+        {
+            "loading" => "loading the selected local model",
+            "warming" => "warming up the local engine",
+            _ => "in progress"
+        };
+        return $"{displayName}: {detail} for {resource}.";
+    }
+
+    private static string BuildAuxLocalLoadedSummary(
+        string displayName,
+        NotebookToolbarSelectionDto? selection,
+        bool isImage)
+    {
+        var resource = AuxLocalResourceLabel(selection);
+        var noun = isImage ? "bundle" : "model";
+        return $"{displayName}: local {noun} {resource} loaded.";
+    }
+
+    private static string BuildAuxLocalRequiresLoadSummary(
+        string displayName,
+        NotebookToolbarSelectionDto? selection,
+        bool isImage)
+    {
+        var resource = AuxLocalResourceLabel(selection);
+        var noun = isImage ? "bundle" : "model";
+        return $"{displayName}: {resource} selected. Load the local {noun} to start.";
+    }
+
+    private static string AuxLocalResourceLabel(NotebookToolbarSelectionDto? selection)
+    {
+        if (!string.IsNullOrWhiteSpace(selection?.ResourceId))
+        {
+            return selection.ResourceId;
+        }
+
+        return selection?.Summary ?? "local resource";
     }
 
     private static string MapServiceStatus(string readinessStatus) =>
@@ -557,54 +657,65 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         return new NotebookToolbarSelectionDto(pick.ModelRef, pick.ModelRef);
     }
 
-    private async Task<bool> IsLocalEngineOnAsync(
+    private async Task<LocalRuntimeProbe> ProbeLocalRuntimeAsync(
         string serviceId,
         bool isImage,
-        NotebookToolbarSelectionDto? selection,
         CancellationToken cancellationToken)
     {
         if (isImage)
         {
-            var json = await HttpGetLocalAdminJsonAsync(serviceId, "/admin/bundles", cancellationToken)
+            var json = await HttpGetLocalAdminJsonAsync(serviceId, "/health", cancellationToken)
                 .ConfigureAwait(false);
-            if (json is null) return false;
+            if (json is null)
+            {
+                return new LocalRuntimeProbe(false, false, false, false);
+            }
+
             try
             {
                 var node = JsonNode.Parse(json);
                 var engine = node?["engine"] as JsonObject;
-                if (engine?["processAlive"] is JsonValue jv && jv.TryGetValue(out bool b))
-                {
-                    return b;
-                }
+                var processAlive = engine?["processAlive"]?.GetValue<bool?>() ?? false;
+                var healthy = engine?["healthy"]?.GetValue<bool?>() ?? false;
+                var startupWarmupRunning = node?["startupWarmup"]?["running"]?.GetValue<bool?>() ?? false;
+                var status = node?["status"]?.GetValue<string>();
+                var loaded = processAlive && healthy
+                    || string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase);
+                var loading = startupWarmupRunning || (processAlive && !healthy);
+                return new LocalRuntimeProbe(loaded, loading, false, startupWarmupRunning);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Image engine parse");
+                _logger.LogDebug(ex, "Image runtime probe parse");
+                return new LocalRuntimeProbe(false, false, false, false);
             }
-            return false;
         }
 
-        var readyJson = await HttpGetLocalAdminJsonAsync(serviceId, "/ready", cancellationToken)
-            .ConfigureAwait(false);
-        if (readyJson is null) return false;
+        var readyJson = await HttpGetLocalAdminJsonAsync(
+            serviceId,
+            "/ready",
+            cancellationToken,
+            readBodyOnAnyStatus: true).ConfigureAwait(false);
+        if (readyJson is null)
+        {
+            return new LocalRuntimeProbe(false, false, false, false);
+        }
+
         try
         {
             var node = JsonNode.Parse(readyJson);
-            if (node?["loaded"] is JsonValue v && v.TryGetValue(out bool loaded))
-            {
-                return loaded;
-            }
-            if (node?["status"]?.GetValue<string>() is { } s
-                && s.Equals("ready", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
+            var loaded = node?["loaded"]?.GetValue<bool?>() ?? false;
+            var loading = node?["loading"]?.GetValue<bool?>() ?? false;
+            var warmupEnabled = node?["warmupEnabled"]?.GetValue<bool?>() ?? false;
+            var warmupSucceeded = node?["warmupSucceeded"]?.GetValue<bool?>() ?? false;
+            var postLoadWarming = loaded && warmupEnabled && !warmupSucceeded;
+            return new LocalRuntimeProbe(loaded, loading, postLoadWarming, false);
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Asr/tts /ready parse");
+            _logger.LogDebug(ex, "Asr/tts runtime probe parse");
+            return new LocalRuntimeProbe(false, false, false, false);
         }
-        return false;
     }
 
     private async Task<IReadOnlyList<NotebookToolbarLocalModelOptionDto>> TryLoadLocalModelInventoryAsync(
@@ -718,7 +829,8 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
     private async Task<string?> HttpGetLocalAdminJsonAsync(
         string serviceId,
         string path,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool readBodyOnAnyStatus = false)
     {
         var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
         if (string.IsNullOrWhiteSpace(adminBase))
@@ -727,16 +839,19 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         }
 
         var client = _httpClientFactory.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(3);
         var url = $"{adminBase.TrimEnd('/')}{path}";
         try
         {
-            using var response = await client.GetAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
+            using var response = await client.GetAsync(new Uri(url), timeoutCts.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode && !readBodyOnAnyStatus)
             {
                 return null;
             }
-            return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            return string.IsNullOrWhiteSpace(body) ? null : body;
         }
         catch (Exception ex)
         {

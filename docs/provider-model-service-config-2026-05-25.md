@@ -167,7 +167,7 @@ Secret values are excluded. Secret fields are reported only as configured/not se
   - Token: configured
   - RouterBaseUrl: https://router.huggingface.co/v1
 - Models:
-  - deepseek-ai/DeepSeek-V4-Pro (provider=hf-inference-chat, active=True), runtimeProfileId=huggingface_chat_standard
+  - zai-org/GLM-5.2 (provider=hf-inference-chat, active=True), runtimeProfileId=huggingface_chat_standard
 - Service Configurations:
   - Service Embeddings / Mode Embeddings.HuggingFace.Inference
     - ProviderSection: HuggingFace

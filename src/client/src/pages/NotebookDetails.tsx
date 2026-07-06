@@ -10,8 +10,7 @@ import ErrorScreen from '../components/ErrorScreen';
 import { NotebookSidebarSectionType, NotebookSidebarSelectedItem, NotebookFileDto, PublishNotebookFileDto, OriginFileInfoDto } from '../types/notebook';
 import { NotebookTemplateDto } from '../types/project';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useNotebookHeaderToolbar } from '../hooks/useNotebookHeaderToolbar';
-import { useNotebookChatReadiness } from '../hooks/useNotebookChatReadiness';
+import { useNotebookWorkspaceControls } from '../hooks/useNotebookWorkspaceControls';
 import { NotebookServiceToolbar } from '../components/notebook/header-toolbar/NotebookServiceToolbar';
 import { PublishToProjectDialog } from '../components/notebook/dialogs/PublishToProjectDialog';
 import { notebookFilesApi } from '../services/notebookFiles';
@@ -129,8 +128,12 @@ function NotebookDetailsContent() {
     // Mobile Sidebar State
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-    const headerToolbar = useNotebookHeaderToolbar(notebookId, activeConversationId, isAuthenticatedAdmin);
-    const chatReadiness = useNotebookChatReadiness(notebookId, activeConversationId, Boolean(notebookId));
+    const workspaceControls = useNotebookWorkspaceControls({
+        notebookId,
+        conversationId: activeConversationId,
+        includeToolbar: isAuthenticatedAdmin,
+        enabled: Boolean(notebookId),
+    });
 
     const publishedNotebookTitle = project?.notebooks.find((n) => n.id === notebookId)?.title ?? notebook?.title;
     usePublishGuideViewContext({
@@ -193,13 +196,13 @@ function NotebookDetailsContent() {
     }, [activeConversationId]);
 
     const chatModelMissing = Boolean(
-        chatReadiness.data &&
-        !chatReadiness.isLoading &&
-        !chatReadiness.data.effectiveModelId
+        workspaceControls.chat &&
+        !workspaceControls.chatIsLoading &&
+        !workspaceControls.chat.effectiveModelId
     );
     const contributorRuntimeLoading =
         !isAdmin &&
-        chatReadiness.data?.inProgressState === 'loading';
+        workspaceControls.chat?.inProgressState === 'loading';
 
     const showNoChatModelDialog =
         chatModelMissing &&
@@ -1283,12 +1286,12 @@ function NotebookDetailsContent() {
                         projectId={projectId}
                         notebookId={notebookId}
                         conversationId={activeConversationId}
-                        data={headerToolbar.data}
-                        isLoading={headerToolbar.isLoading}
+                        data={workspaceControls.toolbar}
+                        isLoading={workspaceControls.toolbarIsLoading}
                         isMobile={headerIsMobile}
-                        onRefresh={() => headerToolbar.refresh()}
-                        inFlight={headerToolbar.inFlight}
-                        setInFlight={headerToolbar.setInFlight}
+                        onRefresh={() => workspaceControls.refresh()}
+                        inFlight={workspaceControls.inFlight}
+                        setInFlight={workspaceControls.setInFlight}
                         assistantByName={assistantByNameForToolbar}
                         onMobileOpen={() => setIsMobileSidebarOpen(false)}
                     />
@@ -1414,7 +1417,7 @@ function NotebookDetailsContent() {
             isOpen={showNoChatModelDialog}
             onClose={() => setNoChatModelDialogDismissed(true)}
             onGoToSettings={() => navigate('/settings')}
-            blockers={chatReadiness.data?.blockers}
+            blockers={workspaceControls.chat?.blockers}
         />
         <LlamaCrashedModal
             isOpen={crashState !== null}

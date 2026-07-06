@@ -397,7 +397,7 @@ public sealed class SpeechSynthesisServiceTests
     }
 
     [TestMethod]
-    public async Task SynthesizeToWavAsync_Local_InfersKokoroLanguageFromVoice()
+    public async Task SynthesizeToWavAsync_Local_ForwardsVoiceWithoutLangCode()
     {
         var audio = Encoding.ASCII.GetBytes("RIFFfakeWAVE");
         var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -410,19 +410,23 @@ public sealed class SpeechSynthesisServiceTests
             "LocalServiceHosts:SpeechSynthesisBaseUrl",
             localServiceHostsOptions: new LocalServiceHostsOptions { SpeechSynthesisBaseUrl = "http://guideants-ai:80" },
             configurationValues: new Dictionary<string, string?> { ["SpeechSynthesis:Speed"] = "1.25" },
-            modelId: "Kokoro-82M",
-            requestPresetJson: "{\"VoiceName\":\"bf_alice\",\"LanguageCode\":\"z\",\"Speed\":\"0.5\"}");
+            modelId: "chatterbox",
+            requestPresetJson: "{\"VoiceName\":\"en_gb_cv_002\",\"LanguageCode\":\"z\",\"Speed\":\"0.5\"}");
         var outputPath = TempOutputPath();
 
         try
         {
-            var result = await service.SynthesizeToWavAsync("<speak>Hello Kokoro</speak>", outputPath);
+            var result = await service.SynthesizeToWavAsync("<speak>Hello Chatterbox</speak>", outputPath);
 
             result.Success.Should().BeTrue();
             using var document = JsonDocument.Parse(handler.LastRequestBody);
             var root = document.RootElement;
-            root.GetProperty("voice").GetString().Should().Be("bf_alice");
-            root.GetProperty("lang_code").GetString().Should().Be("b");
+
+            // The configured voice is forwarded verbatim; the engine resolves
+            // its meaning per the active family. lang_code is NOT sent from
+            // .NET (RULES I5) — no hardcoded language map remains.
+            root.GetProperty("voice").GetString().Should().Be("en_gb_cv_002");
+            root.TryGetProperty("lang_code", out _).Should().BeFalse();
             root.GetProperty("speed").GetDouble().Should().BeApproximately(1.25, 0.001);
         }
         finally

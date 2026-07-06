@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parseSkillFrontmatter, buildCanonicalSkillMarkdown } from '../skillFrontmatter';
 import { computeSkillGating } from '../skillGating';
 import { mapSkillPrerequisites } from '../skillToolsetMapping';
+import { buildAssistantInstructionsFromSkillMarkdown } from '../createFromSkillHelpers';
 import { buildSkillCardViewModel } from '../skillCardViewModel';
 import { moveSkill, nextSkillDisplayOrder, reindexSkillDisplayOrders } from '../skillOrdering';
 import { buildSkillFileTree, skillPackagePath } from '../skillFileTreeModel';
@@ -264,6 +265,24 @@ describe('skillOrdering', () => {
     ];
 
     expect(reindexSkillDisplayOrders(skills).map((skill) => skill.displayOrder)).toEqual([0, 1, 2]);
+  });
+});
+
+describe('createFromSkillHelpers', () => {
+  it('uses the SKILL.md body for assistant instructions', () => {
+    const instructions = buildAssistantInstructionsFromSkillMarkdown(agentskillsYaml);
+    expect(instructions).toBe('# Body');
+    expect(instructions).not.toContain('Use the');
+  });
+
+  it('falls back to full markdown when the body is empty', () => {
+    const markdown = `---
+name: empty-body
+description: No body content.
+---
+`;
+    const instructions = buildAssistantInstructionsFromSkillMarkdown(markdown);
+    expect(instructions).toContain('name: empty-body');
   });
 });
 
