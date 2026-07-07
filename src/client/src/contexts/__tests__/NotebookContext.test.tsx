@@ -476,9 +476,10 @@ describe('NotebookContext', () => {
 
     });
 
-    expect(result.current.isExecuting).toBe(false);
-
-    expect(result.current.notebook?.cells.find((c) => c.id === codeCellId)?.output).toContain('print(1)');
+    await waitFor(() => {
+      expect(result.current.isExecuting).toBe(false);
+      expect(result.current.notebook?.cells.find((c) => c.id === codeCellId)?.output).toContain('print(1)');
+    }, { timeout: 3000 });
 
 
 
