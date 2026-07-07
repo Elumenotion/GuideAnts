@@ -2443,6 +2443,7 @@ public class GuideUsageService : IGuideUsageService
             "published_chat" => "published_chat",
             "mcp" => "mcp",
             "wire_api" => "wire_api",
+            "sandbox_wire_api" => "sandbox_wire_api",
             _ => "all"
         };
     }
@@ -2457,6 +2458,7 @@ public class GuideUsageService : IGuideUsageService
             "published_chat" => query.Where(e => e.SourceChannel == "published_chat"),
             "mcp" => query.Where(e => e.SourceChannel == "mcp"),
             "wire_api" => query.Where(e => e.SourceChannel == "wire_api"),
+            "sandbox_wire_api" => query.Where(e => e.SourceChannel == "sandbox_wire_api"),
             _ => query
         };
     }

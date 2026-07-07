@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -18,11 +19,51 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 MAX_PRODUCED_DIMENSION = 1536
+MODEL_PATH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+MODEL_FILES_NOT_FOUND_MESSAGE = "Required model files were not found. Download the model first."
 CATALOG_PATH = os.path.join(os.path.dirname(__file__), "catalog", "manifest.json")
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def model_load_client_message(exc: ValueError) -> str:
+    detail = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ""
+    if detail == "resolved model_path escapes the permitted model directory.":
+        return detail
+    if detail == "model_id or model_path is required, or set GA_EMB_DEFAULT_MODEL_PATH.":
+        return detail
+    if detail == "GA_EMB_NGL must be an integer.":
+        return detail
+    local_gguf_match = re.fullmatch(
+        r"Local GGUF '([^']+)' is not a catalog-listed artifact\.",
+        detail,
+    )
+    if local_gguf_match and MODEL_PATH_RE.fullmatch(local_gguf_match.group(1)):
+        return detail
+    catalog_match = re.fullmatch(
+        r"model_id '([^']+)' is not in the curated embeddings catalog\. Only manifest entries are allowed\.",
+        detail,
+    )
+    if catalog_match:
+        return detail
+    if re.fullmatch(
+        r"Catalog entry '([^']+)' has invalid producedDimension \d+; must be > 0 and <= \d+\.",
+        detail,
+    ):
+        return detail
+    return "Invalid model request."
+
+
+def model_load_not_found_message(exc: FileNotFoundError) -> str:
+    detail = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ""
+    if re.fullmatch(
+        r"Catalog model '([^']+)' expects '([^']+)'\. Download it first\.",
+        detail,
+    ):
+        return detail
+    return MODEL_FILES_NOT_FOUND_MESSAGE
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -789,14 +830,36 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
             status_code=200,
             content={"requestId": request_id, "status": "loaded", **details},
         )
-    except (ValueError, FileNotFoundError) as exc:
+    except ValueError as exc:
+        log_event(
+            "emb_model_load_validation_failed",
+            requestId=request_id,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
         return JSONResponse(
             status_code=400,
             content={
                 "requestId": request_id,
                 "status": "failed",
                 "error": "invalid_model_request",
-                "message": str(exc),
+                "message": model_load_client_message(exc),
+            },
+        )
+    except FileNotFoundError as exc:
+        log_event(
+            "emb_model_load_not_found",
+            requestId=request_id,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        return JSONResponse(
+            status_code=400,
+            content={
+                "requestId": request_id,
+                "status": "failed",
+                "error": "invalid_model_request",
+                "message": model_load_not_found_message(exc),
             },
         )
     except Exception as exc:
@@ -898,12 +961,14 @@ async def admin_cancel_download(operation_id: str) -> JSONResponse:
 async def admin_delete_model(model_ref: str) -> JSONResponse:
     if not model_ref:
         raise HTTPException(status_code=400, detail="model_ref is required")
+    if not MODEL_PATH_RE.fullmatch(model_ref):
+        raise HTTPException(status_code=400, detail="invalid model_ref")
     active_ref = STATE.snapshot().get("modelRef")
     if active_ref and (active_ref == model_ref or str(active_ref).endswith(model_ref)):
         raise HTTPException(status_code=409, detail="cannot delete active model")
-    model_dir = os.path.abspath(get_model_dir())
-    target = os.path.abspath(os.path.join(model_dir, model_ref))
-    if not target.startswith(model_dir + os.sep) and target != model_dir:
+    model_dir = os.path.realpath(get_model_dir())
+    target = os.path.realpath(os.path.join(model_dir, model_ref))
+    if not target.startswith(model_dir + os.sep):
         raise HTTPException(status_code=400, detail="invalid model_ref")
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="model not found")

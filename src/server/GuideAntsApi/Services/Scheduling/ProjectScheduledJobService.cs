@@ -115,6 +115,12 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
             Prompt = request.Prompt?.Trim(),
             AssistantName = request.AssistantName?.Trim(),
             ScriptNotebookFileId = request.ScriptNotebookFileId,
+            ExposeSandboxWireApi = request.ExposeSandboxWireApi,
+            WireTargetAssistantId = request.WireTargetAssistantId,
+            WireAttributionConversationTitle = request.WireAttributionConversationTitle?.Trim(),
+            WireCreateAttributionConversationPerRun = request.WireCreateAttributionConversationPerRun,
+            WireDailyLimitUsd = request.WireDailyLimitUsd,
+            WireMonthlyLimitUsd = request.WireMonthlyLimitUsd,
             CreatedByUserId = createdByUserId,
             CreatedUtc = now,
             UpdatedUtc = now
@@ -160,6 +166,12 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
         job.Prompt = request.Prompt?.Trim();
         job.AssistantName = request.AssistantName?.Trim();
         job.ScriptNotebookFileId = request.ScriptNotebookFileId;
+        job.ExposeSandboxWireApi = request.ExposeSandboxWireApi;
+        job.WireTargetAssistantId = request.WireTargetAssistantId;
+        job.WireAttributionConversationTitle = request.WireAttributionConversationTitle?.Trim();
+        job.WireCreateAttributionConversationPerRun = request.WireCreateAttributionConversationPerRun;
+        job.WireDailyLimitUsd = request.WireDailyLimitUsd;
+        job.WireMonthlyLimitUsd = request.WireMonthlyLimitUsd;
         job.UpdatedUtc = DateTime.UtcNow;
         job.NextRunUtc = request.IsEnabled
             ? _cronScheduleService.GetNextOccurrenceUtc(job.CronExpression, job.TimeZoneId, DateTime.UtcNow)
@@ -323,6 +335,12 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
             job.AssistantName,
             job.ScriptNotebookFileId,
             job.ScriptNotebookFile?.RelativePath,
+            job.ExposeSandboxWireApi,
+            job.WireTargetAssistantId,
+            job.WireAttributionConversationTitle,
+            job.WireCreateAttributionConversationPerRun,
+            job.WireDailyLimitUsd,
+            job.WireMonthlyLimitUsd,
             job.NextRunUtc,
             job.LastRunUtc,
             job.LastRunStatus?.ToString(),

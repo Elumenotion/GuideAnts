@@ -1,12 +1,13 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import '@testing-library/jest-dom';
 import Settings from '../Settings';
 import SystemGuidesWorkspace from '../SystemGuidesWorkspace';
 import { ProtectedRoute } from '../../components/ProtectedRoute';
 import { useAuth } from '../../contexts/AuthContext';
+import { api } from '../../services/api';
 import type { AppRole } from '../../types/user';
 import { ToastProvider } from '../../components/common/Toast';
 
@@ -66,10 +67,16 @@ vi.mock('../../components/LoadingSpinner', () => ({
   default: ({ message }: { message?: string }) => <div>{message}</div>,
 }));
 vi.mock('../../components/ErrorScreen', () => ({
-  default: ({ title }: { title?: string }) => <div>{title}</div>,
+  default: ({ title, message }: { title?: string; message?: string }) => (
+    <div>
+      <div>{title}</div>
+      <div>{message}</div>
+    </div>
+  ),
 }));
 
 const mockedUseAuth = vi.mocked(useAuth);
+const mockedGetWorkspace = vi.mocked(api.systemGuide.getWorkspace);
 
 function authState(role: AppRole | null) {
   return {
@@ -129,6 +136,7 @@ function renderSystemGuidesRoute(path = '/settings/system-guides', role: AppRole
 describe('System guides settings access', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedGetWorkspace.mockResolvedValue({ projectId: 'system-project' });
   });
 
   it('shows the System Guides header link for admins only', () => {
@@ -153,5 +161,20 @@ describe('System guides settings access', () => {
 
     expect(screen.getByText('settings-page')).toBeInTheDocument();
     expect(screen.queryByText('Loading system guides workspace...')).not.toBeInTheDocument();
+  });
+
+  it('loads the workspace for admins', async () => {
+    renderSystemGuidesRoute('/settings/system-guides', 'Admin');
+
+    expect(await screen.findByText('project-details-workspace')).toBeInTheDocument();
+    expect(mockedGetWorkspace).toHaveBeenCalled();
+  });
+
+  it('shows an error screen when workspace loading fails', async () => {
+    mockedGetWorkspace.mockRejectedValue(new Error('Workspace missing'));
+    renderSystemGuidesRoute('/settings/system-guides', 'Admin');
+
+    expect(await screen.findByText('Unable to open system guides')).toBeInTheDocument();
+    expect(screen.getByText('Workspace missing')).toBeInTheDocument();
   });
 });

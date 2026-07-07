@@ -6,6 +6,7 @@ using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.EnvironmentVariables;
+using GuideAntsApi.Services.SandboxWireApi;
 using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -418,7 +419,32 @@ namespace GuideAntsApi.Services
                 _settingsSecretsOptions.CurrentValue,
                 orderedManifests);
 
-            return environment.Count == 0 ? null : environment;
+            var provisioner = scope.ServiceProvider.GetService<ISandboxWireEnvironmentProvisioner>();
+            if (provisioner != null)
+            {
+                var overrides = context.SandboxWireOverrides;
+                Guid? attributionConversationId = context.ConversationId == Guid.Empty
+                    ? null
+                    : context.ConversationId;
+                var sandboxEnvironment = await provisioner.BuildEnvironmentAsync(
+                    new SandboxWireProvisionRequest(
+                        ExecutionId: Guid.NewGuid(),
+                        ProjectId: context.ProjectId,
+                        NotebookId: context.NotebookId,
+                        OwnerAssistantId: guideScopeId,
+                        AttributionConversationId: attributionConversationId,
+                        Lifetime: TimeSpan.FromMinutes(35),
+                        OverrideTargetAssistantId: overrides?.TargetAssistantId,
+                        JobDailyLimitUsd: overrides?.DailyLimitUsd,
+                        JobMonthlyLimitUsd: overrides?.MonthlyLimitUsd,
+                        ForceEnabled: overrides?.ForceEnabled ?? false),
+                    CancellationToken.None);
+                environment = SandboxWireEnvironmentMergeExtensions.MergeSandboxWireEnvironment(
+                    environment,
+                    sandboxEnvironment);
+            }
+
+            return environment == null || environment.Count == 0 ? null : environment;
         }
 
         internal static string BuildScriptAgentTransportFailureMessage(string scriptExecutionBaseUrl, Exception ex)

@@ -404,6 +404,7 @@ public class Program
         app.MapPublishedNotebookConversationsEndpoints();
         app.MapPublishedGuidesEndpoints();
         app.MapPublishedOpenAiWireEndpoints();
+        app.MapSandboxOpenAiWireEndpoints();
         app.MapPublishedAnthropicWireEndpoints();
         app.MapSpeechEndpoints();
         app.MapPublishedSpeechEndpoints();

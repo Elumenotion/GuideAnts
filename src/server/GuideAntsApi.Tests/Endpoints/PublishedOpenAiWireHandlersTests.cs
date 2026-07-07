@@ -13,6 +13,7 @@ using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Conversations;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.PublishedWireApi;
+using GuideAntsApi.Services.SandboxWireApi;
 using GuideAntsApi.Services.Routing;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -3833,6 +3834,41 @@ public sealed class PublishedOpenAiWireHandlersTests
 
         public Task RecordAsync(
             PublishedApiExecutionContext context,
+            GuideAnts.Usage.UsageCategory category,
+            string service,
+            string operation,
+            UsageMetrics metrics,
+            string endpoint,
+            string status = "success",
+            string? alias = null,
+            string? providerModel = null,
+            string? providerServiceMode = null,
+            long? requestBytes = null,
+            long? inputCount = null,
+            long? outputCount = null,
+            decimal costUsd = 0m,
+            string? modelDeploymentId = null,
+            CancellationToken ct = default) =>
+            RecordAsync(
+                new PublishedWireExecutionContextAdapter(context),
+                category,
+                service,
+                operation,
+                metrics,
+                endpoint,
+                status,
+                alias,
+                providerModel,
+                providerServiceMode,
+                requestBytes,
+                inputCount,
+                outputCount,
+                costUsd,
+                modelDeploymentId,
+                ct);
+
+        public Task RecordAsync(
+            IWireExecutionContext context,
             GuideAnts.Usage.UsageCategory category,
             string service,
             string operation,

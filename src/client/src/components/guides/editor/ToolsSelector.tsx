@@ -1,20 +1,53 @@
 import { useEffect, useState } from 'react';
-import { ToolDto, ContextOptionDto } from '../../../types/guides';
+import { ToolDto, ContextOptionDto, SandboxWireApiConfigDto } from '../../../types/guides';
 import { api } from '../../../services/api';
 import { RUN_PYTHON_TOOL_ID } from './skills/skillToolsetMapping';
+import { SandboxWireApiPanel } from './SandboxWireApiPanel';
+import { classifySchemeFromServerUrl } from './toolSources/toolSourceClassification';
+import type { CustomToolDto } from '../../../types/guides';
 
 interface ToolsSelectorProps {
   selectedToolIds: string[];
   contextOptions: ContextOptionDto[];
+  customTools: CustomToolDto[];
   requiresRunPython: boolean;
+  projectId?: string;
+  guideId?: string;
+  crewMemberIds: string[];
+  sandboxWireApiConfig: SandboxWireApiConfigDto;
   onSelectedToolIdsChange: (toolIds: string[]) => void;
+  onSandboxWireApiConfigChange: (config: SandboxWireApiConfigDto) => void;
+  onDirtyChange?: () => void;
+}
+
+function hasSandboxModuleToolSources(customTools: CustomToolDto[]): boolean {
+  return customTools.some((tool) => {
+    if (!tool.openApiSpec) {
+      return false;
+    }
+    try {
+      const spec = JSON.parse(tool.openApiSpec) as { servers?: Array<{ url?: string }> };
+      return (spec.servers ?? []).some(
+        (server) => classifySchemeFromServerUrl(server.url ?? '') === 'sandbox-module',
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function ToolsSelector({
   selectedToolIds,
   contextOptions,
+  customTools,
   requiresRunPython,
+  projectId,
+  guideId,
+  crewMemberIds,
+  sandboxWireApiConfig,
   onSelectedToolIdsChange,
+  onSandboxWireApiConfigChange,
+  onDirtyChange,
 }: ToolsSelectorProps) {
   const [globalTools, setGlobalTools] = useState<ToolDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,6 +122,8 @@ export function ToolsSelector({
   }
 
   const categories = Object.keys(toolsByCategory).sort();
+  const showSandboxWirePanel =
+    selectedToolIds.includes(RUN_PYTHON_TOOL_ID) || hasSandboxModuleToolSources(customTools);
 
   return (
     <div className="space-y-4" data-tour-id="guide.tools.catalog">
@@ -103,7 +138,9 @@ export function ToolsSelector({
         <div className="text-sm text-gray-500">Loading tools...</div>
       ) : (
         <div className="space-y-4">
-          {categories.map((category) => (
+          {categories.map((category) => {
+            const categoryHasRunPython = toolsByCategory[category].some((t) => t.id === RUN_PYTHON_TOOL_ID);
+            return (
             <div key={category} className="space-y-2">
               <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">{category}</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -157,8 +194,19 @@ export function ToolsSelector({
                   );
                 })}
               </div>
+              {categoryHasRunPython && showSandboxWirePanel && (
+                <SandboxWireApiPanel
+                  projectId={projectId}
+                  guideId={guideId}
+                  crewMemberIds={crewMemberIds}
+                  config={sandboxWireApiConfig}
+                  onChange={onSandboxWireApiConfigChange}
+                  onDirtyChange={onDirtyChange}
+                />
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

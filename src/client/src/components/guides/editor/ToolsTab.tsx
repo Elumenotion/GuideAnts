@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
 import { ToolsSelector } from './ToolsSelector';
 import { OpenApiSchemas } from './OpenApiSchemas';
-import { CustomToolDto, ContextOptionDto, EnvironmentVariableDto } from '../../../types/guides';
+import { CustomToolDto, ContextOptionDto, EnvironmentVariableDto, SandboxWireApiConfigDto } from '../../../types/guides';
 
 interface ToolsTabProps {
   selectedToolIds: string[];
@@ -11,9 +11,12 @@ interface ToolsTabProps {
   requiresRunPython: boolean;
   projectId?: string;
   guideId?: string;
+  crewMemberIds: string[];
+  sandboxWireApiConfig: SandboxWireApiConfigDto;
   onSelectedToolIdsChange: (ids: string[]) => void;
   onCustomToolsChange: (tools: CustomToolDto[]) => void;
   onEnvironmentVariablesChange: (variables: EnvironmentVariableDto[]) => void;
+  onSandboxWireApiConfigChange: (config: SandboxWireApiConfigDto) => void;
   onValidationChange?: (hasErrors: boolean) => void;
   onDirtyChange?: () => void;
 }
@@ -26,9 +29,12 @@ export function ToolsTab({
   requiresRunPython,
   projectId,
   guideId,
+  crewMemberIds,
+  sandboxWireApiConfig,
   onSelectedToolIdsChange,
   onCustomToolsChange,
   onEnvironmentVariablesChange,
+  onSandboxWireApiConfigChange,
   onValidationChange,
   onDirtyChange,
 }: ToolsTabProps) {
@@ -78,8 +84,15 @@ export function ToolsTab({
           <ToolsSelector
             selectedToolIds={selectedToolIds}
             contextOptions={contextOptions}
+            customTools={customTools}
             requiresRunPython={requiresRunPython}
+            projectId={projectId}
+            guideId={guideId}
+            crewMemberIds={crewMemberIds}
+            sandboxWireApiConfig={sandboxWireApiConfig}
             onSelectedToolIdsChange={onSelectedToolIdsChange}
+            onSandboxWireApiConfigChange={onSandboxWireApiConfigChange}
+            onDirtyChange={onDirtyChange}
           />
           </div>
         )}
