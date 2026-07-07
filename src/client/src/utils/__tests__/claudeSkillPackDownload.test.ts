@@ -1,9 +1,10 @@
 import JSZip from 'jszip';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   patchClaudeSkillPackEnv,
   patchEnvInZipBuffer,
   sanitizeClaudeSkillDownloadFileName,
+  triggerBlobDownload,
 } from '../claudeSkillPackDownload';
 
 describe('claudeSkillPackDownload', () => {
@@ -39,5 +40,42 @@ describe('claudeSkillPackDownload', () => {
 
     expect(env).toContain('gak_REPLACE_ME');
     expect(patched).toBeInstanceOf(Blob);
+  });
+
+  it('patchClaudeSkillPackEnv returns a zip blob when patching succeeds', async () => {
+    const zip = new JSZip();
+    zip.file('skill/.env', 'GUIDEANTS_API_KEY=gak_REPLACE_ME\n');
+    const inputBuffer = await zip.generateAsync({ type: 'arraybuffer' });
+
+    const patched = await patchClaudeSkillPackEnv(inputBuffer, 'gak_session_key');
+
+    expect(patched).toBeInstanceOf(Blob);
+    expect(patched.type).toBe('application/zip');
+    expect(patched.size).toBeGreaterThan(0);
+  });
+
+  it('returns the original zip buffer when no .env entry exists', async () => {
+    const zip = new JSZip();
+    zip.file('skill/README.md', '# Skill');
+    const inputBuffer = await zip.generateAsync({ type: 'arraybuffer' });
+
+    const patchedBuffer = await patchEnvInZipBuffer(inputBuffer, 'gak_real_key_123');
+    expect(patchedBuffer).toBe(inputBuffer);
+  });
+
+  it('triggerBlobDownload creates a temporary object URL and clicks the anchor', () => {
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:skill');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    triggerBlobDownload(new Blob(['zip']), 'skill.zip');
+
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(click).toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:skill');
+
+    createObjectURL.mockRestore();
+    revokeObjectURL.mockRestore();
+    click.mockRestore();
   });
 });

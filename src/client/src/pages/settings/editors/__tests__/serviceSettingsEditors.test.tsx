@@ -113,7 +113,7 @@ describe('service settings editors', () => {
 
     render(<EmbeddingsEditor />);
     expect(screen.getByText('Embeddings')).toBeInTheDocument();
-    expect(screen.getByText('emb-runtime-manager')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'trigger-model-auto-loaded' })).toBeInTheDocument();
   });
 
   it('ImageGenerationEditor renders ready state', () => {
@@ -344,7 +344,7 @@ describe('service settings editors', () => {
 
     render(<SpeechSynthesisEditor />);
     expect(screen.getByText(/POST \/tts\/synthesize/i)).toBeInTheDocument();
-    expect(screen.getByText('SpeechSynthesis:TimeoutSeconds')).toBeInTheDocument();
+    expect(screen.getAllByText('SpeechSynthesis:TimeoutSeconds').length).toBeGreaterThan(0);
   });
 
   it.each([
@@ -374,5 +374,346 @@ describe('service settings editors', () => {
 
     render(<SpeechTranscriptionEditor />);
     expect(screen.getByText(/GA_ASR_/i)).toBeInTheDocument();
+  });
+
+  it('EmbeddingsEditor saves and queues rebuild after confirmation', async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => true);
+    vi.mocked(api.settings.rebuildEmbeddings).mockResolvedValue({
+      jobId: 'job-2',
+      status: 'queued',
+    } as never);
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('Embeddings', {
+        fields: {
+          Endpoint: { name: 'Endpoint', value: 'http://localhost:8111', isSecret: false, hasValue: true },
+          ModelId: { name: 'ModelId', value: 'old-model', isSecret: false, hasValue: true },
+        },
+      }),
+      draft: {
+        activeProviderId: 'Embeddings.Local',
+        activeDraft: { ModelId: 'new-model' },
+        switchProvider: vi.fn(),
+        patchActiveDraft: vi.fn(),
+      },
+      save,
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<EmbeddingsEditor />);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(screen.getByRole('button', { name: 'Save and rebuild' }));
+
+    expect(save).toHaveBeenCalled();
+    expect(api.settings.rebuildEmbeddings).toHaveBeenCalled();
+    expect(await screen.findByText(/job-2/i)).toBeInTheDocument();
+  });
+
+  it('EmbeddingsEditor saves directly when rebuild is not required', async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => true);
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('Embeddings'),
+      save,
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<EmbeddingsEditor />);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(save).toHaveBeenCalled();
+    expect(screen.queryByText(/Reindex Required/i)).not.toBeInTheDocument();
+  });
+
+  it('EmbeddingsEditor surfaces generic rebuild failures', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.rebuildEmbeddings).mockRejectedValue(new Error('Queue failed'));
+    vi.mocked(useServiceEditorController).mockReturnValue(
+      makeController('Embeddings') as ReturnType<typeof useServiceEditorController>,
+    );
+
+    render(<EmbeddingsEditor />);
+    await user.click(screen.getByRole('button', { name: 'Rebuild vectors' }));
+    await user.click(screen.getByRole('button', { name: 'Queue rebuild' }));
+
+    expect(await screen.findByText('Queue failed')).toBeInTheDocument();
+  });
+
+  it('ImageGenerationEditor renders azure profile guidance from deployment draft', () => {
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('ImageGeneration', {
+        providerId: 'ImageGeneration.AzureOpenAI.Images',
+        providerKind: 'Cloud',
+        fields: {
+          Deployment: { name: 'Deployment', value: 'dalle3', isSecret: false, hasValue: true },
+        },
+      }),
+      draft: {
+        activeProviderId: 'ImageGeneration.AzureOpenAI.Images',
+        activeDraft: { Deployment: 'dall-e-3-prod' },
+        switchProvider: vi.fn(),
+        patchActiveDraft: vi.fn(),
+      },
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<ImageGenerationEditor />);
+    expect(screen.getByText(/Inferred profile/i)).toBeInTheDocument();
+    expect(screen.getByText(/Allowed sizes/i)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['ImageGeneration.Google.Imagen', /Gemini image generation/i],
+    ['ImageGeneration.HuggingFace.Inference', /Hugging Face image generation/i],
+    ['ImageGeneration.OpenRouter.Image', /OpenRouter image generation/i],
+    ['ImageGeneration.OpenAI.Images', /\/images\/generations/i],
+    ['ImageGeneration.Unknown.Cloud', /Cloud image generation uses the selected provider/i],
+  ] as const)('ImageGenerationEditor renders cloud guidance for %s', (providerId, matcher) => {
+    vi.mocked(useServiceEditorController).mockReturnValue(
+      makeController('ImageGeneration', { providerId, providerKind: 'Cloud' }) as ReturnType<
+        typeof useServiceEditorController
+      >,
+    );
+
+    render(<ImageGenerationEditor />);
+    expect(screen.getByText(matcher)).toBeInTheDocument();
+  });
+
+  it('ImageGenerationEditor renders local SD runtime guidance', () => {
+    vi.mocked(useServiceEditorController).mockReturnValue(
+      makeController('ImageGeneration', { providerId: 'ImageGeneration.Local.Sd' }) as ReturnType<
+        typeof useServiceEditorController
+      >,
+    );
+
+    render(<ImageGenerationEditor />);
+    expect(screen.getByText(/flux-style sizes/i)).toBeInTheDocument();
+    expect(screen.getByText(/GA_SD_/i)).toBeInTheDocument();
+  });
+
+  it('Speech editors show loading and missing-state placeholders', () => {
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('SpeechSynthesis'),
+      loading: true,
+      state: null,
+      selectedProvider: null,
+    } as ReturnType<typeof useServiceEditorController>);
+    const { rerender } = render(<SpeechSynthesisEditor />);
+    expect(screen.getByText(/Loading Speech Synthesis settings/i)).toBeInTheDocument();
+
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('SpeechTranscription'),
+      loading: false,
+      state: null,
+      selectedProvider: null,
+      error: 'Speech transcription unavailable',
+    } as ReturnType<typeof useServiceEditorController>);
+    rerender(<SpeechTranscriptionEditor />);
+    expect(screen.getByText('Speech transcription unavailable')).toBeInTheDocument();
+  });
+
+  it('ImageGenerationEditor shows loading and missing-state placeholders', () => {
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('ImageGeneration'),
+      loading: true,
+      state: null,
+      selectedProvider: null,
+    } as ReturnType<typeof useServiceEditorController>);
+
+    const { rerender } = render(<ImageGenerationEditor />);
+    expect(screen.getByText(/Loading Image Generation settings/i)).toBeInTheDocument();
+
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('ImageGeneration'),
+      loading: false,
+      state: null,
+      selectedProvider: null,
+      error: 'Image generation unavailable',
+    } as ReturnType<typeof useServiceEditorController>);
+    rerender(<ImageGenerationEditor />);
+    expect(screen.getByText('Image generation unavailable')).toBeInTheDocument();
+  });
+
+  it('ImageGenerationEditor switches providers and surfaces operational dependencies', async () => {
+    const user = userEvent.setup();
+    const switchProvider = vi.fn();
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('ImageGeneration', {
+        providerId: 'ImageGeneration.Local.Sd',
+        runtimeDependencies: [{ key: 'ImageGeneration:Endpoint', hasValue: false, currentValue: null }],
+      }),
+      providerOptions: [
+        {
+          providerId: 'ImageGeneration.Local.Sd',
+          displayName: 'Local SD',
+          kind: 'Local',
+          hasExplicitMode: true,
+          connectionConfigured: true,
+          canActivate: true,
+        },
+        {
+          providerId: 'ImageGeneration.OpenAI.Images',
+          displayName: 'OpenAI',
+          kind: 'Cloud',
+          hasExplicitMode: true,
+          connectionConfigured: true,
+          canActivate: true,
+        },
+      ],
+      draft: {
+        activeProviderId: 'ImageGeneration.Local.Sd',
+        activeDraft: {},
+        switchProvider,
+        patchActiveDraft: vi.fn(),
+      },
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<ImageGenerationEditor />);
+    expect(screen.getByText('Operational Dependencies')).toBeInTheDocument();
+    expect(screen.getAllByText('ImageGeneration:Endpoint').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: /OpenAI Cloud/i }));
+    expect(switchProvider).toHaveBeenCalledWith('ImageGeneration.OpenAI.Images');
+  });
+
+  it('ImageGenerationEditor disables save when connection is not configured', () => {
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('ImageGeneration', {
+        providerId: 'ImageGeneration.Local.Sd',
+        connectionConfigured: false,
+      }),
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<ImageGenerationEditor />);
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+    expect(saveButton).toBeDisabled();
+    expect(saveButton).toHaveAttribute('title', 'Configure the provider connection first.');
+  });
+
+  it('ImageGenerationEditor saves and surfaces controller errors', async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => true);
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('ImageGeneration', { providerId: 'ImageGeneration.Local.Sd', hasExplicitMode: false }),
+      save,
+      error: 'Save failed',
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<ImageGenerationEditor />);
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+    expect(saveButton).toHaveAttribute(
+      'title',
+      'Save will create an explicit service mode and activate provider.',
+    );
+    await user.click(saveButton);
+    expect(save).toHaveBeenCalled();
+    expect(screen.getByText('Save failed')).toBeInTheDocument();
+  });
+
+  it('SpeechSynthesisEditor switches providers and saves with implicit mode guidance', async () => {
+    const user = userEvent.setup();
+    const switchProvider = vi.fn();
+    const save = vi.fn(async () => true);
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('SpeechSynthesis', {
+        providerId: 'SpeechSynthesis.Local.Tts',
+        hasExplicitMode: false,
+      }),
+      providerOptions: [
+        {
+          providerId: 'SpeechSynthesis.Local.Tts',
+          displayName: 'Local TTS',
+          kind: 'Local',
+          hasExplicitMode: false,
+          connectionConfigured: true,
+          canActivate: true,
+        },
+        {
+          providerId: 'SpeechSynthesis.OpenAI.Tts',
+          displayName: 'OpenAI',
+          kind: 'Cloud',
+          hasExplicitMode: true,
+          connectionConfigured: true,
+          canActivate: true,
+        },
+      ],
+      draft: {
+        activeProviderId: 'SpeechSynthesis.Local.Tts',
+        activeDraft: {},
+        switchProvider,
+        patchActiveDraft: vi.fn(),
+      },
+      save,
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<SpeechSynthesisEditor />);
+    await user.click(screen.getByRole('button', { name: /OpenAI Cloud/i }));
+    expect(switchProvider).toHaveBeenCalledWith('SpeechSynthesis.OpenAI.Tts');
+
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+    expect(saveButton).toHaveAttribute(
+      'title',
+      'Save will create an explicit service mode and activate provider.',
+    );
+    await user.click(saveButton);
+    expect(save).toHaveBeenCalled();
+  });
+
+  it('SpeechSynthesisEditor shows missing-state error', () => {
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('SpeechSynthesis'),
+      loading: false,
+      state: null,
+      selectedProvider: null,
+      error: 'Speech synthesis unavailable',
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<SpeechSynthesisEditor />);
+    expect(screen.getByText('Speech synthesis unavailable')).toBeInTheDocument();
+  });
+
+  it('SpeechTranscriptionEditor shows loading, switches providers, and renders dependencies', async () => {
+    const user = userEvent.setup();
+    const switchProvider = vi.fn();
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('SpeechTranscription', {
+        providerId: 'SpeechTranscription.Local.Stt',
+        runtimeDependencies: [{ key: 'SpeechTranscription:TimeoutSeconds', hasValue: true, currentValue: '120' }],
+      }),
+      providerOptions: [
+        {
+          providerId: 'SpeechTranscription.Local.Stt',
+          displayName: 'Local ASR',
+          kind: 'Local',
+          hasExplicitMode: true,
+          connectionConfigured: true,
+          canActivate: true,
+        },
+        {
+          providerId: 'SpeechTranscription.OpenAI.Audio',
+          displayName: 'OpenAI',
+          kind: 'Cloud',
+          hasExplicitMode: true,
+          connectionConfigured: true,
+          canActivate: true,
+        },
+      ],
+      draft: {
+        activeProviderId: 'SpeechTranscription.Local.Stt',
+        activeDraft: {},
+        switchProvider,
+        patchActiveDraft: vi.fn(),
+      },
+    } as ReturnType<typeof useServiceEditorController>);
+
+    const { rerender } = render(<SpeechTranscriptionEditor />);
+    expect(screen.getByText('Operational Dependencies')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /OpenAI Cloud/i }));
+    expect(switchProvider).toHaveBeenCalledWith('SpeechTranscription.OpenAI.Audio');
+
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('SpeechTranscription'),
+      loading: true,
+      state: null,
+      selectedProvider: null,
+    } as ReturnType<typeof useServiceEditorController>);
+    rerender(<SpeechTranscriptionEditor />);
+    expect(screen.getByText(/Loading Speech Transcription settings/i)).toBeInTheDocument();
   });
 });

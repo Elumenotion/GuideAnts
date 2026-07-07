@@ -47,4 +47,12 @@ describe('notebookPath', () => {
       'Output/report.md',
     ]);
   });
+
+  it('falls back when notebook paths contain invalid URI escapes', () => {
+    expect(normalizeNotebookRelativePath('%E0%A4%A')).toBe('%E0%A4%A');
+    expect(notebookPathMatches('docs/%E0%A4%A', '%E0%A4%A')).toBe(true);
+    expect(notebookPathMatches('docs/report.md', '   ')).toBe(false);
+    expect(notebookPathMatches('runs/abc/duck.png', 'duck.png')).toBe(true);
+    expect(notebookPathMatches('duck.png', 'duck.png')).toBe(true);
+  });
 });

@@ -29,54 +29,54 @@ vi.mock('../../services/api', () => ({
   },
 }));
 
-vi.mock('../../../features/guideantsGuide/GuideAntsGuideButton', () => ({
+vi.mock('../../features/guideantsGuide/GuideAntsGuideButton', () => ({
   GuideAntsGuideButton: () => null,
 }));
-vi.mock('../../../features/guideantsGuide/viewContext', () => ({
+vi.mock('../../features/guideantsGuide/viewContext', () => ({
   usePublishGuideViewContext: vi.fn(),
 }));
-vi.mock('../../../components/common/HomeButton', () => ({
+vi.mock('../../components/common/HomeButton', () => ({
   HomeButton: () => null,
 }));
-vi.mock('../../../components/common/SettingsButton', () => ({
+vi.mock('../../components/common/SettingsButton', () => ({
   SettingsButton: () => null,
 }));
-vi.mock('../../../components/common/HeaderUserMenu', () => ({
+vi.mock('../../components/common/HeaderUserMenu', () => ({
   HeaderUserMenu: () => null,
 }));
-vi.mock('../../../tour/TourStartButton', () => ({
+vi.mock('../../tour/TourStartButton', () => ({
   TourStartButton: () => null,
 }));
-vi.mock('../../../features/localModelOnboarding/useOperationPolling', () => ({
+vi.mock('../../features/localModelOnboarding/useOperationPolling', () => ({
   useLocalModelOnboardingOperation: () => ({ statusLabel: 'downloading' }),
 }));
-vi.mock('../../settings/components/OverviewTab', () => ({
+vi.mock('../settings/components/OverviewTab', () => ({
   OverviewTab: () => <div>overview-tab-panel</div>,
 }));
-vi.mock('../../settings/components/PersonalizationTab', () => ({
+vi.mock('../settings/components/PersonalizationTab', () => ({
   PersonalizationTab: () => <div>personalization-tab-panel</div>,
 }));
-vi.mock('../../settings/components/UsersTab', () => ({
+vi.mock('../settings/components/UsersTab', () => ({
   UsersTab: () => <div>users-tab-panel</div>,
 }));
-vi.mock('../../settings/components/ConnectionsTab', () => ({
+vi.mock('../settings/components/ConnectionsTab', () => ({
   ConnectionsTab: () => <div>connections-tab-panel</div>,
 }));
-vi.mock('../../settings/components/ServicesTab', () => ({
+vi.mock('../settings/components/ServicesTab', () => ({
   ServicesTab: () => <div>services-tab-panel</div>,
 }));
-vi.mock('../../settings/components/InfrastructureTab', () => ({
+vi.mock('../settings/components/InfrastructureTab', () => ({
   InfrastructureTab: () => <div>infrastructure-tab-panel</div>,
 }));
-vi.mock('../../settings/components/TelemetryTab', () => ({
+vi.mock('../settings/components/TelemetryTab', () => ({
   TelemetryTab: () => <div>telemetry-tab-panel</div>,
 }));
-vi.mock('../../settings/components/catalog/AddModelWizard', () => ({
+vi.mock('../settings/components/catalog/AddModelWizard', () => ({
   AddModelWizard: () => null,
 }));
 
 const profile: SettingsRuntimeProfileDto = {
-  profileId: 'local-llama',
+  profileId: 'local_llama',
   displayName: 'Local Llama',
   description: 'Dev profile',
   providers: ['llama-cpp'],
@@ -88,13 +88,14 @@ const profile: SettingsRuntimeProfileDto = {
   thinkingControlJson: '{}',
 };
 
-vi.mock('../../settings/components/ModelsRuntimeWorkspace', () => ({
+vi.mock('../settings/components/ModelsRuntimeWorkspace', () => ({
   ModelsRuntimeWorkspace: ({
     onOpenCreateProfile,
     onSaveProfile,
     onEditProfile,
     onInsertRuntimeProfileTemplate,
     onProfileFormChange,
+    onImportProfile,
   }: {
     onOpenCreateProfile: () => void;
     onSaveProfile: () => void;
@@ -104,6 +105,7 @@ vi.mock('../../settings/components/ModelsRuntimeWorkspace', () => ({
       key: K,
       value: ReturnType<typeof createEmptyProfileForm>[K],
     ) => void;
+    onImportProfile: (form: ReturnType<typeof createEmptyProfileForm>) => void;
   }) => (
     <div>
       <button type="button" onClick={onOpenCreateProfile}>
@@ -112,7 +114,13 @@ vi.mock('../../settings/components/ModelsRuntimeWorkspace', () => ({
       <button type="button" onClick={() => onEditProfile(profile)}>
         edit-profile
       </button>
-      <button type="button" onClick={() => onProfileFormChange('displayName', 'Updated Profile')}>
+      <button
+        type="button"
+        onClick={() => {
+          onProfileFormChange('profileId', 'new_profile');
+          onProfileFormChange('displayName', 'New Profile');
+        }}
+      >
         patch-profile-form
       </button>
       <button type="button" onClick={onSaveProfile}>
@@ -120,6 +128,24 @@ vi.mock('../../settings/components/ModelsRuntimeWorkspace', () => ({
       </button>
       <button type="button" onClick={() => onInsertRuntimeProfileTemplate('qwen3_5')}>
         insert-template
+      </button>
+      <button type="button" onClick={() => onInsertRuntimeProfileTemplate('qwen3_6')}>
+        insert-template-qwen36
+      </button>
+      <button type="button" onClick={() => onInsertRuntimeProfileTemplate('gemma4')}>
+        insert-template-gemma4
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onImportProfile({
+            ...createEmptyProfileForm(),
+            profileId: 'imported_profile',
+            displayName: 'Imported Profile',
+          })
+        }
+      >
+        import-profile
       </button>
     </div>
   ),
@@ -193,10 +219,13 @@ describe('Settings profile flows', () => {
     await openModelsRuntime(user);
 
     await user.click(screen.getByRole('button', { name: 'edit-profile' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'save-profile' })).toBeEnabled();
+    });
     await user.click(screen.getByRole('button', { name: 'save-profile' }));
 
     await waitFor(() => {
-      expect(api.settings.updateRuntimeProfile).toHaveBeenCalledWith('local-llama', expect.any(Object));
+      expect(api.settings.updateRuntimeProfile).toHaveBeenCalledWith('local_llama', expect.any(Object));
     });
   });
 
@@ -216,6 +245,71 @@ describe('Settings profile flows', () => {
         expect.objectContaining({ profileId: 'qwen3_5' }),
       );
       expect(api.settings.getRuntimeProfiles).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('creates gemma4 and qwen3_6 runtime profile templates', async () => {
+    const user = userEvent.setup();
+    renderSettingsAsAdmin();
+    await openModelsRuntime(user);
+
+    await user.click(screen.getByRole('button', { name: 'insert-template-qwen36' }));
+    await waitFor(() => {
+      expect(api.settings.createRuntimeProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ profileId: 'qwen3_6' }),
+      );
+    });
+
+    await user.click(screen.getByRole('button', { name: 'insert-template-gemma4' }));
+    await waitFor(() => {
+      expect(api.settings.createRuntimeProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ profileId: 'gemma4' }),
+      );
+    });
+  });
+
+  it('surfaces template creation failures that are not duplicate-profile cases', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.createRuntimeProfile).mockRejectedValue(new Error('Template write failed'));
+
+    renderSettingsAsAdmin();
+    await openModelsRuntime(user);
+
+    await user.click(screen.getByRole('button', { name: 'insert-template' }));
+
+    await waitFor(() => {
+      expect(api.settings.createRuntimeProfile).toHaveBeenCalled();
+    });
+  });
+
+  it('surfaces profile save failures from the API', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.createRuntimeProfile).mockRejectedValue(new Error('Create failed'));
+
+    renderSettingsAsAdmin();
+    await openModelsRuntime(user);
+
+    await user.click(screen.getByRole('button', { name: 'open-create-profile' }));
+    await user.click(screen.getByRole('button', { name: 'patch-profile-form' }));
+    await user.click(screen.getByRole('button', { name: 'save-profile' }));
+
+    await waitFor(() => {
+      expect(api.settings.createRuntimeProfile).toHaveBeenCalled();
+    });
+  });
+
+  it('opens the profile dialog with imported profile data', async () => {
+    const user = userEvent.setup();
+    renderSettingsAsAdmin();
+    await openModelsRuntime(user);
+
+    await user.click(screen.getByRole('button', { name: 'import-profile' }));
+    await user.click(screen.getByRole('button', { name: 'save-profile' }));
+
+    await waitFor(() => {
+      expect(api.settings.createRuntimeProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ profileId: 'imported_profile' }),
+      );
     });
   });
 });

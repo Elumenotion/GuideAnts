@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatSecretRef,
+  isSecretRef,
+  listSecretVariables,
+  normalizeHeaderValueForStorage,
   parseSecretRef,
   resolveHeaderValues,
 } from '../environmentVariableRefs';
@@ -30,5 +33,17 @@ describe('environmentVariableRefs', () => {
 
     expect(resolved).toEqual({});
     expect(missingRefs).toEqual(['MISSING']);
+  });
+
+  it('lists secret variables and normalizes stored header values', () => {
+    expect(isSecretRef('{{secret:TOKEN}}')).toBe(true);
+    expect(
+      listSecretVariables([
+        { name: 'TOKEN', value: 'secret', isSecret: true },
+        { name: 'PUBLIC', value: 'plain', isSecret: false },
+      ]),
+    ).toEqual([{ name: 'TOKEN', value: 'secret', isSecret: true }]);
+    expect(normalizeHeaderValueForStorage(' {{secret:TOKEN}} ')).toBe('{{secret:TOKEN}}');
+    expect(normalizeHeaderValueForStorage(' plain ')).toBe('plain');
   });
 });

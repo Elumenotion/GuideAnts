@@ -137,4 +137,70 @@ describe('ModelsTab', () => {
     await user.click(screen.getByTitle('Delete model gpt-test'));
     expect(onRequestDeleteModel).toHaveBeenCalledWith('gpt-test');
   });
+
+  it('shows active add-operation banner and llama runtime badges', async () => {
+    const loadedLlama: SettingsModelDto = {
+      ...llamaModel,
+      modelId: 'llama/loaded',
+      displayName: 'Loaded Llama',
+      runtimeConfigJson: JSON.stringify({
+        routerModelId: 'alias-loaded',
+        runtimeProfileId: 'profile-1',
+      }),
+    };
+    const invalidLlama: SettingsModelDto = {
+      ...llamaModel,
+      modelId: 'llama/broken',
+      displayName: 'Broken Llama',
+      runtimeConfigJson: '{not-json',
+    };
+
+    renderModelsTab({
+      orderedModels: [cloudModel, llamaModel, loadedLlama, invalidLlama],
+      activeAddOperation: {
+        operationId: 'op-1',
+        routerModelId: 'alias-1',
+        catalogModelId: 'llama/local',
+      },
+      llamaInventory: [
+        {
+          routerModelId: 'alias-1',
+          runtimeState: 'loaded',
+          modelPath: '/models/llama.gguf',
+          hasModelFile: true,
+          hasMmprojFile: false,
+          catalogModelIds: ['llama/local'],
+          notebookReferenceCount: 0,
+        },
+        {
+          routerModelId: 'alias-loaded',
+          runtimeState: 'loaded',
+          modelPath: '/models/loaded.gguf',
+          hasModelFile: true,
+          hasMmprojFile: false,
+          catalogModelIds: ['llama/loaded'],
+          notebookReferenceCount: 0,
+        },
+      ],
+      llamaInventoryLoading: false,
+    });
+
+    expect(
+      screen.getByText(/Add operation in progress for/i).textContent,
+    ).toContain('llama/local');
+    expect(await screen.findByText('Installing…')).toBeInTheDocument();
+    expect(await screen.findByText('Loaded')).toBeInTheDocument();
+    expect(await screen.findByText('Invalid local JSON')).toBeInTheDocument();
+  });
+
+  it('highlights a focused catalog row when deep-linked', async () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    renderModelsTab({ focusedModelId: 'gpt-test' });
+
+    await waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalled();
+    });
+  });
 });

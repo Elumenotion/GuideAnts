@@ -131,6 +131,63 @@ describe('mcpSandboxSetupComposer extended', () => {
     expect(error).toBe('requirements failed');
   });
 
+  it('returns install script staging errors', async () => {
+    const error = await stageSandboxSetupForGuide(
+      { projectId: 'project-1', guideId: 'guide-1' },
+      [{ registryType: 'pypi', identifier: 'pkg', command: 'python', args: [] }],
+      {
+        setRequirements: vi.fn().mockResolvedValue({ status: 'ok' }),
+        setInstallScripts: vi.fn().mockResolvedValue({ status: 'error', message: 'install failed' }),
+        getAptPackages: vi.fn(),
+        setAptPackages: vi.fn(),
+      },
+    );
+
+    expect(error).toBe('install failed');
+  });
+
+  it('returns apt package staging errors for npm packages', async () => {
+    const error = await stageSandboxSetupForGuide(
+      { projectId: 'project-1', guideId: 'guide-1' },
+      [{ registryType: 'npm', identifier: '@acme/mcp', command: 'npx', args: ['-y', '@acme/mcp'] }],
+      {
+        setRequirements: vi.fn().mockResolvedValue({ status: 'ok' }),
+        setInstallScripts: vi.fn().mockResolvedValue({ status: 'ok' }),
+        getAptPackages: vi.fn().mockResolvedValue({ status: 'ok', content: '' }),
+        setAptPackages: vi.fn().mockResolvedValue({ status: 'error', message: 'apt failed' }),
+      },
+    );
+
+    expect(error).toBe('apt failed');
+  });
+
+  it('quotes empty shell arguments defensively', () => {
+    const artifacts = composeSandboxStagingArtifacts([
+      {
+        registryType: 'custom',
+        identifier: 'pkg',
+        command: 'bash',
+        args: [''],
+      },
+    ]);
+
+    expect(artifacts.installScriptsJson).toContain("''");
+  });
+
+  it('adds node apt dependency for npx-driven sandbox packages', () => {
+    const artifacts = composeSandboxStagingArtifacts([
+      {
+        registryType: 'custom',
+        identifier: '@acme/mcp',
+        command: 'npx',
+        args: ['-y', '@acme/mcp'],
+      },
+    ]);
+
+    expect(artifacts.aptPackagesText).toBe('nodejs\n');
+    expect(artifacts.installScriptsJson).toContain('npx');
+  });
+
   it('returns null when there are no packages to stage', async () => {
     const error = await stageSandboxSetupForGuide(
       { projectId: 'project-1', guideId: 'guide-1' },

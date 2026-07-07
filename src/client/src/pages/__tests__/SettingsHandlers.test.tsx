@@ -269,4 +269,46 @@ describe('Settings confirmation handlers', () => {
     expect(await screen.findByText('personalization-tab-panel')).toBeInTheDocument();
     expect(screen.queryByText('overview-tab-panel')).not.toBeInTheDocument();
   });
+
+  it('surfaces delete model failures via toast', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.deleteModel).mockRejectedValue(new Error('Delete blocked'));
+    renderSettingsAsAdmin();
+    await openModelsRuntime(user);
+
+    await user.click(screen.getByRole('button', { name: 'trigger-delete-model' }));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(api.settings.deleteModel).toHaveBeenCalledWith('gpt-test');
+    });
+  });
+
+  it('surfaces llama unload failures via toast', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.unloadLlamaModel).mockRejectedValue(new Error('Unload blocked'));
+    renderSettingsAsAdmin();
+    await openModelsRuntime(user);
+
+    await user.click(screen.getByRole('button', { name: 'trigger-unload-llama' }));
+    await user.click(screen.getByRole('button', { name: 'Unload' }));
+
+    await waitFor(() => {
+      expect(api.settings.unloadLlamaModel).toHaveBeenCalledWith('alias-1');
+    });
+  });
+
+  it('surfaces runtime profile deletion failures via toast', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.deleteRuntimeProfile).mockRejectedValue(new Error('Profile locked'));
+    renderSettingsAsAdmin();
+    await openModelsRuntime(user);
+
+    await user.click(screen.getByRole('button', { name: 'trigger-delete-profile' }));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(api.settings.deleteRuntimeProfile).toHaveBeenCalledWith('profile-1');
+    });
+  });
 });

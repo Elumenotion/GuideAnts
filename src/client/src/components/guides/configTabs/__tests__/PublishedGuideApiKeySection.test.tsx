@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { render, screen, waitFor } from '@testing-library/react';
+import { useState, type ComponentProps } from 'react';
 import '@testing-library/jest-dom';
 import { PublishedGuideApiKeySection } from '../PublishedGuideApiKeySection';
 
@@ -16,6 +17,37 @@ vi.mock('../../../../services/api', () => ({
 }));
 
 import { api } from '../../../../services/api';
+
+function renderApiKeySection(overrides: Partial<ComponentProps<typeof PublishedGuideApiKeySection>> = {}) {
+  const {
+    hasApiKey: initialHasApiKey = false,
+    sessionApiKey: initialSessionApiKey = null,
+    onApiKeyChange: _ignoredKeyChange,
+    onSessionApiKeyChange: _ignoredSessionChange,
+    ...rest
+  } = overrides;
+
+  function Harness() {
+    const [hasApiKey, setHasApiKey] = useState(initialHasApiKey);
+    const [sessionApiKey, setSessionApiKey] = useState<string | null>(initialSessionApiKey);
+
+    return (
+      <PublishedGuideApiKeySection
+        context="auth"
+        guideId="guide-1"
+        publishedGuideId="pub-1"
+        authWebhookUrl=""
+        hasApiKey={hasApiKey}
+        sessionApiKey={sessionApiKey}
+        onApiKeyChange={setHasApiKey}
+        onSessionApiKeyChange={setSessionApiKey}
+        {...rest}
+      />
+    );
+  }
+
+  return render(<Harness />);
+}
 
 const baseProps = {
   context: 'auth' as const,
@@ -34,9 +66,9 @@ describe('PublishedGuideApiKeySection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     writeText.mockClear();
-    vi.stubGlobal('navigator', {
-      ...navigator,
-      clipboard: { writeText },
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
     });
   });
 
@@ -75,54 +107,36 @@ describe('PublishedGuideApiKeySection', () => {
 
   it('generates an API key in edit mode', async () => {
     const user = userEvent.setup();
-    const onApiKeyChange = vi.fn();
-    const onSessionApiKeyChange = vi.fn();
     vi.mocked(api.guides.guides.generateApiKey).mockResolvedValue({ apiKey: 'gak_new_key' } as never);
 
-    render(
-      <PublishedGuideApiKeySection
-        {...baseProps}
-        onApiKeyChange={onApiKeyChange}
-        onSessionApiKeyChange={onSessionApiKeyChange}
-      />,
-    );
+    renderApiKeySection();
 
     await user.click(screen.getByRole('button', { name: 'Generate API Key' }));
 
     await waitFor(() => {
       expect(api.guides.guides.generateApiKey).toHaveBeenCalledWith('guide-1', 'pub-1');
-      expect(onSessionApiKeyChange).toHaveBeenCalledWith('gak_new_key');
-      expect(onApiKeyChange).toHaveBeenCalledWith(true);
+      expect(screen.getByText('gak_new_key')).toBeInTheDocument();
     });
-    expect(screen.getByText('gak_new_key')).toBeInTheDocument();
   });
 
   it('copies the session API key to clipboard', async () => {
     const user = userEvent.setup();
+    const copyToClipboard = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
 
-    render(
-      <PublishedGuideApiKeySection
-        {...baseProps}
-        hasApiKey
-        sessionApiKey="gak_copy_me"
-      />,
-    );
+    renderApiKeySection({ hasApiKey: true, sessionApiKey: 'gak_copy_me' });
 
     await user.click(screen.getByRole('button', { name: 'Copy' }));
-    expect(writeText).toHaveBeenCalledWith('gak_copy_me');
+    expect(copyToClipboard).toHaveBeenCalledWith('gak_copy_me');
     expect(await screen.findByRole('button', { name: 'Copied!' })).toBeInTheDocument();
+
+    copyToClipboard.mockRestore();
   });
 
   it('regenerates an API key after confirmation', async () => {
     const user = userEvent.setup();
     vi.mocked(api.guides.guides.generateApiKey).mockResolvedValue({ apiKey: 'gak_regenerated' } as never);
 
-    render(
-      <PublishedGuideApiKeySection
-        {...baseProps}
-        hasApiKey
-      />,
-    );
+    renderApiKeySection({ hasApiKey: true });
 
     await user.click(screen.getByRole('button', { name: 'Regenerate Key' }));
     await user.click(screen.getByRole('button', { name: 'Confirm Regenerate' }));

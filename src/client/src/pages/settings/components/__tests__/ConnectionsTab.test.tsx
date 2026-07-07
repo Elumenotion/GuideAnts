@@ -145,4 +145,24 @@ describe('ConnectionsTab', () => {
 
     expect(screen.getByText(/Summaries failed/i)).toBeInTheDocument();
   });
+
+  it('surfaces schema and usage load failures', async () => {
+    vi.mocked(api.settings.getSchema).mockRejectedValue(new Error('Schema unavailable'));
+    vi.mocked(api.settings.connections.getUsage).mockRejectedValue(new Error('Usage unavailable'));
+    renderConnectionsTab();
+
+    expect(await screen.findByText('Schema unavailable')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Usage unavailable')).toBeInTheDocument();
+    });
+  });
+
+  it('auto-selects the focused provider section on first render', async () => {
+    renderConnectionsTab({ focusedSection: 'OpenAI' });
+
+    await waitFor(() => {
+      expect(api.settings.getSection).toHaveBeenCalledWith('OpenAI');
+      expect(api.settings.connections.getUsage).toHaveBeenCalledWith('OpenAI');
+    });
+  });
 });

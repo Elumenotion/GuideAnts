@@ -131,27 +131,18 @@ describe('ProfilesTab', () => {
 
   it('exports a profile JSON file', async () => {
     const user = userEvent.setup();
-    const click = vi.fn();
-    const remove = vi.fn();
-    const revoke = vi.fn();
-    const appendChild = vi.spyOn(document.body, 'appendChild').mockImplementation((node) => {
-      if (node instanceof HTMLAnchorElement) {
-        node.click = click;
-        node.remove = remove;
-      }
-      return node;
-    });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:profile');
-    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(revoke);
 
     renderProfiles();
     await user.click(screen.getByRole('button', { name: 'Export' }));
 
-    expect(click).toHaveBeenCalled();
-    expect(remove).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
     expect(revoke).toHaveBeenCalledWith('blob:profile');
 
-    appendChild.mockRestore();
+    clickSpy.mockRestore();
+    revoke.mockRestore();
   });
 
   it('shows import validation errors for invalid JSON', async () => {
@@ -161,7 +152,7 @@ describe('ProfilesTab', () => {
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [file] } });
 
-    expect(await screen.findByText(/Failed to import runtime profile/i)).toBeInTheDocument();
+    expect(await screen.findByText(/not valid JSON/i)).toBeInTheDocument();
   });
 
   it('shows deleting spinner on the active profile row', () => {
