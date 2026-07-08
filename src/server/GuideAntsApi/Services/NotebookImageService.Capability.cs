@@ -159,14 +159,17 @@ public partial class NotebookImageService
 
     private string ResolveStorageRoot()
     {
-        if (_serviceProvider == null)
+        if (_serviceProvider != null)
         {
-            throw new InvalidOperationException("Service provider is not configured.");
+            using var scope = _serviceProvider.CreateScope();
+            var cfg = scope.ServiceProvider.GetService<IConfiguration>();
+            if (cfg != null)
+            {
+                return NotebookRunOutputWriter.ResolveStorageRoot(cfg);
+            }
         }
 
-        using var scope = _serviceProvider.CreateScope();
-        var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-        return NotebookRunOutputWriter.ResolveStorageRoot(cfg);
+        return NotebookRunOutputWriter.ResolveStorageRoot(_configuration);
     }
 
     private static string SanitizeGeneratedImageFilename(string filename, string outputFormat)
