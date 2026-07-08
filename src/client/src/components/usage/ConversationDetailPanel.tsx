@@ -194,7 +194,7 @@ export function ConversationDetailPanel({
                 {/* Turn invocation trees */}
                 {turns.length > 0 && (
                   <div className="space-y-6">
-                    {turns.map((turn, idx) => {
+                    {turns.map((turn) => {
                       const filteredRoots =
                         allowedAssistantIds && allowedAssistantIds.length > 0
                           ? turn.rootInvocations.filter(
@@ -212,7 +212,7 @@ export function ConversationDetailPanel({
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-3">
                               <div className="text-sm font-semibold text-gray-900">
-                                Turn {idx + 1}
+                                Turn {turn.turnIndex}
                               </div>
                               <button
                                 onClick={() => setSelectedTurnForMessages(turn.turnIndex)}
@@ -266,14 +266,14 @@ export function ConversationDetailPanel({
                           Turn Messages
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          {conversation.turnIndices.map((turnIndex, idx) => (
+                          {conversation.turnIndices.map((turnIndex) => (
                             <button
                               key={turnIndex}
                               onClick={() => setSelectedTurnForMessages(turnIndex)}
                               className="px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
                               title="View conversation messages"
                             >
-                              Turn {idx + 1} Messages
+                              Turn {turnIndex} Messages
                             </button>
                           ))}
                         </div>

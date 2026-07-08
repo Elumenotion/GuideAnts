@@ -123,7 +123,7 @@ const appendTraceMessageMarkdown = (
 const buildPromptTraceMarkdown = (trace: TurnPromptTraceDto): string => {
   const lines: string[] = [];
 
-  lines.push(`# Prompt Trace — Turn ${trace.turnIndex + 1}`);
+  lines.push(`# Prompt Trace — Turn ${trace.turnIndex}`);
   lines.push('');
   if (trace.assistantName) {
     lines.push(`- **Assistant:** ${trace.assistantName}`);
@@ -713,7 +713,7 @@ export function TurnMessagesPanel({
               <h2 className="text-lg font-semibold">Turn Messages</h2>
               {activeTab === 'messages' && data && (
                 <div className="mt-1 text-sm text-gray-600">
-                  <span>Turn {turnIndex! + 1}</span>
+                  <span>Turn {turnIndex}</span>
                   {data.assistantName && (
                     <>
                       <span className="text-gray-400 mx-2">•</span>
@@ -726,7 +726,7 @@ export function TurnMessagesPanel({
               )}
               {activeTab === 'promptTrace' && traceData && (
                 <div className="mt-1 text-sm text-gray-600">
-                  <span>Turn {turnIndex! + 1}</span>
+                  <span>Turn {turnIndex}</span>
                   <span className="text-gray-400 mx-2">•</span>
                   <span>Trace state: {traceData.captureState}</span>
                   <span className="text-gray-400 mx-2">•</span>

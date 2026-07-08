@@ -21,6 +21,31 @@ public sealed class NotebookPathHelperTests
     }
 
     [TestMethod]
+    public void GetGeneratedImageDbRelativePath_PrivateNotebook_UsesOutputFolder()
+    {
+        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())
+        {
+            IsPublished = false
+        };
+
+        NotebookPathHelper.GetGeneratedImageDbRelativePath(context, "wire-abc.png")
+            .Should().Be("Output/wire-abc.png");
+    }
+
+    [TestMethod]
+    public void GetGeneratedImageDbRelativePath_PublishedNotebook_UsesRunsFolder()
+    {
+        var context = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid())
+        {
+            IsPublished = true,
+            RunId = "Ab12Cd34Ef"
+        };
+
+        NotebookPathHelper.GetGeneratedImageDbRelativePath(context, "wire-abc.png")
+            .Should().Be("Runs/Ab12Cd34Ef/wire-abc.png");
+    }
+
+    [TestMethod]
     public void GetWorkingDirectory_WithResolver_EnsuresMetadataBeforeContainerPath()
     {
         var resolver = new RecordingStoragePathResolver(

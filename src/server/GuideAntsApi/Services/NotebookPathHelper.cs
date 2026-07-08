@@ -51,6 +51,17 @@ internal static class NotebookPathHelper
     }
 
     /// <summary>
+    /// Reconstructs the DB-relative path for a generated image from the cwd-relative
+    /// path returned by <see cref="NotebookImageService"/> (typically the filename).
+    /// Uses the same Output vs Runs/{runId} rules as the write path.
+    /// </summary>
+    public static string GetGeneratedImageDbRelativePath(InvocationContext runContext, string cwdRelativePath)
+    {
+        var normalized = cwdRelativePath.Trim().Replace('\\', '/').TrimStart('/');
+        return Path.Combine(GetRelativeRunFolder(runContext), normalized).Replace('\\', '/');
+    }
+
+    /// <summary>
     /// Returns the relative folder name ("Output" or "Runs/{runId}") for the invocation.
     /// </summary>
     public static string GetRelativeRunFolder(InvocationContext context)

@@ -14,7 +14,7 @@ public enum UsageCategory
     DocumentExtraction = 2,
     /// <summary>Speech-to-text transcription seconds charged.</summary>
     SpeechTranscription = 3,
-    /// <summary>Text-to-speech synthesis seconds charged.</summary>
+    /// <summary>Text-to-speech synthesis; billing unit is character count in ValueOther.</summary>
     SpeechSynthesis = 4,
     /// <summary>Search API usage counts.</summary>
     Search = 5,
@@ -42,6 +42,21 @@ public sealed record UsageMetrics(
     long ValueReasoning = 0,
     long ValueOutput = 0,
     long ValueOther = 0);
+
+/// <summary>
+/// Canonical speech usage metrics shared by wire endpoints, extension helpers, and cost calculation.
+/// <see cref="UsageMetrics.ValueOther"/> is the billing unit: duration seconds (STT) or character count (TTS).
+/// </summary>
+public static class SpeechUsageMetrics
+{
+    /// <summary>STT: ValueOther is duration in seconds (used by <see cref="EfUsageRecorder"/>).</summary>
+    public static UsageMetrics ForTranscription(long durationSeconds, long transcriptLength) =>
+        new(ValueInput: durationSeconds, ValueOutput: transcriptLength, ValueOther: durationSeconds);
+
+    /// <summary>TTS: ValueOther is input character count (used by <see cref="EfUsageRecorder"/>).</summary>
+    public static UsageMetrics ForSynthesis(long characterCount, long durationSeconds = 0) =>
+        new(ValueInput: characterCount, ValueOutput: durationSeconds, ValueOther: characterCount);
+}
 
 /// <summary>
 /// Abstraction for recording usage events. Implementations may write directly to the database,
@@ -220,7 +235,7 @@ public static class UsageRecorderExtensions
         CancellationToken ct = default)
         => recorder.RecordAsync(projectId, notebookId, UsageCategory.SpeechTranscription,
             "AzureSpeech", "STT",
-            new UsageMetrics(ValueOther: durationSeconds), costUsd, null, contentFileId, notebookFileId,
+            SpeechUsageMetrics.ForTranscription(durationSeconds, transcriptLength: 0), costUsd, null, contentFileId, notebookFileId,
             null, metadataJson, assistantId, agentInvocationId, null, ct);
 
     /// <summary>
@@ -243,7 +258,7 @@ public static class UsageRecorderExtensions
         Guid? notebookConversationMessageId = null)
         => recorder.RecordAsync(projectId, notebookId, UsageCategory.SpeechSynthesis,
             service, operation,
-            new UsageMetrics(ValueOther: characterCount), costUsd, conversationId, null, notebookFileId,
+            SpeechUsageMetrics.ForSynthesis(characterCount), costUsd, conversationId, null, notebookFileId,
             null, metadataJson, assistantId, agentInvocationId, notebookConversationMessageId, ct);
 
     /// <summary>

@@ -9,6 +9,7 @@ using GuideAntsApi.Endpoints.PublishedWire;
 using GuideAntsApi.Services.PublishedWireApi;
 using GuideAntsApi.Services.SandboxWireApi;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -449,7 +450,7 @@ public static class SandboxOpenAiWireHandlers
         [FromServices] ISandboxWireExecutionContextResolver executionContextResolver,
         [FromServices] INotebookImageService notebookImageService,
         [FromServices] IServiceModeResolver serviceModeResolver,
-        [FromServices] IStoragePathResolver storagePathResolver,
+        [FromServices] IConfiguration configuration,
         [FromServices] IPublishedWireUsageRecorder wireUsageRecorder) =>
         SandboxWireMediaHandlers.PostImageGenerationsAsync(
             httpContext,
@@ -457,7 +458,7 @@ public static class SandboxOpenAiWireHandlers
             executionContextResolver,
             notebookImageService,
             serviceModeResolver,
-            storagePathResolver,
+            configuration,
             wireUsageRecorder);
 
     public static Task<IResult> PostAudioTranscriptionsAsync(
@@ -481,6 +482,7 @@ public static class SandboxOpenAiWireHandlers
         [FromServices] ISandboxWireExecutionContextResolver executionContextResolver,
         [FromServices] ISpeechSynthesisService speechSynthesisService,
         [FromServices] IServiceModeResolver serviceModeResolver,
+        [FromServices] IConfiguration configuration,
         [FromServices] IPublishedWireUsageRecorder wireUsageRecorder) =>
         SandboxWireMediaHandlers.PostAudioSpeechAsync(
             httpContext,
@@ -488,6 +490,7 @@ public static class SandboxOpenAiWireHandlers
             executionContextResolver,
             speechSynthesisService,
             serviceModeResolver,
+            configuration,
             wireUsageRecorder);
 
     private static async Task<IResult> ResolveAndDelegateNotReady(

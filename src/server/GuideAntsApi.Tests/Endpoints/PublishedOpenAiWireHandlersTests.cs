@@ -17,6 +17,7 @@ using GuideAntsApi.Services.SandboxWireApi;
 using GuideAntsApi.Services.Routing;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 
@@ -3554,7 +3555,8 @@ public sealed class PublishedOpenAiWireHandlersTests
         var resolver = new StubResolver(CreateExecutionContext(pubId));
         var imageService = new Mock<INotebookImageService>(MockBehavior.Strict);
         var modeResolver = new Mock<IServiceModeResolver>(MockBehavior.Strict);
-        var storagePathResolver = new Mock<IStoragePathResolver>(MockBehavior.Strict);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        var notebookFileSyncService = new Mock<INotebookFileSyncService>(MockBehavior.Strict);
         var usageRecorder = new CapturingWireUsageRecorder();
         var http = new DefaultHttpContext();
 
@@ -3565,7 +3567,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             resolver,
             imageService.Object,
             modeResolver.Object,
-            storagePathResolver.Object,
+            configuration,
+            notebookFileSyncService.Object,
             usageRecorder);
         var executed = await ExecuteResultAsync(result);
 
@@ -3606,6 +3609,8 @@ public sealed class PublishedOpenAiWireHandlersTests
         var resolver = new StubResolver(CreateExecutionContext(pubId));
         var speechService = new Mock<ISpeechSynthesisService>(MockBehavior.Strict);
         var modeResolver = new Mock<IServiceModeResolver>(MockBehavior.Strict);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        var notebookFileSyncService = new Mock<INotebookFileSyncService>(MockBehavior.Strict);
         var usageRecorder = new CapturingWireUsageRecorder();
         var http = new DefaultHttpContext();
 
@@ -3621,6 +3626,8 @@ public sealed class PublishedOpenAiWireHandlersTests
             resolver,
             speechService.Object,
             modeResolver.Object,
+            configuration,
+            notebookFileSyncService.Object,
             usageRecorder);
         var executed = await ExecuteResultAsync(result);
 
@@ -3888,6 +3895,118 @@ public sealed class PublishedOpenAiWireHandlersTests
             Calls.Add(new Call(service, operation, endpoint, alias, providerModel, providerServiceMode, status));
             return Task.CompletedTask;
         }
+
+        public Task RecordTranscriptionAsync(
+            PublishedApiExecutionContext context,
+            string service,
+            string operation,
+            string endpoint,
+            long durationSeconds,
+            long transcriptLength,
+            string? alias = null,
+            string? providerModel = null,
+            string? providerServiceMode = null,
+            long? requestBytes = null,
+            decimal costUsd = 0m,
+            CancellationToken ct = default) =>
+            RecordTranscriptionAsync(
+                new PublishedWireExecutionContextAdapter(context),
+                service,
+                operation,
+                endpoint,
+                durationSeconds,
+                transcriptLength,
+                alias,
+                providerModel,
+                providerServiceMode,
+                requestBytes,
+                costUsd,
+                ct);
+
+        public Task RecordTranscriptionAsync(
+            IWireExecutionContext context,
+            string service,
+            string operation,
+            string endpoint,
+            long durationSeconds,
+            long transcriptLength,
+            string? alias = null,
+            string? providerModel = null,
+            string? providerServiceMode = null,
+            long? requestBytes = null,
+            decimal costUsd = 0m,
+            CancellationToken ct = default) =>
+            RecordAsync(
+                context,
+                GuideAnts.Usage.UsageCategory.SpeechTranscription,
+                service,
+                operation,
+                SpeechUsageMetrics.ForTranscription(durationSeconds, transcriptLength),
+                endpoint,
+                alias: alias,
+                providerModel: providerModel,
+                providerServiceMode: providerServiceMode,
+                requestBytes: requestBytes,
+                inputCount: durationSeconds,
+                outputCount: transcriptLength,
+                costUsd: costUsd,
+                ct: ct);
+
+        public Task RecordSpeechAsync(
+            PublishedApiExecutionContext context,
+            string service,
+            string operation,
+            string endpoint,
+            long characterCount,
+            long durationSeconds,
+            string? alias = null,
+            string? providerModel = null,
+            string? providerServiceMode = null,
+            long? requestBytes = null,
+            decimal costUsd = 0m,
+            CancellationToken ct = default) =>
+            RecordSpeechAsync(
+                new PublishedWireExecutionContextAdapter(context),
+                service,
+                operation,
+                endpoint,
+                characterCount,
+                durationSeconds,
+                alias,
+                providerModel,
+                providerServiceMode,
+                requestBytes,
+                costUsd,
+                ct);
+
+        public Task RecordSpeechAsync(
+            IWireExecutionContext context,
+            string service,
+            string operation,
+            string endpoint,
+            long characterCount,
+            long durationSeconds,
+            string? alias = null,
+            string? providerModel = null,
+            string? providerServiceMode = null,
+            long? requestBytes = null,
+            decimal costUsd = 0m,
+            CancellationToken ct = default) =>
+            RecordAsync(
+                context,
+                GuideAnts.Usage.UsageCategory.SpeechSynthesis,
+                service,
+                operation,
+                SpeechUsageMetrics.ForSynthesis(characterCount, durationSeconds),
+                endpoint,
+                alias: alias,
+                providerModel: providerModel,
+                providerServiceMode: providerServiceMode,
+                requestBytes: requestBytes,
+                inputCount: characterCount,
+                outputCount: durationSeconds,
+                costUsd: costUsd,
+                ct: ct);
 
         public sealed record Call(
             string Service,

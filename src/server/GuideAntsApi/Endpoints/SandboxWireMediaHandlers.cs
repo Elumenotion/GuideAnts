@@ -8,6 +8,7 @@ using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.PublishedWireApi;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Services.SandboxWireApi;
+using Microsoft.Extensions.Configuration;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -108,7 +109,7 @@ public static class SandboxWireMediaHandlers
         ISandboxWireExecutionContextResolver executionContextResolver,
         INotebookImageService notebookImageService,
         IServiceModeResolver serviceModeResolver,
-        IStoragePathResolver storagePathResolver,
+        IConfiguration configuration,
         IPublishedWireUsageRecorder wireUsageRecorder)
     {
         var resolution = await executionContextResolver.ResolveAsync(
@@ -148,70 +149,35 @@ public static class SandboxWireMediaHandlers
                 NotebookId: context.NotebookId,
                 ConversationId: context.AttributionConversationId ?? Guid.NewGuid())
             {
-                IsPublished = false,
                 AssistantId = context.OwnerAssistantId
             };
 
-            var fileName = $"wire-{Guid.NewGuid():N}.png";
-            var imageResult = await notebookImageService.GenerateImageAsync(
-                prompt: request.Prompt,
-                filename: fileName,
-                size: string.IsNullOrWhiteSpace(request.Size) ? "1024x1024" : request.Size!,
-                n: request.N.GetValueOrDefault(1),
-                outputFormat: "png",
-                context: runContext);
-
-            var newFile = imageResult.NewFiles?.FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(newFile))
-            {
-                return OpenAiWireErrorResults.ProviderNotReady(string.IsNullOrWhiteSpace(imageResult.StandardError)
-                    ? "Image generation did not return an output file."
-                    : imageResult.StandardError);
-            }
-
-            var normalizedRelative = newFile.Trim().Replace("\\", "/").TrimStart('/');
-            if (normalizedRelative.StartsWith("../", StringComparison.Ordinal))
-            {
-                return OpenAiWireErrorResults.ProviderNotReady("Image output path was outside the run directory.");
-            }
-
-            var dbRelativePath = $"Runs/{runContext.RunId}/{normalizedRelative}";
-            var rootPath = storagePathResolver.GetNotebookRootPath(context.ProjectId, context.NotebookId);
-            var fullPath = Path.Combine(rootPath, dbRelativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(fullPath))
-            {
-                return OpenAiWireErrorResults.ProviderNotReady("Generated image file was not found.");
-            }
-
-            var bytes = await File.ReadAllBytesAsync(fullPath, httpContext.RequestAborted);
-            var base64 = Convert.ToBase64String(bytes);
-            await wireUsageRecorder.RecordAsync(
-                context: context,
-                category: UsageCategory.ImageGeneration,
-                service: mode.ProviderSection,
-                operation: "images.generations",
-                metrics: new UsageMetrics(ValueInput: request.Prompt.Length, ValueOther: bytes.Length),
-                endpoint: "images.generations",
-                alias: modelAlias.Alias,
-                providerModel: mode.ModelId,
-                providerServiceMode: mode.ModeId,
-                requestBytes: httpContext.Request.ContentLength,
-                inputCount: request.Prompt.Length,
-                outputCount: bytes.Length,
-                ct: httpContext.RequestAborted);
-
-            return Results.Json(new
-            {
-                created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                data = new[]
-                {
-                    new
-                    {
-                        b64_json = base64,
-                        revised_prompt = request.Prompt
-                    }
-                }
-            }, WireJson.SerializationOptions);
+            return await WireImageGenerationsExecutor.ExecuteAsync(
+                httpContext,
+                new WireImageGenerationsExecutor.Request(
+                    Prompt: request.Prompt,
+                    Size: string.IsNullOrWhiteSpace(request.Size) ? "1024x1024" : request.Size!,
+                    N: request.N.GetValueOrDefault(1),
+                    RunContext: runContext),
+                mode,
+                configuration,
+                notebookImageService,
+                notebookFileSyncService: null,
+                syncDatabaseAfterWrite: false,
+                recordUsageAsync: async (metrics, inputCount, outputCount) => await wireUsageRecorder.RecordAsync(
+                    context: context,
+                    category: UsageCategory.ImageGeneration,
+                    service: mode.ProviderSection,
+                    operation: "images.generations",
+                    metrics: metrics,
+                    endpoint: "images.generations",
+                    alias: modelAlias.Alias,
+                    providerModel: mode.ModelId,
+                    providerServiceMode: mode.ModeId,
+                    requestBytes: httpContext.Request.ContentLength,
+                    inputCount: inputCount,
+                    outputCount: outputCount,
+                    ct: httpContext.RequestAborted));
         }
         catch (RoutingException ex)
         {
@@ -297,19 +263,17 @@ public static class SandboxWireMediaHandlers
                 enableDiarization: false,
                 httpContext.RequestAborted);
 
-            await wireUsageRecorder.RecordAsync(
+            await wireUsageRecorder.RecordTranscriptionAsync(
                 context: context,
-                category: UsageCategory.SpeechTranscription,
                 service: mode.ProviderSection,
                 operation: "audio.transcriptions",
-                metrics: new UsageMetrics(ValueInput: result.DurationSeconds, ValueOutput: result.Text.Length, ValueOther: file.Length),
                 endpoint: "audio.transcriptions",
+                durationSeconds: result.DurationSeconds,
+                transcriptLength: result.Text.Length,
                 alias: modelAlias.Alias,
                 providerModel: mode.ModelId,
                 providerServiceMode: mode.ModeId,
                 requestBytes: file.Length,
-                inputCount: result.DurationSeconds,
-                outputCount: result.Text.Length,
                 ct: httpContext.RequestAborted);
 
             return Results.Json(new { text = result.Text }, WireJson.SerializationOptions);
@@ -334,6 +298,7 @@ public static class SandboxWireMediaHandlers
         ISandboxWireExecutionContextResolver executionContextResolver,
         ISpeechSynthesisService speechSynthesisService,
         IServiceModeResolver serviceModeResolver,
+        IConfiguration configuration,
         IPublishedWireUsageRecorder wireUsageRecorder)
     {
         var resolution = await executionContextResolver.ResolveAsync(
@@ -365,38 +330,45 @@ public static class SandboxWireMediaHandlers
                 param: "input");
         }
 
-        var tempPath = Path.Combine(Path.GetTempPath(), $"wire-speech-{Guid.NewGuid():N}.wav");
+        var responseFormat = string.IsNullOrWhiteSpace(request.ResponseFormat)
+            ? "wav"
+            : request.ResponseFormat.Trim().ToLowerInvariant();
+        if (!string.Equals(responseFormat, "wav", StringComparison.Ordinal))
+        {
+            return OpenAiWireErrorResults.UnsupportedFeature("Only response_format='wav' is supported.", "response_format");
+        }
+
         try
         {
             var mode = await serviceModeResolver.ResolveAsync(RoutedServiceNames.SpeechSynthesis, modeId: null, httpContext.RequestAborted);
-        var result = await speechSynthesisService.SynthesizeToWavAsync(request.Input, tempPath, httpContext.RequestAborted);
-            if (!result.Success)
+            var runContext = new InvocationContext(
+                ProjectId: context.ProjectId,
+                NotebookId: context.NotebookId,
+                ConversationId: context.AttributionConversationId ?? Guid.NewGuid())
             {
-                return OpenAiWireErrorResults.ProviderNotReady(result.ErrorMessage ?? "Speech synthesis failed.");
-            }
+                AssistantId = context.OwnerAssistantId
+            };
 
-            if (!File.Exists(tempPath))
-            {
-                return OpenAiWireErrorResults.ProviderNotReady("Speech synthesis did not produce an output file.");
-            }
-
-            var bytes = await File.ReadAllBytesAsync(tempPath, httpContext.RequestAborted);
-            await wireUsageRecorder.RecordAsync(
-                context: context,
-                category: UsageCategory.SpeechSynthesis,
-                service: result.ProviderId ?? mode.ProviderSection,
-                operation: "audio.speech",
-                metrics: new UsageMetrics(ValueInput: request.Input.Length, ValueOutput: result.DurationSeconds, ValueOther: bytes.Length),
-                endpoint: "audio.speech",
-                alias: modelAlias.Alias,
-                providerModel: mode.ModelId,
-                providerServiceMode: mode.ModeId,
-                requestBytes: httpContext.Request.ContentLength,
-                inputCount: request.Input.Length,
-                outputCount: result.DurationSeconds,
-                ct: httpContext.RequestAborted);
-
-            return Results.File(bytes, "audio/wav");
+            return await WireAudioSpeechExecutor.ExecuteAsync(
+                httpContext,
+                new WireAudioSpeechExecutor.Request(request.Input, runContext),
+                mode,
+                speechSynthesisService,
+                configuration,
+                notebookFileSyncService: null,
+                syncDatabaseAfterWrite: false,
+                recordUsageAsync: async (synthResult, characterCount, durationSeconds) => await wireUsageRecorder.RecordSpeechAsync(
+                    context: context,
+                    service: synthResult.ProviderId ?? mode.ProviderSection,
+                    operation: "audio.speech",
+                    endpoint: "audio.speech",
+                    characterCount: characterCount,
+                    durationSeconds: durationSeconds,
+                    alias: modelAlias.Alias,
+                    providerModel: mode.ModelId,
+                    providerServiceMode: mode.ModeId,
+                    requestBytes: httpContext.Request.ContentLength,
+                    ct: httpContext.RequestAborted));
         }
         catch (RoutingException ex)
         {
@@ -405,20 +377,6 @@ public static class SandboxWireMediaHandlers
         catch (InvalidOperationException ex)
         {
             return OpenAiWireErrorResults.ProviderNotReady(ex.Message);
-        }
-        finally
-        {
-            try
-            {
-                if (File.Exists(tempPath))
-                {
-                    File.Delete(tempPath);
-                }
-            }
-            catch
-            {
-                // best effort cleanup
-            }
         }
     }
 }

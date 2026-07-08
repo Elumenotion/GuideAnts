@@ -1351,30 +1351,32 @@ public class GuideUsageService : IGuideUsageService
                 .ToListAsync();
         });
 
-        // Query 3: Direct tool events (not triggered by agent invocations)
-        var directToolEventsTask = Task.Run(async () =>
+        // Query 3: Direct usage events (chat, tools, services) not triggered by agent invocations
+        var directUsageEventsTask = Task.Run(async () =>
         {
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
-                .Where(e => e.NotebookConversationMessageId != null
-                         && e.Category == UsageCategory.ToolCall)
+                .Where(e => e.NotebookConversationMessageId != null)
                 .Join(
                     ctx.NotebookConversationMessages
                         .Where(m => m.NotebookConversationId == conversationId && m.TurnIndex == turnIndex),
                     e => e.NotebookConversationMessageId,
                     m => m.Id,
                     (e, m) => new { Event = e, ToolCallId = m.ToolCallId })
-                .Where(x => x.ToolCallId == null || !triggeringToolCallIds.Contains(x.ToolCallId))
+                .Where(x => x.Event.Category != UsageCategory.ToolCall
+                         || x.ToolCallId == null
+                         || !triggeringToolCallIds.Contains(x.ToolCallId))
                 .OrderBy(x => x.Event.Created)
+                .Select(x => x.Event)
                 .ToListAsync();
         });
 
         // Await all queries in parallel
-        await Task.WhenAll(messagesTask, usageEventsTask, directToolEventsTask);
+        await Task.WhenAll(messagesTask, usageEventsTask, directUsageEventsTask);
 
         var messagesByInvocation = await messagesTask;
         var allUsageEvents = await usageEventsTask;
-        var directToolEvents = await directToolEventsTask;
+        var directUsageEvents = await directUsageEventsTask;
 
         // =====================================================================
         // Derive all usage aggregates from consolidated query (in-memory)
@@ -1444,38 +1446,7 @@ public class GuideUsageService : IGuideUsageService
             rootNodes.Add(node);
         }
 
-        foreach (var item in directToolEvents)
-        {
-            // Suppress ReadWeb bridge tool rows - these do not represent billable usage
-            // and would confuse the usage guideants. The underlying crawl usage is
-            // represented separately.
-            if (string.Equals(item.Event.Operation, "ReadWeb", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            rootNodes.Add(new InvocationNodeDto(
-                item.Event.Id,
-                null,
-                null,
-                $"Tool: {item.Event.Operation}",
-                null,
-                null,
-                0,
-                "completed",
-                0,
-                0,
-                0,
-                0,
-                item.Event.ChargeUsd ?? 0m,
-                item.Event.Created,
-                item.Event.Created,
-                0,
-                false,
-                new List<InvocationNodeDto>(),
-                null
-            ));
-        }
+        rootNodes.AddRange(BuildDirectUsageNodes(directUsageEvents));
 
         // Sort all root nodes by created time
         rootNodes = rootNodes.OrderBy(n => n.Created).ToList();
@@ -1483,12 +1454,14 @@ public class GuideUsageService : IGuideUsageService
         var turnStarted = allInvocations.Min(i => i.Created);
         var totalDuration = allInvocations.Max(i => i.DurationMs ?? 0);
         // Use UsageEvents-based token aggregates rather than UsageJson
-        var totalTokens = tokenUsageByInvocation.Values.Sum(a => a.PromptTokens + a.CompletionTokens);
+        var invocationTokens = tokenUsageByInvocation.Values.Sum(a => a.PromptTokens + a.CompletionTokens);
+        var (_, directTokens) = SummarizeDirectUsageEvents(directUsageEvents);
+        var totalTokens = invocationTokens + directTokens;
         
-        // Calculate total charge from this turn's invocations plus direct tool events
+        // Calculate total charge from this turn's invocations plus direct usage events
         var invocationCharges = invocationCosts.Values.Sum();
-        var directToolCharges = directToolEvents.Sum(x => x.Event.ChargeUsd ?? 0m);
-        var totalCharge = invocationCharges + directToolCharges;
+        var directCharge = directUsageEvents.Sum(e => e.ChargeUsd ?? 0m);
+        var totalCharge = invocationCharges + directCharge;
 
         return new TurnInvocationTreeDto(
             conversationId,
@@ -1659,57 +1632,53 @@ public class GuideUsageService : IGuideUsageService
 
         if (!usageEvents.Any()) return null;
 
-        // Aggregate metrics
-        var chatEvents = usageEvents.Where(e => e.Category == UsageCategory.ChatCompletion).ToList();
-        var toolEvents = usageEvents.Where(e => e.Category == UsageCategory.ToolCall).ToList();
-        var serviceEvents = usageEvents.Where(e => e.Category != UsageCategory.ChatCompletion && e.Category != UsageCategory.ToolCall).ToList();
+        var (totalCharge, totalTokens) = SummarizeDirectUsageEvents(usageEvents);
+        var rootNodes = BuildDirectUsageNodes(usageEvents);
 
-        var promptTokens = chatEvents.Sum(e => e.ValueInput);
-        var completionTokens = chatEvents.Sum(e => e.ValueOutput);
-        var totalCharge = usageEvents.Sum(e => e.ChargeUsd ?? 0m);
-        var totalTokens = promptTokens + completionTokens;
+        return new TurnInvocationTreeDto(
+            conversationId,
+            turnIndex,
+            turn.Created,
+            (long?)((turn.LastUpdated - turn.Created).TotalMilliseconds) ?? 0,
+            totalCharge,
+            totalTokens,
+            rootNodes
+        );
+    }
 
-        // Build tool nodes as root-level items (the card is the root, tools are direct children)
-        var toolNodes = toolEvents
-            // Suppress ReadWeb bridge tool rows - these do not represent billable usage
-            // and would confuse the usage guideants. The underlying crawl usage is
-            // represented separately.
-            .Where(e => !string.Equals(e.Operation, "ReadWeb", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(e => e.Created)
-            .Select(e => new InvocationNodeDto(
-                e.Id,                           // Use usage event ID as node ID
-                null,                           // No parent invocation
-                null,                           // No triggering tool call
-                $"Tool: {e.Operation}",         // Display as "Tool: FunctionName"
-                null,                           // No assistant ID (it's a tool, not an agent)
-                null,                           // No model
-                0,                              // Depth 0 (root level)
-                "completed",
-                0,                              // Tools don't have prompt tokens
-                0,                              // Tools don't have completion tokens
-                0,                              // Tool call count
-                0,                              // LLM round trips
-                e.ChargeUsd ?? 0m,
-                e.Created,
-                e.Created,
-                0,                              // Duration
-                false,                          // Not outlier
-                new List<InvocationNodeDto>(),  // No children
-                null                            // No messages
-            ))
-            .ToList();
+    private static string FormatDirectUsageNodeName(UsageEvent usageEvent)
+    {
+        if (usageEvent.Category == UsageCategory.ToolCall)
+        {
+            return $"Tool: {usageEvent.Operation}";
+        }
 
-        // Build AI service nodes as root-level items (image gen, TTS, etc.)
-        var serviceNodes = serviceEvents
+        if (usageEvent.Category == UsageCategory.ChatCompletion)
+        {
+            return $"Chat: {usageEvent.Operation}";
+        }
+
+        return usageEvent.Operation ?? usageEvent.Category.ToString();
+    }
+
+    private static bool ShouldSuppressDirectUsageNode(UsageEvent usageEvent)
+    {
+        return string.Equals(usageEvent.Operation, "ReadWeb", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<InvocationNodeDto> BuildDirectUsageNodes(IEnumerable<UsageEvent> usageEvents)
+    {
+        return usageEvents
+            .Where(e => !ShouldSuppressDirectUsageNode(e))
             .OrderBy(e => e.Created)
             .Select(e => new InvocationNodeDto(
                 e.Id,
                 null,
                 null,
-                e.Operation,                    // Display operation name directly
-                null,                           // No assistant ID (AI service node)
+                FormatDirectUsageNodeName(e),
                 null,
-                0,                              // Depth 0 (root level)
+                null,
+                0,
                 "completed",
                 0,
                 0,
@@ -1721,22 +1690,19 @@ public class GuideUsageService : IGuideUsageService
                 0,
                 false,
                 new List<InvocationNodeDto>(),
-                null
-            ))
+                null))
             .ToList();
+    }
 
-        // All items are root-level - the card itself is the container
-        var rootNodes = toolNodes.Concat(serviceNodes).OrderBy(n => n.Created).ToList();
-
-        return new TurnInvocationTreeDto(
-            conversationId,
-            turnIndex,
-            turn.Created,
-            (long?)((turn.LastUpdated - turn.Created).TotalMilliseconds) ?? 0,
-            totalCharge,
-            totalTokens,
-            rootNodes
-        );
+    private static (decimal TotalCharge, long TotalTokens) SummarizeDirectUsageEvents(
+        IEnumerable<UsageEvent> usageEvents)
+    {
+        var events = usageEvents.ToList();
+        var chatEvents = events.Where(e => e.Category == UsageCategory.ChatCompletion).ToList();
+        var promptTokens = chatEvents.Sum(e => e.ValueInput);
+        var completionTokens = chatEvents.Sum(e => e.ValueOutput);
+        var totalCharge = events.Sum(e => e.ChargeUsd ?? 0m);
+        return (totalCharge, promptTokens + completionTokens);
     }
 
     /// <summary>
@@ -1812,19 +1778,20 @@ public class GuideUsageService : IGuideUsageService
                 .ToListAsync();
         });
 
-        var directToolEventsTask = Task.Run(async () =>
+        var directUsageEventsTask = Task.Run(async () =>
         {
             await using var ctx = await _contextFactory.CreateDbContextAsync();
             return await ctx.UsageEvents
-                .Where(e => e.NotebookConversationMessageId != null
-                         && e.Category == UsageCategory.ToolCall)
+                .Where(e => e.NotebookConversationMessageId != null)
                 .Join(
                     ctx.NotebookConversationMessages
                         .Where(m => m.NotebookConversationId == conversationId),
                     e => e.NotebookConversationMessageId,
                     m => m.Id,
                     (e, m) => new { Event = e, m.ToolCallId, m.TurnIndex })
-                .Where(x => x.ToolCallId == null || !triggeringToolCallIds.Contains(x.ToolCallId))
+                .Where(x => x.Event.Category != UsageCategory.ToolCall
+                         || x.ToolCallId == null
+                         || !triggeringToolCallIds.Contains(x.ToolCallId))
                 .OrderBy(x => x.Event.Created)
                 .ToListAsync();
         });
@@ -1837,11 +1804,11 @@ public class GuideUsageService : IGuideUsageService
                 .ToDictionaryAsync(t => t.TurnIndex, t => t);
         });
 
-        await Task.WhenAll(messagesTask, usageEventsTask, directToolEventsTask, turnsTask);
+        await Task.WhenAll(messagesTask, usageEventsTask, directUsageEventsTask, turnsTask);
 
         var messagesByInvocation = await messagesTask;
         var allUsageEvents = await usageEventsTask;
-        var allDirectToolEvents = await directToolEventsTask;
+        var allDirectUsageEvents = await directUsageEventsTask;
         var turnsByIndex = await turnsTask;
 
         // =====================================================================
@@ -1871,10 +1838,10 @@ public class GuideUsageService : IGuideUsageService
             .GroupBy(e => e.AgentInvocationId!.Value)
             .ToDictionary(g => g.Key, g => g.Sum(e => e.ChargeUsd ?? 0m));
 
-        // Group direct tool events by turn
-        var directToolEventsByTurn = allDirectToolEvents
+        // Group direct usage events (chat, tools, services) by turn
+        var directUsageEventsByTurn = allDirectUsageEvents
             .GroupBy(x => x.TurnIndex)
-            .ToDictionary(g => g.Key, g => g.ToList());
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Event).ToList());
 
         // =====================================================================
         // Build turn trees
@@ -1885,49 +1852,22 @@ public class GuideUsageService : IGuideUsageService
         foreach (var turnIndex in turnIndices)
         {
             var turnInvocations = allInvocations.Where(i => i.ParentTurnIndex == turnIndex).ToList();
+            directUsageEventsByTurn.TryGetValue(turnIndex, out var turnDirectUsageEvents);
+            turnDirectUsageEvents ??= new List<UsageEvent>();
+
+            var (directCharge, directTokens) = SummarizeDirectUsageEvents(turnDirectUsageEvents);
+            var turn = turnsByIndex.GetValueOrDefault(turnIndex);
 
             if (!turnInvocations.Any())
             {
-                // Check for root-level usage (published guides with direct tool calls)
-                if (directToolEventsByTurn.TryGetValue(turnIndex, out var directTools) && directTools.Any())
-                {
-                    var rootNodes = directTools
-                        // Suppress ReadWeb bridge tool rows - these do not represent billable usage
-                        // and would confuse the usage guideants. The underlying crawl usage is
-                        // represented separately.
-                        .Where(x => !string.Equals(x.Event.Operation, "ReadWeb", StringComparison.OrdinalIgnoreCase))
-                        .Select(x => new InvocationNodeDto(
-                            x.Event.Id,
-                            null,
-                            null,
-                            $"Tool: {x.Event.Operation}",
-                            null,
-                            null,
-                            0,
-                            "completed",
-                            0, 0, 0, 0,
-                            x.Event.ChargeUsd ?? 0m,
-                            x.Event.Created,
-                            x.Event.Created,
-                            0,
-                            false,
-                            new List<InvocationNodeDto>(),
-                            null))
-                        .OrderBy(n => n.Created)
-                        .ToList();
-
-                    var turn = turnsByIndex.GetValueOrDefault(turnIndex);
-                    var totalCharge = directTools.Sum(x => x.Event.ChargeUsd ?? 0m);
-
-                    results.Add(new TurnInvocationTreeDto(
-                        conversationId,
-                        turnIndex,
-                        turn?.Created ?? DateTime.UtcNow,
-                        turn != null ? (long)((turn.LastUpdated - turn.Created).TotalMilliseconds) : 0,
-                        totalCharge,
-                        0,
-                        rootNodes));
-                }
+                results.Add(new TurnInvocationTreeDto(
+                    conversationId,
+                    turnIndex,
+                    turn?.Created ?? DateTime.UtcNow,
+                    turn != null ? (long)((turn.LastUpdated - turn.Created).TotalMilliseconds) : 0,
+                    directCharge,
+                    directTokens,
+                    BuildDirectUsageNodes(turnDirectUsageEvents)));
                 continue;
             }
 
@@ -1947,39 +1887,7 @@ public class GuideUsageService : IGuideUsageService
                     invocationCosts));
             }
 
-            // Add direct tool events for this turn
-            if (directToolEventsByTurn.TryGetValue(turnIndex, out var turnDirectTools))
-            {
-                foreach (var item in turnDirectTools)
-                {
-                    // Suppress ReadWeb bridge tool rows - these do not represent billable usage
-                    // and would confuse the usage guideants. The underlying crawl usage is
-                    // represented separately.
-                    if (string.Equals(item.Event.Operation, "ReadWeb", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    rootNodes2.Add(new InvocationNodeDto(
-                        item.Event.Id,
-                        null,
-                        null,
-                        $"Tool: {item.Event.Operation}",
-                        null,
-                        null,
-                        0,
-                        "completed",
-                        0, 0, 0, 0,
-                        item.Event.ChargeUsd ?? 0m,
-                        item.Event.Created,
-                        item.Event.Created,
-                        0,
-                        false,
-                        new List<InvocationNodeDto>(),
-                        null));
-                }
-            }
-
+            rootNodes2.AddRange(BuildDirectUsageNodes(turnDirectUsageEvents));
             rootNodes2 = rootNodes2.OrderBy(n => n.Created).ToList();
 
             var turnStarted = turnInvocations.Min(i => i.Created);
@@ -1988,18 +1896,17 @@ public class GuideUsageService : IGuideUsageService
             var turnInvocationIds = turnInvocations.Select(i => i.Id).ToHashSet();
             var turnTokens = tokenUsageByInvocation
                 .Where(kvp => turnInvocationIds.Contains(kvp.Key))
-                .Sum(kvp => kvp.Value.PromptTokens + kvp.Value.CompletionTokens);
+                .Sum(kvp => kvp.Value.PromptTokens + kvp.Value.CompletionTokens) + directTokens;
             var turnInvocationCharges = invocationCosts
                 .Where(kvp => turnInvocationIds.Contains(kvp.Key))
                 .Sum(kvp => kvp.Value);
-            var turnDirectCharges = turnDirectTools?.Sum(x => x.Event.ChargeUsd ?? 0m) ?? 0m;
 
             results.Add(new TurnInvocationTreeDto(
                 conversationId,
                 turnIndex,
                 turnStarted,
                 totalDuration,
-                turnInvocationCharges + turnDirectCharges,
+                turnInvocationCharges + directCharge,
                 turnTokens,
                 rootNodes2));
         }
