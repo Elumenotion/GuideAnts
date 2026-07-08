@@ -170,7 +170,12 @@ describe('assistantContentFile utilities', () => {
       const text = await getFileContent(file);
       
       expect(text).toContain('January 15, 2024');
-      expect(text).toContain('10:30 AM');
+      const expectedTime = new Date('2024-01-15T10:30:00.000Z').toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+      expect(text).toContain(expectedTime);
       expect(text).toContain('**GPT-4**');
     });
 

@@ -14,6 +14,7 @@ describe('markdownUtils', () => {
 
   it('rejects unsupported or mismatched file types', () => {
     expect(isMarkdownExtractionSupported('', 'application/pdf')).toBe(false);
+    expect(isMarkdownExtractionSupported('README', 'text/plain')).toBe(false);
     expect(isMarkdownExtractionSupported('archive.zip', 'application/zip')).toBe(false);
     expect(isMarkdownExtractionSupported('report.pdf', 'application/zip')).toBe(false);
   });

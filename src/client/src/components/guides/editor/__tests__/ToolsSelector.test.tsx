@@ -7,6 +7,13 @@ import { ToolsSelector } from '../ToolsSelector';
 
 vi.mock('../../../../services/api');
 
+const defaultSelectorProps = {
+  customTools: [],
+  crewMemberIds: [] as string[],
+  sandboxWireApiConfig: {},
+  onSandboxWireApiConfigChange: () => {},
+};
+
 describe('ToolsSelector', () => {
   const tools = [
     {
@@ -64,6 +71,7 @@ describe('ToolsSelector', () => {
   it('shows Web Search first in Search category', async () => {
     render(
       <ToolsSelector
+        {...defaultSelectorProps}
         selectedToolIds={[]}
         contextOptions={[]}
         requiresRunPython={false}
@@ -97,6 +105,7 @@ describe('ToolsSelector', () => {
       return (
         <>
           <ToolsSelector
+            {...defaultSelectorProps}
             selectedToolIds={selected}
             contextOptions={[]}
             requiresRunPython={false}
@@ -121,6 +130,7 @@ describe('ToolsSelector', () => {
       return (
         <>
           <ToolsSelector
+            {...defaultSelectorProps}
             selectedToolIds={selected}
             contextOptions={[]}
             requiresRunPython

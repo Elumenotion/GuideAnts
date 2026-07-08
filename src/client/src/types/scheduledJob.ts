@@ -39,6 +39,12 @@ export interface ProjectScheduledJobDetailDto extends ProjectScheduledJobSummary
   assistantName?: string | null;
   scriptNotebookFileId?: string | null;
   scriptRelativePath?: string | null;
+  exposeSandboxWireApi: boolean;
+  wireTargetAssistantId?: string | null;
+  wireAttributionConversationTitle?: string | null;
+  wireCreateAttributionConversationPerRun: boolean;
+  wireDailyLimitUsd?: number | null;
+  wireMonthlyLimitUsd?: number | null;
   createdByUserId: string;
 }
 
@@ -53,6 +59,12 @@ export interface CreateProjectScheduledJobRequest {
   prompt?: string | null;
   assistantName?: string | null;
   scriptNotebookFileId?: string | null;
+  exposeSandboxWireApi?: boolean;
+  wireTargetAssistantId?: string | null;
+  wireAttributionConversationTitle?: string | null;
+  wireCreateAttributionConversationPerRun?: boolean;
+  wireDailyLimitUsd?: number | null;
+  wireMonthlyLimitUsd?: number | null;
 }
 
 export type UpdateProjectScheduledJobRequest = CreateProjectScheduledJobRequest;

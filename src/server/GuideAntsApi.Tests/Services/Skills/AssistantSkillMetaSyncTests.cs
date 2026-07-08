@@ -68,7 +68,7 @@ metadata:
     }
 
     [TestMethod]
-    public async Task SkillDtoBuilder_UsesSidecar_WhenHashMatches()
+    public void SkillDtoBuilder_UsesSidecar_WhenHashMatches()
     {
         var bytes = Encoding.UTF8.GetBytes(SkillMarkdown);
         var hash = AssistantSkillMetaSync.ComputeContentHash(bytes);
@@ -102,7 +102,7 @@ metadata:
     }
 
     [TestMethod]
-    public async Task SkillDtoBuilder_IgnoresStaleSidecar_WhenHashDiffers()
+    public void SkillDtoBuilder_IgnoresStaleSidecar_WhenHashDiffers()
     {
         var bytes = Encoding.UTF8.GetBytes(SkillMarkdown);
         var assistantId = Guid.NewGuid();

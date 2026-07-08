@@ -167,10 +167,52 @@ public sealed class ProjectScheduledJobExecutor : IProjectScheduledJobExecutor
         }
 
         var script = await File.ReadAllTextAsync(scriptPath, cancellationToken);
+
+        // Owner-guide resolution and attribution wiring are only required when this job
+        // exposes the sandbox wire API. Jobs that don't must run unchanged and must not
+        // fail just because the notebook has no associated guide.
+        Guid? ownerGuideId = null;
+        Guid? attributionConversationId = null;
+        SandboxWireProvisionOverrides? sandboxWireOverrides = null;
+        if (job.ExposeSandboxWireApi)
+        {
+            var notebook = await db.Notebooks.AsNoTracking()
+                .FirstOrDefaultAsync(n => n.Id == job.NotebookId && n.ProjectId == job.ProjectId, cancellationToken);
+            if (notebook == null)
+            {
+                return Fail("The target notebook was not found.");
+            }
+
+            var resolvedOwner = notebook.GuideId ?? notebook.NotebookTemplateId;
+            if (resolvedOwner is not Guid guideId || guideId == Guid.Empty)
+            {
+                return Fail("The target notebook is not associated with a guide.");
+            }
+
+            ownerGuideId = guideId;
+            sandboxWireOverrides = new SandboxWireProvisionOverrides(
+                job.WireTargetAssistantId,
+                job.WireDailyLimitUsd,
+                job.WireMonthlyLimitUsd,
+                ForceEnabled: true);
+
+            if (job.WireCreateAttributionConversationPerRun)
+            {
+                var title = ResolveConversationTitle(
+                    job.WireAttributionConversationTitle ?? "Sandbox wire {timestamp}");
+                var conversation = await _conversationService.CreateConversationAsync(job.NotebookId, title);
+                attributionConversationId = conversation.Id;
+            }
+        }
+
         var context = new InvocationContext(
             job.ProjectId,
             job.NotebookId,
-            Guid.Empty);
+            attributionConversationId ?? Guid.Empty)
+        {
+            AssistantId = ownerGuideId,
+            SandboxWireOverrides = sandboxWireOverrides,
+        };
 
         ScriptExecutionResult result;
         try

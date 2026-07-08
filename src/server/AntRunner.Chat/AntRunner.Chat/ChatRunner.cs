@@ -23,6 +23,21 @@ namespace AntRunner.Chat
     }
 
     /// <summary>
+    /// Thrown when a chat run is cancelled after one or more completed LLM rounds.
+    /// Carries partial output including accumulated token usage for billing.
+    /// </summary>
+    public sealed class ChatRunCancelledException : OperationCanceledException
+    {
+        public ChatRunOutput ChatRunOutput { get; }
+
+        public ChatRunCancelledException(ChatRunOutput chatRunOutput)
+            : base("Chat run was cancelled.")
+        {
+            ChatRunOutput = chatRunOutput ?? throw new ArgumentNullException(nameof(chatRunOutput));
+        }
+    }
+
+    /// <summary>
     /// Responsible for running assistant threads through interaction with various utilities.
     /// </summary>
     public class ChatRunner

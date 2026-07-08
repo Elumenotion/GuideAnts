@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Services.PublishedWireApi;
+using GuideAntsApi.Services.SandboxWireApi;
 using Microsoft.EntityFrameworkCore;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 
@@ -110,6 +111,17 @@ internal static void TryAddOpenAiResponsesToolResult(JsonElement item, ICollecti
 
 internal static async Task<(Guid? ConversationId, IResult? ErrorResult)> ResolvePendingToolResultConversationAsync(
     PublishedApiExecutionContext context,
+    ApplicationDbContext db,
+    IReadOnlyList<AnthropicToolResult> toolResults,
+    CancellationToken ct) =>
+    await ResolvePendingToolResultConversationAsync(
+        new PublishedWireExecutionContextAdapter(context),
+        db,
+        toolResults,
+        ct);
+
+internal static async Task<(Guid? ConversationId, IResult? ErrorResult)> ResolvePendingToolResultConversationAsync(
+    IWireExecutionContext context,
     ApplicationDbContext db,
     IReadOnlyList<AnthropicToolResult> toolResults,
     CancellationToken ct)
@@ -361,6 +373,17 @@ internal static void TryAddAnthropicToolResult(JsonElement block, ICollection<An
 
 internal static async Task<(Guid? ConversationId, IResult? ErrorResult)> ResolveAnthropicToolResultConversationAsync(
     PublishedApiExecutionContext context,
+    ApplicationDbContext db,
+    IReadOnlyList<AnthropicToolResult> toolResults,
+    CancellationToken ct) =>
+    await ResolveAnthropicToolResultConversationAsync(
+        new PublishedWireExecutionContextAdapter(context),
+        db,
+        toolResults,
+        ct);
+
+internal static async Task<(Guid? ConversationId, IResult? ErrorResult)> ResolveAnthropicToolResultConversationAsync(
+    IWireExecutionContext context,
     ApplicationDbContext db,
     IReadOnlyList<AnthropicToolResult> toolResults,
     CancellationToken ct)

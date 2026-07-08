@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Models.Speech;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.PublishedWireApi;
-using GuideAnts.Usage;
 
 namespace GuideAntsApi.Endpoints;
 
@@ -95,23 +94,17 @@ public static class PublishedSpeechEndpoints
                     .Select(kvp => kvp.Value)
                     .FirstOrDefault()
                     ?? "transcription";
-                await wireUsageRecorder.RecordAsync(
+                await wireUsageRecorder.RecordTranscriptionAsync(
                     context: executionContext,
-                    category: UsageCategory.SpeechTranscription,
                     service: "SpeechTranscription",
                     operation: "audio.transcriptions",
-                    metrics: new UsageMetrics(
-                        ValueInput: result.DurationSeconds,
-                        ValueOutput: result.Text.Length,
-                        ValueOther: result.DurationSeconds),
                     endpoint: "audio.transcriptions",
-                    status: "success",
+                    durationSeconds: result.DurationSeconds,
+                    transcriptLength: result.Text.Length,
                     alias: alias,
                     providerModel: null,
                     providerServiceMode: executionContext.WireApiConfig.Profile,
                     requestBytes: audioFile.Length,
-                    inputCount: result.DurationSeconds,
-                    outputCount: result.Text.Length,
                     ct: ctx.RequestAborted);
 
                 return Results.Ok(new TranscriptionResponseDto

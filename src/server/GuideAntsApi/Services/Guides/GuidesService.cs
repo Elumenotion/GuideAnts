@@ -14,6 +14,7 @@ using AntRunner.ToolCalling.Functions;
 using AntRunner.Chat;
 using Microsoft.Extensions.Options;
 using GuideAntsApi.Services.Guides.Skills;
+using GuideAntsApi.Services.SandboxWireApi;
 using AntRunner.ToolCalling.AssistantDefinitions;
 
 namespace GuideAntsApi.Services.Guides;
@@ -26,6 +27,7 @@ public class GuidesService(
     ISystemGuideCatalogFilter systemGuideCatalogFilter,
     IMcpSandboxSetupStagingService mcpSandboxSetupStagingService,
     IAssistantSkillMetaSync assistantSkillMetaSync,
+    ISandboxWireCycleDetector sandboxWireCycleDetector,
     ILogger<GuidesService> logger) : IGuidesService
 {
     private readonly ApplicationDbContext _context = context;
@@ -35,6 +37,7 @@ public class GuidesService(
     private readonly ISystemGuideCatalogFilter _systemGuideCatalogFilter = systemGuideCatalogFilter;
     private readonly IMcpSandboxSetupStagingService _mcpSandboxSetupStagingService = mcpSandboxSetupStagingService;
     private readonly IAssistantSkillMetaSync _assistantSkillMetaSync = assistantSkillMetaSync;
+    private readonly ISandboxWireCycleDetector _sandboxWireCycleDetector = sandboxWireCycleDetector;
     private readonly ILogger<GuidesService> _logger = logger;
 
     private static readonly JsonSerializerOptions JsonCaseInsensitiveOptions = new()
@@ -264,8 +267,52 @@ public class GuidesService(
         )
         {
             EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null,
-            Skills = skills.Count > 0 ? skills : null
+            Skills = skills.Count > 0 ? skills : null,
+            SandboxWireApiConfig = DeserializeSandboxWireApiConfig(guide.SandboxWireApiConfigJson)
         };
+    }
+
+    private static SandboxWireApiConfigDto? DeserializeSandboxWireApiConfig(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        return JsonSerializer.Deserialize<SandboxWireApiConfigDto>(json, JsonCaseInsensitiveOptions);
+    }
+
+    private static string? SerializeSandboxWireApiConfig(SandboxWireApiConfigDto? config)
+    {
+        if (config == null)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Serialize(config, JsonCamelCaseOptions);
+    }
+
+    private async Task ValidateSandboxWireApiConfigAsync(Guid ownerGuideId, SandboxWireApiConfigDto? config)
+    {
+        if (config == null || !config.Enabled)
+        {
+            return;
+        }
+
+        if (!config.TargetAssistantId.HasValue)
+        {
+            throw new InvalidOperationException("Sandbox wire API requires a target assistant when enabled.");
+        }
+
+        if (config.TargetAssistantId.Value == ownerGuideId)
+        {
+            throw new InvalidOperationException("Sandbox wire API target assistant cannot be the owning guide.");
+        }
+
+        if (await _sandboxWireCycleDetector.WouldCreateCycleAsync(ownerGuideId, config.TargetAssistantId.Value))
+        {
+            throw new InvalidOperationException("Sandbox wire API configuration would create a circular reference.");
+        }
     }
 
     // Internal class for deserializing AuthConfigJson
@@ -469,6 +516,9 @@ public class GuidesService(
         {
             guide.AuthConfigJson = SerializeAuthProviders(dto.AuthProviders);
         }
+
+        await ValidateSandboxWireApiConfigAsync(guide.Id, dto.SandboxWireApiConfig);
+        guide.SandboxWireApiConfigJson = SerializeSandboxWireApiConfig(dto.SandboxWireApiConfig);
         _context.Assistants.Add(guide);
         await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
@@ -564,6 +614,8 @@ public class GuidesService(
         guide.AuthConfigJson = dto.AuthProviders is { Count: > 0 }
             ? SerializeAuthProviders(dto.AuthProviders)
             : null;
+        await ValidateSandboxWireApiConfigAsync(guideId, dto.SandboxWireApiConfig);
+        guide.SandboxWireApiConfigJson = SerializeSandboxWireApiConfig(dto.SandboxWireApiConfig);
         await SaveProjectEnvironmentAsync(dto.ProjectId, guide.Id, dto.EnvironmentVariables);
         await _context.SaveChangesAsync();
         await StageMcpSandboxSetupIfNeededAsync(dto.ProjectId, guide.Id, dto.CustomTools);

@@ -454,16 +454,18 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                 await QueueNotebookSyncIfNeededAsync(context, output);
                 await PersistTraceSegmentAsync("completed", ct: noneCt);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
                 try
                 {
+                    var partialOutput = (ex as ChatRunCancelledException)?.ChatRunOutput;
                     await HandleCancellationAsync(
                         context,
                         currentAssistantMessageId,
                         currentAssistantContent,
                         assistantMessageIds,
                         TryWrite,
+                        partialOutput,
                         noneCt);
                     await PersistTraceSegmentAsync("cancelled", ct: noneCt);
                 }
@@ -843,6 +845,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
         StringBuilder currentAssistantContent,
         IReadOnlyList<Guid> assistantMessageIds,
         Action<StreamingEvent> tryWrite,
+        ChatRunOutput? partialOutput,
         CancellationToken ct)
     {
         if (currentAssistantMessageId != null)
@@ -884,20 +887,34 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
         }
 
         await RecordToolUsageAsync(context, ct);
-        await _usageReporter.RecordCancelledTurnMarkerUsageAsync(
-            new CancelledTurnUsageRequest(
-                context.Policy.UsageMode,
-                context.Conversation.Notebook.ProjectId,
-                context.Conversation.NotebookId,
-                context.Conversation.Id,
-                context.TurnIndex,
-                context.ModelDeploymentId,
-                context.AssistantId,
-                PreferredAssistantMessageId: currentAssistantMessageId
-                    ?? (assistantMessageIds.Count > 0 ? assistantMessageIds[^1] : null),
-                AssistantMessageIds: assistantMessageIds,
-                ContextLabel: context.UsageContextLabel != null ? $"{context.UsageContextLabel}(cancelled)" : null),
-            ct);
+
+        if (partialOutput?.Usage != null)
+        {
+            await RecordChatUsageAsync(
+                context,
+                partialOutput,
+                currentAssistantMessageId,
+                assistantMessageIds,
+                tryWrite,
+                ct);
+        }
+        else
+        {
+            await _usageReporter.RecordCancelledTurnMarkerUsageAsync(
+                new CancelledTurnUsageRequest(
+                    context.Policy.UsageMode,
+                    context.Conversation.Notebook.ProjectId,
+                    context.Conversation.NotebookId,
+                    context.Conversation.Id,
+                    context.TurnIndex,
+                    context.ModelDeploymentId,
+                    context.AssistantId,
+                    PreferredAssistantMessageId: currentAssistantMessageId
+                        ?? (assistantMessageIds.Count > 0 ? assistantMessageIds[^1] : null),
+                    AssistantMessageIds: assistantMessageIds,
+                    ContextLabel: context.UsageContextLabel != null ? $"{context.UsageContextLabel}(cancelled)" : null),
+                ct);
+        }
 
         var cancelPayload = new
         {

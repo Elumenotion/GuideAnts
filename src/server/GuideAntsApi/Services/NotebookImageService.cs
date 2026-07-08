@@ -16,6 +16,26 @@ namespace GuideAntsApi.Services
 {
     public interface INotebookImageService
     {
+        /// <summary>
+        /// Routed image generation that returns raw bytes only. Does not write files or sync the database.
+        /// </summary>
+        Task<byte[]?> GenerateImageBytesAsync(
+            string prompt,
+            string size = "1024x1024",
+            int n = 1,
+            string outputFormat = "png",
+            InvocationContext? context = null,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Writes image bytes to the notebook run output directory without database sync or tool result semantics.
+        /// </summary>
+        Task WriteImageBytesToNotebookOutputAsync(
+            byte[] imageBytes,
+            string filename,
+            InvocationContext context,
+            CancellationToken cancellationToken = default);
+
         Task<ScriptExecutionResult> GenerateImageAsync(
             string prompt,
             string filename,
@@ -135,18 +155,7 @@ namespace GuideAntsApi.Services
                 };
             }
 
-            var storageRoot = Environment.GetEnvironmentVariable("FileStorage__Path") ?? Environment.GetEnvironmentVariable("FILESTORAGE__PATH");
-            if (string.IsNullOrWhiteSpace(storageRoot) && _serviceProvider != null)
-            {
-                try
-                {
-                    using var scope = _serviceProvider.CreateScope();
-                    var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-                    storageRoot = cfg["FileStorage:Path"];
-                }
-                catch { /* ignore — will fail below */ }
-            }
-            if (storageRoot == null) throw new InvalidOperationException("FileStorage:Path is not configured");
+            var storageRoot = ResolveStorageRoot();
             var notebookDirectory = NotebookPathHelper.GetLocalWorkingDirectory(context!, storageRoot);
 
             _logger?.LogInformation("Will generate image and save to directory: {NotebookDirectory}", LogValueSanitizer.Sanitize(notebookDirectory));
@@ -159,104 +168,22 @@ namespace GuideAntsApi.Services
                 var mode = await ResolveImageGenerationModeAsync();
                 var imageProvider = ResolveImageProviderId(mode);
 
-                byte[]? imageBytes;
-                var imageAttachment = _serviceProvider != null
-                    ? await MediaAttachmentHelper.TryGetFirstImageAttachmentForCurrentUserMessageAsync(_serviceProvider, context!.ConversationId)
-                    : null;
-                if (imageAttachment != null)
-                {
-                    var (imageContent, contentType, sourceFileName) = imageAttachment.Value;
-                    imageBytes = imageProvider switch
-                    {
-                        ImageProviderLocal => await GenerateImageEditViaLocalSd(
-                            prompt: prompt,
-                            size: size,
-                            n: n,
-                            outputFormat: outputFormat,
-                            imageBytes: imageContent,
-                            imageContentType: contentType,
-                            imageFileName: sourceFileName),
-                        ImageProviderCloud => await GenerateImageEditViaAzureOpenAI(
-                            prompt: prompt,
-                            size: size,
-                            n: n,
-                            imageBytes: imageContent,
-                            imageContentType: contentType,
-                            imageFileName: sourceFileName,
-                            mode: mode),
-                        ImageProviderGoogle => await GenerateImageEditViaGoogleGemini(
-                            prompt: prompt,
-                            size: size,
-                            n: n,
-                            outputFormat: outputFormat,
-                            imageBytes: imageContent,
-                            imageContentType: contentType,
-                            imageFileName: sourceFileName,
-                            modelId: mode.ModelId),
-                        ImageProviderHuggingFace => await GenerateImageEditViaHuggingFace(
-                            prompt: prompt,
-                            size: size,
-                            n: n,
-                            outputFormat: outputFormat,
-                            imageBytes: imageContent,
-                            imageContentType: contentType,
-                            imageFileName: sourceFileName,
-                            modelId: mode.ModelId,
-                            requestPresetJson: mode.RequestPresetJson),
-                        ImageProviderOpenRouter => await GenerateImageEditViaOpenRouter(
-                            prompt: prompt,
-                            size: size,
-                            n: n,
-                            outputFormat: outputFormat,
-                            imageBytes: imageContent,
-                            imageContentType: contentType,
-                            imageFileName: sourceFileName,
-                            modelId: mode.ModelId,
-                            requestPresetJson: mode.RequestPresetJson),
-                        ImageProviderOpenAi => await GenerateImageEditViaOpenAi(
-                            prompt: prompt,
-                            size: size,
-                            n: n,
-                            imageBytes: imageContent,
-                            imageContentType: contentType,
-                            imageFileName: sourceFileName,
-                            modelId: mode.ModelId),
-                        _ => throw new RoutingException(
-                            RoutingErrorCodes.ProviderNotReady,
-                            $"Image edit provider '{imageProvider}' is not recognized.",
-                            action: "Fix the service mode provider configuration.",
-                            serviceId: RoutedServiceNames.ImageGeneration,
-                            providerSection: imageProvider)
-                    };
-                }
-                else
-                {
-                    imageBytes = imageProvider switch
-                    {
-                        ImageProviderLocal => await GenerateImageViaLocalSd(prompt, size, n, outputFormat),
-                        ImageProviderCloud => await GenerateImageViaAzureOpenAI(prompt, size, n, outputFormat, mode),
-                        ImageProviderGoogle => await GenerateImageViaGoogleGemini(prompt, size, n, outputFormat, mode.ModelId),
-                        ImageProviderHuggingFace => await GenerateImageViaHuggingFace(prompt, size, n, outputFormat, mode.ModelId, mode.RequestPresetJson),
-                        ImageProviderOpenRouter => await GenerateImageViaOpenRouter(prompt, size, n, outputFormat, mode.ModelId, mode.RequestPresetJson),
-                        ImageProviderOpenAi => await GenerateImageViaOpenAi(prompt, size, n, mode.ModelId),
-                        _ => throw new RoutingException(
-                            RoutingErrorCodes.ProviderNotReady,
-                            $"Image provider '{imageProvider}' is not recognized.",
-                            action: "Fix the service mode provider configuration.",
-                            serviceId: RoutedServiceNames.ImageGeneration,
-                            providerSection: imageProvider)
-                    };
-                }
+                var imageBytes = await GenerateImageBytesAsync(
+                    prompt,
+                    size,
+                    n,
+                    outputFormat,
+                    context);
 
                 if (imageBytes != null && imageBytes.Length > 0)
                 {
-                    var filePath = Path.Combine(notebookDirectory, filename);
-                    await File.WriteAllBytesAsync(filePath, imageBytes);
+                    var outputFilename = SanitizeGeneratedImageFilename(filename, outputFormat);
+                    await WriteImageBytesToNotebookOutputAsync(imageBytes, outputFilename, context!, CancellationToken.None);
 
-                    _logger?.LogInformation("Image saved to: {FilePath}, Size: {Size} bytes", LogValueSanitizer.Sanitize(filePath), imageBytes.Length);
-                    stdOutBuffer.AppendLine($"Image generated successfully: {filename}");
+                    _logger?.LogInformation("Image saved to: {FilePath}, Size: {Size} bytes", LogValueSanitizer.Sanitize(Path.Combine(notebookDirectory, outputFilename)), imageBytes.Length);
+                    stdOutBuffer.AppendLine($"Image generated successfully: {outputFilename}");
 
-                    var relativePath = Path.Combine(NotebookPathHelper.GetRelativeRunFolder(context!), filename).Replace("\\", "/");
+                    var relativePath = Path.Combine(NotebookPathHelper.GetRelativeRunFolder(context!), outputFilename).Replace("\\", "/");
                     createdFileCwdPath = NotebookFileChangeReporter.ToCwdRelativePath(relativePath, context.IsPublished, context.RunId);
 
                     if (_serviceProvider != null)
@@ -278,7 +205,7 @@ namespace GuideAntsApi.Services
                     await RecordImageUsageAsync(
                         context!,
                         imageProvider,
-                        filename,
+                        outputFilename,
                         imageBytes.Length,
                         imageCount: Math.Max(1, n),
                         operation: "image-generation");

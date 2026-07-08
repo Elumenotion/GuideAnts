@@ -258,6 +258,9 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<string>("SamplingParametersJson")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("SandboxWireApiConfigJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<float?>("Temperature")
                         .HasColumnType("real");
 
@@ -2258,6 +2261,9 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<bool>("ExposeSandboxWireApi")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");
 
@@ -2303,6 +2309,22 @@ namespace GuideAntsApi.DataModel.Migrations
 
                     b.Property<DateTime>("UpdatedUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("WireAttributionConversationTitle")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<bool>("WireCreateAttributionConversationPerRun")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal?>("WireDailyLimitUsd")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("WireMonthlyLimitUsd")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid?>("WireTargetAssistantId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 

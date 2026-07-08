@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
+using GuideAnts.Logging;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Endpoints;
@@ -405,7 +406,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                     // idling.
                     _logger.LogInformation(
                         "Refusing load for '{ServiceId}': it is not the active provider (routing is remote/off).",
-                        serviceId);
+                        LogValueSanitizer.Sanitize(serviceId));
                     return new LocalServiceReconcileResult(
                         LocalServiceReconcileOutcome.NotActiveProvider,
                         $"'{serviceId}' is not the active provider; nothing was loaded.");
@@ -416,7 +417,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
             default:
                 _logger.LogWarning(
                     "Skipping '{ServiceId}' reconcile: routing resolution failed; leaving engine state unchanged.",
-                    serviceId);
+                    LogValueSanitizer.Sanitize(serviceId));
                 return new LocalServiceReconcileResult(
                     LocalServiceReconcileOutcome.RoutingUnknown,
                     $"Routing for '{serviceId}' could not be resolved.");
@@ -445,18 +446,18 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
             {
                 _logger.LogWarning(
                     "Timed out waiting for local service '{ServiceId}' readiness after load.",
-                    serviceId);
+                    LogValueSanitizer.Sanitize(serviceId));
                 return new LocalServiceReconcileResult(
                     LocalServiceReconcileOutcome.Timeout,
                     $"'{serviceId}' did not report ready after load.");
             }
 
-            _logger.LogInformation("Local service '{ServiceId}' is ready.", serviceId);
+            _logger.LogInformation("Local service '{ServiceId}' is ready.", LogValueSanitizer.Sanitize(serviceId));
             return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Warm);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Local service '{ServiceId}' load failed.", serviceId);
+            _logger.LogWarning(ex, "Local service '{ServiceId}' load failed.", LogValueSanitizer.Sanitize(serviceId));
             return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Failed, ex.Message);
         }
     }
@@ -486,12 +487,12 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                     $"'{serviceId}' did not report unloaded.");
             }
 
-            _logger.LogInformation("Local service '{ServiceId}' is unloaded.", serviceId);
+            _logger.LogInformation("Local service '{ServiceId}' is unloaded.", LogValueSanitizer.Sanitize(serviceId));
             return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Local service '{ServiceId}' unload failed.", serviceId);
+            _logger.LogWarning(ex, "Local service '{ServiceId}' unload failed.", LogValueSanitizer.Sanitize(serviceId));
             return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Failed, ex.Message);
         }
     }
@@ -663,17 +664,17 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                 {
                     _logger.LogWarning(
                         "Load request for service '{ServiceId}' was rejected ({StatusCode}) and will not be retried: {Body}",
-                        serviceId,
+                        LogValueSanitizer.Sanitize(serviceId),
                         (int)response.StatusCode,
-                        Truncate(responseBody, 512));
+                        LogValueSanitizer.Sanitize(Truncate(responseBody, 512)));
                     return false;
                 }
 
                 _logger.LogDebug(
                     "Load request for service '{ServiceId}' returned {StatusCode}: {Body}",
-                    serviceId,
+                    LogValueSanitizer.Sanitize(serviceId),
                     (int)response.StatusCode,
-                    Truncate(responseBody, 512));
+                    LogValueSanitizer.Sanitize(Truncate(responseBody, 512)));
             }
             catch (Exception ex)
             {
@@ -685,11 +686,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
         if (lastError is not null)
         {
-            _logger.LogWarning(lastError, "Failed issuing startup load for service '{ServiceId}'.", serviceId);
+            _logger.LogWarning(lastError, "Failed issuing startup load for service '{ServiceId}'.", LogValueSanitizer.Sanitize(serviceId));
         }
         else
         {
-            _logger.LogWarning("Failed issuing startup load for service '{ServiceId}' within timeout.", serviceId);
+            _logger.LogWarning("Failed issuing startup load for service '{ServiceId}' within timeout.", LogValueSanitizer.Sanitize(serviceId));
         }
 
         return false;
@@ -721,9 +722,9 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
                 _logger.LogDebug(
                     "Unload request for service '{ServiceId}' returned {StatusCode}: {Body}",
-                    serviceId,
+                    LogValueSanitizer.Sanitize(serviceId),
                     (int)response.StatusCode,
-                    Truncate(responseBody, 512));
+                    LogValueSanitizer.Sanitize(Truncate(responseBody, 512)));
             }
             catch (Exception ex)
             {
@@ -735,11 +736,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
         if (lastError is not null)
         {
-            _logger.LogWarning(lastError, "Failed issuing unload for service '{ServiceId}'.", serviceId);
+            _logger.LogWarning(lastError, "Failed issuing unload for service '{ServiceId}'.", LogValueSanitizer.Sanitize(serviceId));
         }
         else
         {
-            _logger.LogWarning("Failed issuing unload for service '{ServiceId}' within timeout.", serviceId);
+            _logger.LogWarning("Failed issuing unload for service '{ServiceId}' within timeout.", LogValueSanitizer.Sanitize(serviceId));
         }
 
         return false;
@@ -911,7 +912,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed resolving active modelRef for service '{ServiceId}'.", serviceId);
+            _logger.LogDebug(ex, "Failed resolving active modelRef for service '{ServiceId}'.", LogValueSanitizer.Sanitize(serviceId));
         }
 
         return null;
@@ -934,14 +935,14 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                 var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 _logger.LogWarning(
                     "Select-active for image bundle '{BundleId}' returned {StatusCode}: {Body}",
-                    bundleId,
+                    LogValueSanitizer.Sanitize(bundleId),
                     (int)response.StatusCode,
-                    Truncate(responseBody, 512));
+                    LogValueSanitizer.Sanitize(Truncate(responseBody, 512)));
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to select active image bundle '{BundleId}'.", bundleId);
+            _logger.LogWarning(ex, "Failed to select active image bundle '{BundleId}'.", LogValueSanitizer.Sanitize(bundleId));
         }
     }
 
@@ -1052,10 +1053,10 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
             _logger.LogInformation(
                 "Local {ServiceId} should be idle: default mode '{ModeId}' routes to provider section '{ProviderSection}', not local '{LocalProviderSection}'.",
-                serviceId,
-                mode.ModeId,
-                mode.ProviderSection,
-                expectedLocalProviderSection);
+                LogValueSanitizer.Sanitize(serviceId),
+                LogValueSanitizer.Sanitize(mode.ModeId),
+                LogValueSanitizer.Sanitize(mode.ProviderSection),
+                LogValueSanitizer.Sanitize(expectedLocalProviderSection));
             return LocalRoutingDesiredState.Idle;
         }
         catch (Exception ex)
@@ -1063,7 +1064,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
             _logger.LogWarning(
                 ex,
                 "Could not resolve routing mode for {ServiceId}; treating as unknown (do not warm).",
-                serviceId);
+                LogValueSanitizer.Sanitize(serviceId));
             return LocalRoutingDesiredState.Unknown;
         }
     }

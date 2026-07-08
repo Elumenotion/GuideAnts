@@ -179,7 +179,7 @@ export interface GuideUsageConversationsPageDto {
   items: ConversationUsageSummaryDto[];
 }
 
-export type GuideUsageSourceFilter = 'all' | 'conversation' | 'published_chat' | 'mcp' | 'wire_api';
+export type GuideUsageSourceFilter = 'all' | 'conversation' | 'published_chat' | 'mcp' | 'wire_api' | 'sandbox_wire_api';
 
 export interface GuideApiUsageRowDto {
   sourceChannel: string;

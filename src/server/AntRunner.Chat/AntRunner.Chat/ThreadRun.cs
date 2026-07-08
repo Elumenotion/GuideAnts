@@ -343,6 +343,7 @@ namespace AntRunner.Chat
 
             ChatChoice? choice = null;
             ChatRunOutput? runResults = null;
+            UsageResponse? accumulatedUsage = null;
             int evaluatorTurnCounter = 0;
             
             // Track files created/modified across all tool calls in this run
@@ -400,6 +401,11 @@ namespace AntRunner.Chat
                         roundIndex,
                         response.FirstChoice.FinishReason,
                         BuildTraceMessageSnapshot(response.FirstChoice.Message, toolCallJson));
+
+                    if (response.Usage != null)
+                    {
+                        accumulatedUsage = MergeRoundUsage(accumulatedUsage, response.Usage);
+                    }
 
                     var lastRole = messages.Last().Role;
                     var lastText = messages.Last().GetText();
@@ -512,6 +518,10 @@ namespace AntRunner.Chat
                     if (!string.Equals(runResults?.Status, "pending_client_tool", StringComparison.OrdinalIgnoreCase))
                     {
                         runResults = BuildRunResults(messages, response);
+                        if (accumulatedUsage != null)
+                        {
+                            runResults!.Usage = accumulatedUsage;
+                        }
                     }
 
                     if (choice.FinishReason == "stop" && !string.IsNullOrEmpty(options.Evaluator) && runResults != null)
@@ -557,7 +567,20 @@ namespace AntRunner.Chat
             catch (OperationCanceledException)
             {
                 traceCollector?.CaptureTerminalStatus("cancelled");
-                // Propagate cancellation so upstream callers can react appropriately
+
+                if (accumulatedUsage != null)
+                {
+                    var partial = runResults ?? new ChatRunOutput
+                    {
+                        Messages = messages,
+                        Status = "cancelled",
+                        LastMessage = messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.GetText() ?? string.Empty
+                    };
+                    partial.Status = "cancelled";
+                    partial.Usage = accumulatedUsage;
+                    throw new ChatRunCancelledException(partial);
+                }
+
                 throw;
             }
             catch (Exception ex)
@@ -912,6 +935,33 @@ namespace AntRunner.Chat
                 $"[Message aborted due to size restrictions{detail}. The original content was too large for the model " +
                 "context window and has been removed. Retry with a different approach that limits the message size — " +
                 "for example, write large output to a file and return only a short summary instead of the full content.]";
+        }
+
+        private static UsageResponse MergeRoundUsage(UsageResponse? accumulated, ChatCompletionUsage roundUsage)
+        {
+            var roundCached = roundUsage.PromptTokensDetails?.CachedTokens ?? 0;
+            var roundPrompt = roundUsage.PromptTokens ?? 0;
+            var roundCompletion = roundUsage.CompletionTokens ?? 0;
+            var roundTotal = roundUsage.TotalTokens ?? (roundPrompt + roundCompletion);
+
+            if (accumulated == null)
+            {
+                return new UsageResponse
+                {
+                    PromptTokens = roundPrompt,
+                    CompletionTokens = roundCompletion,
+                    CachedPromptTokens = roundCached,
+                    TotalTokens = roundTotal
+                };
+            }
+
+            return new UsageResponse
+            {
+                PromptTokens = (accumulated.PromptTokens ?? 0) + roundPrompt,
+                CompletionTokens = (accumulated.CompletionTokens ?? 0) + roundCompletion,
+                CachedPromptTokens = (accumulated.CachedPromptTokens ?? 0) + roundCached,
+                TotalTokens = (accumulated.TotalTokens ?? 0) + roundTotal
+            };
         }
 
         private static ChatRunOutput? BuildRunResults(List<ChatMessage> messages, ChatCompletionResponse response)
