@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using AntRunner.Chat;
+using AntRunner.Chat.Abstractions;
 using FluentAssertions;
 
 namespace GuideAntsApi.Tests.Services.Providers;
@@ -214,5 +215,41 @@ public sealed class ThreadRunTests
         clearOne.Should().NotThrow();
         clearAll.Should().NotThrow();
         clearOne.Should().NotThrow();
+    }
+
+    [TestMethod]
+    public void MergeRoundUsage_AccumulatesAcrossRounds()
+    {
+        var first = Invoke<UsageResponse>(
+            "MergeRoundUsage",
+            null,
+            new ChatCompletionUsage
+            {
+                PromptTokens = 100,
+                CompletionTokens = 50,
+                TotalTokens = 150,
+                PromptTokensDetails = new ChatPromptTokensDetails { CachedTokens = 10 }
+            });
+
+        first.PromptTokens.Should().Be(100);
+        first.CompletionTokens.Should().Be(50);
+        first.CachedPromptTokens.Should().Be(10);
+        first.TotalTokens.Should().Be(150);
+
+        var combined = Invoke<UsageResponse>(
+            "MergeRoundUsage",
+            first,
+            new ChatCompletionUsage
+            {
+                PromptTokens = 200,
+                CompletionTokens = 75,
+                TotalTokens = 275,
+                PromptTokensDetails = new ChatPromptTokensDetails { CachedTokens = 5 }
+            });
+
+        combined.PromptTokens.Should().Be(300);
+        combined.CompletionTokens.Should().Be(125);
+        combined.CachedPromptTokens.Should().Be(15);
+        combined.TotalTokens.Should().Be(425);
     }
 }

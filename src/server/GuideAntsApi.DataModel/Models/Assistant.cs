@@ -102,6 +102,12 @@ namespace GuideAntsApi.DataModel.Models
         public string? AuthConfigJson { get; set; }
 
         /// <summary>
+        /// Serialized sandbox wire API configuration for exposing a selected assistant
+        /// to code running in the script execution sandbox.
+        /// </summary>
+        public string? SandboxWireApiConfigJson { get; set; }
+
+        /// <summary>
         /// Optional default assistant name for guide workspace context.
         /// When Kind=Guide, specifies which crew member is the primary entry point.
         /// Null for regular assistants.

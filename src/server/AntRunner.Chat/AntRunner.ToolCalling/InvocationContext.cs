@@ -58,6 +58,11 @@ public sealed record InvocationContext(
     public Guid? AssistantId { get; set; }
 
     /// <summary>
+    /// Optional per-run sandbox wire overrides (e.g. scheduled job target assistant and limits).
+    /// </summary>
+    public SandboxWireProvisionOverrides? SandboxWireOverrides { get; set; }
+
+    /// <summary>
     /// Optional live activity sink used by the parent conversation stream to expose
     /// current tool/invocation progress without changing persisted messages or usage.
     /// </summary>
@@ -79,6 +84,12 @@ public sealed record InvocationContext(
         }
     }
 }
+
+public sealed record SandboxWireProvisionOverrides(
+    Guid? TargetAssistantId,
+    decimal? DailyLimitUsd,
+    decimal? MonthlyLimitUsd,
+    bool ForceEnabled);
 
 public sealed record ToolActivityUpdate(
     string Name,

@@ -333,6 +333,8 @@ export default function GuideUsagePage() {
         return 'MCP';
       case 'wire_api':
         return 'Wire API';
+      case 'sandbox_wire_api':
+        return 'Sandbox Wire API';
       default:
         return value;
     }
@@ -927,6 +929,7 @@ export default function GuideUsagePage() {
                   <option value="published_chat">Published Chat</option>
                   <option value="mcp">MCP</option>
                   <option value="wire_api">Wire API</option>
+                  <option value="sandbox_wire_api">Sandbox Wire API</option>
                 </select>
               </div>
               {apiUsageError && (

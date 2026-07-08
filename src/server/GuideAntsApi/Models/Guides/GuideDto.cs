@@ -32,6 +32,7 @@ public record GuideDetailsDto(
 ) {
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
     public List<AssistantSkillDto>? Skills { get; init; }
+    public SandboxWireApiConfigDto? SandboxWireApiConfig { get; init; }
 }
 
 // Create guide request
@@ -58,6 +59,7 @@ public record CreateGuideDto(
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
     public List<AssistantSkillSaveDto>? Skills { get; init; }
+    public SandboxWireApiConfigDto? SandboxWireApiConfig { get; init; }
 }
 
 // Update guide request
@@ -85,6 +87,7 @@ public record UpdateGuideDto(
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
     public List<AssistantSkillSaveDto>? Skills { get; init; }
+    public SandboxWireApiConfigDto? SandboxWireApiConfig { get; init; }
 }
 
 // Supporting DTOs

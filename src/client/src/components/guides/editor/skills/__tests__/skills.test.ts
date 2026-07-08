@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { parseSkillFrontmatter, buildCanonicalSkillMarkdown } from '../skillFrontmatter';
 import { computeSkillGating } from '../skillGating';
 import { mapSkillPrerequisites } from '../skillToolsetMapping';
@@ -7,10 +7,23 @@ import { moveSkill, nextSkillDisplayOrder, reindexSkillDisplayOrders } from '../
 import { buildSkillFileTree, skillPackagePath } from '../skillFileTreeModel';
 import {
   buildAssistantInstructionsFromSkillMarkdown,
+  buildCreateAssistantFromSkillPayload,
   filterSkillPayloadFilesForAssistant,
   isSkillManifestPath,
+  resolveSkillMarkdown,
 } from '../createFromSkillHelpers';
 import type { AssistantSkillDto } from '../../../../../types/guides';
+import { api } from '../../../../../services/api';
+
+vi.mock('../../../../../services/api', () => ({
+  api: {
+    guides: {
+      assistants: {
+        downloadFile: vi.fn(),
+      },
+    },
+  },
+}));
 
 const agentskillsYaml = `---
 name: pptx-author
@@ -301,6 +314,74 @@ describe('createFromSkillHelpers', () => {
 
     expect(filtered).toHaveLength(1);
     expect(filtered[0].relativePath).toBe('Skills/searxng-search/scripts/searxng.sh');
+  });
+
+  it('resolves markdown from pending uploads before hitting the API', async () => {
+    const markdown = await resolveSkillMarkdown(
+      { name: 'demo', description: '', files: [], requiresToolsets: [], requiresTools: [] },
+      [
+        {
+          name: 'demo',
+          filesToAdd: [
+            {
+              folderKind: 'Skill',
+              relativePath: 'Skills/demo/SKILL.md',
+              contentBytes: btoa('# Pending skill'),
+              contentType: 'text/markdown',
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(markdown).toBe('# Pending skill');
+    expect(api.guides.assistants.downloadFile).not.toHaveBeenCalled();
+  });
+
+  it('builds create-assistant payload from pending skill files', async () => {
+    const skill: AssistantSkillDto = {
+      name: 'demo',
+      description: 'Demo skill',
+      displayOrder: 0,
+      requiresToolsets: ['sandbox'],
+      requiresTools: [],
+      files: [],
+    };
+
+    const payload = await buildCreateAssistantFromSkillPayload(
+      'project-1',
+      [skill],
+      [
+        {
+          name: 'demo',
+          filesToAdd: [
+            {
+              folderKind: 'Skill',
+              relativePath: 'Skills/demo/SKILL.md',
+              contentBytes: btoa('# Skill body'),
+              contentType: 'text/markdown',
+            },
+            {
+              folderKind: 'Skill',
+              relativePath: 'Skills/demo/scripts/run.sh',
+              contentBytes: btoa('#!/bin/bash'),
+              contentType: 'application/x-sh',
+            },
+          ],
+        },
+      ],
+      undefined,
+      { primarySkillName: 'demo', selectedSkillNames: ['demo'] },
+    );
+
+    expect(payload.name).toBe('demo');
+    expect(payload.instructions).toBe('# Skill body');
+    expect(payload.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ relativePath: 'Skills/demo/scripts/run.sh' }),
+        expect.objectContaining({ folderKind: 'CodeInterpreter' }),
+      ]),
+    );
   });
 });
 

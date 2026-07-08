@@ -68,7 +68,11 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
                 ["Jwt:Issuer"] = IntegrationTestAuthHandler.JwtIssuer,
                 ["Jwt:Audience"] = IntegrationTestAuthHandler.JwtAudience,
                 ["Jwt:LifetimeMinutes"] = IntegrationTestAuthHandler.JwtLifetimeMinutes.ToString(),
-                ["Jwt:SigningKey"] = IntegrationTestAuthHandler.JwtSigningKey
+                ["Jwt:SigningKey"] = IntegrationTestAuthHandler.JwtSigningKey,
+                ["SandboxWireApi:Issuer"] = "GuideAnts.Test",
+                ["SandboxWireApi:Audience"] = "GuideAnts.SandboxWire",
+                ["SandboxWireApi:SigningKey"] = "guideants-integration-tests-sandbox-wire-signing-key-2026",
+                ["SandboxWireApi:InternalBaseUrl"] = "http://localhost/api/internal/sandbox/openai/v1"
             });
         });
 

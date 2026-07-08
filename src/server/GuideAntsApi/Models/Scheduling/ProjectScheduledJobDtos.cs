@@ -55,6 +55,12 @@ public record ProjectScheduledJobDetailDto(
     string? AssistantName,
     Guid? ScriptNotebookFileId,
     string? ScriptRelativePath,
+    bool ExposeSandboxWireApi,
+    Guid? WireTargetAssistantId,
+    string? WireAttributionConversationTitle,
+    bool WireCreateAttributionConversationPerRun,
+    decimal? WireDailyLimitUsd,
+    decimal? WireMonthlyLimitUsd,
     DateTime? NextRunUtc,
     DateTime? LastRunUtc,
     string? LastRunStatus,
@@ -72,7 +78,13 @@ public record CreateProjectScheduledJobRequest(
     string? ConversationTitle,
     string? Prompt,
     string? AssistantName,
-    Guid? ScriptNotebookFileId);
+    Guid? ScriptNotebookFileId,
+    bool ExposeSandboxWireApi = false,
+    Guid? WireTargetAssistantId = null,
+    string? WireAttributionConversationTitle = null,
+    bool WireCreateAttributionConversationPerRun = false,
+    decimal? WireDailyLimitUsd = null,
+    decimal? WireMonthlyLimitUsd = null);
 
 public record UpdateProjectScheduledJobRequest(
     string Name,
@@ -84,7 +96,13 @@ public record UpdateProjectScheduledJobRequest(
     string? ConversationTitle,
     string? Prompt,
     string? AssistantName,
-    Guid? ScriptNotebookFileId);
+    Guid? ScriptNotebookFileId,
+    bool ExposeSandboxWireApi = false,
+    Guid? WireTargetAssistantId = null,
+    string? WireAttributionConversationTitle = null,
+    bool WireCreateAttributionConversationPerRun = false,
+    decimal? WireDailyLimitUsd = null,
+    decimal? WireMonthlyLimitUsd = null);
 
 public record ProjectScheduledJobRunSummaryDto(
     Guid Id,

@@ -66,6 +66,47 @@ public sealed class PublishedWireUsageRecorderTests
             .WithMessage("*usage write failed*");
     }
 
+    [TestMethod]
+    public async Task RecordTranscriptionAsync_uses_canonical_speech_metrics()
+    {
+        var fake = new CapturingUsageRecorder();
+        var sut = new PublishedWireUsageRecorder(fake);
+        var context = CreateContext();
+
+        await sut.RecordTranscriptionAsync(
+            context: context,
+            service: "SpeechTranscription.OpenRouter.Audio",
+            operation: "audio.transcriptions",
+            endpoint: "audio.transcriptions",
+            durationSeconds: 12,
+            transcriptLength: 240,
+            requestBytes: 125_000,
+            ct: CancellationToken.None);
+
+        fake.Metrics.Should().Be(SpeechUsageMetrics.ForTranscription(12, 240));
+        fake.Category.Should().Be(UsageCategory.SpeechTranscription);
+    }
+
+    [TestMethod]
+    public async Task RecordSpeechAsync_uses_canonical_speech_metrics()
+    {
+        var fake = new CapturingUsageRecorder();
+        var sut = new PublishedWireUsageRecorder(fake);
+        var context = CreateContext();
+
+        await sut.RecordSpeechAsync(
+            context: context,
+            service: "SpeechSynthesis.OpenRouter.Tts",
+            operation: "audio.speech",
+            endpoint: "audio.speech",
+            characterCount: 42,
+            durationSeconds: 3,
+            ct: CancellationToken.None);
+
+        fake.Metrics.Should().Be(SpeechUsageMetrics.ForSynthesis(42, 3));
+        fake.Category.Should().Be(UsageCategory.SpeechSynthesis);
+    }
+
     private static PublishedApiExecutionContext CreateContext() =>
         new(
             PubId: Guid.NewGuid(),
@@ -84,6 +125,7 @@ public sealed class PublishedWireUsageRecorderTests
     private sealed class CapturingUsageRecorder : IUsageRecorder
     {
         public UsageCategory? Category { get; private set; }
+        public UsageMetrics? Metrics { get; private set; }
         public string? Service { get; private set; }
         public string? Operation { get; private set; }
         public string? MetadataJson { get; private set; }
@@ -115,6 +157,7 @@ public sealed class PublishedWireUsageRecorderTests
             string? externalUserIdentity = null)
         {
             Category = category;
+            Metrics = metrics;
             Service = service;
             Operation = operation;
             MetadataJson = metadataJson;

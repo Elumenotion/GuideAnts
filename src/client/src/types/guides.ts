@@ -29,6 +29,7 @@ export interface GuideDetailsDto {
   conversationStarters: ConversationStarterDto[];
   crews: CrewSummaryDto[];
   skills?: AssistantSkillDto[];
+  sandboxWireApiConfig?: SandboxWireApiConfigDto;
 }
 
 export interface CreateGuideDto {
@@ -53,6 +54,7 @@ export interface CreateGuideDto {
   skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
   crewMemberIds?: string[];
+  sandboxWireApiConfig?: SandboxWireApiConfigDto;
 }
 
 export interface UpdateGuideDto {
@@ -78,6 +80,7 @@ export interface UpdateGuideDto {
   skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
   crewMemberIds?: string[];
+  sandboxWireApiConfig?: SandboxWireApiConfigDto;
 }
 
 export interface AssistantDto {
@@ -545,6 +548,16 @@ export interface UpdatePublishedGuideDto {
   wireApiConfig?: PublishedWireApiConfigDto;
   mcpEnabled?: boolean;
   mcpDescription?: string;
+}
+
+export interface SandboxWireApiConfigDto {
+  enabled?: boolean;
+  targetAssistantId?: string;
+  endpointFlags?: PublishedWireApiEndpointFlagsDto;
+  aliasMap?: Record<string, string>;
+  maxRequestSizes?: PublishedWireApiMaxRequestSizesDto;
+  dailyLimitUsd?: number | null;
+  monthlyLimitUsd?: number | null;
 }
 
 export interface PublishedWireApiConfigDto {

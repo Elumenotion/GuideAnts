@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useToast } from '../../common/Toast';
 import { api } from '../../../services/api';
-import { GuideDetailsDto, AssistantDetailsDto, CreateGuideDto, UpdateGuideDto, CreateAssistantDto, UpdateAssistantDto, ContextOptionDto, CustomToolDto, FileUploadDto, FileDto, AuthProviderDto, ModelDto, EnvironmentVariableDto, AssistantSkillDto, AssistantSkillSaveDto, ToolAssignmentDto } from '../../../types/guides';
+import { GuideDetailsDto, AssistantDetailsDto, CreateGuideDto, UpdateGuideDto, CreateAssistantDto, UpdateAssistantDto, ContextOptionDto, CustomToolDto, FileUploadDto, FileDto, AuthProviderDto, ModelDto, EnvironmentVariableDto, AssistantSkillDto, AssistantSkillSaveDto, ToolAssignmentDto, SandboxWireApiConfigDto } from '../../../types/guides';
 import LoadingSpinner from '../../LoadingSpinner';
 import { API_BASE_URL, getApiOrigin } from '../../../config/apiConfig';
 import { ConfirmationDialog } from '../../common/ConfirmationDialog';
@@ -64,6 +64,7 @@ interface FormData {
   toolAssignments: ToolAssignmentDto[];
   conversationStarters: string[];
   crewMemberIds: string[]; // Only used for guides
+  sandboxWireApiConfig: SandboxWireApiConfigDto;
 }
 
 const defaultFormData: FormData = {
@@ -87,6 +88,7 @@ const defaultFormData: FormData = {
   toolAssignments: [],
   conversationStarters: [],
   crewMemberIds: [],
+  sandboxWireApiConfig: {},
 };
 
 function normalizeFormValue<K extends keyof FormData>(key: K, value: FormData[K]): FormData[K] {
@@ -641,6 +643,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           conversationStarters: data.conversationStarters.map((cs) => cs.prompt),
           crewMemberIds: data.crews.flatMap((crew) => crew.members.map((m) => m.assistantId)),
           samplingOverrides: {},
+          sandboxWireApiConfig: data.sandboxWireApiConfig ?? {},
         });
 
         if (data.guide.avatarUrl) {
@@ -672,6 +675,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           toolAssignments: data.tools,
           conversationStarters: data.conversationStarters.map((cs) => cs.prompt),
           crewMemberIds: [],
+          sandboxWireApiConfig: {},
         });
 
         if (data.assistant.avatarUrl) {
@@ -830,6 +834,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             skills: skillsToSave,
             conversationStarters: formData.conversationStarters,
             crewMemberIds: formData.crewMemberIds,
+            sandboxWireApiConfig: formData.sandboxWireApiConfig,
           };
 
           await api.guides.guides.update(entityId, updateDto);
@@ -898,6 +903,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             skills: skillsToSave,
             conversationStarters: formData.conversationStarters,
             crewMemberIds: formData.crewMemberIds,
+            sandboxWireApiConfig: formData.sandboxWireApiConfig,
           };
 
           const newGuide = await api.guides.guides.create(createDto);
@@ -1157,9 +1163,12 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               requiresRunPython={requiresRunPython}
               projectId={projectId}
               guideId={isGuide && isEditing ? entityId : undefined}
+              crewMemberIds={formData.crewMemberIds}
+              sandboxWireApiConfig={formData.sandboxWireApiConfig}
               onSelectedToolIdsChange={(selectedToolIds) => updateForm({ selectedToolIds })}
               onCustomToolsChange={(customTools) => updateForm({ customTools })}
               onEnvironmentVariablesChange={(environmentVariables) => updateForm({ environmentVariables })}
+              onSandboxWireApiConfigChange={(sandboxWireApiConfig) => updateForm({ sandboxWireApiConfig })}
               onValidationChange={setHasValidationErrors}
               onDirtyChange={() => setIsDirty(true)}
             />

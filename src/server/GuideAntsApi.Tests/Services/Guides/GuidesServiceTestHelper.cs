@@ -7,6 +7,7 @@ using GuideAntsApi.Services.Guides;
 using GuideAntsApi.Services.Guides.Skills;
 using GuideAntsApi.Services.Mcp;
 using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.Services.SandboxWireApi;
 using GuideAntsApi.Services.SystemGuide;
 using GuideAntsApi.Tests.TestUtils;
 using GuideAntsApi.Settings;
@@ -31,6 +32,7 @@ internal static class GuidesServiceTestHelper
             catalogFilter ?? EmptySystemGuideCatalogFilter.Instance,
             Mock.Of<IMcpSandboxSetupStagingService>(),
             new AssistantSkillMetaSync(context),
+            Mock.Of<ISandboxWireCycleDetector>(),
             NullLogger<GuidesService>.Instance);
 
     internal static GuideExportImportService CreateExportImportService(ApplicationDbContext context, DbContextOptions<ApplicationDbContext> options) =>

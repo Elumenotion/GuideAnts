@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ChatModelConfigurator } from '../ChatModelConfigurator';
 import { api } from '../../../services/api';
 
@@ -120,13 +120,15 @@ describe('ChatModelConfigurator', () => {
 
     await screen.findByRole('combobox', { name: /ai model/i });
 
-    expect(onChange).toHaveBeenCalledWith({
-      modelId: 'gemini-2.5-flash',
-      temperature: null,
-      topP: null,
-      reasoningEffort: undefined,
-      samplingOverrides: {},
-    });
+    await waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith({
+        modelId: 'gemini-2.5-flash',
+        temperature: null,
+        topP: null,
+        reasoningEffort: undefined,
+        samplingOverrides: {},
+      })
+    );
   });
 
   it('drops stale reasoning effort when switching to a model without reasoning support', async () => {

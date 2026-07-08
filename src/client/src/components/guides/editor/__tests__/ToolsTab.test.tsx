@@ -20,9 +20,12 @@ describe('ToolsTab', () => {
         contextOptions={[]}
         environmentVariables={[]}
         requiresRunPython={false}
+        crewMemberIds={[]}
+        sandboxWireApiConfig={{}}
         onSelectedToolIdsChange={() => {}}
         onCustomToolsChange={() => {}}
         onEnvironmentVariablesChange={() => {}}
+        onSandboxWireApiConfigChange={() => {}}
       />
     );
 
@@ -39,9 +42,12 @@ describe('ToolsTab', () => {
         contextOptions={[]}
         environmentVariables={[]}
         requiresRunPython={false}
+        crewMemberIds={[]}
+        sandboxWireApiConfig={{}}
         onSelectedToolIdsChange={() => {}}
         onCustomToolsChange={() => {}}
         onEnvironmentVariablesChange={() => {}}
+        onSandboxWireApiConfigChange={() => {}}
       />
     );
 

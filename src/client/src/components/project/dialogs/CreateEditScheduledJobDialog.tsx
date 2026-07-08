@@ -47,6 +47,14 @@ export function CreateEditScheduledJobDialog({
   const [prompt, setPrompt] = useState('');
   const [assistantName, setAssistantName] = useState('assistant');
   const [scriptNotebookFileId, setScriptNotebookFileId] = useState<string | null>(null);
+  const [exposeSandboxWireApi, setExposeSandboxWireApi] = useState(false);
+  const [wireTargetAssistantId, setWireTargetAssistantId] = useState<string | null>(null);
+  const [wireAttributionConversationTitle, setWireAttributionConversationTitle] = useState('Sandbox wire {timestamp}');
+  const [wireCreateAttributionConversationPerRun, setWireCreateAttributionConversationPerRun] = useState(false);
+  const [wireDailyLimitUsd, setWireDailyLimitUsd] = useState<string>('');
+  const [wireMonthlyLimitUsd, setWireMonthlyLimitUsd] = useState<string>('');
+  const [wireTargetAssistants, setWireTargetAssistants] = useState<Array<{ id: string; name: string }>>([]);
+  const [isLoadingWireAssistants, setIsLoadingWireAssistants] = useState(false);
   const [assistants, setAssistants] = useState<AssistantOption[]>([]);
   const [isLoadingAssistants, setIsLoadingAssistants] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -86,6 +94,12 @@ export function CreateEditScheduledJobDialog({
       setPrompt(job.prompt ?? '');
       setAssistantName(job.assistantName ?? 'assistant');
       setScriptNotebookFileId(job.scriptNotebookFileId ?? null);
+      setExposeSandboxWireApi(job.exposeSandboxWireApi);
+      setWireTargetAssistantId(job.wireTargetAssistantId ?? null);
+      setWireAttributionConversationTitle(job.wireAttributionConversationTitle ?? 'Sandbox wire {timestamp}');
+      setWireCreateAttributionConversationPerRun(job.wireCreateAttributionConversationPerRun);
+      setWireDailyLimitUsd(job.wireDailyLimitUsd != null ? String(job.wireDailyLimitUsd) : '');
+      setWireMonthlyLimitUsd(job.wireMonthlyLimitUsd != null ? String(job.wireMonthlyLimitUsd) : '');
     } else {
       setName('');
       setJobType('NewConversation');
@@ -97,6 +111,12 @@ export function CreateEditScheduledJobDialog({
       setPrompt('');
       setAssistantName('assistant');
       setScriptNotebookFileId(null);
+      setExposeSandboxWireApi(false);
+      setWireTargetAssistantId(null);
+      setWireAttributionConversationTitle('Sandbox wire {timestamp}');
+      setWireCreateAttributionConversationPerRun(false);
+      setWireDailyLimitUsd('');
+      setWireMonthlyLimitUsd('');
     }
   }, [isOpen, job]);
 
@@ -169,6 +189,44 @@ export function CreateEditScheduledJobDialog({
   }, [isOpen, jobType, notebookId, projectId, selectedNotebookGuideId]);
 
   useEffect(() => {
+    if (!isOpen || jobType !== 'RunPythonScript' || !notebookId || !selectedNotebookGuideId) {
+      setWireTargetAssistants([]);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingWireAssistants(true);
+    api.projects.notebookTemplates.getAssistants(selectedNotebookGuideId, projectId)
+      .then((assistantList) => {
+        if (cancelled) {
+          return;
+        }
+        setWireTargetAssistants(
+          assistantList
+            .filter((assistant: { id: string }) => assistant.id !== selectedNotebookGuideId)
+            .map((assistant: { id: string; name: string }) => ({
+              id: assistant.id,
+              name: assistant.name,
+            })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWireTargetAssistants([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingWireAssistants(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, jobType, notebookId, projectId, selectedNotebookGuideId]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && isOpen && !isSubmitting) {
         onClose();
@@ -214,6 +272,22 @@ export function CreateEditScheduledJobDialog({
       prompt: jobType === 'NewConversation' ? prompt.trim() : null,
       assistantName: jobType === 'NewConversation' ? assistantName : null,
       scriptNotebookFileId: jobType === 'RunPythonScript' ? scriptNotebookFileId : null,
+      exposeSandboxWireApi: jobType === 'RunPythonScript' ? exposeSandboxWireApi : false,
+      wireTargetAssistantId: jobType === 'RunPythonScript' && exposeSandboxWireApi
+        ? wireTargetAssistantId
+        : null,
+      wireAttributionConversationTitle: jobType === 'RunPythonScript' && exposeSandboxWireApi
+        ? wireAttributionConversationTitle.trim() || null
+        : null,
+      wireCreateAttributionConversationPerRun: jobType === 'RunPythonScript'
+        ? wireCreateAttributionConversationPerRun
+        : false,
+      wireDailyLimitUsd: jobType === 'RunPythonScript' && wireDailyLimitUsd !== ''
+        ? Number(wireDailyLimitUsd)
+        : null,
+      wireMonthlyLimitUsd: jobType === 'RunPythonScript' && wireMonthlyLimitUsd !== ''
+        ? Number(wireMonthlyLimitUsd)
+        : null,
     };
 
     setIsSubmitting(true);
@@ -368,7 +442,7 @@ export function CreateEditScheduledJobDialog({
           )}
 
           {jobType === 'RunPythonScript' && notebookId && (
-            <div className="border-t border-gray-100 pt-4">
+            <div className="border-t border-gray-100 pt-4 space-y-4">
               <NotebookPythonFilePicker
                 projectId={projectId}
                 notebookId={notebookId}
@@ -376,6 +450,116 @@ export function CreateEditScheduledJobDialog({
                 onSelect={(fileId) => setScriptNotebookFileId(fileId)}
                 disabled={disabled || isSubmitting}
               />
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-900">AI model access for this script</h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    When enabled, this scheduled run receives{' '}
+                    <code className="text-xs bg-gray-100 px-1 rounded">OPENAI_BASE_URL</code> and{' '}
+                    <code className="text-xs bg-gray-100 px-1 rounded">OPENAI_API_KEY</code> so the Python
+                    script can call an OpenAI-compatible API with the standard OpenAI or Anthropic SDKs.
+                    Requests run a selected target assistant and are metered against this project. The
+                    key is scoped to this single run.
+                  </p>
+                </div>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={exposeSandboxWireApi}
+                    onChange={(e) => setExposeSandboxWireApi(e.target.checked)}
+                    disabled={disabled || isSubmitting}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Give this script AI model access
+                </label>
+
+                {exposeSandboxWireApi && (
+                  <div className="space-y-3 pl-1">
+                    <div>
+                      <label htmlFor="wire-target-assistant" className="block text-sm font-medium text-gray-700 mb-1">
+                        Target assistant override (optional)
+                      </label>
+                      {isLoadingWireAssistants ? (
+                        <p className="text-sm text-gray-500">Loading assistants…</p>
+                      ) : (
+                        <select
+                          id="wire-target-assistant"
+                          value={wireTargetAssistantId ?? ''}
+                          onChange={(e) => setWireTargetAssistantId(e.target.value || null)}
+                          disabled={disabled || isSubmitting}
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+                        >
+                          <option value="">Use guide default</option>
+                          {wireTargetAssistants.map((assistant) => (
+                            <option key={assistant.id} value={assistant.id}>{assistant.name}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={wireCreateAttributionConversationPerRun}
+                        onChange={(e) => setWireCreateAttributionConversationPerRun(e.target.checked)}
+                        disabled={disabled || isSubmitting}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      Create attribution conversation per run
+                    </label>
+
+                    {wireCreateAttributionConversationPerRun && (
+                      <div>
+                        <label htmlFor="wire-attribution-title" className="block text-sm font-medium text-gray-700 mb-1">
+                          Attribution conversation title
+                        </label>
+                        <input
+                          id="wire-attribution-title"
+                          type="text"
+                          value={wireAttributionConversationTitle}
+                          onChange={(e) => setWireAttributionConversationTitle(e.target.value)}
+                          disabled={disabled || isSubmitting}
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+                        />
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label htmlFor="wire-daily-limit" className="block text-sm font-medium text-gray-700 mb-1">
+                          Daily limit (USD, optional)
+                        </label>
+                        <input
+                          id="wire-daily-limit"
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={wireDailyLimitUsd}
+                          onChange={(e) => setWireDailyLimitUsd(e.target.value)}
+                          disabled={disabled || isSubmitting}
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="wire-monthly-limit" className="block text-sm font-medium text-gray-700 mb-1">
+                          Monthly limit (USD, optional)
+                        </label>
+                        <input
+                          id="wire-monthly-limit"
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={wireMonthlyLimitUsd}
+                          onChange={(e) => setWireMonthlyLimitUsd(e.target.value)}
+                          disabled={disabled || isSubmitting}
+                          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

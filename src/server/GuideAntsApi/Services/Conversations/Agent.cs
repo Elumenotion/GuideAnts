@@ -226,9 +226,10 @@ public static class Agent
                 ModifiedFiles = output?.ModifiedFiles
             };
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
             var elapsed = Stopwatch.GetElapsedTime(startTime);
+            var partialOutput = (ex as ChatRunCancelledException)?.ChatRunOutput;
 
             // Even on cancellation, compute tool responses that completed
             toolCallCount = await ComputeToolCallCountAsync(invocationId, CancellationToken.None);
@@ -237,10 +238,35 @@ public static class Agent
                 invocationId: invocationId,
                 status: "cancelled",
                 errorMessage: "Operation was cancelled",
-                usageJson: null,
+                usageJson: partialOutput?.Usage != null ? JsonSerializer.Serialize(partialOutput.Usage) : null,
                 llmRoundTrips: llmRoundTrips,
                 toolCallCount: toolCallCount,
                 durationMs: (long)elapsed.TotalMilliseconds);
+
+            if (partialOutput?.Usage != null)
+            {
+                try
+                {
+                    var scopeFactory = scope.ServiceProvider.GetService<IServiceScopeFactory>();
+                    var usageService = LlmProviderResolver.ResolveUsageServiceName(opts.DeploymentId, scopeFactory);
+
+                    ChatUsage.RecordChatCompletion(
+                        projectId: context.ProjectId,
+                        notebookId: context.NotebookId,
+                        conversationId: context.ConversationId,
+                        service: usageService,
+                        operation: "agent_invoke",
+                        modelDeploymentId: opts.DeploymentId,
+                        inputTokens: partialOutput.Usage.PromptTokens ?? 0,
+                        cachedInputTokens: partialOutput.Usage.CachedPromptTokens ?? 0,
+                        reasoningTokens: 0,
+                        outputTokens: partialOutput.Usage.CompletionTokens ?? 0,
+                        assistantId: assistant.Id,
+                        agentInvocationId: invocationId);
+                }
+                catch { /* non-fatal usage logging */ }
+            }
+
             throw;
         }
         catch (Exception ex)

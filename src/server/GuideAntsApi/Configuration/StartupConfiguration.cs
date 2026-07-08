@@ -144,6 +144,12 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.Auth.IPublishedGuideAuthService, GuideAntsApi.Services.Auth.PublishedGuideAuthService>();
         services.AddScoped<GuideAntsApi.Services.PublishedWireApi.IPublishedApiExecutionContextResolver, GuideAntsApi.Services.PublishedWireApi.PublishedApiExecutionContextResolver>();
         services.AddScoped<GuideAntsApi.Services.PublishedWireApi.IPublishedWireUsageRecorder, GuideAntsApi.Services.PublishedWireApi.PublishedWireUsageRecorder>();
+        services.AddScoped<GuideAntsApi.Services.SandboxWireApi.ISandboxWireJwtService, GuideAntsApi.Services.SandboxWireApi.SandboxWireJwtService>();
+        services.AddScoped<GuideAntsApi.Services.SandboxWireApi.ISandboxWireExecutionContextResolver, GuideAntsApi.Services.SandboxWireApi.SandboxWireExecutionContextResolver>();
+        services.AddScoped<GuideAntsApi.Services.SandboxWireApi.ISandboxWireCostLimitService, GuideAntsApi.Services.SandboxWireApi.SandboxWireCostLimitService>();
+        services.AddScoped<GuideAntsApi.Services.SandboxWireApi.ISandboxWireCycleDetector, GuideAntsApi.Services.SandboxWireApi.SandboxWireCycleDetector>();
+        services.AddScoped<GuideAntsApi.Services.SandboxWireApi.ISandboxWireEnvironmentProvisioner, GuideAntsApi.Services.SandboxWireApi.SandboxWireEnvironmentProvisioner>();
+        services.AddScoped<GuideAntsApi.Services.SandboxWireApi.ISandboxWireConversationService, GuideAntsApi.Services.SandboxWireApi.SandboxWireConversationService>();
         services.AddScoped<IContextOptionsService, ContextOptionsService>();
         
         services.AddHttpClient<GuideAntsApi.Services.LlamaCpp.ILlamaServerRuntimeClient, GuideAntsApi.Services.LlamaCpp.LlamaServerRuntimeClient>(client =>
@@ -758,6 +764,7 @@ public static class StartupConfiguration
         services.Configure<LlamaModelManagementOptions>(configuration.GetSection(LlamaModelManagementOptions.SectionName));
         services.Configure<DocumentServerOptions>(configuration.GetSection(DocumentServerOptions.SectionName));
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
+        services.Configure<GuideAntsApi.Options.SandboxWireApiOptions>(configuration.GetSection(GuideAntsApi.Options.SandboxWireApiOptions.SectionName));
     }
 
     private static void ValidateJwtOptions(JwtOptions jwtOptions)

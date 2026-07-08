@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GuideAnts.Usage;
+using GuideAntsApi.Services.SandboxWireApi;
 
 namespace GuideAntsApi.Services.PublishedWireApi;
 
@@ -22,6 +23,80 @@ public interface IPublishedWireUsageRecorder
         decimal costUsd = 0m,
         string? modelDeploymentId = null,
         CancellationToken ct = default);
+
+    Task RecordAsync(
+        IWireExecutionContext context,
+        UsageCategory category,
+        string service,
+        string operation,
+        UsageMetrics metrics,
+        string endpoint,
+        string status = "success",
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        long? inputCount = null,
+        long? outputCount = null,
+        decimal costUsd = 0m,
+        string? modelDeploymentId = null,
+        CancellationToken ct = default);
+
+    Task RecordTranscriptionAsync(
+        PublishedApiExecutionContext context,
+        string service,
+        string operation,
+        string endpoint,
+        long durationSeconds,
+        long transcriptLength,
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        decimal costUsd = 0m,
+        CancellationToken ct = default);
+
+    Task RecordSpeechAsync(
+        PublishedApiExecutionContext context,
+        string service,
+        string operation,
+        string endpoint,
+        long characterCount,
+        long durationSeconds,
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        decimal costUsd = 0m,
+        CancellationToken ct = default);
+
+    Task RecordTranscriptionAsync(
+        IWireExecutionContext context,
+        string service,
+        string operation,
+        string endpoint,
+        long durationSeconds,
+        long transcriptLength,
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        decimal costUsd = 0m,
+        CancellationToken ct = default);
+
+    Task RecordSpeechAsync(
+        IWireExecutionContext context,
+        string service,
+        string operation,
+        string endpoint,
+        long characterCount,
+        long durationSeconds,
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        decimal costUsd = 0m,
+        CancellationToken ct = default);
 }
 
 public sealed class PublishedWireUsageRecorder : IPublishedWireUsageRecorder
@@ -36,6 +111,41 @@ public sealed class PublishedWireUsageRecorder : IPublishedWireUsageRecorder
 
     public Task RecordAsync(
         PublishedApiExecutionContext context,
+        UsageCategory category,
+        string service,
+        string operation,
+        UsageMetrics metrics,
+        string endpoint,
+        string status = "success",
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        long? inputCount = null,
+        long? outputCount = null,
+        decimal costUsd = 0m,
+        string? modelDeploymentId = null,
+        CancellationToken ct = default) =>
+        RecordAsync(
+            new PublishedWireExecutionContextAdapter(context),
+            category,
+            service,
+            operation,
+            metrics,
+            endpoint,
+            status,
+            alias,
+            providerModel,
+            providerServiceMode,
+            requestBytes,
+            inputCount,
+            outputCount,
+            costUsd,
+            modelDeploymentId,
+            ct);
+
+    public Task RecordAsync(
+        IWireExecutionContext context,
         UsageCategory category,
         string service,
         string operation,
@@ -77,20 +187,134 @@ public sealed class PublishedWireUsageRecorder : IPublishedWireUsageRecorder
             operation: operation,
             metrics: metrics,
             costUsd: costUsd,
-            conversationId: null,
+            conversationId: context.AttributionConversationId,
             contentFileId: null,
             notebookFileId: null,
             modelDeploymentId: modelDeploymentId,
             metadataJson: metadataJson,
-            assistantId: context.GuideId,
+            assistantId: context.OwnerAssistantId,
             agentInvocationId: null,
             notebookConversationMessageId: null,
             ct: ct,
-            publishedGuideId: context.PubId,
+            publishedGuideId: context is PublishedWireExecutionContextAdapter adapter
+                ? adapter.Context.PubId
+                : null,
             sourceChannel: context.SourceChannel,
             externalRequestId: context.ExternalRequestId,
             externalUserIdentity: context.ExternalUserIdentity);
     }
+
+    public Task RecordTranscriptionAsync(
+        PublishedApiExecutionContext context,
+        string service,
+        string operation,
+        string endpoint,
+        long durationSeconds,
+        long transcriptLength,
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        decimal costUsd = 0m,
+        CancellationToken ct = default) =>
+        RecordTranscriptionAsync(
+            new PublishedWireExecutionContextAdapter(context),
+            service,
+            operation,
+            endpoint,
+            durationSeconds,
+            transcriptLength,
+            alias,
+            providerModel,
+            providerServiceMode,
+            requestBytes,
+            costUsd,
+            ct);
+
+    public Task RecordTranscriptionAsync(
+        IWireExecutionContext context,
+        string service,
+        string operation,
+        string endpoint,
+        long durationSeconds,
+        long transcriptLength,
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        decimal costUsd = 0m,
+        CancellationToken ct = default) =>
+        RecordAsync(
+            context,
+            UsageCategory.SpeechTranscription,
+            service,
+            operation,
+            SpeechUsageMetrics.ForTranscription(durationSeconds, transcriptLength),
+            endpoint,
+            alias: alias,
+            providerModel: providerModel,
+            providerServiceMode: providerServiceMode,
+            requestBytes: requestBytes,
+            inputCount: durationSeconds,
+            outputCount: transcriptLength,
+            costUsd: costUsd,
+            ct: ct);
+
+    public Task RecordSpeechAsync(
+        PublishedApiExecutionContext context,
+        string service,
+        string operation,
+        string endpoint,
+        long characterCount,
+        long durationSeconds,
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        decimal costUsd = 0m,
+        CancellationToken ct = default) =>
+        RecordSpeechAsync(
+            new PublishedWireExecutionContextAdapter(context),
+            service,
+            operation,
+            endpoint,
+            characterCount,
+            durationSeconds,
+            alias,
+            providerModel,
+            providerServiceMode,
+            requestBytes,
+            costUsd,
+            ct);
+
+    public Task RecordSpeechAsync(
+        IWireExecutionContext context,
+        string service,
+        string operation,
+        string endpoint,
+        long characterCount,
+        long durationSeconds,
+        string? alias = null,
+        string? providerModel = null,
+        string? providerServiceMode = null,
+        long? requestBytes = null,
+        decimal costUsd = 0m,
+        CancellationToken ct = default) =>
+        RecordAsync(
+            context,
+            UsageCategory.SpeechSynthesis,
+            service,
+            operation,
+            SpeechUsageMetrics.ForSynthesis(characterCount, durationSeconds),
+            endpoint,
+            alias: alias,
+            providerModel: providerModel,
+            providerServiceMode: providerServiceMode,
+            requestBytes: requestBytes,
+            inputCount: characterCount,
+            outputCount: durationSeconds,
+            costUsd: costUsd,
+            ct: ct);
 
     private sealed record PublishedWireUsageMetadata(
         string Endpoint,

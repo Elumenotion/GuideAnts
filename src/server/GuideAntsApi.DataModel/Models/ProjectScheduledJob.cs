@@ -69,6 +69,23 @@ public class ProjectScheduledJob
 
     public ProjectScheduledJobLastRunStatus? LastRunStatus { get; set; }
 
+    [Required]
+    public bool ExposeSandboxWireApi { get; set; }
+
+    public Guid? WireTargetAssistantId { get; set; }
+
+    [StringLength(512)]
+    public string? WireAttributionConversationTitle { get; set; }
+
+    [Required]
+    public bool WireCreateAttributionConversationPerRun { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? WireDailyLimitUsd { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? WireMonthlyLimitUsd { get; set; }
+
     [Timestamp]
     public byte[] RowVersion { get; set; } = null!;
 
