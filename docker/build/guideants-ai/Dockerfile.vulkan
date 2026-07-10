@@ -331,6 +331,9 @@ COPY start-media.sh /app/start-media.sh
 COPY router-models.seed.ini /opt/seed/router-models.ini
 RUN chmod +x /entrypoint.sh /opt/guideants/script-agent-admin/reconcile.sh /app/start-llama.sh /app/start-ga-admin.sh /app/start-asr.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
 
+ENV PYTHONPATH=/app/lib
+
+COPY lib/ /app/lib/
 COPY admin-service/ /app/admin-service/
 
 COPY llama-admin-service/ /app/llama-admin-service/

@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from guideants_hf.catalog_download import download_repo_file
+from guideants_hf.operations import find_in_flight_operation
+
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -842,6 +845,16 @@ def _status_is_terminal(status: str | None) -> bool:
 
 def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dict[str, Any]:
     bundle_id = validate_bundle_id(request.bundle_id)
+    with BUNDLE_OPS_LOCK:
+        existing = find_in_flight_operation(BUNDLE_OPERATIONS, bundle_id=bundle_id)
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": f"A download for bundle '{bundle_id}' is already in progress.",
+                    **dict(existing),
+                },
+            )
     previous_definition = read_bundle_definition(model_dir, bundle_id)
     paths = expected_bundle_paths(model_dir, bundle_id)
     operation_id = uuid.uuid4().hex
@@ -924,23 +937,18 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
                     BUNDLE_OPERATIONS[operation_id]["roles"][role] = "downloading"
                 clear_stale_role_files(target_path, filename)
                 os.makedirs(target_path, exist_ok=True)
-                snapshot_download(
-                    repo_id=repo,
-                    revision=request.revision,
-                    local_dir=target_path,
-                    local_dir_use_symlinks=False,
-                    resume_download=True,
-                    allow_patterns=[filename],
-                    token=hf_token,
-                )
-                # snapshot_download with allow_patterns silently produces an
-                # empty directory if the filename does not exist in the repo.
-                # Turn that into a loud failure so the operator sees it.
                 expected_file = resolve_role_file_path(target_path, filename)
+                download_repo_file(
+                    repo,
+                    filename,
+                    expected_file,
+                    hf_token,
+                    revision=request.revision,
+                )
                 if not os.path.isfile(expected_file):
                     raise RuntimeError(
                         f"Expected file '{filename}' was not produced by "
-                        f"snapshot_download of '{repo}' into '{target_path}'. "
+                        f"download of '{repo}' into '{target_path}'. "
                         f"Check the filename matches the repo's file listing "
                         f"exactly (including case)."
                     )

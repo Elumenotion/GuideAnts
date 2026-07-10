@@ -3,17 +3,19 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="$ROOT_DIR/.installer_state.env"
-DOCKER_DIR="$ROOT_DIR/docker"
 
 MODE="install"          # install | doctor
 FIX_MODE="0"            # 0 | 1
+INSTALLER_MODE="0"      # 0 | 1
 BACKEND_OVERRIDE=""     # cpu | cuda13 | rocm | slim | vulkan
 COMPOSE_MODE="ghcr"     # ghcr | local
 HEALTH_URL="http://localhost:5107/"
 HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
 ROCM_RUNTIME_OVERRIDE_FILE="docker-compose.rocm-runtime.generated.yml"
-DOCKER_DIRECTORY="docker"
 START_COMMAND="start_macos.sh"
+DOCKER_DIR=""
+DOCKER_DIRECTORY=""
+ENV_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -24,6 +26,7 @@ Options:
   --fix                  Attempt limited auto-remediation where possible.
   --backend cpu|cuda13|rocm|slim|vulkan   Force backend selection. slim and vulkan are explicit only and are not auto-detected.
   --compose ghcr|local   Use GHCR compose files (default) or local build files.
+  --installer            Use installer/docker compose files, volumes, and overrides.
   --help                 Show this help.
 EOF
 }
@@ -31,6 +34,19 @@ EOF
 log() { printf '[guideants-installer] %s\n' "$*"; }
 warn() { printf '[guideants-installer][warn] %s\n' "$*" >&2; }
 fail() { printf '[guideants-installer][error] %s\n' "$*" >&2; exit 1; }
+
+apply_docker_layout() {
+  if [[ "$INSTALLER_MODE" == "1" ]]; then
+    DOCKER_DIR="$ROOT_DIR/installer/docker"
+    DOCKER_DIRECTORY="installer/docker"
+    log "Installer layout: using $DOCKER_DIRECTORY for compose, volumes, and overrides."
+  else
+    DOCKER_DIR="$ROOT_DIR/docker"
+    DOCKER_DIRECTORY="docker"
+  fi
+  ENV_FILE="$DOCKER_DIR/.env"
+  [[ -d "$DOCKER_DIR" ]] || fail "Docker directory not found: $DOCKER_DIR"
+}
 
 # shellcheck source=installer/scripts/rocm-runtime-compose.sh
 . "$ROOT_DIR/installer/scripts/rocm-runtime-compose.sh"
@@ -145,6 +161,7 @@ while [[ $# -gt 0 ]]; do
       COMPOSE_MODE="$2"
       shift
       ;;
+    --installer) INSTALLER_MODE="1" ;;
     --help|-h) usage; exit 0 ;;
     *) fail "Unknown option: $1" ;;
   esac
@@ -154,6 +171,7 @@ done
 [[ "$COMPOSE_MODE" == "ghcr" || "$COMPOSE_MODE" == "local" ]] || fail "--compose must be ghcr or local"
 [[ -z "$BACKEND_OVERRIDE" || "$BACKEND_OVERRIDE" == "cpu" || "$BACKEND_OVERRIDE" == "cuda13" || "$BACKEND_OVERRIDE" == "rocm" || "$BACKEND_OVERRIDE" == "slim" || "$BACKEND_OVERRIDE" == "vulkan" ]] || fail "--backend must be cpu, cuda13, rocm, slim, or vulkan"
 
+apply_docker_layout
 check_prereqs
 detect_backend
 select_compose_file
@@ -161,7 +179,7 @@ select_vulkan_runtime
 select_rocm_runtime "$DOCKER_DIR"
 
 log "Selected backend: $SELECTED_BACKEND"
-log "Compose file: docker/$COMPOSE_FILE"
+log "Compose file: $DOCKER_DIRECTORY/$COMPOSE_FILE"
 
 if [[ "$MODE" == "doctor" ]]; then
   log "Doctor mode complete. No changes were made."
@@ -176,28 +194,29 @@ fi
 pushd "$DOCKER_DIR" >/dev/null
 compose_args=(-f "$COMPOSE_FILE")
 if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
-  if docker compose -f "$COMPOSE_FILE" -f "$HOST_MOUNT_OVERRIDE_FILE" config >/dev/null 2>&1; then
+  if docker compose -f "$COMPOSE_FILE" -f "$HOST_MOUNT_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
     compose_args+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
+    log "Including host mount override: $HOST_MOUNT_OVERRIDE_FILE"
   else
-    warn "Ignoring invalid host mount override docker/$HOST_MOUNT_OVERRIDE_FILE. Recreate mounts to regenerate it."
+    warn "Ignoring invalid host mount override $DOCKER_DIRECTORY/$HOST_MOUNT_OVERRIDE_FILE. Recreate mounts to regenerate it."
   fi
 fi
 if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
-  if docker compose -f "$COMPOSE_FILE" -f "$ROCM_RUNTIME_OVERRIDE_FILE" config >/dev/null 2>&1; then
+  if docker compose -f "$COMPOSE_FILE" -f "$ROCM_RUNTIME_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
     compose_args+=(-f "$ROCM_RUNTIME_OVERRIDE_FILE")
     log "Including ROCm runtime override: $ROCM_RUNTIME_OVERRIDE_FILE"
   else
-    warn "Ignoring invalid ROCm runtime override docker/$ROCM_RUNTIME_OVERRIDE_FILE."
+    warn "Ignoring invalid ROCm runtime override $DOCKER_DIRECTORY/$ROCM_RUNTIME_OVERRIDE_FILE."
   fi
 fi
-docker compose "${compose_args[@]}" up -d
+docker compose "${compose_args[@]}" --env-file "$ENV_FILE" up -d
 popd >/dev/null
 
 if wait_for_health; then
   log "GuideAnts is up: $HEALTH_URL"
   open_browser
 else
-  warn "GuideAnts did not pass health check in time. Check: docker compose -f docker/$COMPOSE_FILE ps"
+  warn "GuideAnts did not pass health check in time. Check: docker compose -f $DOCKER_DIRECTORY/$COMPOSE_FILE ps"
 fi
 
 save_state

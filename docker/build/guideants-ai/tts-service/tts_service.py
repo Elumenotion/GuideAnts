@@ -17,6 +17,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from guideants_hf.catalog_download import download_catalog_entry_files
+from guideants_hf.engine_process import format_engine_exit_error
+from guideants_hf.operations import find_in_flight_operation
+
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -694,7 +698,7 @@ def wait_for_engine_ready(config: TtsRuntimeConfig) -> None:
         if not is_engine_process_alive():
             process = STATE.engine_process
             exit_code = process.poll() if process is not None else None
-            raise RuntimeError(f"audiocpp_server exited before readiness (exit code: {exit_code}).")
+            raise RuntimeError(format_engine_exit_error(process, exit_code))
         try:
             status_code, _, _ = engine_json_request(
                 config, "GET", "/health", min(5, config.request_timeout_seconds)
@@ -1170,9 +1174,6 @@ def _status_is_terminal(status: str | None) -> bool:
 
 def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
     entry = resolve_catalog_entry(request.model_id)
-    source = entry["sourceRepos"][0]
-    repo_id = source["repoId"] if isinstance(source, dict) else source
-    revision = request.revision or (source.get("revision") if isinstance(source, dict) else None) or "main"
     target_name = entry.get("targetDirectory", entry["id"])
 
     operation_id = uuid.uuid4().hex
@@ -1206,16 +1207,12 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
                 return
             current["status"] = "running"
         try:
-            from huggingface_hub import snapshot_download
-
             hf_token = (request.hf_token or "").strip() or None
-            snapshot_download(
-                repo_id=repo_id,
-                revision=revision,
-                local_dir=target_path,
-                local_dir_use_symlinks=False,
-                resume_download=True,
-                token=hf_token,
+            download_catalog_entry_files(
+                entry,
+                target_path,
+                hf_token,
+                revision_override=request.revision,
             )
             with MODEL_OPS_LOCK:
                 current = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)
@@ -1533,6 +1530,10 @@ async def admin_download_model(payload: DownloadModelRequest) -> JSONResponse:
         resolve_catalog_entry(payload.model_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with MODEL_OPS_LOCK:
+        existing = find_in_flight_operation(MODEL_DOWNLOAD_OPERATIONS, model_id=payload.model_id.strip())
+        if existing is not None:
+            return JSONResponse(status_code=409, content=dict(existing))
     operation = start_download_operation(payload)
     return JSONResponse(status_code=202, content=operation)
 

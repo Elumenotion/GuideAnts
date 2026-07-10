@@ -27,6 +27,7 @@ import {
   mapChatProviderToSection,
   parseFieldValue,
   payloadSignature,
+  prepareSectionPayloadForSave,
 } from '../utils';
 import { TextActionButton } from './shared/ActionButtons';
 
@@ -281,6 +282,9 @@ export function ConnectionsTab({
     setSectionPreservedDraft(null);
   }, [sectionPreservedDraft]);
 
+  const selectedSummary = selectedSection ? sectionSummariesByName.get(selectedSection) : undefined;
+  const selectedSchema = selectedSection ? getSectionSchema(schema, selectedSection) : undefined;
+
   const handleSave = useCallback(async () => {
     if (!sectionData || !selectedSection) {
       return;
@@ -289,7 +293,7 @@ export function ConnectionsTab({
     try {
       const updated = await api.settings.updateSection(selectedSection, {
         rowVersion: sectionData.rowVersion,
-        payload: sectionDraft,
+        payload: prepareSectionPayloadForSave(sectionDraft, sectionData, selectedSchema),
       });
       setSectionData(updated);
       setSectionDraft(clonePayload(updated.payload));
@@ -318,7 +322,7 @@ export function ConnectionsTab({
     } finally {
       setSectionSaving(false);
     }
-  }, [sectionData, selectedSection, sectionDraft, loadOverview, loadSection, loadUsage, onRefreshSectionSummaries, showToast]);
+  }, [sectionData, selectedSection, sectionDraft, selectedSchema, loadOverview, loadSection, loadUsage, onRefreshSectionSummaries, showToast]);
 
   const handleRefresh = useCallback(() => {
     if (!selectedSection) {
@@ -330,8 +334,6 @@ export function ConnectionsTab({
     onRefreshSectionSummaries();
   }, [selectedSection, loadSection, loadUsage, loadOverview, onRefreshSectionSummaries]);
 
-  const selectedSummary = selectedSection ? sectionSummariesByName.get(selectedSection) : undefined;
-  const selectedSchema = selectedSection ? getSectionSchema(schema, selectedSection) : undefined;
   const isDirty = sectionData ? payloadSignature(sectionDraft) !== payloadSignature(sectionData.payload) : false;
 
   const { requiredProperties, optionalProperties } = useMemo(() => {

@@ -1,6 +1,7 @@
 using GuideAntsApi.BackgroundJobs.Options;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Options;
+using ServiceProviderIds = GuideAntsApi.Options.ServiceProviderIds;
 using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Services.Bootstrap;

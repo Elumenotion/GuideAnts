@@ -109,6 +109,28 @@ describe('ConnectionsTab extended', () => {
     } as never);
   });
 
+  it('preserves stored secrets when the api key field is left empty on save', async () => {
+    const user = userEvent.setup();
+    renderConnectionsTab();
+
+    const organizationInput = await screen.findByDisplayValue('org-1');
+    await user.clear(organizationInput);
+    await user.type(organizationInput, 'org-updated');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(api.settings.updateSection).toHaveBeenCalledWith(
+        'OpenAI',
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            Organization: 'org-updated',
+            ApiKey: '********',
+          }),
+        }),
+      );
+    });
+  });
+
   it('resets unsaved draft edits back to the loaded section payload', async () => {
     const user = userEvent.setup();
     renderConnectionsTab();
