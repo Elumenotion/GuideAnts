@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { guideUsageApi } from '../../services/guideUsageApi';
-import type { ConversationUsageSummaryDto, TurnInvocationTreeDto } from '../../types/usage';
+import type { ConversationUsageSummaryDto, InvocationNodeDto, TurnInvocationTreeDto } from '../../types/usage';
 import { InvocationTree } from './InvocationTree';
 import { InvocationDetailPanel } from './InvocationDetailPanel';
+import { TurnInvocationTimeline } from './TurnInvocationTimeline';
 import { TurnMessagesPanel } from './TurnMessagesPanel';
 
 interface ConversationDetailPanelProps {
@@ -82,6 +83,12 @@ export function ConversationDetailPanel({
     + (conversation?.cachedTokens ?? 0)
     + (conversation?.reasoningTokens ?? 0)
     + (conversation?.completionTokens ?? 0);
+
+  const handleInvocationNodeClick = (node: InvocationNodeDto) => {
+    if (node.assistantId) {
+      setSelectedInvocationId(node.id);
+    }
+  };
 
   return (
     <>
@@ -237,17 +244,17 @@ export function ConversationDetailPanel({
                               </span>
                             </div>
                           </div>
+                          <TurnInvocationTimeline
+                            nodes={filteredRoots}
+                            turnStarted={turn.turnStarted}
+                            onNodeClick={handleInvocationNodeClick}
+                          />
                           {/* In the conversation-level usage view, only show usage-based nodes
                               (agents + tool / AI service UsageEvents). Message-level traces are
                               available in the per-invocation detail panel. */}
                           <InvocationTree
                             nodes={filteredRoots}
-                            onNodeClick={(node) => {
-                              // Only drill into real AgentInvocation nodes (those with AssistantId).
-                              if (node.assistantId) {
-                                setSelectedInvocationId(node.id);
-                              }
-                            }}
+                            onNodeClick={handleInvocationNodeClick}
                           />
                         </div>
                       );
