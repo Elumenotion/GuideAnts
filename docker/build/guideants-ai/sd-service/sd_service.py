@@ -20,6 +20,8 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
+from sd_bundle_seeds import seed_default_bundle_definitions
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -1709,6 +1711,9 @@ async def on_startup() -> None:
     # there is no bundle yet (otherwise there is no way to create the first
     # one) or when the last load failed.
     STATE.model_dir = os.getenv("GA_SD_MODEL_DIR", "/models-local/sd")
+    seeded_bundle_ids = seed_default_bundle_definitions(STATE.model_dir)
+    if seeded_bundle_ids:
+        log_event("sd_bundle_definitions_seeded", bundleIds=seeded_bundle_ids)
     STATE.startup_warmup_enabled = False
     STATE.startup_warmup_completed_at_utc = None
     STATE.startup_warmup_last_attempt_at_utc = None

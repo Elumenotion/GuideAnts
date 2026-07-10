@@ -2,6 +2,8 @@ param(
     [string]$Owner = 'elumenotion',
     [string]$Registry = 'ghcr.io',
     [string]$ComposeTag = 'main',
+    [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
+    [string[]]$Variant = @(),
     [string]$Username = $env:GHCR_USERNAME,
     [string]$Token = $(if ($env:CR_PAT) { $env:CR_PAT } elseif ($env:GHCR_PAT) { $env:GHCR_PAT } elseif ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $null }),
     [switch]$SkipLogin,
@@ -166,6 +168,50 @@ function Get-LatestVariantImage {
     return $candidates | Sort-Object -Property SortKey -Descending | Select-Object -First 1
 }
 
+function Get-VariantPackageName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
+        [string]$Variant
+    )
+
+    switch ($Variant) {
+        'cpu' { return 'guideants-ai-cpu' }
+        'cuda13' { return 'guideants-ai-cuda13' }
+        'rocm' { return 'guideants-ai-rocm' }
+        'slim' { return 'guideants-ai-slim' }
+        'vulkan' { return 'guideants-ai-vulkan' }
+    }
+}
+
+function New-VariantTarget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
+        [string]$Variant,
+        [switch]$Required
+    )
+
+    try {
+        $image = Get-LatestVariantImage -Variant $Variant
+    }
+    catch {
+        if ($Required) {
+            throw
+        }
+
+        Write-Warning "No local $Variant image found; skipping $Variant push. Build it first with docker/build/build_guideants_ai.ps1 -Backend $Variant."
+        return $null
+    }
+
+    return [pscustomobject]@{
+        Variant     = $Variant
+        PackageName = Get-VariantPackageName -Variant $Variant
+        SourceRef   = $image.SourceRef
+        BuildTag    = $image.BuildTag
+    }
+}
+
 function Get-LocalImageRef {
     param(
         [Parameter(Mandatory = $true)]
@@ -240,73 +286,25 @@ if (-not $SkipLogin) {
     }
 }
 
-$cpuImage = Get-LatestVariantImage -Variant 'cpu'
-$cudaImage = Get-LatestVariantImage -Variant 'cuda13'
+$pushSupportImages = $Variant.Count -eq 0
+$variantFilter = if ($Variant.Count -gt 0) { $Variant } else { @('cpu', 'cuda13', 'rocm', 'slim', 'vulkan') }
 
-$rocmImage = $null
-try {
-    $rocmImage = Get-LatestVariantImage -Variant 'rocm'
-}
-catch {
-    Write-Warning "No local ROCm image found; skipping ROCm push. Build it first with docker/build/build_guideants_ai.ps1 (backend rocm)."
-}
-
-$slimImage = $null
-try {
-    $slimImage = Get-LatestVariantImage -Variant 'slim'
-}
-catch {
-    Write-Warning "No local slim AI image found; skipping slim push. Build it first with docker/build/build_guideants_ai.ps1 (backend slim)."
-}
-
-$vulkanImage = $null
-try {
-    $vulkanImage = Get-LatestVariantImage -Variant 'vulkan'
-}
-catch {
-    Write-Warning "No local Vulkan AI image found; skipping Vulkan push. Build it first with docker/build/build_guideants_ai.ps1 (backend vulkan)."
-}
-
-$targets = @(
-    [pscustomobject]@{
-        Variant     = 'cpu'
-        PackageName = 'guideants-ai-cpu'
-        SourceRef   = $cpuImage.SourceRef
-        BuildTag    = $cpuImage.BuildTag
-    },
-    [pscustomobject]@{
-        Variant     = 'cuda13'
-        PackageName = 'guideants-ai-cuda13'
-        SourceRef   = $cudaImage.SourceRef
-        BuildTag    = $cudaImage.BuildTag
-    }
-)
-
-if ($null -ne $rocmImage) {
-    $targets += [pscustomobject]@{
-        Variant     = 'rocm'
-        PackageName = 'guideants-ai-rocm'
-        SourceRef   = $rocmImage.SourceRef
-        BuildTag    = $rocmImage.BuildTag
+$targets = @()
+foreach ($variantName in $variantFilter) {
+    $required = $Variant.Count -gt 0 -or $variantName -in @('cpu', 'cuda13')
+    $target = New-VariantTarget -Variant $variantName -Required:($required)
+    if ($null -ne $target) {
+        $targets += $target
     }
 }
 
-if ($null -ne $slimImage) {
-    $targets += [pscustomobject]@{
-        Variant     = 'slim'
-        PackageName = 'guideants-ai-slim'
-        SourceRef   = $slimImage.SourceRef
-        BuildTag    = $slimImage.BuildTag
-    }
+if ($targets.Count -eq 0) {
+    throw 'No GuideAnts AI images matched the requested variant filter.'
 }
 
-if ($null -ne $vulkanImage) {
-    $targets += [pscustomobject]@{
-        Variant     = 'vulkan'
-        PackageName = 'guideants-ai-vulkan'
-        SourceRef   = $vulkanImage.SourceRef
-        BuildTag    = $vulkanImage.BuildTag
-    }
+$cpuImage = $targets | Where-Object { $_.Variant -eq 'cpu' } | Select-Object -First 1
+if ($pushSupportImages -and $null -eq $cpuImage) {
+    $cpuImage = Get-LatestVariantImage -Variant 'cpu'
 }
 
 foreach ($target in $targets) {
@@ -331,55 +329,63 @@ foreach ($target in $targets) {
     Invoke-DockerCommand -Arguments @('push', $latestRef)
 }
 
-$plantUmlSourceRef = Get-LocalImageRef `
-    -Repository 'plantuml-1.2025.2' `
-    -MissingMessage "No local plantuml-1.2025.2:latest image found. Build it first with docker/build/build_support_images.ps1."
+if ($pushSupportImages) {
+    $plantUmlSourceRef = Get-LocalImageRef `
+        -Repository 'plantuml-1.2025.2' `
+        -MissingMessage "No local plantuml-1.2025.2:latest image found. Build it first with docker/build/build_support_images.ps1."
 
-$mssqlSourceRef = Get-LocalImageRef `
-    -Repository 'mssql2025-express-fts' `
-    -MissingMessage "No local mssql2025-express-fts:latest image found. Build it first with docker/build/build_support_images.ps1."
+    $mssqlSourceRef = Get-LocalImageRef `
+        -Repository 'mssql2025-express-fts' `
+        -MissingMessage "No local mssql2025-express-fts:latest image found. Build it first with docker/build/build_support_images.ps1."
 
-$searxngSourceRef = Get-LocalImageRef `
-    -Repository 'guideants-searxng' `
-    -MissingMessage "No local guideants-searxng:latest image found. Build it first with docker/build/build_support_images.ps1."
+    $searxngSourceRef = Get-LocalImageRef `
+        -Repository 'guideants-searxng' `
+        -MissingMessage "No local guideants-searxng:latest image found. Build it first with docker/build/build_support_images.ps1."
 
-$extraTargets = @(
-    [pscustomobject]@{
-        Name        = 'plantuml'
-        SourceRef   = $plantUmlSourceRef
-        PackageName = 'guideants-plantuml'
-        Tags        = @($cpuImage.BuildTag, '1.2025.2', $ComposeTag, 'latest')
-    },
-    [pscustomobject]@{
-        Name        = 'mssql'
-        SourceRef   = $mssqlSourceRef
-        PackageName = 'mssql2025-express-fts'
-        Tags        = @($cpuImage.BuildTag, $ComposeTag, 'latest')
-    },
-    [pscustomobject]@{
-        Name        = 'searxng'
-        SourceRef   = $searxngSourceRef
-        PackageName = 'guideants-searxng'
-        Tags        = @($cpuImage.BuildTag, $ComposeTag, 'latest')
-    }
-)
+    $extraTargets = @(
+        [pscustomobject]@{
+            Name        = 'plantuml'
+            SourceRef   = $plantUmlSourceRef
+            PackageName = 'guideants-plantuml'
+            Tags        = @($cpuImage.BuildTag, '1.2025.2', $ComposeTag, 'latest')
+        },
+        [pscustomobject]@{
+            Name        = 'mssql'
+            SourceRef   = $mssqlSourceRef
+            PackageName = 'mssql2025-express-fts'
+            Tags        = @($cpuImage.BuildTag, $ComposeTag, 'latest')
+        },
+        [pscustomobject]@{
+            Name        = 'searxng'
+            SourceRef   = $searxngSourceRef
+            PackageName = 'guideants-searxng'
+            Tags        = @($cpuImage.BuildTag, $ComposeTag, 'latest')
+        }
+    )
 
-foreach ($target in $extraTargets) {
-    $targetRefs = @()
-    foreach ($tag in $target.Tags) {
-        $targetRefs += "$Registry/$Owner/$($target.PackageName):$tag"
-    }
+    foreach ($target in $extraTargets) {
+        $targetRefs = @()
+        foreach ($tag in $target.Tags) {
+            $targetRefs += "$Registry/$Owner/$($target.PackageName):$tag"
+        }
 
-    Write-Host ""
-    Write-Host "Pushing $($target.Name) image" -ForegroundColor Cyan
-    Write-Host "  Source:      $($target.SourceRef)"
-    foreach ($targetRef in $targetRefs) {
-        Write-Host "  Target tag:  $targetRef"
-        Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $targetRef)
-        Invoke-DockerCommand -Arguments @('push', $targetRef)
+        Write-Host ""
+        Write-Host "Pushing $($target.Name) image" -ForegroundColor Cyan
+        Write-Host "  Source:      $($target.SourceRef)"
+        foreach ($targetRef in $targetRefs) {
+            Write-Host "  Target tag:  $targetRef"
+            Invoke-DockerCommand -Arguments @('tag', $target.SourceRef, $targetRef)
+            Invoke-DockerCommand -Arguments @('push', $targetRef)
+        }
     }
 }
 
 Write-Host ""
 $aiVariants = ($targets | ForEach-Object { $_.Variant }) -join ', '
-Write-Host "Done. Pushed local GuideAnts AI images ($aiVariants) plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$Owner'." -ForegroundColor Green
+$doneMessage = if ($pushSupportImages) {
+    "Done. Pushed local GuideAnts AI images ($aiVariants) plus PlantUML, MSSQL FTS, and SearXNG images to GHCR owner '$Owner'."
+}
+else {
+    "Done. Pushed local GuideAnts AI images ($aiVariants) to GHCR owner '$Owner'."
+}
+Write-Host $doneMessage -ForegroundColor Green

@@ -4,7 +4,7 @@
 # ROCm-only stable-diffusion.cpp builder
 # =============================================================================
 ARG SDCPP_REF=master
-ARG AUDIOCPP_REF=release-0.1
+ARG AUDIOCPP_REF=release-0.2
 # Strix Halo / Ryzen AI (gfx1150, gfx1151) must be included or sd-server HIP kernels
 # segfault on those GPUs. Set both GPU_TARGETS and AMDGPU_TARGETS (ROCm 7.x).
 ARG SD_GPU_TARGETS="gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1200;gfx1201"

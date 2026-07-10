@@ -4,7 +4,7 @@
 # stable-diffusion.cpp builders (baked by target choice)
 # =============================================================================
 ARG SDCPP_REF=master
-ARG AUDIOCPP_REF=release-0.1
+ARG AUDIOCPP_REF=release-0.2
 ARG GA_DEPS_CPU_IMAGE=deps-cpu
 ARG GA_UBUNTU_MIRROR_URL=http://archive.ubuntu.com/ubuntu
 ARG PYTHON311_VERSION=3.11.11
