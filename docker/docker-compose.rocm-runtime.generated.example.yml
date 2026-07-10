@@ -1,0 +1,34 @@
+# Example only — launcher writes docker-compose.rocm-runtime.generated.yml at runtime.
+
+# Native Linux:
+
+#   devices: /dev/kfd + /dev/dri
+
+#   group_add: video + render
+
+# WSL ROCDXG (Windows / Docker Desktop):
+
+#   device: /dev/dxg
+
+#   binds: libdxcore.so, staged librocdxg.so (host ./volumes/rocm-wsl/lib)
+
+#   env: HSA_ENABLE_DXG_DETECTION=1
+
+#   security_opt: seccomp:unconfined
+
+services:
+
+  guideants-ai:
+
+    devices:
+
+      - /dev/kfd
+
+      - /dev/dri
+
+    group_add:
+
+      - video
+
+      - render
+

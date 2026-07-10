@@ -5,8 +5,10 @@ using GuideAnts.Logging;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Endpoints;
+using GuideAntsApi.Options;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
+using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Services.Bootstrap;
@@ -156,14 +158,25 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         try
         {
             // Drain GPU/RAM from auxiliary services (including any container autoload)
-            // before the LLM claims memory, then reload the full stack in order.
+            // before the LLM claims memory. Llama must become usable before aux reload
+            // because auxiliary warmup can take minutes and must not block chat.
             await UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
             await EnsureDefaultLlamaLoadedAsync(cancellationToken).ConfigureAwait(false);
-            await EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             Interlocked.Decrement(ref _warmupInProgress);
+        }
+
+        try
+        {
+            await EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Auxiliary local AI service warmup failed. Llama chat remains available.");
         }
     }
 
@@ -312,12 +325,19 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         }
 
         var targetLoaded = loadedAliases.Any(id => string.Equals(id, routerAlias, StringComparison.Ordinal));
-        if (!targetLoaded)
+        var targetLoading = models.Data.Any(m =>
+            string.Equals(m.Id, routerAlias, StringComparison.Ordinal)
+            && IsRouterModelLoading(m));
+        if (!targetLoaded && !targetLoading)
         {
             await using var loadLock = await _coordinator
                 .AcquireAliasLockAsync(routerAlias, cancellationToken)
                 .ConfigureAwait(false);
             await llamaClient.LoadModelAsync(routerAlias, loadParams: null, cancellationToken).ConfigureAwait(false);
+        }
+        else if (targetLoading)
+        {
+            _logger.LogDebug("Default llama alias '{Alias}' is already loading.", routerAlias);
         }
 
         var readyTimeout = TimeSpan.FromSeconds(ReadPositiveInt("GA_LLAMA_READY_TIMEOUT_SECONDS", 900));
@@ -381,14 +401,23 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         string? requestedModelRef = null,
         CancellationToken cancellationToken = default)
     {
-        var routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
-
         var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
         if (string.IsNullOrWhiteSpace(adminBase))
         {
             return new LocalServiceReconcileResult(
                 LocalServiceReconcileOutcome.Unavailable,
                 $"Local admin base URL is not configured for '{serviceId}'.");
+        }
+
+        var routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
+        if (await TryEnsureLocalProviderRoutedForModelOperationAsync(
+                serviceId,
+                routing,
+                requestedModelRef,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
         }
 
         switch (routing)
@@ -656,11 +685,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                     return true;
                 }
 
-                // A 4xx other than 409 is a permanent, non-retryable rejection (e.g. the
-                // model is not a catalog artifact, or the body is malformed). Retrying cannot
-                // fix it, so fail fast instead of hammering the engine every poll until the
-                // ready timeout and wedging the whole reconcile.
-                if ((int)response.StatusCode is >= 400 and < 500)
+                // Any definitive HTTP error other than 409 is permanent for this reconcile
+                // attempt (4xx validation, 5xx model_load_failed from the facade, etc.).
+                // Retrying cannot fix it, so fail fast instead of hammering the engine every
+                // poll until the ready timeout and blocking later auxiliary services.
+                if ((int)response.StatusCode is >= 400 and not (int)HttpStatusCode.Conflict)
                 {
                     _logger.LogWarning(
                         "Load request for service '{ServiceId}' was rejected ({StatusCode}) and will not be retried: {Body}",
@@ -1015,11 +1044,84 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         return false;
     }
 
+    private static bool IsRouterModelLoading(LlamaModelData model)
+    {
+        if (!string.IsNullOrWhiteSpace(model.Status?.Value))
+        {
+            return string.Equals(model.Status.Value, "loading", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.State))
+        {
+            return string.Equals(model.State, "loading", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
     private enum LocalRoutingDesiredState
     {
         Warm,
         Idle,
         Unknown
+    }
+
+    private static string? TryGetLocalProviderId(string serviceId) =>
+        serviceId switch
+        {
+            RoutedServiceNames.ImageGeneration => ServiceProviderIds.ImageGenerationLocalSdHttp,
+            RoutedServiceNames.Embeddings => ServiceProviderIds.EmbeddingsLocalEmbHttp,
+            RoutedServiceNames.SpeechTranscription => ServiceProviderIds.SpeechTranscriptionLocalAsrHttp,
+            RoutedServiceNames.SpeechSynthesis => ServiceProviderIds.SpeechSynthesisLocalTtsHttp,
+            _ => null
+        };
+
+    /// <summary>
+    /// Local model download/list proxies straight to the container admin API, but load /
+    /// select-active reconcile through routing. When the user operates on a local model
+    /// (or routing was never configured), activate the local provider automatically so
+    /// the same settings surface does not require a separate "Save and activate" click.
+    /// </summary>
+    private async Task<bool> TryEnsureLocalProviderRoutedForModelOperationAsync(
+        string serviceId,
+        LocalRoutingDesiredState routing,
+        string? requestedModelRef,
+        CancellationToken cancellationToken)
+    {
+        var localProviderId = TryGetLocalProviderId(serviceId);
+        if (localProviderId is null)
+        {
+            return false;
+        }
+
+        var shouldEnsure = routing == LocalRoutingDesiredState.Unknown
+            || (routing == LocalRoutingDesiredState.Idle && !string.IsNullOrWhiteSpace(requestedModelRef));
+        if (!shouldEnsure)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
+            await settings.EnsureServiceModeExistsAsync(serviceId, localProviderId, cancellationToken)
+                .ConfigureAwait(false);
+            await settings.SetServiceActiveProviderAsync(serviceId, localProviderId, cancellationToken)
+                .ConfigureAwait(false);
+            _logger.LogInformation(
+                "Auto-activated local provider for '{ServiceId}' before local model reconcile.",
+                LogValueSanitizer.Sanitize(serviceId));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not auto-activate local provider for '{ServiceId}' before local model reconcile.",
+                LogValueSanitizer.Sanitize(serviceId));
+            return false;
+        }
     }
 
     private async Task<LocalRoutingDesiredState> ResolveLocalRoutingDesiredStateAsync(

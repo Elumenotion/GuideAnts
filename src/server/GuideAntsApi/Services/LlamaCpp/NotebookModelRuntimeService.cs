@@ -651,7 +651,12 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             return false;
         }
 
-        if (_localAiWarmupService.IsWarmupInProgress)
+        if (_localAiWarmupService.IsWarmupInProgress
+            && !requiredRouterIds.IsSubsetOf(
+                routerState.Data
+                    .Where(IsRouterModelLoaded)
+                    .Select(m => NormalizeRouterModelId(m.Id))
+                    .ToHashSet(StringComparer.Ordinal)))
         {
             return true;
         }

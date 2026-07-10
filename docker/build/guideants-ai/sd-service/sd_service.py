@@ -15,10 +15,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from guideants_hf.catalog_download import download_repo_file
+from guideants_hf.operations import find_in_flight_operation
+
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
+
+from sd_bundle_seeds import seed_default_bundle_definitions
 
 
 def utc_now_iso() -> str:
@@ -183,6 +188,7 @@ class SdRuntimeConfig:
     strength: float
     sampling_method: str
     offload_to_cpu: bool
+    vae_on_cpu: bool
     diffusion_fa: bool
     vulkan_visible_devices: str | None
     default_output_format: str
@@ -406,6 +412,7 @@ def resolve_runtime_config() -> SdRuntimeConfig:
     strength = parse_positive_float(os.getenv("GA_SD_STRENGTH"), 0.75)
     sampling_method = (os.getenv("GA_SD_SAMPLING_METHOD") or "euler").strip() or "euler"
     offload_to_cpu = env_flag("GA_SD_OFFLOAD_TO_CPU", False)
+    vae_on_cpu = env_flag("GA_SD_VAE_ON_CPU", False)
     diffusion_fa = env_flag("GA_SD_DIFFUSION_FA", True)
     vulkan_visible_devices = optional_env_value("GA_SD_VK_VISIBLE_DEVICES")
     default_output_format = normalize_output_format(os.getenv("GA_SD_DEFAULT_OUTPUT_FORMAT"), "png")
@@ -440,6 +447,7 @@ def resolve_runtime_config() -> SdRuntimeConfig:
         strength=strength,
         sampling_method=sampling_method,
         offload_to_cpu=offload_to_cpu,
+        vae_on_cpu=vae_on_cpu,
         diffusion_fa=diffusion_fa,
         vulkan_visible_devices=vulkan_visible_devices,
         default_output_format=default_output_format,
@@ -837,6 +845,16 @@ def _status_is_terminal(status: str | None) -> bool:
 
 def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dict[str, Any]:
     bundle_id = validate_bundle_id(request.bundle_id)
+    with BUNDLE_OPS_LOCK:
+        existing = find_in_flight_operation(BUNDLE_OPERATIONS, bundle_id=bundle_id)
+        if existing is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": f"A download for bundle '{bundle_id}' is already in progress.",
+                    **dict(existing),
+                },
+            )
     previous_definition = read_bundle_definition(model_dir, bundle_id)
     paths = expected_bundle_paths(model_dir, bundle_id)
     operation_id = uuid.uuid4().hex
@@ -919,23 +937,18 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
                     BUNDLE_OPERATIONS[operation_id]["roles"][role] = "downloading"
                 clear_stale_role_files(target_path, filename)
                 os.makedirs(target_path, exist_ok=True)
-                snapshot_download(
-                    repo_id=repo,
-                    revision=request.revision,
-                    local_dir=target_path,
-                    local_dir_use_symlinks=False,
-                    resume_download=True,
-                    allow_patterns=[filename],
-                    token=hf_token,
-                )
-                # snapshot_download with allow_patterns silently produces an
-                # empty directory if the filename does not exist in the repo.
-                # Turn that into a loud failure so the operator sees it.
                 expected_file = resolve_role_file_path(target_path, filename)
+                download_repo_file(
+                    repo,
+                    filename,
+                    expected_file,
+                    hf_token,
+                    revision=request.revision,
+                )
                 if not os.path.isfile(expected_file):
                     raise RuntimeError(
                         f"Expected file '{filename}' was not produced by "
-                        f"snapshot_download of '{repo}' into '{target_path}'. "
+                        f"download of '{repo}' into '{target_path}'. "
                         f"Check the filename matches the repo's file listing "
                         f"exactly (including case)."
                     )
@@ -990,6 +1003,8 @@ def build_sd_server_command(config: SdRuntimeConfig) -> list[str]:
 
     if config.offload_to_cpu:
         command.append("--offload-to-cpu")
+    if config.vae_on_cpu:
+        command.append("--vae-on-cpu")
     if config.diffusion_fa:
         command.append("--diffusion-fa")
 
@@ -1006,6 +1021,16 @@ def build_sd_server_environment(config: SdRuntimeConfig) -> dict[str, str]:
 def is_engine_process_alive() -> bool:
     process = STATE.engine_process
     return process is not None and process.poll() is None
+
+
+def describe_engine_process_failure() -> str:
+    process = STATE.engine_process
+    if process is None:
+        return "sd-server process is not running"
+    exit_code = process.poll()
+    if exit_code is None:
+        return "sd-server connection failed while the process was still running"
+    return f"sd-server exited unexpectedly (exit code {exit_code})"
 
 
 def perform_http_request(
@@ -1026,6 +1051,11 @@ def perform_http_request(
         return int(exc.code), exc.read()
     except urllib.error.URLError as exc:
         reason = getattr(exc, "reason", exc)
+        if not is_engine_process_alive():
+            raise RuntimeError(
+                f"Failed to reach sd-server at {url}: {describe_engine_process_failure()} "
+                f"(connection error: {reason})"
+            ) from exc
         raise RuntimeError(f"Failed to reach sd-server at {url}: {reason}") from exc
 
 
@@ -1432,6 +1462,7 @@ def run_sd_generation_via_engine(
         strength=config.strength,
         samplingMethod=config.sampling_method,
         offloadToCpu=config.offload_to_cpu,
+        vaeOnCpu=config.vae_on_cpu,
         diffusionFa=config.diffusion_fa,
         timeoutSeconds=config.timeout_seconds,
         engineMode="sd-server",
@@ -1535,6 +1566,7 @@ def run_sd_edit_via_openai_endpoint(
         strength=config.strength,
         samplingMethod=config.sampling_method,
         offloadToCpu=config.offload_to_cpu,
+        vaeOnCpu=config.vae_on_cpu,
         diffusionFa=config.diffusion_fa,
         timeoutSeconds=config.timeout_seconds,
         engineMode="sd-server-openai-edits",
@@ -1687,6 +1719,9 @@ async def on_startup() -> None:
     # there is no bundle yet (otherwise there is no way to create the first
     # one) or when the last load failed.
     STATE.model_dir = os.getenv("GA_SD_MODEL_DIR", "/models-local/sd")
+    seeded_bundle_ids = seed_default_bundle_definitions(STATE.model_dir)
+    if seeded_bundle_ids:
+        log_event("sd_bundle_definitions_seeded", bundleIds=seeded_bundle_ids)
     STATE.startup_warmup_enabled = False
     STATE.startup_warmup_completed_at_utc = None
     STATE.startup_warmup_last_attempt_at_utc = None
@@ -1763,6 +1798,7 @@ async def health() -> dict[str, Any]:
             "strength": config.strength,
             "samplingMethod": config.sampling_method,
             "offloadToCpu": config.offload_to_cpu,
+            "vaeOnCpu": config.vae_on_cpu,
             "diffusionFa": config.diffusion_fa,
             "vulkanVisibleDevices": config.vulkan_visible_devices,
         },

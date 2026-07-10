@@ -27,14 +27,8 @@ services:
   guideants-ai:
     image: ${GA_AI_ROCM_IMAGE:-ghcr.io/elumenotion/guideants-ai-rocm:latest}
     container_name: guideants-ai
-    cap_drop:
-      - SYS_PTRACE
-    group_add:
-      - video
-      - render
-    devices:
-      - /dev/kfd
-      - /dev/dri
+    # ROCm GPU devices are supplied by docker-compose.rocm-runtime.generated.yml
+    # (native Linux: /dev/kfd + /dev/dri + group_add; WSL ROCDXG: /dev/dxg + librocdxg binds).
     ports:
       - "8110:80"      # gateway (/sandbox, /llama-cpp, /asr, /sd, /tts, /emb)
     shm_size: "8gb"
@@ -73,6 +67,17 @@ services:
       - GA_LLAMA_KV_UNIFIED=1
       - GA_LLAMA_JINJA=1
       - GA_LLAMA_CONT_BATCH=1
+      # Global router knobs (propagate to every spawned child instance).
+      # q8_0 KV cache halves KV VRAM with ~no quality loss on 20B+ models;
+      # cache-type-v quantization requires flash attention to be enabled.
+      - GA_LLAMA_FLASH_ATTN=on
+      - GA_LLAMA_CACHE_TYPE_K=q8_0
+      - GA_LLAMA_CACHE_TYPE_V=q8_0
+      # Qwen-VL grounding accuracy requires >=1024 image tokens.
+      - GA_LLAMA_IMAGE_MIN_TOKENS=1024
+      # Per-GPU layer split (comma list, e.g. "7,1"). Hardware-specific, so it is
+      # sourced from .env; empty falls back to llama.cpp's free-VRAM heuristic.
+      - GA_LLAMA_TENSOR_SPLIT=${GA_LLAMA_TENSOR_SPLIT:-}
       - GA_LLAMA_NO_MMAP=0
       - GA_ASR_HOST=127.0.0.1
       - GA_ASR_PORT=8082
@@ -82,7 +87,7 @@ services:
       - GA_ASR_WAIT_FOR_READY_ON_STARTUP=${GA_ASR_WAIT_FOR_READY_ON_STARTUP:-0}
       - GA_ASR_READY_TIMEOUT_SECONDS=${GA_ASR_READY_TIMEOUT_SECONDS:-1800}
       - GA_ASR_DEVICE_MAP=auto
-      - GA_ASR_BACKEND=vulkan
+      - GA_ASR_BACKEND=cuda
       - GA_ASR_DTYPE=bfloat16
       - GA_ASR_MAX_INFERENCE_BATCH_SIZE=8
       - GA_ASR_MAX_NEW_TOKENS=512
@@ -97,7 +102,7 @@ services:
       - GA_TTS_WAIT_FOR_READY_ON_STARTUP=${GA_TTS_WAIT_FOR_READY_ON_STARTUP:-0}
       - GA_TTS_READY_TIMEOUT_SECONDS=${GA_TTS_READY_TIMEOUT_SECONDS:-1800}
       - GA_TTS_DEVICE_MAP=auto
-      - GA_TTS_BACKEND=vulkan
+      - GA_TTS_BACKEND=cuda
       - GA_TTS_DTYPE=float32
       - GA_TTS_TIMEOUT_SECONDS=300
       - GA_TTS_MAX_NEW_TOKENS=512
@@ -131,6 +136,7 @@ services:
       - GA_SD_CFG_SCALE=1.0
       - GA_SD_STRENGTH=0.75
       - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
+      - GA_SD_VAE_ON_CPU=${GA_SD_VAE_ON_CPU:-0}
       - GA_SD_DIFFUSION_FA=1
       - GA_SD_WARMUP_PROMPT=${GA_SD_WARMUP_PROMPT:-startup-warmup}
       - GA_SD_WARMUP_SIZE=${GA_SD_WARMUP_SIZE:-512x512}

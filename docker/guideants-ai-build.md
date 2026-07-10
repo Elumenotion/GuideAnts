@@ -529,7 +529,7 @@ Startup loading behavior is configurable per service through environment variabl
   - `0`: skip ASR readiness monitoring on startup
 - `GA_ASR_READY_TIMEOUT_SECONDS` (default `1800`)
 - `GA_ASR_DEVICE_MAP` (default `auto`)
-- `GA_ASR_BACKEND` (default `cuda`; must be `cpu`/`cuda`/`vulkan` and must match the `ENGINE_ENABLE_*` flags the image's `audiocpp_server` was built with — `cpu` for the CPU flavor, `vulkan` for the Vulkan/ROCm flavors, `cuda` for the CUDA flavor)
+- `GA_ASR_BACKEND` (default `cuda`; must be `cpu`/`cuda`/`vulkan` and must match the `ENGINE_ENABLE_*` flags the image's `audiocpp_server` was built with — `cpu` for the CPU flavor, `vulkan` for the Vulkan flavor, `cuda` for the CUDA and ROCm flavors)
 - `GA_ASR_WARMUP_ON_LOAD` (`1`/`0`, default `1`)
   - `1`: runs a representative warmup transcription using `GA_ASR_WARMUP_AUDIO_PATH`
   - `0`: skips warmup (first real ASR call may be slower)
@@ -546,7 +546,7 @@ Startup loading behavior is configurable per service through environment variabl
 - `GA_TTS_DEFAULT_MODEL_PATH` (default `chatterbox`)
 - `GA_TTS_DEFAULT_MODEL_ID` (default `chatterbox` catalog id; download resolves to `ResembleAI/chatterbox`)
 - `GA_TTS_DEVICE_MAP` (legacy; native engine ignores)
-- `GA_TTS_BACKEND` (default `cuda`; must be `cpu`/`cuda`/`vulkan` and must match the `ENGINE_ENABLE_*` flags the image's `audiocpp_server` was built with — `cpu` for the CPU flavor, `vulkan` for the Vulkan/ROCm flavors, `cuda` for the CUDA flavor)
+- `GA_TTS_BACKEND` (default `cuda`; must be `cpu`/`cuda`/`vulkan` and must match the `ENGINE_ENABLE_*` flags the image's `audiocpp_server` was built with — `cpu` for the CPU flavor, `vulkan` for the Vulkan flavor, `cuda` for the CUDA and ROCm flavors)
 - `GA_TTS_DTYPE` (legacy; native engine ignores)
 - `GA_TTS_VOICE` (default reference voice from voice pack, e.g. `en_us_cv_001`)
 - `GA_TTS_LANG_CODE` (inferred from voice pack selection)

@@ -11,6 +11,7 @@ BACKEND_OVERRIDE=""     # cpu | cuda13 | rocm | slim | vulkan
 COMPOSE_MODE="ghcr"     # ghcr | local
 HEALTH_URL="http://localhost:5107/"
 HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
+ROCM_RUNTIME_OVERRIDE_FILE="docker-compose.rocm-runtime.generated.yml"
 DOCKER_DIRECTORY="docker"
 START_COMMAND="start_linux.sh"
 
@@ -30,6 +31,11 @@ EOF
 log() { printf '[guideants-installer] %s\n' "$*"; }
 warn() { printf '[guideants-installer][warn] %s\n' "$*" >&2; }
 fail() { printf '[guideants-installer][error] %s\n' "$*" >&2; exit 1; }
+
+# shellcheck source=installer/scripts/rocm-runtime-compose.sh
+. "$ROOT_DIR/installer/scripts/rocm-runtime-compose.sh"
+export ROCM_RUNTIME_LOG_FN=log
+export ROCM_RUNTIME_WARN_FN=warn
 
 save_state() {
   cat >"$STATE_FILE" <<EOF
@@ -199,6 +205,7 @@ check_prereqs
 detect_backend
 select_compose_file
 select_vulkan_runtime
+select_rocm_runtime "$DOCKER_DIR"
 
 log "Selected backend: $SELECTED_BACKEND"
 log "Compose file: docker/$COMPOSE_FILE"
@@ -216,6 +223,14 @@ if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
     compose_args+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
   else
     warn "Ignoring invalid host mount override docker/$HOST_MOUNT_OVERRIDE_FILE. Recreate mounts to regenerate it."
+  fi
+fi
+if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
+  if docker compose -f "$COMPOSE_FILE" -f "$ROCM_RUNTIME_OVERRIDE_FILE" config >/dev/null 2>&1; then
+    compose_args+=(-f "$ROCM_RUNTIME_OVERRIDE_FILE")
+    log "Including ROCm runtime override: $ROCM_RUNTIME_OVERRIDE_FILE"
+  else
+    warn "Ignoring invalid ROCm runtime override docker/$ROCM_RUNTIME_OVERRIDE_FILE."
   fi
 fi
 docker compose "${compose_args[@]}" up -d

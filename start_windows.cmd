@@ -7,6 +7,7 @@ set "DOCKER_DIR=%ROOT_DIR%\docker"
 set "STATE_FILE=%ROOT_DIR%\.installer_state.env"
 set "HEALTH_URL=http://localhost:5107/"
 set "HOST_MOUNT_OVERRIDE_FILE=docker-compose.host-mounts.generated.yml"
+set "ROCM_RUNTIME_OVERRIDE_FILE=docker-compose.rocm-runtime.generated.yml"
 set "DOCKER_DIRECTORY=docker"
 set "START_COMMAND=start_windows.cmd"
 
@@ -69,6 +70,7 @@ call :detect_backend
 call :validate_backend
 call :select_compose_file
 call :select_vulkan_runtime
+call :select_rocm_runtime
 
 call :log Selected backend: %SELECTED_BACKEND%
 call :log Compose file: docker\%COMPOSE_FILE%
@@ -87,6 +89,15 @@ if exist "%HOST_MOUNT_OVERRIDE_FILE%" (
     call :warn Ignoring invalid host mount override docker\%HOST_MOUNT_OVERRIDE_FILE%. Recreate mounts to regenerate it.
   ) else (
     set "COMPOSE_ARGS=%COMPOSE_ARGS% -f %HOST_MOUNT_OVERRIDE_FILE%"
+  )
+)
+if exist "%ROCM_RUNTIME_OVERRIDE_FILE%" (
+  docker compose -f "%COMPOSE_FILE%" -f "%ROCM_RUNTIME_OVERRIDE_FILE%" config >nul 2>nul
+  if errorlevel 1 (
+    call :warn Ignoring invalid ROCm runtime override docker\%ROCM_RUNTIME_OVERRIDE_FILE%.
+  ) else (
+    set "COMPOSE_ARGS=%COMPOSE_ARGS% -f %ROCM_RUNTIME_OVERRIDE_FILE%"
+    call :log Including ROCm runtime override: %ROCM_RUNTIME_OVERRIDE_FILE%
   )
 )
 docker compose %COMPOSE_ARGS% up -d || (
@@ -222,6 +233,11 @@ exit /b 0
 :select_vulkan_runtime
 if /I not "%SELECTED_BACKEND%"=="vulkan" exit /b 0
 call :log Vulkan: Docker Desktop -^> Mesa dzn over D3D12 (/dev/dxg). Using built-in defaults (no env).
+exit /b 0
+
+:select_rocm_runtime
+if /I not "%SELECTED_BACKEND%"=="rocm" exit /b 0
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT_DIR%\installer\scripts\rocm-runtime-compose.ps1" -DockerDir "%DOCKER_DIR%" -Backend "%SELECTED_BACKEND%"
 exit /b 0
 
 :wait_for_health

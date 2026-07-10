@@ -26,24 +26,9 @@ export const WIZARD_PROVIDER_OPTIONS: readonly {
   description: string;
 }[] = [
   {
-    id: 'foundry',
-    label: 'Microsoft Foundry',
-    description: 'Configure Azure OpenAI plus optional Microsoft cloud services.',
-  },
-  {
-    id: 'google-gemini',
-    label: 'Google Gemini',
-    description: 'Configure Gemini API key, Gemini chat models, and Gemini service modes.',
-  },
-  {
-    id: 'openai',
-    label: 'OpenAI',
-    description: 'Configure OpenAI API key, chat models, and optional services (STT, TTS, images, embeddings).',
-  },
-  {
-    id: 'huggingface',
-    label: 'Hugging Face',
-    description: 'Configure Hugging Face token, HF chat models, and optional HF service modes (embeddings, image, STT, TTS).',
+    id: 'local-ai',
+    label: 'Local AI',
+    description: 'Install local llama chat models and configure local non-chat services (embeddings, images, STT, TTS, document intelligence).',
   },
   {
     id: 'openrouter',
@@ -51,9 +36,24 @@ export const WIZARD_PROVIDER_OPTIONS: readonly {
     description: 'Configure OpenRouter API key, chat model routing, and optional OpenRouter service modes.',
   },
   {
-    id: 'local-ai',
-    label: 'Local AI',
-    description: 'Install local llama chat models and configure local non-chat services (embeddings, images, STT, TTS, document intelligence).',
+    id: 'huggingface',
+    label: 'Hugging Face',
+    description: 'Configure Hugging Face token, HF chat models, and optional HF service modes (embeddings, image, STT, TTS).',
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    description: 'Configure OpenAI API key, chat models, and optional services (STT, TTS, images, embeddings).',
+  },
+  {
+    id: 'google-gemini',
+    label: 'Google Gemini',
+    description: 'Configure Gemini API key, Gemini chat models, and Gemini service modes.',
+  },
+  {
+    id: 'foundry',
+    label: 'Microsoft Foundry',
+    description: 'Configure Azure OpenAI plus optional Microsoft cloud services.',
   },
 ] as const;
 

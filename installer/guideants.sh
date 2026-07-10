@@ -20,6 +20,7 @@
 #   --mount <path>           Mount a host folder into a project (requires prior login).
 #   --unmount                Interactively remove a host folder mount (requires prior login).
 #   --reconfigure            Re-prompt for backend even if one was saved.
+#   --install-rocm-wsl       Install ROCm + ROCDXG in a user WSL distro (Windows).
 #   --yes                    Assume "yes" for prompts (auto-accept updates).
 #   --help                   Show this help.
 
@@ -31,6 +32,7 @@ ENV_FILE="$DOCKER_DIR/.env"
 STATE_FILE="$ROOT_DIR/.installer_state.env"
 HEALTH_URL="http://localhost:5107/"
 HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
+ROCM_RUNTIME_OVERRIDE_FILE="docker-compose.rocm-runtime.generated.yml"
 DOCKER_DIRECTORY="docker"
 
 MODE="install"            # install | doctor
@@ -38,6 +40,7 @@ BACKEND_OVERRIDE=""       # cpu | cuda13 | rocm | slim | vulkan
 COMPOSE_MODE="ghcr"       # ghcr | local
 ASSUME_YES="0"            # 0 | 1
 RECONFIGURE="0"           # 0 | 1
+INSTALL_ROCM_WSL="0"      # 0 | 1
 MOUNT_PATH=""             # host folder to bind-mount
 UNMOUNT="0"               # 0 | 1
 
@@ -46,6 +49,11 @@ log()  { printf '[guideants] %s\n' "$*"; }
 warn() { printf '[guideants][warn] %s\n' "$*" >&2; }
 fail() { printf '[guideants][error] %s\n' "$*" >&2; exit 1; }
 hr()   { printf '%s\n' "----------------------------------------------------------------"; }
+
+# shellcheck source=scripts/rocm-runtime-compose.sh
+. "$ROOT_DIR/scripts/rocm-runtime-compose.sh"
+export ROCM_RUNTIME_LOG_FN=log
+export ROCM_RUNTIME_WARN_FN=warn
 
 usage() {
   sed -n '3,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -57,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --doctor) MODE="doctor" ;;
     --yes|-y) ASSUME_YES="1" ;;
     --reconfigure) RECONFIGURE="1" ;;
+    --install-rocm-wsl) INSTALL_ROCM_WSL="1" ;;
     --backend)
       [[ $# -ge 2 ]] || fail "Missing value for --backend"
       BACKEND_OVERRIDE="$2"; shift ;;
@@ -118,8 +127,8 @@ check_docker() {
       *)     fail "Docker daemon not reachable. Start Docker Desktop and rerun." ;;
     esac
   fi
-  if [[ "$OS" == "windows" ]] && have wsl.exe; then
-    wsl.exe --status >/dev/null 2>&1 || warn "Could not confirm WSL2 status; Docker Desktop may still work if configured."
+  if [[ "$OS" == "windows" && "$IS_WSL" == "0" ]]; then
+    check_wsl2_status
   fi
   log "Docker is installed and running."
 }
@@ -185,21 +194,7 @@ nvidia_cuda_version() {
   nvidia-smi 2>/dev/null | grep -oP 'CUDA Version:\s*\K[0-9]+\.[0-9]+' | head -n1
 }
 
-rocm_version() {
-  if [[ -f /opt/rocm/.info/version ]]; then
-    cat /opt/rocm/.info/version 2>/dev/null | head -n1 | tr -d ' '
-    return
-  fi
-  if have rocminfo; then
-    rocminfo 2>/dev/null | grep -oP 'ROCm Runtime Version:\s*\K[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1
-    return
-  fi
-  if have apt && dpkg -l rocm-core 2>/dev/null | grep -q '^ii'; then
-    dpkg -l rocm-core 2>/dev/null | awk '/^ii/{print $3}' | head -n1
-    return
-  fi
-  return 1
-}
+# rocm_version() and amd_gpu_detected() are provided by scripts/rocm-probe.sh (via rocm-runtime-compose.sh).
 
 # Compare two dotted version strings: returns 0 if $1 >= $2
 version_gte() {
@@ -366,13 +361,24 @@ check_gpu_drivers() {
         log "ROCm $rver meets minimum requirement (>= $MIN_ROCM_VERSION)."
       fi
     else
-      if [[ -e /dev/kfd ]]; then
-        warn "AMD GPU detected (/dev/kfd) but could not determine ROCm version."
+      if amd_gpu_detected; then
+        warn "AMD GPU detected but could not determine ROCm version."
         warn "Ensure ROCm is properly installed: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/"
         warn "Without a working ROCm installation, GPU acceleration may not function."
+        if [[ "$OS" == "windows" && "$IS_WSL" == "0" ]]; then
+          warn "Install ROCm in WSL with:"
+          warn "  $(rocm_install_command_hint "$ROOT_DIR")"
+          warn "Or run: ./guideants.sh --install-rocm-wsl"
+        fi
       else
-        warn "No AMD GPU device found (/dev/kfd missing). ROCm backend requires an AMD GPU with ROCm drivers."
-        warn "Install ROCm: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/"
+        warn "No AMD GPU device found. ROCm backend requires an AMD GPU with ROCm drivers."
+        if [[ "$OS" == "windows" && "$IS_WSL" == "0" ]]; then
+          warn "Install ROCm in WSL with:"
+          warn "  $(rocm_install_command_hint "$ROOT_DIR")"
+          warn "Or run: ./guideants.sh --install-rocm-wsl"
+        else
+          warn "Install ROCm: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/"
+        fi
         if ! ask_yes_no "Continue anyway without ROCm? [y/N]" "N"; then
           fail "Aborting. Install ROCm drivers and rerun."
         fi
@@ -398,8 +404,8 @@ recommend_backend() {
     RECOMMENDED="cpu"; REASON="NVIDIA driver R${major} is below the CUDA 13 minimum (R580); using CPU."
     return
   fi
-  if [[ -e /dev/kfd ]] || { have rocminfo && rocminfo >/dev/null 2>&1; }; then
-    RECOMMENDED="rocm"; REASON="AMD ROCm device detected (/dev/kfd)."
+  if amd_gpu_detected; then
+    RECOMMENDED="rocm"; REASON="AMD ROCm-capable GPU detected."
     return
   fi
   if [[ "${LOW_RAM:-0}" == "1" ]]; then
@@ -435,7 +441,7 @@ choose_backend() {
     backend_keys+=("cuda13")
     backend_labels+=("cuda13  Local AI on NVIDIA GPU (R${major} driver detected, ~50 GB disk)")
   fi
-  if [[ -e /dev/kfd ]] || { have rocminfo && rocminfo >/dev/null 2>&1; }; then
+  if amd_gpu_detected; then
     backend_keys+=("rocm")
     backend_labels+=("rocm    Local AI on AMD GPU (ROCm device detected, ~50 GB disk)")
   fi
@@ -566,12 +572,13 @@ local_digest() {
   [[ "$rd" == *@* ]] && echo "${rd##*@}"
 }
 
-# Sets UPDATE_DECISION = pull | pull_stale | skip
-# When pull_stale, STALE_SERVICES contains the service names to update.
+# Sets UPDATE_DECISION = pull | skip
+# When pull, PULL_ALWAYS_SERVICES and/or PULL_MISSING_SERVICES name what to fetch.
 plan_pull() {
   local compose_path="$DOCKER_DIR/$1"
   local images missing=0 stale=0 img r l
-  STALE_SERVICES=()
+  PULL_ALWAYS_SERVICES=()
+  PULL_MISSING_SERVICES=()
   local -a missing_images=()
   if ! images="$(docker compose -f "$compose_path" --env-file "$ENV_FILE" config --images 2>/dev/null)"; then
     warn "Could not resolve image list; will let Compose pull what's missing."
@@ -619,29 +626,34 @@ plan_pull() {
       fail "If these are private images, run 'docker login' for the registry or switch to --compose local after building them locally."
     fi
     log "$missing image(s) not present locally — they will be downloaded on first start."
-    UPDATE_DECISION="pull"; return
   fi
   if [[ "$stale" -gt 0 ]]; then
     hr
     log "Updates available for $stale image(s) ($SELECTED_BACKEND)."
     if ask_yes_no "Update now before starting? [Y/n]" "Y"; then
-      UPDATE_DECISION="pull_stale"
-      resolve_stale_services "$compose_path" "${stale_images[@]}"
+      mapfile -t PULL_ALWAYS_SERVICES < <(services_for_images "$compose_path" "${stale_images[@]}")
     else
       log "Keeping current images."
-      UPDATE_DECISION="skip"
     fi
-  else
+  fi
+  if [[ "$missing" -gt 0 ]]; then
+    mapfile -t PULL_MISSING_SERVICES < <(services_for_images "$compose_path" "${missing_images[@]}")
+  fi
+  if [[ ${#PULL_ALWAYS_SERVICES[@]} -gt 0 || ${#PULL_MISSING_SERVICES[@]} -gt 0 ]]; then
+    UPDATE_DECISION="pull"
+  elif [[ "$stale" -eq 0 && "$missing" -eq 0 ]]; then
     log "All images are up to date."
+    UPDATE_DECISION="skip"
+  else
     UPDATE_DECISION="skip"
   fi
 }
 
-resolve_stale_services() {
+services_for_images() {
   local compose_path="$1"; shift
-  local -a stale_imgs=("$@")
-  STALE_SERVICES=()
+  local -a imgs=("$@")
   local mapping svc img svc_img
+  [[ ${#imgs[@]} -gt 0 ]] || return 0
   mapping="$(docker compose -f "$compose_path" --env-file "$ENV_FILE" config --format json 2>/dev/null \
     | python3 -c "
 import json,sys
@@ -650,9 +662,9 @@ for svc,conf in json.load(sys.stdin).get('services',{}).items():
 " 2>/dev/null || true)"
   [[ -n "$mapping" ]] || return 0
   while IFS='=' read -r svc svc_img; do
-    for img in "${stale_imgs[@]}"; do
+    for img in "${imgs[@]}"; do
       if [[ "$svc_img" == "$img" ]]; then
-        STALE_SERVICES+=("$svc")
+        echo "$svc"
         break
       fi
     done
@@ -1142,12 +1154,20 @@ log "OS: ${OS}${WSL_NOTE}   Arch: $ARCH"
 hr
 
 check_docker
+if [[ "$INSTALL_ROCM_WSL" == "1" ]]; then
+  if [[ "$OS" != "windows" || "$IS_WSL" == "1" ]]; then
+    fail "--install-rocm-wsl is only supported on native Windows with WSL2."
+  fi
+  install_rocm_wsl_from_host "$ROOT_DIR"
+fi
 report_resources
 choose_backend
 COMPOSE_FILE="$(compose_file_for "$SELECTED_BACKEND")"
 log "Selected backend: $SELECTED_BACKEND  ->  docker/$COMPOSE_FILE"
 
 select_vulkan_runtime
+
+select_rocm_runtime "$DOCKER_DIR" "$ROOT_DIR"
 
 check_gpu_drivers "$SELECTED_BACKEND"
 
@@ -1164,6 +1184,7 @@ if [[ "$MODE" == "doctor" ]]; then
   log "Doctor mode complete. No changes were made."
   would_start="docker compose -f docker/$COMPOSE_FILE"
   [[ -f "$DOCKER_DIR/$HOST_MOUNT_OVERRIDE_FILE" ]] && would_start+=" -f docker/$HOST_MOUNT_OVERRIDE_FILE"
+  [[ -f "$DOCKER_DIR/$ROCM_RUNTIME_OVERRIDE_FILE" ]] && would_start+=" -f docker/$ROCM_RUNTIME_OVERRIDE_FILE"
   log "Would start: $would_start up -d"
   log "Update decision: ${UPDATE_DECISION:-skip}"
   exit 0
@@ -1184,12 +1205,23 @@ if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
     warn "Ignoring invalid host mount override docker/$HOST_MOUNT_OVERRIDE_FILE. Recreate mounts to regenerate it."
   fi
 fi
+if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
+  if docker compose -f "$COMPOSE_FILE" -f "$ROCM_RUNTIME_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    compose_args+=(-f "$ROCM_RUNTIME_OVERRIDE_FILE")
+    log "Including ROCm runtime override: $ROCM_RUNTIME_OVERRIDE_FILE"
+  else
+    warn "Ignoring invalid ROCm runtime override docker/$ROCM_RUNTIME_OVERRIDE_FILE."
+  fi
+fi
 if [[ "${UPDATE_DECISION:-skip}" == "pull" ]]; then
-  log "Pulling images..."
-  docker compose "${compose_args[@]}" --env-file "$ENV_FILE" pull
-elif [[ "${UPDATE_DECISION:-skip}" == "pull_stale" && ${#STALE_SERVICES[@]} -gt 0 ]]; then
-  log "Pulling updates for: ${STALE_SERVICES[*]}"
-  docker compose "${compose_args[@]}" --env-file "$ENV_FILE" pull --policy always "${STALE_SERVICES[@]}"
+  if [[ ${#PULL_MISSING_SERVICES[@]} -gt 0 ]]; then
+    log "Pulling missing images: ${PULL_MISSING_SERVICES[*]}"
+    docker compose "${compose_args[@]}" --env-file "$ENV_FILE" pull "${PULL_MISSING_SERVICES[@]}"
+  fi
+  if [[ ${#PULL_ALWAYS_SERVICES[@]} -gt 0 ]]; then
+    log "Pulling updates for: ${PULL_ALWAYS_SERVICES[*]}"
+    docker compose "${compose_args[@]}" --env-file "$ENV_FILE" pull --policy always "${PULL_ALWAYS_SERVICES[@]}"
+  fi
 fi
 log "Starting the stack..."
 docker compose "${compose_args[@]}" --env-file "$ENV_FILE" up -d
