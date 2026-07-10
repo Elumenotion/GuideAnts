@@ -103,6 +103,7 @@ public sealed class WireStreamAdapterTests
                            "resp_test",
                            "guide",
                            created: 1,
+                           conversationId: "conv_test",
                            publicApiOrigin: null,
                            state,
                            CancellationToken.None))
@@ -116,6 +117,33 @@ public sealed class WireStreamAdapterTests
         deltaChunks.Count.Should().BeGreaterThanOrEqualTo(2);
         string.Join(string.Empty, ExtractResponsesTextDeltas(chunks)).Should().Be("Hello");
         chunks.Should().Contain(chunk => chunk.Contains("event: response.completed", StringComparison.Ordinal));
+        chunks.Should().Contain(chunk => chunk.Contains("event: response.created", StringComparison.Ordinal) && chunk.Contains("\"conversation\":\"conv_test\"", StringComparison.Ordinal));
+        chunks.Should().Contain(chunk => chunk.Contains("event: response.completed", StringComparison.Ordinal) && chunk.Contains("\"conversation\":\"conv_test\"", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task WriteOpenAiResponsesSseAsync_Includes_conversation_when_stream_has_no_tokens()
+    {
+        var events = StreamEvents(
+            new StreamingEvent(StreamingEventTypes.Usage, "{\"prompt_tokens\":1,\"completion_tokens\":0}"));
+
+        var state = new WireStreamAdapter.OpenAiResponsesStreamState();
+        var chunks = new List<string>();
+        await foreach (var chunk in WireStreamAdapter.WriteOpenAiResponsesSseAsync(
+                           events,
+                           "resp_test",
+                           "guide",
+                           created: 1,
+                           conversationId: "conv_test",
+                           publicApiOrigin: null,
+                           state,
+                           CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        chunks.Should().Contain(chunk => chunk.Contains("event: response.created", StringComparison.Ordinal) && chunk.Contains("\"conversation\":\"conv_test\"", StringComparison.Ordinal));
+        chunks.Should().Contain(chunk => chunk.Contains("event: response.completed", StringComparison.Ordinal) && chunk.Contains("\"conversation\":\"conv_test\"", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -162,6 +190,7 @@ public sealed class WireStreamAdapterTests
                            "resp_test",
                            "guide",
                            created: 1,
+                           conversationId: "conv_test",
                            publicApiOrigin: null,
                            state,
                            CancellationToken.None))
@@ -213,6 +242,7 @@ public sealed class WireStreamAdapterTests
                            "resp_test",
                            "guide",
                            created: 1,
+                           conversationId: "conv_test",
                            publicApiOrigin: null,
                            state,
                            CancellationToken.None))

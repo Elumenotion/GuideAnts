@@ -343,6 +343,7 @@ public static async Task<IResult> PostResponsesAsync(
             var streamState = new WireStreamAdapter.OpenAiResponsesStreamState();
             var conversationId = streamHandle.ConversationId;
             var createdConversation = streamHandle.CreatedConversation;
+            var conversationWireId = WireIdCodec.FormatConversationId(streamHandle.ConversationId);
 
             return Results.Stream(async outputStream =>
             {
@@ -351,6 +352,7 @@ public static async Task<IResult> PostResponsesAsync(
                                    streamResponseId,
                                    modelAlias.Alias,
                                    streamCreated,
+                                   conversationWireId,
                                    publicApiOrigin,
                                    streamState,
                                    httpContext.RequestAborted))
