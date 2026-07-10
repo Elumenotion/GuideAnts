@@ -27,14 +27,8 @@ services:
   guideants-ai:
     image: ${GA_AI_ROCM_IMAGE:-ghcr.io/elumenotion/guideants-ai-rocm:latest}
     container_name: guideants-ai
-    cap_drop:
-      - SYS_PTRACE
-    group_add:
-      - video
-      - render
-    devices:
-      - /dev/kfd
-      - /dev/dri
+    # ROCm GPU devices are supplied by docker-compose.rocm-runtime.generated.yml
+    # (native Linux: /dev/kfd + /dev/dri + group_add; WSL ROCDXG: /dev/dxg + librocdxg binds).
     ports:
       - "8110:80"      # gateway (/sandbox, /llama-cpp, /asr, /sd, /tts, /emb)
     shm_size: "8gb"
@@ -142,6 +136,7 @@ services:
       - GA_SD_CFG_SCALE=1.0
       - GA_SD_STRENGTH=0.75
       - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
+      - GA_SD_VAE_ON_CPU=${GA_SD_VAE_ON_CPU:-0}
       - GA_SD_DIFFUSION_FA=1
       - GA_SD_WARMUP_PROMPT=${GA_SD_WARMUP_PROMPT:-startup-warmup}
       - GA_SD_WARMUP_SIZE=${GA_SD_WARMUP_SIZE:-512x512}

@@ -31,6 +31,7 @@ ENV_FILE="$DOCKER_DIR/.env"
 STATE_FILE="$ROOT_DIR/.installer_state.env"
 HEALTH_URL="http://localhost:5107/"
 HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
+ROCM_RUNTIME_OVERRIDE_FILE="docker-compose.rocm-runtime.generated.yml"
 DOCKER_DIRECTORY="docker"
 
 MODE="install"            # install | doctor
@@ -46,6 +47,11 @@ log()  { printf '[guideants] %s\n' "$*"; }
 warn() { printf '[guideants][warn] %s\n' "$*" >&2; }
 fail() { printf '[guideants][error] %s\n' "$*" >&2; exit 1; }
 hr()   { printf '%s\n' "----------------------------------------------------------------"; }
+
+# shellcheck source=scripts/rocm-runtime-compose.sh
+. "$ROOT_DIR/scripts/rocm-runtime-compose.sh"
+export ROCM_RUNTIME_LOG_FN=log
+export ROCM_RUNTIME_WARN_FN=warn
 
 usage() {
   sed -n '3,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -1149,6 +1155,8 @@ log "Selected backend: $SELECTED_BACKEND  ->  docker/$COMPOSE_FILE"
 
 select_vulkan_runtime
 
+select_rocm_runtime "$DOCKER_DIR"
+
 check_gpu_drivers "$SELECTED_BACKEND"
 
 detect_prior_install
@@ -1164,6 +1172,7 @@ if [[ "$MODE" == "doctor" ]]; then
   log "Doctor mode complete. No changes were made."
   would_start="docker compose -f docker/$COMPOSE_FILE"
   [[ -f "$DOCKER_DIR/$HOST_MOUNT_OVERRIDE_FILE" ]] && would_start+=" -f docker/$HOST_MOUNT_OVERRIDE_FILE"
+  [[ -f "$DOCKER_DIR/$ROCM_RUNTIME_OVERRIDE_FILE" ]] && would_start+=" -f docker/$ROCM_RUNTIME_OVERRIDE_FILE"
   log "Would start: $would_start up -d"
   log "Update decision: ${UPDATE_DECISION:-skip}"
   exit 0
@@ -1182,6 +1191,14 @@ if [[ -f "$HOST_MOUNT_OVERRIDE_FILE" ]]; then
     log "Including host mount override: $HOST_MOUNT_OVERRIDE_FILE"
   else
     warn "Ignoring invalid host mount override docker/$HOST_MOUNT_OVERRIDE_FILE. Recreate mounts to regenerate it."
+  fi
+fi
+if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
+  if docker compose -f "$COMPOSE_FILE" -f "$ROCM_RUNTIME_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    compose_args+=(-f "$ROCM_RUNTIME_OVERRIDE_FILE")
+    log "Including ROCm runtime override: $ROCM_RUNTIME_OVERRIDE_FILE"
+  else
+    warn "Ignoring invalid ROCm runtime override docker/$ROCM_RUNTIME_OVERRIDE_FILE."
   fi
 fi
 if [[ "${UPDATE_DECISION:-skip}" == "pull" ]]; then

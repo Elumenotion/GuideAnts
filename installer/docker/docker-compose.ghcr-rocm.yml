@@ -26,12 +26,8 @@ services:
     image: ${GA_AI_GHCR_IMAGE:-ghcr.io/elumenotion/guideants-ai-rocm:main}
     pull_policy: missing
     container_name: guideants-ai
-    group_add:
-      - video
-      - render
-    devices:
-      - /dev/kfd
-      - /dev/dri
+    # ROCm GPU devices are supplied by docker-compose.rocm-runtime.generated.yml
+    # (native Linux: /dev/kfd + /dev/dri + group_add; WSL ROCDXG: /dev/dxg + librocdxg binds).
     shm_size: "8gb"
     volumes:
       - ai_local_models-new:/models-local
@@ -111,6 +107,7 @@ services:
       - GA_SD_CFG_SCALE=1.0
       - GA_SD_STRENGTH=0.75
       - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
+      - GA_SD_VAE_ON_CPU=${GA_SD_VAE_ON_CPU:-0}
       - GA_SD_DIFFUSION_FA=1
       - GA_SD_WARMUP_PROMPT=${GA_SD_WARMUP_PROMPT:-startup-warmup}
       - GA_SD_WARMUP_SIZE=${GA_SD_WARMUP_SIZE:-512x512}

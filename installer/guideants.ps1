@@ -33,6 +33,7 @@ $script:StateFile = Join-Path $script:RootDir '.installer_state.env'
 $script:HealthUrl = 'http://localhost:5107/'
 $script:ApiBase = 'http://localhost:5107'
 $script:HostMountOverrideFile = 'docker-compose.host-mounts.generated.yml'
+$script:RocmRuntimeOverrideFile = 'docker-compose.rocm-runtime.generated.yml'
 $script:DockerDirectory = 'docker'
 
 $script:Mode = 'install'
@@ -413,6 +414,37 @@ function Test-VersionGte {
     return $true
 }
 
+function Get-WslUserDistros {
+    if (-not (Test-Command 'wsl.exe')) { return @() }
+
+    $result = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('-l', '-q') -IgnoreErrors
+    if ($result.ExitCode -ne 0) { return @() }
+
+    $distros = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $result.Output) {
+        $name = (($line -as [string]) -replace "`0", '').Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        if ($name -match '^(?i)docker-desktop(-data)?$') { continue }
+        $distros.Add($name) | Out-Null
+    }
+
+    return @($distros)
+}
+
+function Invoke-WslUserProbe {
+    param([Parameter(Mandatory = $true)][string]$Probe)
+
+    foreach ($distro in (Get-WslUserDistros)) {
+        $result = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('-d', $distro, 'sh', '-lc', $Probe) -IgnoreErrors
+        if ($result.ExitCode -eq 0) {
+            $value = ([string]($result.Output | Select-Object -First 1)).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+        }
+    }
+
+    return $null
+}
+
 function Get-RocmVersion {
     if (Test-Path -LiteralPath '/opt/rocm/.info/version') {
         try {
@@ -445,12 +477,9 @@ function Get-RocmVersion {
     }
 
     if ($script:OsName -eq 'windows' -and -not $script:IsWsl -and (Test-Command 'wsl.exe')) {
-        $probe = 'if [ -f /opt/rocm/.info/version ]; then head -n1 /opt/rocm/.info/version | tr -d " "; elif command -v rocminfo >/dev/null 2>&1; then rocminfo 2>/dev/null | sed -n -E "s/.*ROCm Runtime Version:[[:space:]]*([0-9.]+).*/\1/p" | head -n1; fi'
-        $result = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('sh', '-lc', $probe) -IgnoreErrors
-        if ($result.ExitCode -eq 0) {
-            $value = ([string]($result.Output | Select-Object -First 1)).Trim()
-            if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
-        }
+        $probe = 'if [ -f /opt/rocm/.info/version ]; then head -n1 /opt/rocm/.info/version; elif command -v dpkg >/dev/null 2>&1; then dpkg -l rocm-core 2>/dev/null | awk ''/^ii/{print $3; exit}''; fi'
+        $value = Invoke-WslUserProbe -Probe $probe
+        if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
     }
 
     return $null
@@ -473,8 +502,13 @@ function Test-AmdGpuDetected {
         }
 
         if (Test-Command 'wsl.exe') {
-            $wsl = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('test', '-e', '/dev/kfd') -IgnoreErrors
-            if ($wsl.ExitCode -eq 0) { return $true }
+            foreach ($distro in (Get-WslUserDistros)) {
+                $wsl = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('-d', $distro, 'sh', '-lc', 'test -e /dev/dxg || test -e /dev/kfd') -IgnoreErrors
+                if ($wsl.ExitCode -eq 0) { return $true }
+
+                $wsl = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('-d', $distro, 'sh', '-lc', 'command -v rocminfo >/dev/null 2>&1 && HSA_ENABLE_DXG_DETECTION=1 rocminfo >/dev/null 2>&1') -IgnoreErrors
+                if ($wsl.ExitCode -eq 0) { return $true }
+            }
         }
     }
 
@@ -853,6 +887,37 @@ function Choose-Backend {
         Write-WarnLog "Unrecognized choice '$choice'; using recommended."
         $script:SelectedBackend = $script:Recommended
     }
+}
+
+function Add-ComposeOverrideIfValid {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
+        [Parameter(Mandatory = $true)][string]$OverrideFile
+    )
+
+    if (-not (Test-Path -LiteralPath $OverrideFile)) { return $ComposeArgs }
+
+    $configCheck = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('compose', '-f', $script:ComposeFile, '-f', $OverrideFile, '--env-file', $script:EnvFile, 'config') -IgnoreErrors
+    if ($configCheck.ExitCode -eq 0) {
+        Write-Log "Including compose override: $OverrideFile"
+        return @($ComposeArgs + @('-f', $OverrideFile))
+    }
+
+    Write-WarnLog "Ignoring invalid compose override docker/$OverrideFile."
+    return $ComposeArgs
+}
+
+function Select-RocmRuntime {
+    if ($script:SelectedBackend -ne 'rocm') {
+        $override = Join-Path $script:DockerDir $script:RocmRuntimeOverrideFile
+        if (Test-Path -LiteralPath $override) {
+            Remove-Item -LiteralPath $override -Force
+        }
+        return
+    }
+
+    $helper = Join-Path $script:RootDir 'scripts/rocm-runtime-compose.ps1'
+    & $helper -DockerDir $script:DockerDir -Backend $script:SelectedBackend
 }
 
 function Select-VulkanRuntime {
@@ -1622,16 +1687,8 @@ function Start-GuideAntsStack {
     Push-Location $script:DockerDir
     try {
         $composeArgs = @('-f', $script:ComposeFile)
-        if (Test-Path -LiteralPath $script:HostMountOverrideFile) {
-            $configCheck = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('compose', '-f', $script:ComposeFile, '-f', $script:HostMountOverrideFile, '--env-file', $script:EnvFile, 'config') -IgnoreErrors
-            if ($configCheck.ExitCode -eq 0) {
-                $composeArgs += @('-f', $script:HostMountOverrideFile)
-                Write-Log "Including host mount override: $($script:HostMountOverrideFile)"
-            }
-            else {
-                Write-WarnLog "Ignoring invalid host mount override docker/$($script:HostMountOverrideFile). Recreate mounts to regenerate it."
-            }
-        }
+        $composeArgs = Add-ComposeOverrideIfValid -ComposeArgs $composeArgs -OverrideFile $script:HostMountOverrideFile
+        $composeArgs = Add-ComposeOverrideIfValid -ComposeArgs $composeArgs -OverrideFile $script:RocmRuntimeOverrideFile
 
         if ($script:UpdateDecision -eq 'pull') {
             Write-Log 'Pulling images...'
@@ -1670,6 +1727,7 @@ function Invoke-Main {
     Write-Log "Selected backend: $($script:SelectedBackend)  ->  docker/$($script:ComposeFile)"
 
     Select-VulkanRuntime
+    Select-RocmRuntime
     Check-GpuDrivers -Backend $script:SelectedBackend
 
     Detect-PriorInstall
@@ -1687,6 +1745,9 @@ function Invoke-Main {
         $wouldStart = "docker compose -f docker/$($script:ComposeFile)"
         if (Test-Path -LiteralPath (Join-Path $script:DockerDir $script:HostMountOverrideFile)) {
             $wouldStart += " -f docker/$($script:HostMountOverrideFile)"
+        }
+        if (Test-Path -LiteralPath (Join-Path $script:DockerDir $script:RocmRuntimeOverrideFile)) {
+            $wouldStart += " -f docker/$($script:RocmRuntimeOverrideFile)"
         }
         Write-Log "Would start: $wouldStart up -d"
         Write-Log "Update decision: $($script:UpdateDecision)"

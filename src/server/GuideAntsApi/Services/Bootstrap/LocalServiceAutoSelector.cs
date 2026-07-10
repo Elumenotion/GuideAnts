@@ -1,5 +1,6 @@
 using GuideAntsApi.BackgroundJobs.Options;
 using GuideAntsApi.Configuration;
+using GuideAntsApi.Options;
 using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Services.Bootstrap;
@@ -17,6 +18,14 @@ public interface ILocalServiceAutoSelector
 public sealed class LocalServiceAutoSelector : ILocalServiceAutoSelector
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
+
+    private static readonly (string ServiceId, string LocalProviderId, string BaseUrlConfigKey)[] LocalAuxiliaryServices =
+    [
+        (ImageGenerationOptions.SectionName, ServiceProviderIds.ImageGenerationLocalSdHttp, "LocalServiceHosts:ImageGenerationBaseUrl"),
+        (EmbeddingsOptions.SectionName, ServiceProviderIds.EmbeddingsLocalEmbHttp, "LocalServiceHosts:EmbeddingsBaseUrl"),
+        (SpeechTranscriptionOptions.SectionName, ServiceProviderIds.SpeechTranscriptionLocalAsrHttp, "LocalServiceHosts:SpeechTranscriptionBaseUrl"),
+        (SpeechSynthesisOptions.SectionName, ServiceProviderIds.SpeechSynthesisLocalTtsHttp, "LocalServiceHosts:SpeechSynthesisBaseUrl"),
+    ];
 
     private readonly IApplicationSettingsService _settings;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -37,66 +46,91 @@ public sealed class LocalServiceAutoSelector : ILocalServiceAutoSelector
 
     public async Task AutoSelectAsync(CancellationToken cancellationToken = default)
     {
+        foreach (var (serviceId, localProviderId, baseUrlConfigKey) in LocalAuxiliaryServices)
+        {
+            await TryAutoSelectLocalProviderAsync(
+                    serviceId,
+                    localProviderId,
+                    baseUrlConfigKey,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         await TryAutoSelectDoclingAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task TryAutoSelectDoclingAsync(CancellationToken cancellationToken)
+    private async Task TryAutoSelectLocalProviderAsync(
+        string serviceId,
+        string localProviderId,
+        string baseUrlConfigKey,
+        CancellationToken cancellationToken)
     {
-        var state = await _settings.GetServiceEditorStateAsync(
-            DocumentIntelligenceOptions.SectionName, cancellationToken).ConfigureAwait(false);
+        var state = await _settings.GetServiceEditorStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
 
         if (!string.IsNullOrEmpty(state.ActiveProviderId)
-            && state.ActiveProviderId == ServiceProviderIds.DocumentIntelligenceLocalDoclingHttp)
+            && string.Equals(state.ActiveProviderId, localProviderId, StringComparison.Ordinal))
         {
             return;
         }
 
-        var azureProvider = state.Providers.FirstOrDefault(p =>
-            p.ProviderId == ServiceProviderIds.DocumentIntelligenceAzure);
-        if (azureProvider is { ConnectionConfigured: true })
+        if (state.Providers.Any(provider =>
+                string.Equals(provider.ProviderKind, "Cloud", StringComparison.OrdinalIgnoreCase)
+                && provider.ConnectionConfigured))
         {
             return;
         }
 
-        var doclingBaseUrl = _configuration["LocalServiceHosts:DocumentIntelligenceBaseUrl"];
-        if (!RuntimeConfigurationPlaceholders.HasUsableUrl(doclingBaseUrl))
+        var localBaseUrl = _configuration[baseUrlConfigKey];
+        if (!RuntimeConfigurationPlaceholders.HasUsableUrl(localBaseUrl))
         {
             _logger.LogInformation(
-                "LocalServiceHosts:DocumentIntelligenceBaseUrl is not configured with a usable URL; skipping local Docling auto-select");
+                "{ConfigKey} is not configured with a usable URL; skipping local auto-select for {ServiceId}",
+                baseUrlConfigKey,
+                serviceId);
             return;
         }
 
-        doclingBaseUrl = doclingBaseUrl!.Trim();
-
-        if (!await IsReachableAsync(doclingBaseUrl, cancellationToken).ConfigureAwait(false))
+        localBaseUrl = localBaseUrl!.Trim();
+        if (!await IsReachableAsync(localBaseUrl, cancellationToken).ConfigureAwait(false))
         {
             _logger.LogInformation(
-                "Local Docling service at {Url} is not reachable; skipping auto-select",
-                doclingBaseUrl);
+                "Local service for {ServiceId} at {Url} is not reachable; skipping auto-select",
+                serviceId,
+                localBaseUrl);
             return;
         }
 
         try
         {
-            await _settings.EnsureServiceModeExistsAsync(
-                DocumentIntelligenceOptions.SectionName,
-                ServiceProviderIds.DocumentIntelligenceLocalDoclingHttp,
-                cancellationToken).ConfigureAwait(false);
-
-            await _settings.SetServiceActiveProviderAsync(
-                DocumentIntelligenceOptions.SectionName,
-                ServiceProviderIds.DocumentIntelligenceLocalDoclingHttp,
-                cancellationToken).ConfigureAwait(false);
+            await _settings.EnsureServiceModeExistsAsync(serviceId, localProviderId, cancellationToken)
+                .ConfigureAwait(false);
+            await _settings.SetServiceActiveProviderAsync(serviceId, localProviderId, cancellationToken)
+                .ConfigureAwait(false);
 
             _logger.LogInformation(
-                "Auto-selected local Docling as DocumentIntelligence provider (Azure not configured, Docling reachable at {Url})",
-                doclingBaseUrl);
+                "Auto-selected {LocalProviderId} as {ServiceId} provider (no cloud connection configured, local service reachable at {Url})",
+                localProviderId,
+                serviceId,
+                localBaseUrl);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex,
-                "Failed to auto-select local Docling as DocumentIntelligence provider");
+            _logger.LogWarning(
+                ex,
+                "Failed to auto-select {LocalProviderId} as {ServiceId} provider",
+                localProviderId,
+                serviceId);
         }
+    }
+
+    private async Task TryAutoSelectDoclingAsync(CancellationToken cancellationToken)
+    {
+        await TryAutoSelectLocalProviderAsync(
+                GuideAntsApi.BackgroundJobs.Options.DocumentIntelligenceOptions.SectionName,
+                ServiceProviderIds.DocumentIntelligenceLocalDoclingHttp,
+                "LocalServiceHosts:DocumentIntelligenceBaseUrl",
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<bool> IsReachableAsync(string baseUrl, CancellationToken cancellationToken)

@@ -5,8 +5,10 @@ using GuideAnts.Logging;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Endpoints;
+using GuideAntsApi.Options;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
+using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Services.Bootstrap;
@@ -381,14 +383,23 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         string? requestedModelRef = null,
         CancellationToken cancellationToken = default)
     {
-        var routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
-
         var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
         if (string.IsNullOrWhiteSpace(adminBase))
         {
             return new LocalServiceReconcileResult(
                 LocalServiceReconcileOutcome.Unavailable,
                 $"Local admin base URL is not configured for '{serviceId}'.");
+        }
+
+        var routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
+        if (await TryEnsureLocalProviderRoutedForModelOperationAsync(
+                serviceId,
+                routing,
+                requestedModelRef,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
         }
 
         switch (routing)
@@ -1020,6 +1031,64 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         Warm,
         Idle,
         Unknown
+    }
+
+    private static string? TryGetLocalProviderId(string serviceId) =>
+        serviceId switch
+        {
+            RoutedServiceNames.ImageGeneration => ServiceProviderIds.ImageGenerationLocalSdHttp,
+            RoutedServiceNames.Embeddings => ServiceProviderIds.EmbeddingsLocalEmbHttp,
+            RoutedServiceNames.SpeechTranscription => ServiceProviderIds.SpeechTranscriptionLocalAsrHttp,
+            RoutedServiceNames.SpeechSynthesis => ServiceProviderIds.SpeechSynthesisLocalTtsHttp,
+            _ => null
+        };
+
+    /// <summary>
+    /// Local model download/list proxies straight to the container admin API, but load /
+    /// select-active reconcile through routing. When the user operates on a local model
+    /// (or routing was never configured), activate the local provider automatically so
+    /// the same settings surface does not require a separate "Save and activate" click.
+    /// </summary>
+    private async Task<bool> TryEnsureLocalProviderRoutedForModelOperationAsync(
+        string serviceId,
+        LocalRoutingDesiredState routing,
+        string? requestedModelRef,
+        CancellationToken cancellationToken)
+    {
+        var localProviderId = TryGetLocalProviderId(serviceId);
+        if (localProviderId is null)
+        {
+            return false;
+        }
+
+        var shouldEnsure = routing == LocalRoutingDesiredState.Unknown
+            || (routing == LocalRoutingDesiredState.Idle && !string.IsNullOrWhiteSpace(requestedModelRef));
+        if (!shouldEnsure)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
+            await settings.EnsureServiceModeExistsAsync(serviceId, localProviderId, cancellationToken)
+                .ConfigureAwait(false);
+            await settings.SetServiceActiveProviderAsync(serviceId, localProviderId, cancellationToken)
+                .ConfigureAwait(false);
+            _logger.LogInformation(
+                "Auto-activated local provider for '{ServiceId}' before local model reconcile.",
+                LogValueSanitizer.Sanitize(serviceId));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not auto-activate local provider for '{ServiceId}' before local model reconcile.",
+                LogValueSanitizer.Sanitize(serviceId));
+            return false;
+        }
     }
 
     private async Task<LocalRoutingDesiredState> ResolveLocalRoutingDesiredStateAsync(
