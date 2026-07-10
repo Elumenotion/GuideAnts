@@ -1338,16 +1338,6 @@ public class GuideUsageService : IGuideUsageService
             return await ctx.UsageEvents
                 .Where(e => e.AgentInvocationId != null
                             && invocationIds.Contains(e.AgentInvocationId.Value))
-                .Select(e => new
-                {
-                    e.AgentInvocationId,
-                    e.Category,
-                    e.Operation,
-                    e.ValueInput,
-                    e.ValueOutput,
-                    e.ChargeUsd,
-                    e.Created
-                })
                 .ToListAsync();
         });
 
@@ -1377,6 +1367,10 @@ public class GuideUsageService : IGuideUsageService
         var messagesByInvocation = await messagesTask;
         var allUsageEvents = await usageEventsTask;
         var directUsageEvents = await directUsageEventsTask;
+        var timingResolver = await UsageEventTimingResolver.CreateAsync(
+            _context,
+            conversationId,
+            invocationIds);
 
         // =====================================================================
         // Derive all usage aggregates from consolidated query (in-memory)
@@ -1384,33 +1378,17 @@ public class GuideUsageService : IGuideUsageService
 
         // Tool usage by invocation
         var toolUsageByInvocation = allUsageEvents
-            .Where(e => e.Category == UsageCategory.ToolCall)
+            .Where(e => e.Category == UsageCategory.ToolCall && e.AgentInvocationId != null)
             .GroupBy(e => e.AgentInvocationId!.Value)
-            .ToDictionary(
-                g => g.Key,
-                g => g.Select(e => new UsageEvent
-                {
-                    AgentInvocationId = e.AgentInvocationId,
-                    Category = e.Category,
-                    Operation = e.Operation ?? string.Empty,
-                    ChargeUsd = e.ChargeUsd,
-                    Created = e.Created
-                }).ToList());
+            .ToDictionary(g => g.Key, g => g.ToList());
 
         // Service usage by invocation (non-Chat, non-Tool)
         var serviceUsageByInvocation = allUsageEvents
-            .Where(e => e.Category != UsageCategory.ChatCompletion && e.Category != UsageCategory.ToolCall)
+            .Where(e => e.Category != UsageCategory.ChatCompletion
+                        && e.Category != UsageCategory.ToolCall
+                        && e.AgentInvocationId != null)
             .GroupBy(e => e.AgentInvocationId!.Value)
-            .ToDictionary(
-                g => g.Key,
-                g => g.Select(e => new UsageEvent
-                {
-                    AgentInvocationId = e.AgentInvocationId,
-                    Category = e.Category,
-                    Operation = e.Operation ?? string.Empty,
-                    ChargeUsd = e.ChargeUsd,
-                    Created = e.Created
-                }).ToList());
+            .ToDictionary(g => g.Key, g => g.ToList());
 
         // Token usage by invocation
         var tokenUsageByInvocation = allUsageEvents
@@ -1442,11 +1420,12 @@ public class GuideUsageService : IGuideUsageService
                 serviceUsageByInvocation,
                 tokenUsageByInvocation,
                 messagesByInvocation,
-                invocationCosts);
+                invocationCosts,
+                timingResolver);
             rootNodes.Add(node);
         }
 
-        rootNodes.AddRange(BuildDirectUsageNodes(directUsageEvents));
+        rootNodes.AddRange(BuildDirectUsageNodes(directUsageEvents, timingResolver));
 
         // Sort all root nodes by created time
         rootNodes = rootNodes.OrderBy(n => n.Created).ToList();
@@ -1484,7 +1463,8 @@ public class GuideUsageService : IGuideUsageService
         Dictionary<Guid, List<UsageEvent>> serviceUsageByInvocation,
         Dictionary<Guid, InvocationTokenAggregate> tokenUsageByInvocation,
         Dictionary<Guid, List<InvocationMessageDto>> messagesByInvocation,
-        Dictionary<Guid, decimal> invocationCosts)
+        Dictionary<Guid, decimal> invocationCosts,
+        UsageEventTimingResolver? timingResolver = null)
     {
         var tokens = tokenUsageByInvocation.GetValueOrDefault(invocation.Id);
         var promptTokens = tokens?.PromptTokens ?? 0;
@@ -1498,7 +1478,7 @@ public class GuideUsageService : IGuideUsageService
         // Add tool usage nodes as children
         if (toolUsageByInvocation.TryGetValue(invocation.Id, out var toolUsage))
         {
-            foreach (var tool in toolUsage.OrderBy(t => t.Created))
+            foreach (var tool in toolUsage.OrderBy(t => timingResolver?.Resolve(t).Start ?? t.Created))
             {
                 // Suppress ReadWeb bridge tool rows - these do not represent billable usage
                 // and would confuse the usage guideants. The underlying crawl usage is
@@ -1508,56 +1488,28 @@ public class GuideUsageService : IGuideUsageService
                     continue;
                 }
 
-                children.Add(new InvocationNodeDto(
-                    tool.Id,
+                children.Add(CreateUsageEventNode(
+                    tool,
                     invocation.Id,
-                    null,
                     $"Tool: {tool.Operation}",
-                    null,
-                    null,
-                    invocation.Depth + 1,
-                    "completed",
-                    0,
-                    0,
-                    0,
-                    0,
-                    tool.ChargeUsd ?? 0m,
-                    tool.Created,
-                    tool.Created,
-                    0,
-                    false,
-                    new List<InvocationNodeDto>(),
-                    null
-                ));
+                    assistantId: null,
+                    depth: invocation.Depth + 1,
+                    timingResolver));
             }
         }
 
         // Add service usage nodes as children
         if (serviceUsageByInvocation.TryGetValue(invocation.Id, out var serviceUsage))
         {
-            foreach (var svc in serviceUsage.OrderBy(s => s.Created))
+            foreach (var svc in serviceUsage.OrderBy(s => timingResolver?.Resolve(s).Start ?? s.Created))
             {
-                children.Add(new InvocationNodeDto(
-                    svc.Id,
+                children.Add(CreateUsageEventNode(
+                    svc,
                     invocation.Id,
-                    null,
                     svc.Operation,
-                    null,
-                    null,
-                    invocation.Depth + 1,
-                    "completed",
-                    0,
-                    0,
-                    0,
-                    0,
-                    svc.ChargeUsd ?? 0m,
-                    svc.Created,
-                    svc.Created,
-                    0,
-                    false,
-                    new List<InvocationNodeDto>(),
-                    null
-                ));
+                    assistantId: null,
+                    depth: invocation.Depth + 1,
+                    timingResolver));
             }
         }
 
@@ -1572,7 +1524,8 @@ public class GuideUsageService : IGuideUsageService
                 serviceUsageByInvocation,
                 tokenUsageByInvocation,
                 messagesByInvocation,
-                invocationCosts));
+                invocationCosts,
+                timingResolver));
         }
 
         return new InvocationNodeDto(
@@ -1633,7 +1586,7 @@ public class GuideUsageService : IGuideUsageService
         if (!usageEvents.Any()) return null;
 
         var (totalCharge, totalTokens) = SummarizeDirectUsageEvents(usageEvents);
-        var rootNodes = BuildDirectUsageNodes(usageEvents);
+        var rootNodes = BuildDirectUsageNodes(usageEvents, timingResolver: null);
 
         return new TurnInvocationTreeDto(
             conversationId,
@@ -1666,32 +1619,54 @@ public class GuideUsageService : IGuideUsageService
         return string.Equals(usageEvent.Operation, "ReadWeb", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static List<InvocationNodeDto> BuildDirectUsageNodes(IEnumerable<UsageEvent> usageEvents)
+    private static List<InvocationNodeDto> BuildDirectUsageNodes(
+        IEnumerable<UsageEvent> usageEvents,
+        UsageEventTimingResolver? timingResolver = null)
     {
         return usageEvents
             .Where(e => !ShouldSuppressDirectUsageNode(e))
-            .OrderBy(e => e.Created)
-            .Select(e => new InvocationNodeDto(
-                e.Id,
-                null,
-                null,
-                FormatDirectUsageNodeName(e),
-                null,
-                null,
-                0,
-                "completed",
-                0,
-                0,
-                0,
-                0,
-                e.ChargeUsd ?? 0m,
-                e.Created,
-                e.Created,
-                0,
-                false,
-                new List<InvocationNodeDto>(),
-                null))
+            .OrderBy(e => timingResolver?.Resolve(e).Start ?? e.Created)
+            .Select(e => CreateUsageEventNode(
+                e,
+                parentInvocationId: null,
+                label: FormatDirectUsageNodeName(e),
+                assistantId: null,
+                depth: 0,
+                timingResolver))
             .ToList();
+    }
+
+    private static InvocationNodeDto CreateUsageEventNode(
+        UsageEvent usageEvent,
+        Guid? parentInvocationId,
+        string label,
+        Guid? assistantId,
+        int depth,
+        UsageEventTimingResolver? timingResolver)
+    {
+        var timing = timingResolver?.Resolve(usageEvent)
+            ?? new UsageEventTiming(usageEvent.Created, usageEvent.Created, 0);
+
+        return new InvocationNodeDto(
+            usageEvent.Id,
+            parentInvocationId,
+            null,
+            label,
+            assistantId,
+            usageEvent.ModelDeploymentId,
+            depth,
+            "completed",
+            0,
+            0,
+            0,
+            0,
+            usageEvent.ChargeUsd ?? 0m,
+            timing.Start,
+            timing.End,
+            timing.DurationMs,
+            false,
+            new List<InvocationNodeDto>(),
+            null);
     }
 
     private static (decimal TotalCharge, long TotalTokens) SummarizeDirectUsageEvents(
@@ -1843,6 +1818,11 @@ public class GuideUsageService : IGuideUsageService
             .GroupBy(x => x.TurnIndex)
             .ToDictionary(g => g.Key, g => g.Select(x => x.Event).ToList());
 
+        var timingResolver = await UsageEventTimingResolver.CreateAsync(
+            _context,
+            conversationId,
+            invocationIds);
+
         // =====================================================================
         // Build turn trees
         // =====================================================================
@@ -1867,7 +1847,7 @@ public class GuideUsageService : IGuideUsageService
                     turn != null ? (long)((turn.LastUpdated - turn.Created).TotalMilliseconds) : 0,
                     directCharge,
                     directTokens,
-                    BuildDirectUsageNodes(turnDirectUsageEvents)));
+                    BuildDirectUsageNodes(turnDirectUsageEvents, timingResolver)));
                 continue;
             }
 
@@ -1884,10 +1864,11 @@ public class GuideUsageService : IGuideUsageService
                     serviceUsageByInvocation,
                     tokenUsageByInvocation,
                     messagesByInvocation,
-                    invocationCosts));
+                    invocationCosts,
+                    timingResolver));
             }
 
-            rootNodes2.AddRange(BuildDirectUsageNodes(turnDirectUsageEvents));
+            rootNodes2.AddRange(BuildDirectUsageNodes(turnDirectUsageEvents, timingResolver));
             rootNodes2 = rootNodes2.OrderBy(n => n.Created).ToList();
 
             var turnStarted = turnInvocations.Min(i => i.Created);

@@ -1,4 +1,5 @@
 import type { InvocationNodeDto } from '../../types/usage';
+import { getInvocationNodeKind, isInvocationNodeClickable } from './invocationNodeUtils';
 
 interface InvocationTreeProps {
   nodes: InvocationNodeDto[];
@@ -40,10 +41,10 @@ export function InvocationTree({ nodes, level = 0, showMessages = false, onNodeC
     <ul className={`space-y-1 ${indentClass}`}>
       {nodes.map((node) => {
         const totalTokens = (node.promptTokens ?? 0) + (node.completionTokens ?? 0);
-        const isToolNode = node.assistantName.startsWith('Tool: ');
-        // AI Service nodes are created with AssistantId = null and a label equal to
-        // the UsageEvent.Operation (e.g., "image-generation").
-        const isServiceNode = !isToolNode && !node.assistantId;
+        const nodeKind = getInvocationNodeKind(node);
+        const isToolNode = nodeKind === 'tool';
+        const isServiceNode = nodeKind === 'service';
+        const isClickable = !!onNodeClick && isInvocationNodeClickable(node);
         const toolMessages = showMessages && node.messages
           ? node.messages.filter((m) => {
               const role = m.role.toLowerCase();
@@ -59,15 +60,9 @@ export function InvocationTree({ nodes, level = 0, showMessages = false, onNodeC
           <li key={node.id}>
             <div
               className={`flex items-center justify-between text-xs md:text-sm py-1 ${
-                onNodeClick && !isToolNode && !isServiceNode
-                  ? 'cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1'
-                  : ''
+                isClickable ? 'cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1' : ''
               }`}
-              onClick={
-                onNodeClick && !isToolNode && !isServiceNode
-                  ? () => onNodeClick(node)
-                  : undefined
-              }
+              onClick={isClickable ? () => onNodeClick!(node) : undefined}
             >
               <div className="flex items-center gap-2">
                 {isToolNode && (
