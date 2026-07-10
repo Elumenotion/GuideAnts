@@ -43,7 +43,7 @@ services:
     shm_size: "8gb"
     volumes:
       - ${GA_VULKAN_DRIVER_LIBS:-/usr/lib/wsl}:/usr/lib/wsl:ro
-      - ai_local_models-new:/models-local
+      - ai_local_models:/models-local
       - script_agent_admin_state:/var/lib/guideants/script-agent-admin
       - type: bind
         source: ${GA_CONTENT_FILES_HOST_PATH:-./volumes/content-files}
@@ -281,7 +281,7 @@ volumes:
   mssql_data:
   mssql_ftdata:
   mssql_log:
-  ai_local_models-new:
+  ai_local_models:
   script_agent_admin_state:
 
 networks:

@@ -224,7 +224,7 @@ The stack runs the following containers:
 ## Data persistence
 
 Projects, database, and models live in Docker named volumes (`mssql_data`,
-`mssql_log`, `ai_local_models-new`, etc.) and in the `docker/volumes/content-files`
+`mssql_log`, `ai_local_models`, etc.) and in the `docker/volumes/content-files`
 bind mount. They persist across stops and updates.
 
 ## File structure
