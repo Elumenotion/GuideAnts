@@ -322,9 +322,9 @@ public sealed class LocalAiStartupWarmupServiceTests
                 return new HttpResponseMessage(HttpStatusCode.OK);
             }
 
-            if (request.Method == HttpMethod.Get && path.EndsWith("/sd/ready", StringComparison.Ordinal))
+            if (request.Method == HttpMethod.Get && path.EndsWith("/sd/health", StringComparison.Ordinal))
             {
-                return new HttpResponseMessage(HttpStatusCode.OK);
+                return Json(HttpStatusCode.OK, """{"engine":{"processAlive":true,"healthy":true}}""");
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
