@@ -76,6 +76,45 @@ public sealed class LlamaServerRuntimeClientTests
     }
 
     [TestMethod]
+    public async Task LoadModelAsync_AlreadyRunning_ReturnsWithoutError()
+    {
+        var calls = 0;
+        var handler = new CapturingHandler(_ =>
+        {
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                ReasonPhrase = "Bad Request",
+                Content = new StringContent(
+                    "{\"error\":{\"code\":400,\"message\":\"model is already running\",\"type\":\"invalid_request_error\"}}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:8110/llama-cpp/")
+        };
+
+        var client = new LlamaServerRuntimeClient(httpClient, NullLogger<LlamaServerRuntimeClient>.Instance);
+
+        await client.LoadModelAsync("Qwen3.6-35B-A3B-MTP-GGUF");
+
+        calls.Should().Be(1);
+    }
+
+    [TestMethod]
+    public void IsBenignLoadConflict_MatchesAlreadyRunningOnModelsLoad()
+    {
+        LlamaServerRuntimeClient.IsBenignLoadConflict(
+                "models/load",
+                HttpStatusCode.BadRequest,
+                """{"error":{"message":"model is already running"}}""")
+            .Should().BeTrue();
+    }
+
+    [TestMethod]
     public async Task LoadModelAsync_FailureMessageIncludesResponseBody()
     {
         var calls = 0;

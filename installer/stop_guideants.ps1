@@ -17,6 +17,7 @@ $script:RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:DockerDir = Join-Path $script:RootDir 'docker'
 $script:EnvFile = Join-Path $script:DockerDir '.env'
 $script:StateFile = Join-Path $script:RootDir '.installer_state.env'
+$script:RocmRuntimeOverrideFile = 'docker-compose.rocm-runtime.generated.yml'
 
 $script:BackendOverride = ''
 $script:ComposeMode = 'ghcr'
@@ -169,6 +170,16 @@ function Invoke-Main {
     $hostMountOverridePath = Join-Path $script:DockerDir $hostMountOverrideFile
     if (Test-Path -LiteralPath $hostMountOverridePath) {
         $composeArgs += @('-f', $hostMountOverridePath)
+    }
+
+    if ($backend -eq 'rocm') {
+        $helper = Join-Path $script:RootDir 'scripts/rocm-runtime-compose.ps1'
+        & $helper -DockerDir $script:DockerDir -Backend 'rocm' -RootDir $script:RootDir
+    }
+
+    $rocmOverridePath = Join-Path $script:DockerDir $script:RocmRuntimeOverrideFile
+    if (Test-Path -LiteralPath $rocmOverridePath) {
+        $composeArgs += @('-f', $rocmOverridePath)
     }
 
     Write-Log "Stopping GuideAnts ($backend backend)..."

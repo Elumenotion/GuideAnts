@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from guideants_hf.catalog_download import download_catalog_entry_files
+from guideants_hf.operations import find_in_flight_operation
+
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -708,18 +711,15 @@ def start_download_operation(request: DownloadModelRequest) -> dict[str, Any]:
                 return
             current["status"] = "running"
         try:
-            from huggingface_hub import hf_hub_download
-
             hf_token = (request.hf_token or "").strip() or None
-            downloaded = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                revision=revision,
-                local_dir=model_dir,
-                local_dir_use_symlinks=False,
-                token=hf_token,
+            download_catalog_entry_files(
+                entry,
+                model_dir,
+                hf_token,
+                revision_override=request.revision,
+                prune_legacy_cache=False,
             )
-            if not os.path.isfile(downloaded):
+            if not os.path.isfile(target_path):
                 raise RuntimeError(f"Expected GGUF file was not produced: {filename}")
             with MODEL_OPS_LOCK:
                 current = MODEL_DOWNLOAD_OPERATIONS.get(operation_id)
@@ -926,6 +926,10 @@ async def admin_download_model(payload: DownloadModelRequest) -> JSONResponse:
         resolve_catalog_entry(payload.model_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with MODEL_OPS_LOCK:
+        existing = find_in_flight_operation(MODEL_DOWNLOAD_OPERATIONS, model_id=payload.model_id.strip())
+        if existing is not None:
+            return JSONResponse(status_code=409, content=dict(existing))
     operation = start_download_operation(payload)
     return JSONResponse(status_code=202, content=operation)
 

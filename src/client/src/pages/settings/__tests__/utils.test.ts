@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { SettingsModelDto, SettingsProviderDefinitionDto, SettingsReadinessDto, SettingsSchemaDto } from '../../../types/settings';
+import type {
+  SettingsModelDto,
+  SettingsProviderDefinitionDto,
+  SettingsReadinessDto,
+  SettingsSchemaDto,
+  SettingsSectionDto,
+  SettingsSectionSchemaDto,
+} from '../../../types/settings';
 import {
   SECRET_MASK,
   buildAddModelRequest,
@@ -23,9 +30,11 @@ import {
   importRuntimeProfile,
   mapChatProviderToSection,
   parseCanonicalLocalRuntimeJson,
+  prepareSectionPayloadForSave,
   parseFieldValue,
   parseRuntimeProfileId,
   payloadSignature,
+  withSecretPreserved,
 } from '../utils';
 
 describe('buildAddModelRequest', () => {
@@ -356,6 +365,42 @@ describe('settings utility helpers', () => {
 
   it('exports the secret mask constant', () => {
     expect(SECRET_MASK).toBe('********');
+  });
+
+  it('withSecretPreserved sends mask when field is empty but secret is stored', () => {
+    expect(withSecretPreserved('', true)).toBe(SECRET_MASK);
+    expect(withSecretPreserved('   ', true)).toBe(SECRET_MASK);
+    expect(withSecretPreserved('hf_new_token', true)).toBe('hf_new_token');
+    expect(withSecretPreserved('', false)).toBe('');
+  });
+
+  it('prepareSectionPayloadForSave preserves stored secrets omitted from draft', () => {
+    const section: SettingsSectionDto = {
+      sectionName: 'HuggingFace',
+      schemaVersion: 1,
+      rowVersion: 'rv',
+      updatedUtc: '2026-01-01T00:00:00Z',
+      payload: { Token: SECRET_MASK, RouterBaseUrl: 'https://router.huggingface.co/v1' },
+      secretHasValue: { Token: true },
+    };
+    const schema: SettingsSectionSchemaDto = {
+      sectionName: 'HuggingFace',
+      schemaVersion: 1,
+      hasSecrets: true,
+      properties: [
+        { name: 'Token', valueType: 'string', isSecret: true, isEditable: true, isRequired: true },
+        { name: 'RouterBaseUrl', valueType: 'string', isSecret: false, isEditable: true, isRequired: false },
+      ],
+    };
+
+    const payload = prepareSectionPayloadForSave(
+      { RouterBaseUrl: 'https://example.com' },
+      section,
+      schema,
+    );
+
+    expect(payload.Token).toBe(SECRET_MASK);
+    expect(payload.RouterBaseUrl).toBe('https://example.com');
   });
 
   it('formats valid ISO timestamps', () => {

@@ -54,9 +54,10 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} h
        else echo "sd-server binary was not produced by stable-diffusion.cpp ROCm build" && exit 1; fi \
     && strip /out/sd-cli /out/sd-server || true
 
-# D4: ROCm image uses Vulkan build for audiocpp_server (not HIP).
-FROM ubuntu:24.04 AS audiocpp-vulkan-builder
+# D4: ROCm image builds audiocpp_server with GGML_HIP (same ROCm stack as llama/sd).
+FROM rocm/dev-ubuntu-24.04:latest AS audiocpp-rocm-builder
 ARG AUDIOCPP_REF
+ARG SD_GPU_TARGETS
 ARG GA_UBUNTU_MIRROR_URL
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
         sed -i \
@@ -72,19 +73,19 @@ RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
     fi
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
-    && apt-get install -y --no-install-recommends software-properties-common \
-    && add-apt-repository -y universe \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential ca-certificates cmake git \
-        libvulkan-dev glslang-tools glslc spirv-headers \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates cmake git hipblas-dev rocblas-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN git clone --recursive --depth 1 --shallow-submodules --branch ${AUDIOCPP_REF} https://github.com/0xShug0/audio.cpp /src/audio.cpp \
     && cmake -S /src/audio.cpp -B /src/audio.cpp/build \
         -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang \
+        -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
         -DENGINE_ENABLE_CUDA=OFF \
-        -DENGINE_ENABLE_VULKAN=ON \
-        -DGGML_VULKAN=ON \
+        -DENGINE_ENABLE_VULKAN=OFF \
+        -DGGML_HIP=ON \
+        -DGGML_HIP_NO_VMM=ON \
+        "-DAMDGPU_TARGETS=${SD_GPU_TARGETS}" \
+        "-DGPU_TARGETS=${SD_GPU_TARGETS}" \
         -DENGINE_ENABLE_NATIVE_CPU=OFF \
         -DENGINE_BUILD_EXAMPLES=OFF \
         -DENGINE_BUILD_TESTS=OFF \
@@ -92,7 +93,7 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${AUDIOCPP_REF
     && cmake --build /src/audio.cpp/build --target audiocpp_server --config Release -j"$(nproc)" \
     && mkdir -p /out \
     && if [ -f /src/audio.cpp/build/bin/audiocpp_server ]; then cp /src/audio.cpp/build/bin/audiocpp_server /out/audiocpp_server; \
-       else echo "audiocpp_server binary was not produced by audio.cpp Vulkan build" && exit 1; fi \
+       else echo "audiocpp_server binary was not produced by audio.cpp HIP build" && exit 1; fi \
     && (strip /out/audiocpp_server || true)
 
 FROM python:${PYTHON311_VERSION}-slim-bookworm AS python311-runtime
@@ -257,13 +258,17 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libopenblas0-pthread liblapack3 \
         gdal-bin libgdal-dev \
         libgeos-dev libproj-dev \
+        libomp5 \
+    && ln -sf libomp.so.5 /usr/lib/x86_64-linux-gnu/libomp.so \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=pydeps-rocm-builder /opt/venv /opt/venv
 COPY --from=sd-cli-rocm-builder /out/sd-cli /usr/local/bin/sd-cli
 COPY --from=sd-cli-rocm-builder /out/sd-server /usr/local/bin/sd-server
-COPY --from=audiocpp-vulkan-builder /out/audiocpp_server /usr/local/bin/audiocpp_server
-RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server /usr/local/bin/audiocpp_server
+COPY --from=audiocpp-rocm-builder /out/audiocpp_server /usr/local/bin/audiocpp_server
+RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server /usr/local/bin/audiocpp_server \
+    && ldd /usr/local/bin/audiocpp_server | grep -q 'libomp.so =>' \
+    && ldd /usr/local/bin/audiocpp_server | grep -vq 'not found'
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install playwright \
@@ -289,6 +294,9 @@ COPY start-media.sh /app/start-media.sh
 COPY router-models.seed.ini /opt/seed/router-models.ini
 RUN chmod +x /entrypoint.sh /opt/guideants/script-agent-admin/reconcile.sh /app/start-llama.sh /app/start-ga-admin.sh /app/start-asr.sh /app/start-tts.sh /app/start-emb.sh /app/start-media.sh
 
+ENV PYTHONPATH=/app/lib
+
+COPY lib/ /app/lib/
 COPY admin-service/ /app/admin-service/
 
 COPY llama-admin-service/ /app/llama-admin-service/

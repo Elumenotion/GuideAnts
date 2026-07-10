@@ -158,14 +158,25 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         try
         {
             // Drain GPU/RAM from auxiliary services (including any container autoload)
-            // before the LLM claims memory, then reload the full stack in order.
+            // before the LLM claims memory. Llama must become usable before aux reload
+            // because auxiliary warmup can take minutes and must not block chat.
             await UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
             await EnsureDefaultLlamaLoadedAsync(cancellationToken).ConfigureAwait(false);
-            await EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             Interlocked.Decrement(ref _warmupInProgress);
+        }
+
+        try
+        {
+            await EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Auxiliary local AI service warmup failed. Llama chat remains available.");
         }
     }
 
@@ -314,12 +325,19 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         }
 
         var targetLoaded = loadedAliases.Any(id => string.Equals(id, routerAlias, StringComparison.Ordinal));
-        if (!targetLoaded)
+        var targetLoading = models.Data.Any(m =>
+            string.Equals(m.Id, routerAlias, StringComparison.Ordinal)
+            && IsRouterModelLoading(m));
+        if (!targetLoaded && !targetLoading)
         {
             await using var loadLock = await _coordinator
                 .AcquireAliasLockAsync(routerAlias, cancellationToken)
                 .ConfigureAwait(false);
             await llamaClient.LoadModelAsync(routerAlias, loadParams: null, cancellationToken).ConfigureAwait(false);
+        }
+        else if (targetLoading)
+        {
+            _logger.LogDebug("Default llama alias '{Alias}' is already loading.", routerAlias);
         }
 
         var readyTimeout = TimeSpan.FromSeconds(ReadPositiveInt("GA_LLAMA_READY_TIMEOUT_SECONDS", 900));
@@ -667,11 +685,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                     return true;
                 }
 
-                // A 4xx other than 409 is a permanent, non-retryable rejection (e.g. the
-                // model is not a catalog artifact, or the body is malformed). Retrying cannot
-                // fix it, so fail fast instead of hammering the engine every poll until the
-                // ready timeout and wedging the whole reconcile.
-                if ((int)response.StatusCode is >= 400 and < 500)
+                // Any definitive HTTP error other than 409 is permanent for this reconcile
+                // attempt (4xx validation, 5xx model_load_failed from the facade, etc.).
+                // Retrying cannot fix it, so fail fast instead of hammering the engine every
+                // poll until the ready timeout and blocking later auxiliary services.
+                if ((int)response.StatusCode is >= 400 and not (int)HttpStatusCode.Conflict)
                 {
                     _logger.LogWarning(
                         "Load request for service '{ServiceId}' was rejected ({StatusCode}) and will not be retried: {Body}",
@@ -1021,6 +1039,21 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         if (!string.IsNullOrWhiteSpace(model.State))
         {
             return string.Equals(model.State, "loaded", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static bool IsRouterModelLoading(LlamaModelData model)
+    {
+        if (!string.IsNullOrWhiteSpace(model.Status?.Value))
+        {
+            return string.Equals(model.Status.Value, "loading", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.State))
+        {
+            return string.Equals(model.State, "loading", StringComparison.OrdinalIgnoreCase);
         }
 
         return false;

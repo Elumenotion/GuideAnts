@@ -1,4 +1,5 @@
 import { api } from '../../../services/api';
+import { withSecretPreserved as withSecretPreservedFromSettings } from '../../../pages/settings/utils';
 import type {
   AddModelRequest,
   ProviderEditorStateDto,
@@ -41,7 +42,6 @@ import {
   OPENROUTER_OPTIONAL_SERVICE_DEFAULTS,
   OPENROUTER_SECTION,
   OPENROUTER_SERVICE_PROVIDER_IDS,
-  SECRET_MASK,
 } from './constants';
 import type {
   ExistingGeminiModel,
@@ -873,13 +873,7 @@ export function summarizeLocalAiOptionalServiceWarnings(snapshot: WizardLoadSnap
 // Shared form helpers
 // ---------------------------------------------------------------------------
 
-export function withSecretPreserved(value: string, hasStoredValue: boolean): string {
-  const trimmed = value.trim();
-  if (trimmed.length > 0) {
-    return trimmed;
-  }
-  return hasStoredValue ? SECRET_MASK : '';
-}
+export const withSecretPreserved = withSecretPreservedFromSettings;
 
 export function isPositiveIntegerValue(value: string): boolean {
   const parsed = Number(value);

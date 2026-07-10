@@ -19,6 +19,7 @@ Flags:
   --mount <path>           Mount a host folder into a project (requires prior login).
   --unmount                Interactively remove a host folder mount (requires prior login).
   --reconfigure            Re-prompt for backend even if one was saved.
+  --install-rocm-wsl       Install ROCm + ROCDXG in a user WSL distro (Windows).
   --yes                    Assume "yes" for prompts (auto-accept updates).
   --help                   Show this help.
 #>
@@ -27,6 +28,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $script:RootDir 'scripts/rocm-probe.ps1')
 $script:DockerDir = Join-Path $script:RootDir 'docker'
 $script:EnvFile = Join-Path $script:DockerDir '.env'
 $script:StateFile = Join-Path $script:RootDir '.installer_state.env'
@@ -41,6 +43,7 @@ $script:BackendOverride = ''
 $script:ComposeMode = 'ghcr'
 $script:AssumeYes = $false
 $script:Reconfigure = $false
+$script:InstallRocmWsl = $false
 $script:MountPath = ''
 $script:Unmount = $false
 $script:SelectedBackend = ''
@@ -49,7 +52,8 @@ $script:LowRam = $false
 $script:Recommended = ''
 $script:RecommendationReason = ''
 $script:UpdateDecision = 'skip'
-$script:StaleServices = @()
+$script:PullAlwaysServices = @()
+$script:PullMissingServices = @()
 $script:AuthToken = ''
 $script:FallbackMinNvidiaDriver = '580.0'
 $script:FallbackMinCudaVersion = '13.0'
@@ -101,6 +105,7 @@ Flags:
   --mount <path>           Mount a host folder into a project (requires prior login).
   --unmount                Interactively remove a host folder mount (requires prior login).
   --reconfigure            Re-prompt for backend even if one was saved.
+  --install-rocm-wsl       Install ROCm + ROCDXG in a user WSL distro (Windows).
   --yes                    Assume "yes" for prompts (auto-accept updates).
   --help                   Show this help.
 '@
@@ -165,6 +170,7 @@ function Parse-Arguments {
             '--yes' { $script:AssumeYes = $true }
             '-y' { $script:AssumeYes = $true }
             '--reconfigure' { $script:Reconfigure = $true }
+            '--install-rocm-wsl' { $script:InstallRocmWsl = $true }
             '--backend' {
                 if ($i + 1 -ge $rawArgs.Count) { Stop-WithError 'Missing value for --backend' }
                 $script:BackendOverride = [string]$rawArgs[$i + 1]
@@ -272,9 +278,9 @@ function Check-Docker {
     }
 
     if ($script:OsName -eq 'windows' -and -not $script:IsWsl -and (Test-Command 'wsl.exe')) {
-        $wsl = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('--status') -IgnoreErrors
-        if ($wsl.ExitCode -ne 0) {
-            Write-WarnLog 'Could not confirm WSL2 status; Docker Desktop may still work if configured.'
+        $wslStatus = Test-Wsl2Ready
+        if (-not $wslStatus.Ok) {
+            Stop-WithError $wslStatus.Message
         }
     }
 
@@ -369,6 +375,33 @@ function Ask-YesNo {
     return $reply -match '^[Yy]'
 }
 
+function Invoke-InstallRocmWsl {
+    if ($script:OsName -ne 'windows' -or $script:IsWsl) {
+        Stop-WithError '--install-rocm-wsl is only supported on native Windows with WSL2.'
+    }
+
+    $distro = Get-PreferredWslDistro
+    if ([string]::IsNullOrWhiteSpace($distro)) {
+        Stop-WithError 'No user WSL distro found. Install one: wsl --install -d Ubuntu-24.04'
+    }
+
+    $installScript = Join-Path $script:RootDir 'scripts/install-rocm-wsl.sh'
+    if (-not (Test-Path -LiteralPath $installScript)) {
+        Stop-WithError "Install script not found: $installScript"
+    }
+
+    $wslScript = ConvertTo-WslLinuxPath -Path $installScript
+    $wslArgs = @('-d', $distro, '-u', 'root', 'bash', $wslScript)
+    if ($script:AssumeYes) { $wslArgs += '--yes' }
+
+    Write-Log "Installing ROCm in WSL distro '$distro'..."
+    & wsl.exe @wslArgs
+    if ((Get-LastExitCodeSafe) -ne 0) {
+        Stop-WithError 'ROCm WSL install failed.'
+    }
+    Write-Log 'ROCm WSL install complete.'
+}
+
 function Get-NvidiaDriverFull {
     if (-not (Test-Command 'nvidia-smi')) { return $null }
     $result = Invoke-ExternalCapture -FilePath 'nvidia-smi' -ArgumentList @('--query-gpu=driver_version', '--format=csv,noheader') -IgnoreErrors
@@ -412,107 +445,6 @@ function Test-VersionGte {
     }
 
     return $true
-}
-
-function Get-WslUserDistros {
-    if (-not (Test-Command 'wsl.exe')) { return @() }
-
-    $result = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('-l', '-q') -IgnoreErrors
-    if ($result.ExitCode -ne 0) { return @() }
-
-    $distros = New-Object System.Collections.Generic.List[string]
-    foreach ($line in $result.Output) {
-        $name = (($line -as [string]) -replace "`0", '').Trim()
-        if ([string]::IsNullOrWhiteSpace($name)) { continue }
-        if ($name -match '^(?i)docker-desktop(-data)?$') { continue }
-        $distros.Add($name) | Out-Null
-    }
-
-    return @($distros)
-}
-
-function Invoke-WslUserProbe {
-    param([Parameter(Mandatory = $true)][string]$Probe)
-
-    foreach ($distro in (Get-WslUserDistros)) {
-        $result = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('-d', $distro, 'sh', '-lc', $Probe) -IgnoreErrors
-        if ($result.ExitCode -eq 0) {
-            $value = ([string]($result.Output | Select-Object -First 1)).Trim()
-            if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
-        }
-    }
-
-    return $null
-}
-
-function Get-RocmVersion {
-    if (Test-Path -LiteralPath '/opt/rocm/.info/version') {
-        try {
-            $value = (Get-Content -LiteralPath '/opt/rocm/.info/version' | Select-Object -First 1).Trim()
-            if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
-        }
-        catch {
-        }
-    }
-
-    if (Test-Command 'rocminfo') {
-        $result = Invoke-ExternalCapture -FilePath 'rocminfo' -ArgumentList @() -IgnoreErrors
-        if ($result.ExitCode -eq 0) {
-            $text = $result.Output -join "`n"
-            if ($text -match 'ROCm Runtime Version:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)') {
-                return $Matches[1]
-            }
-        }
-    }
-
-    if ((Test-Command 'apt') -and (Test-Command 'dpkg')) {
-        $result = Invoke-ExternalCapture -FilePath 'dpkg' -ArgumentList @('-l', 'rocm-core') -IgnoreErrors
-        if ($result.ExitCode -eq 0) {
-            foreach ($line in $result.Output) {
-                if ($line -match '^ii\s+\S+\s+(\S+)') {
-                    return $Matches[1]
-                }
-            }
-        }
-    }
-
-    if ($script:OsName -eq 'windows' -and -not $script:IsWsl -and (Test-Command 'wsl.exe')) {
-        $probe = 'if [ -f /opt/rocm/.info/version ]; then head -n1 /opt/rocm/.info/version; elif command -v dpkg >/dev/null 2>&1; then dpkg -l rocm-core 2>/dev/null | awk ''/^ii/{print $3; exit}''; fi'
-        $value = Invoke-WslUserProbe -Probe $probe
-        if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
-    }
-
-    return $null
-}
-
-function Test-AmdGpuDetected {
-    if (Test-Path -LiteralPath '/dev/kfd') { return $true }
-
-    if (Test-Command 'rocminfo') {
-        $result = Invoke-ExternalCapture -FilePath 'rocminfo' -ArgumentList @() -IgnoreErrors
-        if ($result.ExitCode -eq 0) { return $true }
-    }
-
-    if ($script:OsName -eq 'windows' -and -not $script:IsWsl) {
-        try {
-            $names = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop | Select-Object -ExpandProperty Name)
-            if (($names -join "`n") -match '(?i)AMD|Radeon') { return $true }
-        }
-        catch {
-        }
-
-        if (Test-Command 'wsl.exe') {
-            foreach ($distro in (Get-WslUserDistros)) {
-                $wsl = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('-d', $distro, 'sh', '-lc', 'test -e /dev/dxg || test -e /dev/kfd') -IgnoreErrors
-                if ($wsl.ExitCode -eq 0) { return $true }
-
-                $wsl = Invoke-ExternalCapture -FilePath 'wsl.exe' -ArgumentList @('-d', $distro, 'sh', '-lc', 'command -v rocminfo >/dev/null 2>&1 && HSA_ENABLE_DXG_DETECTION=1 rocminfo >/dev/null 2>&1') -IgnoreErrors
-                if ($wsl.ExitCode -eq 0) { return $true }
-            }
-        }
-    }
-
-    return $false
 }
 
 function Resolve-CudaImageRef {
@@ -734,7 +666,7 @@ function Check-GpuDrivers {
     elseif ($Backend -eq 'rocm') {
         Write-HRule
         Write-Log 'Checking AMD ROCm driver version...'
-        $rocm = Get-RocmVersion
+        $rocm = Get-RocmVersion -OsName $script:OsName -IsWsl $script:IsWsl
         if (-not [string]::IsNullOrWhiteSpace($rocm)) {
             Write-Log "ROCm version: $rocm"
             if (-not (Test-VersionGte -Value $rocm -Minimum $script:MinRocmVersion)) {
@@ -751,14 +683,22 @@ function Check-GpuDrivers {
             }
         }
         else {
-            if (Test-AmdGpuDetected) {
+            if (Test-AmdGpuDetected -OsName $script:OsName -IsWsl $script:IsWsl) {
                 Write-WarnLog 'AMD GPU detected but could not determine ROCm version.'
                 Write-WarnLog 'Ensure ROCm is properly installed: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/'
                 Write-WarnLog 'Without a working ROCm installation, GPU acceleration may not function.'
+                if ($script:OsName -eq 'windows' -and -not $script:IsWsl) {
+                    Write-RocmInstallHint -RootDir $script:RootDir -WarnFn ${function:Write-WarnLog}
+                }
             }
             else {
                 Write-WarnLog 'No AMD GPU device found. ROCm backend requires an AMD GPU with ROCm drivers.'
-                Write-WarnLog 'Install ROCm: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/'
+                if ($script:OsName -eq 'windows' -and -not $script:IsWsl) {
+                    Write-RocmInstallHint -RootDir $script:RootDir -WarnFn ${function:Write-WarnLog}
+                }
+                else {
+                    Write-WarnLog 'Install ROCm: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/'
+                }
                 if (-not (Ask-YesNo -Prompt 'Continue anyway without ROCm? [y/N]' -Default 'N')) {
                     Stop-WithError 'Aborting. Install ROCm drivers and rerun.'
                 }
@@ -789,7 +729,7 @@ function Recommend-Backend {
         return
     }
 
-    if (Test-AmdGpuDetected) {
+    if (Test-AmdGpuDetected -OsName $script:OsName -IsWsl $script:IsWsl) {
         $script:Recommended = 'rocm'
         $script:RecommendationReason = 'AMD ROCm-capable GPU detected.'
         return
@@ -851,7 +791,7 @@ function Choose-Backend {
         $backendKeys.Add('cuda13') | Out-Null
         $backendLabels.Add("cuda13  Local AI on NVIDIA GPU (R$major driver detected, ~50 GB disk)") | Out-Null
     }
-    if (Test-AmdGpuDetected) {
+    if (Test-AmdGpuDetected -OsName $script:OsName -IsWsl $script:IsWsl) {
         $backendKeys.Add('rocm') | Out-Null
         $backendLabels.Add('rocm    Local AI on AMD GPU (ROCm device detected, ~50 GB disk)') | Out-Null
     }
@@ -917,7 +857,7 @@ function Select-RocmRuntime {
     }
 
     $helper = Join-Path $script:RootDir 'scripts/rocm-runtime-compose.ps1'
-    & $helper -DockerDir $script:DockerDir -Backend $script:SelectedBackend
+    & $helper -DockerDir $script:DockerDir -Backend $script:SelectedBackend -RootDir $script:RootDir
 }
 
 function Select-VulkanRuntime {
@@ -1030,30 +970,32 @@ function Get-LocalDigest {
     return $null
 }
 
-function Resolve-StaleServices {
+function Get-ServicesForImages {
     param(
         [Parameter(Mandatory = $true)][string]$ComposePath,
-        [string[]]$StaleImages = @()
+        [string[]]$Images = @()
     )
 
-    $script:StaleServices = @()
-    if ($StaleImages.Count -eq 0) { return }
+    if ($Images.Count -eq 0) { return @() }
 
     $result = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('compose', '-f', $ComposePath, '--env-file', $script:EnvFile, 'config', '--format', 'json') -IgnoreErrors
-    if ($result.ExitCode -ne 0) { return }
+    if ($result.ExitCode -ne 0) { return @() }
 
     try {
+        $services = New-Object System.Collections.Generic.List[string]
         $config = ($result.Output -join "`n") | ConvertFrom-Json
         foreach ($property in $config.services.PSObject.Properties) {
             $serviceName = $property.Name
             $image = [string]$property.Value.image
-            if ($StaleImages -contains $image) {
-                $script:StaleServices += $serviceName
+            if ($Images -contains $image) {
+                $services.Add($serviceName) | Out-Null
             }
         }
+
+        return @($services)
     }
     catch {
-        return
+        return @()
     }
 }
 
@@ -1061,7 +1003,8 @@ function Plan-Pull {
     param([Parameter(Mandatory = $true)][string]$ComposeFileName)
 
     $composePath = Join-Path $script:DockerDir $ComposeFileName
-    $script:StaleServices = @()
+    $script:PullAlwaysServices = @()
+    $script:PullMissingServices = @()
 
     $imagesResult = Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('compose', '-f', $composePath, '--env-file', $script:EnvFile, 'config', '--images') -IgnoreErrors
     if ($imagesResult.ExitCode -ne 0) {
@@ -1113,24 +1056,31 @@ function Plan-Pull {
         }
 
         Write-Log "$missing image(s) not present locally - they will be downloaded on first start."
-        $script:UpdateDecision = 'pull'
-        return
     }
 
     if ($stale -gt 0) {
         Write-HRule
         Write-Log "Updates available for $stale image(s) ($($script:SelectedBackend))."
         if (Ask-YesNo -Prompt 'Update now before starting? [Y/n]' -Default 'Y') {
-            $script:UpdateDecision = 'pull_stale'
-            Resolve-StaleServices -ComposePath $composePath -StaleImages @($staleImages)
+            $script:PullAlwaysServices = @(Get-ServicesForImages -ComposePath $composePath -Images @($staleImages))
         }
         else {
             Write-Log 'Keeping current images.'
-            $script:UpdateDecision = 'skip'
         }
     }
-    else {
+
+    if ($missing -gt 0) {
+        $script:PullMissingServices = @(Get-ServicesForImages -ComposePath $composePath -Images @($missingImages))
+    }
+
+    if ($script:PullAlwaysServices.Count -gt 0 -or $script:PullMissingServices.Count -gt 0) {
+        $script:UpdateDecision = 'pull'
+    }
+    elseif ($stale -eq 0 -and $missing -eq 0) {
         Write-Log 'All images are up to date.'
+        $script:UpdateDecision = 'skip'
+    }
+    else {
         $script:UpdateDecision = 'skip'
     }
 }
@@ -1691,12 +1641,14 @@ function Start-GuideAntsStack {
         $composeArgs = Add-ComposeOverrideIfValid -ComposeArgs $composeArgs -OverrideFile $script:RocmRuntimeOverrideFile
 
         if ($script:UpdateDecision -eq 'pull') {
-            Write-Log 'Pulling images...'
-            Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $composeArgs + @('--env-file', $script:EnvFile, 'pull'))
-        }
-        elseif ($script:UpdateDecision -eq 'pull_stale' -and $script:StaleServices.Count -gt 0) {
-            Write-Log "Pulling updates for: $($script:StaleServices -join ' ')"
-            Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $composeArgs + @('--env-file', $script:EnvFile, 'pull', '--policy', 'always') + $script:StaleServices)
+            if ($script:PullMissingServices.Count -gt 0) {
+                Write-Log "Pulling missing images: $($script:PullMissingServices -join ' ')"
+                Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $composeArgs + @('--env-file', $script:EnvFile, 'pull') + $script:PullMissingServices)
+            }
+            if ($script:PullAlwaysServices.Count -gt 0) {
+                Write-Log "Pulling updates for: $($script:PullAlwaysServices -join ' ')"
+                Invoke-External -FilePath 'docker' -ArgumentList (@('compose') + $composeArgs + @('--env-file', $script:EnvFile, 'pull', '--policy', 'always') + $script:PullAlwaysServices)
+            }
         }
 
         Write-Log 'Starting the stack...'
@@ -1721,6 +1673,9 @@ function Invoke-Main {
     Write-HRule
 
     Check-Docker
+    if ($script:InstallRocmWsl) {
+        Invoke-InstallRocmWsl
+    }
     Report-Resources
     Choose-Backend
     $script:ComposeFile = Get-ComposeFileForBackend -Backend $script:SelectedBackend

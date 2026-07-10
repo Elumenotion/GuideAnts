@@ -164,6 +164,21 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         return value.Length <= maxChars ? value : value[..maxChars] + "...";
     }
 
+    internal static bool IsBenignLoadConflict(string requestPath, HttpStatusCode statusCode, string responseContent)
+    {
+        if (!requestPath.EndsWith("models/load", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (statusCode is not (HttpStatusCode.BadRequest or HttpStatusCode.Conflict))
+        {
+            return false;
+        }
+
+        return responseContent.Contains("already running", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<string> GetStringWithTransientRetryAsync(
         string requestPath,
         CancellationToken cancellationToken)
@@ -235,6 +250,15 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
 
                 if (response.IsSuccessStatusCode)
                 {
+                    return;
+                }
+
+                if (IsBenignLoadConflict(requestPath, response.StatusCode, responseContent))
+                {
+                    _logger.LogDebug(
+                        "Llama runtime POST {RequestPath} returned HTTP {(StatusCode)} but the model is already running; treating as success.",
+                        requestPath,
+                        (int)response.StatusCode);
                     return;
                 }
 

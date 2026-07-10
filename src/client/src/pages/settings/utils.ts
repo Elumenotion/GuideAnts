@@ -6,7 +6,9 @@ import {
   SettingsReadinessDto,
   SettingsSchemaDto,
   SettingsModelDto,
+  SettingsSectionDto,
   SettingsSectionPropertyDefinitionDto,
+  SettingsSectionSchemaDto,
   SettingsServiceReadinessDto,
   UpdateRuntimeProfileRequest,
   UpdateSettingsModelRequest,
@@ -550,6 +552,43 @@ export function payloadSignature(payload: Record<string, unknown>): string {
 
 export function clonePayload(payload: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+}
+
+/**
+ * When a secret field is left blank but the server reports a stored value,
+ * send the mask so {@code MergeForUpdate} preserves the existing ciphertext.
+ * Matches the Add AI Services wizard contract.
+ */
+export function withSecretPreserved(value: string, hasStoredValue: boolean): string {
+  const trimmed = value.trim();
+  if (trimmed.length > 0) {
+    return trimmed;
+  }
+  return hasStoredValue ? SECRET_MASK : '';
+}
+
+/**
+ * Normalizes a Connections-tab draft immediately before
+ * {@code PUT /api/settings/sections/{name}} so untouched or cleared secret
+ * inputs do not overwrite stored secrets with an empty string.
+ */
+export function prepareSectionPayloadForSave(
+  draft: Record<string, unknown>,
+  section: SettingsSectionDto,
+  schema: SettingsSectionSchemaDto | undefined,
+): Record<string, unknown> {
+  const payload = clonePayload(draft);
+  const secretPropertyNames =
+    schema?.properties.filter((property) => property.isSecret).map((property) => property.name) ?? [];
+
+  for (const propertyName of secretPropertyNames) {
+    payload[propertyName] = withSecretPreserved(
+      getInputTextValue(payload[propertyName]),
+      Boolean(section.secretHasValue?.[propertyName]),
+    );
+  }
+
+  return payload;
 }
 
 export function getSectionSchema(schema: SettingsSchemaDto | null, sectionName: string) {
