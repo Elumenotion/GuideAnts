@@ -211,6 +211,61 @@ public static class AuthEndpoints
         .WithName("LogoutUser")
         .AllowAnonymous()
         .Produces(StatusCodes.Status204NoContent);
+
+        group.MapPost("/change-password", [Authorize] async (
+            [FromBody] ChangePasswordRequest request,
+            HttpContext httpContext,
+            [FromServices] ApplicationDbContext db,
+            [FromServices] ICurrentUserService currentUserService,
+            [FromServices] IUserPasswordHasher passwordHasher,
+            [FromServices] IJwtTokenService jwtTokenService,
+            [FromServices] IAuthCookieService authCookieService,
+            CancellationToken cancellationToken) =>
+        {
+            var errors = ValidateChangePasswordRequest(request);
+            if (errors.Count > 0)
+            {
+                return Results.BadRequest(new { errors });
+            }
+
+            var currentUser = await currentUserService.GetCurrentUserAsync(cancellationToken);
+            if (currentUser == null)
+            {
+                return Results.Unauthorized();
+            }
+
+            var userRole = await db.UserRoles
+                .Include(ur => ur.User)
+                .SingleOrDefaultAsync(ur => ur.UserId == currentUser.UserId, cancellationToken);
+            if (userRole?.User.PasswordHash == null)
+            {
+                return Results.BadRequest(new { message = "Current password is incorrect." });
+            }
+
+            var currentPassword = request.CurrentPassword.Trim();
+            var newPassword = request.NewPassword.Trim();
+
+            var passwordIsValid = passwordHasher.VerifyPassword(userRole.User, userRole.User.PasswordHash, currentPassword);
+            if (!passwordIsValid)
+            {
+                return Results.BadRequest(new { message = "Current password is incorrect." });
+            }
+
+            userRole.User.PasswordHash = passwordHasher.HashPassword(userRole.User, newPassword);
+            userRole.User.MustChangePassword = false;
+            userRole.User.SecurityStamp = Guid.NewGuid();
+
+            await db.SaveChangesAsync(cancellationToken);
+
+            var issuedToken = jwtTokenService.IssueToken(userRole.User, userRole.Role);
+            authCookieService.AppendAuthCookie(httpContext.Response, httpContext.Request, issuedToken);
+
+            return Results.NoContent();
+        })
+        .WithName("ChangePassword")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized);
     }
 
     private static List<string> ValidateRegisterRequest(RegisterRequest request)
@@ -267,6 +322,28 @@ public static class AuthEndpoints
         return errors;
     }
 
+    private static List<string> ValidateChangePasswordRequest(ChangePasswordRequest request)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(request.CurrentPassword?.Trim()))
+        {
+            errors.Add("Current password is required.");
+        }
+
+        var newPassword = request.NewPassword?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(newPassword))
+        {
+            errors.Add("New password is required.");
+        }
+        else if (newPassword.Length < 8)
+        {
+            errors.Add("New password must be at least 8 characters.");
+        }
+
+        return errors;
+    }
+
     private static bool IsValidEmail(string email)
     {
         try
@@ -283,6 +360,8 @@ public static class AuthEndpoints
     public sealed record RegisterRequest(string Name, string Email, string Password);
 
     public sealed record LoginRequest(string Email, string Password);
+
+    public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
     public sealed record AuthResponse(
         Guid UserId,
