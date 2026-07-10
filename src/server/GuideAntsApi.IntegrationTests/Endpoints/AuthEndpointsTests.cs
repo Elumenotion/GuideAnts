@@ -146,6 +146,99 @@ public class AuthEndpointsTests
     }
 
     [TestMethod]
+    public async Task ChangePassword_UpdatesPasswordClearsMustChangeFlagAndRotatesSession()
+    {
+        const string initialPassword = "Password123!";
+        const string replacementPassword = "Password456!";
+
+        AuthCookieTestHelper.SetBearerToken(_client, null);
+        var registration = await _client.PostAsJsonAsync("/api/auth/register", new
+        {
+            name = "Password Changer",
+            email = "password.changer@example.com",
+            password = initialPassword
+        });
+        registration.StatusCode.Should().Be(HttpStatusCode.OK);
+        var auth = await registration.Content.ReadFromJsonAsync<AuthResponse>();
+        auth.Should().NotBeNull();
+        var originalToken = AuthCookieTestHelper.ReadAuthToken(registration);
+        originalToken.Should().NotBeNullOrWhiteSpace();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var user = await db.Users.SingleAsync(candidate => candidate.Id == auth!.UserId);
+            user.MustChangePassword = true;
+            await db.SaveChangesAsync();
+        }
+
+        AuthCookieTestHelper.SetBearerToken(_client, originalToken);
+        var changePasswordResponse = await _client.PostAsJsonAsync("/api/auth/change-password", new
+        {
+            currentPassword = initialPassword,
+            newPassword = replacementPassword
+        });
+        changePasswordResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        var renewedToken = AuthCookieTestHelper.ReadAuthToken(changePasswordResponse);
+        renewedToken.Should().NotBeNullOrWhiteSpace();
+        renewedToken.Should().NotBe(originalToken);
+
+        AuthCookieTestHelper.SetBearerToken(_client, renewedToken);
+        var meResponse = await _client.GetAsync("/api/auth/me");
+        meResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var me = await meResponse.Content.ReadFromJsonAsync<AuthMeResponse>();
+        me.Should().NotBeNull();
+        me!.MustChangePassword.Should().BeFalse();
+
+        AuthCookieTestHelper.SetBearerToken(_client, originalToken);
+        var staleTokenResponse = await _client.GetAsync("/api/auth/me");
+        staleTokenResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        AuthCookieTestHelper.SetBearerToken(_client, null);
+        var oldPasswordLoginResponse = await _client.PostAsJsonAsync("/api/auth/login", new
+        {
+            email = "password.changer@example.com",
+            password = initialPassword
+        });
+        oldPasswordLoginResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var newPasswordLoginResponse = await _client.PostAsJsonAsync("/api/auth/login", new
+        {
+            email = "password.changer@example.com",
+            password = replacementPassword
+        });
+        newPasswordLoginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var loginAuth = await newPasswordLoginResponse.Content.ReadFromJsonAsync<AuthResponse>();
+        loginAuth.Should().NotBeNull();
+        loginAuth!.MustChangePassword.Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task ChangePassword_WithWrongCurrentPassword_ReturnsBadRequest()
+    {
+        const string password = "Password123!";
+
+        AuthCookieTestHelper.SetBearerToken(_client, null);
+        var registration = await _client.PostAsJsonAsync("/api/auth/register", new
+        {
+            name = "Wrong Password User",
+            email = "wrong.password@example.com",
+            password
+        });
+        registration.StatusCode.Should().Be(HttpStatusCode.OK);
+        var token = AuthCookieTestHelper.ReadAuthToken(registration);
+        token.Should().NotBeNullOrWhiteSpace();
+
+        AuthCookieTestHelper.SetBearerToken(_client, token);
+        var changePasswordResponse = await _client.PostAsJsonAsync("/api/auth/change-password", new
+        {
+            currentPassword = "NotTheRightPassword!",
+            newPassword = "Password456!"
+        });
+        changePasswordResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [TestMethod]
     public async Task ConcurrentInitialRegistrations_CreateExactlyOneAdmin()
     {
         AuthCookieTestHelper.SetBearerToken(_client, null);

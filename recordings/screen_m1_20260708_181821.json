@@ -1,0 +1,26 @@
+{
+  "recording": {
+    "started_at": "2026-07-08T18:18:21.206-04:00",
+    "stopped_at": "2026-07-08T18:18:49.133-04:00",
+    "duration_seconds": 27.927
+  },
+  "source": {
+    "type": "monitor",
+    "monitor_index": 1,
+    "left": -2560,
+    "top": 0,
+    "width": 2560,
+    "height": 1440
+  },
+  "host": {
+    "hostname": "OFFICEDESKTOP",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "video": {
+    "path": "D:\\repos\\GuideAnts\\recordings\\screen_m1_20260708_181821.mp4",
+    "fps": 30,
+    "frame_count": 801,
+    "codec": "mp4v",
+    "container": "mp4"
+  }
+}
