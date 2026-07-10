@@ -6,9 +6,31 @@ States: `BLOCKED` · `READY` · `IN_PROGRESS` · `GATE_FAILED` · `DONE`.
 
 ## Pre-flight baseline
 
+**Worktree identity:** branch `fix/windows-rocm-wsl-detection` @ `fc293bf` (dirty).
+
+### Worktree ownership inventory (2026-07-10)
+
+| Path(s) | Classification | Notes |
+|---|---|---|
+| `docs/llama-router-preset-ui-execution/*`, `docs/llama-router-preset-ui-proposal.md` | Execution plan artifacts | Orchestrator-owned; not product code |
+| `docker/build/guideants-ai/lib/guideants_hf/*` | Accepted starting work — **Phase 1A/2** | New HF catalog/download lib; overlaps 1A+2 if both touch llama-admin |
+| `docker/build/guideants-ai/llama-admin-service/llama_admin_service.py` | Accepted starting work — **Phase 1A/2** | Same overlap risk as above |
+| `docker/build/guideants-ai/{asr,emb,sd,tts}-service/*`, `start-{asr,tts}.sh` | Unrelated parallel work | HF lib integration in non-llama services |
+| `docker/build/guideants-ai/Dockerfile.*` | Unrelated parallel work | Image build changes |
+| `docker/docker-compose*.yml`, `docker/.env`, `docker/guideants-ai-build.md` | Unrelated parallel work | ROCm/compose; `.env` is secrets — never commit |
+| `installer/**` (compose, scripts, README, `.env`) | Unrelated parallel work | ROCm/WSL installer lane on current branch |
+| `installer/scripts/rocm-probe.{ps1,sh}` | Unrelated parallel work | New probe scripts |
+| `scripts/setup-dev-environment.ps1` | Unrelated parallel work | Dev setup |
+| `start_{linux,macos,windows}.*` | Unrelated parallel work | Startup script changes |
+| `src/server/GuideAntsApi/**` (LlamaCpp, Bootstrap) | Accepted starting work — **Phase 3** | Runtime/fleet prep; must not advance before Phase 0 gate |
+| `src/server/GuideAntsApi.Tests/**` (LlamaCpp, Bootstrap) | Accepted starting work — **Phase 3** | Matching test updates |
+| `src/client/src/pages/settings/**`, `addAiServicesWizard/utils.ts` | Ambiguous — **Phase 6 or unrelated** | Settings/connections UI; classify in Phase 0 report |
+
+**Environment blockers (orchestrator pre-check):** `python`/`py` not on PATH; `dotnet ef` not installed; `bash` broken (WSL relay error); `codeql` not on PATH. Docker 29.6.1 available; dotnet 8.0.422; node v24.18.0; npm 11.16.0.
+
 | Check | Command/evidence | Baseline result | Date |
 |---|---|---|---|
-| Worktree ownership | modified/untracked file inventory and phase assignment | **not captured** | — |
+| Worktree ownership | modified/untracked file inventory and phase assignment | **captured** (table above) | 2026-07-10 |
 | Server build | `dotnet build GuideAntsApi.sln` in `src/server` | **not run** | — |
 | Server tests | `dotnet test GuideAntsApi.sln` in `src/server` | **not run** | — |
 | Client build | `npm run build` in `src/client` | **not run** | — |
@@ -28,7 +50,7 @@ States: `BLOCKED` · `READY` · `IN_PROGRESS` · `GATE_FAILED` · `DONE`.
 
 | Phase | Brief | State | Attempts | Gate | Notes |
 |---|---|---:|---:|---|---|
-| 0 — Contracts/baseline | `task-phase-0-contracts-baseline.md` | **READY** | 0 | — | Required before product changes |
+| 0 — Contracts/baseline | `task-phase-0-contracts-baseline.md` | **IN_PROGRESS** | 1 | — | Dispatched; env gaps noted above |
 | 1A — Catalog/discovery | `task-phase-1a-catalog-discovery.md` | **BLOCKED** | 0 | — | Needs Phase 0 |
 | 1B — Persistence/profiles | `task-phase-1b-persistence-profiles.md` | **BLOCKED** | 0 | — | Needs Phase 0; may parallel 1A |
 | 2 — Router/download | `task-phase-2-router-download.md` | **BLOCKED** | 0 | — | Needs 1A contract |
