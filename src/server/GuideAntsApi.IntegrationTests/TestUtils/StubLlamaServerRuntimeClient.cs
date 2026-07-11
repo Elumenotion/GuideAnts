@@ -98,7 +98,7 @@ public sealed class StubLlamaServerRuntimeClient : ILlamaServerRuntimeClient
     public Task<LlamaOpenAiModelsResponse> ListOpenAiModelsAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(new LlamaOpenAiModelsResponse());
 
-    public async Task LoadModelAsync(string modelPathOrPreset, JsonObject? loadParams = null, CancellationToken cancellationToken = default)
+    public async Task LoadModelAsync(string modelPathOrPreset, CancellationToken cancellationToken = default)
     {
         TaskCompletionSource? gate;
         lock (_gate)

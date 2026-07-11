@@ -1,8 +1,8 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Collections.Concurrent;
+using GuideAntsApi.DataModel;
+using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Settings;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 
@@ -16,26 +16,49 @@ public interface ILocalModelOnboardingOrchestrator
     Task<ModelDownloadOperationDto?> GetOperationStatusAsync(
         string operationId,
         CancellationToken cancellationToken = default);
+
+    Task<LlamaOperationStatusDto?> GetCuratedOperationStatusAsync(
+        Guid operationId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrchestrator
 {
-    private static readonly ConcurrentDictionary<string, PendingCatalogRegistration> PendingCatalogRegistrations = new();
-
     private readonly IApplicationSettingsService _settingsService;
     private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly IHuggingFaceModelDownloadService _downloadService;
+    private readonly ICuratedInstallResolver _curatedInstallResolver;
+    private readonly ILocalModelOperationService _operationService;
+    private readonly ICustomInstallResolver _customInstallResolver;
+    private readonly ILocalModelLifecycleOperationService _lifecycleOperationService;
+    private readonly ILlamaRuntimeAdminClient _adminClient;
+    private readonly ApplicationDbContext _db;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<LocalModelOnboardingOrchestrator> _logger;
 
     public LocalModelOnboardingOrchestrator(
         IApplicationSettingsService settingsService,
         IRuntimeProfileResolver runtimeProfileResolver,
         IHuggingFaceModelDownloadService downloadService,
+        ICuratedInstallResolver curatedInstallResolver,
+        ILocalModelOperationService operationService,
+        ICustomInstallResolver customInstallResolver,
+        ILocalModelLifecycleOperationService lifecycleOperationService,
+        ILlamaRuntimeAdminClient adminClient,
+        ApplicationDbContext db,
+        IServiceScopeFactory scopeFactory,
         ILogger<LocalModelOnboardingOrchestrator> logger)
     {
         _settingsService = settingsService;
         _runtimeProfileResolver = runtimeProfileResolver;
         _downloadService = downloadService;
+        _curatedInstallResolver = curatedInstallResolver;
+        _operationService = operationService;
+        _customInstallResolver = customInstallResolver;
+        _lifecycleOperationService = lifecycleOperationService;
+        _adminClient = adminClient;
+        _db = db;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -43,6 +66,84 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
         AddModelRequest request,
         LocalModelOnboardingCommand command,
         CancellationToken cancellationToken = default)
+    {
+        if (string.Equals(command.InstallSource, LocalModelInstallSources.Curated, StringComparison.OrdinalIgnoreCase))
+        {
+            return await OnboardCuratedAsync(request, command, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (command.ExplicitHuggingFace is not null)
+        {
+            return await OnboardCustomExplicitAsync(request, command, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await OnboardLegacyAsync(request, command, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<LocalModelOnboardingResult> OnboardCuratedAsync(
+        AddModelRequest request,
+        LocalModelOnboardingCommand command,
+        CancellationToken cancellationToken)
+    {
+        var immutableInput = await _curatedInstallResolver
+            .ResolveAsync(request, command, cancellationToken)
+            .ConfigureAwait(false);
+        var inputHash = immutableInput.ComputeHash();
+
+        var existing = await _operationService
+            .FindActiveByInputHashAsync(inputHash, cancellationToken)
+            .ConfigureAwait(false);
+        if (existing is not null)
+        {
+            _logger.LogInformation(
+                "Reusing in-flight curated install operation {OperationId} for model {ModelId}.",
+                existing.OperationId,
+                immutableInput.CatalogModelId);
+
+            var reusedOperationId = existing.OperationId;
+            QueueBackgroundWork(async (services, cancellationToken) =>
+            {
+                var operationService = services.GetRequiredService<ILocalModelOperationService>();
+                await operationService
+                    .ReconcileAndGetStatusAsync(reusedOperationId, cancellationToken)
+                    .ConfigureAwait(false);
+            }, "Background curated install reconciliation failed for reused operation {OperationId}.", reusedOperationId);
+
+            return new LocalModelOnboardingResult(
+                OperationId: existing.OperationId.ToString("D"),
+                AddOperation: new AddModelOperationDto(
+                    Kind: "async",
+                    CatalogModel: null,
+                    Status: "inProgress",
+                    Error: null));
+        }
+
+        var operation = await _operationService
+            .CreateCuratedInstallOperationAsync(immutableInput, cancellationToken)
+            .ConfigureAwait(false);
+
+        var operationId = operation.OperationId;
+        QueueBackgroundWork(async (services, cancellationToken) =>
+        {
+            var operationService = services.GetRequiredService<ILocalModelOperationService>();
+            await operationService
+                .ReconcileAndGetStatusAsync(operationId, cancellationToken)
+                .ConfigureAwait(false);
+        }, "Background curated install reconciliation failed for operation {OperationId}.", operationId);
+
+        return new LocalModelOnboardingResult(
+            OperationId: operation.OperationId.ToString("D"),
+            AddOperation: new AddModelOperationDto(
+                Kind: "async",
+                CatalogModel: null,
+                Status: "inProgress",
+                Error: null));
+    }
+
+    private async Task<LocalModelOnboardingResult> OnboardLegacyAsync(
+        AddModelRequest request,
+        LocalModelOnboardingCommand command,
+        CancellationToken cancellationToken)
     {
         var localRuntimeJson = BuildLlamaLocalRuntimeJson(command);
         var reasoningChoicesJson = await DeriveReasoningChoicesJsonAsync(command.RuntimeProfileId, cancellationToken)
@@ -55,7 +156,44 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
 
         if (string.Equals(command.InstallSource, LocalModelInstallSources.ExistingAlias, StringComparison.OrdinalIgnoreCase))
         {
+            var routerEntries = await _adminClient.GetRouterEntriesAsync(cancellationToken).ConfigureAwait(false);
+            var entry = routerEntries.Entries.FirstOrDefault(e =>
+                string.Equals(e.Alias, command.RouterModelId, StringComparison.Ordinal));
+            if (entry is null)
+            {
+                throw new InvalidOperationException($"Router alias '{command.RouterModelId}' was not found.");
+            }
+
             var attached = await _settingsService.CreateModelAsync(createRequest, cancellationToken).ConfigureAwait(false);
+
+            var now = DateTime.UtcNow;
+            _db.LocalModelInstallations.Add(new LocalModelInstallation
+            {
+                ModelId = attached.ModelId,
+                ManagementMode = "operatorManaged",
+                RouterModelId = command.RouterModelId,
+                RuntimeProfileId = command.RuntimeProfileId,
+                ModelArtifactsJson = InstallationArtifactRecords.Serialize(
+                [
+                    new InstallationArtifactDto(
+                        RepositoryPath: Path.GetFileName(entry.ModelPath ?? string.Empty),
+                        InstalledRelativePath: entry.ModelPath ?? string.Empty),
+                ]),
+                ProjectorArtifactsJson = string.IsNullOrWhiteSpace(entry.MmprojPath)
+                    ? "[]"
+                    : InstallationArtifactRecords.Serialize(
+                    [
+                        new InstallationArtifactDto(
+                            RepositoryPath: Path.GetFileName(entry.MmprojPath),
+                            InstalledRelativePath: entry.MmprojPath),
+                    ]),
+                RouterPresetSnapshotJson = System.Text.Json.JsonSerializer.Serialize(entry.Preset ?? new Dictionary<string, string>()),
+                CreatedUtc = now,
+                UpdatedUtc = now,
+                RowVersion = [1, 0, 0, 0, 0, 0, 0, 0],
+            });
+            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
             return new LocalModelOnboardingResult(
                 OperationId: null,
                 AddOperation: new AddModelOperationDto(
@@ -74,20 +212,11 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
         }
         catch (LlamaRuntimeAdminConflictException ex)
         {
-            // Conflict translation is transport-level; dedupe/reuse policy is domain-level.
             op = ex.ExistingOperation;
             _logger.LogInformation(
                 "Reusing in-flight local onboarding operation {OperationId} for alias {Alias}.",
                 LogValueSanitizer.Sanitize(op.OperationId),
                 LogValueSanitizer.Sanitize(command.RouterModelId));
-        }
-
-        if (!string.IsNullOrWhiteSpace(op.OperationId))
-        {
-            PendingCatalogRegistrations[op.OperationId] = new PendingCatalogRegistration(
-                createRequest,
-                command.RouterModelId,
-                command.RuntimeProfileId);
         }
 
         return new LocalModelOnboardingResult(
@@ -103,81 +232,106 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
         string operationId,
         CancellationToken cancellationToken = default)
     {
-        var op = await _downloadService.GetOperationStatusAsync(operationId, cancellationToken).ConfigureAwait(false);
-        if (op is null)
+        if (Guid.TryParse(operationId, out var operationGuid))
         {
-            return null;
+            var curated = await _operationService
+                .GetStatusAsync(operationGuid, cancellationToken)
+                .ConfigureAwait(false);
+            if (curated is not null)
+            {
+                return MapCuratedToLegacyDownloadDto(curated);
+            }
+
+            try
+            {
+                var lifecycleStatus = await _lifecycleOperationService
+                    .ReconcileLifecycleOperationAsync(operationGuid, cancellationToken)
+                    .ConfigureAwait(false);
+                return MapCuratedToLegacyDownloadDto(lifecycleStatus);
+            }
+            catch (InvalidOperationException)
+            {
+                // Fall through to legacy download journal.
+            }
         }
 
-        if (string.Equals(op.Status, "failed", StringComparison.OrdinalIgnoreCase))
-        {
-            PendingCatalogRegistrations.TryRemove(operationId, out _);
-            return op;
-        }
+        return await _downloadService.GetOperationStatusAsync(operationId, cancellationToken).ConfigureAwait(false);
+    }
 
-        if (!string.Equals(op.Status, "completed", StringComparison.OrdinalIgnoreCase))
+    public async Task<LlamaOperationStatusDto?> GetCuratedOperationStatusAsync(
+        Guid operationId,
+        CancellationToken cancellationToken = default)
+    {
+        var curated = await _operationService
+            .GetStatusAsync(operationId, cancellationToken)
+            .ConfigureAwait(false);
+        if (curated is not null)
         {
-            return op;
-        }
-
-        if (!PendingCatalogRegistrations.TryRemove(operationId, out var pendingRegistration))
-        {
-            return op;
+            return await _operationService
+                .ReconcileAndGetStatusAsync(operationId, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         try
         {
-            var existing = await _settingsService.GetModelsAsync(cancellationToken).ConfigureAwait(false);
-            if (existing.Any(m => string.Equals(m.ModelId, pendingRegistration.CreateRequest.ModelId, StringComparison.Ordinal)))
-            {
-                _logger.LogInformation(
-                    "Catalog model '{ModelId}' already exists; skipping auto-registration for router alias '{Alias}'.",
-                    pendingRegistration.CreateRequest.ModelId,
-                    pendingRegistration.RouterModelId);
-                return op;
-            }
-
-            await _settingsService.CreateModelAsync(pendingRegistration.CreateRequest, cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation(
-                "Auto-registered catalog model '{ModelId}' (router alias '{Alias}', profile '{Profile}') after download completion.",
-                pendingRegistration.CreateRequest.ModelId,
-                pendingRegistration.RouterModelId,
-                pendingRegistration.RuntimeProfileId);
-            return op;
+            return await _lifecycleOperationService
+                .ReconcileLifecycleOperationAsync(operationId, cancellationToken)
+                .ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException)
         {
-            _logger.LogError(
-                ex,
-                "Failed to auto-register catalog model '{ModelId}' for router alias '{Alias}'. Operator may need to create it manually.",
-                pendingRegistration.CreateRequest.ModelId,
-                pendingRegistration.RouterModelId);
-            return op with
-            {
-                Status = "failed",
-                ErrorMessage = ex.Message,
-                Error = new AddModelErrorDto(
-                    Code: "INSTALL_STEP_FAILED",
-                    Step: "catalog",
-                    Message: ex.Message,
-                    Remediation: "Fix the catalog or runtime profile issue, then retry from the failed step."),
-                LogLine = ex.Message,
-            };
+            return null;
         }
     }
+
+    private async Task<LocalModelOnboardingResult> OnboardCustomExplicitAsync(
+        AddModelRequest request,
+        LocalModelOnboardingCommand command,
+        CancellationToken cancellationToken)
+    {
+        var immutableInput = await _customInstallResolver
+            .ResolveAsync(request, command, cancellationToken)
+            .ConfigureAwait(false);
+
+        var operation = await _lifecycleOperationService
+            .CreateCustomInstallOperationAsync(immutableInput, cancellationToken)
+            .ConfigureAwait(false);
+
+        var operationId = operation.OperationId;
+        QueueBackgroundWork(async (services, cancellationToken) =>
+        {
+            var lifecycleOperationService = services.GetRequiredService<ILocalModelLifecycleOperationService>();
+            await lifecycleOperationService
+                .ReconcileLifecycleOperationAsync(operationId, cancellationToken)
+                .ConfigureAwait(false);
+        }, "Background custom install reconciliation failed for operation {OperationId}.", operationId);
+
+        return new LocalModelOnboardingResult(
+            OperationId: operation.OperationId.ToString("D"),
+            AddOperation: new AddModelOperationDto(
+                Kind: "async",
+                CatalogModel: null,
+                Status: "inProgress",
+                Error: null));
+    }
+
+    private static ModelDownloadOperationDto MapCuratedToLegacyDownloadDto(LlamaOperationStatusDto status) =>
+        new(
+            OperationId: status.OperationId,
+            Status: status.Status,
+            RouterModelId: status.RouterModelId,
+            Progress: status.Progress,
+            ErrorMessage: status.ErrorMessage,
+            LogLine: status.LogLine,
+            ImmutableInputHash: status.ImmutableInputHash,
+            Journal: status.Journal,
+            Error: status.Error);
 
     public static string BuildLlamaLocalRuntimeJson(LocalModelOnboardingCommand command)
     {
         var config = new LocalRuntimeConfiguration(
             RouterModelId: command.RouterModelId,
-            RuntimeProfileId: command.RuntimeProfileId,
-            LoadParams: new JsonObject
-            {
-                ["model"] = command.RouterModelId,
-            },
-            ParallelToolCalls: false,
-            RouterContextSize: command.RouterContextSize,
-            RouterCacheRamMib: command.RouterCacheRamMib);
+            RuntimeProfileId: command.RuntimeProfileId);
 
         return LocalRuntimeConfigurationParser.SerializeCanonical(config);
     }
@@ -196,7 +350,7 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
             CatalogDescription: command.CatalogDescription,
             CatalogIsActive: command.CatalogIsActive,
             CatalogDisplayOrder: command.CatalogDisplayOrder,
-            CatalogLoadParamsJson: JsonSerializer.Serialize(new { model = command.RouterModelId }),
+            CatalogLoadParamsJson: System.Text.Json.JsonSerializer.Serialize(new { model = command.RouterModelId }),
             CatalogParallelToolCalls: false,
             CatalogRouterContextSize: command.RouterContextSize,
             CatalogRouterCacheRamMib: command.RouterCacheRamMib);
@@ -231,11 +385,25 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        return choices.Count == 0 ? null : JsonSerializer.Serialize(choices);
+        return choices.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(choices);
     }
 
-    private sealed record PendingCatalogRegistration(
-        CreateSettingsModelRequest CreateRequest,
-        string RouterModelId,
-        string RuntimeProfileId);
+    private void QueueBackgroundWork(
+        Func<IServiceProvider, CancellationToken, Task> work,
+        string failureMessageTemplate,
+        Guid operationId)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                await work(scope.ServiceProvider, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, failureMessageTemplate, operationId);
+            }
+        }, CancellationToken.None);
+    }
 }

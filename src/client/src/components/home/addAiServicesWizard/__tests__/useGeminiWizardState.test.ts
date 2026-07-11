@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { api } from '../../../../services/api';
-import { GEMINI_CORE_SECTION, GEMINI_SERVICE_PROVIDER_IDS } from '../constants';
+import { GEMINI_CORE_SECTION, GEMINI_SERVICE_PROVIDER_IDS, WIZARD_DEFER_WARMUP_OPTIONS } from '../constants';
 import { useGeminiWizardState } from '../useGeminiWizardState';
 import {
   createLoadSnapshot,
@@ -231,7 +231,8 @@ describe('useGeminiWizardState', () => {
     );
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'Embeddings',
-      GEMINI_SERVICE_PROVIDER_IDS.Embeddings
+      GEMINI_SERVICE_PROVIDER_IDS.Embeddings,
+      WIZARD_DEFER_WARMUP_OPTIONS
     );
   });
 });

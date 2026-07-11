@@ -102,6 +102,8 @@ public enum LocalServiceReconcileOutcome
 
 public sealed record LocalServiceReconcileResult(LocalServiceReconcileOutcome Outcome, string? Detail = null);
 
+internal sealed record AuxiliaryLoadAttemptResult(bool Success, string? CatalogEntryId);
+
 public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 {
     private int _warmupInProgress;
@@ -333,7 +335,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
             await using var loadLock = await _coordinator
                 .AcquireAliasLockAsync(routerAlias, cancellationToken)
                 .ConfigureAwait(false);
-            await llamaClient.LoadModelAsync(routerAlias, loadParams: null, cancellationToken).ConfigureAwait(false);
+            await llamaClient.LoadModelAsync(routerAlias, cancellationToken).ConfigureAwait(false);
         }
         else if (targetLoading)
         {
@@ -461,13 +463,26 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
     {
         try
         {
-            var loaded = await TriggerLocalServiceLoadAsync(serviceId, adminBase, requestedModelRef, cancellationToken)
+            var loadResult = await TriggerLocalServiceLoadAsync(serviceId, adminBase, requestedModelRef, cancellationToken)
                 .ConfigureAwait(false);
-            if (!loaded)
+            if (!loadResult.Success)
             {
                 return new LocalServiceReconcileResult(
                     LocalServiceReconcileOutcome.Failed,
                     $"Load request for '{serviceId}' did not succeed.");
+            }
+
+            var persisted = await TryPersistConfiguredServiceModeModelIdAsync(
+                    serviceId,
+                    requestedModelRef,
+                    loadResult.CatalogEntryId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!persisted)
+            {
+                return new LocalServiceReconcileResult(
+                    LocalServiceReconcileOutcome.Failed,
+                    $"Load for '{serviceId}' succeeded but the selected model id was not persisted to ServiceModes.");
             }
 
             var ready = await WaitForLocalServiceReadyAsync(serviceId, adminBase, cancellationToken).ConfigureAwait(false);
@@ -550,8 +565,8 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
 
         try
         {
-            var loaded = await TriggerLocalServiceLoadAsync(serviceId, adminBase, requestedModelRef: null, cancellationToken).ConfigureAwait(false);
-            if (!loaded)
+            var loadResult = await TriggerLocalServiceLoadAsync(serviceId, adminBase, requestedModelRef: null, cancellationToken).ConfigureAwait(false);
+            if (!loadResult.Success)
             {
                 return;
             }
@@ -626,7 +641,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         }
     }
 
-    private async Task<bool> TriggerLocalServiceLoadAsync(
+    private async Task<AuxiliaryLoadAttemptResult> TriggerLocalServiceLoadAsync(
         string serviceId,
         string adminBase,
         string? requestedModelRef,
@@ -657,18 +672,19 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                 JsonObject? body = null;
                 if (!isImageGeneration)
                 {
-                    // Desired model: what the caller explicitly asked for, else the engine's
-                    // resolved active/default model. Loading it on a single-model engine
-                    // supersedes anything previously loaded (the "rest" is unloaded).
-                    var modelRef = !string.IsNullOrWhiteSpace(requestedModelRef)
-                        ? requestedModelRef
-                        : await TryResolveActiveModelRefAsync(client, serviceId, adminBase, cancellationToken)
-                            .ConfigureAwait(false);
-                    body = new JsonObject();
-                    if (!string.IsNullOrWhiteSpace(modelRef))
+                    var resolved = ResolveAuxiliaryModelRef(
+                        requestedModelRef,
+                        await ResolveConfiguredServiceModeModelRefAsync(serviceId, cancellationToken).ConfigureAwait(false));
+                    if (resolved is null)
                     {
-                        body["model_path"] = modelRef;
+                        _logger.LogWarning(
+                            "Skipping load for service '{ServiceId}': no model is configured in ServiceModes and no explicit model was requested.",
+                            LogValueSanitizer.Sanitize(serviceId));
+                        return new AuxiliaryLoadAttemptResult(false, null);
                     }
+
+                    body = new JsonObject();
+                    WriteAuxiliaryLoadModelRef(body, resolved);
                 }
 
                 using var request = new HttpRequestMessage(HttpMethod.Post, $"{adminBase}/admin/load")
@@ -682,13 +698,9 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                 var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Conflict)
                 {
-                    return true;
+                    return new AuxiliaryLoadAttemptResult(true, TryReadCatalogEntryId(responseBody));
                 }
 
-                // Any definitive HTTP error other than 409 is permanent for this reconcile
-                // attempt (4xx validation, 5xx model_load_failed from the facade, etc.).
-                // Retrying cannot fix it, so fail fast instead of hammering the engine every
-                // poll until the ready timeout and blocking later auxiliary services.
                 if ((int)response.StatusCode is >= 400 and not (int)HttpStatusCode.Conflict)
                 {
                     _logger.LogWarning(
@@ -696,7 +708,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                         LogValueSanitizer.Sanitize(serviceId),
                         (int)response.StatusCode,
                         LogValueSanitizer.Sanitize(Truncate(responseBody, 512)));
-                    return false;
+                    return new AuxiliaryLoadAttemptResult(false, null);
                 }
 
                 _logger.LogDebug(
@@ -722,7 +734,122 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
             _logger.LogWarning("Failed issuing startup load for service '{ServiceId}' within timeout.", LogValueSanitizer.Sanitize(serviceId));
         }
 
-        return false;
+        return new AuxiliaryLoadAttemptResult(false, null);
+    }
+
+    private sealed record ResolvedAuxiliaryModelRef(string Value, bool UseCatalogModelId);
+
+    private static ResolvedAuxiliaryModelRef? ResolveAuxiliaryModelRef(string? requestedModelRef, string? configuredModelId)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedModelRef))
+        {
+            var trimmed = requestedModelRef.Trim();
+            return new ResolvedAuxiliaryModelRef(trimmed, UseCatalogModelId: ShouldUseCatalogModelId(trimmed, fromConfiguredServiceMode: false));
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuredModelId))
+        {
+            var trimmed = configuredModelId.Trim();
+            return new ResolvedAuxiliaryModelRef(trimmed, UseCatalogModelId: true);
+        }
+
+        return null;
+    }
+
+    private static bool ShouldUseCatalogModelId(string modelRef, bool fromConfiguredServiceMode) =>
+        fromConfiguredServiceMode
+        || !modelRef.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase);
+
+    private static void WriteAuxiliaryLoadModelRef(JsonObject body, ResolvedAuxiliaryModelRef resolved)
+    {
+        if (resolved.UseCatalogModelId)
+        {
+            body["model_id"] = resolved.Value;
+            return;
+        }
+
+        body["model_path"] = resolved.Value;
+    }
+
+    private async Task<string?> ResolveConfiguredServiceModeModelRefAsync(
+        string serviceId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var mode = await _serviceModeResolver
+                .ResolveAsync(serviceId, modeId: null, cancellationToken)
+                .ConfigureAwait(false);
+            var modelId = mode.ModelId?.Trim();
+            return string.IsNullOrWhiteSpace(modelId) ? null : modelId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "Failed resolving configured ServiceModes ModelId for service '{ServiceId}'.",
+                LogValueSanitizer.Sanitize(serviceId));
+            return null;
+        }
+    }
+
+    private async Task<bool> TryPersistConfiguredServiceModeModelIdAsync(
+        string serviceId,
+        string? requestedModelRef,
+        string? loadedCatalogEntryId,
+        CancellationToken cancellationToken)
+    {
+        var persistId = loadedCatalogEntryId?.Trim();
+        if (string.IsNullOrWhiteSpace(persistId)
+            && !string.IsNullOrWhiteSpace(requestedModelRef)
+            && ShouldUseCatalogModelId(requestedModelRef.Trim(), fromConfiguredServiceMode: false))
+        {
+            persistId = requestedModelRef.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(persistId))
+        {
+            _logger.LogWarning(
+                "Load for service '{ServiceId}' succeeded but no catalog model id was available to persist.",
+                LogValueSanitizer.Sanitize(serviceId));
+            return false;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
+            await settings.SetServiceModeModelIdAsync(serviceId, persistId, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Loaded service '{ServiceId}' but failed to persist configured model id '{ModelId}' to ServiceModes.",
+                LogValueSanitizer.Sanitize(serviceId),
+                LogValueSanitizer.Sanitize(persistId));
+            return false;
+        }
+    }
+
+    private static string? TryReadCatalogEntryId(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+        {
+            return null;
+        }
+
+        try
+        {
+            var root = JsonNode.Parse(responseBody) as JsonObject;
+            var catalogEntryId = root?["catalogEntryId"]?.GetValue<string>()?.Trim();
+            return string.IsNullOrWhiteSpace(catalogEntryId) ? null : catalogEntryId;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private async Task<bool> TriggerLocalServiceUnloadAsync(
@@ -896,57 +1023,6 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         }, timeout, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<string?> TryResolveActiveModelRefAsync(
-        HttpClient client,
-        string serviceId,
-        string adminBase,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var response = await client.GetAsync($"{adminBase}/admin/models", cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var root = JsonNode.Parse(body) as JsonObject;
-            var items = root?["items"] as JsonArray;
-            if (items is null)
-            {
-                return null;
-            }
-
-            foreach (var itemNode in items.OfType<JsonObject>())
-            {
-                var modelRef = itemNode["modelRef"]?.GetValue<string>();
-                if (string.IsNullOrWhiteSpace(modelRef) || IsHiddenEntry(modelRef))
-                {
-                    continue;
-                }
-
-                if (IsActiveModelRef(itemNode, serviceId))
-                {
-                    return modelRef;
-                }
-            }
-
-            // No model is currently active. Do NOT guess a model from the on-disk directory
-            // listing: that listing can include non-catalog artifacts (e.g. a stray
-            // "Kokoro-82M" folder) which the engine rejects with a permanent 4xx, and picking
-            // one arbitrarily is exactly the kind of silent-wrong-default that hides bugs.
-            // Returning null makes the caller send no model_path, so the engine loads its own
-            // configured catalog default — the single, well-defined desired model.
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed resolving active modelRef for service '{ServiceId}'.", LogValueSanitizer.Sanitize(serviceId));
-        }
-
-        return null;
-    }
-
     private async Task TrySelectActiveImageBundleAsync(
         HttpClient client,
         string adminBase,
@@ -973,17 +1049,6 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         {
             _logger.LogWarning(ex, "Failed to select active image bundle '{BundleId}'.", LogValueSanitizer.Sanitize(bundleId));
         }
-    }
-
-    private static bool IsHiddenEntry(string modelRef) => modelRef.StartsWith('.');
-
-    private static bool IsActiveModelRef(JsonObject item, string serviceId)
-    {
-        return serviceId switch
-        {
-            "SpeechSynthesis" => item["activeModel"]?.GetValue<bool?>() ?? false,
-            _ => item["active"]?.GetValue<bool?>() ?? false
-        };
     }
 
     private async Task<bool> WaitUntilAsync(

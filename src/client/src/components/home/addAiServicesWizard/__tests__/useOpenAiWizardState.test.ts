@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { api } from '../../../../services/api';
-import { OPENAI_CORE_SECTION, OPENAI_SERVICE_PROVIDER_IDS } from '../constants';
+import { OPENAI_CORE_SECTION, OPENAI_SERVICE_PROVIDER_IDS, WIZARD_DEFER_WARMUP_OPTIONS } from '../constants';
 import { useOpenAiWizardState } from '../useOpenAiWizardState';
 import {
   createLoadSnapshot,
@@ -200,7 +200,8 @@ describe('useOpenAiWizardState', () => {
     );
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'Embeddings',
-      OPENAI_SERVICE_PROVIDER_IDS.Embeddings
+      OPENAI_SERVICE_PROVIDER_IDS.Embeddings,
+      WIZARD_DEFER_WARMUP_OPTIONS
     );
   });
 

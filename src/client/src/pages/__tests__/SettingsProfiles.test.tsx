@@ -8,8 +8,7 @@ import Settings from '../Settings';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/api';
 import { ToastProvider } from '../../components/common/Toast';
-import { createEmptyProfileForm } from '../settings/utils';
-import type { SettingsRuntimeProfileDto } from '../../types/settings';
+import type { CreateRuntimeProfileRequest, SettingsRuntimeProfileDto } from '../../types/settings';
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: vi.fn(),
@@ -71,9 +70,6 @@ vi.mock('../settings/components/InfrastructureTab', () => ({
 vi.mock('../settings/components/TelemetryTab', () => ({
   TelemetryTab: () => <div>telemetry-tab-panel</div>,
 }));
-vi.mock('../settings/components/catalog/AddModelWizard', () => ({
-  AddModelWizard: () => null,
-}));
 
 const profile: SettingsRuntimeProfileDto = {
   profileId: 'local_llama',
@@ -88,67 +84,59 @@ const profile: SettingsRuntimeProfileDto = {
   thinkingControlJson: '{}',
 };
 
+const customProfileRequest: CreateRuntimeProfileRequest = {
+  profileId: 'new_profile',
+  displayName: 'New Profile',
+  description: '',
+  combineSystemAndDeveloperMessages: false,
+  thoughtBlockPattern: '',
+  samplingParametersJson: '{}',
+  thinkingControlJson: '{}',
+};
+
 vi.mock('../settings/components/ModelsRuntimeWorkspace', () => ({
   ModelsRuntimeWorkspace: ({
-    onOpenCreateProfile,
-    onSaveProfile,
-    onEditProfile,
-    onInsertRuntimeProfileTemplate,
-    onProfileFormChange,
-    onImportProfile,
+    onOpenAddModelWizard,
   }: {
-    onOpenCreateProfile: () => void;
-    onSaveProfile: () => void;
-    onEditProfile: (profile: SettingsRuntimeProfileDto) => void;
-    onInsertRuntimeProfileTemplate: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => void;
-    onProfileFormChange: <K extends keyof ReturnType<typeof createEmptyProfileForm>>(
-      key: K,
-      value: ReturnType<typeof createEmptyProfileForm>[K],
-    ) => void;
-    onImportProfile: (form: ReturnType<typeof createEmptyProfileForm>) => void;
+    onOpenAddModelWizard: (provider?: string) => void;
   }) => (
-    <div>
-      <button type="button" onClick={onOpenCreateProfile}>
-        open-create-profile
-      </button>
-      <button type="button" onClick={() => onEditProfile(profile)}>
-        edit-profile
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          onProfileFormChange('profileId', 'new_profile');
-          onProfileFormChange('displayName', 'New Profile');
-        }}
-      >
-        patch-profile-form
-      </button>
-      <button type="button" onClick={onSaveProfile}>
-        save-profile
-      </button>
-      <button type="button" onClick={() => onInsertRuntimeProfileTemplate('qwen3_5')}>
-        insert-template
-      </button>
-      <button type="button" onClick={() => onInsertRuntimeProfileTemplate('qwen3_6')}>
-        insert-template-qwen36
-      </button>
-      <button type="button" onClick={() => onInsertRuntimeProfileTemplate('gemma4')}>
-        insert-template-gemma4
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          onImportProfile({
-            ...createEmptyProfileForm(),
-            profileId: 'imported_profile',
-            displayName: 'Imported Profile',
-          })
-        }
-      >
-        import-profile
-      </button>
-    </div>
+    <button type="button" onClick={() => onOpenAddModelWizard('llama-cpp')}>
+      open-add-model-wizard
+    </button>
   ),
+}));
+
+vi.mock('../settings/components/catalog/AddModelWizard', () => ({
+  AddModelWizard: ({
+    isOpen,
+    onCreateRuntimeProfileTemplate,
+    onCreateCustomRuntimeProfile,
+  }: {
+    isOpen: boolean;
+    onCreateRuntimeProfileTemplate: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => Promise<void>;
+    onCreateCustomRuntimeProfile: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>;
+  }) =>
+    isOpen ? (
+      <div>
+        <button
+          type="button"
+          onClick={() => {
+            void onCreateCustomRuntimeProfile(customProfileRequest).catch(() => undefined);
+          }}
+        >
+          save-profile
+        </button>
+        <button type="button" onClick={() => onCreateRuntimeProfileTemplate('qwen3_5')}>
+          insert-template
+        </button>
+        <button type="button" onClick={() => onCreateRuntimeProfileTemplate('qwen3_6')}>
+          insert-template-qwen36
+        </button>
+        <button type="button" onClick={() => onCreateRuntimeProfileTemplate('gemma4')}>
+          insert-template-gemma4
+        </button>
+      </div>
+    ) : null,
 }));
 
 const mockedUseAuth = vi.mocked(useAuth);
@@ -193,39 +181,24 @@ describe('Settings profile flows', () => {
     vi.mocked(api.settings.updateRuntimeProfile).mockResolvedValue(profile);
   });
 
-  async function openModelsRuntime(user: ReturnType<typeof userEvent.setup>) {
+  async function openAddModelWizard(user: ReturnType<typeof userEvent.setup>) {
     await user.click(screen.getByRole('button', { name: /Models & Runtime/i }));
+    await user.click(await screen.findByRole('button', { name: 'open-add-model-wizard' }));
     expect(await screen.findByText('save-profile')).toBeInTheDocument();
   }
 
-  it('creates a runtime profile from the models workspace', async () => {
+  it('creates a custom runtime profile from the add model wizard', async () => {
     const user = userEvent.setup();
     renderSettingsAsAdmin();
-    await openModelsRuntime(user);
+    await openAddModelWizard(user);
 
-    await user.click(screen.getByRole('button', { name: 'open-create-profile' }));
-    await user.click(screen.getByRole('button', { name: 'patch-profile-form' }));
     await user.click(screen.getByRole('button', { name: 'save-profile' }));
 
     await waitFor(() => {
-      expect(api.settings.createRuntimeProfile).toHaveBeenCalled();
+      expect(api.settings.createRuntimeProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ profileId: 'new_profile' }),
+      );
       expect(api.settings.getRuntimeProfiles).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  it('updates an existing runtime profile', async () => {
-    const user = userEvent.setup();
-    renderSettingsAsAdmin();
-    await openModelsRuntime(user);
-
-    await user.click(screen.getByRole('button', { name: 'edit-profile' }));
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'save-profile' })).toBeEnabled();
-    });
-    await user.click(screen.getByRole('button', { name: 'save-profile' }));
-
-    await waitFor(() => {
-      expect(api.settings.updateRuntimeProfile).toHaveBeenCalledWith('local_llama', expect.any(Object));
     });
   });
 
@@ -236,7 +209,7 @@ describe('Settings profile flows', () => {
       .mockResolvedValueOnce(profile);
 
     renderSettingsAsAdmin();
-    await openModelsRuntime(user);
+    await openAddModelWizard(user);
 
     await user.click(screen.getByRole('button', { name: 'insert-template' }));
 
@@ -251,7 +224,7 @@ describe('Settings profile flows', () => {
   it('creates gemma4 and qwen3_6 runtime profile templates', async () => {
     const user = userEvent.setup();
     renderSettingsAsAdmin();
-    await openModelsRuntime(user);
+    await openAddModelWizard(user);
 
     await user.click(screen.getByRole('button', { name: 'insert-template-qwen36' }));
     await waitFor(() => {
@@ -273,7 +246,7 @@ describe('Settings profile flows', () => {
     vi.mocked(api.settings.createRuntimeProfile).mockRejectedValue(new Error('Template write failed'));
 
     renderSettingsAsAdmin();
-    await openModelsRuntime(user);
+    await openAddModelWizard(user);
 
     await user.click(screen.getByRole('button', { name: 'insert-template' }));
 
@@ -282,34 +255,17 @@ describe('Settings profile flows', () => {
     });
   });
 
-  it('surfaces profile save failures from the API', async () => {
+  it('surfaces custom profile save failures from the API', async () => {
     const user = userEvent.setup();
     vi.mocked(api.settings.createRuntimeProfile).mockRejectedValue(new Error('Create failed'));
 
     renderSettingsAsAdmin();
-    await openModelsRuntime(user);
+    await openAddModelWizard(user);
 
-    await user.click(screen.getByRole('button', { name: 'open-create-profile' }));
-    await user.click(screen.getByRole('button', { name: 'patch-profile-form' }));
     await user.click(screen.getByRole('button', { name: 'save-profile' }));
 
     await waitFor(() => {
       expect(api.settings.createRuntimeProfile).toHaveBeenCalled();
-    });
-  });
-
-  it('opens the profile dialog with imported profile data', async () => {
-    const user = userEvent.setup();
-    renderSettingsAsAdmin();
-    await openModelsRuntime(user);
-
-    await user.click(screen.getByRole('button', { name: 'import-profile' }));
-    await user.click(screen.getByRole('button', { name: 'save-profile' }));
-
-    await waitFor(() => {
-      expect(api.settings.createRuntimeProfile).toHaveBeenCalledWith(
-        expect.objectContaining({ profileId: 'imported_profile' }),
-      );
     });
   });
 });

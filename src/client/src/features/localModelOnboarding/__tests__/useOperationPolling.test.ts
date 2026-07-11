@@ -10,6 +10,7 @@ vi.mock('../../../services/api', () => ({
   api: {
     settings: {
       getDownloadStatus: vi.fn(),
+      getLlamaOperationStatus: vi.fn(),
     },
   },
 }));
@@ -23,6 +24,37 @@ describe('useOperationPolling', () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  describe('useCuratedOperationPolling', () => {
+    it('polls canonical operations route and never downloads', async () => {
+      vi.useRealTimers();
+      (api.settings.getLlamaOperationStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        operationId: 'op-curated',
+        status: 'queued',
+        stage: 'queued',
+        routerModelId: 'Qwen3.6-35B-A3B-MTP-GGUF',
+      });
+      const onUpdate = vi.fn();
+
+      const { useCuratedOperationPolling } = await import('../useOperationPolling');
+      const { unmount } = renderHook(() =>
+        useCuratedOperationPolling({
+          operationId: 'op-curated',
+          enabled: true,
+          onUpdate,
+          intervalMs: 10,
+        })
+      );
+
+      await waitFor(() => {
+        expect(onUpdate).toHaveBeenCalled();
+      }, { timeout: 3000 });
+      expect(api.settings.getLlamaOperationStatus).toHaveBeenCalledWith('op-curated');
+      expect(api.settings.getDownloadStatus).not.toHaveBeenCalled();
+      unmount();
+      vi.useFakeTimers();
+    });
   });
 
   describe('createLocalModelOnboardingPoller', () => {

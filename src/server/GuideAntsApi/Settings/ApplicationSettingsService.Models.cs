@@ -50,8 +50,6 @@ public sealed partial class ApplicationSettingsService
 
         _db.Models.Add(model);
         await _db.SaveChangesAsync(cancellationToken);
-        await TrySyncRouterIniAfterLlamaModelPersistAsync(modelId, provider, model.RuntimeConfigJson, cancellationToken)
-            .ConfigureAwait(false);
         return ToSettingsModelDto(model);
     }
 
@@ -84,8 +82,6 @@ public sealed partial class ApplicationSettingsService
         model.Updated = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(cancellationToken);
-        await TrySyncRouterIniAfterLlamaModelPersistAsync(routeModelId, provider, model.RuntimeConfigJson, cancellationToken)
-            .ConfigureAwait(false);
         return ToSettingsModelDto(model);
     }
 
@@ -132,20 +128,6 @@ public sealed partial class ApplicationSettingsService
         var parsed = LocalRuntimeConfigurationParser.ParseRequired(modelId, runtimeConfigJson);
         _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
         return LocalRuntimeConfigurationParser.SerializeCanonical(parsed);
-    }
-
-    private async Task TrySyncRouterIniAfterLlamaModelPersistAsync(
-        string modelId, string provider, string? runtimeConfigJson, CancellationToken cancellationToken)
-    {
-        if (_llamaRouterIniSync is null
-            || !string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-            || string.IsNullOrWhiteSpace(runtimeConfigJson))
-        {
-            return;
-        }
-
-        var parsed = LocalRuntimeConfigurationParser.Parse(modelId, runtimeConfigJson);
-        await _llamaRouterIniSync.TrySyncFromLocalRuntimeAsync(parsed, cancellationToken).ConfigureAwait(false);
     }
 
     private static string? NormalizeReasoningChoicesJson(string modelId, string? reasoningChoicesJson)

@@ -96,6 +96,30 @@ export function hasValidationErrors(errors: Record<string, string>): boolean {
   return Object.keys(errors).length > 0;
 }
 
+function normalizePersistedFieldValue(value: string | null | undefined): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value).trim();
+}
+
+export function buildChangedSavePayload(
+  provider: ProviderEditorStateDto,
+  draft: Record<string, unknown>
+): Record<string, string | null> {
+  const payload = buildSavePayload(provider, draft);
+  const changed: Record<string, string | null> = {};
+
+  for (const [name, value] of Object.entries(payload)) {
+    const persisted = provider.fields[name]?.value;
+    if (normalizePersistedFieldValue(persisted) !== normalizePersistedFieldValue(value)) {
+      changed[name] = value;
+    }
+  }
+
+  return changed;
+}
+
 export function buildSavePayload(
   provider: ProviderEditorStateDto,
   draft: Record<string, unknown>

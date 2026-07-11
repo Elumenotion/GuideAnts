@@ -37,7 +37,10 @@ public sealed partial class ApplicationSettingsService
             throw new InvalidOperationException($"Runtime profile '{profileId}' already exists.");
         }
 
-        ValidateRuntimeProfileJson(request.SamplingParametersJson, request.ThinkingControlJson);
+        ValidateRuntimeProfileJson(
+            request.SamplingParametersJson,
+            request.ThinkingControlJson,
+            request.RequestFieldsWhenToolsPresentJson);
 
         var entity = new DataModel.Models.RuntimeProfile
         {
@@ -48,6 +51,8 @@ public sealed partial class ApplicationSettingsService
             ThoughtBlockPattern = request.ThoughtBlockPattern,
             SamplingParametersJson = request.SamplingParametersJson,
             ThinkingControlJson = request.ThinkingControlJson,
+            RequestFieldsWhenToolsPresentJson = RuntimeProfileRequestFieldsValidator.NormalizeJsonString(
+                request.RequestFieldsWhenToolsPresentJson),
             ProvidersJson = SerializeProviders(request.Providers),
             Created = DateTime.UtcNow,
             Updated = DateTime.UtcNow
@@ -72,7 +77,10 @@ public sealed partial class ApplicationSettingsService
             return null;
         }
 
-        ValidateRuntimeProfileJson(request.SamplingParametersJson, request.ThinkingControlJson);
+        ValidateRuntimeProfileJson(
+            request.SamplingParametersJson,
+            request.ThinkingControlJson,
+            request.RequestFieldsWhenToolsPresentJson);
 
         entity.DisplayName = request.DisplayName.Trim();
         entity.Description = request.Description;
@@ -80,6 +88,8 @@ public sealed partial class ApplicationSettingsService
         entity.ThoughtBlockPattern = request.ThoughtBlockPattern;
         entity.SamplingParametersJson = request.SamplingParametersJson;
         entity.ThinkingControlJson = request.ThinkingControlJson;
+        entity.RequestFieldsWhenToolsPresentJson = RuntimeProfileRequestFieldsValidator.NormalizeJsonString(
+            request.RequestFieldsWhenToolsPresentJson);
         entity.ProvidersJson = SerializeProviders(request.Providers);
         entity.Updated = DateTime.UtcNow;
 
@@ -121,6 +131,7 @@ public sealed partial class ApplicationSettingsService
             entity.ThoughtBlockPattern,
             entity.SamplingParametersJson,
             entity.ThinkingControlJson,
+            entity.RequestFieldsWhenToolsPresentJson,
             DeserializeProviders(entity.ProvidersJson),
             entity.Created,
             entity.Updated);
@@ -144,7 +155,10 @@ public sealed partial class ApplicationSettingsService
         }
     }
 
-    private static void ValidateRuntimeProfileJson(string samplingParametersJson, string thinkingControlJson)
+    private static void ValidateRuntimeProfileJson(
+        string samplingParametersJson,
+        string thinkingControlJson,
+        string requestFieldsWhenToolsPresentJson)
     {
         try
         {
@@ -187,6 +201,8 @@ public sealed partial class ApplicationSettingsService
         {
             throw new InvalidOperationException("ThinkingControlJson is not valid JSON.", ex);
         }
+
+        RuntimeProfileRequestFieldsValidator.NormalizeJsonString(requestFieldsWhenToolsPresentJson);
     }
 
     private static readonly JsonSerializerOptions RuntimeProfileJsonOptions = new()

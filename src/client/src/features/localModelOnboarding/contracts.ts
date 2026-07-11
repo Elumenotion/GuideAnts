@@ -1,18 +1,21 @@
 import type { AddModelRequest, LlamaRuntimeInventoryItemDto, ModelDownloadOperationDto } from '../../types/settings';
+import type { PresetKeyValue } from './routerPreset';
 
-export type LocalModelOnboardingSource = 'huggingface' | 'existingAlias';
+export type LocalModelOnboardingSource = 'huggingface' | 'existingAlias' | 'curated';
 
 export interface LocalModelOnboardingDraft {
   installSource: LocalModelOnboardingSource;
   runtimeProfileId: string;
   routerModelId: string;
   huggingFaceRepository: string;
-  huggingFaceQuantIncludePattern: string;
-  huggingFaceMmprojIncludePattern: string;
+  huggingFaceResolvedRevision: string;
+  huggingFaceArtifactGroupId: string;
+  huggingFaceModelFiles: string[];
+  huggingFaceMmprojFiles: string[];
   huggingFaceTargetDirectory: string;
+  huggingFaceRouterPresetRows: PresetKeyValue[];
+  huggingFacePresetMode: 'replace' | 'merge';
   existingAliasRouterModelId: string;
-  routerContextSize: string;
-  routerCacheRamMib: string;
   catalogModelId: string;
   catalogDisplayName: string;
   catalogDescription?: string;

@@ -60,6 +60,37 @@ describe('LocalLlamaRuntimeTab', () => {
     await waitFor(() => expect(onLoad).toHaveBeenCalledWith('alias-1'));
   });
 
+  it('offers attach to catalog for unbound aliases with artifacts', async () => {
+    const user = userEvent.setup();
+    const onOpenAddModelWizard = vi.fn();
+
+    render(
+      <ToastProvider>
+        <LocalLlamaRuntimeTab
+          inventory={[
+            {
+              ...inventoryRow,
+              routerModelId: 'Qwen3.5-9B-GGUF',
+              catalogModelIds: [],
+            },
+          ] as never}
+          inventoryLoading={false}
+          inventoryRefreshing={false}
+          inventoryError={null}
+          onRefresh={vi.fn()}
+          onLoad={vi.fn()}
+          onRequestUnload={vi.fn()}
+          onRequestDelete={vi.fn()}
+          onOpenAddModelWizard={onOpenAddModelWizard}
+        />
+      </ToastProvider>,
+    );
+
+    expect(screen.getByText('Not in catalog')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Attach to catalog' }));
+    expect(onOpenAddModelWizard).toHaveBeenCalledWith('llama-cpp', 'Qwen3.5-9B-GGUF');
+  });
+
   it('shows unavailable guidance when inventory cannot reach the runtime', () => {
     render(
       <ToastProvider>

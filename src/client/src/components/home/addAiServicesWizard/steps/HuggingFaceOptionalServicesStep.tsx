@@ -93,7 +93,7 @@ export function HuggingFaceOptionalServicesStep({
           value={value.embeddingsModelId}
           onChange={(next) => onChange({ embeddingsModelId: next })}
           error={errors.embeddingsModelId}
-          placeholder="microsoft/harrier-oss-v1-0.6b"
+          placeholder="Qwen/Qwen3-Embedding-0.6B"
         />
         <Field
           id="hf-embeddings-timeout"

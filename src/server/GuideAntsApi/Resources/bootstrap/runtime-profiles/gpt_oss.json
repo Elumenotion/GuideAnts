@@ -21,5 +21,8 @@
         { "target": "NestedRequestField", "key": "chat_template_kwargs.reasoning_effort", "value": "high" }
       ]
     }
+  },
+  "requestFieldsWhenToolsPresent": {
+    "parallel_tool_calls": true
   }
 }

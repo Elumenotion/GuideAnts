@@ -57,6 +57,13 @@ namespace GuideAntsApi.DataModel.Models
         [Required]
         public string ProvidersJson { get; set; } = "[]";
 
+        /// <summary>
+        /// JSON object of concrete chat request fields merged when tools are present.
+        /// E.g. { "parallel_tool_calls": true }.
+        /// </summary>
+        [Required]
+        public string RequestFieldsWhenToolsPresentJson { get; set; } = "{}";
+
         [Required]
         public DateTime Created { get; set; } = DateTime.UtcNow;
 

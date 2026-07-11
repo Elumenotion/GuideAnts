@@ -237,6 +237,7 @@ RUN python3.11 -m venv $VIRTUAL_ENV
 COPY emb-requirements.txt /tmp/emb-requirements.txt
 COPY asr-requirements.txt /tmp/asr-requirements.txt
 COPY tts-requirements.txt /tmp/tts-requirements.txt
+COPY llama-admin-requirements.txt /tmp/llama-admin-requirements.txt
 COPY requirements.txt /tmp/requirements.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -244,11 +245,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && pip install -r /tmp/emb-requirements.txt \
     && pip install -r /tmp/asr-requirements.txt \
     && pip install -r /tmp/tts-requirements.txt \
+    && pip install -r /tmp/llama-admin-requirements.txt \
     && pip install -r /tmp/requirements.txt \
     && pip uninstall -y jupyterlab-tensorboard-pro basemap basemap-data \
     && pip install tornado==6.5.7 wheel==0.46.2 \
     && pip check \
-    && rm -f /tmp/emb-requirements.txt /tmp/asr-requirements.txt /tmp/tts-requirements.txt /tmp/requirements.txt
+    && rm -f /tmp/emb-requirements.txt /tmp/asr-requirements.txt /tmp/tts-requirements.txt /tmp/llama-admin-requirements.txt /tmp/requirements.txt
 
 FROM runtime-rocm-base AS deps-rocm
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \

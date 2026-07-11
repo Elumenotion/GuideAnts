@@ -92,7 +92,6 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
             return _llamaCppFactory.CreateClientForProfile(
                 localRuntime.RouterModelId,
                 llamaProfile,
-                localRuntime.ParallelToolCalls,
                 httpClient);
         }
 
@@ -169,6 +168,7 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
             data.CombineSystemAndDeveloperMessages,
             data.ThoughtBlockPattern,
             samplingDefaults,
-            thinkingControl);
+            thinkingControl,
+            data.RequestFieldsWhenToolsPresent);
     }
 }

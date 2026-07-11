@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Text.Json;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using Microsoft.Extensions.Configuration;
@@ -197,8 +198,7 @@ public sealed class ChatTargetValidatorTests
         var runtimeJson = """
         {
             "routerModelId": "qwen-model",
-            "runtimeProfileId": "qwen3_5",
-            "loadParams": { "model": "qwen-model" }
+            "runtimeProfileId": "qwen3_5"
         }
         """;
 
@@ -234,7 +234,8 @@ public sealed class ChatTargetValidatorTests
                 CombineSystemAndDeveloperMessages: true,
                 ThoughtBlockPattern: null,
                 SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
-                ThinkingControl: new ThinkingControl("disabled", new Dictionary<string, IReadOnlyList<ThinkingAction>>())));
+                ThinkingControl: new ThinkingControl("disabled", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
+                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
 
         var validator = new ChatTargetValidator(
             BuildConfiguration(new Dictionary<string, string?>()),
@@ -243,8 +244,7 @@ public sealed class ChatTargetValidatorTests
         var runtimeJson = """
         {
             "routerModelId": "qwen-mid-load",
-            "runtimeProfileId": "concurrency-profile",
-            "loadParams": { "model": "qwen-mid-load" }
+            "runtimeProfileId": "concurrency-profile"
         }
         """;
 
@@ -265,7 +265,8 @@ public sealed class ChatTargetValidatorTests
                 CombineSystemAndDeveloperMessages: true,
                 ThoughtBlockPattern: @"<think>[\s\S]*?</think>",
                 SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
-                ThinkingControl: new ThinkingControl("enabled", new Dictionary<string, IReadOnlyList<ThinkingAction>>())));
+                ThinkingControl: new ThinkingControl("enabled", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
+                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
 
         var validator = new ChatTargetValidator(
             BuildConfiguration(new Dictionary<string, string?>()),
@@ -274,8 +275,7 @@ public sealed class ChatTargetValidatorTests
         var runtimeJson = """
         {
             "routerModelId": "qwen-model",
-            "runtimeProfileId": "qwen3_5",
-            "loadParams": { "model": "qwen-model" }
+            "runtimeProfileId": "qwen3_5"
         }
         """;
 

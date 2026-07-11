@@ -8,6 +8,7 @@ import {
   FOUNDRY_SERVICE_PROVIDER_IDS,
   FOUNDRY_SPEECH_SECTION,
   SECRET_MASK,
+  WIZARD_DEFER_WARMUP_OPTIONS,
 } from './constants';
 import type {
   FoundryCoreConnectionFormState,
@@ -393,7 +394,7 @@ export function useFoundryWizardState(): UseFoundryWizardStateResult {
       await api.settings.services.updateProviderFields('Embeddings', FOUNDRY_SERVICE_PROVIDER_IDS.Embeddings, {
         Deployment: optionalForm.embeddingsDeployment.trim(),
       });
-      await api.settings.services.updateActiveProvider('Embeddings', FOUNDRY_SERVICE_PROVIDER_IDS.Embeddings);
+      await api.settings.services.updateActiveProvider('Embeddings', FOUNDRY_SERVICE_PROVIDER_IDS.Embeddings, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableImages) {
@@ -410,7 +411,7 @@ export function useFoundryWizardState(): UseFoundryWizardStateResult {
         Deployment: optionalForm.imagesDeployment.trim(),
         EditModelDeployment: optionalForm.imagesEditDeployment.trim(),
       });
-      await api.settings.services.updateActiveProvider('ImageGeneration', FOUNDRY_SERVICE_PROVIDER_IDS.ImageGeneration);
+      await api.settings.services.updateActiveProvider('ImageGeneration', FOUNDRY_SERVICE_PROVIDER_IDS.ImageGeneration, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableSpeech) {
@@ -423,8 +424,8 @@ export function useFoundryWizardState(): UseFoundryWizardStateResult {
         },
         nextSections
       );
-      await api.settings.services.updateActiveProvider('SpeechTranscription', FOUNDRY_SERVICE_PROVIDER_IDS.SpeechTranscription);
-      await api.settings.services.updateActiveProvider('SpeechSynthesis', FOUNDRY_SERVICE_PROVIDER_IDS.SpeechSynthesis);
+      await api.settings.services.updateActiveProvider('SpeechTranscription', FOUNDRY_SERVICE_PROVIDER_IDS.SpeechTranscription, WIZARD_DEFER_WARMUP_OPTIONS);
+      await api.settings.services.updateActiveProvider('SpeechSynthesis', FOUNDRY_SERVICE_PROVIDER_IDS.SpeechSynthesis, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableDocumentIntelligence) {
@@ -447,7 +448,7 @@ export function useFoundryWizardState(): UseFoundryWizardStateResult {
           MaxRetries: '3',
         }
       );
-      await api.settings.services.updateActiveProvider('DocumentIntelligence', FOUNDRY_SERVICE_PROVIDER_IDS.DocumentIntelligence);
+      await api.settings.services.updateActiveProvider('DocumentIntelligence', FOUNDRY_SERVICE_PROVIDER_IDS.DocumentIntelligence, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     const refreshed = await loadSnapshot();

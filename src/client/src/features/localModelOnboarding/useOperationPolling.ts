@@ -1,13 +1,17 @@
 import { useEffect } from 'react';
 import { api } from '../../services/api';
-import type { ModelDownloadOperationDto } from '../../types/settings';
+import type { LlamaOperationStatusDto, ModelDownloadOperationDto } from '../../types/settings';
+import { mapLlamaOperationStatusToDownloadDto } from './mapOperationStatus';
 import { isLocalModelOnboardingTerminal } from './status';
 
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_FAILURE_THRESHOLD = 5;
 
+export type LocalModelOnboardingPollRoute = 'operations' | 'downloads';
+
 interface CreateLocalModelOnboardingPollerOptions {
   operationId: string;
+  pollRoute?: LocalModelOnboardingPollRoute;
   onUpdate: (operation: ModelDownloadOperationDto) => void;
   onTerminal?: (operation: ModelDownloadOperationDto) => void;
   onPollFailureThreshold?: () => void;
@@ -15,8 +19,20 @@ interface CreateLocalModelOnboardingPollerOptions {
   failureThreshold?: number;
 }
 
+async function fetchOperationStatus(
+  operationId: string,
+  pollRoute: LocalModelOnboardingPollRoute
+): Promise<ModelDownloadOperationDto> {
+  if (pollRoute === 'operations') {
+    const operation = await api.settings.getLlamaOperationStatus(operationId);
+    return mapLlamaOperationStatusToDownloadDto(operation);
+  }
+  return api.settings.getDownloadStatus(operationId);
+}
+
 export function createLocalModelOnboardingPoller({
   operationId,
+  pollRoute = 'downloads',
   onUpdate,
   onTerminal,
   onPollFailureThreshold,
@@ -28,7 +44,7 @@ export function createLocalModelOnboardingPoller({
   return window.setInterval(() => {
     void (async () => {
       try {
-        const operation = await api.settings.getDownloadStatus(operationId);
+        const operation = await fetchOperationStatus(operationId, pollRoute);
         consecutivePollFailures = 0;
         onUpdate(operation);
         if (isLocalModelOnboardingTerminal(operation.status)) {
@@ -47,6 +63,7 @@ export function createLocalModelOnboardingPoller({
 interface UseLocalModelOnboardingOperationOptions {
   operationId: string | null;
   enabled?: boolean;
+  pollRoute?: LocalModelOnboardingPollRoute;
   onUpdate: (operation: ModelDownloadOperationDto) => void;
   onTerminal?: (operation: ModelDownloadOperationDto) => void;
   onPollFailureThreshold?: () => void;
@@ -57,6 +74,7 @@ interface UseLocalModelOnboardingOperationOptions {
 export function useLocalModelOnboardingOperation({
   operationId,
   enabled = true,
+  pollRoute = 'downloads',
   onUpdate,
   onTerminal,
   onPollFailureThreshold,
@@ -70,12 +88,62 @@ export function useLocalModelOnboardingOperation({
 
     const timerId = createLocalModelOnboardingPoller({
       operationId,
+      pollRoute,
       onUpdate,
       onTerminal,
       onPollFailureThreshold,
       intervalMs,
       failureThreshold,
     });
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [enabled, failureThreshold, intervalMs, onPollFailureThreshold, onTerminal, onUpdate, operationId, pollRoute]);
+}
+
+interface UseCuratedOperationPollingOptions {
+  operationId: string | null;
+  enabled?: boolean;
+  onUpdate: (operation: LlamaOperationStatusDto) => void;
+  onTerminal?: (operation: LlamaOperationStatusDto) => void;
+  onPollFailureThreshold?: () => void;
+  intervalMs?: number;
+  failureThreshold?: number;
+}
+
+export function useCuratedOperationPolling({
+  operationId,
+  enabled = true,
+  onUpdate,
+  onTerminal,
+  onPollFailureThreshold,
+  intervalMs,
+  failureThreshold,
+}: UseCuratedOperationPollingOptions): void {
+  useEffect(() => {
+    if (!operationId || !enabled) {
+      return;
+    }
+
+    let consecutivePollFailures = 0;
+    const timerId = window.setInterval(() => {
+      void (async () => {
+        try {
+          const operation = await api.settings.getLlamaOperationStatus(operationId);
+          consecutivePollFailures = 0;
+          onUpdate(operation);
+          if (isLocalModelOnboardingTerminal(operation.status)) {
+            onTerminal?.(operation);
+          }
+        } catch {
+          consecutivePollFailures += 1;
+          if (consecutivePollFailures >= (failureThreshold ?? DEFAULT_FAILURE_THRESHOLD)) {
+            onPollFailureThreshold?.();
+          }
+        }
+      })();
+    }, intervalMs ?? DEFAULT_POLL_INTERVAL_MS);
 
     return () => {
       window.clearInterval(timerId);

@@ -22,7 +22,6 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
     private readonly LlamaCppConfig _config;
     private readonly string? _deploymentId;
     private readonly LlamaCppRuntimeProfileData? _profileData;
-    private readonly bool _parallelToolCalls;
     private readonly ILogger<LlamaCppChatClient> _logger;
     private readonly IReadOnlyList<OutputStripRule> _assistantOutputStripRules;
 
@@ -31,14 +30,12 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         LlamaCppConfig config,
         string? deploymentId,
         LlamaCppRuntimeProfileData? profileData = null,
-        bool parallelToolCalls = false,
         ILogger<LlamaCppChatClient>? logger = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _deploymentId = deploymentId;
         _profileData = profileData;
-        _parallelToolCalls = parallelToolCalls;
         _logger = logger ?? NullLogger<LlamaCppChatClient>.Instance;
         _assistantOutputStripRules = BuildAssistantOutputStripRules();
     }
@@ -505,7 +502,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         {
             var mappedTools = request.Tools.Select(MapTool).ToList();
             body["tools"] = JsonSerializer.SerializeToNode(mappedTools, RequestJsonOptions);
-            body["parallel_tool_calls"] = _parallelToolCalls;
+            ApplyProfileToolFields(body);
         }
 
         MergeSamplingParameters(body, request);
@@ -519,13 +516,29 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         return (body, diagnosticInfo);
     }
 
+    private void ApplyProfileToolFields(JsonObject body)
+    {
+        if (_profileData?.RequestFieldsWhenToolsPresent is not { Count: > 0 } fields)
+        {
+            return;
+        }
+
+        foreach (var (key, value) in fields)
+        {
+            body[key] = JsonNode.Parse(value.GetRawText());
+        }
+    }
+
     private void MergeSamplingParameters(JsonObject body, ChatCompletionRequest request)
     {
         if (_profileData?.SamplingDefaults != null)
         {
             foreach (var (key, defaultValue) in _profileData.SamplingDefaults)
             {
-                body[key] = defaultValue;
+                if (!body.ContainsKey(key))
+                {
+                    body[key] = defaultValue;
+                }
             }
         }
 

@@ -2,29 +2,32 @@ import { describe, expect, it } from 'vitest';
 import { buildLocalModelAddModelRequest, buildLocalModelOnboardingRequest } from '../buildCommand';
 import { selectAttachableAliases } from '../selectors';
 import { isLocalModelOnboardingInFlight, normalizeLocalModelOnboardingStatus } from '../status';
+import { validateLocalModelOnboardingDraft } from '../validateDraft';
+
+const explicitCustomDraft = {
+  installSource: 'huggingface' as const,
+  runtimeProfileId: 'qwen3_6',
+  routerModelId: 'qwen3.6-9b-q5km',
+  huggingFaceRepository: 'unsloth/Qwen3.6-9B-GGUF',
+  huggingFaceResolvedRevision: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+  huggingFaceArtifactGroupId: 'single::Qwen3-9B-Q5_K_M.gguf',
+  huggingFaceModelFiles: ['Qwen3-9B-Q5_K_M.gguf'],
+  huggingFaceMmprojFiles: [] as string[],
+  huggingFaceTargetDirectory: 'qwen3.6-9b-q5km',
+  huggingFaceRouterPresetRows: [{ key: 'ctx-size', value: '8192' }],
+  huggingFacePresetMode: 'replace' as const,
+  existingAliasRouterModelId: '',
+  catalogModelId: 'qwen3.6-local',
+  catalogDisplayName: 'Qwen 3.6 Local',
+  catalogDescription: 'Local text model',
+  catalogDisplayOrder: '5',
+  catalogIsActive: true,
+};
 
 describe('buildLocalModelOnboardingRequest', () => {
   it('produces equivalent payload for settings and wizard inputs', () => {
-    const base = {
-      installSource: 'huggingface' as const,
-      runtimeProfileId: 'qwen3_6',
-      routerModelId: 'qwen3.6-9b-q5km',
-      huggingFaceRepository: 'unsloth/Qwen3.6-9B-GGUF',
-      huggingFaceQuantIncludePattern: '*Q5_K_M*',
-      huggingFaceMmprojIncludePattern: '',
-      huggingFaceTargetDirectory: 'qwen3.6-9b-q5km',
-      existingAliasRouterModelId: '',
-      routerContextSize: '8192',
-      routerCacheRamMib: '1024',
-      catalogModelId: 'qwen3.6-local',
-      catalogDisplayName: 'Qwen 3.6 Local',
-      catalogDescription: 'Local text model',
-      catalogDisplayOrder: '5',
-      catalogIsActive: true,
-    };
-
-    const fromSettings = buildLocalModelAddModelRequest(base, 'settings');
-    const fromWizard = buildLocalModelAddModelRequest(base, 'wizard');
+    const fromSettings = buildLocalModelAddModelRequest(explicitCustomDraft, 'settings');
+    const fromWizard = buildLocalModelAddModelRequest(explicitCustomDraft, 'wizard');
 
     const { providerConfig: settingsProviderConfig, ...settingsWithoutUi } = fromSettings;
     const { providerConfig: wizardProviderConfig, ...wizardWithoutUi } = fromWizard;
@@ -32,49 +35,27 @@ describe('buildLocalModelOnboardingRequest', () => {
     expect(settingsProviderConfig).toEqual({ onboardingUi: 'settings' });
     expect(wizardProviderConfig).toEqual({ onboardingUi: 'wizard' });
     expect(settingsWithoutUi).toEqual(wizardWithoutUi);
+    expect(fromSettings.install?.huggingFace?.modelFiles).toEqual(['Qwen3-9B-Q5_K_M.gguf']);
+    expect(fromSettings.install?.routerContextSize).toBeUndefined();
   });
 
   it('defaults catalog and target directory from router alias when blank', () => {
     const request = buildLocalModelOnboardingRequest({
-      installSource: 'huggingface',
-      runtimeProfileId: 'gemma4',
-      routerModelId: 'gemma-4-12B-it-qat-GGUF',
-      huggingFaceRepository: 'unsloth/gemma-4-12B-it-qat-GGUF',
-      huggingFaceQuantIncludePattern: 'gemma-4-12B-it-qat-UD-Q4_K_XL.gguf',
-      huggingFaceMmprojIncludePattern: 'mmproj-BF16.gguf',
-      huggingFaceTargetDirectory: '',
-      existingAliasRouterModelId: '',
-      routerContextSize: '',
-      routerCacheRamMib: '',
+      ...explicitCustomDraft,
       catalogModelId: '',
       catalogDisplayName: '',
-      catalogIsActive: true,
+      huggingFaceTargetDirectory: '',
     });
 
-    expect(request.catalog.modelId).toBe('gemma-4-12B-it-qat-GGUF');
-    expect(request.catalog.displayName).toBe('gemma-4-12B-it-qat-GGUF');
-    expect(request.install?.huggingFace?.targetDirectory).toBe('gemma-4-12B-it-qat-GGUF');
+    expect(request.catalog.modelId).toBe('qwen3.6-9b-q5km');
+    expect(request.catalog.displayName).toBe('qwen3.6-9b-q5km');
+    expect(request.install?.huggingFace?.targetDirectory).toBe('qwen3.6-9b-q5km');
   });
 
-  it('allows text-only huggingface install without mmproj pattern', () => {
-    const request = buildLocalModelOnboardingRequest({
-      installSource: 'huggingface',
-      runtimeProfileId: 'qwen3_5',
-      routerModelId: 'qwen3.5-local',
-      huggingFaceRepository: 'unsloth/Qwen3.5-9B-GGUF',
-      huggingFaceQuantIncludePattern: '*Q4_K_M*',
-      huggingFaceMmprojIncludePattern: '',
-      huggingFaceTargetDirectory: 'qwen3.5-local',
-      existingAliasRouterModelId: '',
-      routerContextSize: '',
-      routerCacheRamMib: '',
-      catalogModelId: 'qwen3.5-local',
-      catalogDisplayName: 'Qwen 3.5 Local',
-      catalogIsActive: true,
-    });
-
+  it('allows text-only huggingface install without mmproj files', () => {
+    const request = buildLocalModelOnboardingRequest(explicitCustomDraft);
     expect(request.install?.source).toBe('huggingface');
-    expect(request.install?.huggingFace?.mmprojIncludePattern).toBe('');
+    expect(request.install?.huggingFace?.mmprojFiles).toEqual([]);
   });
 });
 
@@ -118,5 +99,15 @@ describe('status helpers', () => {
     expect(isLocalModelOnboardingInFlight('downloading')).toBe(true);
     expect(isLocalModelOnboardingInFlight('completed')).toBe(false);
     expect(isLocalModelOnboardingInFlight('error')).toBe(false);
+  });
+});
+
+describe('validateLocalModelOnboardingDraft', () => {
+  it('returns validation errors from build command', () => {
+    expect(validateLocalModelOnboardingDraft({
+      ...explicitCustomDraft,
+      runtimeProfileId: '',
+    })).toEqual(['Runtime profile is required for llama-cpp.']);
+    expect(validateLocalModelOnboardingDraft(explicitCustomDraft)).toEqual([]);
   });
 });

@@ -25,13 +25,12 @@ public sealed class LlamaCppChatClientFactory : IChatCompletionClientFactory
 
     public IChatCompletionClient CreateClient(string? deploymentId, HttpClient? httpClient = null)
     {
-        return CreateClientForProfile(deploymentId, (LlamaCppRuntimeProfileData?)null, false, httpClient);
+        return CreateClientForProfile(deploymentId, (LlamaCppRuntimeProfileData?)null, httpClient);
     }
 
     public IChatCompletionClient CreateClientForProfile(
         string? deploymentId,
         LlamaCppRuntimeProfileData? profileData,
-        bool parallelToolCalls,
         HttpClient? httpClient = null)
     {
         var client = httpClient ?? _httpClientFactory.CreateClient();
@@ -45,7 +44,6 @@ public sealed class LlamaCppChatClientFactory : IChatCompletionClientFactory
             _config,
             deploymentId,
             profileData,
-            parallelToolCalls,
             _clientLogger);
     }
 }

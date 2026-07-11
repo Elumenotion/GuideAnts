@@ -486,9 +486,8 @@ choose_backend() {
 select_vulkan_runtime() {
   [[ "$SELECTED_BACKEND" == "vulkan" ]] || return 0
 
-  # Windows / Docker Desktop: the dzn defaults already do the right thing for every vendor.
   if docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -q 'Docker Desktop'; then
-    log "Vulkan: Docker Desktop → Mesa dzn over D3D12 (/dev/dxg). Using built-in defaults (no env)."
+    log "Vulkan: Docker Desktop → Mesa dzn over D3D12 (/dev/dxg). Using compose defaults."
     return 0
   fi
 

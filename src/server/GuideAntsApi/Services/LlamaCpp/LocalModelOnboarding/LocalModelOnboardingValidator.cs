@@ -21,19 +21,25 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
     private readonly IChatTargetValidator _chatTargetValidator;
     private readonly ILlamaRuntimeInventoryService _inventoryService;
     private readonly IHuggingFaceTokenResolver _huggingFaceTokenResolver;
+    private readonly ICuratedInstallResolver _curatedInstallResolver;
+    private readonly ICustomInstallResolver _customInstallResolver;
 
     public LocalModelOnboardingValidator(
         IConfiguration configuration,
         IApplicationSettingsService settingsService,
         IChatTargetValidator chatTargetValidator,
         ILlamaRuntimeInventoryService inventoryService,
-        IHuggingFaceTokenResolver huggingFaceTokenResolver)
+        IHuggingFaceTokenResolver huggingFaceTokenResolver,
+        ICuratedInstallResolver curatedInstallResolver,
+        ICustomInstallResolver customInstallResolver)
     {
         _configuration = configuration;
         _settingsService = settingsService;
         _chatTargetValidator = chatTargetValidator;
         _inventoryService = inventoryService;
         _huggingFaceTokenResolver = huggingFaceTokenResolver;
+        _curatedInstallResolver = curatedInstallResolver;
+        _customInstallResolver = customInstallResolver;
     }
 
     public async Task ValidateAsync(
@@ -48,6 +54,18 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
                 step: "validation",
                 message: "Local model onboarding is only valid for the llama-cpp provider.",
                 remediation: "Choose the llama-cpp provider and retry.");
+        }
+
+        if (string.Equals(command.InstallSource, LocalModelInstallSources.Curated, StringComparison.OrdinalIgnoreCase))
+        {
+            await ValidateCuratedAsync(request, command, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (command.ExplicitHuggingFace is not null)
+        {
+            await ValidateCustomExplicitAsync(request, command, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         ValidateRequiredFields(command);
@@ -140,6 +158,123 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         }
     }
 
+    private async Task ValidateCuratedAsync(
+        AddModelRequest request,
+        LocalModelOnboardingCommand command,
+        CancellationToken cancellationToken)
+    {
+        ValidateCuratedForbiddenFields(request);
+
+        if (!RuntimeConfigurationPlaceholders.HasUsableUrl(_configuration["LlamaCpp:BaseUrl"]))
+        {
+            throw new AddModelException(
+                code: "PROVIDER_CREDENTIALS_MISSING",
+                step: "validation",
+                message: "Provider section 'LlamaCpp' is not ready: no local llama server is configured for this container yet.",
+                remediation: "Configure a llama server base URL for this container, or choose a cloud chat provider instead.");
+        }
+
+        var immutableInput = await _curatedInstallResolver
+            .ResolveAsync(request, command, cancellationToken)
+            .ConfigureAwait(false);
+
+        var existingModels = await _settingsService.GetModelsAsync(cancellationToken).ConfigureAwait(false);
+        if (existingModels.Any(model => string.Equals(model.ModelId, immutableInput.CatalogModelId, StringComparison.Ordinal)))
+        {
+            throw new AddModelException(
+                code: "MODEL_ID_TAKEN",
+                step: "validation",
+                message: $"Model '{immutableInput.CatalogModelId}' already exists.",
+                remediation: "Choose a different catalog definition or remove the existing model.");
+        }
+
+        try
+        {
+            _chatTargetValidator.Validate(new ChatTarget(
+                ModelId: immutableInput.CatalogModelId,
+                Provider: "llama-cpp",
+                RuntimeConfigJson: LocalRuntimeConfigurationParser.SerializeCanonical(
+                    new LocalRuntimeConfiguration(
+                        immutableInput.RouterModelId,
+                        immutableInput.RuntimeProfileId))));
+        }
+        catch (RoutingException ex)
+        {
+            throw MapRoutingException(ex);
+        }
+
+        var inventory = await _inventoryService.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
+        var existingAlias = inventory.FirstOrDefault(item =>
+            string.Equals(item.RouterModelId, immutableInput.RouterModelId, StringComparison.Ordinal));
+        if (existingAlias is not null && existingAlias.CatalogModelIds.Count > 0)
+        {
+            throw new AddModelException(
+                code: "ROUTER_ALIAS_TAKEN",
+                step: "validation",
+                message: $"Router alias '{existingAlias.RouterModelId}' is already referenced by catalog rows: {string.Join(", ", existingAlias.CatalogModelIds)}.",
+                remediation: "Remove the existing catalog row or choose another curated definition.");
+        }
+    }
+
+    private static void ValidateCuratedForbiddenFields(AddModelRequest request)
+    {
+        var install = request.Install!;
+        var forbidden = new List<string>();
+
+        if (install.HuggingFace is not null)
+        {
+            forbidden.Add("install.huggingFace");
+        }
+
+        if (install.ExistingAlias is not null)
+        {
+            forbidden.Add("install.existingAlias");
+        }
+
+        if (!string.IsNullOrWhiteSpace(install.RouterModelId))
+        {
+            forbidden.Add("install.routerModelId");
+        }
+
+        if (!string.IsNullOrWhiteSpace(install.RuntimeProfileId))
+        {
+            forbidden.Add("install.runtimeProfileId");
+        }
+
+        if (install.RouterContextSize is not null)
+        {
+            forbidden.Add("install.routerContextSize");
+        }
+
+        if (install.RouterCacheRamMib is not null)
+        {
+            forbidden.Add("install.routerCacheRamMib");
+        }
+
+        if (forbidden.Count > 0)
+        {
+            throw new AddModelException(
+                CuratedInstallErrorCodes.CuratedForbiddenField,
+                step: "validation",
+                message: $"Curated install accepts identities only. Remove forbidden field(s): {string.Join(", ", forbidden)}.",
+                remediation: "Submit only source, catalogId, catalogVersion, quantId, and resolvedRevision under install.");
+        }
+
+        var curated = install.Curated;
+        if (curated is null
+            || string.IsNullOrWhiteSpace(curated.CatalogId)
+            || string.IsNullOrWhiteSpace(curated.CatalogVersion)
+            || string.IsNullOrWhiteSpace(curated.QuantId)
+            || string.IsNullOrWhiteSpace(curated.ResolvedRevision))
+        {
+            throw new AddModelException(
+                code: "INSTALL_STEP_FAILED",
+                step: "validation",
+                message: "Curated install requires catalogId, catalogVersion, quantId, and resolvedRevision.",
+                remediation: "Complete curated quant selection and retry.");
+        }
+    }
+
     private static void ValidateRequiredFields(LocalModelOnboardingCommand command)
     {
         if (string.IsNullOrWhiteSpace(command.CatalogModelId))
@@ -213,6 +348,57 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
                 step: "validation",
                 message: "Prompt cache RAM (MiB) must be a whole number from 0 to 262144.",
                 remediation: "Enter a valid cache value or leave it blank to use container defaults.");
+        }
+    }
+
+    private async Task ValidateCustomExplicitAsync(
+        AddModelRequest request,
+        LocalModelOnboardingCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (!RuntimeConfigurationPlaceholders.HasUsableUrl(_configuration["LlamaCpp:BaseUrl"]))
+        {
+            throw new AddModelException(
+                code: "PROVIDER_CREDENTIALS_MISSING",
+                step: "validation",
+                message: "Provider section 'LlamaCpp' is not ready: no local llama server is configured for this container yet.",
+                remediation: "Configure a llama server base URL for this container, or choose a cloud chat provider instead.");
+        }
+
+        await _customInstallResolver.ResolveAsync(request, command, cancellationToken).ConfigureAwait(false);
+
+        var existingModels = await _settingsService.GetModelsAsync(cancellationToken).ConfigureAwait(false);
+        if (existingModels.Any(model => string.Equals(model.ModelId, command.CatalogModelId, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new AddModelException(
+                code: "MODEL_ID_TAKEN",
+                step: "validation",
+                message: $"Model '{command.CatalogModelId}' already exists.",
+                remediation: "Back up to Step 2 and choose a different model ID.");
+        }
+
+        try
+        {
+            _chatTargetValidator.Validate(new ChatTarget(
+                ModelId: command.CatalogModelId,
+                Provider: "llama-cpp",
+                RuntimeConfigJson: LocalModelOnboardingOrchestrator.BuildLlamaLocalRuntimeJson(command)));
+        }
+        catch (RoutingException ex)
+        {
+            throw MapRoutingException(ex);
+        }
+
+        var inventory = await _inventoryService.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
+        var existingAlias = inventory.FirstOrDefault(item =>
+            string.Equals(item.RouterModelId, command.RouterModelId, StringComparison.Ordinal));
+        if (existingAlias is not null && existingAlias.CatalogModelIds.Count > 0)
+        {
+            throw new AddModelException(
+                code: "ROUTER_ALIAS_TAKEN",
+                step: "validation",
+                message: $"Router alias '{existingAlias.RouterModelId}' is already referenced by catalog rows: {string.Join(", ", existingAlias.CatalogModelIds)}.",
+                remediation: "Back up to Step 3 and choose a different alias.");
         }
     }
 

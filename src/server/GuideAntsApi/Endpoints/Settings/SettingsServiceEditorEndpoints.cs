@@ -59,16 +59,31 @@ public static class SettingsServiceEditorEndpoints
         {
             try
             {
-                var updated = await settingsService.SetServiceActiveProviderAsync(serviceId, request.ProviderId, cancellationToken);
+                ServiceEditorStateDto? previousState = null;
                 try
                 {
-                    await localAiWarmup.WarmupAllAsync(cancellationToken).ConfigureAwait(false);
+                    previousState = await settingsService.GetServiceEditorStateAsync(serviceId, cancellationToken);
                 }
-                catch (Exception ex)
+                catch (InvalidOperationException)
                 {
-                    loggerFactory
-                        .CreateLogger("ServiceModesRuntimeReload")
-                        .LogWarning(ex, "Failed to reconcile local AI stack after service routing change.");
+                    // Let SetServiceActiveProviderAsync surface invalid service ids.
+                }
+
+                var updated = await settingsService.SetServiceActiveProviderAsync(serviceId, request.ProviderId, cancellationToken);
+                var providerChanged = previousState == null
+                    || !string.Equals(previousState.ActiveProviderId, request.ProviderId, StringComparison.Ordinal);
+                if (providerChanged && !request.DeferWarmup)
+                {
+                    try
+                    {
+                        await localAiWarmup.WarmupAllAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        loggerFactory
+                            .CreateLogger("ServiceModesRuntimeReload")
+                            .LogWarning(ex, "Failed to reconcile local AI stack after service routing change.");
+                    }
                 }
 
                 return Results.Ok(updated);

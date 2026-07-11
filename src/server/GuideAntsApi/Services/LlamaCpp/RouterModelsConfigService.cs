@@ -7,7 +7,8 @@ public sealed record RouterModelEntry(
     bool? HasModelFile = null,
     bool? HasMmprojFile = null,
     int? ContextSize = null,
-    int? CacheRamMib = null);
+    int? CacheRamMib = null,
+    IReadOnlyDictionary<string, string>? Preset = null);
 
 public interface IRouterModelsConfigService
 {
@@ -31,8 +32,8 @@ public sealed class RouterModelsConfigService : IRouterModelsConfigService
 
     public async Task<IReadOnlyList<RouterModelEntry>> GetEntriesAsync(CancellationToken cancellationToken = default)
     {
-        var entries = await _adminClient.GetRouterEntriesAsync(cancellationToken).ConfigureAwait(false);
-        return entries
+        var response = await _adminClient.GetRouterEntriesAsync(cancellationToken).ConfigureAwait(false);
+        return response.Entries
             .Select(e => new RouterModelEntry(
                 Alias: e.Alias,
                 ModelPath: e.ModelPath ?? string.Empty,
@@ -40,7 +41,8 @@ public sealed class RouterModelsConfigService : IRouterModelsConfigService
                 HasModelFile: e.HasModelFile,
                 HasMmprojFile: e.HasMmprojFile,
                 ContextSize: e.ContextSize,
-                CacheRamMib: e.CacheRamMib))
+                CacheRamMib: e.CacheRamMib,
+                Preset: e.Preset))
             .ToList();
     }
 

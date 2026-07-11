@@ -84,7 +84,7 @@ public sealed class ServiceEditorUpdateValidationTests
             ServiceProviderIds.EmbeddingsHuggingFaceInference,
             new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
                 {
-                    ["ModelId"] = "microsoft/harrier-oss-v1-0.6b"
+                    ["ModelId"] = "Qwen/Qwen3-Embedding-0.6B"
                 })),
             CancellationToken.None);
 
@@ -96,11 +96,11 @@ public sealed class ServiceEditorUpdateValidationTests
         var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
         modes.Should().Contain(mode =>
             string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal)
-            && string.Equals(mode.ModelId, "microsoft/harrier-oss-v1-0.6b", StringComparison.Ordinal));
+            && string.Equals(mode.ModelId, "Qwen/Qwen3-Embedding-0.6B", StringComparison.Ordinal));
 
         var state = await service.GetServiceEditorStateAsync("Embeddings", CancellationToken.None);
         var provider = state.Providers.Single(p => p.ProviderId == ServiceProviderIds.EmbeddingsHuggingFaceInference);
-        provider.Fields["ModelId"].Value.Should().Be("microsoft/harrier-oss-v1-0.6b");
+        provider.Fields["ModelId"].Value.Should().Be("Qwen/Qwen3-Embedding-0.6B");
         provider.Fields["ModelId"].HasValue.Should().BeTrue();
     }
 
@@ -309,6 +309,42 @@ public sealed class ServiceEditorUpdateValidationTests
     }
 
     [TestMethod]
+    public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForLocalSpeechTranscription()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+
+        await service.EnsureServiceModeExistsAsync(
+            "SpeechTranscription",
+            ServiceProviderIds.SpeechTranscriptionLocalAsrHttp,
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("SpeechTranscription", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "LocalServiceHosts:SpeechTranscriptionBaseUrl", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "qwen3_asr_0_6b", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForLocalSpeechSynthesis()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+
+        await service.EnsureServiceModeExistsAsync(
+            "SpeechSynthesis",
+            ServiceProviderIds.SpeechSynthesisLocalTtsHttp,
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("SpeechSynthesis", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "LocalServiceHosts:SpeechSynthesisBaseUrl", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "chatterbox", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForHuggingFaceSpeechSynthesis()
     {
         await using var db = CreateDbContext();
@@ -324,6 +360,35 @@ public sealed class ServiceEditorUpdateValidationTests
         modes.Should().Contain(mode =>
             string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal)
             && string.Equals(mode.ModelId, "ResembleAI/chatterbox", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task SetServiceModeModelIdAsync_PersistsOntoActiveEnabledDefaultMode()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+        SeedServiceModes(db, "SpeechSynthesis",
+        [
+            new ServiceMode(
+                "local",
+                "LocalServiceHosts:SpeechSynthesisBaseUrl",
+                null,
+                null,
+                Enabled: true,
+                IsDefault: true),
+        ]);
+
+        await service.SetServiceModeModelIdAsync(
+            "SpeechSynthesis",
+            "chatterbox",
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("SpeechSynthesis", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            mode.IsDefault
+            && mode.Enabled
+            && string.Equals(mode.ModelId, "chatterbox", StringComparison.Ordinal));
     }
 
     private static ApplicationDbContext CreateDbContext()

@@ -24,5 +24,8 @@
         { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true }
       ]
     }
+  },
+  "requestFieldsWhenToolsPresent": {
+    "parallel_tool_calls": true
   }
 }

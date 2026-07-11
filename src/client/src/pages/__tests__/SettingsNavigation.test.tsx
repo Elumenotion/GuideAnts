@@ -83,7 +83,7 @@ vi.mock('../settings/components/OverviewTab', () => ({
   }: {
     onOpenConnections: (section?: string) => void;
     onOpenServices: (serviceId: string) => void;
-    onOpenModelsRuntime: (subTab: 'catalog' | 'profiles' | 'local-llama') => void;
+    onOpenModelsRuntime: (subTab: 'catalog' | 'local-llama') => void;
   }) => (
     <div>
       <button type="button" onClick={() => onOpenConnections('openai-chat')}>
@@ -92,8 +92,8 @@ vi.mock('../settings/components/OverviewTab', () => ({
       <button type="button" onClick={() => onOpenServices('Embeddings')}>
         open-embeddings-service
       </button>
-      <button type="button" onClick={() => onOpenModelsRuntime('profiles')}>
-        open-profiles-runtime
+      <button type="button" onClick={() => onOpenModelsRuntime('local-llama')}>
+        open-loaded-models-runtime
       </button>
     </div>
   ),
@@ -152,8 +152,8 @@ describe('Settings navigation deep links', () => {
     expect(await screen.findByText('services-tab-panel:Embeddings')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /Overview/i }));
-    await user.click(screen.getByRole('button', { name: 'open-profiles-runtime' }));
-    expect(await screen.findByText('models-runtime-tab-panel:profiles')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'open-loaded-models-runtime' }));
+    expect(await screen.findByText('models-runtime-tab-panel:local-llama')).toBeInTheDocument();
   });
 
   it('shows the active add-model progress banner and open-progress action', async () => {

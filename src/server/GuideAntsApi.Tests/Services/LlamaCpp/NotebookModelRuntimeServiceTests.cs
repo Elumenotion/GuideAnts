@@ -138,7 +138,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local", 
             Provider = "llama-cpp", 
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -171,7 +171,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local", 
             Provider = "llama-cpp", 
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -205,7 +205,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -242,7 +242,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -286,7 +286,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -316,7 +316,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -356,7 +356,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -388,7 +388,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -428,7 +428,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -494,7 +494,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         };
         _context.Models.Add(model);
         await _context.SaveChangesAsync();
@@ -540,7 +540,7 @@ public class NotebookModelRuntimeServiceTests
             ModelId = "qwen-local",
             Provider = "llama-cpp",
             IsActive = true,
-            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"qwen-model\"}}"
+            RuntimeConfigJson = "{\"routerModelId\":\"qwen-model\",\"runtimeProfileId\":\"qwen3_5\"}"
         });
         await _context.SaveChangesAsync();
 
@@ -576,7 +576,7 @@ public class NotebookModelRuntimeServiceTests
             });
 
         _mockLlamaClient
-            .Setup(c => c.LoadModelAsync(It.IsAny<string>(), It.IsAny<System.Text.Json.Nodes.JsonObject?>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.LoadModelAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Callback(() => callOrder.Add("llm-load"))
             .Returns(Task.CompletedTask);
 

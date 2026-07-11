@@ -22,5 +22,8 @@
         { "target": "SystemMessagePrefix", "key": "", "value": "<|think|>\n" }
       ]
     }
+  },
+  "requestFieldsWhenToolsPresent": {
+    "parallel_tool_calls": true
   }
 }

@@ -35,7 +35,7 @@ def model_load_client_message(exc: ValueError) -> str:
     detail = exc.args[0] if exc.args and isinstance(exc.args[0], str) else ""
     if detail == "resolved model_path escapes the permitted model directory.":
         return detail
-    if detail == "model_id or model_path is required, or set GA_EMB_DEFAULT_MODEL_PATH.":
+    if detail == "model_id or model_path is required.":
         return detail
     if detail == "GA_EMB_NGL must be an integer.":
         return detail
@@ -146,7 +146,7 @@ class EmbRuntimeConfig:
     engine_base_url: str
     engine_ready_timeout_seconds: int
     request_timeout_seconds: int
-    n_gpu_layers: int
+    n_gpu_layers: str
     pooling: str
 
 
@@ -231,21 +231,18 @@ def resolve_server_path() -> str:
     raise RuntimeError("llama-server binary not found; set GA_EMB_SERVER_PATH.")
 
 
-def resolve_n_gpu_layers() -> tuple[str, int]:
+def resolve_n_gpu_layers() -> tuple[str, str]:
     device = (os.getenv("GA_EMB_DEVICE") or "cpu").strip().lower()
     if device in {"cuda-multi"}:
         device = "cuda"
     if device in {"hip", "rocm", "amd", "hip-multi", "rocm-multi", "amd-multi"}:
         device = "cuda"
     if device == "cpu":
-        return device, 0
+        return device, "0"
     override = os.getenv("GA_EMB_NGL")
     if override is not None and override.strip() != "":
-        try:
-            return device, int(override.strip())
-        except ValueError as exc:
-            raise ValueError("GA_EMB_NGL must be an integer.") from exc
-    return device, -1
+        return device, override.strip()
+    return device, "auto"
 
 
 def resolve_permitted_gguf_path(model_dir: str, catalog_filename: str) -> str:
@@ -290,9 +287,9 @@ def resolve_gguf_target(request: LoadModelRequest) -> tuple[str, str, dict[str, 
         candidate = resolve_permitted_gguf_path(model_dir, catalog_filename)
         return candidate, catalog_filename, entry
 
-    catalog_id = (request.model_id or os.getenv("GA_EMB_DEFAULT_MODEL_PATH") or "").strip()
-    if not catalog_id:
-        raise ValueError("model_id or model_path is required, or set GA_EMB_DEFAULT_MODEL_PATH.")
+    catalog_id = (request.model_id or "").strip()
+    if not request.model_path and not catalog_id:
+        raise ValueError("model_id or model_path is required.")
 
     entry = resolve_catalog_entry(catalog_id)
     source = entry["sourceRepos"][0]
@@ -343,7 +340,7 @@ def build_llama_server_command(config: EmbRuntimeConfig) -> list[str]:
         "--port",
         str(config.engine_port),
         "-ngl",
-        str(config.n_gpu_layers),
+        config.n_gpu_layers,
     ]
 
 

@@ -11,6 +11,40 @@ set -e
 # Alias-controlled knobs (not set on router CLI when models-preset is in use):
 #   --ctx-size  (alias key: ctx-size)
 #   --cache-ram (alias key: cache-ram)
+
+FLEET_PROJECTION_DIR="${GA_LLAMA_FLEET_PROJECTION_DIR:-/models-local/llama/runtime/fleet}"
+FLEET_PROJECTION_FILE="${FLEET_PROJECTION_DIR}/fleet-projection.json"
+
+apply_fleet_projection_env() {
+    local projection_file="$1"
+    [ -f "$projection_file" ] || return 0
+
+    while IFS=$'\t' read -r key value; do
+        if [ -z "$key" ]; then
+            continue
+        fi
+        case "$key" in
+            GA_LLAMA_*)
+                export "$key=$value"
+                ;;
+        esac
+    done < <(python3 - "$projection_file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    doc = json.load(handle)
+
+fleet = doc.get("fleetEnv") or {}
+for key, value in fleet.items():
+    if not isinstance(key, str) or not key.startswith("GA_LLAMA_"):
+        continue
+    print(f"{key}\t{value}")
+PY
+)
+}
+
 apply_cuda_visible_devices_override() {
     local override_name="$1"
     local override_value="${!override_name:-}"
@@ -50,35 +84,41 @@ apply_cuda_visible_devices_override() {
     export CUDA_VISIBLE_DEVICES="$override_value"
 }
 
+apply_fleet_projection_env "$FLEET_PROJECTION_FILE"
 apply_cuda_visible_devices_override "GA_LLAMA_CUDA_VISIBLE_DEVICES"
 
-ARGS=""
+# Empty GGML_VK_VISIBLE_DEVICES hides every Vulkan device in llama.cpp.
+if [ -z "${GGML_VK_VISIBLE_DEVICES:-}" ]; then
+    unset GGML_VK_VISIBLE_DEVICES
+fi
+
+ARGS=()
 ROUTER_MODE=0
 if [ -n "$GA_LLAMA_MODELS_PRESET" ]; then
-    ARGS="$ARGS --models-preset $GA_LLAMA_MODELS_PRESET"
+    ARGS+=(--models-preset "$GA_LLAMA_MODELS_PRESET")
     ROUTER_MODE=1
 fi
-[ -n "$GA_LLAMA_MODELS_MAX" ]     && ARGS="$ARGS --models-max $GA_LLAMA_MODELS_MAX"
-[ "$GA_LLAMA_NO_AUTOLOAD" = "1" ] && ARGS="$ARGS --no-models-autoload"
-ARGS="$ARGS --host ${GA_LLAMA_HOST:-127.0.0.1}"
-ARGS="$ARGS --port ${GA_LLAMA_PORT:-8080}"
+[ -n "$GA_LLAMA_MODELS_MAX" ] && ARGS+=(--models-max "$GA_LLAMA_MODELS_MAX")
+[ "$GA_LLAMA_NO_AUTOLOAD" = "1" ] && ARGS+=(--no-models-autoload)
+ARGS+=(--host "${GA_LLAMA_HOST:-127.0.0.1}")
+ARGS+=(--port "${GA_LLAMA_PORT:-8080}")
 if [ "$ROUTER_MODE" = "0" ]; then
     # Standalone mode (no preset INI). These knobs apply to the single loaded model.
-    [ -n "$GA_LLAMA_CTX_SIZE" ]   && ARGS="$ARGS --ctx-size $GA_LLAMA_CTX_SIZE"
-    [ -n "$GA_LLAMA_CACHE_RAM" ]  && ARGS="$ARGS --cache-ram $GA_LLAMA_CACHE_RAM"
+    [ -n "$GA_LLAMA_CTX_SIZE" ] && ARGS+=(--ctx-size "$GA_LLAMA_CTX_SIZE")
+    [ -n "$GA_LLAMA_CACHE_RAM" ] && ARGS+=(--cache-ram "$GA_LLAMA_CACHE_RAM")
 fi
-[ -n "$GA_LLAMA_THREADS" ]        && ARGS="$ARGS --threads $GA_LLAMA_THREADS"
-[ -n "$GA_LLAMA_PARALLEL" ]       && ARGS="$ARGS --parallel $GA_LLAMA_PARALLEL"
-[ -n "$GA_LLAMA_GPU_LAYERS" ]     && ARGS="$ARGS --n-gpu-layers $GA_LLAMA_GPU_LAYERS"
+[ -n "$GA_LLAMA_THREADS" ] && ARGS+=(--threads "$GA_LLAMA_THREADS")
+[ -n "$GA_LLAMA_PARALLEL" ] && ARGS+=(--parallel "$GA_LLAMA_PARALLEL")
+[ -n "$GA_LLAMA_GPU_LAYERS" ] && ARGS+=(--n-gpu-layers "$GA_LLAMA_GPU_LAYERS")
 # Vulkan can fail scheduler reservation when KV-cache tensors are placed on
 # the GPU for some model families. Keep this as an explicit env-controlled
 # base preset because router mode propagates it to child instances.
-[ "$GA_LLAMA_KV_OFFLOAD" = "0" ]  && ARGS="$ARGS --no-kv-offload"
-[ "$GA_LLAMA_KV_OFFLOAD" = "1" ]  && ARGS="$ARGS --kv-offload"
-[ "$GA_LLAMA_KV_UNIFIED" = "1" ]  && ARGS="$ARGS --kv-unified"
-[ "$GA_LLAMA_JINJA" = "1" ]       && ARGS="$ARGS --jinja"
-[ "$GA_LLAMA_CONT_BATCH" = "1" ]  && ARGS="$ARGS --cont-batching"
-[ "$GA_LLAMA_NO_MMAP" = "1" ]     && ARGS="$ARGS --no-mmap"
+[ "$GA_LLAMA_KV_OFFLOAD" = "0" ] && ARGS+=(--no-kv-offload)
+[ "$GA_LLAMA_KV_OFFLOAD" = "1" ] && ARGS+=(--kv-offload)
+[ "$GA_LLAMA_KV_UNIFIED" = "1" ] && ARGS+=(--kv-unified)
+[ -n "$GA_LLAMA_JINJA" ] && [ "$GA_LLAMA_JINJA" != "0" ] && ARGS+=(--jinja)
+[ "$GA_LLAMA_CONT_BATCH" = "1" ] && ARGS+=(--cont-batching)
+[ "$GA_LLAMA_NO_MMAP" = "1" ] && ARGS+=(--no-mmap)
 # Global runtime knobs that intentionally DO propagate from the router base
 # preset into every spawned child instance (unlike ctx-size/cache-ram, which
 # are left per-alias). --flash-attn takes a literal value (on|off|auto);
@@ -86,14 +126,14 @@ fi
 # image-min-tokens is per-alias in router-models.ini (Qwen-VL only). Do not set
 # GA_LLAMA_IMAGE_MIN_TOKENS globally — it propagates to every child and breaks
 # models whose mmproj image_max_pixels is below the 1024-token floor.
-[ -n "$GA_LLAMA_FLASH_ATTN" ]     && ARGS="$ARGS --flash-attn $GA_LLAMA_FLASH_ATTN"
-[ -n "$GA_LLAMA_CACHE_TYPE_K" ]   && ARGS="$ARGS --cache-type-k $GA_LLAMA_CACHE_TYPE_K"
-[ -n "$GA_LLAMA_CACHE_TYPE_V" ]   && ARGS="$ARGS --cache-type-v $GA_LLAMA_CACHE_TYPE_V"
+[ -n "$GA_LLAMA_FLASH_ATTN" ] && ARGS+=(--flash-attn "$GA_LLAMA_FLASH_ATTN")
+[ -n "$GA_LLAMA_CACHE_TYPE_K" ] && ARGS+=(--cache-type-k "$GA_LLAMA_CACHE_TYPE_K")
+[ -n "$GA_LLAMA_CACHE_TYPE_V" ] && ARGS+=(--cache-type-v "$GA_LLAMA_CACHE_TYPE_V")
 # --tensor-split sets the per-GPU layer proportion (comma list, e.g. "7,1").
 # Indices follow this process's visible-device order: with
 # GA_LLAMA_CUDA_VISIBLE_DEVICES=1,0 the FIRST proportion targets physical GPU 1
 # (5090) and the second targets physical GPU 0 (4090), so a larger first value
 # biases layers onto the 5090. Empty => llama.cpp's default free-VRAM heuristic
 # (which mis-splits here because the 4090 is shared with asr/tts/emb/sd).
-[ -n "$GA_LLAMA_TENSOR_SPLIT" ]   && ARGS="$ARGS --tensor-split $GA_LLAMA_TENSOR_SPLIT"
-exec /app/llama-server $ARGS
+[ -n "$GA_LLAMA_TENSOR_SPLIT" ] && ARGS+=(--tensor-split "$GA_LLAMA_TENSOR_SPLIT")
+exec /app/llama-server "${ARGS[@]}"

@@ -3,16 +3,16 @@ setlocal enabledelayedexpansion
 
 set "ROOT_DIR=%~dp0"
 if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
-set "DOCKER_DIR=%ROOT_DIR%\docker"
 set "STATE_FILE=%ROOT_DIR%\.installer_state.env"
 set "HEALTH_URL=http://localhost:5107/"
 set "HOST_MOUNT_OVERRIDE_FILE=docker-compose.host-mounts.generated.yml"
 set "ROCM_RUNTIME_OVERRIDE_FILE=docker-compose.rocm-runtime.generated.yml"
-set "DOCKER_DIRECTORY=docker"
 set "START_COMMAND=start_windows.cmd"
+set "ENV_FILE=.env"
 
 set "MODE=install"
 set "FIX_MODE=0"
+set "INSTALLER_MODE=0"
 set "BACKEND_OVERRIDE="
 set "COMPOSE_MODE=ghcr"
 
@@ -42,11 +42,25 @@ if /I "%~1"=="--compose" (
   shift
   goto parse_args
 )
+if /I "%~1"=="--installer" (
+  set "INSTALLER_MODE=1"
+  shift
+  goto parse_args
+)
 if /I "%~1"=="--help" goto usage
 if /I "%~1"=="-h" goto usage
 call :fail Unknown option: %~1
 
 :args_done
+if "%INSTALLER_MODE%"=="1" (
+  set "DOCKER_DIR=%ROOT_DIR%\installer\docker"
+  set "DOCKER_DIRECTORY=installer/docker"
+) else (
+  set "DOCKER_DIR=%ROOT_DIR%\docker"
+  set "DOCKER_DIRECTORY=docker"
+)
+if not exist "%DOCKER_DIR%" call :fail Docker directory not found: %DOCKER_DIR%
+
 if /I not "%COMPOSE_MODE%"=="ghcr" if /I not "%COMPOSE_MODE%"=="local" call :fail --compose must be ghcr or local
 if not "%BACKEND_OVERRIDE%"=="" (
   if /I not "%BACKEND_OVERRIDE%"=="cpu" if /I not "%BACKEND_OVERRIDE%"=="cuda13" if /I not "%BACKEND_OVERRIDE%"=="rocm" if /I not "%BACKEND_OVERRIDE%"=="slim" if /I not "%BACKEND_OVERRIDE%"=="vulkan" call :fail --backend must be cpu, cuda13, rocm, slim, or vulkan
@@ -72,8 +86,11 @@ call :select_compose_file
 call :select_vulkan_runtime
 call :select_rocm_runtime
 
+if "%INSTALLER_MODE%"=="1" (
+  call :log Installer layout: using %DOCKER_DIRECTORY% for compose, volumes, and overrides.
+)
 call :log Selected backend: %SELECTED_BACKEND%
-call :log Compose file: docker\%COMPOSE_FILE%
+call :log Compose file: %DOCKER_DIRECTORY%\%COMPOSE_FILE%
 
 if /I "%MODE%"=="doctor" (
   call :log Doctor mode complete. No changes were made.
@@ -84,23 +101,24 @@ if /I "%MODE%"=="doctor" (
 pushd "%DOCKER_DIR%" || call :fail Could not open docker directory.
 set "COMPOSE_ARGS=-f %COMPOSE_FILE%"
 if exist "%HOST_MOUNT_OVERRIDE_FILE%" (
-  docker compose -f "%COMPOSE_FILE%" -f "%HOST_MOUNT_OVERRIDE_FILE%" config >nul 2>nul
+  docker compose -f "%COMPOSE_FILE%" -f "%HOST_MOUNT_OVERRIDE_FILE%" --env-file "%ENV_FILE%" config >nul 2>nul
   if errorlevel 1 (
-    call :warn Ignoring invalid host mount override docker\%HOST_MOUNT_OVERRIDE_FILE%. Recreate mounts to regenerate it.
+    call :warn Ignoring invalid host mount override %DOCKER_DIRECTORY%\%HOST_MOUNT_OVERRIDE_FILE%. Recreate mounts to regenerate it.
   ) else (
     set "COMPOSE_ARGS=%COMPOSE_ARGS% -f %HOST_MOUNT_OVERRIDE_FILE%"
+    call :log Including host mount override: %HOST_MOUNT_OVERRIDE_FILE%
   )
 )
 if exist "%ROCM_RUNTIME_OVERRIDE_FILE%" (
-  docker compose -f "%COMPOSE_FILE%" -f "%ROCM_RUNTIME_OVERRIDE_FILE%" config >nul 2>nul
+  docker compose -f "%COMPOSE_FILE%" -f "%ROCM_RUNTIME_OVERRIDE_FILE%" --env-file "%ENV_FILE%" config >nul 2>nul
   if errorlevel 1 (
-    call :warn Ignoring invalid ROCm runtime override docker\%ROCM_RUNTIME_OVERRIDE_FILE%.
+    call :warn Ignoring invalid ROCm runtime override %DOCKER_DIRECTORY%\%ROCM_RUNTIME_OVERRIDE_FILE%.
   ) else (
     set "COMPOSE_ARGS=%COMPOSE_ARGS% -f %ROCM_RUNTIME_OVERRIDE_FILE%"
     call :log Including ROCm runtime override: %ROCM_RUNTIME_OVERRIDE_FILE%
   )
 )
-docker compose %COMPOSE_ARGS% up -d || (
+docker compose %COMPOSE_ARGS% --env-file "%ENV_FILE%" up -d || (
   popd
   call :fail docker compose up failed.
 )
@@ -108,7 +126,7 @@ popd
 
 call :wait_for_health
 if errorlevel 1 (
-  call :warn GuideAnts did not pass health check in time. Check: docker compose -f docker\%COMPOSE_FILE% ps
+  call :warn GuideAnts did not pass health check in time. Check: docker compose -f %DOCKER_DIRECTORY%\%COMPOSE_FILE% ps
 ) else (
   call :log GuideAnts is up: %HEALTH_URL%
   start "" "%HEALTH_URL%"
@@ -282,5 +300,6 @@ echo   --doctor               Run checks only, do not change anything.
 echo   --fix                  Attempt limited auto-remediation where possible.
 echo   --backend cpu^|cuda13^|rocm^|slim^|vulkan   Force backend selection. slim and vulkan are explicit only and are not auto-detected.
 echo   --compose ghcr^|local   Use GHCR compose files ^(default^) or local build files.
+echo   --installer            Use installer/docker compose files, volumes, and overrides.
 echo   --help                 Show this help.
 exit /b 0

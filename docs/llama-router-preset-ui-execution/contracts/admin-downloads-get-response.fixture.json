@@ -1,0 +1,18 @@
+{
+  "operationId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "registeringAlias",
+  "progress": 0.95,
+  "errorMessage": null,
+  "journal": [
+    {
+      "step": "downloadModelFile",
+      "path": "Qwen3.6-35B-A3B-Q6_K_XL-00001-of-00002.gguf",
+      "completedAt": "2026-07-10T12:03:00Z"
+    },
+    {
+      "step": "downloadModelFile",
+      "path": "Qwen3.6-35B-A3B-Q6_K_XL-00002-of-00002.gguf",
+      "completedAt": "2026-07-10T12:04:30Z"
+    }
+  ]
+}

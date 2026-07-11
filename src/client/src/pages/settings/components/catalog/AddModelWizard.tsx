@@ -9,7 +9,7 @@ import {
   SettingsRuntimeProfileDto,
 } from '../../../../types/settings';
 import { ActiveAddOperationState, AddModelProvider, AddModelWizardState } from '../../types';
-import { buildAddModelRequest, createEmptyAddModelWizardState, getErrorMessage } from '../../utils';
+import { buildAddModelRequest, createAttachAliasWizardState, createEmptyAddModelWizardState, getErrorMessage } from '../../utils';
 import { getCatalogProviderDisplayName } from '../../constants/displayLabels';
 import { HIDDEN_CHAT_MODEL_PROVIDERS } from '../../constants/connectionSections';
 import { TextActionButton } from '../shared/ActionButtons';
@@ -28,6 +28,8 @@ import {
   localModelOnboardingProgressStep,
 } from '../../../../features/localModelOnboarding/status';
 import { useLocalModelOnboardingOperation } from '../../../../features/localModelOnboarding/useOperationPolling';
+import { LlamaLocalModelOnboardingPanel } from '../../../../features/localModelOnboarding/curated/LlamaLocalModelOnboardingPanel';
+import type { LocalModelOnboardingMode } from '../../../../features/localModelOnboarding/curated/types';
 
 const ADD_MODEL_STEPS = [
   { id: 'queued', label: 'Queued', help: 'Waiting for install worker.' },
@@ -53,9 +55,45 @@ const VISIBLE_CATALOG_PROVIDER_OPTIONS = CATALOG_PROVIDER_OPTIONS.filter(
   (provider) => !HIDDEN_CHAT_MODEL_PROVIDERS.has(provider)
 );
 
+type WizardStep = 'provider' | 'catalog' | 'providerConfig' | 'review' | 'progress';
+
+function shouldSkipCatalogStep(provider: string, llamaOnboardingMode: LocalModelOnboardingMode): boolean {
+  return provider === 'llama-cpp' && llamaOnboardingMode === 'curated';
+}
+
+function formatWizardStepLabel(step: WizardStep, skipCatalogStep: boolean): string {
+  if (skipCatalogStep) {
+    switch (step) {
+      case 'provider':
+        return '1 of 4 - Choose provider';
+      case 'providerConfig':
+        return '2 of 4 - Provider configuration';
+      case 'review':
+        return '3 of 4 - Review and create';
+      case 'progress':
+        return '4 of 4 - Progress';
+      default:
+        return '2 of 4 - Provider configuration';
+    }
+  }
+  switch (step) {
+    case 'provider':
+      return '1 of 5 - Choose provider';
+    case 'catalog':
+      return '2 of 5 - Catalog entry';
+    case 'providerConfig':
+      return '3 of 5 - Provider configuration';
+    case 'review':
+      return '4 of 5 - Review and create';
+    case 'progress':
+      return '5 of 5 - Progress';
+  }
+}
+
 interface AddModelWizardProps {
   isOpen: boolean;
   providerPreselect: string | null;
+  attachAliasPreselect?: string | null;
   profiles: SettingsRuntimeProfileDto[];
   profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
@@ -167,13 +205,21 @@ function AddOperationProgress({
             {reached ? <div className="pl-6 text-xs text-gray-500">{item.help}</div> : null}
             {item.id === 'downloading' && active ? (
               <div className="pl-6">
-                <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
-                  <div
-                    className="h-full bg-blue-500 transition-all"
-                    style={{ width: `${Math.max(0, Math.min(1, progress ?? 0)) * 100}%` }}
-                  />
-                </div>
-                <div className="mt-1 text-xs text-gray-500">{Math.round(Math.max(0, Math.min(1, progress ?? 0)) * 100)}%</div>
+                {typeof progress === 'number' ? (
+                  <>
+                    <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
+                      <div
+                        className="h-full bg-blue-500 transition-all"
+                        style={{ width: `${Math.max(0, Math.min(1, progress)) * 100}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      {Math.round(Math.max(0, Math.min(1, progress)) * 100)}%
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-xs text-gray-500">Downloading…</div>
+                )}
               </div>
             ) : null}
           </div>
@@ -193,6 +239,7 @@ function AddOperationProgress({
 export function AddModelWizard({
   isOpen,
   providerPreselect,
+  attachAliasPreselect,
   profiles,
   profilesLoading,
   inventory,
@@ -203,7 +250,7 @@ export function AddModelWizard({
   onCatalogChanged,
   onSetActiveAddOperation,
 }: AddModelWizardProps) {
-  const [step, setStep] = useState<'provider' | 'catalog' | 'providerConfig' | 'review' | 'progress'>('provider');
+  const [step, setStep] = useState<WizardStep>('provider');
   const [value, setValue] = useState<AddModelWizardState>(() => createEmptyAddModelWizardState(providerPreselect));
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -213,19 +260,29 @@ export function AddModelWizard({
   const [operationError, setOperationError] = useState<AddModelErrorDto | null>(null);
   const [modelIdError, setModelIdError] = useState<string | null>(null);
   const [checkingModelId, setCheckingModelId] = useState(false);
+  const [llamaOnboardingMode, setLlamaOnboardingMode] = useState<LocalModelOnboardingMode>('curated');
+  const [curatedStep, setCuratedStep] = useState('model');
 
   useEffect(() => {
     if (!isOpen) {
       return;
     }
-    const next = createEmptyAddModelWizardState(providerPreselect);
+    const attachAlias = attachAliasPreselect?.trim() ?? '';
+    const next = attachAlias
+      ? createAttachAliasWizardState(attachAlias, providerPreselect ?? 'llama-cpp')
+      : createEmptyAddModelWizardState(providerPreselect);
     if (next.provider && HIDDEN_CHAT_MODEL_PROVIDERS.has(next.provider)) {
       next.provider = '';
     }
-    if (next.provider) {
-      setStep('catalog');
+    if (attachAlias) {
+      setStep('providerConfig');
+      setLlamaOnboardingMode('existingAlias');
+    } else if (next.provider) {
+      setStep(next.provider === 'llama-cpp' ? 'providerConfig' : 'catalog');
+      setLlamaOnboardingMode('curated');
     } else {
       setStep('provider');
+      setLlamaOnboardingMode('curated');
     }
     setValue(next);
     setSubmitError(null);
@@ -236,7 +293,8 @@ export function AddModelWizard({
     setOperationError(null);
     setModelIdError(null);
     setCheckingModelId(false);
-  }, [isOpen, providerPreselect]);
+    setCuratedStep('model');
+  }, [isOpen, providerPreselect, attachAliasPreselect]);
 
   const handleOperationUpdate = useCallback((op: { status: string; progress?: number | null; error?: AddModelErrorDto | null }) => {
     setOperationStatus(op.status);
@@ -261,14 +319,25 @@ export function AddModelWizard({
 
   useLocalModelOnboardingOperation({
     operationId,
+    pollRoute: llamaOnboardingMode === 'curated' ? 'operations' : 'downloads',
     onUpdate: handleOperationUpdate,
     onTerminal: handleOperationTerminal,
     onPollFailureThreshold: handleOperationPollFailureThreshold,
     intervalMs: 2000,
   });
 
+  const skipCatalogStep = shouldSkipCatalogStep(value.provider, llamaOnboardingMode);
+  const isLlamaCuratedActive = skipCatalogStep;
+  const hideWizardFooterForCurated =
+    isLlamaCuratedActive && step === 'providerConfig' && !['completed', 'progress'].includes(curatedStep);
+  const wizardMaxWidthClass =
+    value.provider === 'llama-cpp' && (step === 'providerConfig' || step === 'progress') ? 'max-w-6xl' : 'max-w-3xl';
+
   const canContinueFromProvider = value.provider.trim().length > 0;
   const canContinueFromCatalog = useMemo(() => {
+    if (value.provider === 'llama-cpp' && llamaOnboardingMode === 'curated') {
+      return true;
+    }
     if (value.provider === 'llama-cpp') {
       return !modelIdError && !checkingModelId;
     }
@@ -278,7 +347,7 @@ export function AddModelWizard({
       !modelIdError &&
       !checkingModelId
     );
-  }, [checkingModelId, modelIdError, value.catalogDisplayName, value.catalogModelId, value.provider]);
+  }, [checkingModelId, llamaOnboardingMode, modelIdError, value.catalogDisplayName, value.catalogModelId, value.provider]);
 
   const validateModelId = async () => {
     const candidate = value.catalogModelId.trim();
@@ -348,11 +417,11 @@ export function AddModelWizard({
       isOpen={isOpen}
       title="Add Model"
       onClose={onClose}
-      maxWidthClass="max-w-3xl"
+      maxWidthClass={wizardMaxWidthClass}
       disableDismiss={submitting}
       disableOverlayDismiss
       footer={
-        step === 'progress' ? (
+        hideWizardFooterForCurated ? null : step === 'progress' ? (
           <TextActionButton tone="neutral" onClick={onClose} title="Close wizard">
             Close
           </TextActionButton>
@@ -365,9 +434,15 @@ export function AddModelWizard({
               <TextActionButton
                 tone="neutral"
                 onClick={() =>
-                  setStep((previous) =>
-                    previous === 'catalog' ? 'provider' : previous === 'providerConfig' ? 'catalog' : 'providerConfig'
-                  )
+                  setStep((previous) => {
+                    if (previous === 'catalog') {
+                      return 'provider';
+                    }
+                    if (previous === 'providerConfig') {
+                      return skipCatalogStep ? 'provider' : 'catalog';
+                    }
+                    return 'providerConfig';
+                  })
                 }
                 title="Back"
               >
@@ -378,7 +453,9 @@ export function AddModelWizard({
               <TextActionButton
                 tone="primary"
                 disabled={!canContinueFromProvider}
-                onClick={() => setStep('catalog')}
+                onClick={() =>
+                  setStep(shouldSkipCatalogStep(value.provider, llamaOnboardingMode) ? 'providerConfig' : 'catalog')
+                }
                 title="Continue"
               >
                 Continue
@@ -414,18 +491,7 @@ export function AddModelWizard({
         )
       }
     >
-      <div className="mb-4 text-xs text-gray-500">
-        Step:{' '}
-        {step === 'provider'
-          ? '1 of 5 - Choose provider'
-          : step === 'catalog'
-          ? '2 of 5 - Catalog entry'
-          : step === 'providerConfig'
-          ? '3 of 5 - Provider configuration'
-          : step === 'review'
-          ? '4 of 5 - Review and create'
-          : '5 of 5 - Progress'}
-      </div>
+      <div className="mb-4 text-xs text-gray-500">Step: {formatWizardStepLabel(step, skipCatalogStep)}</div>
 
       {step === 'provider' ? (
         <div className="space-y-2">
@@ -451,7 +517,7 @@ export function AddModelWizard({
         </div>
       ) : null}
 
-      {step === 'catalog' ? (
+      {step === 'catalog' && !skipCatalogStep ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Model ID</label>
@@ -519,44 +585,97 @@ export function AddModelWizard({
 
       {step === 'providerConfig' ? (
         <div className="space-y-4">
-          {value.provider !== 'llama-cpp' ? (
-            <div className="space-y-2">
-              <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime Profile</label>
-              <select
-                value={value.runtimeProfileId}
-                onChange={(event) => setValue((previous) => ({ ...previous, runtimeProfileId: event.target.value }))}
-                disabled={profilesLoading}
-                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="">
-                  {profilesLoading
-                    ? 'Loading profiles...'
-                    : profiles.filter((p) => p.providers.includes(value.provider)).length === 0
-                    ? `No profiles defined for ${value.provider}`
-                    : 'Select runtime profile'}
-                </option>
-                {profiles
-                  .filter((p) => p.providers.includes(value.provider))
-                  .map((profile) => (
-                    <option key={profile.profileId} value={profile.profileId}>
-                      {profile.displayName} ({profile.profileId})
-                    </option>
-                  ))}
-              </select>
-              <p className="text-[11px] text-gray-500">
-                Assigns sampling parameter controls (Temperature, Top P) to this model in guide and assistant builders.
-              </p>
-            </div>
-          ) : null}
-          {renderProviderForm(
-            value,
-            (updates) => setValue((previous) => ({ ...previous, ...updates })),
-            profiles,
-            profilesLoading,
-            inventory,
-            inventoryError,
-            onCreateRuntimeProfileTemplate,
-            onCreateCustomRuntimeProfile
+          {value.provider === 'llama-cpp' ? (
+            <LlamaLocalModelOnboardingPanel
+              mode={llamaOnboardingMode}
+              onModeChange={setLlamaOnboardingMode}
+              onboardingUi="settings"
+              settingsValue={value}
+              onSettingsChange={(updates) => setValue((previous) => ({ ...previous, ...updates }))}
+              profiles={profiles}
+              profilesLoading={profilesLoading}
+              inventory={inventory}
+              inventoryError={inventoryError}
+              onCreateRuntimeProfile={onCreateRuntimeProfileTemplate}
+              onCreateCustomRuntimeProfile={onCreateCustomRuntimeProfile}
+              onCuratedStepChange={setCuratedStep}
+              onCuratedOperationStarted={(nextOperationId, meta) => {
+                setOperationId(nextOperationId);
+                setValue((previous) => ({
+                  ...previous,
+                  catalogModelId: meta.catalogModelId,
+                  catalogDisplayName: meta.catalogDisplayName,
+                  llamaRouterModelId: meta.routerModelId,
+                }));
+                setStep('progress');
+                onSetActiveAddOperation({
+                  operationId: nextOperationId,
+                  routerModelId: meta.routerModelId,
+                  catalogModelId: meta.catalogModelId,
+                });
+              }}
+              onCuratedCompleted={(result) => {
+                setValue((previous) => ({
+                  ...previous,
+                  catalogModelId: result.catalogModelId || previous.catalogModelId,
+                }));
+                void onCatalogChanged();
+                onSetActiveAddOperation(null);
+              }}
+              onSetDefault={async (catalogModelId) => {
+                const chatDefaults = await api.settings.chatDefaults.get();
+                await api.settings.chatDefaults.update({
+                  rowVersion: chatDefaults.rowVersion,
+                  defaultModelId: catalogModelId,
+                  overrideAllChatModels: chatDefaults.overrideAllChatModels,
+                  temperature: chatDefaults.temperature ?? null,
+                  topP: chatDefaults.topP ?? null,
+                  reasoningEffort: chatDefaults.reasoningEffort ?? null,
+                  samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
+                });
+              }}
+              onClose={onClose}
+            />
+          ) : (
+            <>
+              <div className="space-y-2">
+                <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime Profile</label>
+                <select
+                  value={value.runtimeProfileId}
+                  onChange={(event) => setValue((previous) => ({ ...previous, runtimeProfileId: event.target.value }))}
+                  disabled={profilesLoading}
+                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">
+                    {profilesLoading
+                      ? 'Loading profiles...'
+                      : profiles.filter((p) => p.providers.includes(value.provider)).length === 0
+                      ? `No profiles defined for ${value.provider}`
+                      : 'Select runtime profile'}
+                  </option>
+                  {profiles
+                    .filter((p) => p.providers.includes(value.provider))
+                    .map((profile) => (
+                      <option key={profile.profileId} value={profile.profileId}>
+                        {profile.displayName} ({profile.profileId})
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[11px] text-gray-500">
+                  Assigns sampling parameter controls (Temperature, Top P) to this model in guide and assistant builders.
+                </p>
+              </div>
+              {renderProviderForm(
+                value,
+                (updates) => setValue((previous) => ({ ...previous, ...updates })),
+                profiles,
+                profilesLoading,
+                inventory,
+                inventoryError,
+                onCreateRuntimeProfileTemplate,
+                onCreateCustomRuntimeProfile
+              )}
+            </>
           )}
         </div>
       ) : null}

@@ -10,6 +10,7 @@ import {
   LOCAL_AI_OPTIONAL_SERVICE_DEFAULTS,
   LOCAL_AI_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
+  WIZARD_DEFER_WARMUP_OPTIONS,
 } from './constants';
 import type {
   LocalAiModelDraft,
@@ -164,6 +165,13 @@ export interface UseLocalAiWizardStateResult {
   setPrereqsForm: (patch: Partial<LocalAiPrerequisitesFormState>) => void;
   setOptionalForm: (patch: Partial<LocalAiOptionalServicesFormState>) => void;
   startInstall: (formData: LocalAiInstallFormData) => Promise<void>;
+  startCuratedInstall: (input: {
+    operationId: string;
+    catalogModelId: string;
+    catalogDisplayName: string;
+    routerModelId: string;
+    setAsGlobalDefault: boolean;
+  }) => void;
   removeDraftModel: (localId: string) => void;
   persistLocalAiPrereqs: (snapshot: WizardLoadSnapshot, loadSnapshot: () => Promise<WizardLoadSnapshot>, setSnapshot: (s: WizardLoadSnapshot) => void) => Promise<void>;
   persistLocalAiModels: (snapshot: WizardLoadSnapshot, loadSnapshot: () => Promise<WizardLoadSnapshot>, setSnapshot: (s: WizardLoadSnapshot) => void) => Promise<void>;
@@ -286,10 +294,12 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     localId: string,
     operationId: string,
     catalogModelId: string,
-    shouldSetDefault: boolean
+    shouldSetDefault: boolean,
+    pollRoute: 'operations' | 'downloads' = 'downloads',
   ) => {
     const interval = createLocalModelOnboardingPoller({
       operationId,
+      pollRoute,
       onUpdate: (op) => {
         setDraftModels((prev) =>
           prev.map((d) => {
@@ -416,6 +426,41 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     }
   }, [pollDownload]);
 
+  const startCuratedInstall = useCallback((input: {
+    operationId: string;
+    catalogModelId: string;
+    catalogDisplayName: string;
+    routerModelId: string;
+    setAsGlobalDefault: boolean;
+  }) => {
+    const localId = `draft-curated-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const draft: LocalAiModelDraft = {
+      localId,
+      installSource: 'curated',
+      routerModelId: input.routerModelId,
+      runtimeProfileId: '',
+      huggingFaceRepository: '',
+      huggingFaceResolvedRevision: '',
+      huggingFaceArtifactGroupId: '',
+      huggingFaceModelFiles: [],
+      huggingFaceMmprojFiles: [],
+      huggingFaceTargetDirectory: '',
+      huggingFaceRouterPresetRows: [],
+      huggingFacePresetMode: 'replace',
+      existingAliasRouterModelId: '',
+      catalogModelId: input.catalogModelId,
+      catalogDisplayName: input.catalogDisplayName,
+      setAsGlobalDefault: input.setAsGlobalDefault,
+      persisted: false,
+      asyncOperationId: input.operationId,
+      asyncStatus: 'queued',
+      asyncProgress: null,
+      asyncError: null,
+    };
+    setDraftModels((prev) => [...prev, draft]);
+    pollDownload(localId, input.operationId, input.catalogModelId, input.setAsGlobalDefault, 'operations');
+  }, [pollDownload]);
+
   const persistLocalAiPrereqs = useCallback(async (
     snap: WizardLoadSnapshot,
     loadSnapshotFn: () => Promise<WizardLoadSnapshot>,
@@ -540,7 +585,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
         TimeoutSeconds: optionalForm.embeddingsTimeoutSeconds.trim(),
         LocalMinIntervalMs: optionalForm.embeddingsLocalMinIntervalMs.trim(),
       });
-      await api.settings.services.updateActiveProvider('Embeddings', LOCAL_AI_SERVICE_PROVIDER_IDS.Embeddings);
+      await api.settings.services.updateActiveProvider('Embeddings', LOCAL_AI_SERVICE_PROVIDER_IDS.Embeddings, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableImages) {
@@ -552,21 +597,21 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
         imgFields.LocalOutputFormat = outputFormat;
       }
       await api.settings.services.updateProviderFields('ImageGeneration', LOCAL_AI_SERVICE_PROVIDER_IDS.ImageGeneration, imgFields);
-      await api.settings.services.updateActiveProvider('ImageGeneration', LOCAL_AI_SERVICE_PROVIDER_IDS.ImageGeneration);
+      await api.settings.services.updateActiveProvider('ImageGeneration', LOCAL_AI_SERVICE_PROVIDER_IDS.ImageGeneration, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableSpeechTranscription) {
       await api.settings.services.updateProviderFields('SpeechTranscription', LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechTranscription, {
         TimeoutSeconds: optionalForm.speechTranscriptionTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('SpeechTranscription', LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechTranscription);
+      await api.settings.services.updateActiveProvider('SpeechTranscription', LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechTranscription, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableSpeechSynthesis) {
       await api.settings.services.updateProviderFields('SpeechSynthesis', LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechSynthesis, {
         TimeoutSeconds: optionalForm.speechSynthesisTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('SpeechSynthesis', LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechSynthesis);
+      await api.settings.services.updateActiveProvider('SpeechSynthesis', LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechSynthesis, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableDocumentIntelligence) {
@@ -575,7 +620,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
         MaxConcurrentConversions: optionalForm.documentIntelligenceMaxConcurrentConversions.trim(),
         AsyncStatusPollIntervalMs: optionalForm.documentIntelligenceAsyncStatusPollIntervalMs.trim(),
       });
-      await api.settings.services.updateActiveProvider('DocumentIntelligence', LOCAL_AI_SERVICE_PROVIDER_IDS.DocumentIntelligence);
+      await api.settings.services.updateActiveProvider('DocumentIntelligence', LOCAL_AI_SERVICE_PROVIDER_IDS.DocumentIntelligence, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     const refreshed = await loadSnapshotFn();
@@ -602,6 +647,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
     setPrereqsForm,
     setOptionalForm,
     startInstall,
+    startCuratedInstall,
     removeDraftModel,
     persistLocalAiPrereqs,
     persistLocalAiModels,

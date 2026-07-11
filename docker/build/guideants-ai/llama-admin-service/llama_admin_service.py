@@ -15,6 +15,22 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from guideants_hf.exact_download import (
+    ExactDownloadError,
+    activate_staged_files,
+    build_artifact_specs,
+    build_immutable_input,
+    stage_download_file,
+)
+from guideants_hf.path_safety import PathSafetyError, delete_obsolete_repository_paths
+from guideants_hf.operation_journal import OperationJournalError, OperationJournalStore
+from guideants_hf.preset_validation import (
+    PresetValidationError,
+    apply_preset_mode,
+    normalize_alias,
+    normalize_preset_map,
+)
+from guideants_hf.vision_token_preset import apply_alias_vision_token_preset
 from guideants_hf.transport import (
     build_regex_from_include_pattern,
     download_hf_file,
@@ -22,8 +38,21 @@ from guideants_hf.transport import (
 )
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
+
+import llama_router_ini as router_ini
+from fleet_projection import (
+    confirm_fleet_restart,
+    get_fleet_preset_response,
+    put_fleet_preset,
+)
+from guideants_hf.repository import HuggingFaceAccessError
+from llama_catalog import (
+    CatalogDefinitionError,
+    build_catalog_response,
+    resolve_definition_quants,
+)
 
 
 def utc_now_iso() -> str:
@@ -77,6 +106,10 @@ def resolve_router_config_path() -> str:
 
 MODEL_STORE_ROOT = resolve_model_store_root()
 ROUTER_CONFIG_PATH = resolve_router_config_path()
+router_ini.ROUTER_CONFIG_PATH = ROUTER_CONFIG_PATH
+OPERATION_JOURNAL_ROOT = os.path.join(MODEL_STORE_ROOT, ".llama-operations")
+STAGING_ROOT = os.path.join(MODEL_STORE_ROOT, ".staging")
+OPERATION_JOURNAL = OperationJournalStore(OPERATION_JOURNAL_ROOT)
 
 
 def ensure_inside_root(root_abs: str, candidate_abs: str) -> None:
@@ -531,12 +564,27 @@ def delete_registered_artifacts(model_path: str, mmproj_path: str) -> None:
             log_event("artifact_delete_file", path=fp)
 
 
-def _strip_extras_matching(
-    extras: dict[str, str], allowed_lower: set[str]
-) -> None:
-    for k in list(extras.keys()):
-        if k.lower() in allowed_lower:
-            del extras[k]
+@dataclass
+class RuntimeApplyResult:
+    applied: bool
+    ini_sha256: str
+    remediation: str | None = None
+
+
+def signal_llama_server_reload_with_result(*, preserve_loaded: bool = True) -> RuntimeApplyResult:
+    ini_sha256 = ""
+    if os.path.exists(ROUTER_CONFIG_PATH):
+        with open(ROUTER_CONFIG_PATH, "rb") as handle:
+            ini_sha256 = hashlib.sha256(handle.read()).hexdigest()
+    try:
+        signal_llama_server_reload(preserve_loaded=preserve_loaded)
+        return RuntimeApplyResult(applied=True, ini_sha256=ini_sha256)
+    except Exception as exc:  # noqa: BLE001 - surface reload failure without rewriting preset
+        return RuntimeApplyResult(
+            applied=False,
+            ini_sha256=ini_sha256,
+            remediation=f"INI committed but llama-server reload failed: {exc}",
+        )
 
 
 def upsert_router_entry(
@@ -544,19 +592,31 @@ def upsert_router_entry(
     model_path: str,
     mmproj_path: str,
     *,
+    preset: dict[str, str] | None = None,
+    preset_mode: str = "replace",
     context_size: int | None = None,
     cache_ram_mib: int | None = None,
     update_context: bool = False,
     update_cache: bool = False,
-) -> None:
-    """Write model/mmproj. Optional ctx/cache updates are applied only when the flag is True; null then clears
-    the corresponding keys. When False, existing per-alias extra keys in those families are left unchanged
-    (paths-only registration)."""
-    alias_trimmed = alias.strip()
-    if not alias_trimmed:
-        raise ValueError("Router alias is required.")
+    trigger_reload: bool = True,
+) -> tuple[str, RuntimeApplyResult | None]:
+    """Write model/mmproj and preset extras atomically. Returns (ini_sha256, runtime_apply)."""
+    alias_trimmed = normalize_alias(alias)
+    if not model_path.strip():
+        raise ValueError("modelPath is required.")
     _ctx_l = {x.lower() for x in _CTX_KEYS}
     _cache_l = {x.lower() for x in _CACHE_KEYS}
+
+    incoming_preset = normalize_preset_map(preset or {})
+    incoming_preset = apply_alias_vision_token_preset(alias_trimmed, incoming_preset)
+    if update_context:
+        _strip_extras_matching_incoming(incoming_preset, _ctx_l)
+        if context_size is not None:
+            incoming_preset["ctx-size"] = str(int(context_size))
+    if update_cache:
+        _strip_extras_matching_incoming(incoming_preset, _cache_l)
+        if cache_ram_mib is not None:
+            incoming_preset["cache-ram"] = str(int(cache_ram_mib))
 
     with ROUTER_FILE_LOCK:
         entries: dict[str, _RouterSection] = {}
@@ -567,17 +627,8 @@ def upsert_router_entry(
         payload_before = serialize_router_ini(entries)
         prior = entries.get(alias_trimmed)
         extras: dict[str, str] = dict(prior.extras) if prior else {}
-
-        if update_context:
-            _strip_extras_matching(extras, _ctx_l)
-            if context_size is not None:
-                # Canonical preset key for router per-model configuration.
-                extras["ctx-size"] = str(int(context_size))
-        if update_cache:
-            _strip_extras_matching(extras, _cache_l)
-            if cache_ram_mib is not None:
-                # Canonical preset key for router per-model configuration.
-                extras["cache-ram"] = str(int(cache_ram_mib))
+        if incoming_preset or preset is not None or update_context or update_cache:
+            extras = apply_preset_mode(extras, incoming_preset, preset_mode)
 
         entries[alias_trimmed] = _RouterSection(
             model=model_path.strip(),
@@ -590,6 +641,7 @@ def upsert_router_entry(
             os.makedirs(directory, exist_ok=True)
         payload = serialize_router_ini(entries)
         changed = payload != payload_before
+        ini_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
         temp_fd, temp_path = tempfile.mkstemp(
             dir=directory if directory else None,
@@ -615,6 +667,8 @@ def upsert_router_entry(
         "router_entry_upsert_applied",
         alias=alias_trimmed,
         request={
+            "presetMode": preset_mode,
+            "presetKeys": sorted(incoming_preset.keys()),
             "updateContext": update_context,
             "updateCache": update_cache,
             "contextSize": context_size,
@@ -625,11 +679,25 @@ def upsert_router_entry(
         before=before_summary,
         after=after_summary,
         iniChanged=changed,
-        iniSha256=hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        iniSha256=ini_sha256,
     )
 
-    signal_llama_server_reload()
-    log_event("router_entry_upsert_reload_triggered", alias=alias_trimmed, iniChanged=changed)
+    runtime_apply: RuntimeApplyResult | None = None
+    if trigger_reload and changed:
+        runtime_apply = signal_llama_server_reload_with_result()
+        log_event(
+            "router_entry_upsert_reload_triggered",
+            alias=alias_trimmed,
+            iniChanged=changed,
+            runtimeApplied=runtime_apply.applied,
+        )
+    return ini_sha256, runtime_apply
+
+
+def _strip_extras_matching_incoming(extras: dict[str, str], allowed_lower: set[str]) -> None:
+    for k in list(extras.keys()):
+        if k.lower() in allowed_lower:
+            del extras[k]
 
 
 class RouterEntryUpsertRequest(BaseModel):
@@ -637,7 +705,9 @@ class RouterEntryUpsertRequest(BaseModel):
         extra = "forbid"
     alias: str
     modelPath: str
-    mmprojPath: str
+    mmprojPath: str = ""
+    preset: dict[str, str] | None = None
+    presetMode: str = "replace"
     contextSize: int | None = None
     cacheRamMib: int | None = None
 
@@ -650,6 +720,39 @@ class RouterEntryDto(BaseModel):
     hasMmprojFile: bool
     contextSize: int | None = None
     cacheRamMib: int | None = None
+    preset: dict[str, str]
+
+
+class RouterEntriesResponse(BaseModel):
+    entries: list[RouterEntryDto]
+
+
+class DeleteObsoleteArtifactsRequest(BaseModel):
+    class Config:
+        extra = "forbid"
+    targetDirectory: str
+    repositoryPaths: list[str]
+
+
+class ArtifactMetadataDto(BaseModel):
+    path: str
+    size: int | None = None
+    digest: str | None = None
+    etag: str | None = None
+
+
+class ExactDownloadRequest(BaseModel):
+    operationId: str
+    repository: str
+    resolvedRevision: str
+    modelFiles: list[str]
+    mmprojFiles: list[str] = []
+    alias: str
+    targetDirectory: str
+    preset: dict[str, str]
+    presetMode: str = "replace"
+    artifactMetadata: list[ArtifactMetadataDto] | None = None
+    hfToken: str | None = None
 
 
 class StartDownloadRequest(BaseModel):
@@ -694,10 +797,26 @@ class DownloadOperationState:
         }
 
 
+def _journal_record_to_download_dto(record) -> dict[str, Any]:
+    return record.to_dto()
+
+
 OPERATIONS_LOCK = threading.Lock()
 OPERATIONS: dict[str, DownloadOperationState] = {}
+DOWNLOAD_WORKERS: dict[str, threading.Thread] = {}
 ALIAS_LOCKS_GUARD = threading.Lock()
 ALIAS_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _download_worker_active(operation_id: str) -> bool:
+    worker = DOWNLOAD_WORKERS.get(operation_id)
+    return worker is not None and worker.is_alive()
+
+
+def _start_download_worker(operation_id: str, target: Any, args: tuple[Any, ...]) -> None:
+    worker = threading.Thread(target=target, args=args, daemon=True)
+    DOWNLOAD_WORKERS[operation_id] = worker
+    worker.start()
 
 
 def get_alias_lock(alias: str) -> threading.Lock:
@@ -888,7 +1007,265 @@ def run_download_operation(operation_id: str, request: StartDownloadRequest) -> 
         alias_lock.release()
 
 
+def _immutable_input_download_identity(immutable_input: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "repository": str(immutable_input.get("repository") or "").strip(),
+        "resolvedRevision": str(immutable_input.get("resolvedRevision") or "").strip(),
+        "modelFiles": list(immutable_input.get("modelFiles") or []),
+        "mmprojFiles": list(immutable_input.get("mmprojFiles") or []),
+        "routerModelId": normalize_alias(str(immutable_input.get("routerModelId") or immutable_input.get("alias") or "")),
+        "targetDirectory": str(immutable_input.get("targetDirectory") or "").strip().strip("/\\"),
+        "presetMode": str(immutable_input.get("presetMode") or "replace"),
+        "routerPreset": dict(immutable_input.get("routerPreset") or immutable_input.get("preset") or {}),
+    }
+
+
+def _exact_download_request_identity(request: ExactDownloadRequest) -> dict[str, Any]:
+    return _immutable_input_download_identity(
+        {
+            "repository": request.repository,
+            "resolvedRevision": request.resolvedRevision,
+            "modelFiles": request.modelFiles,
+            "mmprojFiles": request.mmprojFiles,
+            "routerModelId": request.alias,
+            "targetDirectory": request.targetDirectory,
+            "presetMode": request.presetMode,
+            "routerPreset": request.preset,
+        }
+    )
+
+
+def run_exact_download_operation(operation_id: str, request: ExactDownloadRequest) -> None:
+    alias = normalize_alias(request.alias)
+    alias_lock = get_alias_lock(alias)
+    alias_lock.acquire()
+    staging_dir = os.path.join(STAGING_ROOT, operation_id)
+    try:
+        preset = normalize_preset_map(request.preset)
+        immutable_input = build_immutable_input(
+            repository=request.repository,
+            resolved_revision=request.resolvedRevision,
+            model_files=request.modelFiles,
+            mmproj_files=request.mmprojFiles,
+            alias=alias,
+            target_directory=request.targetDirectory,
+            preset=preset,
+            preset_mode=request.presetMode,
+            artifact_metadata=[
+                item.model_dump(exclude_none=True) for item in (request.artifactMetadata or [])
+            ],
+        )
+        try:
+            OPERATION_JOURNAL.create(operation_id=operation_id, immutable_input=immutable_input, alias=alias)
+        except OperationJournalError:
+            existing = OPERATION_JOURNAL.get(operation_id)
+            if existing is None or _immutable_input_download_identity(existing.immutable_input) != _exact_download_request_identity(request):
+                fail_operation(operation_id, "Operation id conflicts with a different immutable input.")
+                OPERATION_JOURNAL.update(
+                    operation_id,
+                    status="failed",
+                    error_message="Operation id conflicts with a different immutable input.",
+                    completed_at=utc_now_iso(),
+                )
+                return
+            OPERATION_JOURNAL.update(
+                operation_id,
+                status="downloading",
+                error_message=None,
+                completed_at=None,
+                log_line="Resuming staged download.",
+            )
+
+        OPERATION_JOURNAL.update(operation_id, status="downloading", progress=0.05, log_line="Preparing staged download.")
+        update_operation(operation_id, status="downloading", progress=0.05, log_line="Preparing staged download.")
+
+        metadata_payload = [
+            item.model_dump(exclude_none=True) for item in (request.artifactMetadata or [])
+        ]
+        target_dir, model_specs, mmproj_specs = build_artifact_specs(
+            model_files=request.modelFiles,
+            mmproj_files=request.mmprojFiles,
+            store_root=MODEL_STORE_ROOT,
+            target_subdir=request.targetDirectory,
+            artifact_metadata=metadata_payload,
+        )
+        os.makedirs(staging_dir, exist_ok=True)
+        token = (request.hfToken or "").strip() or None
+        all_specs = model_specs + mmproj_specs
+        total = len(all_specs)
+        existing = OPERATION_JOURNAL.get(operation_id)
+        completed_files = 0
+        if existing is not None:
+            completed_files = sum(1 for step in existing.journal if step.step == "downloadModelFile")
+
+        for idx, spec in enumerate(all_specs):
+            if idx < completed_files:
+                continue
+
+            def report(bytes_read: int, *, file_idx: int = idx) -> None:
+                if spec.expected_size and spec.expected_size > 0:
+                    file_fraction = min(bytes_read / float(spec.expected_size), 1.0)
+                else:
+                    file_fraction = 0.0
+                progress = 0.05 + 0.80 * ((file_idx + file_fraction) / max(total, 1))
+                OPERATION_JOURNAL.update(operation_id, status="downloading", progress=progress, log_line=f"Downloading {spec.repository_path}")
+                update_operation(operation_id, status="downloading", progress=progress, log_line=f"Downloading {spec.repository_path}")
+
+            stage_download_file(
+                repository=request.repository.strip(),
+                resolved_revision=request.resolvedRevision.strip(),
+                spec=spec,
+                staging_dir=staging_dir,
+                token=token,
+                operation_id=operation_id,
+                progress_callback=report,
+            )
+            OPERATION_JOURNAL.append_step(operation_id, "downloadModelFile", spec.repository_path)
+
+        OPERATION_JOURNAL.update(operation_id, status="validating", progress=0.88, log_line="Validating staged artifact set.")
+        update_operation(operation_id, status="validating", progress=0.88, log_line="Validating staged artifact set.")
+        activate_staged_files(
+            staging_dir=staging_dir,
+            target_dir=target_dir,
+            store_root=MODEL_STORE_ROOT,
+            specs=all_specs,
+        )
+        OPERATION_JOURNAL.mark_side_effect(operation_id, "artifactsActivated")
+
+        update_operation(operation_id, status="registeringAlias", progress=0.92, log_line="Registering router alias.")
+        OPERATION_JOURNAL.update(operation_id, status="registeringAlias", progress=0.92, log_line="Registering router alias.")
+
+        target_subdir = request.targetDirectory.strip().strip("/\\")
+        first_model_name = os.path.basename(model_specs[0].repository_path.replace("\\", "/"))
+        model_container_path = f"/models-local/llama/{target_subdir}/{first_model_name}"
+        mmproj_container_path = ""
+        if mmproj_specs:
+            mmproj_name = os.path.basename(mmproj_specs[0].repository_path.replace("\\", "/"))
+            mmproj_container_path = f"/models-local/llama/{target_subdir}/{mmproj_name}"
+
+        ini_sha256, runtime_apply = upsert_router_entry(
+            alias,
+            model_container_path,
+            mmproj_container_path,
+            preset=preset,
+            preset_mode=request.presetMode,
+        )
+        OPERATION_JOURNAL.mark_side_effect(operation_id, "routerIniCommitted")
+        OPERATION_JOURNAL.update(operation_id, ini_sha256=ini_sha256)
+
+        if runtime_apply is not None and not runtime_apply.applied:
+            message = runtime_apply.remediation or "INI committed but llama-server reload failed."
+            OPERATION_JOURNAL.update(
+                operation_id,
+                status="failed",
+                progress=0.98,
+                error_message=message,
+                log_line=message,
+                completed_at=utc_now_iso(),
+            )
+            update_operation(
+                operation_id,
+                status="failed",
+                progress=0.98,
+                error_message=message,
+                log_line=message,
+                completed_at=utc_now_iso(),
+            )
+            return
+
+        OPERATION_JOURNAL.update(
+            operation_id,
+            status="completed",
+            progress=1.0,
+            error_message=None,
+            log_line="Completed.",
+            completed_at=utc_now_iso(),
+        )
+        update_operation(
+            operation_id,
+            status="completed",
+            progress=1.0,
+            log_line="Completed.",
+            completed_at=utc_now_iso(),
+        )
+    except (ExactDownloadError, PresetValidationError, PathSafetyError, OperationJournalError, ValueError) as exc:
+        code = getattr(exc, "code", type(exc).__name__)
+        message = str(exc)
+        log_event("llama_admin_exact_download_failed", operationId=operation_id, errorType=code, error=message)
+        fail_operation(operation_id, message)
+        if OPERATION_JOURNAL.get(operation_id) is not None:
+            OPERATION_JOURNAL.update(
+                operation_id,
+                status="failed",
+                error_message=message,
+                log_line=message,
+                completed_at=utc_now_iso(),
+            )
+    except Exception as exc:
+        log_event("llama_admin_exact_download_failed", operationId=operation_id, errorType=type(exc).__name__, error=str(exc))
+        fail_operation(operation_id, str(exc))
+        if OPERATION_JOURNAL.get(operation_id) is not None:
+            OPERATION_JOURNAL.update(
+                operation_id,
+                status="failed",
+                error_message=str(exc),
+                log_line=str(exc),
+                completed_at=utc_now_iso(),
+            )
+    finally:
+        alias_lock.release()
+        DOWNLOAD_WORKERS.pop(operation_id, None)
+        if os.path.isdir(staging_dir):
+            shutil.rmtree(staging_dir, ignore_errors=True)
+
+
 APP = FastAPI(title="GuideAnts Llama Admin Service", version="1.0.0")
+
+
+def _catalog_error_status(code: str) -> int:
+    if code in {"CATALOG_DEFINITION_NOT_FOUND", "REPOSITORY_NOT_FOUND"}:
+        return 404
+    if code in {"CATALOG_VERSION_MISMATCH"}:
+        return 409
+    if code in {"HUGGINGFACE_TOKEN_MISSING", "REPO_TOKEN_INSUFFICIENT"}:
+        return 403
+    if code in {"PROJECTOR_NOT_FOUND", "INCOMPLETE_QUANT_GROUP"}:
+        return 422
+    return 400
+
+
+def _resolve_hf_token(request: Request) -> str | None:
+    header_token = (request.headers.get("X-HF-Token") or "").strip()
+    return header_token or None
+
+
+@APP.get("/admin/catalog")
+def get_admin_catalog() -> dict[str, Any]:
+    return build_catalog_response()
+
+
+@APP.get("/admin/catalog/{catalog_id}/quants")
+def get_admin_catalog_quants(catalog_id: str, request: Request) -> dict[str, Any]:
+    catalog_version = (request.query_params.get("catalogVersion") or "").strip() or None
+    resolved_revision = (request.query_params.get("resolvedRevision") or "").strip() or None
+    hf_token = _resolve_hf_token(request)
+    try:
+        return resolve_definition_quants(
+            catalog_id.strip(),
+            hf_token,
+            catalog_version=catalog_version,
+            resolved_revision=resolved_revision,
+        )
+    except CatalogDefinitionError as exc:
+        raise HTTPException(
+            status_code=_catalog_error_status(exc.code),
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except HuggingFaceAccessError as exc:
+        raise HTTPException(
+            status_code=_catalog_error_status(exc.code),
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
 
 
 @APP.get("/health")
@@ -900,8 +1277,32 @@ def health() -> dict[str, Any]:
     }
 
 
+class FleetPresetPutRequest(BaseModel):
+    expectedRevision: int
+    preset: dict[str, Any]
+
+
+@APP.get("/runtime/fleet-preset")
+def get_runtime_fleet_preset() -> dict[str, Any]:
+    return get_fleet_preset_response()
+
+
+@APP.put("/runtime/fleet-preset")
+def put_runtime_fleet_preset(request: FleetPresetPutRequest) -> dict[str, Any]:
+    try:
+        response = put_fleet_preset(request.expectedRevision, request.preset)
+        restart_result = restart_llama_server()
+        if not restart_result.get("restarted"):
+            response["applyStatus"] = "error"
+            response["applyError"] = "llama-server restart did not complete."
+            return response
+        return confirm_fleet_restart(response["desiredRevision"])
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @APP.get("/router/entries")
-def get_router_entries() -> list[RouterEntryDto]:
+def get_router_entries() -> RouterEntriesResponse:
     entries = read_router_entries()
     result: list[RouterEntryDto] = []
     for alias in sorted(entries.keys()):
@@ -918,9 +1319,27 @@ def get_router_entries() -> list[RouterEntryDto]:
                 hasMmprojFile=has_artifact(sec.mmproj),
                 contextSize=ctx,
                 cacheRamMib=c_mib,
+                preset=dict(ex),
             )
         )
-    return result
+    return RouterEntriesResponse(entries=result)
+
+
+@APP.post("/admin/artifacts/delete-obsolete")
+def delete_obsolete_artifacts(request: DeleteObsoleteArtifactsRequest) -> dict[str, Any]:
+    if not request.targetDirectory.strip():
+        raise HTTPException(status_code=400, detail="targetDirectory is required")
+    if not request.repositoryPaths:
+        return {"removed": []}
+    try:
+        removed = delete_obsolete_repository_paths(
+            store_root=MODEL_STORE_ROOT,
+            target_subdir=request.targetDirectory,
+            repository_paths=request.repositoryPaths,
+        )
+    except PathSafetyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"removed": removed}
 
 
 @APP.post("/router/entries")
@@ -938,6 +1357,7 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
         alias=request.alias.strip(),
         request={
             "setFields": sorted(list(set_fields)),
+            "presetMode": request.presetMode,
             "contextSize": request.contextSize,
             "cacheRamMib": request.cacheRamMib,
             "modelPath": request.modelPath.strip(),
@@ -948,21 +1368,34 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
     )
 
     try:
-        upsert_router_entry(
+        ini_sha256, runtime_apply = upsert_router_entry(
             request.alias,
             request.modelPath,
             request.mmprojPath,
+            preset=request.preset,
+            preset_mode=request.presetMode,
             context_size=request.contextSize,
             cache_ram_mib=request.cacheRamMib,
             update_context=update_context,
             update_cache=update_cache,
         )
+    except PresetValidationError as exc:
+        raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return {"ok": True}
+    response: dict[str, Any] = {"ok": True, "iniSha256": ini_sha256}
+    if runtime_apply is not None:
+        response["runtimeApply"] = {
+            "applied": runtime_apply.applied,
+            "iniSha256": runtime_apply.ini_sha256,
+            "remediation": runtime_apply.remediation,
+        }
+        if not runtime_apply.applied:
+            raise HTTPException(status_code=502, detail=response)
+    return response
 
 
 @APP.delete("/router/entries/{alias}")
@@ -992,7 +1425,110 @@ def delete_router_entry_route(alias: str) -> Response:
 
 
 @APP.post("/downloads")
-def start_download(request: StartDownloadRequest) -> dict[str, Any]:
+async def start_download(http_request: Request) -> dict[str, Any]:
+    body = await http_request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+
+    if "modelFiles" in body:
+        request = ExactDownloadRequest.model_validate(body)
+        return _start_exact_download(request)
+
+    request = StartDownloadRequest.model_validate(body)
+    return _start_legacy_download(request)
+
+
+def _start_exact_download(request: ExactDownloadRequest) -> dict[str, Any]:
+    if not request.operationId.strip():
+        raise HTTPException(status_code=400, detail="operationId is required")
+    if not request.repository.strip():
+        raise HTTPException(status_code=400, detail="repository is required")
+    if not request.resolvedRevision.strip():
+        raise HTTPException(status_code=400, detail="resolvedRevision is required")
+    if not request.modelFiles:
+        raise HTTPException(status_code=400, detail="modelFiles is required")
+    if not request.alias.strip():
+        raise HTTPException(status_code=400, detail="alias is required")
+    if not request.targetDirectory.strip():
+        raise HTTPException(status_code=400, detail="targetDirectory is required")
+
+    alias = normalize_alias(request.alias)
+    in_flight_statuses = {"queued", "resolvingFiles", "downloading", "validating", "registeringAlias"}
+    restartable_statuses = in_flight_statuses | {"failed"}
+    operation_id = request.operationId.strip()
+
+    existing_journal = OPERATION_JOURNAL.get(operation_id)
+    if existing_journal is not None and existing_journal.status in restartable_statuses:
+        if _immutable_input_download_identity(existing_journal.immutable_input) != _exact_download_request_identity(request):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": f"Operation '{operation_id}' conflicts with a different download request.",
+                    "operationId": operation_id,
+                    "status": existing_journal.status,
+                    "routerModelId": existing_journal.alias,
+                    "progress": existing_journal.progress,
+                },
+            )
+        if _download_worker_active(operation_id):
+            return existing_journal.to_dto()
+        if existing_journal.status == "failed":
+            OPERATION_JOURNAL.update(
+                operation_id,
+                status="queued",
+                error_message=None,
+                completed_at=None,
+                log_line="Retrying interrupted download.",
+            )
+
+    with OPERATIONS_LOCK:
+        existing = next(
+            (
+                op
+                for op in OPERATIONS.values()
+                if op.router_model_id == alias and op.status in in_flight_statuses
+            ),
+            None,
+        )
+        if existing is not None and existing.operation_id != request.operationId.strip():
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": f"A download for alias '{alias}' is already in progress.",
+                    "operationId": existing.operation_id,
+                    "status": existing.status,
+                    "routerModelId": existing.router_model_id,
+                    "progress": existing.progress,
+                },
+            )
+
+        operation_id = request.operationId.strip()
+        if existing_journal is not None and existing_journal.status in restartable_statuses:
+            state = DownloadOperationState(
+                operation_id=operation_id,
+                router_model_id=alias,
+                status="queued" if existing_journal.status == "failed" else existing_journal.status,
+                progress=existing_journal.progress,
+                log_line=existing_journal.log_line,
+            )
+        else:
+            state = DownloadOperationState(
+                operation_id=operation_id,
+                router_model_id=alias,
+                status="queued",
+                progress=0.0,
+            )
+        OPERATIONS[operation_id] = state
+
+    _start_download_worker(operation_id, run_exact_download_operation, (operation_id, request))
+    journal = OPERATION_JOURNAL.get(operation_id)
+    if journal is not None:
+        return journal.to_dto()
+    with OPERATIONS_LOCK:
+        return OPERATIONS[operation_id].to_dto()
+
+
+def _start_legacy_download(request: StartDownloadRequest) -> dict[str, Any]:
     if not request.repository.strip():
         raise HTTPException(status_code=400, detail="repository is required")
     if not request.quantIncludePattern.strip():
@@ -1046,6 +1582,9 @@ def start_download(request: StartDownloadRequest) -> dict[str, Any]:
 
 @APP.get("/downloads/{operation_id}")
 def get_download_status(operation_id: str) -> dict[str, Any]:
+    journal_record = OPERATION_JOURNAL.get(operation_id)
+    if journal_record is not None:
+        return journal_record.to_dto()
     with OPERATIONS_LOCK:
         state = OPERATIONS.get(operation_id)
         if state is None:

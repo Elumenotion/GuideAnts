@@ -14,7 +14,9 @@
 
 #   env: HSA_ENABLE_DXG_DETECTION=1
 
-#   security_opt: seccomp:unconfined
+#   security_opt: seccomp=unconfined
+
+# Applies to guideants-ai and docling-serve when backend=rocm.
 
 services:
 
@@ -32,3 +34,16 @@ services:
 
       - render
 
+  docling-serve:
+
+    devices:
+
+      - /dev/kfd
+
+      - /dev/dri
+
+    group_add:
+
+      - video
+
+      - render

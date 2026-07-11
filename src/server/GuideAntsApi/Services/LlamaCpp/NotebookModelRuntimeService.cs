@@ -395,7 +395,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 {
                     var routerModelId = NormalizeRouterModelId(model.RuntimeConfig!.RouterModelId);
                     await using var _loadAliasLock = await _coordinator.AcquireAliasLockAsync(routerModelId, CancellationToken.None);
-                    await _llamaClient.LoadModelAsync(routerModelId, model.RuntimeConfig.LoadParams);
+                    await _llamaClient.LoadModelAsync(routerModelId, CancellationToken.None);
                 }
             }
 
@@ -698,8 +698,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
         return new ModelRuntimeConfigDto(
             parsed.RouterModelId,
-            parsed.RuntimeProfileId,
-            parsed.LoadParams);
+            parsed.RuntimeProfileId);
     }
 }
 

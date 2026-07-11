@@ -7,7 +7,9 @@ import { LOCAL_AI_SERVICE_PROVIDER_IDS } from '../../constants';
 import { DraftProgress, LocalAiModelsStep } from '../LocalAiModelsStep';
 import { LocalAiPrerequisitesStep } from '../LocalAiPrerequisitesStep';
 import { LocalAiServiceStepBase, type LocalAiServiceStepHandle } from '../LocalAiServiceStepBase';
+import { api } from '../../../../../services/api';
 import { createLocalAiModelDraft, createLocalAiPrereqsForm } from './stepTestHelpers';
+import { catalogFixture } from '../../../../../features/localModelOnboarding/curated/fixtures';
 
 vi.mock('../../../../../services/api', () => ({
   api: {
@@ -15,39 +17,64 @@ vi.mock('../../../../../services/api', () => ({
       localModels: {
         listOutcome: vi.fn(),
       },
+      getLlamaCatalog: vi.fn(),
+      getLlamaCatalogQuants: vi.fn(),
+      getLlamaOperationStatus: vi.fn(),
+      getLlamaRouterEntries: vi.fn(),
+      chatDefaults: {
+        get: vi.fn(),
+        update: vi.fn(),
+      },
+      addModel: vi.fn(),
     },
   },
 }));
 
-vi.mock('../../../../../pages/settings/editors/common', async () => {
-  const actual = await vi.importActual<typeof import('../../../../../pages/settings/editors/common')>(
-    '../../../../../pages/settings/editors/common',
-  );
-  return {
-    ...actual,
-    RepositoryFilePicker: ({
-      onRepositoryChange,
-      onChange,
-    }: {
-      onRepositoryChange: (value: string) => void;
-      onChange: (values: Record<string, string>) => void;
-    }) => (
-      <div data-testid="repo-picker">
-        <input
-          data-testid="repo-input"
-          aria-label="Repository"
-          onChange={(event) => onRepositoryChange(event.target.value)}
-        />
-        <button
-          type="button"
-          onClick={() => onChange({ 'llamaCpp.model': 'Qwen3-9B-Q5_K_M.gguf' })}
-        >
-          Pick quant
-        </button>
-      </div>
-    ),
-  };
-});
+vi.mock('../../../../../features/localModelOnboarding/advanced/ArtifactGroupPicker', () => ({
+  ArtifactGroupPicker: ({
+    onRepositoryChange,
+    onResolvedRevisionChange,
+    onSelectedGroupChange,
+  }: {
+    onRepositoryChange: (value: string) => void;
+    onResolvedRevisionChange: (value: string) => void;
+    onSelectedGroupChange: (groupId: string, files: string[]) => void;
+  }) => (
+    <div data-testid="artifact-group-picker">
+      <input
+        data-testid="repo-input"
+        aria-label="Repository"
+        onChange={(event) => onRepositoryChange(event.target.value)}
+      />
+      <button
+        type="button"
+        onClick={() => {
+          onResolvedRevisionChange('rev-1');
+          onSelectedGroupChange('group-1', ['Qwen3-9B-Q5_K_M.gguf']);
+        }}
+      >
+        Pick artifacts
+      </button>
+    </div>
+  ),
+}));
+
+function openAdvancedCustom() {
+  fireEvent.click(screen.getByRole('button', { name: /Custom Hugging Face/i }));
+}
+
+function openAdvancedAttach() {
+  fireEvent.click(screen.getByRole('button', { name: /Attach existing alias/i }));
+}
+
+function textboxAfterLabel(label: string): HTMLInputElement {
+  const labelEl = screen.getByText(label);
+  const container = labelEl.parentElement;
+  if (!container) {
+    throw new Error(`Container not found for label: ${label}`);
+  }
+  return within(container).getByRole('textbox');
+}
 
 const mockSave = vi.fn();
 const mockSwitchProvider = vi.fn();
@@ -109,7 +136,6 @@ vi.mock('../../../../../pages/settings/state/useServiceEditorController', () => 
   })),
 }));
 
-import { api } from '../../../../../services/api';
 import { useServiceEditorController } from '../../../../../pages/settings/state/useServiceEditorController';
 
 describe('LocalAiPrerequisitesStep', () => {
@@ -214,21 +240,25 @@ describe('LocalAiModelsStep', () => {
     installError: null,
     installModelError: null,
     onInstall,
+    onCuratedInstall: vi.fn(),
     onRemoveDraft,
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     onInstall.mockResolvedValue(undefined);
+    (api.settings.getLlamaCatalog as ReturnType<typeof vi.fn>).mockResolvedValue(catalogFixture);
+    (api.settings.getLlamaRouterEntries as ReturnType<typeof vi.fn>).mockResolvedValue({ entries: [] });
   });
 
-  it('renders install form and empty-state warning', () => {
+  it('renders curated onboarding by default and empty-state warning', async () => {
     render(<LocalAiModelsStep {...defaultProps} />);
 
     expect(screen.getByText('Local Chat Models')).toBeInTheDocument();
     expect(screen.getByText(/At least one model must be installed/)).toBeInTheDocument();
-    expect(selectContainingOption('Install from Hugging Face')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Install model' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/Qwen 3.6 35B A3B MTP/i)).toBeInTheDocument();
+    });
   });
 
   it('shows existing models and draft install progress', () => {
@@ -248,11 +278,18 @@ describe('LocalAiModelsStep', () => {
 
   it('submits huggingface install form via onInstall', async () => {
     render(<LocalAiModelsStep {...defaultProps} />);
+    openAdvancedCustom();
 
     fireEvent.change(selectContainingOption(/Default/), { target: { value: 'default' } });
-    fireEvent.change(screen.getByPlaceholderText('e.g. qwen3-9b'), { target: { value: 'qwen3-9b' } });
+    fireEvent.change(textboxAfterLabel('Catalog model ID'), { target: { value: 'qwen3-9b' } });
+    fireEvent.change(textboxAfterLabel('Router alias'), { target: { value: 'qwen3-9b' } });
     fireEvent.change(screen.getByTestId('repo-input'), { target: { value: 'Qwen/Qwen3-9B' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Pick quant' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick artifacts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add preset key' }));
+    const presetKey = screen.getByPlaceholderText('ctx-size');
+    fireEvent.change(presetKey, { target: { value: 'ctx-size' } });
+    const presetValue = screen.getByPlaceholderText('value');
+    fireEvent.change(presetValue, { target: { value: '8192' } });
     fireEvent.click(screen.getByRole('button', { name: 'Install model' }));
 
     await waitFor(() => {
@@ -262,7 +299,9 @@ describe('LocalAiModelsStep', () => {
           routerModelId: 'qwen3-9b',
           runtimeProfileId: 'default',
           huggingFaceRepository: 'Qwen/Qwen3-9B',
-          huggingFaceQuantIncludePattern: 'Qwen3-9B-Q5_K_M.gguf',
+          huggingFaceResolvedRevision: 'rev-1',
+          huggingFaceModelFiles: ['Qwen3-9B-Q5_K_M.gguf'],
+          huggingFaceRouterPresetRows: [{ key: 'ctx-size', value: '8192' }],
           setAsGlobalDefault: true,
         }),
       );
@@ -284,9 +323,7 @@ describe('LocalAiModelsStep', () => {
       />,
     );
 
-    fireEvent.change(selectContainingOption('Install from Hugging Face'), {
-      target: { value: 'existingAlias' },
-    });
+    openAdvancedAttach();
     expect(selectContainingOption('alias-1')).toBeInTheDocument();
 
     const installingCard = screen.getByText('Download failed').closest('.rounded-lg') as HTMLElement;
@@ -294,7 +331,7 @@ describe('LocalAiModelsStep', () => {
     expect(onRemoveDraft).toHaveBeenCalledWith('err-draft');
   });
 
-  it('shows install errors', () => {
+  it('shows install errors in advanced mode', () => {
     render(
       <LocalAiModelsStep
         {...defaultProps}
@@ -303,6 +340,7 @@ describe('LocalAiModelsStep', () => {
       />,
     );
 
+    openAdvancedCustom();
     expect(screen.getByText('Profile required')).toBeInTheDocument();
     expect(screen.getByText('VALIDATION')).toBeInTheDocument();
     expect(screen.getByText('Select a profile')).toBeInTheDocument();
@@ -316,9 +354,7 @@ describe('LocalAiModelsStep', () => {
       />,
     );
 
-    fireEvent.change(selectContainingOption('Install from Hugging Face'), {
-      target: { value: 'existingAlias' },
-    });
+    openAdvancedAttach();
     fireEvent.change(selectContainingOption(/Default/), { target: { value: 'default' } });
     fireEvent.change(selectContainingOption('alias-1'), { target: { value: 'alias-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Install model' }));
@@ -337,10 +373,8 @@ describe('LocalAiModelsStep', () => {
   it('shows llama unavailable message when inventory is empty', () => {
     render(<LocalAiModelsStep {...defaultProps} inventory={[]} inventoryLoading={false} />);
 
-    fireEvent.change(selectContainingOption('Install from Hugging Face'), {
-      target: { value: 'existingAlias' },
-    });
-    expect(screen.getByText(/No local llama server is reachable/)).toBeInTheDocument();
+    openAdvancedAttach();
+    expect(screen.getByText(/No local llama server is configured/i)).toBeInTheDocument();
   });
 
   it('retries errored draft by repopulating the install form', async () => {
@@ -362,8 +396,9 @@ describe('LocalAiModelsStep', () => {
     const card = screen.getByText('retry-model').closest('.rounded-lg') as HTMLElement;
     fireEvent.click(within(card).getByTitle('Retry'));
     expect(onRemoveDraft).toHaveBeenCalledWith('retry-draft');
-    expect(selectContainingOption('Install from Hugging Face')).toHaveValue('huggingface');
-    expect(screen.getByPlaceholderText('e.g. qwen3-9b')).toHaveValue('retry-model');
+    await waitFor(() => {
+      expect(textboxAfterLabel('Router alias')).toHaveValue('retry-model');
+    });
   });
 
   it('shows global default checkbox when models already exist', async () => {
@@ -375,15 +410,20 @@ describe('LocalAiModelsStep', () => {
       />,
     );
 
+    openAdvancedCustom();
     const checkbox = screen.getByRole('checkbox');
     expect(checkbox).not.toBeChecked();
     await user.click(checkbox);
     expect(checkbox).toBeChecked();
 
     fireEvent.change(selectContainingOption(/Default/), { target: { value: 'default' } });
-    fireEvent.change(screen.getByPlaceholderText('e.g. qwen3-9b'), { target: { value: 'another-model' } });
+    fireEvent.change(textboxAfterLabel('Catalog model ID'), { target: { value: 'another-model' } });
+    fireEvent.change(textboxAfterLabel('Router alias'), { target: { value: 'another-model' } });
     fireEvent.change(screen.getByTestId('repo-input'), { target: { value: 'Qwen/Qwen3-9B' } });
-    await user.click(screen.getByRole('button', { name: 'Pick quant' }));
+    await user.click(screen.getByRole('button', { name: 'Pick artifacts' }));
+    await user.click(screen.getByRole('button', { name: 'Add preset key' }));
+    fireEvent.change(screen.getByPlaceholderText('ctx-size'), { target: { value: 'ctx-size' } });
+    fireEvent.change(screen.getByPlaceholderText('value'), { target: { value: '4096' } });
     await user.click(screen.getByRole('button', { name: 'Install model' }));
 
     await waitFor(() => {
@@ -409,11 +449,12 @@ describe('LocalAiModelsStep', () => {
       />,
     );
 
-    fireEvent.change(screen.getByPlaceholderText('e.g. qwen3-9b'), { target: { value: 'pending-model' } });
+    openAdvancedCustom();
+    fireEvent.change(textboxAfterLabel('Router alias'), { target: { value: 'pending-model' } });
     rerender(<LocalAiModelsStep {...defaultProps} draftModels={[completedDraft]} />);
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('e.g. qwen3-9b')).toHaveValue('');
+      expect(textboxAfterLabel('Router alias')).toHaveValue('');
     });
   });
 });

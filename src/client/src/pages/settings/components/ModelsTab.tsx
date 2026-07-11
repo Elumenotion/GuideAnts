@@ -431,6 +431,7 @@ export function ModelsTab({
       </section>
       <CatalogRowEditModal
         model={editingModel}
+        orderedModels={orderedModels}
         profiles={profiles}
         profilesLoading={profilesLoading}
         inventory={llamaInventory}

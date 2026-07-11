@@ -14,7 +14,43 @@ public sealed record LlamaAdminRouterEntryDto(
     bool HasModelFile,
     bool HasMmprojFile,
     [property: JsonPropertyName("contextSize")] int? ContextSize,
-    [property: JsonPropertyName("cacheRamMib")] int? CacheRamMib);
+    [property: JsonPropertyName("cacheRamMib")] int? CacheRamMib,
+    IReadOnlyDictionary<string, string>? Preset);
+
+public sealed record LlamaAdminRouterEntriesResponseDto(
+    [property: JsonPropertyName("entries")] IReadOnlyList<LlamaAdminRouterEntryDto> Entries);
+
+public sealed record LlamaAdminRouterEntryUpsertRequest(
+    string Alias,
+    string ModelPath,
+    string MmprojPath,
+    IReadOnlyDictionary<string, string>? Preset,
+    string PresetMode = "replace",
+    int? ContextSize = null,
+    int? CacheRamMib = null);
+
+public sealed record LlamaAdminExactDownloadRequest(
+    string OperationId,
+    string Repository,
+    string ResolvedRevision,
+    IReadOnlyList<string> ModelFiles,
+    IReadOnlyList<string> MmprojFiles,
+    string Alias,
+    string TargetDirectory,
+    IReadOnlyDictionary<string, string> Preset,
+    string PresetMode,
+    IReadOnlyList<LlamaArtifactMetadataDto>? ArtifactMetadata,
+    string? HfToken);
+
+public sealed record LlamaAdminRouterEntryUpsertResult(
+    bool Ok,
+    string? IniSha256,
+    LlamaAdminRuntimeApplyDto? RuntimeApply);
+
+public sealed record LlamaAdminRuntimeApplyDto(
+    bool Applied,
+    string IniSha256,
+    string? Remediation);
 
 public sealed record LlamaAdminRestartResultDto(
     [property: JsonPropertyName("restarted")] bool Restarted,
@@ -44,7 +80,20 @@ public sealed record LlamaAdminStartDownloadRequest(
 
 public interface ILlamaRuntimeAdminClient
 {
-    Task<IReadOnlyList<LlamaAdminRouterEntryDto>> GetRouterEntriesAsync(CancellationToken cancellationToken = default);
+    Task<LlamaCatalogResponseDto> GetCatalogAsync(CancellationToken cancellationToken = default);
+
+    Task<LlamaCatalogQuantsResponseDto> GetCatalogQuantsAsync(
+        string catalogId,
+        string? catalogVersion,
+        string? resolvedHfToken,
+        CancellationToken cancellationToken = default,
+        string? resolvedRevision = null);
+
+    Task<LlamaAdminRouterEntriesResponseDto> GetRouterEntriesAsync(CancellationToken cancellationToken = default);
+
+    Task<LlamaAdminRouterEntryUpsertResult> PutRouterEntryAsync(
+        LlamaRouterEntryPutRequest request,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Updates <c>model</c> / <c>mmproj</c> in <c>router-models.ini</c> and preserves per-alias
     /// context and cache-ram keys when absent from this request (used after HF download registration).</summary>
@@ -64,6 +113,11 @@ public interface ILlamaRuntimeAdminClient
         int? cacheRamMib,
         CancellationToken cancellationToken = default);
 
+    Task<ModelDownloadOperationDto> StartExactDownloadAsync(
+        ExactStartModelDownloadRequest request,
+        string? resolvedHfToken,
+        CancellationToken cancellationToken = default);
+
     Task<ModelDownloadOperationDto> StartDownloadAsync(
         StartModelDownloadRequest request,
         string? resolvedHfToken,
@@ -77,6 +131,11 @@ public interface ILlamaRuntimeAdminClient
     /// Returns <c>false</c> when the alias is not registered (HTTP 404 from llama-admin).
     /// </summary>
     Task<bool> DeleteRouterEntryAsync(string alias, CancellationToken cancellationToken = default);
+
+    Task DeleteObsoleteArtifactPathsAsync(
+        string targetDirectory,
+        IReadOnlyList<string> repositoryPaths,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Operator-initiated restart of llama-server. Sends SIGTERM to the current PID (no-op if
@@ -110,7 +169,99 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<LlamaAdminRouterEntryDto>> GetRouterEntriesAsync(CancellationToken cancellationToken = default)
+    public async Task<LlamaCatalogResponseDto> GetCatalogAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync("admin/catalog", cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Failed to fetch llama catalog from llama admin ({(int)response.StatusCode}): {body}");
+        }
+
+        var parsed = JsonSerializer.Deserialize<LlamaCatalogResponseDto>(body, DeserializeOptions);
+        return parsed ?? throw new InvalidOperationException("Llama admin returned an empty catalog payload.");
+    }
+
+    public async Task<LlamaCatalogQuantsResponseDto> GetCatalogQuantsAsync(
+        string catalogId,
+        string? catalogVersion,
+        string? resolvedHfToken,
+        CancellationToken cancellationToken = default,
+        string? resolvedRevision = null)
+    {
+        if (string.IsNullOrWhiteSpace(catalogId))
+        {
+            throw new ArgumentException("Catalog id is required.", nameof(catalogId));
+        }
+
+        var escapedId = Uri.EscapeDataString(catalogId.Trim());
+        var query = new List<string>();
+        if (!string.IsNullOrWhiteSpace(catalogVersion))
+        {
+            query.Add($"catalogVersion={Uri.EscapeDataString(catalogVersion.Trim())}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(resolvedRevision))
+        {
+            query.Add($"resolvedRevision={Uri.EscapeDataString(resolvedRevision.Trim())}");
+        }
+
+        var path = $"admin/catalog/{escapedId}/quants";
+        if (query.Count > 0)
+        {
+            path += "?" + string.Join("&", query);
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        if (!string.IsNullOrWhiteSpace(resolvedHfToken))
+        {
+            request.Headers.TryAddWithoutValidation("X-HF-Token", resolvedHfToken.Trim());
+        }
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw CreateCatalogServiceException(response.StatusCode, body);
+        }
+
+        var parsed = JsonSerializer.Deserialize<LlamaCatalogQuantsResponseDto>(body, DeserializeOptions);
+        return parsed ?? throw new InvalidOperationException("Llama admin returned an empty quants payload.");
+    }
+
+    private static LlamaCatalogServiceException CreateCatalogServiceException(HttpStatusCode statusCode, string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            JsonElement detail = root;
+            if (root.TryGetProperty("detail", out var detailNode))
+            {
+                detail = detailNode;
+            }
+
+            var code = detail.TryGetProperty("code", out var codeNode)
+                ? codeNode.GetString() ?? "LLAMA_CATALOG_ERROR"
+                : "LLAMA_CATALOG_ERROR";
+            var message = detail.TryGetProperty("message", out var messageNode)
+                ? messageNode.GetString() ?? "Llama catalog request failed."
+                : root.TryGetProperty("detail", out var rawDetail) && rawDetail.ValueKind == JsonValueKind.String
+                    ? rawDetail.GetString() ?? "Llama catalog request failed."
+                    : "Llama catalog request failed.";
+            return new LlamaCatalogServiceException(code, message, (int)statusCode);
+        }
+        catch (JsonException)
+        {
+            return new LlamaCatalogServiceException(
+                "LLAMA_CATALOG_ERROR",
+                $"Llama catalog request failed ({(int)statusCode}).",
+                (int)statusCode);
+        }
+    }
+
+    public async Task<LlamaAdminRouterEntriesResponseDto> GetRouterEntriesAsync(CancellationToken cancellationToken = default)
     {
         using var response = await _httpClient.GetAsync("router/entries", cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -120,8 +271,85 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
                 $"Failed to fetch router entries from llama admin ({(int)response.StatusCode}): {body}");
         }
 
-        var parsed = JsonSerializer.Deserialize<List<LlamaAdminRouterEntryDto>>(body, DeserializeOptions);
-        return parsed ?? [];
+        var parsed = JsonSerializer.Deserialize<LlamaAdminRouterEntriesResponseDto>(body, DeserializeOptions);
+        return parsed ?? new LlamaAdminRouterEntriesResponseDto([]);
+    }
+
+    public async Task<LlamaAdminRouterEntryUpsertResult> PutRouterEntryAsync(
+        LlamaRouterEntryPutRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new LlamaAdminRouterEntryUpsertRequest(
+            Alias: request.Alias,
+            ModelPath: request.ModelPath,
+            MmprojPath: request.MmprojPath,
+            Preset: request.Preset,
+            PresetMode: request.PresetMode,
+            ContextSize: request.ContextSize,
+            CacheRamMib: request.CacheRamMib);
+
+        var json = JsonSerializer.Serialize(payload, RouterEntryUpsertJsonOptions);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "router/entries")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        using var response = await _httpClient.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        if (response.StatusCode == HttpStatusCode.BadGateway)
+        {
+            var parsedFailure = TryParseRouterUpsertResult(body);
+            if (parsedFailure is not null)
+            {
+                return parsedFailure;
+            }
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Failed to upsert router entry '{request.Alias}' via llama admin ({(int)response.StatusCode}): {body}");
+        }
+
+        return TryParseRouterUpsertResult(body)
+            ?? new LlamaAdminRouterEntryUpsertResult(true, null, null);
+    }
+
+    private static LlamaAdminRouterEntryUpsertResult? TryParseRouterUpsertResult(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            JsonElement payload = root;
+            if (root.TryGetProperty("detail", out var detailNode) && detailNode.ValueKind == JsonValueKind.Object)
+            {
+                payload = detailNode;
+            }
+
+            var ok = !payload.TryGetProperty("ok", out var okNode) || okNode.GetBoolean();
+            var iniSha256 = payload.TryGetProperty("iniSha256", out var iniNode)
+                ? iniNode.GetString()
+                : null;
+            LlamaAdminRuntimeApplyDto? runtimeApply = null;
+            if (payload.TryGetProperty("runtimeApply", out var runtimeNode) && runtimeNode.ValueKind == JsonValueKind.Object)
+            {
+                runtimeApply = new LlamaAdminRuntimeApplyDto(
+                    Applied: runtimeNode.TryGetProperty("applied", out var appliedNode) && appliedNode.GetBoolean(),
+                    IniSha256: runtimeNode.TryGetProperty("iniSha256", out var runtimeIniNode)
+                        ? runtimeIniNode.GetString() ?? string.Empty
+                        : string.Empty,
+                    Remediation: runtimeNode.TryGetProperty("remediation", out var remediationNode)
+                        ? remediationNode.GetString()
+                        : null);
+            }
+
+            return new LlamaAdminRouterEntryUpsertResult(ok, iniSha256, runtimeApply);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     public async Task AddOrUpdateRouterEntryAsync(
@@ -178,6 +406,45 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
         var errBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         throw new InvalidOperationException(
             $"Failed to upsert router entry '{alias}' via llama admin ({(int)response.StatusCode}): {errBody}");
+    }
+
+    public async Task<ModelDownloadOperationDto> StartExactDownloadAsync(
+        ExactStartModelDownloadRequest request,
+        string? resolvedHfToken,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new LlamaAdminExactDownloadRequest(
+            OperationId: request.OperationId,
+            Repository: request.Repository,
+            ResolvedRevision: request.ResolvedRevision,
+            ModelFiles: request.ModelFiles,
+            MmprojFiles: request.MmprojFiles,
+            Alias: request.Alias,
+            TargetDirectory: request.TargetDirectory,
+            Preset: request.Preset,
+            PresetMode: request.PresetMode,
+            ArtifactMetadata: request.ArtifactMetadata,
+            HfToken: resolvedHfToken);
+
+        using var response = await _httpClient.PostAsJsonAsync("downloads", payload, cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.Conflict)
+        {
+            var existing = TryParseConflictOperation(body, request.Alias);
+            if (existing is not null)
+            {
+                throw new LlamaRuntimeAdminConflictException(existing);
+            }
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Failed to start exact llama model download via llama admin ({(int)response.StatusCode}): {body}");
+        }
+
+        var parsed = JsonSerializer.Deserialize<ModelDownloadOperationDto>(body, DeserializeOptions);
+        return parsed ?? throw new InvalidOperationException("Llama admin returned an empty download operation payload.");
     }
 
     public async Task<ModelDownloadOperationDto> StartDownloadAsync(
@@ -357,4 +624,33 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
         throw new InvalidOperationException(
             $"Failed to delete router alias '{trimmed}' via llama admin ({(int)response.StatusCode}): {body}");
     }
+
+    public async Task DeleteObsoleteArtifactPathsAsync(
+        string targetDirectory,
+        IReadOnlyList<string> repositoryPaths,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            throw new ArgumentException("Target directory is required.", nameof(targetDirectory));
+        }
+
+        var payload = new
+        {
+            targetDirectory = targetDirectory.Trim(),
+            repositoryPaths = repositoryPaths.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToList(),
+        };
+
+        using var response = await _httpClient
+            .PostAsJsonAsync("admin/artifacts/delete-obsolete", payload, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new InvalidOperationException(
+                $"Failed to delete obsolete artifacts via llama admin ({(int)response.StatusCode}): {body}");
+        }
+    }
+
 }

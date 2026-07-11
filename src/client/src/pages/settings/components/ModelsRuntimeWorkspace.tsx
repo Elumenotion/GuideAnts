@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { LlamaRuntimeInventoryItemDto, SettingsModelDto, SettingsRuntimeProfileDto } from '../../../types/settings';
-import { ActiveAddOperationState, ModelsRuntimeSubTab, ProfileFormState } from '../types';
+import { ActiveAddOperationState, ModelsRuntimeSubTab, OpenAddModelWizardHandler } from '../types';
 import { LocalLlamaRuntimeTab } from './LocalLlamaRuntimeTab';
 import { ModelsTab } from './ModelsTab';
-import { ProfilesTab } from './ProfilesTab';
 
 interface ModelsRuntimeWorkspaceProps {
   initialSubTab?: ModelsRuntimeSubTab;
@@ -30,29 +29,13 @@ interface ModelsRuntimeWorkspaceProps {
   onRetryLoadModels: () => void;
   onRequestDeleteModel: (modelId: string) => void;
   onCatalogEdited: () => Promise<void>;
-  onOpenAddModelWizard: (providerPreselect?: string) => void;
+  onOpenAddModelWizard: OpenAddModelWizardHandler;
   activeAddOperation: ActiveAddOperationState | null;
-  profileDialogOpen: boolean;
-  editingProfileId: string | null;
-  profileForm: ProfileFormState;
-  profileSaving: boolean;
-  profilesError: string | null;
-  deletingProfileId: string | null;
-  onProfileFormChange: <K extends keyof ProfileFormState>(key: K, value: ProfileFormState[K]) => void;
-  onOpenCreateProfile: () => void;
-  onImportProfile: (form: ProfileFormState) => void;
-  onResetProfileForm: () => void;
-  onSaveProfile: () => void;
-  onRetryLoadProfiles: () => void;
-  onEditProfile: (profile: SettingsRuntimeProfileDto) => void;
-  onRequestDeleteProfile: (profileId: string) => void;
-  onInsertRuntimeProfileTemplate: (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => void;
 }
 
 const subTabs: Array<{ key: ModelsRuntimeSubTab; label: string }> = [
   { key: 'catalog', label: 'Catalog' },
-  { key: 'profiles', label: 'Runtime Profiles' },
-  { key: 'local-llama', label: 'Local Llama Runtime' },
+  { key: 'local-llama', label: 'Loaded models' },
 ];
 
 export function ModelsRuntimeWorkspace(props: ModelsRuntimeWorkspaceProps) {
@@ -63,9 +46,6 @@ export function ModelsRuntimeWorkspace(props: ModelsRuntimeWorkspaceProps) {
       setSubTab(props.initialSubTab);
       return;
     }
-    // Phase F (R-6.*): if a deep-link landed on this workspace with a focus
-    // target but no explicit subTab, switch to the tab that actually owns that
-    // target so the user sees the highlight without another click.
     if (props.focusedAlias) {
       setSubTab('local-llama');
     } else if (props.focusedModelId) {
@@ -113,28 +93,6 @@ export function ModelsRuntimeWorkspace(props: ModelsRuntimeWorkspaceProps) {
         />
       )}
 
-      {subTab === 'profiles' && (
-        <ProfilesTab
-          profileDialogOpen={props.profileDialogOpen}
-          editingProfileId={props.editingProfileId}
-          profileForm={props.profileForm}
-          profileSaving={props.profileSaving}
-          profilesLoading={props.profilesLoading}
-          profilesError={props.profilesError}
-          profiles={props.profiles}
-          deletingProfileId={props.deletingProfileId}
-          onProfileFormChange={props.onProfileFormChange}
-          onOpenCreateProfile={props.onOpenCreateProfile}
-          onImportProfile={props.onImportProfile}
-          onResetProfileForm={props.onResetProfileForm}
-          onSaveProfile={props.onSaveProfile}
-          onRetryLoadProfiles={props.onRetryLoadProfiles}
-          onEditProfile={props.onEditProfile}
-          onRequestDeleteProfile={props.onRequestDeleteProfile}
-          onInsertTemplate={props.onInsertRuntimeProfileTemplate}
-        />
-      )}
-
       {subTab === 'local-llama' && (
         <LocalLlamaRuntimeTab
           inventory={props.llamaInventory}
@@ -145,7 +103,7 @@ export function ModelsRuntimeWorkspace(props: ModelsRuntimeWorkspaceProps) {
           onLoad={props.onLoadLlamaModel}
           onRequestUnload={props.onRequestUnloadLlamaRouter}
           onRequestDelete={props.onRequestDeleteLlamaRouter}
-          onOpenAddModelWizard={(providerPreselect) => props.onOpenAddModelWizard(providerPreselect)}
+          onOpenAddModelWizard={props.onOpenAddModelWizard}
           focusedAlias={props.focusedAlias}
         />
       )}

@@ -27,8 +27,6 @@ services:
   guideants-ai:
     image: ${GA_AI_VULKAN_IMAGE:-ghcr.io/elumenotion/guideants-ai-vulkan:latest}
     container_name: guideants-ai
-    cap_drop:
-      - SYS_PTRACE
     # ---- Vulkan GPU wiring (cross-OS) -----------------------------------------
     # Defaults target Windows / Docker Desktop, where GPU Vulkan for EVERY vendor
     # goes Vulkan -> Mesa dzn -> D3D12 -> /dev/dxg (works from git bash, no WSL).
@@ -41,6 +39,10 @@ services:
       - render
     devices:
       - ${GA_VULKAN_DEVICE:-/dev/dxg}         # Windows: /dev/dxg ; Linux AMD/Intel: /dev/dri
+    cap_add:
+      - SYS_PTRACE                            # Docker Desktop dzn stability (harmless on Linux)
+    security_opt:
+      - seccomp=unconfined
     ports:
       - "8110:80"      # gateway (/sandbox, /llama-cpp, /asr, /sd, /tts, /emb)
     shm_size: "8gb"
@@ -71,11 +73,12 @@ services:
       - LD_LIBRARY_PATH=${GA_VULKAN_LD_LIBRARY_PATH:-/usr/lib/wsl/lib}
       - VK_DRIVER_FILES=${GA_VULKAN_ICD:-/usr/share/vulkan/icd.d/dzn_icd.json}
       - VK_ICD_FILENAMES=${GA_VULKAN_ICD:-/usr/share/vulkan/icd.d/dzn_icd.json}
-      # Which D3D12 adapter dzn picks first on Windows (substring match). Defaults
-      # to the NVIDIA discrete GPU; set "Radeon"/"Intel" or use
-      # GGML_VK_VISIBLE_DEVICES to target another GPU. Ignored by non-dzn ICDs.
-      - MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-NVIDIA}
-      - GGML_VK_VISIBLE_DEVICES=${GGML_VK_VISIBLE_DEVICES:-}
+      # Which D3D12 adapter dzn picks first on Windows (substring match). Default
+      # favors AMD iGPU/APU (Strix Halo); set NVIDIA on multi-GPU Windows hosts with
+      # a discrete card. Use GGML_VK_VISIBLE_DEVICES in .env only when pinning a
+      # device index — never set it to an empty string (llama hides all devices).
+      - MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-Radeon}
+      # Optional: set GGML_VK_PREFER_HOST_MEMORY=1 on native Linux RADV/UMA hosts only.
       # Used only when GA_VULKAN_RUNTIME=nvidia (native-Linux NVIDIA); harmless otherwise.
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-graphics,compute,utility}
@@ -93,20 +96,28 @@ services:
       - GA_LLAMA_ADMIN_PORT=8086
       - GA_LLAMA_MODELS_MAX=1
       - GA_LLAMA_NO_AUTOLOAD=1
-      - GA_LLAMA_CTX_SIZE=262144
+      - GA_LLAMA_CTX_SIZE=${GA_LLAMA_CTX_SIZE:-32768}
+      - GA_LLAMA_FORCE_ROUTER_CTX=${GA_LLAMA_FORCE_ROUTER_CTX:-1}
       - GA_LLAMA_THREADS=16
-      - GA_LLAMA_PARALLEL=5
+      # dzn cannot place KV tensors on Vulkan buffers (llama aborts on large models).
+      # Weights still offload via auto ngl; KV stays in system RAM. parallel=1 keeps
+      # the full ctx window per slot when KV is host-resident.
+      - GA_LLAMA_PARALLEL=${GA_LLAMA_PARALLEL:-1}
       - GA_LLAMA_CACHE_RAM=8192
-      # Vulkan currently trips llama.cpp's scheduler for some model families when
-      # KV cache tensors are placed on Vulkan buffers. Keep KV offload disabled
-      # by default; LLAMA_ARG_* lets current images pick this up without rebuild.
       - GA_LLAMA_KV_OFFLOAD=${GA_LLAMA_KV_OFFLOAD:-0}
       - LLAMA_ARG_KV_OFFLOAD=${GA_LLAMA_KV_OFFLOAD:-0}
-      # Keep unified KV opt-in for Vulkan as a separate conservative default.
       - GA_LLAMA_KV_UNIFIED=${GA_LLAMA_KV_UNIFIED:-0}
       - GA_LLAMA_JINJA=1
       - GA_LLAMA_CONT_BATCH=1
       - GA_LLAMA_NO_MMAP=0
+      # Flash attention breaks Qwen on Mesa Dozen/dzn (Ollama #14854); ROCm uses on.
+      # q8 KV cache types require flash-attn — leave unset when FA is off.
+      - GA_LLAMA_FLASH_ATTN=${GA_LLAMA_FLASH_ATTN:-off}
+      - GA_LLAMA_CACHE_TYPE_K=${GA_LLAMA_CACHE_TYPE_K:-}
+      - GA_LLAMA_CACHE_TYPE_V=${GA_LLAMA_CACHE_TYPE_V:-}
+      - GA_LLAMA_IMAGE_MIN_TOKENS=1024
+      - GA_LLAMA_GPU_LAYERS=${GA_LLAMA_GPU_LAYERS:-}
+      - GA_LLAMA_TENSOR_SPLIT=${GA_LLAMA_TENSOR_SPLIT:-}
       - GA_ASR_HOST=127.0.0.1
       - GA_ASR_PORT=8082
       - GA_ASR_MODEL_DIR=/models-local/asr
@@ -142,7 +153,7 @@ services:
       - GA_EMB_PORT=8085
       - GA_EMB_MODEL_DIR=/models-local/emb
       - GA_EMB_DEFAULT_MODEL_PATH=${GA_EMB_DEFAULT_MODEL_PATH}
-      - GA_EMB_DEVICE=${GA_EMB_DEVICE:-cpu}
+      - GA_EMB_DEVICE=${GA_EMB_DEVICE:-vulkan}
       - GA_EMB_FIX_MISTRAL_REGEX=${GA_EMB_FIX_MISTRAL_REGEX:-1}
       - GA_EMB_WARMUP_ON_LOAD=${GA_EMB_WARMUP_ON_LOAD}
       - GA_EMB_WAIT_FOR_READY_ON_STARTUP=${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}
@@ -164,7 +175,8 @@ services:
       - GA_SD_CFG_SCALE=1.0
       - GA_SD_STRENGTH=0.75
       - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
-      - GA_SD_DIFFUSION_FA=1
+      - GA_SD_DIFFUSION_FA=${GA_SD_DIFFUSION_FA:-1}
+      - GA_SD_VAE_ON_CPU=${GA_SD_VAE_ON_CPU:-0}
       # Optional SD-only Vulkan device selector. Empty means inherit the
       # container-wide GGML_VK_VISIBLE_DEVICES value used by llama too.
       - GA_SD_VK_VISIBLE_DEVICES=${GA_SD_VK_VISIBLE_DEVICES:-}

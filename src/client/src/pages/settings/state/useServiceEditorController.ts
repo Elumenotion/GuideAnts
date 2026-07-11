@@ -4,7 +4,12 @@ import type { ProviderEditorStateDto, ServiceEditorStateDto } from '../../../typ
 import { getServiceProviderDisplayName } from '../constants/displayLabels';
 import { HIDDEN_CLOUD_PROVIDER_SECTIONS } from '../constants/connectionSections';
 import { useServiceEditorDraft } from './useServiceEditorDraft';
-import { buildSavePayload, hasValidationErrors, validateOperativeProviderFields } from './serviceEditorValidation';
+import {
+  buildChangedSavePayload,
+  buildSavePayload,
+  hasValidationErrors,
+  validateOperativeProviderFields,
+} from './serviceEditorValidation';
 
 function isHiddenCloudProvider(providerId: string): boolean {
   return Array.from(HIDDEN_CLOUD_PROVIDER_SECTIONS).some(
@@ -56,7 +61,10 @@ export interface UseServiceEditorControllerResult {
   clearFieldError: (fieldName: string) => void;
 }
 
-export function useServiceEditorController(serviceId: string): UseServiceEditorControllerResult {
+export function useServiceEditorController(
+  serviceId: string,
+  options?: { deferWarmup?: boolean }
+): UseServiceEditorControllerResult {
   const [state, setState] = useState<ServiceEditorStateDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -193,14 +201,32 @@ export function useServiceEditorController(serviceId: string): UseServiceEditorC
       return false;
     }
 
+    const payload = buildSavePayload(selectedProvider, draft.activeDraft);
+    const changedPayload = buildChangedSavePayload(selectedProvider, draft.activeDraft);
+    const providerChanged = draft.activeProviderId !== state.activeProviderId;
+    const needsExplicitMode = !selectedProvider.hasExplicitMode;
+    const shouldUpdateFields = Object.keys(changedPayload).length > 0 || needsExplicitMode;
+    const shouldUpdateActiveProvider = providerChanged || needsExplicitMode;
+
+    if (!shouldUpdateFields && !shouldUpdateActiveProvider) {
+      return true;
+    }
+
     setSaving(true);
     setError(null);
     try {
-      const payload = buildSavePayload(selectedProvider, draft.activeDraft);
-      if (Object.keys(payload).length > 0 || !selectedProvider.hasExplicitMode) {
-        await api.settings.services.updateProviderFields(serviceId, selectedProvider.providerId, payload);
+      if (shouldUpdateFields) {
+        await api.settings.services.updateProviderFields(
+          serviceId,
+          selectedProvider.providerId,
+          needsExplicitMode ? payload : changedPayload
+        );
       }
-      await api.settings.services.updateActiveProvider(serviceId, selectedProvider.providerId);
+      if (shouldUpdateActiveProvider) {
+        await api.settings.services.updateActiveProvider(serviceId, selectedProvider.providerId, {
+          deferWarmup: options?.deferWarmup ?? false,
+        });
+      }
       await load();
       return true;
     } catch (saveError) {

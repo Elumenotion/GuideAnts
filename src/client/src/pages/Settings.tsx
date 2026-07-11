@@ -14,7 +14,6 @@ import {
   SettingsModelDto,
   SettingsRuntimeProfileDto,
   SettingsSectionSummaryDto,
-  UpdateRuntimeProfileRequest,
 } from '../types/settings';
 import { ConnectionsTab } from './settings/components/ConnectionsTab';
 import { InfrastructureTab } from './settings/components/InfrastructureTab';
@@ -30,14 +29,9 @@ import {
   ActiveAddOperationState,
   ModelsRuntimeDeepLink,
   PendingConfirmation,
-  ProfileFormState,
   SettingsTab,
 } from './settings/types';
 import {
-  buildProfileCreateRequest,
-  createProfileFormFromContractShape,
-  buildProfileUpdateRequest,
-  createEmptyProfileForm,
   getErrorMessage,
 } from './settings/utils';
 import { useLocalModelOnboardingOperation } from '../features/localModelOnboarding/useOperationPolling';
@@ -75,6 +69,7 @@ export default function Settings() {
   const [deletingModelId, setDeletingModelId] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardProviderPreselect, setWizardProviderPreselect] = useState<string | null>(null);
+  const [wizardAttachAliasPreselect, setWizardAttachAliasPreselect] = useState<string | null>(null);
   const [activeAddOperation, setActiveAddOperationState] = useState<ActiveAddOperationState | null>(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -107,12 +102,6 @@ export default function Settings() {
 
   const [profiles, setProfiles] = useState<SettingsRuntimeProfileDto[]>([]);
   const [profilesLoading, setProfilesLoading] = useState(true);
-  const [profilesError, setProfilesError] = useState<string | null>(null);
-  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
-  const [profileForm, setProfileForm] = useState<ProfileFormState>(() => createEmptyProfileForm());
-  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [deletingProfileId, setDeletingProfileId] = useState<string | null>(null);
 
   const [llamaInventory, setLlamaInventory] = useState<LlamaRuntimeInventoryItemDto[]>([]);
   const [llamaInventoryLoading, setLlamaInventoryLoading] = useState(true);
@@ -156,12 +145,11 @@ export default function Settings() {
 
   const loadProfiles = useCallback(async () => {
     setProfilesLoading(true);
-    setProfilesError(null);
     try {
       const nextProfiles = await api.settings.getRuntimeProfiles();
       setProfiles(nextProfiles);
-    } catch (error) {
-      setProfilesError(getErrorMessage(error, 'Failed to load runtime profiles.'));
+    } catch {
+      // Profiles load for wizard dropdowns only; failure is non-blocking for settings shell.
     } finally {
       setProfilesLoading(false);
     }
@@ -293,8 +281,9 @@ export default function Settings() {
     }
   }, [showToast]);
 
-  const handleOpenAddModelWizard = useCallback((providerPreselect?: string) => {
+  const handleOpenAddModelWizard = useCallback((providerPreselect?: string, attachAliasRouterModelId?: string) => {
     setWizardProviderPreselect(providerPreselect ?? null);
+    setWizardAttachAliasPreselect(attachAliasRouterModelId?.trim() || null);
     setWizardOpen(true);
   }, []);
 
@@ -320,22 +309,6 @@ export default function Settings() {
     },
     [loadLlamaInventory, loadModels, loadSectionSummaries, showToast]
   );
-
-  const handleProfileFormChange = useCallback(<K extends keyof ProfileFormState>(key: K, value: ProfileFormState[K]) => {
-    setProfileForm((previous) => ({ ...previous, [key]: value }));
-  }, []);
-
-  const handleOpenCreateProfile = useCallback(() => {
-    setEditingProfileId(null);
-    setProfileForm(createEmptyProfileForm());
-    setProfileDialogOpen(true);
-  }, []);
-
-  const handleImportProfile = useCallback((form: ProfileFormState) => {
-    setEditingProfileId(null);
-    setProfileForm(form);
-    setProfileDialogOpen(true);
-  }, []);
 
   const createRuntimeProfileFromTemplate = useCallback(
     async (template: 'qwen3_5' | 'qwen3_6' | 'gemma4') => {
@@ -403,82 +376,6 @@ export default function Settings() {
     [loadProfiles, showToast]
   );
 
-  const resetProfileForm = useCallback(() => {
-    setProfileDialogOpen(false);
-    setEditingProfileId(null);
-    setProfileForm(createEmptyProfileForm());
-  }, []);
-
-  const handleEditProfile = useCallback((profile: SettingsRuntimeProfileDto) => {
-    setEditingProfileId(profile.profileId);
-    setProfileForm(createProfileFormFromContractShape(profile));
-    setProfileDialogOpen(true);
-  }, []);
-
-  const handleSaveProfile = useCallback(async () => {
-    let payload: CreateRuntimeProfileRequest | UpdateRuntimeProfileRequest;
-    try {
-      payload = editingProfileId ? buildProfileUpdateRequest(profileForm) : buildProfileCreateRequest(profileForm);
-    } catch (error) {
-      showToast({
-        type: 'error',
-        title: 'Profile validation failed',
-        message: getErrorMessage(error, 'Check required fields and JSON values.'),
-      });
-      return;
-    }
-
-    setProfileSaving(true);
-    try {
-      if (editingProfileId) {
-        await api.settings.updateRuntimeProfile(editingProfileId, payload);
-      } else {
-        await api.settings.createRuntimeProfile(payload as CreateRuntimeProfileRequest);
-      }
-
-      await loadProfiles();
-
-      showToast({
-        type: 'success',
-        title: editingProfileId ? `Profile ${payload.profileId} updated` : `Profile ${payload.profileId} created`,
-      });
-      resetProfileForm();
-    } catch (error) {
-      showToast({
-        type: 'error',
-        title: editingProfileId ? 'Failed to update profile' : 'Failed to create profile',
-        message: getErrorMessage(error, 'Request failed.'),
-      });
-    } finally {
-      setProfileSaving(false);
-    }
-  }, [editingProfileId, loadProfiles, profileForm, resetProfileForm, showToast]);
-
-  const handleDeleteProfile = useCallback(
-    async (profileId: string) => {
-      setDeletingProfileId(profileId);
-      try {
-        await api.settings.deleteRuntimeProfile(profileId);
-        await loadProfiles();
-
-        if (editingProfileId === profileId) {
-          resetProfileForm();
-        }
-
-        showToast({ type: 'success', title: `Profile ${profileId} deleted` });
-      } catch (error) {
-        showToast({
-          type: 'error',
-          title: `Failed to delete ${profileId}`,
-          message: getErrorMessage(error, 'Delete request failed.'),
-        });
-      } finally {
-        setDeletingProfileId(null);
-      }
-    },
-    [editingProfileId, loadProfiles, resetProfileForm, showToast]
-  );
-
   const handleLoadLlamaModel = useCallback(
     async (routerModelId: string) => {
       await api.settings.loadLlamaModel(routerModelId);
@@ -517,8 +414,6 @@ export default function Settings() {
       void handleRebuildEmbeddings();
     } else if (pendingConfirmation.kind === 'delete-model') {
       void handleDeleteModel(pendingConfirmation.modelId);
-    } else if (pendingConfirmation.kind === 'delete-profile') {
-      void handleDeleteProfile(pendingConfirmation.profileId);
     } else if (pendingConfirmation.kind === 'unload-llama-router') {
       const routerId = pendingConfirmation.routerModelId;
       void (async () => {
@@ -562,7 +457,7 @@ export default function Settings() {
     }
 
     setPendingConfirmation(null);
-  }, [handleDeleteModel, handleDeleteProfile, handleRebuildEmbeddings, loadLlamaInventory, loadModels, loadSectionSummaries, pendingConfirmation, showToast]);
+  }, [handleDeleteModel, handleRebuildEmbeddings, loadLlamaInventory, loadModels, loadSectionSummaries, pendingConfirmation, showToast]);
 
   const pendingConfirmationView = useMemo(() => {
     if (!pendingConfirmation) {
@@ -582,15 +477,6 @@ export default function Settings() {
       return {
         title: 'Delete model',
         message: `Delete model '${pendingConfirmation.modelId}'? This cannot be undone.`,
-        confirmText: 'Delete',
-        confirmButtonClass: 'bg-red-600 hover:bg-red-700 text-white',
-      };
-    }
-
-    if (pendingConfirmation.kind === 'delete-profile') {
-      return {
-        title: 'Delete Runtime Profile',
-        message: `Delete runtime profile '${pendingConfirmation.profileId}'? This action cannot be undone.`,
         confirmText: 'Delete',
         confirmButtonClass: 'bg-red-600 hover:bg-red-700 text-white',
       };
@@ -636,7 +522,7 @@ export default function Settings() {
     setActiveTab('models-runtime');
   }, []);
 
-  const handleOpenModelsRuntime = useCallback((subTab: 'catalog' | 'profiles' | 'local-llama') => {
+  const handleOpenModelsRuntime = useCallback((subTab: 'catalog' | 'local-llama') => {
     setModelsRuntimeDeepLink({ subTab });
     setActiveTab('models-runtime');
   }, []);
@@ -733,21 +619,6 @@ export default function Settings() {
           onCatalogEdited={handleCatalogDataRefresh}
           onOpenAddModelWizard={handleOpenAddModelWizard}
           activeAddOperation={activeAddOperation}
-          profileDialogOpen={profileDialogOpen}
-          editingProfileId={editingProfileId}
-          profileForm={profileForm}
-          profileSaving={profileSaving}
-          profilesError={profilesError}
-          deletingProfileId={deletingProfileId}
-          onProfileFormChange={handleProfileFormChange}
-          onOpenCreateProfile={handleOpenCreateProfile}
-          onImportProfile={handleImportProfile}
-          onResetProfileForm={resetProfileForm}
-          onSaveProfile={() => void handleSaveProfile()}
-          onRetryLoadProfiles={() => void loadProfiles()}
-          onEditProfile={handleEditProfile}
-          onRequestDeleteProfile={(profileId) => setPendingConfirmation({ kind: 'delete-profile', profileId })}
-          onInsertRuntimeProfileTemplate={createRuntimeProfileFromTemplate}
         />
       );
     }
@@ -759,22 +630,15 @@ export default function Settings() {
     catalogVersion,
     connectionsFocusedSection,
     deletingModelId,
-    deletingProfileId,
-    editingProfileId,
-    handleEditProfile,
     handleLoadLlamaModel,
     handleNavigate,
     handleOpenAddModelWizard,
     handleOpenConnections,
     handleOpenModelInCatalog,
-    handleOpenCreateProfile,
     handleOpenServices,
     handleServicesFocusHandled,
-    handleImportProfile,
-    handleProfileFormChange,
     handleRequestUnloadLlamaRouter,
     handleRequestDeleteLlamaRouter,
-    handleSaveProfile,
     infrastructureFocusedKey,
     isAdmin,
     servicesFocusedKey,
@@ -790,15 +654,10 @@ export default function Settings() {
     modelsLoading,
     modelsRuntimeDeepLink,
     orderedModels,
-    profileDialogOpen,
-    profileForm,
-    profileSaving,
     profiles,
-    profilesError,
     profilesLoading,
     refreshLlamaInventory,
     createRuntimeProfileFromTemplate,
-    resetProfileForm,
     sectionSummaries,
     sectionSummariesError,
   ]);
@@ -873,11 +732,15 @@ export default function Settings() {
         <AddModelWizard
           isOpen={wizardOpen}
           providerPreselect={wizardProviderPreselect}
+          attachAliasPreselect={wizardAttachAliasPreselect}
           profiles={profiles}
           profilesLoading={profilesLoading}
           inventory={llamaInventory}
           inventoryError={llamaInventoryError}
-          onClose={() => setWizardOpen(false)}
+          onClose={() => {
+            setWizardOpen(false);
+            setWizardAttachAliasPreselect(null);
+          }}
           onCreateRuntimeProfileTemplate={createRuntimeProfileFromTemplate}
           onCreateCustomRuntimeProfile={createCustomRuntimeProfile}
           onCatalogChanged={handleCatalogDataRefresh}

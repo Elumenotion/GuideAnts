@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Models.Settings;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Endpoints.Settings;
@@ -134,6 +135,16 @@ public static class SettingsCoreEndpoints
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status409Conflict);
+
+        group.MapPost("/local-ai/warmup", async (
+            ILocalAiStartupWarmupService localAiWarmup,
+            CancellationToken cancellationToken) =>
+        {
+            await localAiWarmup.WarmupAllAsync(cancellationToken).ConfigureAwait(false);
+            return Results.Ok();
+        })
+        .WithName("WarmupLocalAiStack")
+        .Produces(StatusCodes.Status200OK);
 
         group.MapPost("/embeddings/rebuild", async (
             IEmbeddingsRebuildService rebuildService,

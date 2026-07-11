@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
@@ -494,7 +495,8 @@ public sealed class GuidesServiceDeepTests
                 {
                     ["temperature"] = new("temperature", "Temperature", "", min, max, 0.1, 0.7, 0, true)
                 },
-                ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>())));
+                ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
+                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
         return resolver.Object;
     }
 

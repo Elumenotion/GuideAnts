@@ -34,6 +34,7 @@ public interface IApplicationSettingsService
     Task<ServiceEditorStateDto> GetServiceEditorStateAsync(string serviceId, CancellationToken cancellationToken = default);
     Task<ServiceEditorStateDto> SetServiceActiveProviderAsync(string serviceId, string providerId, CancellationToken cancellationToken = default);
     Task EnsureServiceModeExistsAsync(string serviceId, string providerId, CancellationToken cancellationToken = default);
+    Task SetServiceModeModelIdAsync(string serviceId, string modelId, CancellationToken cancellationToken = default);
     Task<ServiceEditorStateDto> UpdateServiceProviderFieldsAsync(
         string serviceId,
         string providerId,

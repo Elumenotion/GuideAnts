@@ -26,7 +26,7 @@
     {
       "serviceId": "Embeddings",
       "providerId": "Embeddings.HuggingFace.Inference",
-      "modelId": "microsoft/harrier-oss-v1-0.6b",
+      "modelId": "Qwen/Qwen3-Embedding-0.6B",
       "timeoutSeconds": 300
     },
     {

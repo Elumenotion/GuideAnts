@@ -18,12 +18,24 @@ public sealed class LlamaCppChatClientDeepTests2
         CapturingHandler handler,
         HttpClient httpClient,
         LlamaCppRuntimeProfileData? profile = null,
-        bool parallelToolCalls = false,
         LlamaCppConfig? config = null)
     {
         config ??= new LlamaCppConfig { BaseUrl = "http://localhost:8000", ApiKey = "k", TimeoutSeconds = 300 };
-        return new LlamaCppChatClient(httpClient, config, "qwen3.5-27b", profile, parallelToolCalls);
+        profile ??= ProfileWithParallelToolCalls(true);
+        return new LlamaCppChatClient(httpClient, config, "qwen3.5-27b", profile);
     }
+
+    private static LlamaCppRuntimeProfileData ProfileWithParallelToolCalls(bool enabled) =>
+        new(
+            "qwen3_5",
+            CombineSystemAndDeveloperMessages: true,
+            ThoughtBlockPattern: null,
+            SamplingDefaults: new Dictionary<string, double>(),
+            ThinkingControl: new ThinkingControl(string.Empty, new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>
+            {
+                ["parallel_tool_calls"] = JsonSerializer.SerializeToElement(enabled)
+            });
 
     private static ChatCompletionRequest Request(params ChatMessage[] messages) =>
         new(messages: messages.Length > 0 ? messages : [new ChatMessage(ChatRole.User, "hi")], model: "qwen3.5-27b");
@@ -34,7 +46,7 @@ public sealed class LlamaCppChatClientDeepTests2
         var handler = new CapturingHandler(_ => ChatHttpResponses.Json(
             """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"""));
         using var httpClient = new HttpClient(handler);
-        var client = Client(handler, httpClient, parallelToolCalls: true);
+        var client = Client(handler, httpClient, ProfileWithParallelToolCalls(true));
 
         await client.GetCompletionAsync(new ChatCompletionRequest(
             messages: [new ChatMessage(ChatRole.User, "weather?")],
@@ -150,7 +162,8 @@ public sealed class LlamaCppChatClientDeepTests2
             CombineSystemAndDeveloperMessages: false,
             ThoughtBlockPattern: null,
             SamplingDefaults: new Dictionary<string, double>(),
-            ThinkingControl: new ThinkingControl(string.Empty, new Dictionary<string, IReadOnlyList<ThinkingAction>>()));
+            ThinkingControl: new ThinkingControl(string.Empty, new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>());
         var handler = new CapturingHandler(_ => ChatHttpResponses.Json(
             """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"""));
         using var httpClient = new HttpClient(handler);
@@ -182,7 +195,8 @@ public sealed class LlamaCppChatClientDeepTests2
                 ChoiceActions: new Dictionary<string, IReadOnlyList<ThinkingAction>>
                 {
                     ["none"] = new List<ThinkingAction> { new(ThinkingActionTarget.RequestField, "x", true) }
-                }));
+                }),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>());
         var handler = new CapturingHandler(_ => ChatHttpResponses.Json(
             """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"""));
         using var httpClient = new HttpClient(handler);
@@ -216,7 +230,8 @@ public sealed class LlamaCppChatClientDeepTests2
                         new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
                         new(ThinkingActionTarget.SystemMessagePrefix, "", "PREFIX:")
                     }
-                }));
+                }),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>());
         var handler = new CapturingHandler(_ => ChatHttpResponses.Json(
             """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"""));
         using var httpClient = new HttpClient(handler);
@@ -257,7 +272,8 @@ public sealed class LlamaCppChatClientDeepTests2
                     {
                         new(ThinkingActionTarget.SystemMessagePrefix, "", "NEW-SYS")
                     }
-                }));
+                }),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>());
         var handler = new CapturingHandler(_ => ChatHttpResponses.Json(
             """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"""));
         using var httpClient = new HttpClient(handler);

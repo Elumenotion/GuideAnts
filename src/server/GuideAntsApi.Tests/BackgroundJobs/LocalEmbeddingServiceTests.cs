@@ -31,7 +31,7 @@ public sealed class LocalEmbeddingServiceTests
             {
                 data = new[] { new { embedding = sourceVector } },
                 dimensions = 1024,
-                modelRef = "microsoft/harrier-oss-v1-0.6b"
+                modelRef = "qwen3_embedding_0_6b"
             });
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -72,7 +72,7 @@ public sealed class LocalEmbeddingServiceTests
             {
                 data = new[] { new { embedding = new[] { 0.1f, 0.2f } } },
                 dimensions = 1024,
-                modelRef = "microsoft/harrier-oss-v1-0.6b"
+                modelRef = "qwen3_embedding_0_6b"
             });
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {

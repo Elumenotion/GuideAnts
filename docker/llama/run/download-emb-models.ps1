@@ -1,7 +1,7 @@
 param(
     [string]$ModelsDir,
-    [string]$ModelRepository = "microsoft/harrier-oss-v1-0.6b",
-    [string]$ModelSubdirectory = "harrier-oss-v1-0.6b"
+    [string]$ModelRepository = "Qwen/Qwen3-Embedding-0.6B-GGUF",
+    [string]$ModelSubdirectory = "qwen3_embedding_0_6b"
 )
 
 $ErrorActionPreference = "Stop"

@@ -20,6 +20,8 @@ export const LOCAL_AI_WIZARD_STEPS: readonly { id: string; label: string }[] = [
   { id: 'finish', label: 'Finish' },
 ] as const;
 
+export const WIZARD_DEFER_WARMUP_OPTIONS = { deferWarmup: true } as const;
+
 export const WIZARD_PROVIDER_OPTIONS: readonly {
   id: AddAiServicesWizardProvider;
   label: string;
@@ -210,7 +212,7 @@ export const OPENAI_OPTIONAL_SERVICE_DEFAULTS = {
 } as const;
 
 export const HUGGINGFACE_OPTIONAL_SERVICE_DEFAULTS = {
-  embeddingsModelId: 'microsoft/harrier-oss-v1-0.6b',
+  embeddingsModelId: 'Qwen/Qwen3-Embedding-0.6B',
   embeddingsTimeoutSeconds: '300',
   imagesTextToImageModelId: 'Tongyi-MAI/Z-Image-Turbo',
   imagesImageToImageModelId: 'black-forest-labs/FLUX.2-dev',

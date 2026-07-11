@@ -54,13 +54,16 @@ public sealed class RuntimeProfileResolver : IRuntimeProfileResolver
 
         var samplingParams = DeserializeSamplingParameters(entity.SamplingParametersJson, profileId);
         var thinkingControl = DeserializeThinkingControl(entity.ThinkingControlJson, profileId);
+        var requestFields = DeserializeRequestFieldsWhenToolsPresent(
+            entity.RequestFieldsWhenToolsPresentJson, profileId);
 
         var data = new RuntimeProfileData(
             entity.ProfileId,
             entity.CombineSystemAndDeveloperMessages,
             entity.ThoughtBlockPattern,
             samplingParams,
-            thinkingControl);
+            thinkingControl,
+            requestFields);
 
         _cache[profileId] = (data, DateTime.UtcNow);
         return data;
@@ -101,6 +104,21 @@ public sealed class RuntimeProfileResolver : IRuntimeProfileResolver
         {
             throw new InvalidOperationException(
                 $"Failed to deserialize ThinkingControlJson for profile '{profileId}'.", ex);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, JsonElement> DeserializeRequestFieldsWhenToolsPresent(
+        string json, string profileId)
+    {
+        try
+        {
+            return RuntimeProfileRequestFieldsValidator.ValidateAndNormalize(json);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException(
+                $"Failed to deserialize RequestFieldsWhenToolsPresentJson for profile '{profileId}'. {ex.Message}",
+                ex);
         }
     }
 }

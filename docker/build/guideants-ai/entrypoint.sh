@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# llama.cpp treats GGML_VK_VISIBLE_DEVICES="" as "hide every Vulkan device". Compose
+# often sets the key to an empty string when unset; drop it so all devices stay visible.
+if [ -z "${GGML_VK_VISIBLE_DEVICES:-}" ]; then
+    unset GGML_VK_VISIBLE_DEVICES
+fi
+
 # Router preset: persisted on the ai_local_models volume (atomic updates from ga-admin).
 # First boot of an empty volume: copy baked defaults so llama-server has aliases before UI use.
 ROUTER_PRESET="${GA_LLAMA_MODELS_PRESET:-/models-local/router-models.ini}"
@@ -143,7 +149,7 @@ PY
 sanitize_router_preset "$ROUTER_PRESET"
 
 # Qwen-VL needs image-min-tokens=1024 for grounding accuracy, but that value breaks
-# other vision models (e.g. Gemma mmproj max pixels). Apply it per-alias only.
+# other vision models (e.g. Gemma mmproj max pixels). Apply per-alias only.
 normalize_router_image_min_tokens() {
     local preset_path="$1"
     if [ -z "$preset_path" ] || [ ! -f "$preset_path" ]; then
@@ -152,65 +158,18 @@ normalize_router_image_min_tokens() {
 
     local tmp_path="${preset_path}.image-tokens.$$"
     if ! python3 - "$preset_path" "$tmp_path" <<'PY'
-import re
 import sys
+
+from guideants_hf.vision_token_preset import normalize_router_ini_text
 
 source_path = sys.argv[1]
 output_path = sys.argv[2]
 
 with open(source_path, "r", encoding="utf-8") as src:
-    lines = src.read().splitlines()
-
-output: list[str] = []
-current_alias: str | None = None
-section_lines: list[str] = []
-
-def flush_section() -> None:
-    global section_lines, current_alias
-    if current_alias is None:
-        return
-
-    cleaned: list[str] = []
-    for raw_line in section_lines:
-        stripped = raw_line.strip()
-        if stripped.startswith("#") or stripped.startswith(";"):
-            cleaned.append(raw_line)
-            continue
-        if "=" in stripped:
-            key = stripped.split("=", 1)[0].strip().lower()
-            if key == "image-min-tokens":
-                continue
-        cleaned.append(raw_line)
-
-  # Qwen-VL aliases only; global router --image-min-tokens breaks Gemma loads.
-    if re.search(r"(?i)qwen", current_alias):
-        insert_at = 1 if cleaned and cleaned[0].strip().startswith("[") else 0
-        cleaned.insert(insert_at, "image-min-tokens = 1024")
-
-    output.extend(cleaned)
-    section_lines = []
-    current_alias = None
-
-for raw_line in lines:
-    stripped = raw_line.strip()
-    if stripped.startswith("[") and stripped.endswith("]"):
-        flush_section()
-        current_alias = stripped[1:-1].strip()
-        section_lines = [raw_line]
-        continue
-
-    if current_alias is None:
-        output.append(raw_line)
-        continue
-
-    section_lines.append(raw_line)
-
-flush_section()
+    normalized = normalize_router_ini_text(src.read())
 
 with open(output_path, "w", encoding="utf-8", newline="\n") as dst:
-    dst.write("\n".join(output))
-    if output:
-        dst.write("\n")
+    dst.write(normalized)
 PY
     then
         echo "WARNING: router preset image-min-tokens normalization failed for '${preset_path}'; continuing unchanged." >&2
@@ -227,6 +186,106 @@ PY
 }
 
 normalize_router_image_min_tokens "$ROUTER_PRESET"
+
+# Router mode does not pass GA_LLAMA_CTX_SIZE on the router CLI (ctx-size is alias-scoped).
+# Backfill missing alias ctx-size from GA_LLAMA_CTX_SIZE on startup.
+backfill_router_ctx_size() {
+    local preset_path="$1"
+    local default_ctx_size="${GA_LLAMA_CTX_SIZE:-}"
+    local force_router_ctx="${GA_LLAMA_FORCE_ROUTER_CTX:-0}"
+    if [ -z "$preset_path" ] || [ ! -f "$preset_path" ] || [ -z "$default_ctx_size" ]; then
+        return
+    fi
+
+    local tmp_path="${preset_path}.ctx-size.$$"
+    if ! python3 - "$preset_path" "$tmp_path" "$default_ctx_size" "$force_router_ctx" <<'PY'
+import sys
+
+source_path = sys.argv[1]
+output_path = sys.argv[2]
+default_ctx_size = sys.argv[3].strip()
+force_router_ctx = sys.argv[4].strip() in {"1", "true", "yes", "on"}
+
+if not default_ctx_size.isdigit():
+    raise SystemExit(0)
+
+ctx_keys = {"ctx-size", "c", "ctx_size", "llama_arg_ctx_size"}
+
+with open(source_path, "r", encoding="utf-8") as src:
+    lines = src.read().splitlines()
+
+output: list[str] = []
+current_alias: str | None = None
+section_lines: list[str] = []
+section_has_ctx = False
+
+def flush_section() -> None:
+    global section_lines, current_alias, section_has_ctx
+    if current_alias is None:
+        return
+
+    cleaned: list[str] = []
+    for raw_line in section_lines:
+        stripped = raw_line.strip()
+        if stripped.startswith("#") or stripped.startswith(";"):
+            cleaned.append(raw_line)
+            continue
+        if "=" in stripped:
+            key = stripped.split("=", 1)[0].strip().lower()
+            if key in ctx_keys:
+                continue
+        cleaned.append(raw_line)
+
+    if force_router_ctx or not section_has_ctx:
+        insert_at = 1 if cleaned and cleaned[0].strip().startswith("[") else 0
+        cleaned.insert(insert_at, f"ctx-size = {default_ctx_size}")
+
+    output.extend(cleaned)
+    section_lines = []
+    current_alias = None
+    section_has_ctx = False
+
+for raw_line in lines:
+    stripped = raw_line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        flush_section()
+        current_alias = stripped[1:-1].strip()
+        section_lines = [raw_line]
+        continue
+
+    if current_alias is None:
+        output.append(raw_line)
+        continue
+
+    if "=" in stripped:
+        key = stripped.split("=", 1)[0].strip().lower()
+        if key in ctx_keys:
+            section_has_ctx = True
+
+    section_lines.append(raw_line)
+
+flush_section()
+
+with open(output_path, "w", encoding="utf-8", newline="\n") as dst:
+    dst.write("\n".join(output))
+    if output:
+        dst.write("\n")
+PY
+    then
+        echo "WARNING: router preset ctx-size backfill failed for '${preset_path}'; continuing unchanged." >&2
+        rm -f "$tmp_path" 2>/dev/null || true
+        return
+    fi
+
+    if cmp -s "$preset_path" "$tmp_path"; then
+        rm -f "$tmp_path" 2>/dev/null || true
+        return
+    fi
+
+    mv -f "$tmp_path" "$preset_path"
+}
+
+backfill_router_ctx_size "$ROUTER_PRESET"
 
 SCRIPT_EXECUTION_REQUIRE_TOKEN="${SCRIPT_EXECUTION_REQUIRE_TOKEN:-true}"
 SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION="${SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION:-true}"

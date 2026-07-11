@@ -1,0 +1,10 @@
+{
+  "operationId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "downloading",
+  "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF",
+  "progress": 0.42,
+  "errorMessage": null,
+  "logLine": "Downloading Qwen3.6-35B-A3B-Q6_K_XL-00002-of-00002.gguf",
+  "error": null,
+  "immutableInputHash": "sha256:7c2f9a1b4d8e3f601234567890abcdef0123456789abcdef0123456789abcdef"
+}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../../../services/api';
 import { LlamaRuntimeInventoryItemDto, SettingsModelDto, SettingsRuntimeProfileDto } from '../../../../types/settings';
 import { CatalogEditState } from '../../types';
-import { buildCatalogEditRequest, createCatalogEditStateFromModel, getErrorMessage } from '../../utils';
+import { buildCatalogEditRequest, createCatalogEditStateFromModel, getErrorMessage, parseRuntimeProfileId } from '../../utils';
 import { getCatalogProviderDisplayName } from '../../constants/displayLabels';
 import { TextActionButton } from '../shared/ActionButtons';
 import { SettingsModal } from '../shared/SettingsModal';
@@ -18,6 +18,7 @@ import { OpenRouterEditForm } from './providers/OpenRouterForm';
 
 interface CatalogRowEditModalProps {
   model: SettingsModelDto | null;
+  orderedModels: SettingsModelDto[];
   profiles: SettingsRuntimeProfileDto[];
   profilesLoading: boolean;
   inventory?: LlamaRuntimeInventoryItemDto[];
@@ -26,12 +27,26 @@ interface CatalogRowEditModalProps {
   onSaved: () => Promise<void>;
 }
 
+function countModelsSharingProfile(models: SettingsModelDto[], profileId: string): number {
+  if (!profileId) {
+    return 0;
+  }
+  return models.filter((candidate) => {
+    if (candidate.provider !== 'llama-cpp') {
+      return false;
+    }
+    return parseRuntimeProfileId(candidate.runtimeConfigJson) === profileId;
+  }).length;
+}
+
 function renderEditForm(
   value: CatalogEditState,
   onChange: (updates: Partial<CatalogEditState>) => void,
   profiles: SettingsRuntimeProfileDto[],
   profilesLoading: boolean,
-  inventory: LlamaRuntimeInventoryItemDto[] | undefined
+  inventory: LlamaRuntimeInventoryItemDto[] | undefined,
+  sharedProfileModelCount: number,
+  onDetailChanged?: () => Promise<void>
 ) {
   const props = {
     value,
@@ -52,7 +67,13 @@ function renderEditForm(
     case 'anthropic':
       return <AnthropicEditForm {...props} />;
     case 'llama-cpp':
-      return <LlamaCppEditForm {...props} />;
+      return (
+        <LlamaCppEditForm
+          {...props}
+          sharedProfileModelCount={sharedProfileModelCount}
+          onDetailChanged={onDetailChanged}
+        />
+      );
     case 'google-gemini-chat':
       return <GoogleGeminiEditForm {...props} />;
     case 'hf-inference-chat':
@@ -64,7 +85,16 @@ function renderEditForm(
   }
 }
 
-export function CatalogRowEditModal({ model, profiles, profilesLoading, inventory, isOpen, onClose, onSaved }: CatalogRowEditModalProps) {
+export function CatalogRowEditModal({
+  model,
+  orderedModels,
+  profiles,
+  profilesLoading,
+  inventory,
+  isOpen,
+  onClose,
+  onSaved,
+}: CatalogRowEditModalProps) {
   const [value, setValue] = useState<CatalogEditState | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +120,8 @@ export function CatalogRowEditModal({ model, profiles, profilesLoading, inventor
     try {
       const selectedProfile = profiles.find((profile) => profile.profileId === value.runtimeProfileId.trim());
       const request = buildCatalogEditRequest(value, {
-        profileThinkingControlJson: selectedProfile?.thinkingControlJson ?? undefined,
+        runtimeConfigJson: model.runtimeConfigJson ?? undefined,
+        profileThinkingControlJson: value.provider === 'llama-cpp' ? undefined : selectedProfile?.thinkingControlJson,
       });
       await api.settings.updateModel(model.modelId, request);
       await onSaved();
@@ -179,32 +210,47 @@ export function CatalogRowEditModal({ model, profiles, profilesLoading, inventor
             </label>
           </div>
 
-          <div className="border-t border-gray-200 pt-3">{renderEditForm(value, (updates) => setValue((previous) => (previous ? { ...previous, ...updates } : previous)), profiles, profilesLoading, inventory)}</div>
-
-          <div className="space-y-2">
-            <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime Profile</label>
-            <select
-              value={value.runtimeProfileId}
-              onChange={(event) => setValue((previous) => (previous ? { ...previous, runtimeProfileId: event.target.value } : previous))}
-              disabled={profilesLoading}
-              className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="">
-                {profilesLoading
-                  ? 'Loading profiles...'
-                  : profiles.filter((p) => p.providers.includes(value.provider)).length === 0
-                  ? `No profiles defined for ${value.provider}`
-                  : 'Select runtime profile'}
-              </option>
-              {profiles
-                .filter((p) => p.providers.includes(value.provider))
-                .map((profile) => (
-                  <option key={profile.profileId} value={profile.profileId}>
-                    {profile.displayName} ({profile.profileId})
-                  </option>
-                ))}
-            </select>
+          <div className="border-t border-gray-200 pt-3">
+            {renderEditForm(
+              value,
+              (updates) => setValue((previous) => (previous ? { ...previous, ...updates } : previous)),
+              profiles,
+              profilesLoading,
+              inventory,
+              countModelsSharingProfile(
+                orderedModels,
+                parseRuntimeProfileId(model?.runtimeConfigJson) ?? value.runtimeProfileId,
+              ),
+              onSaved,
+            )}
           </div>
+
+          {value.provider !== 'llama-cpp' ? (
+            <div className="space-y-2">
+              <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime Profile</label>
+              <select
+                value={value.runtimeProfileId}
+                onChange={(event) => setValue((previous) => (previous ? { ...previous, runtimeProfileId: event.target.value } : previous))}
+                disabled={profilesLoading}
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">
+                  {profilesLoading
+                    ? 'Loading profiles...'
+                    : profiles.filter((p) => p.providers.includes(value.provider)).length === 0
+                    ? `No profiles defined for ${value.provider}`
+                    : 'Select runtime profile'}
+                </option>
+                {profiles
+                  .filter((p) => p.providers.includes(value.provider))
+                  .map((profile) => (
+                    <option key={profile.profileId} value={profile.profileId}>
+                      {profile.displayName} ({profile.profileId})
+                    </option>
+                  ))}
+              </select>
+            </div>
+          ) : null}
 
           {error ? <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
         </div>

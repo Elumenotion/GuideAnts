@@ -65,7 +65,8 @@ path). The installer sets them on native Linux; you can also set them by hand fo
 | `GA_VULKAN_ICD` | `…/dzn_icd.json` | `…/radeon_icd.x86_64.json` / `…/intel_icd.x86_64.json` | `…/nvidia_icd.json` |
 | `GA_VULKAN_DRIVER_LIBS` | `/usr/lib/wsl` | `/usr/lib` | `/usr/lib` |
 | `GA_VULKAN_LD_LIBRARY_PATH` | `/usr/lib/wsl/lib` | `/usr/lib/x86_64-linux-gnu` | `/usr/lib/x86_64-linux-gnu` |
-| `MESA_D3D12_DEFAULT_ADAPTER_NAME` | `NVIDIA` | (ignored) | (ignored) |
+| `MESA_D3D12_DEFAULT_ADAPTER_NAME` | `Radeon` | (ignored) | (ignored) |
+| `GGML_VK_PREFER_HOST_MEMORY` | (unset) | `1` optional on RADV/UMA | (unset) |
 
 `GA_VULKAN_DRIVER_LIBS` is bind-mounted at `/usr/lib/wsl`; on Windows it carries the D3D12
 runtime libs (`libd3d12core.so`/`libdxcore.so`), and on Linux it points at a harmless existing
@@ -129,21 +130,22 @@ environment:
   - LD_LIBRARY_PATH=${GA_VULKAN_LD_LIBRARY_PATH:-/usr/lib/wsl/lib}
   - VK_DRIVER_FILES=${GA_VULKAN_ICD:-/usr/share/vulkan/icd.d/dzn_icd.json}
   - VK_ICD_FILENAMES=${GA_VULKAN_ICD:-/usr/share/vulkan/icd.d/dzn_icd.json}
-  - MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-NVIDIA}
+  - MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-Radeon}
   - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
   - NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES:-graphics,compute,utility}
-  - GA_EMB_DEVICE=${GA_EMB_DEVICE:-cpu}   # torch is CPU on this backend
+  - GA_EMB_DEVICE=${GA_EMB_DEVICE:-vulkan}   # llama-server embeddings on Vulkan
 ```
 
 With no env set (Windows) this resolves to the dzn/`/dev/dxg` path. The `NVIDIA_*` vars matter
 only when `GA_VULKAN_RUNTIME=nvidia` (native-Linux NVIDIA) and are harmless otherwise.
 
-Vulkan leaves llama.cpp KV-cache offload disabled by default
-(`GA_LLAMA_KV_OFFLOAD=0`, propagated as `LLAMA_ARG_KV_OFFLOAD=0`) because current
-Vulkan router child processes can abort during startup for some model families when
-KV tensors are placed on a Vulkan buffer. Unified KV is also kept opt-in on this backend
-(`GA_LLAMA_KV_UNIFIED=0`). Set `GA_LLAMA_KV_OFFLOAD=1` or `GA_LLAMA_KV_UNIFIED=1`
-explicitly to retest either path with a newer upstream llama.cpp build.
+Vulkan llama defaults differ from ROCm on dzn: model weights offload to GPU
+(`-ngl auto`), but KV cache stays in system RAM (`--no-kv-offload`) because placing
+KV tensors on Vulkan buffers aborts large models. Embeddings use llama-server on Vulkan
+(`GA_EMB_DEVICE=vulkan`, `-ngl auto`). Flash attention defaults to **off** on this
+backend (Qwen + Mesa Dozen/dzn; Ollama #14854); native Linux RADV hosts can set
+`GA_LLAMA_FLASH_ATTN=on` in `.env`. On startup, `entrypoint.sh` backfills per-alias
+`ctx-size` from `GA_LLAMA_CTX_SIZE` when `GA_LLAMA_FORCE_ROUTER_CTX=1`.
 
 > **Note:** the bare-file default targets Windows. On a native-Linux host *without* the
 > `GA_VULKAN_*` env set, `${GA_VULKAN_DEVICE:-/dev/dxg}` resolves to `/dev/dxg`, which doesn't
@@ -228,14 +230,52 @@ docker logs guideants-ai 2>&1 | grep -i vulkan
 
 ### Picking a GPU on a multi-GPU machine
 
-On Windows, `MESA_D3D12_DEFAULT_ADAPTER_NAME` (default `NVIDIA`) sets which adapter dzn lists
-first; `GGML_VK_VISIBLE_DEVICES` picks/splits among enumerated devices on any platform.
+On Windows, `MESA_D3D12_DEFAULT_ADAPTER_NAME` (default `Radeon` for AMD iGPU/APU hosts like
+Strix Halo) sets which adapter dzn lists first. Set `NVIDIA` on Windows boxes with a discrete
+NVIDIA card. `GGML_VK_VISIBLE_DEVICES` picks/splits among enumerated devices on any platform —
+set it in `.env` only when you need a specific index (for example `0` or `1`). **Do not** set
+`GGML_VK_VISIBLE_DEVICES` to an empty string: llama.cpp treats that as "hide every device" and
+falls back to CPU-only inference even when `vulkaninfo` sees the GPU.
 
 Stable Diffusion can be pinned independently from llama with `GA_SD_VK_VISIBLE_DEVICES`.
-Leave it empty to inherit the container-wide `GGML_VK_VISIBLE_DEVICES`; set it when SD should
-use a different Vulkan device. For example, `GGML_VK_VISIBLE_DEVICES=1` and
-`GA_SD_VK_VISIBLE_DEVICES=0` keeps llama on Vulkan device 1 while the SD `sd-server`
-subprocess uses Vulkan device 0.
+Leave it unset to inherit the container-wide device list; set it when SD should use a different
+Vulkan device. For example, `GGML_VK_VISIBLE_DEVICES=1` and `GA_SD_VK_VISIBLE_DEVICES=0`
+keeps llama on Vulkan device 1 while the SD `sd-server` subprocess uses Vulkan device 0.
+
+### Strix Halo (Radeon 8060S / gfx1151)
+
+This is a well-supported llama.cpp target on **native Linux** (RADV + `/dev/dri`, or ROCm 7.2+).
+Community references: [kyuz0/amd-strix-halo-toolboxes](https://github.com/kyuz0/amd-strix-halo-toolboxes),
+[hec-ovi/llama-vulkan-strix](https://github.com/hec-ovi/llama-vulkan-strix), Framework's
+[Fedora llama.cpp guide](https://community.frame.work/t/amd-strix-halo-llama-cpp-installation-guide-for-fedora-42/75856).
+
+On **Docker Desktop + Windows**, the stack uses Mesa **dzn** (Vulkan → D3D12 → `/dev/dxg`) instead
+of RADV. `docker-compose.vulkan.yml` defaults cover this path; tune llama/SD via `.env` if needed.
+No user-WSL install is required (unlike ROCDXG).
+
+Device enumeration works, but dzn cannot allocate large contiguous Vulkan buffers for full-GPU
+35B weights or SD diffusion graphs. Use **ROCm** on this host for production GPU diffusion/35B;
+Vulkan dzn here is viable for **auto-fit llama** (e.g. 9B) when buffers fit.
+
+On native Linux RADV/UMA (Strix Halo), set `GGML_VK_PREFER_HOST_MEMORY=1` in `.env` so weights use
+GTT rather than the BIOS VRAM carve-out.
+
+**ROCm on the same hardware** (when the host exposes it) remains the most mature path in
+GuideAnts today. Vulkan is viable once device enumeration and offload are confirmed:
+
+```sh
+docker exec guideants-ai /app/llama-server --list-devices
+# expect: Vulkan0: Microsoft Direct3D12 (AMD Radeon … 8060S …)
+```
+
+If `vulkaninfo` sees the GPU but `--list-devices` is empty, check `printenv GGML_VK_VISIBLE_DEVICES`
+inside the container — an empty value is the usual cause. Recreate the stack after updating
+compose (we no longer inject an empty default).
+
+A separate [llama.cpp #24474](https://github.com/ggml-org/llama.cpp/issues/24474) regression
+(shader build corruption in some `server-vulkan` tags) can also yield zero devices on Linux
+`/dev/dri` hosts; pin `server-vulkan-b9570` or a post-#24595 tag if enumeration fails on a
+clean env.
 
 ## Publishing
 

@@ -1,7 +1,7 @@
 -- UpsertLocalLlamaQwenModels
 -- Idempotent onboarding script for local llama.cpp model rows (Qwen + Gemma).
 -- Uses canonical RuntimeConfigJson shape:
--- { "routerModelId", "runtimeProfileId", "loadParams" }
+-- { "routerModelId", "runtimeProfileId" }
 
 SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
@@ -42,7 +42,7 @@ VALUES
     N'Local llama.cpp-hosted Qwen 3.5 27B model.',
     N'["none","enabled"]',
     500,
-    N'{"routerModelId":"Qwen3.5-27B-Q6_K","runtimeProfileId":"qwen3_5","loadParams":{"model":"Qwen3.5-27B-Q6_K"}}'
+    N'{"routerModelId":"Qwen3.5-27B-Q6_K","runtimeProfileId":"qwen3_5"}'
 ),
 (
     N'qwen3.5-35b-a3b',
@@ -50,7 +50,7 @@ VALUES
     N'Local llama.cpp-hosted Qwen 3.5 35B A3B model.',
     N'["none","enabled"]',
     505,
-    N'{"routerModelId":"Qwen3.5-35B-A3B-Q5_K_XL","runtimeProfileId":"qwen3_5","loadParams":{"model":"Qwen3.5-35B-A3B-Q5_K_XL"}}'
+    N'{"routerModelId":"Qwen3.5-35B-A3B-Q5_K_XL","runtimeProfileId":"qwen3_5"}'
 ),
 (
     N'gemma4-31b',
@@ -58,7 +58,7 @@ VALUES
     N'Local llama.cpp-hosted Gemma 4 31B dense model.',
     N'["none","enabled"]',
     510,
-    N'{"routerModelId":"Gemma-4-31B-Q6_K_XL","runtimeProfileId":"gemma4","loadParams":{"model":"Gemma-4-31B-Q6_K_XL"}}'
+    N'{"routerModelId":"Gemma-4-31B-Q6_K_XL","runtimeProfileId":"gemma4"}'
 );
 
 MERGE dbo.Models AS target

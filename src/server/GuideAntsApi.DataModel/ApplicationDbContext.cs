@@ -76,6 +76,8 @@ namespace GuideAntsApi.DataModel
         public DbSet<PublishedGuide> PublishedGuides { get; set; } = null!;
         public DbSet<ApplicationSetting> ApplicationSettings { get; set; } = null!;
         public DbSet<RuntimeProfile> RuntimeProfiles { get; set; } = null!;
+        public DbSet<LocalModelInstallation> LocalModelInstallations { get; set; } = null!;
+        public DbSet<LocalModelOperation> LocalModelOperations { get; set; } = null!;
         public DbSet<HostFolderMount> HostFolderMounts { get; set; } = null!;
         public DbSet<HostFolderMountLink> HostFolderMountLinks { get; set; } = null!;
         public DbSet<ProjectScheduledJob> ProjectScheduledJobs { get; set; } = null!;
@@ -435,6 +437,41 @@ namespace GuideAntsApi.DataModel
             {
                 b.Property(x => x.SamplingParametersJson).HasColumnType("nvarchar(max)").IsRequired();
                 b.Property(x => x.ThinkingControlJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.RequestFieldsWhenToolsPresentJson).HasColumnType("nvarchar(max)").IsRequired().HasDefaultValue("{}");
+            });
+
+            modelBuilder.Entity<LocalModelInstallation>(b =>
+            {
+                b.Property(x => x.ModelArtifactsJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.ProjectorArtifactsJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.RouterPresetSnapshotJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.CreatedUtc).HasDefaultValueSql("GETUTCDATE()");
+                b.Property(x => x.UpdatedUtc).HasDefaultValueSql("GETUTCDATE()");
+                b.Property(x => x.RowVersion).IsRowVersion();
+
+                b.HasOne(x => x.Model)
+                    .WithOne(m => m.Installation)
+                    .HasForeignKey<LocalModelInstallation>(x => x.ModelId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<LocalModelOperation>(b =>
+            {
+                b.Property(x => x.ImmutableInputJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.CompletedSideEffectsJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.CreatedUtc).HasDefaultValueSql("GETUTCDATE()");
+                b.Property(x => x.UpdatedUtc).HasDefaultValueSql("GETUTCDATE()");
+                b.Property(x => x.RowVersion).IsRowVersion();
+
+                b.HasIndex(x => x.ModelId)
+                    .HasDatabaseName("IX_LocalModelOperations_ModelId");
+
+                b.HasIndex(x => new { x.Status, x.UpdatedUtc })
+                    .HasDatabaseName("IX_LocalModelOperations_Status_UpdatedUtc");
+
+                b.HasIndex(x => x.RouterModelId)
+                    .HasFilter("[RouterModelId] IS NOT NULL")
+                    .HasDatabaseName("IX_LocalModelOperations_RouterModelId");
             });
 
             modelBuilder.Entity<Model>(b =>

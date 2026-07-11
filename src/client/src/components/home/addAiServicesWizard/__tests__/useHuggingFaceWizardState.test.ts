@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { api } from '../../../../services/api';
-import { HUGGINGFACE_SECTION, HUGGINGFACE_SERVICE_PROVIDER_IDS } from '../constants';
+import { HUGGINGFACE_SECTION, HUGGINGFACE_SERVICE_PROVIDER_IDS, WIZARD_DEFER_WARMUP_OPTIONS } from '../constants';
 import { useHuggingFaceWizardState } from '../useHuggingFaceWizardState';
 import {
   createLoadSnapshot,
@@ -258,7 +258,8 @@ describe('useHuggingFaceWizardState', () => {
     );
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'SpeechSynthesis',
-      HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechSynthesis
+      HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechSynthesis,
+      WIZARD_DEFER_WARMUP_OPTIONS
     );
   });
 

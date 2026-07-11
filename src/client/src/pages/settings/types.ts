@@ -12,7 +12,7 @@ export type SettingsTab =
  * Sub-tabs rendered inside the Models & Runtime workspace. Accepted as a deep-link
  * target when other settings tabs navigate the user here.
  */
-export type ModelsRuntimeSubTab = 'catalog' | 'profiles' | 'local-llama';
+export type ModelsRuntimeSubTab = 'catalog' | 'local-llama';
 
 /**
  * Deep-link payload passed to the Models & Runtime workspace.
@@ -25,10 +25,15 @@ export interface ModelsRuntimeDeepLink {
   focusedModelId?: string;
 }
 
+/** Opens Add Model wizard; optional second arg preselects attach-existing-alias flow. */
+export type OpenAddModelWizardHandler = (
+  providerPreselect?: string,
+  attachAliasRouterModelId?: string
+) => void;
+
 export type PendingConfirmation =
   | { kind: 'rebuild-embeddings' }
   | { kind: 'delete-model'; modelId: string }
-  | { kind: 'delete-profile'; profileId: string }
   | { kind: 'unload-llama-router'; routerModelId: string; notebookReferenceCount: number }
   | {
       kind: 'delete-llama-router';
@@ -63,14 +68,14 @@ export interface AddModelWizardState {
   llamaInstallSource: 'huggingface' | 'existingAlias';
   llamaRouterModelId: string;
   llamaHuggingFaceRepository: string;
-  llamaHuggingFaceQuantIncludePattern: string;
-  llamaHuggingFaceMmprojIncludePattern: string;
+  llamaHuggingFaceResolvedRevision: string;
+  llamaHuggingFaceArtifactGroupId: string;
+  llamaHuggingFaceModelFiles: string[];
+  llamaHuggingFaceMmprojFiles: string[];
   llamaHuggingFaceTargetDirectory: string;
+  llamaHuggingFaceRouterPresetRows: Array<{ key: string; value: string }>;
+  llamaHuggingFacePresetMode: 'replace' | 'merge';
   llamaExistingAliasRouterModelId: string;
-  /** Blank = use container default (no override in router INI). */
-  llamaRouterContextSize: string;
-  /** Blank = use container default. */
-  llamaRouterCacheRamMib: string;
 }
 
 export interface CatalogEditState {
@@ -80,13 +85,7 @@ export interface CatalogEditState {
   description: string;
   displayOrder: string;
   isActive: boolean;
-  /** Runtime profile ID — applies to all providers. */
   runtimeProfileId: string;
-  localRuntimeRouterModelId: string;
-  localRuntimeLoadParamsJson: string;
-  localRuntimeParallelToolCalls: boolean;
-  localRuntimeRouterContextSize: string;
-  localRuntimeRouterCacheRamMib: string;
 }
 
 export interface ActiveAddOperationState {
@@ -112,6 +111,7 @@ export interface ProfileFormState {
   thoughtBlockPattern: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson: string;
   /** Provider IDs this profile applies to, e.g. ["llama-cpp"] or ["openai-chat","azure-openai-chat"]. */
   providers: string[];
 }

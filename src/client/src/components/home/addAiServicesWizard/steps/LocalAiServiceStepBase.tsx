@@ -43,7 +43,7 @@ export const LocalAiServiceStepBase = forwardRef<LocalAiServiceStepHandle, Local
       draft,
       save,
       clearFieldError,
-    } = useServiceEditorController(serviceId);
+    } = useServiceEditorController(serviceId, { deferWarmup: true });
 
     const localProvider = useMemo(
       () => state?.providers.find((provider) => provider.providerId === localProviderId),

@@ -189,6 +189,7 @@ class SdRuntimeConfig:
     sampling_method: str
     offload_to_cpu: bool
     vae_on_cpu: bool
+    backend: str | None
     diffusion_fa: bool
     vulkan_visible_devices: str | None
     default_output_format: str
@@ -413,6 +414,7 @@ def resolve_runtime_config() -> SdRuntimeConfig:
     sampling_method = (os.getenv("GA_SD_SAMPLING_METHOD") or "euler").strip() or "euler"
     offload_to_cpu = env_flag("GA_SD_OFFLOAD_TO_CPU", False)
     vae_on_cpu = env_flag("GA_SD_VAE_ON_CPU", False)
+    backend = optional_env_value("GA_SD_BACKEND")
     diffusion_fa = env_flag("GA_SD_DIFFUSION_FA", True)
     vulkan_visible_devices = optional_env_value("GA_SD_VK_VISIBLE_DEVICES")
     default_output_format = normalize_output_format(os.getenv("GA_SD_DEFAULT_OUTPUT_FORMAT"), "png")
@@ -448,6 +450,7 @@ def resolve_runtime_config() -> SdRuntimeConfig:
         sampling_method=sampling_method,
         offload_to_cpu=offload_to_cpu,
         vae_on_cpu=vae_on_cpu,
+        backend=backend,
         diffusion_fa=diffusion_fa,
         vulkan_visible_devices=vulkan_visible_devices,
         default_output_format=default_output_format,
@@ -1001,9 +1004,11 @@ def build_sd_server_command(config: SdRuntimeConfig) -> list[str]:
         "-1",
     ]
 
-    if config.offload_to_cpu:
+    if config.backend:
+        command.extend(["--backend", config.backend])
+    elif config.offload_to_cpu:
         command.append("--offload-to-cpu")
-    if config.vae_on_cpu:
+    if not config.backend and config.vae_on_cpu:
         command.append("--vae-on-cpu")
     if config.diffusion_fa:
         command.append("--diffusion-fa")

@@ -1,49 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyAddModelWizardState, buildAddModelRequest as buildSettingsAddModelRequest } from '../../../../pages/settings/utils';
 import { buildLocalAiModelRequest } from '../utils';
+import { buildCuratedAddModelRequest } from '../../../../features/localModelOnboarding/curated/buildCuratedRequest';
+import { catalogFixture } from '../../../../features/localModelOnboarding/curated/fixtures';
+import type { LlamaCatalogDefinitionDto, LlamaCatalogResponseDto } from '../../../../types/settings';
 
 describe('local onboarding cross-UI parity', () => {
-  it('builds identical payloads for minimal huggingface intent with blank optional fields', () => {
-    const settings = createEmptyAddModelWizardState('llama-cpp');
-    settings.llamaInstallSource = 'huggingface';
-    settings.runtimeProfileId = 'gemma4';
-    settings.llamaRouterModelId = 'gemma-4-12B-it-qat-GGUF';
-    settings.llamaHuggingFaceRepository = 'unsloth/gemma-4-12B-it-qat-GGUF';
-    settings.llamaHuggingFaceQuantIncludePattern = 'gemma-4-12B-it-qat-UD-Q4_K_XL.gguf';
-    settings.llamaHuggingFaceMmprojIncludePattern = 'mmproj-BF16.gguf';
+  it('builds equivalent curated payloads for settings and wizard entry points', () => {
+    const catalog = catalogFixture as LlamaCatalogResponseDto;
+    const definition = catalog.models[1] as LlamaCatalogDefinitionDto;
 
-    const wizard = {
-      localId: 'draft-minimal',
-      persisted: false,
-      asyncOperationId: null,
-      asyncStatus: 'submitted' as const,
-      asyncProgress: null,
-      asyncError: null,
-      setAsGlobalDefault: false,
-      installSource: 'huggingface' as const,
-      routerModelId: 'gemma-4-12B-it-qat-GGUF',
-      runtimeProfileId: 'gemma4',
-      huggingFaceRepository: 'unsloth/gemma-4-12B-it-qat-GGUF',
-      huggingFaceQuantIncludePattern: 'gemma-4-12B-it-qat-UD-Q4_K_XL.gguf',
-      huggingFaceMmprojIncludePattern: 'mmproj-BF16.gguf',
-      huggingFaceTargetDirectory: '',
-      existingAliasRouterModelId: '',
-      routerContextSize: '',
-      routerCacheRamMib: '',
-      catalogModelId: '',
-      catalogDisplayName: '',
-    };
+    const fromSettings = buildCuratedAddModelRequest(
+      definition,
+      catalog.catalogVersion,
+      'q6_k_xl',
+      '8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a',
+      { onboardingUi: 'settings' },
+    );
+    const fromWizard = buildCuratedAddModelRequest(
+      definition,
+      catalog.catalogVersion,
+      'q6_k_xl',
+      '8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a',
+      { onboardingUi: 'wizard' },
+    );
 
-    const fromSettings = buildSettingsAddModelRequest(settings);
-    const fromWizard = buildLocalAiModelRequest(wizard);
-
-    expect(fromSettings).toEqual({
-      ...fromWizard,
-      providerConfig: { onboardingUi: 'settings' },
-    });
+    expect(fromSettings.install).toEqual(fromWizard.install);
+    expect(fromSettings.catalog).toEqual(fromWizard.catalog);
+    expect(fromSettings.providerConfig).toEqual({ onboardingUi: 'settings' });
+    expect(fromWizard.providerConfig).toEqual({ onboardingUi: 'wizard' });
   });
 
-  it('builds identical payloads for equivalent huggingface intent', () => {
+  it('builds identical payloads for explicit custom huggingface intent', () => {
     const settings = createEmptyAddModelWizardState('llama-cpp');
     settings.catalogModelId = 'qwen3.6-local';
     settings.catalogDisplayName = 'Qwen 3.6 Local';
@@ -54,11 +42,13 @@ describe('local onboarding cross-UI parity', () => {
     settings.runtimeProfileId = 'qwen3_6';
     settings.llamaRouterModelId = 'qwen3.6-local';
     settings.llamaHuggingFaceRepository = 'unsloth/Qwen3.6-9B-GGUF';
-    settings.llamaHuggingFaceQuantIncludePattern = '*Q5_K_M*';
-    settings.llamaHuggingFaceMmprojIncludePattern = '';
+    settings.llamaHuggingFaceResolvedRevision = 'abc123def';
+    settings.llamaHuggingFaceArtifactGroupId = 'q5-k-m-group';
+    settings.llamaHuggingFaceModelFiles = ['Qwen3.6-9B-Q5_K_M.gguf'];
+    settings.llamaHuggingFaceMmprojFiles = [];
     settings.llamaHuggingFaceTargetDirectory = 'qwen3.6-local';
-    settings.llamaRouterContextSize = '8192';
-    settings.llamaRouterCacheRamMib = '1024';
+    settings.llamaHuggingFaceRouterPresetRows = [{ key: 'ctx-size', value: '8192' }];
+    settings.llamaHuggingFacePresetMode = 'replace';
 
     const wizard = {
       localId: 'draft-1',
@@ -72,12 +62,14 @@ describe('local onboarding cross-UI parity', () => {
       routerModelId: 'qwen3.6-local',
       runtimeProfileId: 'qwen3_6',
       huggingFaceRepository: 'unsloth/Qwen3.6-9B-GGUF',
-      huggingFaceQuantIncludePattern: '*Q5_K_M*',
-      huggingFaceMmprojIncludePattern: '',
+      huggingFaceResolvedRevision: 'abc123def',
+      huggingFaceArtifactGroupId: 'q5-k-m-group',
+      huggingFaceModelFiles: ['Qwen3.6-9B-Q5_K_M.gguf'],
+      huggingFaceMmprojFiles: [],
       huggingFaceTargetDirectory: 'qwen3.6-local',
+      huggingFaceRouterPresetRows: [{ key: 'ctx-size', value: '8192' }],
+      huggingFacePresetMode: 'replace' as const,
       existingAliasRouterModelId: '',
-      routerContextSize: '8192',
-      routerCacheRamMib: '1024',
       catalogModelId: 'qwen3.6-local',
       catalogDisplayName: 'Qwen 3.6 Local',
     };
@@ -104,8 +96,6 @@ describe('local onboarding cross-UI parity', () => {
     settings.llamaInstallSource = 'existingAlias';
     settings.runtimeProfileId = 'qwen3_6';
     settings.llamaExistingAliasRouterModelId = 'qwen3.6-runtime';
-    settings.llamaRouterContextSize = '16384';
-    settings.llamaRouterCacheRamMib = '2048';
 
     const wizard = {
       localId: 'draft-2',
@@ -119,12 +109,14 @@ describe('local onboarding cross-UI parity', () => {
       routerModelId: '',
       runtimeProfileId: 'qwen3_6',
       huggingFaceRepository: '',
-      huggingFaceQuantIncludePattern: '',
-      huggingFaceMmprojIncludePattern: '',
+      huggingFaceResolvedRevision: '',
+      huggingFaceArtifactGroupId: '',
+      huggingFaceModelFiles: [],
+      huggingFaceMmprojFiles: [],
       huggingFaceTargetDirectory: '',
+      huggingFaceRouterPresetRows: [],
+      huggingFacePresetMode: 'replace' as const,
       existingAliasRouterModelId: 'qwen3.6-runtime',
-      routerContextSize: '16384',
-      routerCacheRamMib: '2048',
       catalogModelId: 'qwen3.6-attached',
       catalogDisplayName: 'Qwen 3.6 Attached',
     };
@@ -137,7 +129,7 @@ describe('local onboarding cross-UI parity', () => {
     });
   });
 
-  it('builds identical payloads for equivalent multimodal huggingface intent', () => {
+  it('builds identical payloads for multimodal explicit custom huggingface intent', () => {
     const settings = createEmptyAddModelWizardState('llama-cpp');
     settings.catalogModelId = 'llava-local';
     settings.catalogDisplayName = 'LLaVA Local';
@@ -146,9 +138,13 @@ describe('local onboarding cross-UI parity', () => {
     settings.runtimeProfileId = 'qwen3_6';
     settings.llamaRouterModelId = 'llava-local';
     settings.llamaHuggingFaceRepository = 'lmstudio-community/llava-v1.6-gguf';
-    settings.llamaHuggingFaceQuantIncludePattern = '*Q4_K_M*';
-    settings.llamaHuggingFaceMmprojIncludePattern = '*mmproj*';
+    settings.llamaHuggingFaceResolvedRevision = 'rev-mm';
+    settings.llamaHuggingFaceArtifactGroupId = 'q4-group';
+    settings.llamaHuggingFaceModelFiles = ['llava-Q4_K_M.gguf'];
+    settings.llamaHuggingFaceMmprojFiles = ['mmproj.gguf'];
     settings.llamaHuggingFaceTargetDirectory = 'llava-local';
+    settings.llamaHuggingFaceRouterPresetRows = [{ key: 'ctx-size', value: '4096' }];
+    settings.llamaHuggingFacePresetMode = 'merge';
 
     const wizard = {
       localId: 'draft-3',
@@ -162,12 +158,14 @@ describe('local onboarding cross-UI parity', () => {
       routerModelId: 'llava-local',
       runtimeProfileId: 'qwen3_6',
       huggingFaceRepository: 'lmstudio-community/llava-v1.6-gguf',
-      huggingFaceQuantIncludePattern: '*Q4_K_M*',
-      huggingFaceMmprojIncludePattern: '*mmproj*',
+      huggingFaceResolvedRevision: 'rev-mm',
+      huggingFaceArtifactGroupId: 'q4-group',
+      huggingFaceModelFiles: ['llava-Q4_K_M.gguf'],
+      huggingFaceMmprojFiles: ['mmproj.gguf'],
       huggingFaceTargetDirectory: 'llava-local',
+      huggingFaceRouterPresetRows: [{ key: 'ctx-size', value: '4096' }],
+      huggingFacePresetMode: 'merge' as const,
       existingAliasRouterModelId: '',
-      routerContextSize: '',
-      routerCacheRamMib: '',
       catalogModelId: 'llava-local',
       catalogDisplayName: 'LLaVA Local',
     };

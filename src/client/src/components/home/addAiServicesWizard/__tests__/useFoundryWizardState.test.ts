@@ -5,6 +5,7 @@ import {
   FOUNDRY_CORE_SECTION,
   FOUNDRY_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
+  WIZARD_DEFER_WARMUP_OPTIONS,
 } from '../constants';
 import { useFoundryWizardState } from '../useFoundryWizardState';
 import {
@@ -370,10 +371,12 @@ describe('useFoundryWizardState', () => {
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'SpeechTranscription',
       FOUNDRY_SERVICE_PROVIDER_IDS.SpeechTranscription,
+      WIZARD_DEFER_WARMUP_OPTIONS
     );
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'DocumentIntelligence',
       FOUNDRY_SERVICE_PROVIDER_IDS.DocumentIntelligence,
+      WIZARD_DEFER_WARMUP_OPTIONS
     );
     expect(result.current.optionalForm.embeddingsApiKey).toBe(SECRET_MASK);
     expect(result.current.optionalForm.speechApiKeyHasStoredValue).toBe(true);

@@ -129,12 +129,16 @@ public class LocalModelOnboardingValidatorTests
             .Setup(x => x.Resolve())
             .Returns(huggingFaceToken);
 
+        var curatedResolver = new Mock<ICuratedInstallResolver>(MockBehavior.Strict);
+
         return new LocalModelOnboardingValidator(
             configuration,
             settingsService.Object,
             chatTargetValidator.Object,
             inventoryService.Object,
-            tokenResolver.Object);
+            tokenResolver.Object,
+            curatedResolver.Object,
+            new Mock<ICustomInstallResolver>(MockBehavior.Strict).Object);
     }
 
     private static AddModelRequest CreateLocalRequest(

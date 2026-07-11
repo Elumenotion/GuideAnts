@@ -1,0 +1,13 @@
+{
+  "expectedRevision": 2,
+  "preset": {
+    "jinja": true,
+    "parallel": 5,
+    "threads": 16,
+    "kvUnified": true,
+    "contBatching": true,
+    "flashAttn": "on",
+    "modelsMax": 1,
+    "noAutoload": true
+  }
+}

@@ -44,7 +44,7 @@ namespace GuideAntsApi.DataModel.Models
 
         /// <summary>
         /// Optional JSON string containing runtime configuration for this model.
-        /// For llama-cpp: { routerModelId, runtimeProfileId, loadParams?, parallelToolCalls? }.
+        /// For llama-cpp: { routerModelId, runtimeProfileId }.
         /// For cloud models: { runtimeProfileId } — references the profile that defines sampling parameters.
         /// </summary>
         public string? RuntimeConfigJson { get; set; }
@@ -66,6 +66,9 @@ namespace GuideAntsApi.DataModel.Models
         public DateTime? Updated { get; set; }
 
         public ICollection<Assistant> Assistants { get; set; } = [];
+
+        public LocalModelInstallation? Installation { get; set; }
+
     }
 }
 

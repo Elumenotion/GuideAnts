@@ -6,6 +6,7 @@ import {
   HUGGINGFACE_SECTION,
   HUGGINGFACE_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
+  WIZARD_DEFER_WARMUP_OPTIONS,
 } from './constants';
 import type {
   HuggingFaceCoreConnectionFormState,
@@ -325,7 +326,7 @@ export function useHuggingFaceWizardState(): UseHuggingFaceWizardStateResult {
         ModelId: optionalForm.embeddingsModelId.trim(),
         TimeoutSeconds: optionalForm.embeddingsTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('Embeddings', HUGGINGFACE_SERVICE_PROVIDER_IDS.Embeddings);
+      await api.settings.services.updateActiveProvider('Embeddings', HUGGINGFACE_SERVICE_PROVIDER_IDS.Embeddings, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableImages) {
@@ -334,7 +335,7 @@ export function useHuggingFaceWizardState(): UseHuggingFaceWizardStateResult {
         ImageToImageModelId: optionalForm.imagesImageToImageModelId.trim(),
         TimeoutSeconds: optionalForm.imagesTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('ImageGeneration', HUGGINGFACE_SERVICE_PROVIDER_IDS.ImageGeneration);
+      await api.settings.services.updateActiveProvider('ImageGeneration', HUGGINGFACE_SERVICE_PROVIDER_IDS.ImageGeneration, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableSpeechTranscription) {
@@ -342,7 +343,7 @@ export function useHuggingFaceWizardState(): UseHuggingFaceWizardStateResult {
         ModelId: optionalForm.speechTranscriptionModelId.trim(),
         TimeoutSeconds: optionalForm.speechTranscriptionTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('SpeechTranscription', HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechTranscription);
+      await api.settings.services.updateActiveProvider('SpeechTranscription', HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechTranscription, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableSpeechSynthesis) {
@@ -350,7 +351,7 @@ export function useHuggingFaceWizardState(): UseHuggingFaceWizardStateResult {
         ModelId: optionalForm.speechSynthesisModelId.trim(),
         TimeoutSeconds: optionalForm.speechSynthesisTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('SpeechSynthesis', HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechSynthesis);
+      await api.settings.services.updateActiveProvider('SpeechSynthesis', HUGGINGFACE_SERVICE_PROVIDER_IDS.SpeechSynthesis, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     const refreshed = await loadSnapshot();

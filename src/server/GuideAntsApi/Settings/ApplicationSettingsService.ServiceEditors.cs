@@ -4,14 +4,13 @@ using System.Text.Json.Nodes;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Routing;
 
 namespace GuideAntsApi.Settings;
 
 public sealed partial class ApplicationSettingsService
 {
-    private const string DefaultHuggingFaceSpeechSynthesisModelId = "ResembleAI/chatterbox";
-
     public async Task<ServiceEditorStateDto> GetServiceEditorStateAsync(
         string serviceId,
         CancellationToken cancellationToken = default)
@@ -575,16 +574,45 @@ public sealed partial class ApplicationSettingsService
         await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
     }
 
-    private static string? ResolveInitialServiceModeModelId(string serviceId, string providerId)
+    public async Task SetServiceModeModelIdAsync(
+        string serviceId,
+        string modelId,
+        CancellationToken cancellationToken = default)
     {
-        if (string.Equals(serviceId, RoutedServiceNames.SpeechSynthesis, StringComparison.Ordinal)
-            && string.Equals(providerId, ServiceProviderIds.SpeechSynthesisHuggingFaceInference, StringComparison.Ordinal))
+        var trimmed = modelId.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
         {
-            return DefaultHuggingFaceSpeechSynthesisModelId;
+            throw new ArgumentException("Model id is required.", nameof(modelId));
         }
 
-        return null;
+        var contract = GetServiceContract(serviceId);
+        var (row, payload) = await LoadOrCreateServiceModesRowAsync(cancellationToken).ConfigureAwait(false);
+        var canonicalService = CanonicalizeServiceName(contract.ServiceId);
+        var modes = ServiceModesPayload.ReadModesFor(payload, canonicalService).ToList();
+        var activeMode = modes.FirstOrDefault(mode => mode.IsDefault && mode.Enabled)
+            ?? modes.FirstOrDefault(mode => mode.IsDefault);
+        if (activeMode is null)
+        {
+            throw new InvalidOperationException(
+                $"Service '{serviceId}' has no default service mode; cannot persist configured model id.");
+        }
+
+        if (string.Equals(activeMode.ModelId, trimmed, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var updatedModes = modes
+            .Select(mode => string.Equals(mode.ModeId, activeMode.ModeId, StringComparison.Ordinal)
+                ? mode with { ModelId = trimmed }
+                : mode)
+            .ToList();
+        ServiceModesPayload.WriteModesFor(payload, canonicalService, updatedModes, activeMode.ModeId);
+        await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
     }
+
+    private static string? ResolveInitialServiceModeModelId(string serviceId, string providerId) =>
+        LocalAuxiliaryCatalogDefaults.TryGetDefaultCatalogModelId(serviceId, providerId);
 
     private static string BuildExplicitServiceModeId(
         ProviderContract provider,

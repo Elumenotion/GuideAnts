@@ -177,8 +177,15 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.LlamaCpp.INotebookModelRuntimeService, GuideAntsApi.Services.LlamaCpp.NotebookModelRuntimeService>();
         services.AddSingleton<IRouterModelsConfigService, RouterModelsConfigService>();
         services.AddScoped<ILlamaRuntimeInventoryService, LlamaRuntimeInventoryService>();
+        services.AddHostedService<LocalModelStartupReconciliationService>();
         services.AddScoped<ILocalModelOnboardingValidator, LocalModelOnboardingValidator>();
         services.AddScoped<ILocalModelOnboardingOrchestrator, LocalModelOnboardingOrchestrator>();
+        services.AddScoped<ICuratedInstallResolver, CuratedInstallResolver>();
+        services.AddScoped<ICustomInstallResolver, CustomInstallResolver>();
+        services.AddScoped<ILocalModelOperationService, LocalModelOperationService>();
+        services.AddScoped<ILocalModelInstallationService, LocalModelInstallationService>();
+        services.AddScoped<ILocalModelLifecycleOperationService, LocalModelLifecycleOperationService>();
+        services.AddScoped<ILocalModelLifecycleService, LocalModelLifecycleService>();
         services.AddSingleton<GuideAntsApi.Services.HuggingFace.IHuggingFaceTokenResolver, GuideAntsApi.Services.HuggingFace.HuggingFaceTokenResolver>();
         services.AddSingleton<IHuggingFaceModelDownloadService, HuggingFaceModelDownloadService>();
         // Thin HF REST adapter used by the Add Model wizard to populate file
@@ -720,6 +727,10 @@ public static class StartupConfiguration
                 BearerFormat = "JWT"
             });
             options.OperationFilter<BearerSecurityRequirementsOperationFilter>();
+
+            options.CustomSchemaIds(type =>
+                type.FullName?.Replace("+", ".")
+                ?? type.Name);
 
             // Configure ScriptType enum for Swagger
             options.MapType<ScriptType>(() => new OpenApiSchema

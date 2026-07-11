@@ -5,11 +5,7 @@ namespace GuideAntsApi.Services.LlamaCpp;
 
 public sealed record LocalRuntimeConfiguration(
     string RouterModelId,
-    string RuntimeProfileId,
-    JsonObject? LoadParams,
-    bool ParallelToolCalls,
-    int? RouterContextSize = null,
-    int? RouterCacheRamMib = null);
+    string RuntimeProfileId);
 
 public static class LocalRuntimeConfigurationParser
 {
@@ -80,16 +76,9 @@ public static class LocalRuntimeConfigurationParser
                 $"Model '{modelId}' RuntimeConfigJson field 'routerModelId' must not include '.gguf' suffix.");
         }
 
-        ValidateOptionalRange(modelId, "routerContextSize", parsed.RouterContextSize, min: 1024, max: 1_048_576);
-        ValidateOptionalRange(modelId, "routerCacheRamMib", parsed.RouterCacheRamMib, min: 0, max: 262_144);
-
         return new LocalRuntimeConfiguration(
             routerModelId,
-            parsed.RuntimeProfileId!.Trim(),
-            parsed.LoadParams,
-            parsed.ParallelToolCalls ?? false,
-            parsed.RouterContextSize,
-            parsed.RouterCacheRamMib);
+            parsed.RuntimeProfileId!.Trim());
     }
 
     public static string SerializeCanonical(LocalRuntimeConfiguration configuration)
@@ -100,48 +89,75 @@ public static class LocalRuntimeConfigurationParser
             ["runtimeProfileId"] = configuration.RuntimeProfileId
         };
 
-        if (configuration.LoadParams is not null)
-        {
-            root["loadParams"] = configuration.LoadParams.DeepClone();
-        }
-
-        if (configuration.ParallelToolCalls)
-        {
-            root["parallelToolCalls"] = true;
-        }
-
-        if (configuration.RouterContextSize is not null)
-        {
-            root["routerContextSize"] = configuration.RouterContextSize.Value;
-        }
-
-        if (configuration.RouterCacheRamMib is not null)
-        {
-            root["routerCacheRamMib"] = configuration.RouterCacheRamMib.Value;
-        }
-
         return root.ToJsonString(CanonicalJsonOptions);
-    }
-
-    private static void ValidateOptionalRange(string modelId, string fieldName, int? value, int min, int max)
-    {
-        if (value is null)
-        {
-            return;
-        }
-
-        if (value.Value < min || value.Value > max)
-        {
-            throw new InvalidOperationException(
-                $"Model '{modelId}' RuntimeConfigJson property '{fieldName}' must be between {min} and {max}.");
-        }
     }
 
     private sealed record LocalRuntimeConfigurationPayload(
         string? RouterModelId,
-        string? RuntimeProfileId,
-        JsonObject? LoadParams,
-        bool? ParallelToolCalls,
-        int? RouterContextSize = null,
-        int? RouterCacheRamMib = null);
+        string? RuntimeProfileId);
 }
+
+/// <summary>
+/// Reads legacy runtime JSON fields for one-time migration. Not used by the final parser.
+/// </summary>
+public static class LocalRuntimeConfigurationMigrationReader
+{
+    private static readonly JsonSerializerOptions DeserializeJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    public static LegacyLocalRuntimeConfiguration ReadLegacy(string modelId, string runtimeConfigJson)
+    {
+        JsonObject? root;
+        try
+        {
+            root = JsonNode.Parse(runtimeConfigJson) as JsonObject;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelId}' RuntimeConfigJson is invalid JSON.", ex);
+        }
+
+        if (root is null)
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelId}' RuntimeConfigJson must be a JSON object.");
+        }
+
+        var payload = root.Deserialize<LegacyLocalRuntimeConfigurationPayload>(DeserializeJsonOptions)
+            ?? new LegacyLocalRuntimeConfigurationPayload();
+
+        JsonObject? loadParams = null;
+        if (root.TryGetPropertyValue("loadParams", out var loadParamsNode) && loadParamsNode is JsonObject loadObj)
+        {
+            loadParams = loadObj.DeepClone().AsObject();
+        }
+
+        return new LegacyLocalRuntimeConfiguration(
+            payload.RouterModelId?.Trim() ?? string.Empty,
+            payload.RuntimeProfileId?.Trim() ?? string.Empty,
+            loadParams,
+            payload.ParallelToolCalls,
+            payload.RouterContextSize,
+            payload.RouterCacheRamMib);
+    }
+
+    private sealed class LegacyLocalRuntimeConfigurationPayload
+    {
+        public string? RouterModelId { get; set; }
+        public string? RuntimeProfileId { get; set; }
+        public bool? ParallelToolCalls { get; set; }
+        public int? RouterContextSize { get; set; }
+        public int? RouterCacheRamMib { get; set; }
+    }
+}
+
+public sealed record LegacyLocalRuntimeConfiguration(
+    string RouterModelId,
+    string RuntimeProfileId,
+    JsonObject? LoadParams,
+    bool? ParallelToolCalls,
+    int? RouterContextSize = null,
+    int? RouterCacheRamMib = null);

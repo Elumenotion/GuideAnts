@@ -151,7 +151,10 @@ services:
     restart: unless-stopped
 
   docling-serve:
-    image: ${DOCLING_SERVE_CPU_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.21.0}
+    # ROCm GPU devices are supplied by docker-compose.rocm-runtime.generated.yml
+    # (native Linux: /dev/kfd + /dev/dri + group_add; WSL ROCDXG: /dev/dxg + librocdxg binds).
+    # Default image is CPU; set DOCLING_SERVE_ROCM_IMAGE to a local docling-serve-rocm72 build for GPU.
+    image: ${DOCLING_SERVE_ROCM_IMAGE:-quay.io/docling-project/docling-serve-cpu:v1.26.0}
     container_name: docling-serve
     environment:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_SERVE_MAX_SYNC_WAIT:-600}
@@ -166,6 +169,8 @@ services:
       - DOCLING_SERVE_OTEL_ENABLE_METRICS=${DOCLING_SERVE_OTEL_ENABLE_METRICS:-true}
       - DOCLING_SERVE_OTEL_ENABLE_TRACES=${DOCLING_SERVE_OTEL_ENABLE_TRACES:-false}
       - DOCLING_DEBUG_PROFILE_PIPELINE_TIMINGS=${DOCLING_DEBUG_PROFILE_PIPELINE_TIMINGS:-false}
+      - DOCLING_DEVICE=${DOCLING_DEVICE:-cpu}
+      - TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=${TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL:-1}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/version"]
       interval: 30s

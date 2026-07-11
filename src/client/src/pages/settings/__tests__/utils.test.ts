@@ -11,12 +11,13 @@ import {
   SECRET_MASK,
   buildAddModelRequest,
   buildCatalogEditRequest,
-  buildCanonicalLocalRuntimeFromGuidedForm,
   buildProfileCreateRequest,
   buildProfileUpdateRequest,
   clonePayload,
   createCatalogEditStateFromModel,
   createEmptyAddModelWizardState,
+  createAttachAliasWizardState,
+  suggestRuntimeProfileIdForRouterAlias,
   createEmptyProfileForm,
   createProfileFormFromContractShape,
   exportRuntimeProfile,
@@ -65,14 +66,18 @@ describe('buildAddModelRequest', () => {
     state.runtimeProfileId = 'gemma4';
     state.llamaRouterModelId = 'gemma-4-12B-it-qat-GGUF';
     state.llamaHuggingFaceRepository = 'unsloth/gemma-4-12B-it-qat-GGUF';
-    state.llamaHuggingFaceQuantIncludePattern = 'gemma-4-12B-it-qat-UD-Q4_K_XL.gguf';
-    state.llamaHuggingFaceMmprojIncludePattern = 'mmproj-BF16.gguf';
+    state.llamaHuggingFaceResolvedRevision = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    state.llamaHuggingFaceArtifactGroupId = 'single::gemma.gguf';
+    state.llamaHuggingFaceModelFiles = ['gemma-4-12B-it-qat-UD-Q4_K_XL.gguf'];
+    state.llamaHuggingFaceMmprojFiles = ['mmproj-BF16.gguf'];
+    state.llamaHuggingFaceRouterPresetRows = [{ key: 'ctx-size', value: '8192' }];
 
     const request = buildAddModelRequest(state);
 
     expect(request.catalog.modelId).toBe('gemma-4-12B-it-qat-GGUF');
     expect(request.catalog.displayName).toBe('gemma-4-12B-it-qat-GGUF');
     expect(request.install?.huggingFace?.targetDirectory).toBe('gemma-4-12B-it-qat-GGUF');
+    expect(request.install?.huggingFace?.modelFiles).toEqual(['gemma-4-12B-it-qat-UD-Q4_K_XL.gguf']);
   });
 
   it('builds llama-cpp huggingface request', () => {
@@ -83,9 +88,11 @@ describe('buildAddModelRequest', () => {
     state.runtimeProfileId = 'qwen3_5';
     state.llamaRouterModelId = 'Qwen3.5-9B-Q5_K_M';
     state.llamaHuggingFaceRepository = 'unsloth/Qwen3.5-9B-GGUF';
-    state.llamaHuggingFaceQuantIncludePattern = '*Q5_K_M*';
-    state.llamaHuggingFaceMmprojIncludePattern = '';
+    state.llamaHuggingFaceResolvedRevision = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+    state.llamaHuggingFaceArtifactGroupId = 'single::Qwen3.5-9B-Q5_K_M.gguf';
+    state.llamaHuggingFaceModelFiles = ['Qwen3.5-9B-Q5_K_M.gguf'];
     state.llamaHuggingFaceTargetDirectory = 'Qwen3.5-9B-Q5_K_M';
+    state.llamaHuggingFaceRouterPresetRows = [{ key: 'ctx-size', value: '8192' }];
 
     const request = buildAddModelRequest(state);
 
@@ -93,6 +100,7 @@ describe('buildAddModelRequest', () => {
     expect(request.providerConfig).toEqual({ onboardingUi: 'settings' });
     expect(request.install?.source).toBe('huggingface');
     expect(request.install?.huggingFace?.repository).toBe('unsloth/Qwen3.5-9B-GGUF');
+    expect(request.install?.routerContextSize).toBeUndefined();
   });
 
   it('builds llama-cpp existingAlias request', () => {
@@ -111,25 +119,25 @@ describe('buildAddModelRequest', () => {
 });
 
 describe('buildCatalogEditRequest', () => {
-  it('builds llama-cpp edit request with canonical runtimeConfigJson', () => {
-    const request = buildCatalogEditRequest({
-      modelId: 'qwen-local',
-      provider: 'llama-cpp',
-      displayName: 'Qwen Local',
-      description: '',
-      displayOrder: '',
-      isActive: true,
-      runtimeProfileId: 'qwen3_5',
-      localRuntimeRouterModelId: 'QwenAlias',
-      localRuntimeLoadParamsJson: '{"model":"QwenAlias"}',
-      localRuntimeParallelToolCalls: false,
-      localRuntimeRouterContextSize: '',
-      localRuntimeRouterCacheRamMib: '',
-    });
+  it('preserves existing runtimeConfigJson for llama-cpp presentation-only edits', () => {
+    const request = buildCatalogEditRequest(
+      {
+        modelId: 'qwen-local',
+        provider: 'llama-cpp',
+        displayName: 'Qwen Local',
+        description: '',
+        displayOrder: '',
+        isActive: true,
+        runtimeProfileId: '',
+      },
+      {
+        runtimeConfigJson: '{"routerModelId":"QwenAlias","runtimeProfileId":"qwen3_5"}',
+      },
+    );
 
     expect(request.modelId).toBe('qwen-local');
-    expect(request.runtimeConfigJson).toContain('"routerModelId": "QwenAlias"');
-    expect(request.runtimeConfigJson).toContain('"runtimeProfileId": "qwen3_5"');
+    expect(request.runtimeConfigJson).toBe('{"routerModelId":"QwenAlias","runtimeProfileId":"qwen3_5"}');
+    expect(request.runtimeConfigJson).not.toContain('loadParams');
   });
 });
 
@@ -157,6 +165,7 @@ describe('runtime profile import/export helpers', () => {
       samplingParametersJson: '{"temperature":{"kind":"number","defaultValue":0.7}}',
       thinkingControlJson: '{"defaultChoice":"medium","choiceActions":{"minimal":[],"medium":[]}}',
       providers: [],
+      requestFieldsWhenToolsPresentJson: '{}',
     });
   });
 
@@ -263,27 +272,10 @@ describe('catalog edit helpers', () => {
 
     expect(createCatalogEditStateFromModel(model)).toMatchObject({
       modelId: 'qwen-local',
-      localRuntimeRouterModelId: 'QwenAlias',
-      runtimeProfileId: 'qwen3_5',
-      localRuntimeParallelToolCalls: true,
-      localRuntimeRouterContextSize: '8192',
+      displayName: 'Qwen Local',
+      runtimeProfileId: '',
       displayOrder: '3',
     });
-  });
-
-  it('builds canonical local runtime json from guided form values', () => {
-    const json = buildCanonicalLocalRuntimeFromGuidedForm({
-      runtimeProfileId: 'qwen3_5',
-      localRuntimeRouterModelId: 'QwenAlias',
-      localRuntimeLoadParamsJson: '{"model":"QwenAlias"}',
-      localRuntimeParallelToolCalls: true,
-      localRuntimeRouterContextSize: '8192',
-      localRuntimeRouterCacheRamMib: '512',
-    });
-
-    expect(json).toContain('"routerModelId": "QwenAlias"');
-    expect(json).toContain('"parallelToolCalls": true');
-    expect(json).toContain('"routerContextSize": 8192');
   });
 
   it('derives reasoning choices json when editing llama-cpp catalog rows', () => {
@@ -296,11 +288,6 @@ describe('catalog edit helpers', () => {
         displayOrder: '',
         isActive: true,
         runtimeProfileId: 'qwen3_5',
-        localRuntimeRouterModelId: 'QwenAlias',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
       },
       {
         profileThinkingControlJson: '{"choiceActions":{"low":[],"high":[]}}',
@@ -513,80 +500,6 @@ describe('parseRuntimeProfileId and parseCanonicalLocalRuntimeJson', () => {
   });
 });
 
-describe('buildCanonicalLocalRuntimeFromGuidedForm', () => {
-  it('returns undefined when all guided values are empty', () => {
-    expect(
-      buildCanonicalLocalRuntimeFromGuidedForm({
-        runtimeProfileId: '',
-        localRuntimeRouterModelId: '',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
-      })
-    ).toBeUndefined();
-  });
-
-  it('requires router and runtime profile ids when any guided value is set', () => {
-    expect(() =>
-      buildCanonicalLocalRuntimeFromGuidedForm({
-        runtimeProfileId: '',
-        localRuntimeRouterModelId: '',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: true,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
-      })
-    ).toThrow('Router Model ID');
-
-    expect(() =>
-      buildCanonicalLocalRuntimeFromGuidedForm({
-        runtimeProfileId: '',
-        localRuntimeRouterModelId: 'Qwen',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
-      })
-    ).toThrow('Runtime Profile ID');
-  });
-
-  it('rejects invalid load params and router tuning values', () => {
-    expect(() =>
-      buildCanonicalLocalRuntimeFromGuidedForm({
-        runtimeProfileId: 'qwen3_5',
-        localRuntimeRouterModelId: 'Qwen',
-        localRuntimeLoadParamsJson: '[]',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
-      })
-    ).toThrow('JSON object');
-
-    expect(() =>
-      buildCanonicalLocalRuntimeFromGuidedForm({
-        runtimeProfileId: 'qwen3_5',
-        localRuntimeRouterModelId: 'Qwen',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '100',
-        localRuntimeRouterCacheRamMib: '',
-      })
-    ).toThrow('Context size');
-
-    expect(() =>
-      buildCanonicalLocalRuntimeFromGuidedForm({
-        runtimeProfileId: 'qwen3_5',
-        localRuntimeRouterModelId: 'Qwen',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '-1',
-      })
-    ).toThrow('Prompt cache RAM');
-  });
-});
-
 describe('buildAddModelRequest validation', () => {
   it('rejects incomplete wizard state', () => {
     expect(() => buildAddModelRequest(createEmptyAddModelWizardState())).toThrow('Pick a provider');
@@ -617,6 +530,15 @@ describe('buildAddModelRequest validation', () => {
     state.llamaInstallSource = 'huggingface';
     expect(() => buildAddModelRequest(state)).toThrow();
   });
+
+  it('prefills attach-alias wizard state from router alias', () => {
+    expect(suggestRuntimeProfileIdForRouterAlias('Qwen3.5-9B-GGUF')).toBe('qwen3_5');
+    const state = createAttachAliasWizardState('Qwen3.5-9B-GGUF');
+    expect(state.llamaInstallSource).toBe('existingAlias');
+    expect(state.llamaExistingAliasRouterModelId).toBe('Qwen3.5-9B-GGUF');
+    expect(state.catalogModelId).toBe('Qwen3.5-9B-GGUF');
+    expect(state.runtimeProfileId).toBe('qwen3_5');
+  });
 });
 
 describe('buildCatalogEditRequest edge cases', () => {
@@ -629,11 +551,6 @@ describe('buildCatalogEditRequest edge cases', () => {
       displayOrder: '2',
       isActive: true,
       runtimeProfileId: 'openai_default',
-      localRuntimeRouterModelId: '',
-      localRuntimeLoadParamsJson: '',
-      localRuntimeParallelToolCalls: false,
-      localRuntimeRouterContextSize: '',
-      localRuntimeRouterCacheRamMib: '',
     });
 
     expect(request.runtimeConfigJson).toBe(JSON.stringify({ runtimeProfileId: 'openai_default' }));
@@ -651,11 +568,6 @@ describe('buildCatalogEditRequest edge cases', () => {
       displayOrder: '',
       isActive: true,
       runtimeProfileId: 'qwen3_5',
-      localRuntimeRouterModelId: 'QwenAlias',
-      localRuntimeLoadParamsJson: '',
-      localRuntimeParallelToolCalls: false,
-      localRuntimeRouterContextSize: '',
-      localRuntimeRouterCacheRamMib: '',
     };
 
     expect(() => buildCatalogEditRequest({ ...base, modelId: '  ' })).toThrow('Model ID is required');
@@ -663,9 +575,9 @@ describe('buildCatalogEditRequest edge cases', () => {
     expect(() => buildCatalogEditRequest({ ...base, displayName: ' ' })).toThrow('Display name is required');
   });
 
-  it('rejects llama-cpp edits without local runtime configuration', () => {
-    expect(() =>
-      buildCatalogEditRequest({
+  it('preserves llama-cpp runtime config from options without deriving from form fields', () => {
+    const request = buildCatalogEditRequest(
+      {
         modelId: 'qwen-local',
         provider: 'llama-cpp',
         displayName: 'Qwen',
@@ -673,13 +585,10 @@ describe('buildCatalogEditRequest edge cases', () => {
         displayOrder: '',
         isActive: true,
         runtimeProfileId: '',
-        localRuntimeRouterModelId: '',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
-      })
-    ).toThrow('Local runtime configuration');
+      },
+      { runtimeConfigJson: '{"routerModelId":"QwenAlias"}' }
+    );
+    expect(request.runtimeConfigJson).toBe('{"routerModelId":"QwenAlias"}');
   });
 
   it('omits reasoning choices when thinking control json has no choice actions object', () => {
@@ -692,11 +601,6 @@ describe('buildCatalogEditRequest edge cases', () => {
         displayOrder: '',
         isActive: true,
         runtimeProfileId: 'qwen3_5',
-        localRuntimeRouterModelId: 'QwenAlias',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
       },
       { profileThinkingControlJson: '{}' }
     );
@@ -713,11 +617,6 @@ describe('buildCatalogEditRequest edge cases', () => {
         displayOrder: '',
         isActive: true,
         runtimeProfileId: 'qwen3_5',
-        localRuntimeRouterModelId: 'QwenAlias',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
       },
       { profileThinkingControlJson: '{' }
     );
@@ -734,11 +633,6 @@ describe('buildCatalogEditRequest edge cases', () => {
         displayOrder: '',
         isActive: true,
         runtimeProfileId: 'qwen3_5',
-        localRuntimeRouterModelId: 'QwenAlias',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
       },
       { profileThinkingControlJson: '{"choiceActions":{"  ":[]}}' }
     );
@@ -755,11 +649,6 @@ describe('buildCatalogEditRequest edge cases', () => {
         displayOrder: '',
         isActive: true,
         runtimeProfileId: 'qwen3_5',
-        localRuntimeRouterModelId: 'QwenAlias',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
       },
       { profileThinkingControlJson: '{bad-json' }
     );
@@ -832,11 +721,6 @@ describe('buildCatalogEditRequest reasoning derivation', () => {
         displayOrder: '',
         isActive: true,
         runtimeProfileId: 'qwen3_5',
-        localRuntimeRouterModelId: 'QwenAlias',
-        localRuntimeLoadParamsJson: '',
-        localRuntimeParallelToolCalls: false,
-        localRuntimeRouterContextSize: '',
-        localRuntimeRouterCacheRamMib: '',
       },
       { profileThinkingControlJson: '{"defaultChoice":"medium"}' }
     );

@@ -1539,6 +1539,178 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.ToTable("Links");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.LocalModelInstallation", b =>
+                {
+                    b.Property<string>("ModelId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("CatalogId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("CatalogVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<string>("ManagementMode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("ModelArtifactsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ProjectorArtifactsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("QuantId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("QuantLabel")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Repository")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("RequestedRevision")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("ResolvedRevision")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("RouterModelId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("RouterPresetSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("RuntimeProfileId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("TargetDirectory")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.HasKey("ModelId");
+
+                    b.ToTable("LocalModelInstallations");
+                });
+
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.LocalModelOperation", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("AppliedRevision")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CompletedSideEffectsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("CompletedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<string>("CurrentStep")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("DesiredRevision")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("ImmutableInputJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ModelId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("OperationKind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Remediation")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("RouterModelId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.HasKey("OperationId");
+
+                    b.HasIndex("ModelId")
+                        .HasDatabaseName("IX_LocalModelOperations_ModelId");
+
+                    b.HasIndex("RouterModelId")
+                        .HasDatabaseName("IX_LocalModelOperations_RouterModelId")
+                        .HasFilter("[RouterModelId] IS NOT NULL");
+
+                    b.HasIndex("Status", "UpdatedUtc")
+                        .HasDatabaseName("IX_LocalModelOperations_Status_UpdatedUtc");
+
+                    b.ToTable("LocalModelOperations");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.MessageAttachment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2523,6 +2695,12 @@ namespace GuideAntsApi.DataModel.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("RequestFieldsWhenToolsPresentJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("nvarchar(max)")
+                        .HasDefaultValue("{}");
+
                     b.Property<string>("SamplingParametersJson")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -3479,6 +3657,17 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("GuideAntsApi.DataModel.Models.LocalModelInstallation", b =>
+                {
+                    b.HasOne("GuideAntsApi.DataModel.Models.Model", "Model")
+                        .WithOne("Installation")
+                        .HasForeignKey("GuideAntsApi.DataModel.Models.LocalModelInstallation", "ModelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Model");
+                });
+
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.MessageAttachment", b =>
                 {
                     b.HasOne("GuideAntsApi.DataModel.Models.NotebookConversationMessage", "Message")
@@ -3940,6 +4129,8 @@ namespace GuideAntsApi.DataModel.Migrations
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Model", b =>
                 {
                     b.Navigation("Assistants");
+
+                    b.Navigation("Installation");
                 });
 
             modelBuilder.Entity("GuideAntsApi.DataModel.Models.Notebook", b =>

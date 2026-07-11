@@ -5,8 +5,7 @@ namespace GuideAntsApi.Models.Guides;
 // Runtime config descriptor for all model providers
 public record ModelRuntimeConfigDto(
     string RouterModelId,
-    string RuntimeProfileId,
-    JsonObject? LoadParams
+    string RuntimeProfileId
 );
 
 public record SamplingParameterPolicyDto(

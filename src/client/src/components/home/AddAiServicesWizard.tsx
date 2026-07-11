@@ -589,6 +589,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
         }
       } else if (provider === 'local-ai') {
         await localAi.persistLocalAiModels(snapshot, loadSnapshot, setSnapshot);
+        await api.settings.warmupLocalAi();
       } else {
         const hasPendingDrafts = openai.draftModels.some((m) => !m.persisted);
         if (hasPendingDrafts) {
@@ -957,6 +958,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
               installError={localAi.installError}
               installModelError={localAi.installModelError}
               onInstall={localAi.startInstall}
+              onCuratedInstall={localAi.startCuratedInstall}
               onRemoveDraft={localAi.removeDraftModel}
             />
           ) : (

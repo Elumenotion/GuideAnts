@@ -407,7 +407,7 @@ FodyWeavers.xsd
 /docker/volumes/llama/models.bak
 /docker/build/Sandboxes/whiper-large/torch
 /docker/build/Sandboxes/whiper-large/huggingface/hub
-/docker/volumes/emb/models/harrier-oss-v1-0.6b
+/docker/volumes/emb/models/qwen3_embedding_0_6b
 /src/server/GuideAntsApi.IntegrationTests/docker/volumes/content-files
 /_tmp_compose_config.txt
 /build_errors.txt

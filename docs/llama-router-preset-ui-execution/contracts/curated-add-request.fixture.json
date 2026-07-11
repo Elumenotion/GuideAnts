@@ -1,0 +1,14 @@
+{
+  "provider": "llama-cpp",
+  "catalog": {
+    "displayName": "Qwen 3.6 35B A3B MTP",
+    "isActive": true
+  },
+  "install": {
+    "source": "curated",
+    "catalogId": "qwen3.6-35b-a3b-mtp",
+    "catalogVersion": "2026-07-10",
+    "quantId": "q6_k_xl",
+    "resolvedRevision": "8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a"
+  }
+}

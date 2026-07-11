@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guideants.local/schemas/llama-catalog.json",
+  "title": "GuideAnts llama curated catalog manifest",
+  "description": "Dedicated llama manifest root (D11). Do not reuse schema.model.json entries[] shape.",
+  "type": "object",
+  "required": ["schemaVersion", "task", "version", "models"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "task": {
+      "type": "string",
+      "const": "llama"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Manifest-level catalogVersion inherited by every definition (D11)."
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/modelDefinition" }
+    }
+  },
+  "$defs": {
+    "display": {
+      "type": "object",
+      "required": ["name", "description", "labels", "license", "documentationUrl"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "labels": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "license": { "type": "string", "minLength": 1 },
+        "documentationUrl": { "type": "string", "format": "uri" },
+        "recommendedQuantLabels": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "primaryRecommendation": { "type": "boolean" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["repository"],
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "minLength": 3 },
+        "revision": { "type": "string" }
+      }
+    },
+    "mmprojRef": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "minLength": 3 },
+        "revision": { "type": "string" }
+      }
+    },
+    "routerPreset": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string" }
+    },
+    "defaults": {
+      "type": "object",
+      "required": [
+        "catalogModelId",
+        "routerModelId",
+        "runtimeProfileId",
+        "targetDirectory",
+        "routerPreset"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "catalogModelId": { "type": "string", "minLength": 1 },
+        "routerModelId": { "type": "string", "minLength": 1 },
+        "runtimeProfileId": { "type": "string", "minLength": 1 },
+        "targetDirectory": { "type": "string", "minLength": 1 },
+        "mmproj": {
+          "oneOf": [
+            { "$ref": "#/$defs/mmprojRef" },
+            { "type": "null" }
+          ]
+        },
+        "routerPreset": { "$ref": "#/$defs/routerPreset" }
+      }
+    },
+    "quantMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "recommendedLabels": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "guidance": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["summary"],
+            "additionalProperties": false,
+            "properties": {
+              "summary": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "hardwareNotes": {
+      "type": "object",
+      "required": ["summary", "contextClass"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "contextClass": {
+          "type": "string",
+          "enum": ["large", "compact"]
+        }
+      }
+    },
+    "modelDefinition": {
+      "type": "object",
+      "required": ["id", "display", "source", "defaults", "quantMetadata", "hardwareNotes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "display": { "$ref": "#/$defs/display" },
+        "source": { "$ref": "#/$defs/source" },
+        "defaults": { "$ref": "#/$defs/defaults" },
+        "quantMetadata": { "$ref": "#/$defs/quantMetadata" },
+        "hardwareNotes": { "$ref": "#/$defs/hardwareNotes" }
+      }
+    }
+  }
+}

@@ -69,6 +69,9 @@ describe('api.settings (table-driven)', () => {
     { name: 'localModels.get', call: () => api.settings.localModels.get('SpeechSynthesis', 'model-ref'), urlPart: '/settings/services/SpeechSynthesis/local-models/model-ref', sample: {} },
     { name: 'localModels.getOperation', call: () => api.settings.localModels.getOperation('SpeechSynthesis', 'op-1'), urlPart: '/settings/services/SpeechSynthesis/local-models/operations/op-1', sample: {} },
     { name: 'getDownloadStatus', call: () => api.settings.getDownloadStatus('dl-1'), urlPart: '/settings/llama/downloads/dl-1', sample: { status: 'done' } },
+    { name: 'getLlamaCatalog', call: () => api.settings.getLlamaCatalog(), urlPart: '/settings/llama/catalog', sample: { schemaVersion: 1, models: [] } },
+    { name: 'getLlamaCatalogQuants', call: () => api.settings.getLlamaCatalogQuants('qwen3.6-35b-a3b-mtp', '2026-07-10'), urlPart: '/settings/llama/catalog/qwen3.6-35b-a3b-mtp/quants?catalogVersion=2026-07-10', sample: { quants: [] } },
+    { name: 'getLlamaOperationStatus', call: () => api.settings.getLlamaOperationStatus('a1b2c3d4-e5f6-7890-abcd-ef1234567890'), urlPart: '/settings/llama/operations/a1b2c3d4-e5f6-7890-abcd-ef1234567890', sample: { status: 'queued' } },
   ];
 
   it.each(getCases)('$name calls correct endpoint and returns payload', async ({ call, urlPart, sample }) => {

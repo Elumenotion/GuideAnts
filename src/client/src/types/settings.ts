@@ -359,22 +359,31 @@ export interface AddModelInstallHuggingFaceDto {
   quantIncludePattern: string;
   mmprojIncludePattern: string;
   targetDirectory: string;
+  resolvedRevision?: string;
+  modelFiles?: string[];
+  mmprojFiles?: string[];
+  routerPreset?: Record<string, string>;
 }
 
 export interface AddModelInstallExistingAliasDto {
   routerModelId: string;
 }
 
+export interface AddModelInstallCuratedDto {
+  catalogId: string;
+  catalogVersion: string;
+  quantId: string;
+  resolvedRevision: string;
+}
+
 export interface AddModelInstallDto {
-  source: 'huggingface' | 'existingAlias';
-  routerModelId: string;
-  runtimeProfileId: string;
+  source: 'huggingface' | 'existingAlias' | 'curated';
+  routerModelId?: string;
+  runtimeProfileId?: string;
   huggingFace?: AddModelInstallHuggingFaceDto;
   existingAlias?: AddModelInstallExistingAliasDto;
-  /** Optional. Written to LocalRuntimeJson and included in HF catalog registration. */
-  routerContextSize?: number;
-  /** Optional. Written to LocalRuntimeJson and included in HF catalog registration. */
-  routerCacheRamMib?: number;
+  curated?: AddModelInstallCuratedDto;
+  presetMode?: 'replace' | 'merge';
 }
 
 export interface AddModelRequest {
@@ -411,6 +420,7 @@ export interface SettingsRuntimeProfileDto {
   thoughtBlockPattern?: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson?: string;
   providers: string[];
   created: string;
   updated?: string;
@@ -424,6 +434,7 @@ export interface CreateRuntimeProfileRequest {
   thoughtBlockPattern?: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson?: string;
   providers?: string[];
 }
 
@@ -435,6 +446,7 @@ export interface UpdateRuntimeProfileRequest {
   thoughtBlockPattern?: string;
   samplingParametersJson: string;
   thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson?: string;
   providers?: string[];
 }
 
@@ -518,6 +530,117 @@ export interface ModelDownloadOperationDto {
   errorMessage?: string;
   logLine?: string;
   error?: AddModelErrorDto;
+}
+
+export interface LlamaCatalogDisplayDto {
+  name: string;
+  description: string;
+  labels: string[];
+  license: string;
+  documentationUrl: string;
+  recommendedQuantLabels?: string[] | null;
+  primaryRecommendation?: boolean | null;
+}
+
+export interface LlamaCatalogSourceDto {
+  repository: string;
+  revision?: string | null;
+}
+
+export interface LlamaCatalogMmprojDto {
+  path: string;
+  repository?: string | null;
+  revision?: string | null;
+}
+
+export interface LlamaCatalogDefaultsDto {
+  catalogModelId: string;
+  routerModelId: string;
+  runtimeProfileId: string;
+  targetDirectory: string;
+  mmproj: LlamaCatalogMmprojDto | null;
+  routerPreset: Record<string, string>;
+}
+
+export interface LlamaCatalogQuantGuidanceDto {
+  summary: string;
+}
+
+export interface LlamaCatalogQuantMetadataDto {
+  recommendedLabels?: string[] | null;
+  guidance?: Record<string, LlamaCatalogQuantGuidanceDto> | null;
+}
+
+export interface LlamaCatalogHardwareNotesDto {
+  summary: string;
+  contextClass: string;
+}
+
+export interface LlamaCatalogDefinitionDto {
+  id: string;
+  display: LlamaCatalogDisplayDto;
+  source: LlamaCatalogSourceDto;
+  defaults: LlamaCatalogDefaultsDto;
+  quantMetadata: LlamaCatalogQuantMetadataDto;
+  hardwareNotes: LlamaCatalogHardwareNotesDto;
+}
+
+export interface LlamaCatalogResponseDto {
+  schemaVersion: number;
+  task: string;
+  catalogVersion: string;
+  models: LlamaCatalogDefinitionDto[];
+}
+
+export interface LlamaQuantArtifactDto {
+  path: string;
+  size?: number | null;
+  shardIndex?: number | null;
+  shardCount?: number | null;
+  lfsOid?: string | null;
+  gitOid?: string | null;
+}
+
+export interface LlamaQuantGuidanceDto {
+  summary: string;
+}
+
+export interface LlamaQuantGroupDto {
+  id: string;
+  label: string;
+  totalBytes: number;
+  files: LlamaQuantArtifactDto[];
+  guidance?: LlamaQuantGuidanceDto | null;
+}
+
+export interface LlamaProjectorArtifactDto {
+  path: string;
+  size?: number | null;
+  lfsOid?: string | null;
+  gitOid?: string | null;
+}
+
+export interface LlamaCatalogQuantsResponseDto {
+  catalogId: string;
+  repository: string;
+  requestedRevision: string;
+  resolvedRevision: string;
+  quants: LlamaQuantGroupDto[];
+  projector: LlamaProjectorArtifactDto | null;
+}
+
+export interface LlamaOperationStatusDto {
+  operationId: string;
+  status: string;
+  stage: string;
+  routerModelId: string;
+  progress?: number | null;
+  errorMessage?: string | null;
+  logLine?: string | null;
+  immutableInputHash?: string | null;
+  error?: AddModelErrorDto | null;
+  catalogModel?: SettingsModelDto | null;
+  installationModelId?: string | null;
 }
 
 /**
@@ -685,6 +808,138 @@ export interface ConnectionUsageModeRef {
 export interface ConnectionUsageChatTargetRef {
   modelId: string;
   assistantCount: number;
+}
+
+export interface InstallationArtifactDto {
+  repositoryPath: string;
+  installedRelativePath: string;
+  byteSize?: number | null;
+  digest?: string | null;
+  etag?: string | null;
+}
+
+export interface LlamaInstallationDetailDto {
+  modelId: string;
+  catalogModel: SettingsModelDto;
+  catalogId?: string | null;
+  catalogVersion?: string | null;
+  repository?: string | null;
+  requestedRevision?: string | null;
+  resolvedRevision?: string | null;
+  quantId?: string | null;
+  quantLabel?: string | null;
+  routerModelId: string;
+  runtimeProfileId: string;
+  targetDirectory: string;
+  modelArtifacts: InstallationArtifactDto[];
+  projectorArtifacts: InstallationArtifactDto[];
+  routerPresetSnapshot: Record<string, string>;
+  runtimeState: string;
+  loaded: boolean;
+  createdUtc: string;
+  updatedUtc: string;
+}
+
+export interface ChangeQuantRequestDto {
+  quantId: string;
+  resolvedRevision: string;
+}
+
+export interface RepairInstallationRequestDto {
+  confirm?: boolean;
+}
+
+export interface CustomizeInstallationRequestDto {
+  confirm: boolean;
+}
+
+export interface AdoptInstallationRequestDto {
+  catalogId: string;
+  catalogVersion: string;
+  confirm?: boolean;
+}
+
+export interface AdoptDiffFieldDto {
+  field: string;
+  currentValue?: string | null;
+  curatedValue?: string | null;
+  verifiable: boolean;
+  requiredAction?: string | null;
+}
+
+export interface AdoptPreviewResponseDto {
+  modelId: string;
+  catalogId: string;
+  catalogVersion: string;
+  differences: AdoptDiffFieldDto[];
+  canAdopt: boolean;
+  blockers: string[];
+}
+
+export interface LifecycleOperationResponseDto {
+  operationId: string;
+  status: string;
+}
+
+export interface FleetLlamaPresetResponseDto {
+  desiredRevision: number;
+  appliedRevision: number;
+  applyStatus: string;
+  applyError?: string | null;
+  preset: Record<string, unknown>;
+}
+
+export interface FleetLlamaPresetPutRequestDto {
+  expectedRevision: number;
+  preset: Record<string, unknown>;
+}
+
+export interface LlamaMigrationStatusResponseDto {
+  completedModels: number;
+  pendingModels: number;
+  issueCount: number;
+  lastRunAt?: string | null;
+}
+
+export interface LlamaMigrationIssueDto {
+  id: string;
+  modelId: string;
+  issueCode: string;
+  sourceField: string;
+  sourceValueSnapshotJson: string;
+  requiredAction: string;
+  resolutionState: string;
+  createdUtc: string;
+  updatedUtc: string;
+}
+
+export interface LlamaMigrationIssuesResponseDto {
+  issues: LlamaMigrationIssueDto[];
+}
+
+export interface LlamaRouterEntryDto {
+  alias: string;
+  modelPath: string;
+  mmprojPath: string;
+  hasModelFile: boolean;
+  hasMmprojFile: boolean;
+  contextSize?: number | null;
+  cacheRamMib?: number | null;
+  preset: Record<string, string>;
+}
+
+export interface LlamaRouterEntriesResponseDto {
+  entries: LlamaRouterEntryDto[];
+}
+
+export interface LlamaRouterEntryPutRequest {
+  alias: string;
+  modelPath: string;
+  mmprojPath: string;
+  preset?: Record<string, string>;
+  presetMode?: 'replace' | 'merge';
+  contextSize?: number | null;
+  cacheRamMib?: number | null;
 }
 
 /** Canonical ordering used across the settings shell. */

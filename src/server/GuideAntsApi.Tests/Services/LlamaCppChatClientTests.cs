@@ -550,7 +550,7 @@ public sealed class LlamaCppChatClientTests
             return JsonResponse("""{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""");
         });
 
-        var client = CreateClient(handler, parallelToolCalls: true);
+        var client = CreateClient(handler, profileData: CreateQwen35ProfileData());
         var request = BuildRequest();
 
         await client.GetCompletionAsync(request);
@@ -559,6 +559,55 @@ public sealed class LlamaCppChatClientTests
         using var doc = JsonDocument.Parse(capturedBody!);
         var root = doc.RootElement;
         root.GetProperty("parallel_tool_calls").GetBoolean().Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_OmitsProfileToolFields_WhenToolsAbsent()
+    {
+        string? capturedBody = null;
+        var handler = new StaticResponseHandler(async httpRequest =>
+        {
+            capturedBody = await httpRequest.Content!.ReadAsStringAsync();
+            return JsonResponse("""{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""");
+        });
+
+        var client = CreateClient(handler, profileData: CreateQwen35ProfileData());
+        var request = new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, "hi")],
+            model: "qwen3.5-27b");
+
+        await client.GetCompletionAsync(request);
+
+        using var doc = JsonDocument.Parse(capturedBody!);
+        doc.RootElement.TryGetProperty("parallel_tool_calls", out _).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_DeepSeekProfile_SetsParallelToolCallsFalse_WhenToolsPresent()
+    {
+        string? capturedBody = null;
+        var handler = new StaticResponseHandler(async httpRequest =>
+        {
+            capturedBody = await httpRequest.Content!.ReadAsStringAsync();
+            return JsonResponse("""{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""");
+        });
+
+        var deepseekProfile = new LlamaCppRuntimeProfileData(
+            "deepseek_r1",
+            CombineSystemAndDeveloperMessages: true,
+            ThoughtBlockPattern: @"<think>[\s\S]*?</think>",
+            SamplingDefaults: new Dictionary<string, double>(),
+            ThinkingControl: new ThinkingControl(string.Empty, new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>
+            {
+                ["parallel_tool_calls"] = JsonSerializer.SerializeToElement(false)
+            });
+
+        var client = CreateClient(handler, profileData: deepseekProfile);
+        await client.GetCompletionAsync(BuildRequest());
+
+        using var doc = JsonDocument.Parse(capturedBody!);
+        doc.RootElement.GetProperty("parallel_tool_calls").GetBoolean().Should().BeFalse();
     }
 
     [TestMethod]
@@ -741,7 +790,6 @@ public sealed class LlamaCppChatClientTests
         HttpMessageHandler handler,
         string deploymentId = "qwen3.5-27b",
         LlamaCppRuntimeProfileData? profileData = null,
-        bool parallelToolCalls = false,
         LlamaCppConfig? config = null)
     {
         var httpClient = new HttpClient(handler);
@@ -754,7 +802,7 @@ public sealed class LlamaCppChatClientTests
 
         profileData ??= CreateQwen35ProfileData();
 
-        return new LlamaCppChatClient(httpClient, config, deploymentId, profileData, parallelToolCalls);
+        return new LlamaCppChatClient(httpClient, config, deploymentId, profileData);
     }
 
     private static LlamaCppRuntimeProfileData CreateQwen35ProfileData()
@@ -777,7 +825,11 @@ public sealed class LlamaCppChatClientTests
                     {
                         new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true)
                     }
-                }));
+                }),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>
+            {
+                ["parallel_tool_calls"] = JsonSerializer.SerializeToElement(true)
+            });
     }
 
     private static LlamaCppRuntimeProfileData CreateGemma4ProfileData()
@@ -799,7 +851,11 @@ public sealed class LlamaCppChatClientTests
                     {
                         new(ThinkingActionTarget.SystemMessagePrefix, "", "<|think|>\n")
                     }
-                }));
+                }),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>
+            {
+                ["parallel_tool_calls"] = JsonSerializer.SerializeToElement(true)
+            });
     }
 
     private static ChatCompletionRequest BuildRequest()

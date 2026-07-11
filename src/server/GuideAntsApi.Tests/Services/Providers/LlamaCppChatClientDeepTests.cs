@@ -344,7 +344,11 @@ public sealed class LlamaCppChatClientDeepTests
                     {
                         new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true)
                     }
-                }));
+                }),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>
+            {
+                ["parallel_tool_calls"] = JsonSerializer.SerializeToElement(true)
+            });
 
     private static LlamaCppRuntimeProfileData GemmaProfile() =>
         new(
@@ -364,7 +368,11 @@ public sealed class LlamaCppChatClientDeepTests
                     {
                         new(ThinkingActionTarget.SystemMessagePrefix, "", "<|think|>\n")
                     }
-                }));
+                }),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>
+            {
+                ["parallel_tool_calls"] = JsonSerializer.SerializeToElement(true)
+            });
 
     private static string TextResponse(string text) =>
         $$"""{"choices":[{"message":{"role":"assistant","content":"{{text}}"},"finish_reason":"stop"}]}""";

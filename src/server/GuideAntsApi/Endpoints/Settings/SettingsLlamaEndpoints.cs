@@ -13,6 +13,69 @@ public static class SettingsLlamaEndpoints
     {
         var llamaGroup = SettingsGroupFactory.MapLlamaGroup(app);
 
+        llamaGroup.MapGet("/catalog", async (
+            ILlamaRuntimeAdminClient adminClient,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var catalog = await adminClient.GetCatalogAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Ok(catalog);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Problem(
+                    title: "Llama catalog unavailable",
+                    detail: ex.Message,
+                    statusCode: StatusCodes.Status502BadGateway,
+                    extensions: new Dictionary<string, object?> { ["code"] = "LLAMA_CATALOG_UNAVAILABLE" });
+            }
+        })
+        .WithName("GetLlamaCatalog")
+        .Produces<LlamaCatalogResponseDto>(StatusCodes.Status200OK)
+        .ProducesProblem(StatusCodes.Status502BadGateway);
+
+        llamaGroup.MapGet("/catalog/{catalogId}/quants", async (
+            string catalogId,
+            string? catalogVersion,
+            ILlamaRuntimeAdminClient adminClient,
+            GuideAntsApi.Services.HuggingFace.IHuggingFaceTokenResolver tokenResolver,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var quants = await adminClient.GetCatalogQuantsAsync(
+                    catalogId,
+                    catalogVersion,
+                    tokenResolver.Resolve(),
+                    cancellationToken).ConfigureAwait(false);
+                return Results.Ok(quants);
+            }
+            catch (LlamaCatalogServiceException ex)
+            {
+                return Results.Problem(
+                    title: "Llama catalog quants request failed",
+                    detail: ex.Message,
+                    statusCode: ex.StatusCode,
+                    extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Problem(
+                    title: "Llama catalog quants unavailable",
+                    detail: ex.Message,
+                    statusCode: StatusCodes.Status502BadGateway,
+                    extensions: new Dictionary<string, object?> { ["code"] = "LLAMA_CATALOG_UNAVAILABLE" });
+            }
+        })
+        .WithName("GetLlamaCatalogQuants")
+        .Produces<LlamaCatalogQuantsResponseDto>(StatusCodes.Status200OK)
+        .ProducesProblem(StatusCodes.Status403Forbidden)
+        .ProducesProblem(StatusCodes.Status404NotFound)
+        .ProducesProblem(StatusCodes.Status409Conflict)
+        .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+        .ProducesProblem(StatusCodes.Status502BadGateway);
+
         llamaGroup.MapGet("/runtime/inventory", async (
             IConfiguration configuration,
             ILlamaRuntimeInventoryService inventoryService,
@@ -66,7 +129,7 @@ public static class SettingsLlamaEndpoints
                 await localAiWarmup.UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
                 auxiliaryServicesWereUnloaded = true;
 
-                await llamaClient.LoadModelAsync(request.RouterModelId, loadParams: null, cancellationToken);
+                await llamaClient.LoadModelAsync(request.RouterModelId, cancellationToken);
 
                 await localAiWarmup.EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
                 return Results.Ok();
@@ -221,6 +284,124 @@ public static class SettingsLlamaEndpoints
         .Produces<ModelDownloadOperationDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status404NotFound);
 
+        llamaGroup.MapGet("/operations/{operationId}", async (
+            string operationId,
+            ILocalModelOnboardingOrchestrator localModelOnboardingOrchestrator,
+            CancellationToken cancellationToken) =>
+        {
+            if (!Guid.TryParse(operationId, out var operationGuid))
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                var op = await localModelOnboardingOrchestrator
+                    .GetCuratedOperationStatusAsync(operationGuid, cancellationToken)
+                    .ConfigureAwait(false);
+                return Results.Ok(op);
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.NotFound();
+            }
+        })
+        .WithName("GetLlamaCuratedOperationStatus")
+        .Produces<LlamaOperationStatusDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound);
+
+        llamaGroup.MapGet("/router/entries", async (
+            ILlamaRuntimeAdminClient adminClient,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var entries = await adminClient.GetRouterEntriesAsync(cancellationToken).ConfigureAwait(false);
+                var mapped = entries.Entries
+                    .Select(e => new LlamaRouterEntryDto(
+                        Alias: e.Alias,
+                        ModelPath: e.ModelPath ?? string.Empty,
+                        MmprojPath: e.MmprojPath ?? string.Empty,
+                        HasModelFile: e.HasModelFile,
+                        HasMmprojFile: e.HasMmprojFile,
+                        ContextSize: e.ContextSize,
+                        CacheRamMib: e.CacheRamMib,
+                        Preset: e.Preset ?? new Dictionary<string, string>()))
+                    .ToList();
+                return Results.Ok(new LlamaRouterEntriesResponseDto(mapped));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Problem(
+                    title: "Llama router entries unavailable",
+                    detail: ex.Message,
+                    statusCode: StatusCodes.Status502BadGateway,
+                    extensions: new Dictionary<string, object?> { ["code"] = "LLAMA_ROUTER_UNAVAILABLE" });
+            }
+        })
+        .WithName("GetLlamaRouterEntries")
+        .Produces<LlamaRouterEntriesResponseDto>(StatusCodes.Status200OK)
+        .ProducesProblem(StatusCodes.Status502BadGateway);
+
+        llamaGroup.MapPut("/router/entries/{alias}", async (
+            string alias,
+            [FromBody] LlamaRouterEntryPutRequest request,
+            ILlamaRuntimeAdminClient adminClient,
+            CancellationToken cancellationToken) =>
+        {
+            if (!string.Equals(alias.Trim(), request.Alias.Trim(), StringComparison.Ordinal))
+            {
+                return Results.BadRequest(new { error = "Route alias must match request alias." });
+            }
+
+            try
+            {
+                var result = await adminClient.PutRouterEntryAsync(request, cancellationToken).ConfigureAwait(false);
+                if (result.RuntimeApply is { Applied: false })
+                {
+                    return Results.Json(
+                        new
+                        {
+                            ok = result.Ok,
+                            iniSha256 = result.IniSha256,
+                            runtimeApply = new
+                            {
+                                applied = result.RuntimeApply.Applied,
+                                iniSha256 = result.RuntimeApply.IniSha256,
+                                remediation = result.RuntimeApply.Remediation,
+                            },
+                        },
+                        statusCode: StatusCodes.Status502BadGateway);
+                }
+
+                return Results.Ok(new
+                {
+                    ok = result.Ok,
+                    iniSha256 = result.IniSha256,
+                    runtimeApply = result.RuntimeApply is null
+                        ? null
+                        : new
+                        {
+                            applied = result.RuntimeApply.Applied,
+                            iniSha256 = result.RuntimeApply.IniSha256,
+                            remediation = result.RuntimeApply.Remediation,
+                        },
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Problem(
+                    title: "Llama router entry update failed",
+                    detail: ex.Message,
+                    statusCode: StatusCodes.Status502BadGateway,
+                    extensions: new Dictionary<string, object?> { ["code"] = "LLAMA_ROUTER_UPDATE_FAILED" });
+            }
+        })
+        .WithName("PutLlamaRouterEntry")
+        .Produces(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status400BadRequest)
+        .ProducesProblem(StatusCodes.Status502BadGateway);
+
         llamaGroup.MapDelete("/router/entries/{routerModelId}", async (
             string routerModelId,
             ILlamaRuntimeInventoryService inventoryService,
@@ -245,5 +426,7 @@ public static class SettingsLlamaEndpoints
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status409Conflict)
         .ProducesProblem(StatusCodes.Status502BadGateway);
+
+        llamaGroup.MapSettingsLlamaInstallationEndpoints();
     }
 }

@@ -1,0 +1,20 @@
+{
+  "provider": "llama-cpp",
+  "catalog": {
+    "modelId": "qwen3.6-35b-a3b-mtp-local",
+    "displayName": "Qwen 3.6 35B A3B MTP",
+    "description": "Adopted from an existing router alias.",
+    "displayOrder": 10,
+    "isActive": true
+  },
+  "providerConfig": null,
+  "install": {
+    "source": "existingAlias",
+    "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF",
+    "runtimeProfileId": "qwen3_6",
+    "huggingFace": null,
+    "existingAlias": {
+      "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF"
+    }
+  }
+}

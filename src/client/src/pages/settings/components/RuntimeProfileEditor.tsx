@@ -139,6 +139,19 @@ export function RuntimeProfileEditor({
         />
       </div>
 
+      <div className={inline ? 'space-y-2' : 'space-y-2 md:col-span-2'}>
+        <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">
+          Request Fields When Tools Present JSON
+        </label>
+        <textarea
+          value={value.requestFieldsWhenToolsPresentJson}
+          onChange={(event) => onChange('requestFieldsWhenToolsPresentJson', event.target.value)}
+          rows={inline ? 4 : 5}
+          className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-xs text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          spellCheck={false}
+        />
+      </div>
+
       {onSubmit ? (
         <div className={inline ? '' : 'md:col-span-2'}>
           <TextActionButton tone="primary" onClick={onSubmit} disabled={submitting} title={submitLabel}>

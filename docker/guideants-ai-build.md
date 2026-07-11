@@ -12,7 +12,7 @@ GuideAnts AI consolidates two prior containers into one runtime image:
 - local embeddings service (internal port 8085)
 - `nginx` gateway for single ingress (port 80)
 
-The `cpu`, `cuda13`, `rocm`, and `vulkan` variants are full local AI images. The `vulkan` variant is vendor-neutral: a single image GPU-accelerates the LLM and image-generation paths on NVIDIA, AMD, and Intel via Vulkan (torch stays on CPU wheels, so ASR/TTS/embeddings run on CPU). See `docker/guideants-ai-vulkan.md` for the full Vulkan design and usage. The `slim` variant is intentionally sandbox-oriented: it starts the Python `ScriptExecutionAgent` and the non-model media service, but it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. Do not confuse `guideants-ai slim` with `guideants-webapi-ui-slim`; the latter is the existing API/UI image for split-stack deployments.
+The `cpu`, `cuda13`, `rocm`, and `vulkan` variants are full local AI images. The `vulkan` variant is vendor-neutral: a single image GPU-accelerates the LLM, embeddings (llama-server), and image-generation paths on NVIDIA, AMD, and Intel via Vulkan (torch stays on CPU wheels, so ASR/TTS still run on CPU). See `docker/guideants-ai-vulkan.md` for the full Vulkan design and usage. The `slim` variant is intentionally sandbox-oriented: it starts the Python `ScriptExecutionAgent` and the non-model media service, but it does not start llama, llama-admin, ASR, TTS, SD, or embeddings. Do not confuse `guideants-ai slim` with `guideants-webapi-ui-slim`; the latter is the existing API/UI image for split-stack deployments.
 
 Gateway route prefixes:
 
@@ -494,7 +494,7 @@ Default location inside the `ai_local_models` volume:
 
 Default expected subdirectory:
 
-- `harrier-oss-v1-0.6b` (from `microsoft/harrier-oss-v1-0.6b`)
+- `qwen3_embedding_0_6b` (from `Qwen/Qwen3-Embedding-0.6B-GGUF`)
 
 If these files are missing, `/emb/admin/load`, `/emb/ready`, and
 `/emb/embed` fail until artifacts are present.
@@ -564,8 +564,8 @@ Startup loading behavior is configurable per service through environment variabl
   - `0`: skip embeddings readiness monitoring on startup
 - `GA_EMB_READY_TIMEOUT_SECONDS` (default `1800`)
 - `GA_EMB_MODEL_DIR` (default `/models-local/emb`)
-- `GA_EMB_DEFAULT_MODEL_PATH` (default `harrier-oss-v1-0.6b`)
-- `GA_EMB_DEFAULT_MODEL_ID` (default `microsoft/harrier-oss-v1-0.6b`)
+- `GA_EMB_DEFAULT_MODEL_PATH` (default `qwen3_embedding_0_6b`)
+- `GA_EMB_DEFAULT_MODEL_ID` (default `Qwen/Qwen3-Embedding-0.6B`)
 - `GA_SD_AUTO_LOAD_ON_STARTUP` (`1`/`0`)
   - `1`: run SD warmup generation on SD service startup (primes generation path)
   - `0`: skip SD warmup generation

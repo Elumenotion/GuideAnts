@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
+using GuideAntsApi.Services.LlamaCpp;
 using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Services.Bootstrap;
@@ -97,6 +98,7 @@ public sealed class RuntimeProfileSeeder : IRuntimeProfileSeeder
             SamplingParametersJson = GetNestedObjectAsString(root, "samplingParametersJson", fileName),
             ThinkingControlJson = GetNestedObjectAsString(root, "thinkingControlJson", fileName),
             ProvidersJson = GetArrayAsString(root, "providers"),
+            RequestFieldsWhenToolsPresentJson = GetRequestFieldsWhenToolsPresentJson(root, fileName),
             Created = DateTime.UtcNow,
             Updated = DateTime.UtcNow
         };
@@ -159,5 +161,21 @@ public sealed class RuntimeProfileSeeder : IRuntimeProfileSeeder
 
         throw new InvalidOperationException(
             $"Bootstrap runtime profile seed '{fileName}': '{propertyName}' must be a JSON object or string.");
+    }
+
+    private static string GetRequestFieldsWhenToolsPresentJson(JsonElement root, string fileName)
+    {
+        if (!root.TryGetProperty("requestFieldsWhenToolsPresent", out var element))
+        {
+            return "{}";
+        }
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            return RuntimeProfileRequestFieldsValidator.NormalizeJsonString(element.GetRawText());
+        }
+
+        throw new InvalidOperationException(
+            $"Bootstrap runtime profile seed '{fileName}': 'requestFieldsWhenToolsPresent' must be a JSON object.");
     }
 }

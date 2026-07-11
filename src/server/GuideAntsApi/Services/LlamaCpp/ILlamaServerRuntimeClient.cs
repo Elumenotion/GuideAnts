@@ -10,7 +10,7 @@ public interface ILlamaServerRuntimeClient
 {
     Task<LlamaModelsResponse> ListModelsAsync(CancellationToken cancellationToken = default);
     Task<LlamaOpenAiModelsResponse> ListOpenAiModelsAsync(CancellationToken cancellationToken = default);
-    Task LoadModelAsync(string modelPathOrPreset, JsonObject? loadParams = null, CancellationToken cancellationToken = default);
+    Task LoadModelAsync(string modelPathOrPreset, CancellationToken cancellationToken = default);
     Task UnloadModelAsync(string routerModelId, CancellationToken cancellationToken = default);
 }
 
@@ -108,23 +108,12 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         return JsonSerializer.Deserialize<LlamaOpenAiModelsResponse>(responseContent) ?? new LlamaOpenAiModelsResponse();
     }
 
-    public async Task LoadModelAsync(string modelPathOrPreset, JsonObject? loadParams = null, CancellationToken cancellationToken = default)
+    public async Task LoadModelAsync(string modelPathOrPreset, CancellationToken cancellationToken = default)
     {
         var requestBody = new JsonObject
         {
             ["model"] = modelPathOrPreset
         };
-
-        if (loadParams is not null)
-        {
-            foreach (var kvp in loadParams)
-            {
-                if (!string.Equals(kvp.Key, "model", StringComparison.Ordinal))
-                {
-                    requestBody[kvp.Key] = kvp.Value?.DeepClone();
-                }
-            }
-        }
 
         var requestPath = "models/load";
         var requestJson = requestBody.ToJsonString();

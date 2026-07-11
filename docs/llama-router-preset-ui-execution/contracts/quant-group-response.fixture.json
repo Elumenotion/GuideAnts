@@ -1,0 +1,39 @@
+{
+  "catalogId": "qwen3.6-35b-a3b-mtp",
+  "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+  "requestedRevision": "main",
+  "resolvedRevision": "8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a",
+  "quants": [
+    {
+      "id": "q4_k_m",
+      "label": "Q4_K_M",
+      "totalBytes": 20123456789,
+      "files": [
+        {
+          "path": "Qwen3.6-35B-A3B-Q4_K_M.gguf",
+          "size": 20123456789
+        }
+      ]
+    },
+    {
+      "id": "q6_k_xl",
+      "label": "Q6_K_XL",
+      "totalBytes": 28765432100,
+      "files": [
+        {
+          "path": "Qwen3.6-35B-A3B-Q6_K_XL-00001-of-00002.gguf",
+          "size": 14380000000,
+          "shardIndex": 1,
+          "shardCount": 2
+        },
+        {
+          "path": "Qwen3.6-35B-A3B-Q6_K_XL-00002-of-00002.gguf",
+          "size": 14385432100,
+          "shardIndex": 2,
+          "shardCount": 2
+        }
+      ]
+    }
+  ],
+  "projector": null
+}

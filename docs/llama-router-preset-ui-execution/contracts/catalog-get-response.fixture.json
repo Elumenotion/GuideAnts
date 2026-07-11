@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "task": "llama",
+  "catalogVersion": "2026-07-10",
+  "models": [
+    {
+      "id": "qwen3.6-35b-a3b-mtp",
+      "display": {
+        "name": "Qwen 3.6 35B A3B MTP",
+        "description": "Curated local Qwen model with MTP configuration.",
+        "labels": ["Text", "Reasoning", "Tool use"],
+        "license": "Apache-2.0",
+        "documentationUrl": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
+      },
+      "source": {
+        "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+        "revision": "main"
+      },
+      "defaults": {
+        "catalogModelId": "qwen3.6-35b-a3b-mtp-local",
+        "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF",
+        "runtimeProfileId": "qwen3_6",
+        "targetDirectory": "Qwen3.6-35B-A3B-MTP-GGUF",
+        "mmproj": null,
+        "routerPreset": {
+          "ctx-size": "131072",
+          "spec-type": "draft-mtp",
+          "spec-draft-n-max": "2"
+        }
+      },
+      "quantMetadata": {
+        "recommendedLabels": ["UD-Q4_K_XL"]
+      }
+    }
+  ]
+}

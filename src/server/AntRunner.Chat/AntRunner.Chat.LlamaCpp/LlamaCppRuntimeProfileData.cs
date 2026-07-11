@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace AntRunner.Chat.LlamaCpp;
 
 public enum ThinkingActionTarget
@@ -21,4 +23,5 @@ public sealed record LlamaCppRuntimeProfileData(
     bool CombineSystemAndDeveloperMessages,
     string? ThoughtBlockPattern,
     IReadOnlyDictionary<string, double> SamplingDefaults,
-    ThinkingControl ThinkingControl);
+    ThinkingControl ThinkingControl,
+    IReadOnlyDictionary<string, JsonElement> RequestFieldsWhenToolsPresent);

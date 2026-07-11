@@ -36,7 +36,8 @@ public sealed record RuntimeProfileData(
     bool CombineSystemAndDeveloperMessages,
     string? ThoughtBlockPattern,
     IReadOnlyDictionary<string, SamplingParameterDefinition> SamplingParameters,
-    ThinkingControl ThinkingControl);
+    ThinkingControl ThinkingControl,
+    IReadOnlyDictionary<string, JsonElement> RequestFieldsWhenToolsPresent);
 
 internal sealed class ThinkingActionTargetConverter : JsonConverter<ThinkingActionTarget>
 {

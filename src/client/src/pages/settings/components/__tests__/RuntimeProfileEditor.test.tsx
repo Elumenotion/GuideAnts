@@ -123,7 +123,7 @@ describe('RuntimeProfileEditor', () => {
     fireEvent.click(screen.getByLabelText(/Combine System and Developer Messages/i));
     fireEvent.change(screen.getByDisplayValue('.*'), { target: { value: '<think>.*</think>' } });
     fireEvent.change(screen.getByDisplayValue('{"temperature":0.7}'), { target: { value: '{}' } });
-    fireEvent.change(screen.getByDisplayValue('{}'), { target: { value: '{"choiceActions":{}}' } });
+    fireEvent.change(screen.getAllByDisplayValue('{}')[0], { target: { value: '{"choiceActions":{}}' } });
     fireEvent.click(screen.getByRole('button', { name: /Insert qwen3_6/i }));
     fireEvent.click(screen.getByRole('button', { name: /Insert gemma4/i }));
 

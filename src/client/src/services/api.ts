@@ -22,6 +22,9 @@ import {
     LlamaRuntimeInventoryItemDto,
     LlamaRuntimeAliasStatusDto,
     ModelDownloadOperationDto,
+    LlamaCatalogResponseDto,
+    LlamaCatalogQuantsResponseDto,
+    LlamaOperationStatusDto,
     HuggingFaceRepositoryListingDto,
     ChatTargetReadinessDto,
     SettingsOverviewDto,
@@ -33,6 +36,19 @@ import {
     SettingsRuntimeDependencyDto,
     ServiceEditorStateDto,
     LocalModelsListOutcome,
+    LlamaInstallationDetailDto,
+    ChangeQuantRequestDto,
+    RepairInstallationRequestDto,
+    CustomizeInstallationRequestDto,
+    AdoptInstallationRequestDto,
+    AdoptPreviewResponseDto,
+    LifecycleOperationResponseDto,
+    FleetLlamaPresetResponseDto,
+    FleetLlamaPresetPutRequestDto,
+    LlamaMigrationStatusResponseDto,
+    LlamaMigrationIssuesResponseDto,
+    LlamaRouterEntriesResponseDto,
+    LlamaRouterEntryPutRequest,
 } from '../types/settings';
 
 import { API_BASE_URL } from '../config/apiConfig';
@@ -1365,6 +1381,11 @@ export const api = {
                 method: 'POST',
             }),
 
+        warmupLocalAi: () =>
+            callApi<void>('/settings/local-ai/warmup', {
+                method: 'POST',
+            }),
+
         getModels: () =>
             callApi<SettingsModelDto[]>('/settings/models'),
 
@@ -1432,6 +1453,88 @@ export const api = {
 
         getDownloadStatus: (operationId: string) =>
             callApi<ModelDownloadOperationDto>(`/settings/llama/downloads/${encodeURIComponent(operationId)}`),
+
+        getLlamaCatalog: () =>
+            callApi<LlamaCatalogResponseDto>('/settings/llama/catalog'),
+
+        getLlamaCatalogQuants: (catalogId: string, catalogVersion?: string) => {
+            const params = catalogVersion?.trim()
+                ? `?catalogVersion=${encodeURIComponent(catalogVersion.trim())}`
+                : '';
+            return callApi<LlamaCatalogQuantsResponseDto>(
+                `/settings/llama/catalog/${encodeURIComponent(catalogId)}/quants${params}`,
+            );
+        },
+
+        getLlamaOperationStatus: (operationId: string) =>
+            callApi<LlamaOperationStatusDto>(
+                `/settings/llama/operations/${encodeURIComponent(operationId)}`,
+            ),
+
+        getLlamaInstallationDetail: (modelId: string) =>
+            callApi<LlamaInstallationDetailDto>(
+                `/settings/llama/installations/${encodeURIComponent(modelId)}`,
+            ),
+
+        changeLlamaInstallationQuant: (modelId: string, request: ChangeQuantRequestDto) =>
+            callApi<LifecycleOperationResponseDto>(
+                `/settings/llama/installations/${encodeURIComponent(modelId)}/change-quant`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify(request),
+                },
+            ),
+
+        repairLlamaInstallation: (modelId: string, request: RepairInstallationRequestDto) =>
+            callApi<LifecycleOperationResponseDto>(
+                `/settings/llama/installations/${encodeURIComponent(modelId)}/repair`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify(request),
+                },
+            ),
+
+        customizeLlamaInstallation: (modelId: string, request: CustomizeInstallationRequestDto) =>
+            callApi<LlamaInstallationDetailDto>(
+                `/settings/llama/installations/${encodeURIComponent(modelId)}/customize`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify(request),
+                },
+            ),
+
+        adoptLlamaInstallation: (modelId: string, request: AdoptInstallationRequestDto) =>
+            callApi<LlamaInstallationDetailDto | AdoptPreviewResponseDto>(
+                `/settings/llama/installations/${encodeURIComponent(modelId)}/adopt`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify(request),
+                },
+            ),
+
+        getLlamaFleetPreset: () =>
+            callApi<FleetLlamaPresetResponseDto>('/settings/llama/runtime/fleet-preset'),
+
+        putLlamaFleetPreset: (request: FleetLlamaPresetPutRequestDto) =>
+            callApi<FleetLlamaPresetResponseDto>('/settings/llama/runtime/fleet-preset', {
+                method: 'PUT',
+                body: JSON.stringify(request),
+            }),
+
+        getLlamaMigrationStatus: () =>
+            callApi<LlamaMigrationStatusResponseDto>('/settings/llama/migration/status'),
+
+        getLlamaMigrationIssues: () =>
+            callApi<LlamaMigrationIssuesResponseDto>('/settings/llama/migration/issues'),
+
+        getLlamaRouterEntries: () =>
+            callApi<LlamaRouterEntriesResponseDto>('/settings/llama/router/entries'),
+
+        putLlamaRouterEntry: (alias: string, request: LlamaRouterEntryPutRequest) =>
+            callApi<void>(`/settings/llama/router/entries/${encodeURIComponent(alias)}`, {
+                method: 'PUT',
+                body: JSON.stringify(request),
+            }),
 
         /**
          * List files in a public or gated Hugging Face repo to populate the
@@ -1540,10 +1643,17 @@ export const api = {
             get: (serviceId: string) =>
                 callApi<ServiceEditorStateDto>(`/settings/services/${encodeURIComponent(serviceId)}`),
 
-            updateActiveProvider: (serviceId: string, providerId: string) =>
+            updateActiveProvider: (
+                serviceId: string,
+                providerId: string,
+                options?: { deferWarmup?: boolean }
+            ) =>
                 callApi<ServiceEditorStateDto>(`/settings/services/${encodeURIComponent(serviceId)}/active-provider`, {
                     method: 'PUT',
-                    body: JSON.stringify({ providerId }),
+                    body: JSON.stringify({
+                        providerId,
+                        deferWarmup: options?.deferWarmup ?? false,
+                    }),
                 }),
 
             updateProviderFields: (

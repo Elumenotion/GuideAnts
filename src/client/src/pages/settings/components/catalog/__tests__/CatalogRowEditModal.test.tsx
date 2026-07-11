@@ -80,6 +80,7 @@ describe('CatalogRowEditModal', () => {
     render(
       <CatalogRowEditModal
         model={openAiModel}
+        orderedModels={[openAiModel]}
         profiles={[profile]}
         profilesLoading={false}
         isOpen
@@ -111,6 +112,7 @@ describe('CatalogRowEditModal', () => {
     render(
       <CatalogRowEditModal
         model={openAiModel}
+        orderedModels={[openAiModel]}
         profiles={[profile]}
         profilesLoading={false}
         isOpen

@@ -78,13 +78,11 @@ vi.mock('../settings/components/catalog/AddModelWizard', () => ({
 vi.mock('../settings/components/ModelsRuntimeWorkspace', () => ({
   ModelsRuntimeWorkspace: ({
     onRequestDeleteModel,
-    onRequestDeleteProfile,
     onRequestUnloadLlamaRouter,
     onRequestDeleteLlamaRouter,
     onOpenAddModelWizard,
   }: {
     onRequestDeleteModel: (modelId: string) => void;
-    onRequestDeleteProfile: (profileId: string) => void;
     onRequestUnloadLlamaRouter: (routerModelId: string, notebookReferenceCount: number) => void;
     onRequestDeleteLlamaRouter: (
       routerModelId: string,
@@ -96,9 +94,6 @@ vi.mock('../settings/components/ModelsRuntimeWorkspace', () => ({
     <div>
       <button type="button" onClick={() => onRequestDeleteModel('gpt-test')}>
         trigger-delete-model
-      </button>
-      <button type="button" onClick={() => onRequestDeleteProfile('profile-1')}>
-        trigger-delete-profile
       </button>
       <button type="button" onClick={() => onRequestUnloadLlamaRouter('alias-1', 2)}>
         trigger-unload-llama
@@ -187,19 +182,6 @@ describe('Settings confirmation handlers', () => {
 
     await waitFor(() => {
       expect(api.settings.deleteModel).toHaveBeenCalledWith('gpt-test');
-    });
-  });
-
-  it('confirms runtime profile deletion', async () => {
-    const user = userEvent.setup();
-    renderSettingsAsAdmin();
-    await openModelsRuntime(user);
-
-    await user.click(screen.getByRole('button', { name: 'trigger-delete-profile' }));
-    await user.click(screen.getByRole('button', { name: 'Delete' }));
-
-    await waitFor(() => {
-      expect(api.settings.deleteRuntimeProfile).toHaveBeenCalledWith('profile-1');
     });
   });
 
@@ -298,17 +280,4 @@ describe('Settings confirmation handlers', () => {
     });
   });
 
-  it('surfaces runtime profile deletion failures via toast', async () => {
-    const user = userEvent.setup();
-    vi.mocked(api.settings.deleteRuntimeProfile).mockRejectedValue(new Error('Profile locked'));
-    renderSettingsAsAdmin();
-    await openModelsRuntime(user);
-
-    await user.click(screen.getByRole('button', { name: 'trigger-delete-profile' }));
-    await user.click(screen.getByRole('button', { name: 'Delete' }));
-
-    await waitFor(() => {
-      expect(api.settings.deleteRuntimeProfile).toHaveBeenCalledWith('profile-1');
-    });
-  });
 });

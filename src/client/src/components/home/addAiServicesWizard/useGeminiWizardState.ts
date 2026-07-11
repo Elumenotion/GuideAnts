@@ -6,6 +6,7 @@ import {
   GEMINI_OPTIONAL_SERVICE_DEFAULTS,
   GEMINI_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
+  WIZARD_DEFER_WARMUP_OPTIONS,
 } from './constants';
 import type {
   GeminiCoreConnectionFormState,
@@ -318,7 +319,7 @@ export function useGeminiWizardState(): UseGeminiWizardStateResult {
         ModelId: optionalForm.embeddingsModelId.trim(),
         TimeoutSeconds: optionalForm.embeddingsTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('Embeddings', GEMINI_SERVICE_PROVIDER_IDS.Embeddings);
+      await api.settings.services.updateActiveProvider('Embeddings', GEMINI_SERVICE_PROVIDER_IDS.Embeddings, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableImages) {
@@ -326,7 +327,7 @@ export function useGeminiWizardState(): UseGeminiWizardStateResult {
         ModelId: optionalForm.imagesModelId.trim(),
         TimeoutSeconds: optionalForm.imagesTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('ImageGeneration', GEMINI_SERVICE_PROVIDER_IDS.ImageGeneration);
+      await api.settings.services.updateActiveProvider('ImageGeneration', GEMINI_SERVICE_PROVIDER_IDS.ImageGeneration, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableSpeechTranscription) {
@@ -334,7 +335,7 @@ export function useGeminiWizardState(): UseGeminiWizardStateResult {
         ModelId: optionalForm.speechTranscriptionModelId.trim(),
         TimeoutSeconds: optionalForm.speechTranscriptionTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('SpeechTranscription', GEMINI_SERVICE_PROVIDER_IDS.SpeechTranscription);
+      await api.settings.services.updateActiveProvider('SpeechTranscription', GEMINI_SERVICE_PROVIDER_IDS.SpeechTranscription, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableSpeechSynthesis) {
@@ -343,7 +344,7 @@ export function useGeminiWizardState(): UseGeminiWizardStateResult {
         VoiceName: optionalForm.speechSynthesisVoiceName.trim(),
         TimeoutSeconds: optionalForm.speechSynthesisTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('SpeechSynthesis', GEMINI_SERVICE_PROVIDER_IDS.SpeechSynthesis);
+      await api.settings.services.updateActiveProvider('SpeechSynthesis', GEMINI_SERVICE_PROVIDER_IDS.SpeechSynthesis, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     const refreshed = await loadSnapshot();

@@ -47,8 +47,7 @@ public sealed class Qwen36ChatWalkthroughTests : SettingsRoutingIntegrationTestB
     private static readonly string RuntimeConfigJson = JsonSerializer.Serialize(new
     {
         routerModelId = RouterAlias,
-        runtimeProfileId = RuntimeProfileId,
-        parallelToolCalls = true
+        runtimeProfileId = RuntimeProfileId
     });
 
     [ClassInitialize]

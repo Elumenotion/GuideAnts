@@ -19,7 +19,7 @@ namespace GuideAntsApi.Tests.Services.Bootstrap;
 public sealed class LocalAiStartupWarmupServiceTests
 {
     [TestMethod]
-    public async Task EnsureAuxiliaryServicesLoadedAsync_EmbeddingsWithNoActiveModel_SendsEmptyLoadBodyForContainerDefault()
+    public async Task EnsureAuxiliaryServicesLoadedAsync_EmbeddingsWithNoConfiguredModel_SkipsLoad()
     {
         string? capturedEmbLoadBody = null;
         var handler = new CapturingHandler(request =>
@@ -29,19 +29,6 @@ public sealed class LocalAiStartupWarmupServiceTests
             {
                 capturedEmbLoadBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
                 return new HttpResponseMessage(HttpStatusCode.OK);
-            }
-
-            if (request.Method == HttpMethod.Get && path.EndsWith("/emb/admin/models", StringComparison.Ordinal))
-            {
-                const string modelsJson = """
-                    {
-                      "items": [
-                        { "modelRef": "qwen3_embedding_0_6b", "isDirectory": true, "active": false },
-                        { "modelRef": ".cache", "isDirectory": true, "active": false }
-                      ]
-                    }
-                    """;
-                return Json(HttpStatusCode.OK, modelsJson);
             }
 
             if (request.Method == HttpMethod.Get && path.EndsWith("/emb/ready", StringComparison.Ordinal))
@@ -100,12 +87,11 @@ public sealed class LocalAiStartupWarmupServiceTests
 
         await service.EnsureAuxiliaryServicesLoadedAsync();
 
-        capturedEmbLoadBody.Should().NotBeNull();
-        capturedEmbLoadBody.Should().Be("{}");
+        capturedEmbLoadBody.Should().BeNull();
     }
 
     [TestMethod]
-    public async Task EnsureAuxiliaryServicesLoadedAsync_EmbeddingsWithActiveModel_SendsThatModelPath()
+    public async Task EnsureAuxiliaryServicesLoadedAsync_EmbeddingsWithConfiguredServiceModeModelId_SendsModelId()
     {
         string? capturedEmbLoadBody = null;
         var handler = new CapturingHandler(request =>
@@ -114,19 +100,13 @@ public sealed class LocalAiStartupWarmupServiceTests
             if (request.Method == HttpMethod.Post && path.EndsWith("/emb/admin/load", StringComparison.Ordinal))
             {
                 capturedEmbLoadBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
-                return new HttpResponseMessage(HttpStatusCode.OK);
-            }
-
-            if (request.Method == HttpMethod.Get && path.EndsWith("/emb/admin/models", StringComparison.Ordinal))
-            {
-                const string modelsJson = """
-                    {
-                      "items": [
-                        { "modelRef": "qwen3_embedding_0_6b", "isDirectory": true, "active": true }
-                      ]
-                    }
-                    """;
-                return Json(HttpStatusCode.OK, modelsJson);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """{"status":"loaded","catalogEntryId":"qwen3_embedding_0_6b","modelRef":"Qwen3-Embedding-0.6B-Q8_0.gguf"}""",
+                        Encoding.UTF8,
+                        "application/json"),
+                };
             }
 
             if (request.Method == HttpMethod.Get && path.EndsWith("/emb/ready", StringComparison.Ordinal))
@@ -149,7 +129,7 @@ public sealed class LocalAiStartupWarmupServiceTests
             (RoutedServiceNames.Embeddings, new ServiceMode(
                 ModeId: "default",
                 ProviderSection: "LocalServiceHosts:EmbeddingsBaseUrl",
-                ModelId: null,
+                ModelId: "qwen3_embedding_0_6b",
                 RequestPresetJson: null,
                 Enabled: true,
                 IsDefault: true)),
@@ -185,8 +165,7 @@ public sealed class LocalAiStartupWarmupServiceTests
 
         await service.EnsureAuxiliaryServicesLoadedAsync();
 
-        capturedEmbLoadBody.Should().Contain("qwen3_embedding_0_6b");
-        capturedEmbLoadBody.Should().NotContain(".cache");
+        capturedEmbLoadBody.Should().Contain("\"model_id\":\"qwen3_embedding_0_6b\"");
     }
 
     [TestMethod]
@@ -209,34 +188,15 @@ public sealed class LocalAiStartupWarmupServiceTests
                 };
             }
 
-            if (request.Method == HttpMethod.Get && path.EndsWith("/asr/admin/models", StringComparison.Ordinal))
+            if (request.Method == HttpMethod.Get && path.EndsWith("/asr/ready", StringComparison.Ordinal))
             {
-                const string modelsJson = """
-                    {
-                      "items": [
-                        { "modelRef": "Qwen3-ASR-0.6B", "isDirectory": true, "active": true }
-                      ]
-                    }
-                    """;
-                return Json(HttpStatusCode.OK, modelsJson);
+                return new HttpResponseMessage(HttpStatusCode.OK);
             }
 
             if (request.Method == HttpMethod.Post && path.EndsWith("/emb/admin/load", StringComparison.Ordinal))
             {
                 embLoadAttempts++;
                 return new HttpResponseMessage(HttpStatusCode.OK);
-            }
-
-            if (request.Method == HttpMethod.Get && path.EndsWith("/emb/admin/models", StringComparison.Ordinal))
-            {
-                const string modelsJson = """
-                    {
-                      "items": [
-                        { "modelRef": "qwen3_embedding_0_6b", "isDirectory": true, "active": true }
-                      ]
-                    }
-                    """;
-                return Json(HttpStatusCode.OK, modelsJson);
             }
 
             if (request.Method == HttpMethod.Get && path.EndsWith("/emb/ready", StringComparison.Ordinal))
@@ -261,14 +221,14 @@ public sealed class LocalAiStartupWarmupServiceTests
             (RoutedServiceNames.SpeechTranscription, new ServiceMode(
                 ModeId: "default",
                 ProviderSection: "LocalServiceHosts:SpeechTranscriptionBaseUrl",
-                ModelId: null,
+                ModelId: "qwen3_asr_0_6b",
                 RequestPresetJson: null,
                 Enabled: true,
                 IsDefault: true)),
             (RoutedServiceNames.Embeddings, new ServiceMode(
                 ModeId: "default",
                 ProviderSection: "LocalServiceHosts:EmbeddingsBaseUrl",
-                ModelId: null,
+                ModelId: "qwen3_embedding_0_6b",
                 RequestPresetJson: null,
                 Enabled: true,
                 IsDefault: true)),
@@ -302,6 +262,73 @@ public sealed class LocalAiStartupWarmupServiceTests
     }
 
     [TestMethod]
+    public async Task ReconcileLocalServiceAsync_SpeechSynthesisLoad_PersistsCatalogModelIdBeforeReady()
+    {
+        var persistCalled = false;
+        var handler = new CapturingHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Post && path.EndsWith("/tts/admin/load", StringComparison.Ordinal))
+            {
+                return Json(
+                    HttpStatusCode.OK,
+                    """{"status":"loaded","catalogEntryId":"chatterbox","modelRef":"chatterbox"}""");
+            }
+
+            if (request.Method == HttpMethod.Get && path.EndsWith("/tts/ready", StringComparison.Ordinal))
+            {
+                return Json(
+                    HttpStatusCode.OK,
+                    """{"ready":true,"loaded":true,"catalogEntryId":"chatterbox"}""");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LocalServiceHosts:SpeechSynthesisBaseUrl"] = "http://localhost:8110",
+                ["GA_TTS_READY_TIMEOUT_SECONDS"] = "10",
+            })
+            .Build();
+
+        var modeResolver = new FakeServiceModeResolver(
+            (RoutedServiceNames.SpeechSynthesis, new ServiceMode(
+                ModeId: "local",
+                ProviderSection: "LocalServiceHosts:SpeechSynthesisBaseUrl",
+                ModelId: null,
+                RequestPresetJson: null,
+                Enabled: true,
+                IsDefault: true)));
+
+        var settingsMock = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        settingsMock
+            .Setup(s => s.SetServiceModeModelIdAsync(
+                RoutedServiceNames.SpeechSynthesis,
+                "chatterbox",
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .Callback(() => persistCalled = true);
+
+        var service = new LocalAiStartupWarmupService(
+            configuration,
+            new ServiceScopeFactoryStub(settingsMock.Object),
+            new StubHttpClientFactory(handler),
+            new Mock<ILlamaRuntimeCoordinator>().Object,
+            modeResolver,
+            NullLogger<LocalAiStartupWarmupService>.Instance);
+
+        var result = await service.ReconcileLocalServiceAsync(
+            RoutedServiceNames.SpeechSynthesis,
+            requestedModelRef: "chatterbox");
+
+        result.Outcome.Should().Be(LocalServiceReconcileOutcome.Warm);
+        persistCalled.Should().BeTrue();
+        settingsMock.VerifyAll();
+    }
+
+    [TestMethod]
     public async Task ReconcileLocalServiceAsync_SelectActive_AutoActivatesLocalProvider_WhenRoutingMissing()
     {
         var selectActiveCalled = false;
@@ -324,7 +351,7 @@ public sealed class LocalAiStartupWarmupServiceTests
 
             if (request.Method == HttpMethod.Get && path.EndsWith("/sd/health", StringComparison.Ordinal))
             {
-                return Json(HttpStatusCode.OK, """{"engine":{"processAlive":true,"healthy":true}}""");
+                return Json(HttpStatusCode.OK, """{"status":"ok","engine":{"processAlive":true,"healthy":true}}""");
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -369,6 +396,12 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Providers: [],
                 Readiness: new ServiceEditorReadinessDto("ready", [], [])))
             .Callback(() => routingGate.Activate());
+        settingsMock
+            .Setup(s => s.SetServiceModeModelIdAsync(
+                ImageGenerationOptions.SectionName,
+                "flux2-klein-4b-q4ks",
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var service = new LocalAiStartupWarmupService(
             configuration,

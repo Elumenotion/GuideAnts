@@ -7,7 +7,9 @@ import {
   HUGGINGFACE_SERVICE_PROVIDER_IDS,
   OPENAI_SERVICE_PROVIDER_IDS,
   OPENROUTER_SERVICE_PROVIDER_IDS,
+  WIZARD_DEFER_WARMUP_OPTIONS,
 } from '../addAiServicesWizard/constants';
+import { catalogFixture } from '../../../features/localModelOnboarding/curated/fixtures';
 
 vi.mock('../../../services/api', () => ({
   api: {
@@ -20,6 +22,9 @@ vi.mock('../../../services/api', () => ({
       addModel: vi.fn(),
       getRuntimeProfiles: vi.fn(),
       getLlamaInventory: vi.fn(),
+      getLlamaCatalog: vi.fn(),
+      getLlamaCatalogQuants: vi.fn(),
+      getLlamaOperationStatus: vi.fn(),
       chatDefaults: {
         get: vi.fn(),
         update: vi.fn(),
@@ -29,6 +34,7 @@ vi.mock('../../../services/api', () => ({
         updateProviderFields: vi.fn(),
         updateActiveProvider: vi.fn(),
       },
+      warmupLocalAi: vi.fn(),
       localModels: {
         cancelOperation: vi.fn(),
         getOperation: vi.fn(),
@@ -366,6 +372,7 @@ describe('AddAiServicesWizard', () => {
     vi.mocked(api.settings.services.get).mockRejectedValue(new Error('service state not needed for this test'));
     vi.mocked(api.settings.services.updateProviderFields).mockResolvedValue(undefined as never);
     vi.mocked(api.settings.services.updateActiveProvider).mockResolvedValue(undefined as never);
+    vi.mocked(api.settings.warmupLocalAi).mockResolvedValue(undefined as never);
     vi.mocked(api.settings.getRuntimeProfiles).mockResolvedValue([
       {
         profileId: 'qwen3_6',
@@ -389,6 +396,7 @@ describe('AddAiServicesWizard', () => {
         mmprojPath: null,
       },
     ] as any);
+    vi.mocked(api.settings.getLlamaCatalog).mockResolvedValue(catalogFixture);
     vi.mocked(api.settings.localModels.cancelOperation).mockResolvedValue(undefined as never);
     vi.mocked(api.settings.localModels.getOperation).mockRejectedValue(new Error('not used'));
   });
@@ -633,7 +641,8 @@ describe('AddAiServicesWizard', () => {
     await waitFor(() =>
       expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
         'SpeechSynthesis',
-        'SpeechSynthesis.Google.TextToSpeech'
+        'SpeechSynthesis.Google.TextToSpeech',
+        WIZARD_DEFER_WARMUP_OPTIONS
       )
     );
   });
@@ -823,7 +832,7 @@ describe('AddAiServicesWizard', () => {
       expect(api.settings.services.updateProviderFields).toHaveBeenCalledWith(
         'Embeddings',
         HUGGINGFACE_SERVICE_PROVIDER_IDS.Embeddings,
-        expect.objectContaining({ ModelId: 'microsoft/harrier-oss-v1-0.6b' })
+        expect.objectContaining({ ModelId: 'Qwen/Qwen3-Embedding-0.6B' })
       )
     );
 
@@ -957,14 +966,17 @@ describe('AddAiServicesWizard', () => {
     await screen.findByRole('heading', { name: /Local Chat Models/i });
     await waitFor(() => expect(api.settings.getRuntimeProfiles).toHaveBeenCalled());
 
-    const installSection = screen.getByText('Install a model').closest('.rounded.border') as HTMLElement;
-    const [installSourceSelect] = within(installSection).getAllByRole('combobox');
-    fireEvent.change(installSourceSelect, { target: { value: 'existingAlias' } });
+    fireEvent.click(screen.getByRole('button', { name: /Attach existing alias/i }));
     await waitFor(() => {
-      const controls = within(installSection).getAllByRole('combobox');
-      expect(controls).toHaveLength(3);
+      expect(screen.getByText(/Advanced install/i)).toBeInTheDocument();
     });
-    const [, runtimeProfileSelect, existingAliasSelect] = within(installSection).getAllByRole('combobox');
+    const comboboxes = screen.getAllByRole('combobox');
+    const runtimeProfileSelect = comboboxes.find((select) =>
+      Array.from(select.querySelectorAll('option')).some((option) => option.textContent?.includes('qwen3_6'))
+    ) ?? comboboxes[0]!;
+    const existingAliasSelect = comboboxes.find((select) =>
+      Array.from(select.querySelectorAll('option')).some((option) => option.textContent?.includes('qwen3-local'))
+    ) ?? comboboxes[1]!;
     fireEvent.change(runtimeProfileSelect, { target: { value: 'qwen3_6' } });
     fireEvent.change(existingAliasSelect, { target: { value: 'qwen3-local' } });
     fireEvent.click(screen.getByRole('button', { name: /Install model/i }));

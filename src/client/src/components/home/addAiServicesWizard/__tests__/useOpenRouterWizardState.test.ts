@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { api } from '../../../../services/api';
-import { OPENROUTER_SECTION, OPENROUTER_SERVICE_PROVIDER_IDS } from '../constants';
+import { OPENROUTER_SECTION, OPENROUTER_SERVICE_PROVIDER_IDS, WIZARD_DEFER_WARMUP_OPTIONS } from '../constants';
 import { useOpenRouterWizardState } from '../useOpenRouterWizardState';
 import {
   createLoadSnapshot,
@@ -250,7 +250,8 @@ describe('useOpenRouterWizardState', () => {
     );
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'SpeechTranscription',
-      OPENROUTER_SERVICE_PROVIDER_IDS.SpeechTranscription
+      OPENROUTER_SERVICE_PROVIDER_IDS.SpeechTranscription,
+      WIZARD_DEFER_WARMUP_OPTIONS
     );
   });
 });

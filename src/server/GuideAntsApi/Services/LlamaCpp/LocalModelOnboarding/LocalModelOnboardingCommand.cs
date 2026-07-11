@@ -6,7 +6,22 @@ public static class LocalModelInstallSources
 {
     public const string HuggingFace = "huggingface";
     public const string ExistingAlias = "existingAlias";
+    public const string Curated = "curated";
 }
+
+public sealed record LocalModelOnboardingCuratedCommand(
+    string CatalogId,
+    string CatalogVersion,
+    string QuantId,
+    string ResolvedRevision);
+
+public sealed record LocalModelOnboardingExplicitHuggingFaceCommand(
+    string Repository,
+    string ResolvedRevision,
+    IReadOnlyList<string> ModelFiles,
+    IReadOnlyList<string> MmprojFiles,
+    string TargetDirectory,
+    IReadOnlyDictionary<string, string> RouterPreset);
 
 public sealed record LocalModelOnboardingCommand(
     string CatalogModelId,
@@ -23,6 +38,8 @@ public sealed record LocalModelOnboardingCommand(
     string? TargetDirectory,
     int? RouterContextSize,
     int? RouterCacheRamMib,
+    LocalModelOnboardingCuratedCommand? Curated,
+    LocalModelOnboardingExplicitHuggingFaceCommand? ExplicitHuggingFace,
     string? OnboardingUi)
 {
     public static LocalModelOnboardingCommand FromAddModelRequest(AddModelRequest request)
@@ -36,13 +53,24 @@ public sealed record LocalModelOnboardingCommand(
 
         var source = (install.Source ?? string.Empty).Trim();
         if (!string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(source, LocalModelInstallSources.ExistingAlias, StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(source, LocalModelInstallSources.ExistingAlias, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(source, LocalModelInstallSources.Curated, StringComparison.OrdinalIgnoreCase))
         {
             throw new AddModelException(
                 code: "INSTALL_STEP_FAILED",
                 step: "validation",
-                message: "Install source must be either 'huggingface' or 'existingAlias'.",
+                message: "Install source must be 'huggingface', 'existingAlias', or 'curated'.",
                 remediation: "Choose a valid install source and retry.");
+        }
+
+        LocalModelOnboardingCuratedCommand? curated = null;
+        if (string.Equals(source, LocalModelInstallSources.Curated, StringComparison.OrdinalIgnoreCase))
+        {
+            curated = new LocalModelOnboardingCuratedCommand(
+                CatalogId: (install.Curated?.CatalogId ?? string.Empty).Trim(),
+                CatalogVersion: (install.Curated?.CatalogVersion ?? string.Empty).Trim(),
+                QuantId: (install.Curated?.QuantId ?? string.Empty).Trim(),
+                ResolvedRevision: (install.Curated?.ResolvedRevision ?? string.Empty).Trim());
         }
 
         var routerModelId = (install.RouterModelId ?? string.Empty).Trim();
@@ -59,6 +87,23 @@ public sealed record LocalModelOnboardingCommand(
             quantIncludePattern = (install.HuggingFace?.QuantIncludePattern ?? string.Empty).Trim();
             mmprojIncludePattern = (install.HuggingFace?.MmprojIncludePattern ?? string.Empty).Trim();
             targetDirectory = (install.HuggingFace?.TargetDirectory ?? string.Empty).Trim();
+        }
+
+        LocalModelOnboardingExplicitHuggingFaceCommand? explicitHuggingFace = null;
+        var hf = install.HuggingFace;
+        if (string.Equals(source, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
+            && hf?.ModelFiles is { Count: > 0 }
+            && !string.IsNullOrWhiteSpace(hf.ResolvedRevision)
+            && hf.RouterPreset is not null)
+        {
+            explicitHuggingFace = new LocalModelOnboardingExplicitHuggingFaceCommand(
+                Repository: (hf.Repository ?? string.Empty).Trim(),
+                ResolvedRevision: hf.ResolvedRevision.Trim(),
+                ModelFiles: hf.ModelFiles.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToList(),
+                MmprojFiles: hf.MmprojFiles?.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToList()
+                    ?? new List<string>(),
+                TargetDirectory: (hf.TargetDirectory ?? string.Empty).Trim(),
+                RouterPreset: hf.RouterPreset);
         }
 
         return new LocalModelOnboardingCommand(
@@ -78,6 +123,8 @@ public sealed record LocalModelOnboardingCommand(
             TargetDirectory: targetDirectory,
             RouterContextSize: install.RouterContextSize,
             RouterCacheRamMib: install.RouterCacheRamMib,
+            Curated: curated,
+            ExplicitHuggingFace: explicitHuggingFace,
             OnboardingUi: request.ProviderConfig is null
                 ? null
                 : GetProviderConfigString(request.ProviderConfig, "onboardingUi")?.Trim());

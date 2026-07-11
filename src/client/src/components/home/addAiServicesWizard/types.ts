@@ -259,7 +259,7 @@ export interface LocalAiPrerequisitesFormState {
   huggingFaceTokenHasStoredValue: boolean;
 }
 
-export type LocalAiInstallSource = 'huggingface' | 'existingAlias';
+export type LocalAiInstallSource = 'huggingface' | 'existingAlias' | 'curated';
 
 export type LocalAiDraftStatus =
   | 'submitted'
@@ -276,12 +276,14 @@ export interface LocalAiModelDraft {
   routerModelId: string;
   runtimeProfileId: string;
   huggingFaceRepository: string;
-  huggingFaceQuantIncludePattern: string;
-  huggingFaceMmprojIncludePattern: string;
+  huggingFaceResolvedRevision: string;
+  huggingFaceArtifactGroupId: string;
+  huggingFaceModelFiles: string[];
+  huggingFaceMmprojFiles: string[];
   huggingFaceTargetDirectory: string;
+  huggingFaceRouterPresetRows: Array<{ key: string; value: string }>;
+  huggingFacePresetMode: 'replace' | 'merge';
   existingAliasRouterModelId: string;
-  routerContextSize: string;
-  routerCacheRamMib: string;
   catalogModelId: string;
   catalogDisplayName: string;
   setAsGlobalDefault: boolean;

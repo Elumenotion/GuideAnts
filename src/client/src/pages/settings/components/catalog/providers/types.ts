@@ -37,5 +37,6 @@ export interface ProviderAddForm {
     suggestedProfileId?: string
   ) => Promise<void>;
   onCreateCustomRuntimeProfile?: (request: CreateRuntimeProfileRequest) => Promise<SettingsRuntimeProfileDto>;
+  hideInstallSourceSelector?: boolean;
 }
 

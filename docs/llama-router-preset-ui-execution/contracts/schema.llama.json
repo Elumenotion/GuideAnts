@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guideants.local/schemas/llama-catalog.json",
+  "title": "GuideAnts llama curated catalog manifest",
+  "description": "Dedicated llama manifest root (D11). Do not reuse schema.model.json entries[] shape.",
+  "type": "object",
+  "required": ["schemaVersion", "task", "version", "models"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "task": {
+      "type": "string",
+      "const": "llama"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Manifest-level catalogVersion inherited by every definition (D11)."
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/modelDefinition" }
+    }
+  },
+  "$defs": {
+    "display": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "labels": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "license": { "type": "string" },
+        "documentationUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["repository"],
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "minLength": 3 },
+        "revision": { "type": "string" }
+      }
+    },
+    "mmproj": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "routerPreset": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "defaults": {
+      "type": "object",
+      "required": [
+        "catalogModelId",
+        "routerModelId",
+        "runtimeProfileId",
+        "targetDirectory",
+        "routerPreset"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "catalogModelId": { "type": "string", "minLength": 1 },
+        "routerModelId": { "type": "string", "minLength": 1 },
+        "runtimeProfileId": { "type": "string", "minLength": 1 },
+        "targetDirectory": { "type": "string", "minLength": 1 },
+        "mmproj": {
+          "oneOf": [
+            { "$ref": "#/$defs/mmproj" },
+            { "type": "null" }
+          ]
+        },
+        "routerPreset": { "$ref": "#/$defs/routerPreset" }
+      }
+    },
+    "quantMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "recommendedLabels": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "guidance": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["summary"],
+            "additionalProperties": false,
+            "properties": {
+              "summary": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "modelDefinition": {
+      "type": "object",
+      "required": ["id", "source", "defaults"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "display": { "$ref": "#/$defs/display" },
+        "source": { "$ref": "#/$defs/source" },
+        "defaults": { "$ref": "#/$defs/defaults" },
+        "quantMetadata": { "$ref": "#/$defs/quantMetadata" }
+      }
+    }
+  }
+}

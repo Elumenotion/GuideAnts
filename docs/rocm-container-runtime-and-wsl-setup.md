@@ -49,6 +49,13 @@ services:
     group_add:
       - video
       - render
+  docling-serve:
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+      - render
 ```
 
 ### WSL ROCDXG override (written under Docker Desktop / WSL)
@@ -78,7 +85,11 @@ services:
         target: /usr/lib/librocdxg.so
         read_only: true
       # (optional) dids.conf bind added only if present in the WSL distro
+  docling-serve:
+    # same devices / cap_add / security_opt / environment / volumes as guideants-ai
 ```
+
+`docling-serve` receives the same GPU wiring as `guideants-ai`. The static ROCm compose files default to the CPU docling image; set `DOCLING_SERVE_ROCM_IMAGE` to a local `docling-serve-rocm72` build and `DOCLING_DEVICE=cuda` for GPU document intelligence (see section 12).
 
 An example of both shapes is committed at `docker/docker-compose.rocm-runtime.generated.example.yml`.
 
@@ -251,3 +262,42 @@ Available devices:
 - Docker Desktop reports ~2.5 GB of `/dev/dxg` VRAM overhead (WDDM virtualization); expected, not a GuideAnts issue.
 - The WSL library staging depends on a user WSL distro with ROCm installed. If none is found, the launcher warns and skips the ROCDXG override (it does not silently fall back to a broken KFD path).
 - `HSA_ENABLE_DXG_DETECTION=1` is required for ROCm < 7.13; harmless on newer releases.
+
+## 12. Docling on ROCm (optional GPU document intelligence)
+
+Upstream does not publish ROCm docling images (~35 GB). Build locally from [docling-serve](https://github.com/docling-project/docling-serve) at your pinned tag:
+
+```bash
+git clone --branch v1.26.0 https://github.com/docling-project/docling-serve.git
+cd docling-serve
+# Match host ROCm: 7.2 on Windows/WSL and current Strix Halo stacks
+make docling-serve-rocm72-image
+docker tag ghcr.io/docling-project/docling-serve-rocm72:main docling-serve-rocm72:local
+```
+
+Add to `docker/.env` (or `installer/docker/.env`):
+
+```env
+DOCLING_SERVE_ROCM_IMAGE=docling-serve-rocm72:local
+DOCLING_DEVICE=cuda
+```
+
+Launch the ROCm stack as usual (`--backend rocm`). The generated runtime override wires `docling-serve` with the same ROCDXG or native KFD devices as `guideants-ai`.
+
+Verify GPU inside the docling image (WSL example):
+
+```powershell
+$lib = "C:/repos/GuideAnts/docker/volumes/rocm-wsl/lib/librocdxg.so"
+docker run --rm --entrypoint python `
+  -v /usr/lib/wsl/lib/libdxcore.so:/usr/lib/libdxcore.so:ro `
+  -v "${lib}:/lib/librocdxg.so:ro" `
+  -v "${lib}:/usr/lib/librocdxg.so:ro" `
+  --device /dev/dxg --cap-add SYS_PTRACE --security-opt seccomp=unconfined `
+  -e HSA_ENABLE_DXG_DETECTION=1 `
+  docling-serve-rocm72:local `
+  -c "import torch; print(torch.__version__); print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+
+Use **`docling-serve-rocm72`** (PyTorch `rocm7.2`), not `docling-serve-rocm` (PyTorch `rocm6.3`). On ROCDXG hosts the 6.3 build initializes HSA but returns `hipErrorNoDevice`.
+
+Without `DOCLING_SERVE_ROCM_IMAGE`, ROCm stacks keep the CPU docling image (`DOCLING_DEVICE=cpu` default). GPU binds on `docling-serve` are harmless in that mode.

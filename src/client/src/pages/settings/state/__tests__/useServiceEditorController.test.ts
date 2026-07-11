@@ -162,6 +162,12 @@ describe('useServiceEditorController', () => {
       expect(result.current.loading).toBe(false);
     });
 
+    act(() => {
+      result.current.draft.setDraftForProvider('SpeechSynthesis.Local.Tts', {
+        Endpoint: 'http://localhost:8120',
+      });
+    });
+
     let saved = false;
     await act(async () => {
       saved = await result.current.save();
@@ -171,14 +177,77 @@ describe('useServiceEditorController', () => {
     expect(api.settings.services.updateProviderFields).toHaveBeenCalledWith(
       'SpeechSynthesis',
       'SpeechSynthesis.Local.Tts',
-      { Endpoint: 'http://localhost:8110' }
+      { Endpoint: 'http://localhost:8120' }
     );
-    expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
-      'SpeechSynthesis',
-      'SpeechSynthesis.Local.Tts'
-    );
+    expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
     expect(api.settings.services.get).toHaveBeenCalledTimes(2);
     expect(result.current.state?.readiness.warnings).toEqual(['saved']);
+  });
+
+  it('skips save API calls when provider and fields are unchanged', async () => {
+    const initial = makeServiceState();
+    (api.settings.services.get as any).mockResolvedValue(initial);
+
+    const { result } = renderHook(() => useServiceEditorController('SpeechSynthesis'));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    let saved = false;
+    await act(async () => {
+      saved = await result.current.save();
+    });
+
+    expect(saved).toBe(true);
+    expect(api.settings.services.updateProviderFields).not.toHaveBeenCalled();
+    expect(api.settings.services.updateActiveProvider).not.toHaveBeenCalled();
+    expect(api.settings.services.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates active provider without field writes when only provider changes', async () => {
+    const local = makeProvider({ providerId: 'SpeechSynthesis.Local.Tts' });
+    const cloud = makeProvider({
+      providerId: 'SpeechSynthesis.AzureSpeechService.Cloud',
+      providerKind: 'Cloud',
+      providerSection: 'AzureSpeech',
+      connectionConfigured: true,
+    });
+    const initial = makeServiceState({
+      providers: [local, cloud],
+      activeProviderId: local.providerId,
+    });
+    const reloaded = makeServiceState({
+      providers: [local, cloud],
+      activeProviderId: cloud.providerId,
+    });
+    (api.settings.services.get as any)
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(reloaded);
+    (api.settings.services.updateActiveProvider as any).mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useServiceEditorController('SpeechSynthesis'));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.draft.switchProvider(cloud.providerId);
+    });
+
+    let saved = false;
+    await act(async () => {
+      saved = await result.current.save();
+    });
+
+    expect(saved).toBe(true);
+    expect(api.settings.services.updateProviderFields).not.toHaveBeenCalled();
+    expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
+      'SpeechSynthesis',
+      'SpeechSynthesis.AzureSpeechService.Cloud',
+      { deferWarmup: false }
+    );
   });
 
   it('hides unconfigured cloud providers from providerOptions', async () => {

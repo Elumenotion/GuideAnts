@@ -1,0 +1,18 @@
+{
+  "revision": 3,
+  "desiredRevision": 3,
+  "appliedRevision": 2,
+  "applyStatus": "pending_restart",
+  "applyError": null,
+  "writtenAt": "2026-07-10T18:00:00Z",
+  "fleetEnv": {
+    "GA_LLAMA_JINJA": "1",
+    "GA_LLAMA_PARALLEL": "5",
+    "GA_LLAMA_THREADS": "16",
+    "GA_LLAMA_KV_UNIFIED": "1",
+    "GA_LLAMA_CONT_BATCH": "1",
+    "GA_LLAMA_FLASH_ATTN": "on",
+    "GA_LLAMA_MODELS_MAX": "1",
+    "GA_LLAMA_NO_AUTOLOAD": "1"
+  }
+}

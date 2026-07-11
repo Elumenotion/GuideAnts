@@ -6,6 +6,7 @@ import {
   HUGGINGFACE_SECTION,
   LOCAL_AI_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
+  WIZARD_DEFER_WARMUP_OPTIONS,
 } from '../constants';
 import { useLocalAiWizardState } from '../useLocalAiWizardState';
 import {
@@ -169,7 +170,8 @@ describe('useLocalAiWizardState', () => {
     );
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'DocumentIntelligence',
-      LOCAL_AI_SERVICE_PROVIDER_IDS.DocumentIntelligence
+      LOCAL_AI_SERVICE_PROVIDER_IDS.DocumentIntelligence,
+      WIZARD_DEFER_WARMUP_OPTIONS
     );
   });
 
@@ -458,10 +460,12 @@ describe('useLocalAiWizardState', () => {
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'SpeechTranscription',
       LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechTranscription,
+      WIZARD_DEFER_WARMUP_OPTIONS
     );
     expect(api.settings.services.updateActiveProvider).toHaveBeenCalledWith(
       'SpeechSynthesis',
       LOCAL_AI_SERVICE_PROVIDER_IDS.SpeechSynthesis,
+      WIZARD_DEFER_WARMUP_OPTIONS
     );
   });
 

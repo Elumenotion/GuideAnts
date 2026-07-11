@@ -31,6 +31,7 @@ export function createEmptyProfileForm(): ProfileFormState {
     thoughtBlockPattern: '',
     samplingParametersJson: '{}',
     thinkingControlJson: '{}',
+    requestFieldsWhenToolsPresentJson: '{}',
     providers: [],
   };
 }
@@ -53,6 +54,7 @@ export function buildProfileCreateRequest(form: ProfileFormState): CreateRuntime
 
   JSON.parse(form.samplingParametersJson);
   JSON.parse(form.thinkingControlJson);
+  JSON.parse(form.requestFieldsWhenToolsPresentJson);
 
   return {
     profileId,
@@ -62,6 +64,7 @@ export function buildProfileCreateRequest(form: ProfileFormState): CreateRuntime
     thoughtBlockPattern: form.thoughtBlockPattern.trim() || undefined,
     samplingParametersJson: form.samplingParametersJson,
     thinkingControlJson: form.thinkingControlJson,
+    requestFieldsWhenToolsPresentJson: form.requestFieldsWhenToolsPresentJson,
     providers: form.providers,
   };
 }
@@ -80,6 +83,7 @@ type RuntimeProfileContractShape = Pick<
   | 'thoughtBlockPattern'
   | 'samplingParametersJson'
   | 'thinkingControlJson'
+  | 'requestFieldsWhenToolsPresentJson'
   | 'providers'
 >;
 
@@ -92,6 +96,7 @@ export function createProfileFormFromContractShape(profile: RuntimeProfileContra
     thoughtBlockPattern: profile.thoughtBlockPattern ?? '',
     samplingParametersJson: profile.samplingParametersJson,
     thinkingControlJson: profile.thinkingControlJson,
+    requestFieldsWhenToolsPresentJson: profile.requestFieldsWhenToolsPresentJson ?? '{}',
     providers: profile.providers ?? [],
   };
 }
@@ -128,6 +133,13 @@ export function importRuntimeProfile(json: string): ProfileFormState {
   if (typeof candidate.thinkingControlJson !== 'string') {
     throw new Error('Runtime profile import file must include a string thinkingControlJson.');
   }
+  if (
+    candidate.requestFieldsWhenToolsPresentJson !== undefined
+    && candidate.requestFieldsWhenToolsPresentJson !== null
+    && typeof candidate.requestFieldsWhenToolsPresentJson !== 'string'
+  ) {
+    throw new Error('Runtime profile import file requestFieldsWhenToolsPresentJson must be a string when present.');
+  }
   if (candidate.description !== undefined && candidate.description !== null && typeof candidate.description !== 'string') {
     throw new Error('Runtime profile import file description must be a string when present.');
   }
@@ -147,6 +159,10 @@ export function importRuntimeProfile(json: string): ProfileFormState {
     thoughtBlockPattern: candidate.thoughtBlockPattern ?? undefined,
     samplingParametersJson: candidate.samplingParametersJson,
     thinkingControlJson: candidate.thinkingControlJson,
+    requestFieldsWhenToolsPresentJson:
+      typeof candidate.requestFieldsWhenToolsPresentJson === 'string'
+        ? candidate.requestFieldsWhenToolsPresentJson
+        : '{}',
     providers: Array.isArray(candidate.providers) ? (candidate.providers as string[]) : [],
   });
 
@@ -167,13 +183,60 @@ export function createEmptyAddModelWizardState(preselectedProvider?: string | nu
     llamaInstallSource: 'huggingface',
     llamaRouterModelId: '',
     llamaHuggingFaceRepository: '',
-    llamaHuggingFaceQuantIncludePattern: '',
-    llamaHuggingFaceMmprojIncludePattern: '',
+    llamaHuggingFaceResolvedRevision: '',
+    llamaHuggingFaceArtifactGroupId: '',
+    llamaHuggingFaceModelFiles: [],
+    llamaHuggingFaceMmprojFiles: [],
     llamaHuggingFaceTargetDirectory: '',
+    llamaHuggingFaceRouterPresetRows: [],
+    llamaHuggingFacePresetMode: 'replace',
     llamaExistingAliasRouterModelId: '',
-    llamaRouterContextSize: '',
-    llamaRouterCacheRamMib: '',
   };
+}
+
+/** Guess a bootstrap runtime profile from a router alias label (operator may override). */
+export function suggestRuntimeProfileIdForRouterAlias(routerModelId: string): string {
+  const upper = routerModelId.toUpperCase();
+  if (upper.includes('QWEN3.6') || upper.includes('QWEN3_6')) {
+    return 'qwen3_6';
+  }
+  if (upper.includes('QWEN3.5') || upper.includes('QWEN3_5') || upper.includes('QWEN3-5')) {
+    return 'qwen3_5';
+  }
+  if (upper.includes('GEMMA')) {
+    return 'gemma4';
+  }
+  if (upper.includes('DEEPSEEK')) {
+    return 'deepseek_r1';
+  }
+  if (upper.includes('CODER')) {
+    return 'qwen3_coder';
+  }
+  if (upper.includes('GPT-OSS') || upper.includes('GPT_OSS')) {
+    return 'gpt_oss';
+  }
+  return '';
+}
+
+function humanizeRouterAliasForDisplay(routerModelId: string): string {
+  return routerModelId
+    .replace(/-GGUF$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+}
+
+export function createAttachAliasWizardState(
+  routerModelId: string,
+  preselectedProvider: string | null = 'llama-cpp'
+): AddModelWizardState {
+  const alias = routerModelId.trim();
+  const state = createEmptyAddModelWizardState(preselectedProvider);
+  state.llamaInstallSource = 'existingAlias';
+  state.llamaExistingAliasRouterModelId = alias;
+  state.catalogModelId = alias;
+  state.catalogDisplayName = humanizeRouterAliasForDisplay(alias) || alias;
+  state.runtimeProfileId = suggestRuntimeProfileIdForRouterAlias(alias);
+  return state;
 }
 
 export function humanizeKey(value: string): string {
@@ -233,31 +296,6 @@ function normalizeDisplayOrder(value: string): number | undefined {
   }
 
   return parsed;
-}
-
-/** Optional per-alias llama-server argv written to router-models.ini via admin; blank = no override. */
-function parseOptionalRouterContextSize(raw: string): number | undefined {
-  const t = raw.trim();
-  if (t.length === 0) {
-    return undefined;
-  }
-  const n = Number(t);
-  if (!Number.isInteger(n) || n < 1024 || n > 1_048_576) {
-    throw new Error('Context size must be a whole number from 1024 to 1048576, or blank to use the container default.');
-  }
-  return n;
-}
-
-function parseOptionalRouterCacheRamMib(raw: string): number | undefined {
-  const t = raw.trim();
-  if (t.length === 0) {
-    return undefined;
-  }
-  const n = Number(t);
-  if (!Number.isInteger(n) || n < 0 || n > 262_144) {
-    throw new Error('Prompt cache RAM (MiB) must be a whole number from 0 to 262144, or blank to use the container default.');
-  }
-  return n;
 }
 
 export function parseRuntimeProfileId(runtimeConfigJson?: string): string {
@@ -339,7 +377,6 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
 }
 
 export function createCatalogEditStateFromModel(model: SettingsModelDto): CatalogEditState {
-  const parsedRuntime = parseCanonicalLocalRuntimeJson(model.runtimeConfigJson);
   return {
     modelId: model.modelId,
     provider: model.provider,
@@ -347,87 +384,8 @@ export function createCatalogEditStateFromModel(model: SettingsModelDto): Catalo
     description: model.description ?? '',
     displayOrder: model.displayOrder?.toString() ?? '',
     isActive: model.isActive,
-    runtimeProfileId: parseRuntimeProfileId(model.runtimeConfigJson),
-    localRuntimeRouterModelId: parsedRuntime?.routerModelId ?? '',
-    localRuntimeLoadParamsJson: parsedRuntime?.loadParams ? JSON.stringify(parsedRuntime.loadParams, null, 2) : '',
-    localRuntimeParallelToolCalls: parsedRuntime?.parallelToolCalls === true,
-    localRuntimeRouterContextSize:
-      parsedRuntime?.routerContextSize !== undefined && parsedRuntime?.routerContextSize !== null
-        ? String(parsedRuntime.routerContextSize)
-        : '',
-    localRuntimeRouterCacheRamMib:
-      parsedRuntime?.routerCacheRamMib !== undefined && parsedRuntime?.routerCacheRamMib !== null
-        ? String(parsedRuntime.routerCacheRamMib)
-        : '',
+    runtimeProfileId: model.provider === 'llama-cpp' ? '' : parseRuntimeProfileId(model.runtimeConfigJson),
   };
-}
-
-export function buildCanonicalLocalRuntimeFromGuidedForm(
-  form: Pick<
-    CatalogEditState,
-    | 'runtimeProfileId'
-    | 'localRuntimeRouterModelId'
-    | 'localRuntimeLoadParamsJson'
-    | 'localRuntimeParallelToolCalls'
-    | 'localRuntimeRouterContextSize'
-    | 'localRuntimeRouterCacheRamMib'
-  >
-): string | undefined {
-  const routerModelId = form.localRuntimeRouterModelId.trim();
-  const runtimeProfileId = form.runtimeProfileId.trim();
-  const loadParamsText = form.localRuntimeLoadParamsJson.trim();
-  const parallelToolCalls = form.localRuntimeParallelToolCalls;
-  const ctxSizeText = form.localRuntimeRouterContextSize?.trim() ?? '';
-  const cacheMibText = form.localRuntimeRouterCacheRamMib?.trim() ?? '';
-
-  const hasAnyGuidedValue =
-    routerModelId.length > 0 ||
-    runtimeProfileId.length > 0 ||
-    loadParamsText.length > 0 ||
-    parallelToolCalls ||
-    ctxSizeText.length > 0 ||
-    cacheMibText.length > 0;
-
-  if (!hasAnyGuidedValue) {
-    return undefined;
-  }
-
-  if (!routerModelId) {
-    throw new Error('Local runtime Router Model ID is required for llama-cpp models.');
-  }
-
-  if (!runtimeProfileId) {
-    throw new Error('Local runtime Runtime Profile ID is required for llama-cpp models.');
-  }
-
-  const canonical: CanonicalLocalRuntimeConfig = {
-    routerModelId,
-    runtimeProfileId,
-  };
-
-  if (loadParamsText.length > 0) {
-    const parsed = JSON.parse(loadParamsText) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Local runtime load params must be a JSON object.');
-    }
-
-    canonical.loadParams = parsed as Record<string, unknown>;
-  }
-
-  if (parallelToolCalls) {
-    canonical.parallelToolCalls = true;
-  }
-
-  const ctxOpt = parseOptionalRouterContextSize(form.localRuntimeRouterContextSize);
-  const cacheOpt = parseOptionalRouterCacheRamMib(form.localRuntimeRouterCacheRamMib);
-  if (ctxOpt !== undefined) {
-    canonical.routerContextSize = ctxOpt;
-  }
-  if (cacheOpt !== undefined) {
-    canonical.routerCacheRamMib = cacheOpt;
-  }
-
-  return JSON.stringify(canonical, null, 2);
 }
 
 export function buildAddModelRequest(state: AddModelWizardState): AddModelRequest {
@@ -500,7 +458,7 @@ function deriveReasoningChoicesJsonFromProfile(profileThinkingControlJson?: stri
 
 export function buildCatalogEditRequest(
   state: CatalogEditState,
-  options?: { profileThinkingControlJson?: string }
+  options?: { runtimeConfigJson?: string; profileThinkingControlJson?: string }
 ): UpdateSettingsModelRequest {
   const modelId = state.modelId.trim();
   const provider = state.provider.trim();
@@ -517,13 +475,8 @@ export function buildCatalogEditRequest(
 
   const reasoningChoicesJson = deriveReasoningChoicesJsonFromProfile(options?.profileThinkingControlJson);
 
-  let runtimeConfigJson: string | undefined;
-  if (provider === 'llama-cpp') {
-    runtimeConfigJson = buildCanonicalLocalRuntimeFromGuidedForm(state);
-    if (!runtimeConfigJson) {
-      throw new Error('Local runtime configuration is required for llama-cpp models.');
-    }
-  } else if (state.runtimeProfileId.trim()) {
+  let runtimeConfigJson = options?.runtimeConfigJson;
+  if (provider !== 'llama-cpp' && state.runtimeProfileId.trim()) {
     runtimeConfigJson = JSON.stringify({ runtimeProfileId: state.runtimeProfileId.trim() });
   }
 

@@ -194,7 +194,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             ModelId = "qwen3.5-27b",
             DisplayName = "Qwen 3.5 27B",
             Provider = "llama-cpp",
-            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\",\"loadParams\":{\"model\":\"Qwen3.5-27B-Q6_K\"}}",
+            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\"}",
             IsActive = true
         });
         db.SaveChanges();
@@ -263,7 +263,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
     }
 
     [TestMethod]
-    public async Task CreateClient_UsesParallelToolCallsSetting_FromRuntimeConfigJson()
+    public async Task CreateClient_AppliesProfileToolFields_WhenToolsPresent()
     {
         using var db = CreateDb();
         db.Models.Add(new Model
@@ -271,7 +271,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             ModelId = "qwen3.5-27b",
             DisplayName = "Qwen 3.5 27B",
             Provider = "llama-cpp",
-            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\",\"parallelToolCalls\":true}",
+            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\"}",
             IsActive = true
         });
         db.SaveChanges();
@@ -509,7 +509,11 @@ public sealed class RoutingChatCompletionClientFactoryTests
                             {
                                 new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true)
                             }
-                        }));
+                        }),
+                        new Dictionary<string, JsonElement>
+                        {
+                            ["parallel_tool_calls"] = JsonSerializer.SerializeToElement(true)
+                        });
                 }
 
                 throw new InvalidOperationException(

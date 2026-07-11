@@ -18,13 +18,13 @@ public sealed class HuggingFaceEmbeddingServiceTests
         {
             if (request.RequestUri?.Host == "huggingface.co")
             {
-                return BuildHuggingFaceProviderMappingResponse("hf-inference", "microsoft/harrier-oss-v1-0.6b", "feature-extraction");
+                return BuildHuggingFaceProviderMappingResponse("hf-inference", "Qwen/Qwen3-Embedding-0.6B", "feature-extraction");
             }
 
             requestBody = request.Content is null
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
-            request.RequestUri!.ToString().Should().Contain("router.huggingface.co/hf-inference/models/microsoft/harrier-oss-v1-0.6b");
+            request.RequestUri!.ToString().Should().Contain("router.huggingface.co/hf-inference/models/Qwen/Qwen3-Embedding-0.6B");
             var payload = JsonSerializer.Serialize(new[] { 0.1, 0.2, 0.3 });
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -35,7 +35,7 @@ public sealed class HuggingFaceEmbeddingServiceTests
         var service = new HuggingFaceEmbeddingService(httpClient, BuildConfiguration());
         var result = await service.GetEmbeddingsAsync(
             ["hello"],
-            "microsoft/harrier-oss-v1-0.6b",
+            "Qwen/Qwen3-Embedding-0.6B",
             requestPresetJson: null);
 
         result.Should().HaveCount(1);
@@ -51,7 +51,7 @@ public sealed class HuggingFaceEmbeddingServiceTests
         {
             if (request.RequestUri?.Host == "huggingface.co")
             {
-                return Task.FromResult(BuildHuggingFaceProviderMappingResponse("hf-inference", "microsoft/harrier-oss-v1-0.6b", "feature-extraction"));
+                return Task.FromResult(BuildHuggingFaceProviderMappingResponse("hf-inference", "Qwen/Qwen3-Embedding-0.6B", "feature-extraction"));
             }
 
             var payload = JsonSerializer.Serialize(new[]
@@ -68,7 +68,7 @@ public sealed class HuggingFaceEmbeddingServiceTests
         var service = new HuggingFaceEmbeddingService(httpClient, BuildConfiguration());
         var result = await service.GetEmbeddingsAsync(
             ["one", "two"],
-            "microsoft/harrier-oss-v1-0.6b",
+            "Qwen/Qwen3-Embedding-0.6B",
             requestPresetJson: null);
 
         result.Should().HaveCount(2);
@@ -83,7 +83,7 @@ public sealed class HuggingFaceEmbeddingServiceTests
         {
             if (request.RequestUri?.Host == "huggingface.co")
             {
-                return Task.FromResult(BuildHuggingFaceProviderMappingResponse("hf-inference", "microsoft/harrier-oss-v1-0.6b", "feature-extraction"));
+                return Task.FromResult(BuildHuggingFaceProviderMappingResponse("hf-inference", "Qwen/Qwen3-Embedding-0.6B", "feature-extraction"));
             }
 
             return Task.FromResult(new HttpResponseMessage((HttpStatusCode)429)
@@ -95,7 +95,7 @@ public sealed class HuggingFaceEmbeddingServiceTests
         var service = new HuggingFaceEmbeddingService(httpClient, BuildConfiguration());
         var act = async () => await service.GetEmbeddingsAsync(
             ["hello"],
-            "microsoft/harrier-oss-v1-0.6b",
+            "Qwen/Qwen3-Embedding-0.6B",
             requestPresetJson: null);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -109,7 +109,7 @@ public sealed class HuggingFaceEmbeddingServiceTests
         {
             if (request.RequestUri?.Host == "huggingface.co")
             {
-                return Task.FromResult(BuildHuggingFaceProviderMappingResponse("hf-inference", "microsoft/harrier-oss-v1-0.6b", "feature-extraction"));
+                return Task.FromResult(BuildHuggingFaceProviderMappingResponse("hf-inference", "Qwen/Qwen3-Embedding-0.6B", "feature-extraction"));
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -121,7 +121,7 @@ public sealed class HuggingFaceEmbeddingServiceTests
         var service = new HuggingFaceEmbeddingService(httpClient, BuildConfiguration());
         var act = async () => await service.GetEmbeddingsAsync(
             ["hello"],
-            "microsoft/harrier-oss-v1-0.6b",
+            "Qwen/Qwen3-Embedding-0.6B",
             requestPresetJson: null);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -129,13 +129,13 @@ public sealed class HuggingFaceEmbeddingServiceTests
     }
 
     [TestMethod]
-    public async Task GetEmbeddingsAsync_HuggingFace_AllowsHarrierWithoutPresetAllowlist()
+    public async Task GetEmbeddingsAsync_HuggingFace_AllowsAnyModelWithoutPresetAllowlist()
     {
         using var httpClient = new HttpClient(new DelegatingStubHandler((request, _) =>
         {
             if (request.RequestUri?.Host == "huggingface.co")
             {
-                return Task.FromResult(BuildHuggingFaceProviderMappingResponse("hf-inference", "microsoft/harrier-oss-v1-0.6b", "feature-extraction"));
+                return Task.FromResult(BuildHuggingFaceProviderMappingResponse("hf-inference", "Qwen/Qwen3-Embedding-0.6B", "feature-extraction"));
             }
 
             var payload = JsonSerializer.Serialize(new[] { 0.1, 0.2, 0.3 });
@@ -148,7 +148,7 @@ public sealed class HuggingFaceEmbeddingServiceTests
         var service = new HuggingFaceEmbeddingService(httpClient, BuildConfiguration());
         var result = await service.GetEmbeddingsAsync(
             ["hello"],
-            "microsoft/harrier-oss-v1-0.6b",
+            "Qwen/Qwen3-Embedding-0.6B",
             requestPresetJson: null);
 
         result.Should().HaveCount(1);

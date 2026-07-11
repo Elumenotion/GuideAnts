@@ -1,0 +1,36 @@
+{
+  "modelId": "qwen3.6-35b-a3b-mtp-local",
+  "managementMode": "curated",
+  "catalogId": "qwen3.6-35b-a3b-mtp",
+  "catalogVersion": "2026-07-10",
+  "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+  "requestedRevision": "main",
+  "resolvedRevision": "8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a",
+  "quantId": "q6_k_xl",
+  "quantLabel": "Q6_K_XL",
+  "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF",
+  "runtimeProfileId": "qwen3_6",
+  "targetDirectory": "Qwen3.6-35B-A3B-MTP-GGUF",
+  "modelArtifacts": [
+    {
+      "repositoryPath": "Qwen3.6-35B-A3B-Q6_K_XL-00001-of-00002.gguf",
+      "installedRelativePath": "Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-Q6_K_XL-00001-of-00002.gguf",
+      "byteSize": 14380000000,
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "repositoryPath": "Qwen3.6-35B-A3B-Q6_K_XL-00002-of-00002.gguf",
+      "installedRelativePath": "Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-Q6_K_XL-00002-of-00002.gguf",
+      "byteSize": 14385432100,
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ],
+  "projectorArtifacts": [],
+  "aliasPresetSnapshot": {
+    "ctx-size": "131072",
+    "spec-type": "draft-mtp",
+    "spec-draft-n-max": "2"
+  },
+  "installedAt": "2026-07-10T12:00:00Z",
+  "updatedAt": "2026-07-10T12:05:00Z"
+}

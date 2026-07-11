@@ -107,7 +107,7 @@ public sealed record ServiceEditorStateDto(
     IReadOnlyList<ProviderEditorStateDto> Providers,
     ServiceEditorReadinessDto Readiness);
 
-public sealed record SetActiveProviderRequest(string ProviderId);
+public sealed record SetActiveProviderRequest(string ProviderId, bool DeferWarmup = false);
 
 public sealed record ProviderFieldsUpdateRequest(IReadOnlyDictionary<string, JsonElement> Fields);
 
@@ -216,17 +216,28 @@ public sealed record AddModelInstallHuggingFaceDto(
     string Repository,
     string QuantIncludePattern,
     string MmprojIncludePattern,
-    string TargetDirectory);
+    string TargetDirectory,
+    string? ResolvedRevision = null,
+    IReadOnlyList<string>? ModelFiles = null,
+    IReadOnlyList<string>? MmprojFiles = null,
+    IReadOnlyDictionary<string, string>? RouterPreset = null);
 
 public sealed record AddModelInstallExistingAliasDto(
     string RouterModelId);
 
+public sealed record AddModelInstallCuratedDto(
+    string CatalogId,
+    string CatalogVersion,
+    string QuantId,
+    string ResolvedRevision);
+
 public sealed record AddModelInstallDto(
     string Source,
-    string RouterModelId,
-    string RuntimeProfileId,
-    AddModelInstallHuggingFaceDto? HuggingFace,
-    AddModelInstallExistingAliasDto? ExistingAlias,
+    string? RouterModelId = null,
+    string? RuntimeProfileId = null,
+    AddModelInstallHuggingFaceDto? HuggingFace = null,
+    AddModelInstallExistingAliasDto? ExistingAlias = null,
+    AddModelInstallCuratedDto? Curated = null,
     int? RouterContextSize = null,
     int? RouterCacheRamMib = null);
 
@@ -260,6 +271,7 @@ public sealed record SettingsRuntimeProfileDto(
     string? ThoughtBlockPattern,
     string SamplingParametersJson,
     string ThinkingControlJson,
+    string RequestFieldsWhenToolsPresentJson,
     IReadOnlyList<string> Providers,
     DateTime Created,
     DateTime? Updated);
@@ -272,6 +284,7 @@ public sealed record CreateRuntimeProfileRequest(
     string? ThoughtBlockPattern,
     string SamplingParametersJson,
     string ThinkingControlJson,
+    string RequestFieldsWhenToolsPresentJson = "{}",
     IReadOnlyList<string>? Providers = null);
 
 public sealed record UpdateRuntimeProfileRequest(
@@ -282,6 +295,7 @@ public sealed record UpdateRuntimeProfileRequest(
     string? ThoughtBlockPattern,
     string SamplingParametersJson,
     string ThinkingControlJson,
+    string RequestFieldsWhenToolsPresentJson = "{}",
     IReadOnlyList<string>? Providers = null);
 
 public sealed record EmbeddingsRebuildResponse(
@@ -304,8 +318,56 @@ public sealed record LlamaRuntimeInventoryItemDto(
     int NotebookReferenceCount,
     int? RouterContextSize = null,
     int? RouterCacheRamMib = null,
+    IReadOnlyDictionary<string, string>? RouterPreset = null,
     bool RuntimeFailed = false,
-    int? RuntimeExitCode = null);
+    int? RuntimeExitCode = null,
+    LlamaInstallationProvenanceSummaryDto? InstallationProvenance = null);
+
+public sealed record LlamaInstallationProvenanceSummaryDto(
+    string? CuratedCatalogId,
+    string? CuratedCatalogVersion,
+    string? QuantId);
+
+public sealed record LlamaRouterEntryDto(
+    string Alias,
+    string ModelPath,
+    string MmprojPath,
+    bool HasModelFile,
+    bool HasMmprojFile,
+    int? ContextSize,
+    int? CacheRamMib,
+    IReadOnlyDictionary<string, string> Preset);
+
+public sealed record LlamaRouterEntriesResponseDto(
+    [property: System.Text.Json.Serialization.JsonPropertyName("entries")]
+    IReadOnlyList<LlamaRouterEntryDto> Entries);
+
+public sealed record LlamaRouterEntryPutRequest(
+    string Alias,
+    string ModelPath,
+    string MmprojPath,
+    IReadOnlyDictionary<string, string>? Preset,
+    string PresetMode = "replace",
+    int? ContextSize = null,
+    int? CacheRamMib = null);
+
+public sealed record LlamaArtifactMetadataDto(
+    string Path,
+    long? Size = null,
+    string? Digest = null,
+    string? Etag = null);
+
+public sealed record ExactStartModelDownloadRequest(
+    string OperationId,
+    string Repository,
+    string ResolvedRevision,
+    IReadOnlyList<string> ModelFiles,
+    IReadOnlyList<string> MmprojFiles,
+    string Alias,
+    string TargetDirectory,
+    IReadOnlyDictionary<string, string> Preset,
+    string PresetMode = "replace",
+    IReadOnlyList<LlamaArtifactMetadataDto>? ArtifactMetadata = null);
 
 public sealed record StartModelDownloadRequest(
     string Repository,
@@ -335,7 +397,42 @@ public sealed record ModelDownloadOperationDto(
     double? Progress,
     string? ErrorMessage,
     string? LogLine,
+    string? ImmutableInputHash = null,
+    IReadOnlyList<ModelDownloadJournalEntryDto>? Journal = null,
     AddModelErrorDto? Error = null);
+
+public sealed record ModelDownloadJournalEntryDto(
+    string Step,
+    string? Path,
+    string CompletedAt);
+
+public sealed record LlamaOperationImmutableSummaryDto(
+    string DefinitionId,
+    string DefinitionVersion,
+    string QuantId,
+    string ResolvedRevision);
+
+public sealed record LlamaOperationCompletedSideEffectsDto(
+    bool DownloadStarted,
+    bool ArtifactsActivated,
+    bool AliasRegistered,
+    bool CatalogFinalized);
+
+public sealed record LlamaOperationStatusDto(
+    string OperationId,
+    string Status,
+    string Stage,
+    string RouterModelId,
+    double? Progress,
+    string? ErrorMessage,
+    string? LogLine,
+    string? ImmutableInputHash = null,
+    LlamaOperationImmutableSummaryDto? ImmutableSummary = null,
+    LlamaOperationCompletedSideEffectsDto? CompletedSideEffects = null,
+    IReadOnlyList<ModelDownloadJournalEntryDto>? Journal = null,
+    AddModelErrorDto? Error = null,
+    SettingsModelDto? CatalogModel = null,
+    string? InstallationModelId = null);
 
 public sealed record LlamaRuntimeLoadRequest(string RouterModelId);
 

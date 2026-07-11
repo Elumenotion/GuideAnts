@@ -1,0 +1,11 @@
+{
+  "alias": "Qwen3.6-35B-A3B-MTP-GGUF",
+  "modelPath": "/models-local/llama/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-Q6_K_XL-00001-of-00002.gguf",
+  "mmprojPath": "",
+  "preset": {
+    "ctx-size": "131072",
+    "spec-type": "draft-mtp",
+    "spec-draft-n-max": "2"
+  },
+  "presetMode": "replace"
+}

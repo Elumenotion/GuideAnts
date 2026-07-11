@@ -1,0 +1,21 @@
+{
+  "operationId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "immutableInput": {
+    "definitionId": "qwen3.6-35b-a3b-mtp",
+    "definitionVersion": "2026-07-10",
+    "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+    "resolvedRevision": "8f4c3f1a2b3c4d5e6f708192a3b4c5d6e7f8091a",
+    "modelFiles": [
+      "Qwen3.6-35B-A3B-Q6_K_XL-00001-of-00002.gguf",
+      "Qwen3.6-35B-A3B-Q6_K_XL-00002-of-00002.gguf"
+    ],
+    "mmprojFiles": [],
+    "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF",
+    "runtimeProfileId": "qwen3_6",
+    "routerPreset": {
+      "ctx-size": "131072",
+      "spec-type": "draft-mtp",
+      "spec-draft-n-max": "2"
+    }
+  }
+}

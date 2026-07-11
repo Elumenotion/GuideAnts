@@ -1,5 +1,6 @@
 import type { AddModelRequest } from '../../types/settings';
 import type { LocalModelOnboardingDraft } from './contracts';
+import { presetRecordFromRows } from './routerPreset';
 
 export interface LocalModelOnboardingDefaultOptions {
   defaultCatalogModelId: string;
@@ -56,28 +57,10 @@ function normalizeDisplayOrder(value: string | undefined): number | undefined {
   return parsed;
 }
 
-function parseOptionalRouterContextSize(raw: string): number | undefined {
-  const t = raw.trim();
-  if (t.length === 0) {
-    return undefined;
-  }
-  const n = Number(t);
-  if (!Number.isInteger(n) || n < 1024 || n > 1_048_576) {
-    throw new Error('Context size must be a whole number from 1024 to 1048576, or blank to use the container default.');
-  }
-  return n;
-}
-
-function parseOptionalRouterCacheRamMib(raw: string): number | undefined {
-  const t = raw.trim();
-  if (t.length === 0) {
-    return undefined;
-  }
-  const n = Number(t);
-  if (!Number.isInteger(n) || n < 0 || n > 262_144) {
-    throw new Error('Prompt cache RAM (MiB) must be a whole number from 0 to 262144, or blank to use the container default.');
-  }
-  return n;
+function isExplicitCustomInstall(draft: LocalModelOnboardingDraft): boolean {
+  return draft.huggingFaceModelFiles.length > 0
+    && draft.huggingFaceResolvedRevision.trim().length > 0
+    && draft.huggingFaceRouterPresetRows.some((row) => row.key.trim().length > 0);
 }
 
 export function buildLocalModelOnboardingRequest(
@@ -93,16 +76,6 @@ export function buildLocalModelOnboardingRequest(
   const runtimeProfileId = draft.runtimeProfileId.trim();
   if (!runtimeProfileId) {
     throw new Error('Runtime profile is required for llama-cpp.');
-  }
-
-  const routerContextSize = parseOptionalRouterContextSize(draft.routerContextSize);
-  const routerCacheRamMib = parseOptionalRouterCacheRamMib(draft.routerCacheRamMib);
-  const routerKnobs: { routerContextSize?: number; routerCacheRamMib?: number } = {};
-  if (routerContextSize !== undefined) {
-    routerKnobs.routerContextSize = routerContextSize;
-  }
-  if (routerCacheRamMib !== undefined) {
-    routerKnobs.routerCacheRamMib = routerCacheRamMib;
   }
 
   const source = draft.installSource;
@@ -150,7 +123,6 @@ export function buildLocalModelOnboardingRequest(
       routerModelId: alias,
       runtimeProfileId,
       existingAlias: { routerModelId: alias },
-      ...routerKnobs,
     };
     return request;
   }
@@ -161,8 +133,6 @@ export function buildLocalModelOnboardingRequest(
   }
 
   const repository = draft.huggingFaceRepository.trim();
-  const quantPattern = draft.huggingFaceQuantIncludePattern.trim();
-  const mmprojPattern = draft.huggingFaceMmprojIncludePattern.trim();
   const fallbackTargetDirectory = (
     options?.defaultTargetDirectory ?? resolvedDefaults.defaultTargetDirectory
   ).trim();
@@ -171,25 +141,35 @@ export function buildLocalModelOnboardingRequest(
   if (!repository) {
     throw new Error('Hugging Face repository is required.');
   }
-  if (!quantPattern) {
-    throw new Error('Model file (GGUF) is required. Browse the repository and select a quant file.');
-  }
   if (!targetDirectory) {
     throw new Error('Target directory is required. It defaults to the router alias when left blank.');
   }
 
-  request.install = {
-    source: 'huggingface',
-    routerModelId,
-    runtimeProfileId,
-    huggingFace: {
-      repository,
-      quantIncludePattern: quantPattern,
-      mmprojIncludePattern: mmprojPattern,
-      targetDirectory,
-    },
-    ...routerKnobs,
-  };
+  if (isExplicitCustomInstall(draft)) {
+    const resolvedRevision = draft.huggingFaceResolvedRevision.trim();
+    const routerPreset = presetRecordFromRows(draft.huggingFaceRouterPresetRows);
+    if (Object.keys(routerPreset).length === 0) {
+      throw new Error('Alias preset is required for custom Hugging Face install.');
+    }
 
-  return request;
+    request.install = {
+      source: 'huggingface',
+      routerModelId,
+      runtimeProfileId,
+      presetMode: draft.huggingFacePresetMode,
+      huggingFace: {
+        repository,
+        resolvedRevision,
+        modelFiles: draft.huggingFaceModelFiles,
+        mmprojFiles: draft.huggingFaceMmprojFiles,
+        targetDirectory,
+        routerPreset,
+        quantIncludePattern: '',
+        mmprojIncludePattern: '',
+      },
+    };
+    return request;
+  }
+
+  throw new Error('Complete custom Hugging Face fields: revision, artifact group, alias preset, profile, and alias.');
 }

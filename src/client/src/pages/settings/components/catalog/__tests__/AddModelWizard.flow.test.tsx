@@ -4,6 +4,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { AddModelWizard } from '../AddModelWizard';
 import { api } from '../../../../../services/api';
 
+import { catalogFixture } from '../../../../../features/localModelOnboarding/curated/fixtures';
+
 vi.mock('../../../../../services/api', () => ({
   api: {
     settings: {
@@ -11,12 +13,20 @@ vi.mock('../../../../../services/api', () => ({
       addModel: vi.fn(),
       loadLlamaModel: vi.fn(),
       getDownloadStatus: vi.fn(),
+      getLlamaCatalog: vi.fn(),
+      getLlamaCatalogQuants: vi.fn(),
+      getLlamaOperationStatus: vi.fn(),
+      chatDefaults: {
+        get: vi.fn(),
+        update: vi.fn(),
+      },
     },
   },
 }));
 
 vi.mock('../../../../../features/localModelOnboarding/useOperationPolling', () => ({
   useLocalModelOnboardingOperation: vi.fn(),
+  useCuratedOperationPolling: vi.fn(),
 }));
 
 import { useLocalModelOnboardingOperation } from '../../../../../features/localModelOnboarding/useOperationPolling';
@@ -61,6 +71,7 @@ describe('AddModelWizard flow', () => {
     mockApi.settings.addModel.mockResolvedValue({
       addOperation: { kind: 'sync' },
     });
+    (api.settings.getLlamaCatalog as ReturnType<typeof vi.fn>).mockResolvedValue(catalogFixture);
   });
 
   it('walks provider through review and completes sync add', async () => {
@@ -430,7 +441,7 @@ describe('AddModelWizard flow', () => {
     expect(screen.getByText(/GoogleGeminiApi/i)).toBeInTheDocument();
   });
 
-  it('shows llama install source on the review step', async () => {
+  it('shows llama install source on the review step in advanced mode', async () => {
     const user = userEvent.setup();
 
     render(
@@ -441,10 +452,9 @@ describe('AddModelWizard flow', () => {
       />
     );
 
-    const { modelId, displayName } = catalogInputs();
-    await user.type(modelId, 'llama-local');
-    await user.type(displayName, 'Llama Local');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByText(/2 of 4 - Provider configuration/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Custom Hugging Face/i }));
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(screen.getByText(/Install Source:/i)).toBeInTheDocument();

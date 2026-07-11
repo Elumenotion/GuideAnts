@@ -865,7 +865,7 @@ function Select-VulkanRuntime {
 
     $dockerOs = (Invoke-ExternalCapture -FilePath 'docker' -ArgumentList @('info', '--format', '{{.OperatingSystem}}') -IgnoreErrors).Output | Select-Object -First 1
     if ([string]$dockerOs -match 'Docker Desktop') {
-        Write-Log 'Vulkan: Docker Desktop -> Mesa dzn over D3D12 (/dev/dxg). Using built-in defaults (no env).'
+        Write-Log 'Vulkan: Docker Desktop -> Mesa dzn over D3D12 (/dev/dxg). Using compose defaults.'
         return
     }
 

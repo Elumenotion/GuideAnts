@@ -81,6 +81,26 @@ public class RuntimeProfileResolverTests
     }
 
     [TestMethod]
+    public async Task ResolveAsync_DeserializesRequestFieldsWhenToolsPresent_FromJson()
+    {
+        _context.RuntimeProfiles.Add(new RuntimeProfile
+        {
+            ProfileId = "tool_profile",
+            DisplayName = "Tool Profile",
+            CombineSystemAndDeveloperMessages = true,
+            SamplingParametersJson = "{}",
+            ThinkingControlJson = """{"defaultChoice":"enabled","choiceActions":{}}""",
+            RequestFieldsWhenToolsPresentJson = """{"parallel_tool_calls":true}"""
+        });
+        await _context.SaveChangesAsync();
+
+        var result = await _resolver.ResolveAsync("tool_profile");
+
+        result.RequestFieldsWhenToolsPresent.Should().ContainKey("parallel_tool_calls");
+        result.RequestFieldsWhenToolsPresent["parallel_tool_calls"].GetBoolean().Should().BeTrue();
+    }
+
+    [TestMethod]
     public async Task ResolveAsync_ThrowsInvalidOperationException_ForUnknownProfile()
     {
         var act = () => _resolver.ResolveAsync("nonexistent_profile");

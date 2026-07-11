@@ -1,0 +1,34 @@
+{
+  "provider": "llama-cpp",
+  "catalog": {
+    "modelId": "custom-qwen-local",
+    "displayName": "Custom Qwen Install",
+    "description": "Operator-managed custom Hugging Face installation.",
+    "displayOrder": 20,
+    "isActive": true
+  },
+  "providerConfig": null,
+  "install": {
+    "source": "huggingface",
+    "routerModelId": "Custom-Qwen-GGUF",
+    "runtimeProfileId": "qwen3_6",
+    "huggingFace": {
+      "repository": "example/Custom-Qwen-GGUF",
+      "quantIncludePattern": "Custom-Qwen-Q4_K_M-00001-of-00002.gguf",
+      "mmprojIncludePattern": "mmproj-F16.gguf",
+      "targetDirectory": "Custom-Qwen-GGUF"
+    },
+    "existingAlias": null,
+    "resolvedRevision": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "modelFiles": [
+      "Custom-Qwen-Q4_K_M-00001-of-00002.gguf",
+      "Custom-Qwen-Q4_K_M-00002-of-00002.gguf"
+    ],
+    "mmprojFiles": ["mmproj-F16.gguf"],
+    "routerPreset": {
+      "ctx-size": "32768",
+      "image-min-tokens": "1024"
+    },
+    "presetMode": "replace"
+  }
+}

@@ -6,6 +6,7 @@ import {
   OPENAI_OPTIONAL_SERVICE_DEFAULTS,
   OPENAI_SERVICE_PROVIDER_IDS,
   SECRET_MASK,
+  WIZARD_DEFER_WARMUP_OPTIONS,
 } from './constants';
 import type {
   OpenAiCoreConnectionFormState,
@@ -339,7 +340,7 @@ export function useOpenAiWizardState(): UseOpenAiWizardStateResult {
         ModelId: optionalForm.speechTranscriptionModelId.trim(),
         TimeoutSeconds: optionalForm.speechTranscriptionTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('SpeechTranscription', OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription);
+      await api.settings.services.updateActiveProvider('SpeechTranscription', OPENAI_SERVICE_PROVIDER_IDS.SpeechTranscription, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableSpeechSynthesis) {
@@ -348,7 +349,7 @@ export function useOpenAiWizardState(): UseOpenAiWizardStateResult {
         VoiceName: optionalForm.speechSynthesisVoiceName.trim(),
         TimeoutSeconds: optionalForm.speechSynthesisTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('SpeechSynthesis', OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis);
+      await api.settings.services.updateActiveProvider('SpeechSynthesis', OPENAI_SERVICE_PROVIDER_IDS.SpeechSynthesis, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableImages) {
@@ -356,7 +357,7 @@ export function useOpenAiWizardState(): UseOpenAiWizardStateResult {
         ModelId: optionalForm.imagesModelId.trim(),
         TimeoutSeconds: optionalForm.imagesTimeoutSeconds.trim(),
       });
-      await api.settings.services.updateActiveProvider('ImageGeneration', OPENAI_SERVICE_PROVIDER_IDS.ImageGeneration);
+      await api.settings.services.updateActiveProvider('ImageGeneration', OPENAI_SERVICE_PROVIDER_IDS.ImageGeneration, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     if (optionalForm.enableEmbeddings) {
@@ -369,7 +370,7 @@ export function useOpenAiWizardState(): UseOpenAiWizardStateResult {
         fields.Dimensions = dimensionsValue;
       }
       await api.settings.services.updateProviderFields('Embeddings', OPENAI_SERVICE_PROVIDER_IDS.Embeddings, fields);
-      await api.settings.services.updateActiveProvider('Embeddings', OPENAI_SERVICE_PROVIDER_IDS.Embeddings);
+      await api.settings.services.updateActiveProvider('Embeddings', OPENAI_SERVICE_PROVIDER_IDS.Embeddings, WIZARD_DEFER_WARMUP_OPTIONS);
     }
 
     const refreshed = await loadSnapshot();

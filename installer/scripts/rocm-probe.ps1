@@ -100,6 +100,13 @@ function Write-RocmInstallHint {
     & $WarnFn "Or run: .\guideants.ps1 --install-rocm-wsl"
 }
 
+function Get-NormalizedWslCliText {
+    param([string]$Text)
+    # wsl.exe often emits UTF-16LE with embedded NULs when captured from PowerShell;
+    # strip them so status/version parsing regexes match.
+    return ($Text -replace "`0", '').Trim()
+}
+
 function Test-Wsl2Ready {
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
         return [pscustomobject]@{
@@ -108,7 +115,7 @@ function Test-Wsl2Ready {
         }
     }
 
-    $status = (& wsl.exe --status 2>&1 | Out-String)
+    $status = Get-NormalizedWslCliText -Text ((& wsl.exe --status 2>&1 | Out-String))
     if ($LASTEXITCODE -ne 0) {
         return [pscustomobject]@{
             Ok = $false
@@ -122,6 +129,11 @@ function Test-Wsl2Ready {
     }
 
     if ($status -notmatch '(?i)Default Version:\s*2\b') {
+        $distros = Get-NormalizedWslCliText -Text ((& wsl.exe -l -v 2>&1 | Out-String))
+        if ($distros -match '(?m)^\s*\*?\s*\S+\s+\S+\s+2\s*$') {
+            return [pscustomobject]@{ Ok = $true; Message = '' }
+        }
+
         return [pscustomobject]@{
             Ok = $false
             Message = @(

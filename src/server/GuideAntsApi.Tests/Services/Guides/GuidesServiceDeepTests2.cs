@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
@@ -298,7 +299,8 @@ public sealed class GuidesServiceDeepTests2
                 CombineSystemAndDeveloperMessages: false,
                 ThoughtBlockPattern: null,
                 SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
-                ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>())));
+                ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
+                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
 
         var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver.Object);
 

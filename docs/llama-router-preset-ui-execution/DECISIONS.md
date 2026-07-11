@@ -55,22 +55,10 @@ product implementation continues.
 - Deleting a catalog model may cascade its database provenance only after the
   existing explicit runtime/artifact deletion operation succeeds.
 
-## D4. Fleet settings: desired SQL state and applied projection
+## D4. Fleet settings: desired SQL state and applied projection (**SUPERSEDED in Phase 2 cleanup**)
 
-- The authoritative fleet llama preset is a singleton revisioned SQL record.
-- The public API is:
-  - `GET /api/settings/llama/runtime/fleet-preset`
-  - `PUT /api/settings/llama/runtime/fleet-preset`
-- GuideAnts applies a saved revision through llama-admin, which atomically writes a
-  runtime projection file consumed by `start-llama.sh` on every router spawn, then
-  requests restart.
-- SQL stores desired revision and applied revision/status/error. A failed projection
-  or restart leaves desired state visible as not applied and returns an error.
-- Startup reconciliation reapplies desired state when desired/applied revisions
-  differ. It does not report equality until llama-admin confirms the revision.
-- Compose `GA_LLAMA_*` values seed SQL only when no fleet row exists. Once a row
-  exists, compose values do not override it.
-- Alias-scoped keys never enter the fleet row or router CLI base preset.
+- Phase 2 backend cleanup removes Fleet Llama SQL + API machinery.
+- Fleet preset routes and persistence are no longer part of the supported contract.
 
 ## D5. Preset scope and write semantics
 
@@ -157,7 +145,7 @@ Lifecycle route mapping:
 Every route in D8 uses the existing Admin settings authorization policy. Integration
 tests require unauthenticated `401`, non-Admin `403`, and Admin contract behavior.
 
-## D9. UI state and selection
+## D9. UI state and selection (**SUPERSEDED in Phase 2 cleanup**)
 
 - Settings and Home map into one shared onboarding state machine and request builder.
 - Entering curated quant selection starts with no selected quant, even when the
@@ -165,9 +153,8 @@ tests require unauthenticated `401`, non-Admin `403`, and Admin contract behavio
 - A repository refresh that removes the selected group clears the selection and
   shows an explicit changed-repository error.
 - Technical details are read-only in curated mode.
-- Customize is an explicit, confirmed transition to `operatorManaged`; it retains
-  provenance history but stops curated version tracking.
-- Fleet and alias settings use separate editors and show effective precedence.
+- Phase 2 cleanup removes Customize and Fleet editors from the active backend contract.
+- UI state continues to support curated install, repair, adopt, router entries, and runtime inventory flows.
 
 ## D10. Verification tiers
 

@@ -30,9 +30,6 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
 
     public async Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> GetInventoryAsync(CancellationToken cancellationToken = default)
     {
-        // Use a fresh DbContext for this call. GetInventoryAsync is invoked in parallel
-        // from readiness probes (e.g. header toolbar) but DbContext is not thread-safe
-        // or re-entrant across concurrent async operations.
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
@@ -76,6 +73,18 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
             .Where(m => m.Provider == "llama-cpp")
             .Select(m => new { m.ModelId, m.RuntimeConfigJson })
             .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var installationByModelId = await context.LocalModelInstallations
+            .AsNoTracking()
+            .ToDictionaryAsync(
+                i => i.ModelId,
+                i => new LlamaInstallationProvenanceSummaryDto(
+                    i.CatalogId,
+                    i.CatalogVersion,
+                    i.QuantId),
+                StringComparer.Ordinal,
+                cancellationToken)
             .ConfigureAwait(false);
 
         var catalogByRouter = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -135,6 +144,16 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
                 catalogIds,
                 cancellationToken).ConfigureAwait(false);
 
+            LlamaInstallationProvenanceSummaryDto? provenance = null;
+            foreach (var catalogId in catalogIds)
+            {
+                if (installationByModelId.TryGetValue(catalogId, out var match))
+                {
+                    provenance = match;
+                    break;
+                }
+            }
+
             results.Add(new LlamaRuntimeInventoryItemDto(
                 RouterModelId: routerId,
                 RuntimeState: runtimeState,
@@ -146,8 +165,10 @@ public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
                 NotebookReferenceCount: notebookCount,
                 RouterContextSize: entry?.ContextSize,
                 RouterCacheRamMib: entry?.CacheRamMib,
+                RouterPreset: entry?.Preset,
                 RuntimeFailed: runtimeRow?.Failed ?? false,
-                RuntimeExitCode: runtimeRow?.ExitCode));
+                RuntimeExitCode: runtimeRow?.ExitCode,
+                InstallationProvenance: provenance));
         }
 
         return results;

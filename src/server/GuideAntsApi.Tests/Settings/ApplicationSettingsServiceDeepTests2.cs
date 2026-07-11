@@ -273,6 +273,37 @@ public sealed class ApplicationSettingsServiceDeepTests2
     }
 
     [TestMethod]
+    public async Task CreateRuntimeProfileAsync_Persists_RequestFieldsWhenToolsPresent()
+    {
+        await using var db = CreateDbContext();
+        var service = CreateService(db);
+
+        var created = await service.CreateRuntimeProfileAsync(NewProfileRequest("tool_fields") with
+        {
+            RequestFieldsWhenToolsPresentJson = """{"parallel_tool_calls":true}"""
+        });
+
+        created.RequestFieldsWhenToolsPresentJson.Should().Contain("parallel_tool_calls");
+        (await service.GetRuntimeProfileAsync("tool_fields"))!
+            .RequestFieldsWhenToolsPresentJson.Should().Contain("true");
+    }
+
+    [TestMethod]
+    public async Task CreateRuntimeProfileAsync_Rejects_ReservedTransportField_In_RequestFields()
+    {
+        await using var db = CreateDbContext();
+        var service = CreateService(db);
+
+        var act = async () => await service.CreateRuntimeProfileAsync(NewProfileRequest("bad_tools") with
+        {
+            RequestFieldsWhenToolsPresentJson = """{"tools":true}"""
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*reserved for transport*");
+    }
+
+    [TestMethod]
     public async Task UpdateRuntimeProfileAsync_Mismatch_RouteAndPayload_Throws()
     {
         await using var db = CreateDbContext();
