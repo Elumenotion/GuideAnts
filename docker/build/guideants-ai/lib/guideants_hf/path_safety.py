@@ -39,6 +39,49 @@ def destination_name(relative_path: str) -> str:
     return os.path.basename(normalized)
 
 
+def validate_destination_filename(value: str) -> str:
+    filename = (value or "").strip()
+    if not filename:
+        raise PathSafetyError("DEST_BLANK", "Destination filename is required.")
+    if "*" in filename or "?" in filename:
+        raise PathSafetyError(
+            "DEST_INVALID",
+            "Destination must be a single filename without glob metacharacters.",
+        )
+    if (
+        filename in {".", ".."}
+        or os.path.isabs(filename)
+        or os.path.basename(filename) != filename
+        or "/" in filename
+        or "\\" in filename
+    ):
+        raise PathSafetyError("DEST_INVALID", "Destination must be a single filename with no path separators.")
+    return filename
+
+
+def resolve_path_under_dir(parent_dir: str, filename: str) -> str:
+    safe_filename = validate_destination_filename(filename)
+    parent_real = os.path.realpath(parent_dir)
+    candidate = os.path.realpath(os.path.join(parent_real, safe_filename))
+    parent_prefix = parent_real if parent_real.endswith(os.sep) else parent_real + os.sep
+    if not candidate.startswith(parent_prefix):
+        raise PathSafetyError("PATH_ESCAPE", "Target path escapes the parent directory.")
+    return candidate
+
+
+def resolve_repository_destination(
+    *,
+    store_root: str,
+    target_dir: str,
+    relative_path: str,
+) -> tuple[str, str]:
+    repo_path = normalize_repository_relative_path(relative_path)
+    dest_name = validate_destination_filename(destination_name(repo_path))
+    dest_abs = resolve_path_under_dir(target_dir, dest_name)
+    ensure_inside_root(store_root, dest_abs)
+    return repo_path, dest_abs
+
+
 def validate_ordered_artifact_paths(
     model_files: Iterable[str],
     mmproj_files: Iterable[str],
@@ -60,16 +103,18 @@ def validate_ordered_artifact_paths(
     seen_dest_names: dict[str, str] = {}
 
     def add_spec(relative_path: str, bucket: list[tuple[str, str]]) -> None:
-        repo_path = normalize_repository_relative_path(relative_path)
-        dest_name = destination_name(repo_path)
+        repo_path, dest_abs = resolve_repository_destination(
+            store_root=store_root,
+            target_dir=target_dir,
+            relative_path=relative_path,
+        )
+        dest_name = os.path.basename(dest_abs)
         if dest_name in seen_dest_names and seen_dest_names[dest_name] != repo_path:
             raise PathSafetyError(
                 "DEST_DUPLICATE",
                 f"Duplicate destination filename '{dest_name}' from '{seen_dest_names[dest_name]}' and '{repo_path}'.",
             )
         seen_dest_names[dest_name] = repo_path
-        dest_abs = os.path.abspath(os.path.join(target_dir, dest_name))
-        ensure_inside_root(store_root, dest_abs)
         bucket.append((repo_path, dest_abs))
 
     model_list = list(model_files)
@@ -99,11 +144,12 @@ def delete_obsolete_repository_paths(
 
     removed: list[str] = []
     for relative_path in repository_paths:
-        repo_path = normalize_repository_relative_path(relative_path)
-        dest_name = destination_name(repo_path)
-        candidate = os.path.abspath(os.path.join(target_dir, dest_name))
-        ensure_inside_root(store_root, candidate)
-        if os.path.isfile(candidate):
-            os.remove(candidate)
+        repo_path, dest_abs = resolve_repository_destination(
+            store_root=store_root,
+            target_dir=target_dir,
+            relative_path=relative_path,
+        )
+        if os.path.isfile(dest_abs):
+            os.remove(dest_abs)
             removed.append(repo_path)
     return removed
