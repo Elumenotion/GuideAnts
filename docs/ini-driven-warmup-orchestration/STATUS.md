@@ -18,8 +18,8 @@ State values: `BLOCKED` · `READY` · `IN_PROGRESS` · `GATE_FAILED` · `DONE`.
 
 | Phase | Brief | State | Attempts | Gate result | Notes |
 |---|---|---|---|---|---|
-| 1 — INI contract | `task-phase-1-ini-contract.md` | READY | 0 | — | |
-| 2 — Orchestrator | `task-phase-2-orchestrator.md` | BLOCKED | 0 | — | Depends on Phase 1 |
+| 1 — INI contract | `task-phase-1-ini-contract.md` | DONE | 1 | **PASS** | `warmup_desired_ini.py` + `warmup_state.py` + unit tests |
+| 2 — Orchestrator | `task-phase-2-orchestrator.md` | READY | 0 | — | |
 | 3 — ga-admin routes | `task-phase-3-ga-admin-routes.md` | BLOCKED | 0 | — | Depends on Phase 2 |
 | 4 — API client | `task-phase-4-api-desired-builder.md` | BLOCKED | 0 | — | Depends on Phase 3 |
 | 5 — API call sites | `task-phase-5-api-call-sites.md` | BLOCKED | 0 | — | Depends on Phase 4 |
