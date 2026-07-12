@@ -47,14 +47,6 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
         "catalogFinalization",
     };
 
-    private static readonly HashSet<string> StaleDownloadRestartStatuses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "queued",
-        "resolvingFiles",
-        "downloading",
-        "validating",
-    };
-
     private readonly ApplicationDbContext _db;
     private readonly ILlamaRuntimeAdminClient _adminClient;
     private readonly IHuggingFaceTokenResolver _tokenResolver;
@@ -210,11 +202,6 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
             return null;
         }
 
-        if (sideEffects.DownloadStarted && StaleDownloadRestartStatuses.Contains(operation.Status))
-        {
-            await StartDownloadAsync(operation, immutableInput, sideEffects, cancellationToken).ConfigureAwait(false);
-        }
-
         var journal = await _adminClient
             .GetDownloadStatusAsync(operation.OperationId.ToString("D"), cancellationToken)
             .ConfigureAwait(false);
@@ -340,11 +327,11 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
             .ConfigureAwait(false);
         if (existingModel)
         {
-            operation.Status = "completed";
-            operation.CurrentStep = "completed";
-            operation.CompletedUtc = DateTime.UtcNow;
-            operation.UpdatedUtc = DateTime.UtcNow;
-            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            // Reconcile: the catalog row already exists (e.g. a prior text-only install). The download
+            // step above fetched any newly-required artifacts (projector) and re-registered the alias.
+            // Refresh the installation provenance so it reflects what is actually on disk now.
+            await ReconcileExistingInstallationAsync(operation, immutableInput, sideEffects, cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 
@@ -380,6 +367,48 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
         {
             await MarkFinalizationFailureAsync(operation, ex, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private async Task ReconcileExistingInstallationAsync(
+        LocalModelOperation operation,
+        CuratedImmutableOperationInput immutableInput,
+        CompletedSideEffects sideEffects,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+
+        var installation = await _db.LocalModelInstallations
+            .SingleOrDefaultAsync(i => i.ModelId == immutableInput.CatalogModelId, cancellationToken)
+            .ConfigureAwait(false);
+        if (installation is not null)
+        {
+            installation.ManagementMode = "curated";
+            installation.CatalogId = immutableInput.DefinitionId;
+            installation.CatalogVersion = immutableInput.DefinitionVersion;
+            installation.Repository = immutableInput.Repository;
+            installation.RequestedRevision = immutableInput.RequestedRevision;
+            installation.ResolvedRevision = immutableInput.ResolvedRevision;
+            installation.QuantId = immutableInput.QuantId;
+            installation.QuantLabel = immutableInput.QuantLabel;
+            installation.RouterModelId = immutableInput.RouterModelId;
+            installation.RuntimeProfileId = immutableInput.RuntimeProfileId;
+            installation.TargetDirectory = immutableInput.TargetDirectory;
+            installation.ModelArtifactsJson = BuildModelArtifactsJson(immutableInput);
+            installation.ProjectorArtifactsJson = BuildProjectorArtifactsJson(immutableInput);
+            installation.RouterPresetSnapshotJson = JsonSerializer.Serialize(immutableInput.RouterPreset);
+            installation.UpdatedUtc = now;
+        }
+
+        operation.Status = "completed";
+        operation.CurrentStep = "completed";
+        operation.ErrorCode = null;
+        operation.ErrorMessage = null;
+        operation.Remediation = null;
+        operation.CompletedUtc = now;
+        operation.UpdatedUtc = now;
+        sideEffects.CatalogFinalized = true;
+        operation.CompletedSideEffectsJson = SerializeSideEffects(sideEffects);
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task CommitFinalizationAsync(

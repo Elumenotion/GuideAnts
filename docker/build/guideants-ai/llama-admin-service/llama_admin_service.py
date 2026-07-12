@@ -18,9 +18,11 @@ from typing import Any, Callable
 from guideants_hf.exact_download import (
     ExactDownloadError,
     activate_staged_files,
+    artifact_is_installed,
     build_artifact_specs,
     build_immutable_input,
     stage_download_file,
+    staged_artifact_path,
 )
 from guideants_hf.path_safety import PathSafetyError, delete_obsolete_repository_paths
 from guideants_hf.operation_journal import OperationJournalError, OperationJournalStore
@@ -1035,6 +1037,70 @@ def _exact_download_request_identity(request: ExactDownloadRequest) -> dict[str,
     )
 
 
+def _journal_has_download_step(record, repository_path: str) -> bool:
+    return any(
+        step.step == "downloadModelFile" and step.path == repository_path
+        for step in record.journal
+    )
+
+
+def _ensure_journal_download_step(operation_id: str, repository_path: str) -> None:
+    record = OPERATION_JOURNAL.get(operation_id)
+    if record is None or _journal_has_download_step(record, repository_path):
+        return
+    OPERATION_JOURNAL.append_step(operation_id, "downloadModelFile", repository_path)
+
+
+def _exact_download_request_from_journal(journal_record) -> ExactDownloadRequest:
+    immutable_input = journal_record.immutable_input
+    artifact_metadata: list[ArtifactMetadataDto] | None = None
+    raw_metadata = immutable_input.get("artifactMetadata")
+    if isinstance(raw_metadata, list):
+        artifact_metadata = [
+            ArtifactMetadataDto.model_validate(item)
+            for item in raw_metadata
+            if isinstance(item, dict)
+        ]
+    return ExactDownloadRequest(
+        operationId=journal_record.operation_id,
+        repository=str(immutable_input.get("repository") or ""),
+        resolvedRevision=str(immutable_input.get("resolvedRevision") or ""),
+        modelFiles=[str(path) for path in (immutable_input.get("modelFiles") or [])],
+        mmprojFiles=[str(path) for path in (immutable_input.get("mmprojFiles") or [])],
+        alias=normalize_alias(
+            str(immutable_input.get("routerModelId") or immutable_input.get("alias") or journal_record.alias)
+        ),
+        targetDirectory=str(immutable_input.get("targetDirectory") or ""),
+        preset=dict(immutable_input.get("routerPreset") or immutable_input.get("preset") or {}),
+        presetMode=str(immutable_input.get("presetMode") or "replace"),
+        artifactMetadata=artifact_metadata,
+        hfToken=None,
+    )
+
+
+def _maybe_resume_exact_download_from_journal(journal_record) -> None:
+    if journal_record.status not in {"queued", "resolvingFiles", "downloading", "validating", "registeringAlias"}:
+        return
+    if _download_worker_active(journal_record.operation_id):
+        return
+    request = _exact_download_request_from_journal(journal_record)
+    with OPERATIONS_LOCK:
+        state = OPERATIONS.get(journal_record.operation_id)
+        if state is None:
+            OPERATIONS[journal_record.operation_id] = DownloadOperationState(
+                operation_id=journal_record.operation_id,
+                router_model_id=journal_record.alias,
+                status=journal_record.status,
+                progress=journal_record.progress,
+                log_line=journal_record.log_line,
+            )
+    _start_download_worker(
+        journal_record.operation_id,
+        run_exact_download_operation,
+        (journal_record.operation_id, request),
+    )
+
+
 def run_exact_download_operation(operation_id: str, request: ExactDownloadRequest) -> None:
     alias = normalize_alias(request.alias)
     alias_lock = get_alias_lock(alias)
@@ -1093,13 +1159,10 @@ def run_exact_download_operation(operation_id: str, request: ExactDownloadReques
         token = (request.hfToken or "").strip() or None
         all_specs = model_specs + mmproj_specs
         total = len(all_specs)
-        existing = OPERATION_JOURNAL.get(operation_id)
-        completed_files = 0
-        if existing is not None:
-            completed_files = sum(1 for step in existing.journal if step.step == "downloadModelFile")
 
         for idx, spec in enumerate(all_specs):
-            if idx < completed_files:
+            if artifact_is_installed(spec) or staged_artifact_path(staging_dir, spec) is not None:
+                _ensure_journal_download_step(operation_id, spec.repository_path)
                 continue
 
             def report(bytes_read: int, *, file_idx: int = idx) -> None:
@@ -1472,14 +1535,15 @@ def _start_exact_download(request: ExactDownloadRequest) -> dict[str, Any]:
             )
         if _download_worker_active(operation_id):
             return existing_journal.to_dto()
-        if existing_journal.status == "failed":
-            OPERATION_JOURNAL.update(
-                operation_id,
-                status="queued",
-                error_message=None,
-                completed_at=None,
-                log_line="Retrying interrupted download.",
-            )
+        if existing_journal.status != "failed":
+            return existing_journal.to_dto()
+        OPERATION_JOURNAL.update(
+            operation_id,
+            status="queued",
+            error_message=None,
+            completed_at=None,
+            log_line="Retrying interrupted download.",
+        )
 
     with OPERATIONS_LOCK:
         existing = next(
@@ -1584,6 +1648,8 @@ def _start_legacy_download(request: StartDownloadRequest) -> dict[str, Any]:
 def get_download_status(operation_id: str) -> dict[str, Any]:
     journal_record = OPERATION_JOURNAL.get(operation_id)
     if journal_record is not None:
+        _maybe_resume_exact_download_from_journal(journal_record)
+        journal_record = OPERATION_JOURNAL.get(operation_id) or journal_record
         return journal_record.to_dto()
     with OPERATIONS_LOCK:
         state = OPERATIONS.get(operation_id)

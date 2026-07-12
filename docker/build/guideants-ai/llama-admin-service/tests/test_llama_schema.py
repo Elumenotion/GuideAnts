@@ -81,17 +81,19 @@ class LlamaSchemaTests(unittest.TestCase):
         with self.assertRaises(CatalogValidationError):
             validate_manifest_instance(bad)
 
-    def test_rejects_mtp_with_projector(self) -> None:
+    def test_mtp_with_projector_requires_image_min_tokens(self) -> None:
         bad = copy.deepcopy(self.manifest)
         mtp = next(m for m in bad["models"] if m["id"] == "qwen3.6-35b-a3b-mtp")
-        mtp["defaults"]["mmproj"] = {"path": "mmproj-F16.gguf"}
+        del mtp["defaults"]["routerPreset"]["image-min-tokens"]
         with self.assertRaises(CatalogValidationError):
             validate_manifest_instance(bad)
 
-    def test_rejects_mtp_with_image_min_tokens(self) -> None:
+    def test_mtp_without_projector_rejects_image_min_tokens(self) -> None:
         bad = copy.deepcopy(self.manifest)
-        mtp = next(m for m in bad["models"] if m["id"] == "qwen3.6-35b-a3b-mtp")
-        mtp["defaults"]["routerPreset"]["image-min-tokens"] = "1024"
+        text_only = next(m for m in bad["models"] if m["id"] == "gpt-oss-20b")
+        text_only["defaults"]["routerPreset"]["spec-type"] = "draft-mtp"
+        text_only["defaults"]["routerPreset"]["spec-draft-n-max"] = "2"
+        text_only["defaults"]["routerPreset"]["image-min-tokens"] = "1024"
         with self.assertRaises(CatalogValidationError):
             validate_manifest_instance(bad)
 

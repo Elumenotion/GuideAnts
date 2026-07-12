@@ -52,12 +52,15 @@ if (catalog.schemaVersion !== 1 || catalog.task !== 'llama') {
 const mtp = JSON.parse(
   readFileSync(join(contractsDir, 'immutable-operation-input.fixture.json'), 'utf8'),
 ) as ImmutableOperationInput;
-if (mtp.mmprojFiles.length > 0) {
-  failures.push('immutable-operation-input.fixture.json: D12 requires empty mmprojFiles for MTP');
-}
-for (const forbidden of ['image-min-tokens', 'mmproj', 'projector']) {
-  if (forbidden in mtp.routerPreset) {
-    failures.push(`immutable-operation-input.fixture.json: D12 forbids routerPreset key '${forbidden}'`);
+if (mtp.definitionId.endsWith('-mtp')) {
+  if (mtp.mmprojFiles.length === 0) {
+    failures.push('immutable-operation-input.fixture.json: MTP vision rows require mmprojFiles');
+  }
+  if (!('image-min-tokens' in mtp.routerPreset)) {
+    failures.push('immutable-operation-input.fixture.json: MTP vision rows require routerPreset.image-min-tokens');
+  }
+  if (mtp.routerPreset['spec-type'] !== 'draft-mtp') {
+    failures.push('immutable-operation-input.fixture.json: MTP rows require routerPreset.spec-type=draft-mtp');
   }
 }
 

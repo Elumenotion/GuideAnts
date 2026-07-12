@@ -98,6 +98,28 @@ describe('useOperationPolling', () => {
       window.clearInterval(timerId);
     });
 
+    it('stops polling after a terminal status so onTerminal fires once', async () => {
+      (api.settings.getDownloadStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        operationId: 'op-term',
+        status: 'completed',
+      });
+      const onUpdate = vi.fn();
+      const onTerminal = vi.fn();
+
+      const timerId = createLocalModelOnboardingPoller({
+        operationId: 'op-term',
+        onUpdate,
+        onTerminal,
+        intervalMs: 100,
+      });
+
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(onTerminal).toHaveBeenCalledTimes(1);
+      expect(onUpdate).toHaveBeenCalledTimes(1);
+      window.clearInterval(timerId);
+    });
+
     it('calls onPollFailureThreshold after repeated failures', async () => {
       (api.settings.getDownloadStatus as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('offline'));
       const onPollFailureThreshold = vi.fn();

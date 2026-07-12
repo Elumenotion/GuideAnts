@@ -33,15 +33,20 @@ def main() -> int:
     if d12_path.exists():
         mtp = load_json(d12_path)
         assert isinstance(mtp, dict)
-        if mtp.get("mmprojFiles"):
-            failures.append("immutable-operation-input.fixture.json: D12 requires empty mmprojFiles for MTP")
-        forbidden = {"image-min-tokens", "mmproj", "projector"}
-        preset = mtp.get("routerPreset") or {}
-        if isinstance(preset, dict):
-            for key in forbidden:
-                if key in preset:
+        if str(mtp.get("definitionId", "")).endswith("-mtp"):
+            if not mtp.get("mmprojFiles"):
+                failures.append(
+                    "immutable-operation-input.fixture.json: MTP rows require mmprojFiles when vision is enabled"
+                )
+            preset = mtp.get("routerPreset") or {}
+            if isinstance(preset, dict):
+                if "image-min-tokens" not in preset:
                     failures.append(
-                        f"immutable-operation-input.fixture.json: D12 forbids routerPreset key '{key}'"
+                        "immutable-operation-input.fixture.json: MTP vision rows require routerPreset.image-min-tokens"
+                    )
+                if preset.get("spec-type") != "draft-mtp":
+                    failures.append(
+                        "immutable-operation-input.fixture.json: MTP rows require routerPreset.spec-type=draft-mtp"
                     )
 
     if failures:

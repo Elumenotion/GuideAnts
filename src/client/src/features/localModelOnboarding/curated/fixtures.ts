@@ -41,8 +41,8 @@ export const catalogFixture: LlamaCatalogResponseDto = {
       id: 'qwen3.6-35b-a3b-mtp',
       display: {
         name: 'Qwen 3.6 35B A3B MTP',
-        description: 'Curated local Qwen model with MTP configuration.',
-        labels: ['Text', 'Reasoning', 'Tool use'],
+        description: 'Curated local Qwen model with MTP and vision configuration.',
+        labels: ['Text', 'Vision', 'Reasoning', 'Tool use', 'MTP'],
         license: 'Apache-2.0',
         documentationUrl: 'https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF',
       },
@@ -55,9 +55,10 @@ export const catalogFixture: LlamaCatalogResponseDto = {
         routerModelId: 'Qwen3.6-35B-A3B-MTP-GGUF',
         runtimeProfileId: 'qwen3_6',
         targetDirectory: 'Qwen3.6-35B-A3B-MTP-GGUF',
-        mmproj: null,
+        mmproj: { path: 'mmproj-F16.gguf' },
         routerPreset: {
           'ctx-size': '131072',
+          'image-min-tokens': '1024',
           'spec-type': 'draft-mtp',
           'spec-draft-n-max': '2',
         },
@@ -95,7 +96,7 @@ export const quantFixture: LlamaCatalogQuantsResponseDto = {
       ],
     },
   ],
-  projector: null,
+  projector: { path: 'mmproj-F16.gguf', size: 900_000_000 },
 };
 
 export const curatedRequestFixture = {

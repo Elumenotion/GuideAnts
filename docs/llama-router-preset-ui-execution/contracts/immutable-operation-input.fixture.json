@@ -7,11 +7,14 @@
     "Qwen3.6-35B-A3B-Q6_K_XL-00001-of-00002.gguf",
     "Qwen3.6-35B-A3B-Q6_K_XL-00002-of-00002.gguf"
   ],
-  "mmprojFiles": [],
+  "mmprojFiles": [
+    "mmproj-F16.gguf"
+  ],
   "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF",
   "runtimeProfileId": "qwen3_6",
   "routerPreset": {
     "ctx-size": "131072",
+    "image-min-tokens": "1024",
     "spec-type": "draft-mtp",
     "spec-draft-n-max": "2"
   }

@@ -42,18 +42,24 @@ if (File.Exists(d12Path))
     using var stream = File.OpenRead(d12Path);
     using var doc = JsonDocument.Parse(stream);
     var root = doc.RootElement;
-    if (root.TryGetProperty("mmprojFiles", out var mmprojFiles) && mmprojFiles.GetArrayLength() > 0)
+    if (root.TryGetProperty("definitionId", out var definitionId)
+        && definitionId.GetString()?.EndsWith("-mtp", StringComparison.Ordinal) == true)
     {
-        failures.Add("immutable-operation-input.fixture.json: D12 requires empty mmprojFiles for MTP");
-    }
-
-    if (root.TryGetProperty("routerPreset", out var preset) && preset.ValueKind == JsonValueKind.Object)
-    {
-        foreach (var forbidden in new[] { "image-min-tokens", "mmproj", "projector" })
+        if (!root.TryGetProperty("mmprojFiles", out var mmprojFiles) || mmprojFiles.GetArrayLength() == 0)
         {
-            if (preset.TryGetProperty(forbidden, out _))
+            failures.Add("immutable-operation-input.fixture.json: MTP vision rows require mmprojFiles");
+        }
+
+        if (root.TryGetProperty("routerPreset", out var preset) && preset.ValueKind == JsonValueKind.Object)
+        {
+            if (!preset.TryGetProperty("image-min-tokens", out _))
             {
-                failures.Add($"immutable-operation-input.fixture.json: D12 forbids routerPreset key '{forbidden}'");
+                failures.Add("immutable-operation-input.fixture.json: MTP vision rows require routerPreset.image-min-tokens");
+            }
+
+            if (!preset.TryGetProperty("spec-type", out var specType) || specType.GetString() != "draft-mtp")
+            {
+                failures.Add("immutable-operation-input.fixture.json: MTP rows require routerPreset.spec-type=draft-mtp");
             }
         }
     }

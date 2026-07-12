@@ -124,12 +124,16 @@ def validate_manifest_instance(manifest: dict[str, Any]) -> None:
         has_mtp = any(key in preset for key in _MTP_PRESET_KEYS)
 
         if has_mtp:
-            if has_projector:
-                raise CatalogValidationError(f"MTP model '{model_id}' must not declare mmproj.")
-            if has_vision:
-                raise CatalogValidationError(f"MTP model '{model_id}' must not declare vision preset keys.")
             if preset.get("spec-type") != "draft-mtp":
                 raise CatalogValidationError(f"MTP model '{model_id}' must set spec-type=draft-mtp.")
+            if has_projector and not has_vision:
+                raise CatalogValidationError(
+                    f"MTP model '{model_id}' with mmproj must declare image-min-tokens in routerPreset."
+                )
+            if not has_projector and has_vision:
+                raise CatalogValidationError(
+                    f"MTP model '{model_id}' declares image-min-tokens without mmproj."
+                )
         elif has_projector and not has_vision:
             raise CatalogValidationError(
                 f"Vision model '{model_id}' with mmproj must declare image-min-tokens in routerPreset."

@@ -43,7 +43,9 @@ public sealed class LlamaCatalogContractTests
         dto.CatalogVersion.Should().Be("2026-07-10");
         dto.Models.Should().HaveCount(1);
         dto.Models[0].Defaults.RouterPreset.Should().ContainKey("ctx-size");
-        dto.Models[0].Defaults.Mmproj.Should().BeNull();
+        dto.Models[0].Defaults.RouterPreset.Should().ContainKey("image-min-tokens");
+        dto.Models[0].Defaults.Mmproj.Should().NotBeNull();
+        dto.Models[0].Defaults.Mmproj!.Path.Should().Be("mmproj-F16.gguf");
     }
 
     [TestMethod]
@@ -64,7 +66,8 @@ public sealed class LlamaCatalogContractTests
         dto!.Quants.Should().HaveCount(2);
         dto.Quants[1].Files.Should().HaveCount(2);
         dto.Quants[1].Files[0].ShardIndex.Should().Be(1);
-        dto.Projector.Should().BeNull();
+        dto.Projector.Should().NotBeNull();
+        dto.Projector!.Path.Should().Be("mmproj-F16.gguf");
     }
 
     [TestMethod]

@@ -9,6 +9,7 @@ from support import CONTRACTS_ROOT
 from guideants_hf.exact_download import (
     ExactDownloadError,
     activate_staged_files,
+    artifact_is_installed,
     build_artifact_specs,
     build_immutable_input,
     resume_metadata_matches,
@@ -122,6 +123,39 @@ class ExactDownloadTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(final_path))
         self.assertEqual(os.path.getsize(final_path), 4)
 
+    def test_activate_skips_already_installed_artifacts(self) -> None:
+        _, model_specs, mmproj_specs = build_artifact_specs(
+            model_files=["model.gguf"],
+            mmproj_files=["mmproj-F16.gguf"],
+            store_root=self._root,
+            target_subdir="vision-model",
+            artifact_metadata=[
+                {"path": "model.gguf", "size": 6},
+                {"path": "mmproj-F16.gguf", "size": 4},
+            ],
+        )
+        target_dir = os.path.join(self._root, "vision-model")
+        os.makedirs(target_dir, exist_ok=True)
+        installed_model = os.path.join(target_dir, "model.gguf")
+        with open(installed_model, "wb") as handle:
+            handle.write(b"model!")
+
+        staging_dir = os.path.join(self._root, ".staging", "op-vision")
+        os.makedirs(staging_dir, exist_ok=True)
+        staged_mmproj = os.path.join(staging_dir, "mmproj-F16.gguf")
+        with open(staged_mmproj, "wb") as handle:
+            handle.write(b"proj")
+
+        activated = activate_staged_files(
+            staging_dir=staging_dir,
+            target_dir=target_dir,
+            store_root=self._root,
+            specs=model_specs + mmproj_specs,
+        )
+        self.assertEqual(activated, [installed_model, os.path.join(target_dir, "mmproj-F16.gguf")])
+        self.assertTrue(artifact_is_installed(model_specs[0]))
+        self.assertTrue(artifact_is_installed(mmproj_specs[0]))
+
     def test_journal_survives_restart(self) -> None:
         journal_root = os.path.join(self._root, ".llama-operations")
         store = OperationJournalStore(journal_root)
@@ -186,6 +220,32 @@ class ExactDownloadTests(unittest.TestCase):
             operation_id="op-2",
         )
         self.assertTrue(os.path.isfile(os.path.join(staging_dir, "a.gguf")))
+
+    @mock.patch("guideants_hf.exact_download.download_hf_file")
+    def test_stage_download_skips_when_already_installed(self, download_mock: mock.Mock) -> None:
+        _, model_specs, _ = build_artifact_specs(
+            model_files=["a.gguf"],
+            mmproj_files=[],
+            store_root=self._root,
+            target_subdir="alias",
+            artifact_metadata=[{"path": "a.gguf", "size": 4}],
+        )
+        target_dir = os.path.join(self._root, "alias")
+        os.makedirs(target_dir, exist_ok=True)
+        with open(os.path.join(target_dir, "a.gguf"), "wb") as handle:
+            handle.write(b"1234")
+
+        staging_dir = os.path.join(self._root, ".staging", "op-3")
+        result = stage_download_file(
+            repository="org/repo",
+            resolved_revision="rev",
+            spec=model_specs[0],
+            staging_dir=staging_dir,
+            token=None,
+            operation_id="op-3",
+        )
+        self.assertEqual(result, model_specs[0].destination_abs)
+        download_mock.assert_not_called()
 
 
 if __name__ == "__main__":

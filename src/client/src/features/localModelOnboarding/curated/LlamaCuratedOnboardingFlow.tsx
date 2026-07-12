@@ -136,6 +136,19 @@ export function LlamaCuratedOnboardingFlow({
         />
       ) : null}
 
+      {state.submitError && state.step !== 'progress' ? (
+        <div
+          role="alert"
+          className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
+          <div className="font-medium">{state.submitError.code}</div>
+          <div>{state.submitError.message}</div>
+          {state.submitError.remediation ? (
+            <div className="mt-1 text-xs">{state.submitError.remediation}</div>
+          ) : null}
+        </div>
+      ) : null}
+
       {state.step === 'completed' ? (
         <LlamaCuratedCompletion
           catalogModel={state.completedCatalogModel}
