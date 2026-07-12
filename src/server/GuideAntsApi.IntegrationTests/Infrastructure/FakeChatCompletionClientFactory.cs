@@ -13,7 +13,8 @@ internal enum FakeChatScenario
     SlowCancellableStream,
     ToolCallsCancelBeforeExecution,
     ToolCallThenReply,
-    ThinkingStream
+    ThinkingStream,
+    RepeatedToolCalls,
 }
 
 internal sealed class FakeChatCompletionBehavior
@@ -35,8 +36,19 @@ internal sealed class FakeChatCompletionBehavior
     public Action? OnToolCallsReturning { get; set; }
 
     private int _callIndex;
+    private int _toolChoiceNoneRequestCount;
 
     public int NextCallIndex() => Interlocked.Increment(ref _callIndex);
+
+    public int ToolChoiceNoneRequestCount => Volatile.Read(ref _toolChoiceNoneRequestCount);
+
+    public void RecordToolChoiceRequest(string? toolChoice)
+    {
+        if (string.Equals(toolChoice, "none", StringComparison.Ordinal))
+        {
+            Interlocked.Increment(ref _toolChoiceNoneRequestCount);
+        }
+    }
 
     public void Reset()
     {
@@ -49,6 +61,7 @@ internal sealed class FakeChatCompletionBehavior
         ToolFunctionName = "IntegrationTestTool";
         OnToolCallsReturning = null;
         Interlocked.Exchange(ref _callIndex, 0);
+        Interlocked.Exchange(ref _toolChoiceNoneRequestCount, 0);
     }
 }
 
@@ -65,6 +78,8 @@ internal sealed class FakeChatCompletionClientFactory : IChatCompletionClientFac
 internal sealed class FakeChatCompletionClient : IChatCompletionClient
 {
     private readonly FakeChatCompletionBehavior _behavior;
+
+    public bool SupportsToolChoiceNone => true;
 
     public FakeChatCompletionClient(FakeChatCompletionBehavior behavior)
     {
@@ -89,6 +104,7 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
             FakeChatScenario.ToolCallsCancelBeforeExecution => ToolCallsCancelBeforeExecutionAsync(onChunk),
             FakeChatScenario.ToolCallThenReply => ToolCallThenReplyAsync(onChunk, cancellationToken),
             FakeChatScenario.ThinkingStream => ThinkingStreamAsync(onChunk, cancellationToken),
+            FakeChatScenario.RepeatedToolCalls => RepeatedToolCallsAsync(request, onChunk),
             _ => DefaultStreamAsync(onChunk)
         };
     }
@@ -142,7 +158,7 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
             [
                 new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, "Invoking tool."), null)
             ]));
-            return CreateToolCallsResponse();
+            return CreateToolCallsResponse(callIndex);
         }
 
         foreach (var word in _behavior.FinalAssistantText.Split(' ', StringSplitOptions.RemoveEmptyEntries))
@@ -156,6 +172,19 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
         }
 
         return CreateResponse(_behavior.FinalAssistantText, finishReason: "stop");
+    }
+
+    private Task<ChatCompletionResponse> RepeatedToolCallsAsync(
+        ChatCompletionRequest request,
+        Action<ChatCompletionChunk> onChunk)
+    {
+        _behavior.RecordToolChoiceRequest(request.ToolChoice);
+        var callIndex = _behavior.NextCallIndex();
+        onChunk(new ChatCompletionChunk(
+        [
+            new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, $"Tool round {callIndex}."), null)
+        ]));
+        return Task.FromResult(CreateToolCallsResponse(callIndex));
     }
 
     private async Task<ChatCompletionResponse> ThinkingStreamAsync(
@@ -203,11 +232,15 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
             CreateUsage());
     }
 
-    private ChatCompletionResponse CreateToolCallsResponse()
+    private ChatCompletionResponse CreateToolCallsResponse(int callIndex = 1)
     {
+        var toolCallId = _behavior.Scenario == FakeChatScenario.RepeatedToolCalls
+            ? $"{_behavior.ToolCallId}_{callIndex}"
+            : _behavior.ToolCallId;
+
         var toolCall = new ChatToolCall
         {
-            Id = _behavior.ToolCallId,
+            Id = toolCallId,
             Type = "function",
             Function = new ChatToolCallFunction
             {

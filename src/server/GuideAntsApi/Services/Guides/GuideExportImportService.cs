@@ -274,6 +274,8 @@ public class GuideExportImportService : IGuideExportImportService
             TopP = assistant.TopP,
             ReasoningEffort = assistant.ReasoningEffort,
             InvocationEvaluator = assistant.InvocationEvaluator,
+            MaxToolCallsPerTurn = assistant.MaxToolCallsPerTurn,
+            MaxToolRoundsPerTurn = assistant.MaxToolRoundsPerTurn,
             Tools = assistant.Tools.Select(t => new AntRunner.ToolCalling.AssistantDefinitions.ToolDefinition 
             { 
                 Type = t.Tool.ToolType 
@@ -351,6 +353,16 @@ public class GuideExportImportService : IGuideExportImportService
                 manifestData["invocationEvaluator"] = guide.InvocationEvaluator;
             }
 
+            if (guide.MaxToolCallsPerTurn.HasValue)
+            {
+                manifestData["max_tool_calls_per_turn"] = guide.MaxToolCallsPerTurn;
+            }
+
+            if (guide.MaxToolRoundsPerTurn.HasValue)
+            {
+                manifestData["max_tool_rounds_per_turn"] = guide.MaxToolRoundsPerTurn;
+            }
+
             // Add tools if present
             if (guide.Tools.Any())
             {
@@ -362,7 +374,16 @@ public class GuideExportImportService : IGuideExportImportService
             // Add crew
             manifestData["crew"] = guide.CrewMembers
                 .OrderBy(ga => ga.DisplayOrder)
-                .Select(ga => new { name = ga.Assistant.Name })
+                .Select(ga =>
+                {
+                    var member = new Dictionary<string, object?> { ["name"] = ga.Assistant.Name };
+                    if (ga.MaxToolCallsPerInvocation.HasValue)
+                    {
+                        member["max_tool_calls_per_invocation"] = ga.MaxToolCallsPerInvocation;
+                    }
+
+                    return member;
+                })
                 .ToArray();
 
             // Add auth config if present (stored as JSON)
@@ -561,6 +582,8 @@ public class GuideExportImportService : IGuideExportImportService
                 guide.DefaultAssistant = defaultAssistant;
                 guide.InvocationEvaluator = invocationEvaluator;
                 guide.ModelId = modelId;
+                guide.MaxToolCallsPerTurn = TryReadOptionalIntProperty(manifest, "max_tool_calls_per_turn");
+                guide.MaxToolRoundsPerTurn = TryReadOptionalIntProperty(manifest, "max_tool_rounds_per_turn");
                 guide.Updated = DateTime.UtcNow;
 
                 // Wipe and replace dependent collections
@@ -582,6 +605,8 @@ public class GuideExportImportService : IGuideExportImportService
                     DefaultAssistant = defaultAssistant,
                     InvocationEvaluator = invocationEvaluator,
                     ModelId = modelId,
+                    MaxToolCallsPerTurn = TryReadOptionalIntProperty(manifest, "max_tool_calls_per_turn"),
+                    MaxToolRoundsPerTurn = TryReadOptionalIntProperty(manifest, "max_tool_rounds_per_turn"),
                     Created = DateTime.UtcNow
                 };
             }
@@ -1050,6 +1075,7 @@ public class GuideExportImportService : IGuideExportImportService
                             GuideId = guide.Id,
                             AssistantId = crewAssistantId.Value,
                             DisplayOrder = displayOrder++,
+                            MaxToolCallsPerInvocation = TryReadOptionalIntProperty(crewMember, "max_tool_calls_per_invocation"),
                             Created = DateTime.UtcNow
                         };
                         if (isUpdate)
@@ -1187,6 +1213,21 @@ public class GuideExportImportService : IGuideExportImportService
         );
     }
 
+    private static int? TryReadOptionalIntProperty(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.Number when property.TryGetInt32(out var value) => value,
+            _ => null
+        };
+    }
+
     /// <summary>
     /// Normalizes legacy reasoning fields to reasoning_effort.
     /// </summary>
@@ -1317,6 +1358,8 @@ public class GuideExportImportService : IGuideExportImportService
             Temperature = temperature,
             TopP = topP,
             ReasoningEffort = reasoningEffort,
+            MaxToolCallsPerTurn = assistantDef.MaxToolCallsPerTurn,
+            MaxToolRoundsPerTurn = assistantDef.MaxToolRoundsPerTurn,
             Created = DateTime.UtcNow
         };
 

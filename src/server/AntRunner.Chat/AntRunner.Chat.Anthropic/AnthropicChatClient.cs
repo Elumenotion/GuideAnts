@@ -18,6 +18,8 @@ public sealed class AnthropicChatClient : IChatCompletionClient
     private readonly AnthropicThinkingBudgets _thinkingBudgets;
     private readonly ILogger<AnthropicChatClient> _logger;
 
+    public bool SupportsToolChoiceNone => false;
+
     public AnthropicChatClient(
         IAnthropicClient client,
         string? defaultModel,

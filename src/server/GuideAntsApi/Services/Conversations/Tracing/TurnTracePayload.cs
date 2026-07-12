@@ -35,6 +35,12 @@ public sealed class TurnTraceSegment
     public string? TerminalStatus { get; set; }
 
     public string? ErrorMessage { get; set; }
+
+    public int? ToolLimitCallsUsed { get; set; }
+
+    public int? ToolLimitRoundsUsed { get; set; }
+
+    public string? ToolLimitEscalationPhase { get; set; }
 }
 
 public sealed class TurnTraceRound

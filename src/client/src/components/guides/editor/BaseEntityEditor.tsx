@@ -65,6 +65,10 @@ interface FormData {
   conversationStarters: string[];
   crewMemberIds: string[]; // Only used for guides
   sandboxWireApiConfig: SandboxWireApiConfigDto;
+  maxToolCallsPerTurn?: number;
+  maxToolRoundsPerTurn?: number;
+  crewMemberLimitById: Record<string, number | null | undefined>;
+  crewMemberInvocationLimits: Record<string, number | undefined>;
 }
 
 const defaultFormData: FormData = {
@@ -89,6 +93,8 @@ const defaultFormData: FormData = {
   conversationStarters: [],
   crewMemberIds: [],
   sandboxWireApiConfig: {},
+  crewMemberLimitById: {},
+  crewMemberInvocationLimits: {},
 };
 
 function normalizeFormValue<K extends keyof FormData>(key: K, value: FormData[K]): FormData[K] {
@@ -144,6 +150,16 @@ function buildSkillsSavePayload(
   return all.length > 0 ? all : undefined;
 }
 
+function buildCrewMemberLimitsPayload(
+  crewMemberIds: string[],
+  limits: Record<string, number | undefined>,
+) {
+  return crewMemberIds.map((assistantId) => ({
+    assistantId,
+    maxToolCallsPerInvocation: limits[assistantId] ?? null,
+  }));
+}
+
 interface BaseEntityEditorProps {
   entityType: 'assistant' | 'guide';
   entityId?: string;
@@ -175,6 +191,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
   const [avatarBlobUrl, setAvatarBlobUrl] = useState<string | null>(null);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [hasValidationErrors, setHasValidationErrors] = useState(false);
+  const [hasToolLimitErrors, setHasToolLimitErrors] = useState(false);
   const [showMarkdownPreview, setShowMarkdownPreview] = useState(false);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const instructionsEditorRef = useRef<LexicalEditorRef>(null);
@@ -644,6 +661,18 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           crewMemberIds: data.crews.flatMap((crew) => crew.members.map((m) => m.assistantId)),
           samplingOverrides: {},
           sandboxWireApiConfig: data.sandboxWireApiConfig ?? {},
+          maxToolCallsPerTurn: data.maxToolCallsPerTurn ?? undefined,
+          maxToolRoundsPerTurn: data.maxToolRoundsPerTurn ?? undefined,
+          crewMemberLimitById: Object.fromEntries(
+            data.crews
+              .flatMap((crew) => crew.members)
+              .map((member) => [member.assistantId, member.maxToolCallsPerTurn ?? null]),
+          ),
+          crewMemberInvocationLimits: Object.fromEntries(
+            data.crews
+              .flatMap((crew) => crew.members)
+              .map((member) => [member.assistantId, member.maxToolCallsPerInvocation ?? undefined]),
+          ),
         });
 
         if (data.guide.avatarUrl) {
@@ -676,6 +705,10 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           conversationStarters: data.conversationStarters.map((cs) => cs.prompt),
           crewMemberIds: [],
           sandboxWireApiConfig: {},
+          maxToolCallsPerTurn: data.maxToolCallsPerTurn ?? undefined,
+          maxToolRoundsPerTurn: data.maxToolRoundsPerTurn ?? undefined,
+          crewMemberLimitById: {},
+          crewMemberInvocationLimits: {},
         });
 
         if (data.assistant.avatarUrl) {
@@ -728,6 +761,10 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     }
     if (hasValidationErrors) {
       showToast({ type: 'error', title: 'Validation Error', message: 'Please fix all OpenAPI schema validation errors before saving' });
+      return;
+    }
+    if (hasToolLimitErrors) {
+      showToast({ type: 'error', title: 'Validation Error', message: 'Please fix tool execution limit values before saving' });
       return;
     }
 
@@ -835,6 +872,12 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             conversationStarters: formData.conversationStarters,
             crewMemberIds: formData.crewMemberIds,
             sandboxWireApiConfig: formData.sandboxWireApiConfig,
+            maxToolCallsPerTurn: formData.maxToolCallsPerTurn ?? null,
+            maxToolRoundsPerTurn: formData.maxToolRoundsPerTurn ?? null,
+            crewMemberLimits: buildCrewMemberLimitsPayload(
+              formData.crewMemberIds,
+              formData.crewMemberInvocationLimits,
+            ),
           };
 
           await api.guides.guides.update(entityId, updateDto);
@@ -865,6 +908,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             filesToAdd,
             skills: isGuide ? skillsToSave : undefined,
             conversationStarters: formData.conversationStarters,
+            maxToolCallsPerTurn: formData.maxToolCallsPerTurn ?? null,
+            maxToolRoundsPerTurn: formData.maxToolRoundsPerTurn ?? null,
           };
 
           await api.guides.assistants.update(entityId, updateDto);
@@ -904,6 +949,12 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             conversationStarters: formData.conversationStarters,
             crewMemberIds: formData.crewMemberIds,
             sandboxWireApiConfig: formData.sandboxWireApiConfig,
+            maxToolCallsPerTurn: formData.maxToolCallsPerTurn ?? null,
+            maxToolRoundsPerTurn: formData.maxToolRoundsPerTurn ?? null,
+            crewMemberLimits: buildCrewMemberLimitsPayload(
+              formData.crewMemberIds,
+              formData.crewMemberInvocationLimits,
+            ),
           };
 
           const newGuide = await api.guides.guides.create(createDto);
@@ -933,6 +984,8 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             contextOptions: contextOptionsToSave,
             files: formData.newFiles.length > 0 ? formData.newFiles : undefined,
             conversationStarters: formData.conversationStarters,
+            maxToolCallsPerTurn: formData.maxToolCallsPerTurn ?? null,
+            maxToolRoundsPerTurn: formData.maxToolRoundsPerTurn ?? null,
           };
 
           const newAssistant = await api.guides.assistants.create(createDto);
@@ -1165,11 +1218,16 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               guideId={isGuide && isEditing ? entityId : undefined}
               crewMemberIds={formData.crewMemberIds}
               sandboxWireApiConfig={formData.sandboxWireApiConfig}
+              maxToolCallsPerTurn={formData.maxToolCallsPerTurn}
+              maxToolRoundsPerTurn={formData.maxToolRoundsPerTurn}
               onSelectedToolIdsChange={(selectedToolIds) => updateForm({ selectedToolIds })}
               onCustomToolsChange={(customTools) => updateForm({ customTools })}
               onEnvironmentVariablesChange={(environmentVariables) => updateForm({ environmentVariables })}
               onSandboxWireApiConfigChange={(sandboxWireApiConfig) => updateForm({ sandboxWireApiConfig })}
-              onValidationChange={setHasValidationErrors}
+              onMaxToolCallsPerTurnChange={(maxToolCallsPerTurn) => updateForm({ maxToolCallsPerTurn })}
+              onMaxToolRoundsPerTurnChange={(maxToolRoundsPerTurn) => updateForm({ maxToolRoundsPerTurn })}
+              onOpenApiValidationChange={setHasValidationErrors}
+              onToolLimitValidationChange={setHasToolLimitErrors}
               onDirtyChange={() => setIsDirty(true)}
             />
           )}
@@ -1235,8 +1293,19 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
 
           {activeTab === 'crew' && isGuide && (
             <CrewTab
+              projectId={projectId}
               selectedAssistantIds={formData.crewMemberIds}
+              crewMemberLimitById={formData.crewMemberLimitById}
+              crewMemberInvocationLimits={formData.crewMemberInvocationLimits}
               onChange={(crewMemberIds) => updateForm({ crewMemberIds })}
+              onInvocationLimitChange={(assistantId, maxToolCallsPerInvocation) =>
+                updateForm({
+                  crewMemberInvocationLimits: {
+                    ...formData.crewMemberInvocationLimits,
+                    [assistantId]: maxToolCallsPerInvocation,
+                  },
+                })}
+              onDirtyChange={() => setIsDirty(true)}
             />
           )}
         </div>

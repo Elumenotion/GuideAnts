@@ -238,6 +238,12 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasColumnType("tinyint")
                         .HasComment("AssistantKind discriminator");
 
+                    b.Property<int?>("MaxToolCallsPerTurn")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaxToolRoundsPerTurn")
+                        .HasColumnType("int");
+
                     b.Property<string>("MetadataJson")
                         .HasColumnType("nvarchar(max)");
 
@@ -1291,6 +1297,9 @@ namespace GuideAntsApi.DataModel.Migrations
                         .HasDefaultValueSql("GETUTCDATE()");
 
                     b.Property<int?>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaxToolCallsPerInvocation")
                         .HasColumnType("int");
 
                     b.HasKey("GuideId", "AssistantId");

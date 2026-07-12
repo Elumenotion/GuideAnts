@@ -18,6 +18,8 @@ public sealed class OpenAiChatClient : IChatCompletionClient
     private readonly OpenAIClient _client;
     private readonly ILogger<OpenAiChatClient> _logger;
 
+    public bool SupportsToolChoiceNone => true;
+
     public OpenAiChatClient(OpenAIClient client, ILogger<OpenAiChatClient>? logger = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
@@ -88,13 +90,21 @@ public sealed class OpenAiChatClient : IChatCompletionClient
             var reasoningEffort = OpenAiReasoningSupport.MapReasoningEffort(request.Model, request.ReasoningEffort);
             var (temperature, topP) = ResolveOpenAiSampling(request);
 
-            return new ChatRequest(
+            var chatRequest = new ChatRequest(
                 messages,
                 tools: tools,
                 model: request.Model,
                 temperature: temperature,
                 topP: topP,
                 reasoningEffort: reasoningEffort);
+
+            if (string.Equals(request.ToolChoice, "none", StringComparison.Ordinal))
+            {
+                var toolChoiceProperty = typeof(ChatRequest).GetProperty("ToolChoice");
+                toolChoiceProperty?.SetValue(chatRequest, "none");
+            }
+
+            return chatRequest;
         }
 
         private static (double? Temperature, double? TopP) ResolveOpenAiSampling(ChatCompletionRequest request)

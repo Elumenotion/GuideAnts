@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
 import { ToolsSelector } from './ToolsSelector';
 import { OpenApiSchemas } from './OpenApiSchemas';
+import { ToolExecutionLimitsSection } from './toolLimits/ToolExecutionLimitsSection';
 import { CustomToolDto, ContextOptionDto, EnvironmentVariableDto, SandboxWireApiConfigDto } from '../../../types/guides';
 
 interface ToolsTabProps {
@@ -13,11 +14,16 @@ interface ToolsTabProps {
   guideId?: string;
   crewMemberIds: string[];
   sandboxWireApiConfig: SandboxWireApiConfigDto;
+  maxToolCallsPerTurn?: number;
+  maxToolRoundsPerTurn?: number;
   onSelectedToolIdsChange: (ids: string[]) => void;
   onCustomToolsChange: (tools: CustomToolDto[]) => void;
   onEnvironmentVariablesChange: (variables: EnvironmentVariableDto[]) => void;
   onSandboxWireApiConfigChange: (config: SandboxWireApiConfigDto) => void;
-  onValidationChange?: (hasErrors: boolean) => void;
+  onMaxToolCallsPerTurnChange: (value: number | undefined) => void;
+  onMaxToolRoundsPerTurnChange: (value: number | undefined) => void;
+  onOpenApiValidationChange?: (hasErrors: boolean) => void;
+  onToolLimitValidationChange?: (hasErrors: boolean) => void;
   onDirtyChange?: () => void;
 }
 
@@ -31,11 +37,16 @@ export function ToolsTab({
   guideId,
   crewMemberIds,
   sandboxWireApiConfig,
+  maxToolCallsPerTurn,
+  maxToolRoundsPerTurn,
   onSelectedToolIdsChange,
   onCustomToolsChange,
   onEnvironmentVariablesChange,
   onSandboxWireApiConfigChange,
-  onValidationChange,
+  onMaxToolCallsPerTurnChange,
+  onMaxToolRoundsPerTurnChange,
+  onOpenApiValidationChange,
+  onToolLimitValidationChange,
   onDirtyChange,
 }: ToolsTabProps) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -94,6 +105,14 @@ export function ToolsTab({
             onSandboxWireApiConfigChange={onSandboxWireApiConfigChange}
             onDirtyChange={onDirtyChange}
           />
+          <ToolExecutionLimitsSection
+            maxToolCallsPerTurn={maxToolCallsPerTurn}
+            maxToolRoundsPerTurn={maxToolRoundsPerTurn}
+            onMaxToolCallsPerTurnChange={onMaxToolCallsPerTurnChange}
+            onMaxToolRoundsPerTurnChange={onMaxToolRoundsPerTurnChange}
+            onValidationChange={onToolLimitValidationChange}
+            onDirtyChange={onDirtyChange}
+          />
           </div>
         )}
 
@@ -106,7 +125,7 @@ export function ToolsTab({
             guideId={guideId}
             onCustomToolsChange={onCustomToolsChange}
             onEnvironmentVariablesChange={onEnvironmentVariablesChange}
-            onValidationChange={onValidationChange}
+            onValidationChange={onOpenApiValidationChange}
             onDirtyChange={onDirtyChange}
           />
           </div>

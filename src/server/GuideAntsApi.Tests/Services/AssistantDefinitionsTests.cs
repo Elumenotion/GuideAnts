@@ -8,6 +8,8 @@ using Microsoft.EntityFrameworkCore;
 using AntRunner.ToolCalling.AssistantDefinitions.Storage;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using AntRunner.ToolCalling.AssistantDefinitions;
 using FluentAssertions;
 
 namespace GuideAntsApi.Tests.Services;
@@ -127,6 +129,35 @@ public class AssistantDefinitionsTests
         storageMetadata!.AdditionalMetadata.Should().NotBeNull();
         storageMetadata.AdditionalMetadata.Should().ContainKey("__crew_names__");
         storageMetadata.AdditionalMetadata.Should().NotContainKey("__model_reasoning_choices__");
+    }
+
+    [TestMethod]
+    public void DatabaseMaterialization_IncludesToolLimits_RoundTripsThroughAssistantDefinition()
+    {
+        var assistant = new Assistant
+        {
+            Name = "Limited Assistant",
+            Kind = AssistantKind.Assistant,
+            IsActive = true,
+            MaxToolCallsPerTurn = 12,
+            MaxToolRoundsPerTurn = 3,
+            ModelId = "gpt-4.1"
+        };
+
+        var storageMetadata = Materialize(assistant);
+        using var manifest = JsonDocument.Parse(storageMetadata.ManifestJson);
+        manifest.RootElement.TryGetProperty("max_tool_calls_per_turn", out var callsProp).Should().BeTrue(
+            because: $"manifest keys: {string.Join(", ", manifest.RootElement.EnumerateObject().Select(p => p.Name))}");
+        callsProp.GetInt32().Should().Be(12);
+        manifest.RootElement.GetProperty("max_tool_rounds_per_turn").GetInt32().Should().Be(3);
+
+        var lenientOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter(allowIntegerValues: true) }
+        };
+        var definition = JsonSerializer.Deserialize<AssistantDefinition>(storageMetadata.ManifestJson, lenientOptions);
+        definition!.MaxToolCallsPerTurn.Should().Be(12);
+        definition.MaxToolRoundsPerTurn.Should().Be(3);
     }
 
     [TestMethod]
