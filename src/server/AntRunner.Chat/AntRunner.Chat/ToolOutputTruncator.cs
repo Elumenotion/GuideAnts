@@ -28,15 +28,29 @@ public static class ToolOutputTruncator
 
     public static ToolOutputTruncationResult Truncate(string? output)
     {
-        if (string.IsNullOrEmpty(output) || output.Length <= MaxCharacters)
+        if (string.IsNullOrEmpty(output))
         {
-            return new ToolOutputTruncationResult(output, false, output?.Length ?? 0);
+            return new ToolOutputTruncationResult(output, false, 0);
         }
 
         var originalLength = output.Length;
 
-        var truncated = TryDeserializeScriptExecutionResult(output, out var parsed)
-            ? TruncateScriptExecutionResult(parsed, originalLength)
+        if (TryDeserializeScriptExecutionResult(output, out var parsed))
+        {
+            var forToolCall = parsed.ForToolCall();
+            if (!ReferenceEquals(forToolCall, parsed))
+            {
+                output = Serialize(forToolCall);
+            }
+        }
+
+        if (output.Length <= MaxCharacters)
+        {
+            return new ToolOutputTruncationResult(output, false, originalLength);
+        }
+
+        var truncated = TryDeserializeScriptExecutionResult(output, out parsed)
+            ? TruncateScriptExecutionResult(parsed.ForToolCall(), originalLength)
             : TruncatePlainOutput(output, originalLength);
 
         return new ToolOutputTruncationResult(Serialize(truncated), true, originalLength);

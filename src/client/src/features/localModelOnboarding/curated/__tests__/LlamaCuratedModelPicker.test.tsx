@@ -34,7 +34,7 @@ describe('LlamaCuratedModelPicker', () => {
     render(
       <LlamaCuratedModelPicker
         models={models}
-        searchQuery="vision"
+        searchQuery="MTP-GGUF"
         selectedDefinitionId={null}
         loading={false}
         error={null}
@@ -44,7 +44,7 @@ describe('LlamaCuratedModelPicker', () => {
       />
     );
 
-    expect(screen.getByText(/Qwen 3.6 35B A3B/i)).toBeInTheDocument();
-    expect(screen.queryByText(/MTP/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Qwen 3.6 35B A3B MTP/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Qwen 3.6 35B A3B$/i)).not.toBeInTheDocument();
   });
 });

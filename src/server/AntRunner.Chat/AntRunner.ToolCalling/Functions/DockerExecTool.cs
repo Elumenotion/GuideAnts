@@ -33,6 +33,27 @@ namespace AntRunner.ToolCalling.Functions
         /// Used by ThreadRun to inject a system message so the assistant is aware of modified files.
         /// </summary>
         public List<string>? ModifiedFiles { get; set; }
+
+        /// <summary>
+        /// Shape returned to the model for a tool call. Successful runs (exit code 0) omit
+        /// <see cref="StandardError"/> — that stream is progress/diagnostics, not actionable errors.
+        /// </summary>
+        public ScriptExecutionResult ForToolCall()
+        {
+            if (ExitCode is not 0 || string.IsNullOrEmpty(StandardError))
+            {
+                return this;
+            }
+
+            return new ScriptExecutionResult
+            {
+                StandardOutput = StandardOutput,
+                StandardError = string.Empty,
+                ExitCode = ExitCode,
+                NewFiles = NewFiles,
+                ModifiedFiles = ModifiedFiles
+            };
+        }
     }
 
     public class DockerScriptService

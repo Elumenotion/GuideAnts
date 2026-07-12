@@ -1245,7 +1245,7 @@ namespace AntRunner.Chat
                                     assistantDef.Name!,
                                     isolatedCtx);
                                 
-                                output = JsonSerializer.Serialize(sandboxResult);
+                                output = SerializeToolResult(sandboxResult);
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                             {
@@ -1263,7 +1263,7 @@ namespace AntRunner.Chat
                                 var toolResult = await builder.ExecuteLocalFunctionAsync(cancellationToken);
                                 if (toolResult != null)
                                 {
-                                    output = JsonSerializer.Serialize(toolResult);
+                                    output = SerializeToolResult(toolResult);
                                 }
                                 else
                                 {
@@ -1634,6 +1634,11 @@ namespace AntRunner.Chat
         {
             PropertyNameCaseInsensitive = true
         };
+
+        private static string SerializeToolResult(object toolResult) =>
+            toolResult is ScriptExecutionResult scriptResult
+                ? JsonSerializer.Serialize(scriptResult.ForToolCall(), ScriptExecutionResultJsonOptions)
+                : JsonSerializer.Serialize(toolResult);
 
         private static IReadOnlyDictionary<string, JsonElement> ResolveExecutionParameters(
             ResolvedExecutionPolicy policy)

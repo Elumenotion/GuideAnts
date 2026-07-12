@@ -84,8 +84,8 @@
       "id": "qwen3.6-35b-a3b-mtp",
       "display": {
         "name": "Qwen 3.6 35B A3B (MTP)",
-        "description": "Text-first faster inference using llama.cpp draft-mtp.",
-        "labels": ["Text", "Reasoning", "Tool use", "MTP"],
+        "description": "Faster inference with llama.cpp draft-mtp and vision support.",
+        "labels": ["Text", "Vision", "Reasoning", "Tool use", "MTP"],
         "license": "Apache-2.0",
         "documentationUrl": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
       },
@@ -98,9 +98,10 @@
         "routerModelId": "Qwen3.6-35B-A3B-MTP-GGUF",
         "runtimeProfileId": "qwen3_6",
         "targetDirectory": "Qwen3.6-35B-A3B-MTP-GGUF",
-        "mmproj": null,
+        "mmproj": { "path": "mmproj-F16.gguf" },
         "routerPreset": {
           "ctx-size": "131072",
+          "image-min-tokens": "1024",
           "spec-type": "draft-mtp",
           "spec-draft-n-max": "2"
         }
@@ -112,7 +113,7 @@
         }
       },
       "hardwareNotes": {
-        "summary": "Requires recent llama.cpp MTP support. Text-only in v1; do not enable vision on this row.",
+        "summary": "Requires recent llama.cpp draft-mtp support. Vision via mmproj-F16.gguf.",
         "contextClass": "large"
       }
     },
@@ -120,8 +121,8 @@
       "id": "qwen3.6-27b-mtp",
       "display": {
         "name": "Qwen 3.6 27B (MTP)",
-        "description": "Dense Qwen 3.6 MTP variant for faster text-only inference.",
-        "labels": ["Text", "Reasoning", "Tool use", "MTP"],
+        "description": "Dense Qwen 3.6 MTP variant with draft-mtp and vision support.",
+        "labels": ["Text", "Vision", "Reasoning", "Tool use", "MTP"],
         "license": "Apache-2.0",
         "documentationUrl": "https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF"
       },
@@ -134,9 +135,10 @@
         "routerModelId": "Qwen3.6-27B-MTP-GGUF",
         "runtimeProfileId": "qwen3_6",
         "targetDirectory": "Qwen3.6-27B-MTP-GGUF",
-        "mmproj": null,
+        "mmproj": { "path": "mmproj-F16.gguf" },
         "routerPreset": {
           "ctx-size": "131072",
+          "image-min-tokens": "1024",
           "spec-type": "draft-mtp",
           "spec-draft-n-max": "2"
         }
@@ -148,7 +150,7 @@
         }
       },
       "hardwareNotes": {
-        "summary": "Dense MTP model. Text-only; requires llama.cpp draft-mtp support.",
+        "summary": "Dense MTP model with vision via mmproj-F16.gguf; requires llama.cpp draft-mtp support.",
         "contextClass": "large"
       }
     },

@@ -166,6 +166,25 @@ def verify_file_integrity(path: str, *, expected_size: int | None, digest: str |
                 )
 
 
+def artifact_is_installed(spec: ArtifactSpec) -> bool:
+    try:
+        verify_file_integrity(spec.destination_abs, expected_size=spec.expected_size, digest=spec.digest)
+        return True
+    except ExactDownloadError:
+        return False
+
+
+def staged_artifact_path(staging_dir: str, spec: ArtifactSpec) -> str | None:
+    staged_name = destination_name(spec.repository_path)
+    staged_src = os.path.abspath(os.path.join(staging_dir, staged_name))
+    try:
+        ensure_inside_root(staging_dir, staged_src)
+        verify_file_integrity(staged_src, expected_size=spec.expected_size, digest=spec.digest)
+        return staged_src
+    except (PathSafetyError, ExactDownloadError):
+        return None
+
+
 def build_artifact_specs(
     *,
     model_files: list[str],
@@ -223,6 +242,8 @@ def stage_download_file(
 ) -> str:
     ensure_inside_root(staging_dir, staging_dir)
     os.makedirs(staging_dir, exist_ok=True)
+    if artifact_is_installed(spec):
+        return spec.destination_abs
     staged_name = destination_name(spec.repository_path)
     staged_dest = os.path.abspath(os.path.join(staging_dir, staged_name))
     ensure_inside_root(staging_dir, staged_dest)
@@ -275,12 +296,14 @@ def activate_staged_files(
     activated: list[str] = []
     for spec in specs:
         staged_name = destination_name(spec.repository_path)
-        staged_src = os.path.abspath(os.path.join(staging_dir, staged_name))
         final_dest = spec.destination_abs
         ensure_inside_root(store_root, final_dest)
-        if not os.path.isfile(staged_src):
+        if artifact_is_installed(spec):
+            activated.append(final_dest)
+            continue
+        staged_src = staged_artifact_path(staging_dir, spec)
+        if staged_src is None:
             raise ExactDownloadError("STAGING_MISSING", f"Staged artifact missing: {staged_name}")
-        verify_file_integrity(staged_src, expected_size=spec.expected_size, digest=spec.digest)
         if os.path.exists(final_dest):
             # Phase 2 does not delete prior active artifacts; overwrite only when activating the same path.
             os.remove(final_dest)

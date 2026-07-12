@@ -43,6 +43,61 @@ public sealed class ToolOutputTruncatorTests
     }
 
     [TestMethod]
+    public void Truncate_SuccessfulScriptExecutionResult_OmitsStderr()
+    {
+        var original = new ScriptExecutionResult
+        {
+            StandardOutput = "SUCCESS! Video created: out.mp4",
+            StandardError = CreateOversizedOutput('e'),
+            ExitCode = 0,
+            NewFiles = new List<string> { "out.mp4" }
+        };
+        var serialized = JsonSerializer.Serialize(original, JsonOptions);
+
+        var result = ToolOutputTruncator.Truncate(serialized);
+
+        result.WasTruncated.Should().BeFalse();
+        using var doc = JsonDocument.Parse(result.Output!);
+        doc.RootElement.GetProperty("standardError").GetString().Should().BeEmpty();
+        doc.RootElement.GetProperty("standardOutput").GetString().Should().Contain("SUCCESS");
+        doc.RootElement.GetProperty("newFiles").EnumerateArray().Should().ContainSingle()
+            .Which.GetString().Should().Be("out.mp4");
+    }
+
+    [TestMethod]
+    public void ForToolCall_NonZeroExitCode_PreservesStderr()
+    {
+        var original = new ScriptExecutionResult
+        {
+            StandardOutput = string.Empty,
+            StandardError = "actual failure",
+            ExitCode = 1
+        };
+
+        var toolCall = original.ForToolCall();
+
+        toolCall.Should().BeSameAs(original);
+        toolCall.StandardError.Should().Be("actual failure");
+    }
+
+    [TestMethod]
+    public void ForToolCall_ZeroExitCode_ClearsStderr()
+    {
+        var original = new ScriptExecutionResult
+        {
+            StandardOutput = "done",
+            StandardError = "progress spam",
+            ExitCode = 0
+        };
+
+        var toolCall = original.ForToolCall();
+
+        toolCall.Should().NotBeSameAs(original);
+        toolCall.StandardError.Should().BeEmpty();
+        toolCall.StandardOutput.Should().Be("done");
+    }
+
+    [TestMethod]
     public void Truncate_LargeScriptExecutionResult_TruncatesStdoutAndAddsStderrNotice()
     {
         var largeStdout = CreateOversizedOutput('x');

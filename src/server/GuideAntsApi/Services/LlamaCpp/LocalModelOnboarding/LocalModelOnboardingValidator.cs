@@ -178,13 +178,21 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
             .ResolveAsync(request, command, cancellationToken)
             .ConfigureAwait(false);
 
+        // Re-installing the same curated definition is a reconcile, not a conflict. When a model row
+        // with this catalogModelId already exists AND it targets the same router alias + runtime
+        // profile, allow the install to proceed: the operation is idempotent (already-downloaded
+        // artifacts are skipped) and will fetch any artifacts the current definition now requires
+        // (e.g. a projector added to the catalog after the original text-only install).
         var existingModels = await _settingsService.GetModelsAsync(cancellationToken).ConfigureAwait(false);
-        if (existingModels.Any(model => string.Equals(model.ModelId, immutableInput.CatalogModelId, StringComparison.Ordinal)))
+        var existingModel = existingModels.FirstOrDefault(model =>
+            string.Equals(model.ModelId, immutableInput.CatalogModelId, StringComparison.Ordinal));
+        var isReconcile = existingModel is not null && IsSameCuratedTarget(existingModel, immutableInput);
+        if (existingModel is not null && !isReconcile)
         {
             throw new AddModelException(
                 code: "MODEL_ID_TAKEN",
                 step: "validation",
-                message: $"Model '{immutableInput.CatalogModelId}' already exists.",
+                message: $"Model '{immutableInput.CatalogModelId}' already exists and targets a different runtime configuration.",
                 remediation: "Choose a different catalog definition or remove the existing model.");
         }
 
@@ -206,13 +214,36 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         var inventory = await _inventoryService.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
         var existingAlias = inventory.FirstOrDefault(item =>
             string.Equals(item.RouterModelId, immutableInput.RouterModelId, StringComparison.Ordinal));
-        if (existingAlias is not null && existingAlias.CatalogModelIds.Count > 0)
+        var conflictingCatalogRows = existingAlias?.CatalogModelIds
+            .Where(id => !string.Equals(id, immutableInput.CatalogModelId, StringComparison.Ordinal))
+            .ToList() ?? [];
+        if (conflictingCatalogRows.Count > 0)
         {
             throw new AddModelException(
                 code: "ROUTER_ALIAS_TAKEN",
                 step: "validation",
-                message: $"Router alias '{existingAlias.RouterModelId}' is already referenced by catalog rows: {string.Join(", ", existingAlias.CatalogModelIds)}.",
+                message: $"Router alias '{existingAlias!.RouterModelId}' is already referenced by catalog rows: {string.Join(", ", conflictingCatalogRows)}.",
                 remediation: "Remove the existing catalog row or choose another curated definition.");
+        }
+    }
+
+    private static bool IsSameCuratedTarget(SettingsModelDto existing, CuratedImmutableOperationInput immutableInput)
+    {
+        if (!string.Equals(existing.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(existing.RuntimeConfigJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            var parsed = LocalRuntimeConfigurationParser.Parse(existing.ModelId, existing.RuntimeConfigJson);
+            return string.Equals(parsed.RouterModelId, immutableInput.RouterModelId, StringComparison.Ordinal)
+                && string.Equals(parsed.RuntimeProfileId, immutableInput.RuntimeProfileId, StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
         }
     }
 

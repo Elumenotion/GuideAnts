@@ -38,6 +38,76 @@ public sealed class CuratedInstallTests
     }
 
     [TestMethod]
+    public async Task ValidateAsync_CuratedSameTargetAlreadyInstalled_DoesNotThrow()
+    {
+        // A prior (e.g. text-only) install of the same curated definition exists and its catalog row
+        // owns the router alias. Re-installing the current definition must reconcile, not throw.
+        var runtimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
+            new LocalRuntimeConfiguration("Qwen3.6-35B-A3B-MTP-GGUF", "qwen3_6"));
+        var validator = CreateValidator(
+            models:
+            [
+                new SettingsModelDto(
+                    "qwen3.6-35b-a3b-mtp-local", "Qwen 3.6 35B A3B MTP", "llama-cpp", null, null,
+                    runtimeConfigJson, true, null, DateTime.UtcNow, null),
+            ],
+            inventory:
+            [
+                new LlamaRuntimeInventoryItemDto(
+                    "Qwen3.6-35B-A3B-MTP-GGUF", "unloaded", "/models/model.gguf", null, true, false,
+                    ["qwen3.6-35b-a3b-mtp-local"], 0),
+            ]);
+
+        var request = CreateCuratedRequest();
+        var command = LocalModelOnboardingCommand.FromAddModelRequest(request);
+
+        var act = async () => await validator.ValidateAsync(request, command, CancellationToken.None);
+        await act.Should().NotThrowAsync();
+    }
+
+    [TestMethod]
+    public async Task ValidateAsync_CuratedModelIdReusedForDifferentTarget_ThrowsModelIdTaken()
+    {
+        // Same catalogModelId but a different runtime configuration (different alias) is a genuine
+        // conflict, not a reconcile.
+        var runtimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
+            new LocalRuntimeConfiguration("some-other-alias", "qwen3_6"));
+        var validator = CreateValidator(
+            models:
+            [
+                new SettingsModelDto(
+                    "qwen3.6-35b-a3b-mtp-local", "Different", "llama-cpp", null, null,
+                    runtimeConfigJson, true, null, DateTime.UtcNow, null),
+            ]);
+
+        var request = CreateCuratedRequest();
+        var command = LocalModelOnboardingCommand.FromAddModelRequest(request);
+
+        var act = async () => await validator.ValidateAsync(request, command, CancellationToken.None);
+        var ex = await act.Should().ThrowAsync<AddModelException>();
+        ex.Which.Code.Should().Be("MODEL_ID_TAKEN");
+    }
+
+    [TestMethod]
+    public async Task ValidateAsync_CuratedAliasOwnedByDifferentCatalogRow_ThrowsRouterAliasTaken()
+    {
+        var validator = CreateValidator(
+            inventory:
+            [
+                new LlamaRuntimeInventoryItemDto(
+                    "Qwen3.6-35B-A3B-MTP-GGUF", "unloaded", "/models/model.gguf", null, true, false,
+                    ["some-other-model"], 0),
+            ]);
+
+        var request = CreateCuratedRequest();
+        var command = LocalModelOnboardingCommand.FromAddModelRequest(request);
+
+        var act = async () => await validator.ValidateAsync(request, command, CancellationToken.None);
+        var ex = await act.Should().ThrowAsync<AddModelException>();
+        ex.Which.Code.Should().Be("ROUTER_ALIAS_TAKEN");
+    }
+
+    [TestMethod]
     public async Task Resolver_CatalogVersionMismatch_Throws()
     {
         var adminClient = CreateAdminClient(catalogVersion: "2026-01-01");
@@ -167,6 +237,73 @@ public sealed class CuratedInstallTests
     }
 
     [TestMethod]
+    public async Task OperationService_ReconcileExistingInstall_UpdatesProjectorProvenance()
+    {
+        await using var db = CreateDbContext();
+        SeedRuntimeProfile(db);
+        var input = CreateImmutableInput(singleGguf: true);
+        var now = DateTime.UtcNow;
+
+        // Prior text-only install: catalog row + provenance with NO projector recorded.
+        db.Models.Add(new Model
+        {
+            ModelId = input.CatalogModelId,
+            DisplayName = input.CatalogDisplayName,
+            Provider = "llama-cpp",
+            RuntimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
+                new LocalRuntimeConfiguration(input.RouterModelId, input.RuntimeProfileId)),
+            IsActive = true,
+            Created = now,
+            Updated = now,
+        });
+        db.LocalModelInstallations.Add(new LocalModelInstallation
+        {
+            ModelId = input.CatalogModelId,
+            ManagementMode = "curated",
+            CatalogId = input.DefinitionId,
+            CatalogVersion = input.DefinitionVersion,
+            Repository = input.Repository,
+            ResolvedRevision = input.ResolvedRevision,
+            QuantId = input.QuantId,
+            QuantLabel = input.QuantLabel,
+            RouterModelId = input.RouterModelId,
+            RuntimeProfileId = input.RuntimeProfileId,
+            TargetDirectory = input.TargetDirectory,
+            ModelArtifactsJson = "[]",
+            ProjectorArtifactsJson = "[]",
+            RouterPresetSnapshotJson = "{}",
+            CreatedUtc = now,
+            UpdatedUtc = now,
+            RowVersion = DefaultRowVersion,
+        });
+
+        var operationId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        db.LocalModelOperations.Add(new LocalModelOperation
+        {
+            OperationId = operationId,
+            OperationKind = "curatedInstall",
+            ModelId = input.CatalogModelId,
+            RouterModelId = input.RouterModelId,
+            ImmutableInputJson = input.ToJson(),
+            Status = "catalogFinalization",
+            CurrentStep = "catalogFinalization",
+            CompletedSideEffectsJson = """{"downloadStarted":true,"artifactsActivated":true,"aliasRegistered":true}""",
+            RowVersion = DefaultRowVersion,
+        });
+        await db.SaveChangesAsync();
+
+        var adminClient = new Mock<ILlamaRuntimeAdminClient>(MockBehavior.Strict);
+        var service = CreateOperationService(db, adminClient.Object);
+        var status = await service.ReconcileAndGetStatusAsync(operationId, CancellationToken.None);
+
+        status.Status.Should().Be("completed");
+        (await db.Models.CountAsync()).Should().Be(1);
+        var installation = await db.LocalModelInstallations.SingleAsync(x => x.ModelId == input.CatalogModelId);
+        installation.ProjectorArtifactsJson.Should().Contain("mmproj-F16.gguf");
+        installation.ModelArtifactsJson.Should().Contain("Qwen3.6-35B-A3B-Q6_K_XL.gguf");
+    }
+
+    [TestMethod]
     public async Task OperationService_ApiRestart_ResumesFromCatalogFinalization()
     {
         await using var db = CreateDbContext();
@@ -288,7 +425,7 @@ public sealed class CuratedInstallTests
     }
 
     [TestMethod]
-    public async Task OperationService_StaleDownloading_RestartsLlamaAdminWorker()
+    public async Task OperationService_Downloading_DoesNotRestartLlamaAdminWorker()
     {
         await using var db = CreateDbContext();
         SeedRuntimeProfile(db);
@@ -310,16 +447,6 @@ public sealed class CuratedInstallTests
 
         var adminClient = new Mock<ILlamaRuntimeAdminClient>(MockBehavior.Strict);
         adminClient
-            .Setup(x => x.StartExactDownloadAsync(It.IsAny<ExactStartModelDownloadRequest>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ModelDownloadOperationDto(
-                OperationId: operationId.ToString("D"),
-                Status: "downloading",
-                RouterModelId: input.RouterModelId,
-                Progress: 0.34,
-                ErrorMessage: null,
-                LogLine: "Resuming gemma-4-E4B-it-UD-Q8_K_XL.gguf",
-                ImmutableInputHash: input.ComputeHash()));
-        adminClient
             .Setup(x => x.GetDownloadStatusAsync(operationId.ToString("D"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ModelDownloadOperationDto(
                 OperationId: operationId.ToString("D"),
@@ -337,10 +464,16 @@ public sealed class CuratedInstallTests
         status.Progress.Should().Be(0.42);
         adminClient.Verify(
             x => x.StartExactDownloadAsync(It.IsAny<ExactStartModelDownloadRequest>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        adminClient.Verify(
+            x => x.GetDownloadStatusAsync(operationId.ToString("D"), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
-    private static LocalModelOnboardingValidator CreateValidator(ICuratedInstallResolver? resolver = null)
+    private static LocalModelOnboardingValidator CreateValidator(
+        ICuratedInstallResolver? resolver = null,
+        IReadOnlyList<SettingsModelDto>? models = null,
+        IReadOnlyList<LlamaRuntimeInventoryItemDto>? inventory = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -350,13 +483,15 @@ public sealed class CuratedInstallTests
             .Build();
 
         var settingsService = new Mock<IApplicationSettingsService>();
-        settingsService.Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<SettingsModelDto>());
+        settingsService.Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(models ?? Array.Empty<SettingsModelDto>());
 
         var chatTargetValidator = new Mock<IChatTargetValidator>();
         chatTargetValidator.Setup(x => x.Validate(It.IsAny<ChatTarget>()));
 
         var inventoryService = new Mock<ILlamaRuntimeInventoryService>();
-        inventoryService.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<LlamaRuntimeInventoryItemDto>());
+        inventoryService.Setup(x => x.GetInventoryAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(inventory ?? Array.Empty<LlamaRuntimeInventoryItemDto>());
 
         var tokenResolver = new Mock<IHuggingFaceTokenResolver>();
         tokenResolver.Setup(x => x.Resolve()).Returns("hf_token");
@@ -451,7 +586,7 @@ public sealed class CuratedInstallTests
                     Display: new LlamaCatalogDisplayDto(
                         Name: "Qwen 3.6 35B A3B MTP",
                         Description: "Curated",
-                        Labels: ["Text"],
+                        Labels: ["Text", "Vision", "MTP"],
                         License: "Apache-2.0",
                         DocumentationUrl: "https://example.com"),
                     Source: new LlamaCatalogSourceDto("unsloth/Qwen3.6-35B-A3B-MTP-GGUF", "main"),
@@ -460,10 +595,11 @@ public sealed class CuratedInstallTests
                         RouterModelId: "Qwen3.6-35B-A3B-MTP-GGUF",
                         RuntimeProfileId: "qwen3_6",
                         TargetDirectory: "Qwen3.6-35B-A3B-MTP-GGUF",
-                        Mmproj: null,
+                        Mmproj: new LlamaCatalogMmprojDto("mmproj-F16.gguf"),
                         RouterPreset: new Dictionary<string, string>
                         {
                             ["ctx-size"] = "131072",
+                            ["image-min-tokens"] = "1024",
                             ["spec-type"] = "draft-mtp",
                             ["spec-draft-n-max"] = "2",
                         }),
@@ -504,7 +640,7 @@ public sealed class CuratedInstallTests
             RequestedRevision: "main",
             ResolvedRevision: revision,
             Quants: quants,
-            Projector: null);
+            Projector: new LlamaProjectorArtifactDto("mmproj-F16.gguf", 900_000_000));
     }
 
     private static CuratedImmutableOperationInput CreateImmutableInput(bool singleGguf) =>
@@ -528,13 +664,14 @@ public sealed class CuratedInstallTests
                     "Qwen3.6-35B-A3B-Q6_K_XL-00001-of-00002.gguf",
                     "Qwen3.6-35B-A3B-Q6_K_XL-00002-of-00002.gguf",
                 ],
-            MmprojFiles: [],
+            MmprojFiles: ["mmproj-F16.gguf"],
             RouterModelId: "Qwen3.6-35B-A3B-MTP-GGUF",
             RuntimeProfileId: "qwen3_6",
             TargetDirectory: "Qwen3.6-35B-A3B-MTP-GGUF",
             RouterPreset: new Dictionary<string, string>
             {
                 ["ctx-size"] = "131072",
+                ["image-min-tokens"] = "1024",
                 ["spec-type"] = "draft-mtp",
                 ["spec-draft-n-max"] = "2",
             });

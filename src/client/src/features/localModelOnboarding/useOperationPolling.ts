@@ -40,16 +40,28 @@ export function createLocalModelOnboardingPoller({
   failureThreshold = DEFAULT_FAILURE_THRESHOLD,
 }: CreateLocalModelOnboardingPollerOptions): number {
   let consecutivePollFailures = 0;
+  let stopped = false;
+  let timerId = 0;
 
-  return window.setInterval(() => {
+  timerId = window.setInterval(() => {
     void (async () => {
+      if (stopped) {
+        return;
+      }
       try {
         const operation = await fetchOperationStatus(operationId, pollRoute);
         consecutivePollFailures = 0;
-        onUpdate(operation);
         if (isLocalModelOnboardingTerminal(operation.status)) {
+          // Stop before invoking callbacks so a terminal status fires onUpdate/onTerminal
+          // exactly once. Otherwise the interval keeps re-firing terminal side effects
+          // (e.g. catalog refetch) every tick.
+          stopped = true;
+          window.clearInterval(timerId);
+          onUpdate(operation);
           onTerminal?.(operation);
+          return;
         }
+        onUpdate(operation);
       } catch {
         consecutivePollFailures += 1;
         if (consecutivePollFailures >= failureThreshold) {
@@ -58,6 +70,8 @@ export function createLocalModelOnboardingPoller({
       }
     })();
   }, intervalMs);
+
+  return timerId;
 }
 
 interface UseLocalModelOnboardingOperationOptions {
@@ -127,15 +141,24 @@ export function useCuratedOperationPolling({
     }
 
     let consecutivePollFailures = 0;
-    const timerId = window.setInterval(() => {
+    let stopped = false;
+    let timerId = 0;
+    timerId = window.setInterval(() => {
       void (async () => {
+        if (stopped) {
+          return;
+        }
         try {
           const operation = await api.settings.getLlamaOperationStatus(operationId);
           consecutivePollFailures = 0;
-          onUpdate(operation);
           if (isLocalModelOnboardingTerminal(operation.status)) {
+            stopped = true;
+            window.clearInterval(timerId);
+            onUpdate(operation);
             onTerminal?.(operation);
+            return;
           }
+          onUpdate(operation);
         } catch {
           consecutivePollFailures += 1;
           if (consecutivePollFailures >= (failureThreshold ?? DEFAULT_FAILURE_THRESHOLD)) {
@@ -146,6 +169,7 @@ export function useCuratedOperationPolling({
     }, intervalMs ?? DEFAULT_POLL_INTERVAL_MS);
 
     return () => {
+      stopped = true;
       window.clearInterval(timerId);
     };
   }, [enabled, failureThreshold, intervalMs, onPollFailureThreshold, onTerminal, onUpdate, operationId]);

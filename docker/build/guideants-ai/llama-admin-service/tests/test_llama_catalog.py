@@ -46,10 +46,12 @@ class LlamaCatalogServiceTests(unittest.TestCase):
     ) -> None:
         list_files.return_value = [
             {"type": "file", "path": "Qwen3.6-35B-A3B-MTP-UD-Q4_K_XL.gguf", "size": 100},
+            {"type": "file", "path": "mmproj-F16.gguf", "size": 900_000_000},
         ]
         payload = llama_catalog.resolve_definition_quants("qwen3.6-35b-a3b-mtp", None)
         self.assertEqual("abc123", payload["resolvedRevision"])
-        self.assertIsNone(payload["projector"])
+        self.assertIsNotNone(payload["projector"])
+        self.assertEqual("mmproj-F16.gguf", payload["projector"]["path"])
         self.assertEqual("ud_q4_k_xl", payload["quants"][0]["id"])
         self.assertIn("guidance", payload["quants"][0])
 

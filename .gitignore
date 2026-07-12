@@ -440,3 +440,4 @@ docker-compose.rocm-runtime.generated.yml
 /docker/volumes/rocm-wsl/
 *.cli-auth-token
 /src/client/GuideAnts.code-workspace
+/recordings

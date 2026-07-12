@@ -60,14 +60,6 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         "registeringAlias",
     };
 
-    private static readonly HashSet<string> StaleDownloadRestartStatuses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "queued",
-        "resolvingFiles",
-        "downloading",
-        "validating",
-    };
-
     private readonly ApplicationDbContext _db;
     private readonly ILlamaRuntimeAdminClient _adminClient;
     private readonly IHuggingFaceTokenResolver _tokenResolver;
@@ -231,11 +223,6 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         {
             await BeginQueuedOperationAsync(operation, sideEffects, cancellationToken).ConfigureAwait(false);
             return null;
-        }
-
-        if (sideEffects.DownloadStarted && StaleDownloadRestartStatuses.Contains(operation.Status))
-        {
-            await BeginQueuedOperationAsync(operation, sideEffects, cancellationToken).ConfigureAwait(false);
         }
 
         var journal = await _adminClient
