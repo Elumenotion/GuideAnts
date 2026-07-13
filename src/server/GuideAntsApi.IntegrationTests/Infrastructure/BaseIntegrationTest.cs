@@ -40,6 +40,8 @@ public abstract class BaseIntegrationTest : IAsyncDisposable
         if (SharedFactory == null)
             throw new InvalidOperationException("SharedFactory is not initialized. Ensure ClassInitialize ran properly.");
 
+        FakeChatCompletionBehavior.Instance.Reset();
+
         // Create a fresh client for each test method
         Client = SharedFactory.CreateClient();
         

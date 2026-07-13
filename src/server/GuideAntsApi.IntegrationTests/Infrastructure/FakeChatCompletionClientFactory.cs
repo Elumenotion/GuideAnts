@@ -179,6 +179,15 @@ internal sealed class FakeChatCompletionClient : IChatCompletionClient
         Action<ChatCompletionChunk> onChunk)
     {
         _behavior.RecordToolChoiceRequest(request.ToolChoice);
+        if (string.Equals(request.ToolChoice, "none", StringComparison.Ordinal))
+        {
+            onChunk(new ChatCompletionChunk(
+            [
+                new ChatChoiceDelta(new ChatDelta(ChatRole.Assistant, _behavior.FinalAssistantText), null)
+            ]));
+            return Task.FromResult(CreateResponse(_behavior.FinalAssistantText, finishReason: "stop"));
+        }
+
         var callIndex = _behavior.NextCallIndex();
         onChunk(new ChatCompletionChunk(
         [
