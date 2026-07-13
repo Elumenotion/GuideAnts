@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from warmup_desired_ini import (
     SERVICE_LLAMA,
@@ -175,6 +175,17 @@ def sync_state_after_desired_write(
 
         atomic_write_warmup_state(next_state)
         return next_state
+
+
+def mutate_warmup_state(mutator: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    """Read-modify-write warmup state under lock."""
+    with WARMUP_STATE_LOCK:
+        state = _read_warmup_state_unlocked()
+        if state is None:
+            raise RuntimeError("warmup state is missing")
+        mutator(state)
+        atomic_write_warmup_state(state)
+        return dict(state)
 
 
 def get_warmup_status_response() -> dict[str, Any]:

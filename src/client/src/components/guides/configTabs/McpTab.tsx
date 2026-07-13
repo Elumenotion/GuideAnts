@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { API_BASE_URL, resolveUrlAgainstOrigin } from '../../../config/apiConfig';
+import { resolveExternalApiUrl } from '../../../config/apiConfig';
 import { PublishedGuideApiKeySection } from './PublishedGuideApiKeySection';
 
 interface McpTabProps {
@@ -43,7 +43,7 @@ export function McpTab({
   const [enableError, setEnableError] = useState<string | null>(null);
 
   const mcpEndpointUrl = publishedGuideId
-    ? resolveUrlAgainstOrigin(`${API_BASE_URL}/published/mcp?pubId=${publishedGuideId}`).href
+    ? resolveExternalApiUrl(`/published/mcp?pubId=${publishedGuideId}`)
     : null;
 
   const copyEndpoint = async () => {

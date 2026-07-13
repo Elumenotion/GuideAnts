@@ -12,11 +12,39 @@ interface CachedFile {
 const DB_NAME = 'guideants-file-cache';
 const STORE_NAME = 'files';
 const DB_VERSION = 1;
+const DB_OPEN_TIMEOUT_MS = 5000;
+const DB_OP_TIMEOUT_MS = 3000;
 
 // Some environments (Vitest/JSDOM) don't expose indexedDB.  Fail gracefully.
 let hasIndexedDB = typeof indexedDB !== 'undefined';
 
 let dbPromise: Promise<IDBPDatabase | null> | null = null;
+
+function disableFileCache(reason: string, err?: unknown) {
+  console.warn(reason, err);
+  hasIndexedDB = false;
+  dbPromise = null;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 function getDb() {
   if (!hasIndexedDB) {
@@ -26,21 +54,40 @@ function getDb() {
   }
 
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db: IDBPDatabase) {
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME);
+    dbPromise = withTimeout(
+      openDB(DB_NAME, DB_VERSION, {
+        upgrade(db: IDBPDatabase) {
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+          }
         }
-      }
-    })
-    // New: gracefully handle environments where IndexedDB cannot be opened
-    .catch(err => {
-      console.warn('IndexedDB unavailable – disabling file cache', err);
-      hasIndexedDB = false;
-      return null; // callers will fall back to network
-    });
+      }),
+      DB_OPEN_TIMEOUT_MS,
+      `IndexedDB open timed out after ${DB_OPEN_TIMEOUT_MS}ms`
+    )
+      .catch((err) => {
+        disableFileCache('IndexedDB unavailable – disabling file cache', err);
+        return null;
+      });
   }
   return dbPromise;
+}
+
+async function runDbOperation<T>(operation: (db: IDBPDatabase) => Promise<T>): Promise<T | null> {
+  if (!hasIndexedDB) return null;
+  const db = await getDb();
+  if (!db) return null;
+
+  try {
+    return await withTimeout(
+      operation(db),
+      DB_OP_TIMEOUT_MS,
+      `IndexedDB operation timed out after ${DB_OP_TIMEOUT_MS}ms`
+    );
+  } catch (err) {
+    disableFileCache('IndexedDB operation failed – disabling file cache', err);
+    return null;
+  }
 }
 
 function buildKey(projectId: string, fileId: string) {
@@ -52,26 +99,20 @@ export async function cacheFile(
   fileId: string,
   data: Omit<CachedFile, 'updatedAt'>
 ) {
-  if (!hasIndexedDB) return;
-  const db = await getDb();
-  if (!db) return;
   const record: CachedFile = { ...data, updatedAt: Date.now() };
-  await db.put(STORE_NAME, record, buildKey(projectId, fileId));
+  await runDbOperation((db) => db.put(STORE_NAME, record, buildKey(projectId, fileId)));
 }
 
 export async function getCachedFile(
   projectId: string,
   fileId: string
 ): Promise<CachedFile | null> {
-  if (!hasIndexedDB) return null;
-  const db = await getDb();
-  if (!db) return null;
-  return (await db.get(STORE_NAME, buildKey(projectId, fileId))) as CachedFile | undefined || null;
+  const cached = await runDbOperation((db) =>
+    db.get(STORE_NAME, buildKey(projectId, fileId))
+  );
+  return (cached as CachedFile | undefined) ?? null;
 }
 
 export async function deleteCachedFile(projectId: string, fileId: string) {
-  if (!hasIndexedDB) return;
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(STORE_NAME, buildKey(projectId, fileId));
+  await runDbOperation((db) => db.delete(STORE_NAME, buildKey(projectId, fileId)));
 } 

@@ -51,9 +51,11 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
         });
     }
 
-    private sealed class NoOpLocalAiStartupWarmupService : ILocalAiStartupWarmupService
+    private sealed class NoOpLocalAiStartupWarmupService : ILocalAiStartupWarmupService, ILocalAiWarmupService
     {
         public bool IsWarmupInProgress => false;
+
+        public bool IsApplyInProgress => false;
 
         public Task WarmupAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -73,5 +75,22 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
             string serviceId,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle));
+
+        public Task SyncDesiredAndApplyAsync(
+            WarmupDesiredBuildOptions? options = null,
+            bool waitForCompletion = false,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<WarmupStatusDocument> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WarmupStatusDocument(
+                SchemaVersion: 1,
+                DesiredRevision: 0,
+                AppliedRevision: 0,
+                InProgressRevision: null,
+                ApplyStatus: "idle",
+                ApplyError: null,
+                DesiredSha256: string.Empty,
+                WrittenAt: string.Empty,
+                Services: new Dictionary<string, WarmupServiceStatus>()));
     }
 }

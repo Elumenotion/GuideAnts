@@ -60,7 +60,9 @@ internal static class WireImageGenerationsExecutor
                     "Notebook file sync is required when syncDatabaseAfterWrite is enabled.");
             }
 
-            await notebookFileSyncService.SyncNotebookAsync(request.RunContext.NotebookId);
+            await notebookFileSyncService.QueueNotebookSyncAsync(
+                request.RunContext.NotebookId,
+                httpContext.RequestAborted);
         }
 
         var base64 = Convert.ToBase64String(imageBytes);

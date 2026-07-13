@@ -8,8 +8,13 @@ const isWin = process.platform === 'win32';
 const viteCli = path.join(cwd, 'node_modules', 'vite', 'bin', 'vite.js');
 const electronBin = path.join(cwd, 'node_modules', '.bin', isWin ? 'electron.cmd' : 'electron');
 
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:5107';
+
 const env = {
   ...process.env,
+  // Same-origin /api keeps auth cookies on the Vite dev server (5173).
+  VITE_API_URL: '/api',
+  VITE_API_PROXY_TARGET: apiProxyTarget,
   ELECTRON_ENABLE_LOGGING: 'true',
   NODE_ENV: 'development',
 };

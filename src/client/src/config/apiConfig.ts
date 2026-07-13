@@ -1,5 +1,7 @@
 // API Configuration - Runtime API URL from window object
 
+import { isElectron } from '../utils/environment';
+
 declare global {
   interface Window {
     __RUNTIME_CONFIG__?: {
@@ -27,6 +29,35 @@ function normalizeConfiguredApiUrl(value?: string): string | undefined {
   }
 
   return trimmed;
+}
+
+function getApiProxyTarget(): string | undefined {
+  return normalizeConfiguredApiUrl(import.meta.env.VITE_API_PROXY_TARGET);
+}
+
+/**
+ * Resolve a user-facing API URL for copy/paste (SDK examples, curl, MCP endpoint).
+ * Browser same-origin deployments use the page host; Electron uses the real API host.
+ */
+export function resolveExternalApiUrl(
+  pathFromApiBase: string,
+  apiBaseUrl: string = API_BASE_URL,
+): string {
+  const suffix = pathFromApiBase.startsWith('/') ? pathFromApiBase : `/${pathFromApiBase}`;
+  const combined = `${apiBaseUrl.replace(/\/+$/, '')}${suffix}`;
+
+  if (/^https?:\/\//i.test(combined)) {
+    return new URL(combined).href;
+  }
+
+  if (isElectron()) {
+    const proxyTarget = getApiProxyTarget();
+    if (proxyTarget) {
+      return new URL(combined, `${proxyTarget}/`).href;
+    }
+  }
+
+  return resolveUrlAgainstOrigin(combined).href;
 }
 
 /**

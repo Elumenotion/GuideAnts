@@ -121,26 +121,96 @@ public sealed class NotebookFileChangeReporterTests
     }
 
     [TestMethod]
-    public async Task DetectChangesAsync_DetectsModifiedFile_WhenHashDiffers()
+    public async Task DetectChangesAsync_DetectsModifiedFile_WhenSizeOrTimestampDiffers()
     {
         using var storage = new TempStorage();
         var projectId = Guid.NewGuid();
         var notebookId = Guid.NewGuid();
         var outputDir = storage.OutputDir(projectId, notebookId);
         var filePath = Path.Combine(outputDir, "changed.txt");
-        File.WriteAllText(filePath, "new content");
+        File.WriteAllText(filePath, "original");
+        var originalInfo = new FileInfo(filePath);
+
+        var provider = BuildProvider(storage.Root, projectId, notebookId, seed: ctx =>
+        {
+            ctx.NotebookFiles.Add(MakeFile(
+                notebookId,
+                "Output/changed.txt",
+                originalInfo.Length,
+                originalInfo.LastWriteTimeUtc,
+                "STALEHASH"));
+        });
+        var context = new InvocationContext(projectId, notebookId, Guid.NewGuid()) { IsPublished = false };
+
+        File.WriteAllText(filePath, "updated content with different length");
+        var (newFiles, modifiedFiles) = await NotebookFileChangeReporter.DetectChangesAsync(provider, storage.Root, context);
+
+        newFiles.Should().BeEmpty();
+        modifiedFiles.Should().ContainSingle().Which.Should().Be("changed.txt");
+    }
+
+    [TestMethod]
+    public async Task DetectChangesAsync_DetectsModifiedFile_WhenTimestampDiffersButSizeMatches()
+    {
+        using var storage = new TempStorage();
+        var projectId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var outputDir = storage.OutputDir(projectId, notebookId);
+        var filePath = Path.Combine(outputDir, "retouched.txt");
+        File.WriteAllText(filePath, "same length!!");
         var info = new FileInfo(filePath);
 
         var provider = BuildProvider(storage.Root, projectId, notebookId, seed: ctx =>
         {
-            ctx.NotebookFiles.Add(MakeFile(notebookId, "Output/changed.txt", info.Length, info.LastWriteTimeUtc, "STALEHASH"));
+            // Same size, but an older last-write time than what is now on disk.
+            ctx.NotebookFiles.Add(MakeFile(
+                notebookId,
+                "Output/retouched.txt",
+                info.Length,
+                info.LastWriteTimeUtc.AddHours(-1),
+                "STALEHASH"));
         });
         var context = new InvocationContext(projectId, notebookId, Guid.NewGuid()) { IsPublished = false };
 
         var (newFiles, modifiedFiles) = await NotebookFileChangeReporter.DetectChangesAsync(provider, storage.Root, context);
 
         newFiles.Should().BeEmpty();
-        modifiedFiles.Should().ContainSingle().Which.Should().Be("changed.txt");
+        modifiedFiles.Should().ContainSingle().Which.Should().Be("retouched.txt");
+    }
+
+    [TestMethod]
+    public async Task DetectChangesAsync_DoesNotReport_WhenContentChangesButSizeAndTimestampMatch()
+    {
+        // Documents the intentional metadata-only tradeoff: an in-place content change that preserves
+        // BOTH size and last-write time is not surfaced here. The authoritative hash-based sync catches
+        // it; this reporter deliberately does not. Do not "fix" this by reintroducing hashing.
+        using var storage = new TempStorage();
+        var projectId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var outputDir = storage.OutputDir(projectId, notebookId);
+        var filePath = Path.Combine(outputDir, "sneaky.txt");
+        File.WriteAllText(filePath, "original");
+        var info = new FileInfo(filePath);
+
+        var provider = BuildProvider(storage.Root, projectId, notebookId, seed: ctx =>
+        {
+            ctx.NotebookFiles.Add(MakeFile(
+                notebookId,
+                "Output/sneaky.txt",
+                info.Length,
+                info.LastWriteTimeUtc,
+                ComputeSha256(filePath)));
+        });
+        var context = new InvocationContext(projectId, notebookId, Guid.NewGuid()) { IsPublished = false };
+
+        // Overwrite with different content of identical length, then restore the original timestamp.
+        File.WriteAllText(filePath, "modified");
+        File.SetLastWriteTimeUtc(filePath, info.LastWriteTimeUtc);
+
+        var (newFiles, modifiedFiles) = await NotebookFileChangeReporter.DetectChangesAsync(provider, storage.Root, context);
+
+        newFiles.Should().BeEmpty();
+        modifiedFiles.Should().BeEmpty();
     }
 
     [TestMethod]

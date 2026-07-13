@@ -34,6 +34,8 @@ from engine_proxy import (  # noqa: E402
     TTS_ENGINE_BASE_URL,
     proxy_to_engine,
 )
+from warmup_orchestrator import configure_warmup_orchestrator, maybe_auto_apply_on_startup  # noqa: E402
+from warmup_routes import ROUTER as WARMUP_ROUTER  # noqa: E402
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -77,6 +79,7 @@ APP = FastAPI(title="GuideAnts Admin Service", version="1.0.0")
 
 # llama-admin public paths are exposed at the ga-admin root (nginx strips /llama-admin/).
 _include_flat_routes(APP, llama_admin_service.APP)
+_include_flat_routes(APP, WARMUP_ROUTER)
 
 # SD admin + inference facade + sd-server lifecycle (nginx prefixes /sd/).
 APP.mount("/sd", sd_service.APP)
@@ -84,7 +87,9 @@ APP.mount("/sd", sd_service.APP)
 
 @APP.on_event("startup")
 async def on_startup() -> None:
+    configure_warmup_orchestrator(log_event=lambda event, **fields: print({"event": event, **fields}, flush=True))
     await sd_service.on_startup()
+    maybe_auto_apply_on_startup()
 
 
 @APP.on_event("shutdown")

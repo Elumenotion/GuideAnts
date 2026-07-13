@@ -57,7 +57,7 @@ public sealed class LocalAiRuntimeWatchdogHostedService : BackgroundService
                     && !await IsConfiguredDefaultLlamaFailedAsync(stoppingToken).ConfigureAwait(false))
                 {
                     _logger.LogInformation(
-                        "Configured default llama model is not loaded; re-running full local AI warmup.");
+                        "Configured default llama model is not loaded; syncing warmup desired state.");
                     await _warmupService.WarmupAllAsync(stoppingToken).ConfigureAwait(false);
                 }
             }

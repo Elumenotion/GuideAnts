@@ -138,7 +138,7 @@ public class NotebookPodcastService : INotebookPodcastService
                 // Calculate relative path for the generated file
                 var relativePath = Path.Combine(NotebookPathHelper.GetRelativeRunFolder(context), filename).Replace("\\", "/");
 
-                // Reconcile DB with disk before returning so the new file is queryable.
+                // Queue reconciliation so tool turns never block on a full notebook walk.
                 if (context?.NotebookId != null)
                 {
                     try
@@ -150,8 +150,8 @@ public class NotebookPodcastService : INotebookPodcastService
                             StandardError = "Service provider not available"
                         };
                         var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                        await syncService.SyncNotebookAsync(context.NotebookId);
-                        _logger?.LogInformation("Database synchronized for notebook {NotebookId} after podcast generation", context.NotebookId);
+                        await syncService.QueueNotebookSyncAsync(context.NotebookId);
+                        _logger?.LogInformation("Queued notebook sync for {NotebookId} after podcast generation", context.NotebookId);
 
                         // Record TTS usage and storage
                         var recorder = scope.ServiceProvider.GetRequiredService<GuideAnts.Usage.IUsageRecorder>();
@@ -190,8 +190,8 @@ public class NotebookPodcastService : INotebookPodcastService
                     }
                     catch (Exception syncEx)
                     {
-                        _logger?.LogError(syncEx, "Failed to sync database after podcast generation");
-                        stdErrBuffer.AppendLine($"Warning: Podcast generated but failed to sync database: {syncEx.Message}");
+                        _logger?.LogError(syncEx, "Failed to queue notebook sync after podcast generation");
+                        stdErrBuffer.AppendLine($"Warning: Podcast generated but failed to queue notebook sync: {syncEx.Message}");
                     }
                 }
 

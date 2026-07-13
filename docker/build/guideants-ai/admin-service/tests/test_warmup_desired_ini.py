@@ -97,6 +97,19 @@ desired = warm
         with self.assertRaises(WarmupDesiredValidationError):
             parse_warmup_desired_ini(bad)
 
+    def test_image_generation_warm_without_bundle_id_is_valid(self) -> None:
+        ini = """\
+version = 1
+revision = 1
+updated_at_utc = 2026-07-12T19:00:00Z
+
+[ImageGeneration]
+desired = warm
+"""
+        document = parse_warmup_desired_ini(ini)
+        self.assertEqual(document.sections["ImageGeneration"].desired, "warm")
+        self.assertIsNone(document.sections["ImageGeneration"].bundle_id)
+
     def test_atomic_write_bumps_revision(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ini_path = os.path.join(tmp, "warmup-desired.ini")

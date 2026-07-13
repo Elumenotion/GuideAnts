@@ -61,11 +61,12 @@ public sealed class WireAudioSpeechExecutorTests
         Path.GetFileName(capturedOutputPath).Should().StartWith("wire-").And.EndWith(".wav");
         File.Exists(capturedOutputPath).Should().BeTrue();
         syncService.Verify(s => s.SyncNotebookAsync(It.IsAny<Guid>()), Times.Never);
+        syncService.Verify(s => s.QueueNotebookSyncAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         speechService.VerifyAll();
     }
 
     [TestMethod]
-    public async Task ExecuteAsync_PublishedPath_SyncsAfterWrite()
+    public async Task ExecuteAsync_PublishedPath_QueuesSyncAfterWrite()
     {
         using var storage = new TempStorage();
         var configuration = BuildConfiguration(storage.Root);
@@ -91,7 +92,7 @@ public sealed class WireAudioSpeechExecutorTests
                 ProviderId: "SpeechProvider"));
 
         syncService
-            .Setup(s => s.SyncNotebookAsync(notebookId))
+            .Setup(s => s.QueueNotebookSyncAsync(notebookId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var http = new DefaultHttpContext();
@@ -107,7 +108,7 @@ public sealed class WireAudioSpeechExecutorTests
             syncDatabaseAfterWrite: true,
             recordUsageAsync: (_, _, _) => Task.CompletedTask);
 
-        syncService.Verify(s => s.SyncNotebookAsync(notebookId), Times.Once);
+        syncService.Verify(s => s.QueueNotebookSyncAsync(notebookId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static IConfiguration BuildConfiguration(string storageRoot)

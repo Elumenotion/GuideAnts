@@ -21,6 +21,7 @@ public class NotebookModelRuntimeServiceTests
     private Mock<IRuntimeProfileResolver> _mockRuntimeProfileResolver = null!;
     private Mock<IChatModelResolver> _mockChatModelResolver = null!;
     private Mock<ILocalAiStartupWarmupService> _mockLocalAiWarmupService = null!;
+    private Mock<ILocalAiWarmupService> _mockLocalAiWarmup = null!;
     private Mock<ILogger<NotebookModelRuntimeService>> _mockLogger = null!;
     private IMemoryCache _cache = null!;
     private ApplicationDbContext _context = null!;
@@ -58,6 +59,14 @@ public class NotebookModelRuntimeServiceTests
         _mockLocalAiWarmupService
             .Setup(s => s.IsWarmupInProgress)
             .Returns(false);
+        _mockLocalAiWarmup = new Mock<ILocalAiWarmupService>();
+        _mockLocalAiWarmup.SetupGet(s => s.IsApplyInProgress).Returns(false);
+        _mockLocalAiWarmup
+            .Setup(s => s.SyncDesiredAndApplyAsync(
+                It.IsAny<WarmupDesiredBuildOptions?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         _mockLogger = new Mock<ILogger<NotebookModelRuntimeService>>();
         _cache = new MemoryCache(new MemoryCacheOptions());
 
@@ -74,6 +83,7 @@ public class NotebookModelRuntimeServiceTests
             new LlamaRuntimeCoordinator(),
             _mockChatModelResolver.Object,
             _mockLocalAiWarmupService.Object,
+            _mockLocalAiWarmup.Object,
             _mockLogger.Object);
     }
 
@@ -480,6 +490,7 @@ public class NotebookModelRuntimeServiceTests
             new LlamaRuntimeCoordinator(),
             _mockChatModelResolver.Object,
             _mockLocalAiWarmupService.Object,
+            _mockLocalAiWarmup.Object,
             _mockLogger.Object);
 
         var notebookId = Guid.NewGuid();
@@ -526,7 +537,7 @@ public class NotebookModelRuntimeServiceTests
     }
 
     [TestMethod]
-    public async Task StartLoadOperationAsync_UnloadsAuxiliaryServicesBeforeLlmLoad_AndReloadsAfter()
+    public async Task StartLoadOperationAsync_DrainsAuxViaOrchestratorBeforeLlmLoad_AndRestoresAfter()
     {
         // Arrange
         var notebookId = Guid.NewGuid();
@@ -544,14 +555,33 @@ public class NotebookModelRuntimeServiceTests
         });
         await _context.SaveChangesAsync();
 
+        // The orchestrator is the single authority for aux load/unload ordering (D6/D11).
+        // The notebook load first drives an INI+apply with aux forced idle (GPU drain), then
+        // reconciles the multi-alias llama delta directly, then restores desired via an
+        // INI+apply carrying the primary router alias override.
         var callOrder = new List<string>();
-        _mockLocalAiWarmupService
-            .Setup(s => s.UnloadAuxiliaryServicesAsync(It.IsAny<CancellationToken>()))
-            .Callback(() => callOrder.Add("aux-unload"))
-            .Returns(Task.CompletedTask);
-        _mockLocalAiWarmupService
-            .Setup(s => s.EnsureAuxiliaryServicesLoadedAsync(It.IsAny<CancellationToken>()))
-            .Callback(() => callOrder.Add("aux-reload"))
+        string? restoreAliasOverride = null;
+        _mockLocalAiWarmup
+            .Setup(s => s.SyncDesiredAndApplyAsync(
+                It.IsAny<WarmupDesiredBuildOptions?>(),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<WarmupDesiredBuildOptions?, bool, CancellationToken>((options, _, _) =>
+            {
+                if (options?.ForceAuxiliaryIdle == true)
+                {
+                    callOrder.Add("aux-drain");
+                }
+                else if (!string.IsNullOrEmpty(options?.LlamaRouterAliasOverride))
+                {
+                    restoreAliasOverride = options!.LlamaRouterAliasOverride;
+                    callOrder.Add("aux-restore");
+                }
+                else
+                {
+                    callOrder.Add("apply-default");
+                }
+            })
             .Returns(Task.CompletedTask);
 
         var listCalls = 0;
@@ -600,17 +630,28 @@ public class NotebookModelRuntimeServiceTests
         Assert.IsNotNull(final);
         Assert.AreEqual("ready", final!.State, final.ErrorDetails);
 
-        var unloadIndex = callOrder.IndexOf("aux-unload");
+        var drainIndex = callOrder.IndexOf("aux-drain");
         var llmLoadIndex = callOrder.IndexOf("llm-load");
-        var reloadIndex = callOrder.IndexOf("aux-reload");
-        Assert.IsTrue(unloadIndex >= 0, "aux-unload call missing");
+        var restoreIndex = callOrder.IndexOf("aux-restore");
+        Assert.IsTrue(drainIndex >= 0, "aux drain (ForceAuxiliaryIdle apply) missing");
         Assert.IsTrue(llmLoadIndex >= 0, "llm-load call missing");
-        Assert.IsTrue(reloadIndex >= 0, "aux-reload call missing");
-        Assert.IsTrue(unloadIndex < llmLoadIndex, "aux unload did not happen before llama load");
-        Assert.IsTrue(llmLoadIndex < reloadIndex, "aux reload did not happen after llama load");
+        Assert.IsTrue(restoreIndex >= 0, "aux restore (router alias override apply) missing");
+        Assert.IsTrue(drainIndex < llmLoadIndex, "aux drain did not happen before llama load");
+        Assert.IsTrue(llmLoadIndex < restoreIndex, "aux restore did not happen after llama load");
+        Assert.AreEqual("qwen-model", restoreAliasOverride, "restore apply must carry the primary router alias");
 
-        _mockLocalAiWarmupService.Verify(s => s.UnloadAuxiliaryServicesAsync(It.IsAny<CancellationToken>()), Times.Once);
-        _mockLocalAiWarmupService.Verify(s => s.EnsureAuxiliaryServicesLoadedAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _mockLocalAiWarmup.Verify(
+            s => s.SyncDesiredAndApplyAsync(
+                It.Is<WarmupDesiredBuildOptions?>(o => o != null && o.ForceAuxiliaryIdle),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockLocalAiWarmup.Verify(
+            s => s.SyncDesiredAndApplyAsync(
+                It.Is<WarmupDesiredBuildOptions?>(o => o != null && o.LlamaRouterAliasOverride == "qwen-model"),
+                It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 }
 

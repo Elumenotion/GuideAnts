@@ -104,10 +104,9 @@ def validate_warmup_desired(document: WarmupDesiredDocument) -> None:
                         f"[{section_name}] desired=warm requires router_alias."
                     )
             elif section_name == "ImageGeneration":
-                if not (section.bundle_id or "").strip():
-                    raise WarmupDesiredValidationError(
-                        f"[{section_name}] desired=warm requires bundle_id."
-                    )
+                # bundle_id is optional: when omitted the orchestrator loads the
+                # active bundle already marked on disk (legacy local-SD behavior).
+                pass
             else:
                 if not (section.model_id or "").strip():
                     raise WarmupDesiredValidationError(

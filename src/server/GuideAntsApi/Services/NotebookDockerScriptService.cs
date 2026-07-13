@@ -148,20 +148,20 @@ namespace GuideAntsApi.Services
                             _logger);
                     }
 
-                    // Reconcile DB with disk before returning so new files are queryable. Extraction/indexing enqueued inside sync.
+                    // Queue reconciliation so chat/tool turns never block on a full notebook walk.
                     if (_serviceProvider != null)
                     {
                         try
                         {
                             using var scope = _serviceProvider.CreateScope();
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                            await syncService.SyncNotebookAsync(context.NotebookId);
-                            _logger.LogInformation("Database synchronized for notebook {NotebookId} after script execution", context.NotebookId);
+                            await syncService.QueueNotebookSyncAsync(context.NotebookId);
+                            _logger.LogInformation("Queued notebook sync for {NotebookId} after script execution", context.NotebookId);
                         }
                         catch (Exception syncEx)
                         {
-                            _logger.LogError(syncEx, "Failed to sync database after script execution");
-                            stdErrBuffer.AppendLine($"Warning: Script executed but failed to sync database: {syncEx.Message}");
+                            _logger.LogError(syncEx, "Failed to queue notebook sync after script execution");
+                            stdErrBuffer.AppendLine($"Warning: Script executed but failed to queue notebook sync: {syncEx.Message}");
                         }
                     }
                 }

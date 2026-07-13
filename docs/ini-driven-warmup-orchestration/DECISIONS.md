@@ -54,3 +54,19 @@ Locked decisions for this execution track. Update only when the orchestrator exp
 Revision pattern mirrors `fleet_projection.py` (`desiredRevision`, `appliedRevision`, `applyStatus`).
 
 **Status:** LOCKED (2026-07-12)
+
+---
+
+## D6 — Chat/notebook multi-alias llama is a bounded exception
+
+**Decision:** Normal llama switches (settings default model, single-alias routing) update `warmup-desired.ini` (`[llama].router_alias`) and call `POST /warmup/apply`. The orchestrator is the **only** place that enforces D11 load/unload order for that path.
+
+**Chat exception:** Notebook chat preflight may require **multiple** llama aliases loaded at once. INI carries one `router_alias`, so notebook load may:
+
+1. INI+apply with aux forced idle (orchestrator drains aux),
+2. Direct `ILlamaServerRuntimeClient` load/unload for the multi-alias delta,
+3. INI+apply with `LlamaRouterAliasOverride` (orchestrator restores aux + primary alias).
+
+Direct llama client calls are allowed **only** in step 2 — not for settings warmup, aux routing, or engine admin load/unload.
+
+**Status:** LOCKED (2026-07-12)
