@@ -2,10 +2,17 @@ import { useEffect, useState } from 'react';
 import { AssistantDto, GlobalAssistantDto } from '../../../types/guides';
 import { api } from '../../../services/api';
 import { getApiOrigin } from '../../../config/apiConfig';
+import { CrewMemberLimitsRow } from '../editor/crew/CrewMemberLimitsRow';
+import { CrewMemberLimitOverrideField } from '../editor/crew/CrewMemberLimitOverrideField';
 
 interface GuideCrewManagerProps {
+  projectId: string;
   selectedAssistantIds: string[];
+  crewMemberLimitById: Record<string, number | null | undefined>;
+  crewMemberInvocationLimits: Record<string, number | undefined>;
   onChange: (assistantIds: string[]) => void;
+  onInvocationLimitChange: (assistantId: string, value: number | undefined) => void;
+  onDirtyChange?: () => void;
 }
 
 interface AssistantOption {
@@ -85,7 +92,15 @@ function AssistantAvatar({ avatarUrl, name, isGlobal }: AssistantAvatarProps) {
   );
 }
 
-export function GuideCrewManager({ selectedAssistantIds, onChange }: GuideCrewManagerProps) {
+export function GuideCrewManager({
+  projectId,
+  selectedAssistantIds,
+  crewMemberLimitById,
+  crewMemberInvocationLimits,
+  onChange,
+  onInvocationLimitChange,
+  onDirtyChange,
+}: GuideCrewManagerProps) {
   const [teamAssistants, setTeamAssistants] = useState<AssistantDto[]>([]);
   const [globalAssistants, setGlobalAssistants] = useState<GlobalAssistantDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -312,6 +327,18 @@ export function GuideCrewManager({ selectedAssistantIds, onChange }: GuideCrewMa
                             {assistant.isGlobal ? 'Global' : 'Custom'}
                           </span>
                         </div>
+                        <CrewMemberLimitsRow
+                          projectId={projectId}
+                          assistantId={assistant.id}
+                          assistantName={assistant.name}
+                          initialMaxToolCallsPerTurn={crewMemberLimitById[assistant.id]}
+                        />
+                        <CrewMemberLimitOverrideField
+                          assistantName={assistant.name}
+                          value={crewMemberInvocationLimits[assistant.id]}
+                          onChange={(value) => onInvocationLimitChange(assistant.id, value)}
+                          onDirtyChange={onDirtyChange}
+                        />
                       </div>
 
                       {/* Remove button */}

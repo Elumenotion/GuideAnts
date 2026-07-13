@@ -18,6 +18,8 @@ public sealed class OpenAiResponsesClient : IChatCompletionClient
     private readonly OpenAIClient _client;
     private readonly ILogger<OpenAiResponsesClient> _logger;
 
+    public bool SupportsToolChoiceNone => false;
+
     public OpenAiResponsesClient(OpenAIClient client, ILogger<OpenAiResponsesClient>? logger = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));

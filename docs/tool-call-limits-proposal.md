@@ -1,9 +1,10 @@
 # Per-Assistant Tool Call Limits Proposal
 
-Status: Proposal (ready for implementation)  
+Status: Implemented on `feature/tool-call-limits` (see [execution STATUS](./tool-call-limits-execution/STATUS.md))  
 Last updated: 2026-07-12  
 Owner: Guide/assistant builder + conversation runtime  
 Related:
+- [Execution plan & acceptance](./tool-call-limits-execution/00-orchestration.md) — phased implementation, gates, `STATUS.md`, `acceptance-evidence.md`
 - [Conversation Stream Reconnect and Server Cancel](./conversation-stream-reconnect-and-cancel-proposal.md)
 - `src/client/src/components/guides/editor/ToolsTab.tsx`
 - `src/client/src/components/guides/editor/CrewTab.tsx`

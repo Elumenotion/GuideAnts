@@ -21,6 +21,12 @@ namespace GuideAntsApi.DataModel.Models
         /// </summary>
         public int? DisplayOrder { get; set; }
 
+        /// <summary>
+        /// Optional override for max tool calls when this member is invoked via Agent.Invoke.
+        /// Null = use the child assistant's MaxToolCallsPerTurn.
+        /// </summary>
+        public int? MaxToolCallsPerInvocation { get; set; }
+
         [Required]
         public DateTime Created { get; set; } = DateTime.UtcNow;
     }

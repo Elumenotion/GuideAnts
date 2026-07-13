@@ -239,6 +239,8 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                 description = assistant.Description,
                 model = assistant.ModelId ?? assistant.Model?.ModelId,
                 invocation_evaluator = assistant.InvocationEvaluator,
+                max_tool_calls_per_turn = assistant.MaxToolCallsPerTurn,
+                max_tool_rounds_per_turn = assistant.MaxToolRoundsPerTurn,
                 tools = BuildToolsArray(assistant),
                 tool_resources = BuildToolResources(assistant),
                 skills = BuildSkills(assistant),

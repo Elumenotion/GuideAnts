@@ -30,6 +30,8 @@ export interface GuideDetailsDto {
   crews: CrewSummaryDto[];
   skills?: AssistantSkillDto[];
   sandboxWireApiConfig?: SandboxWireApiConfigDto;
+  maxToolCallsPerTurn?: number | null;
+  maxToolRoundsPerTurn?: number | null;
 }
 
 export interface CreateGuideDto {
@@ -55,6 +57,9 @@ export interface CreateGuideDto {
   conversationStarters?: string[];
   crewMemberIds?: string[];
   sandboxWireApiConfig?: SandboxWireApiConfigDto;
+  maxToolCallsPerTurn?: number | null;
+  maxToolRoundsPerTurn?: number | null;
+  crewMemberLimits?: CrewMemberLimitDto[];
 }
 
 export interface UpdateGuideDto {
@@ -81,6 +86,9 @@ export interface UpdateGuideDto {
   conversationStarters?: string[];
   crewMemberIds?: string[];
   sandboxWireApiConfig?: SandboxWireApiConfigDto;
+  maxToolCallsPerTurn?: number | null;
+  maxToolRoundsPerTurn?: number | null;
+  crewMemberLimits?: CrewMemberLimitDto[];
 }
 
 export interface AssistantDto {
@@ -109,6 +117,8 @@ export interface AssistantDetailsDto {
   files: FileDto[];
   conversationStarters: ConversationStarterDto[];
   skills?: AssistantSkillDto[];
+  maxToolCallsPerTurn?: number | null;
+  maxToolRoundsPerTurn?: number | null;
 }
 
 export interface CreateAssistantDto {
@@ -131,6 +141,8 @@ export interface CreateAssistantDto {
   files?: FileUploadDto[];
   skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
+  maxToolCallsPerTurn?: number | null;
+  maxToolRoundsPerTurn?: number | null;
 }
 
 export interface UpdateAssistantDto {
@@ -154,6 +166,8 @@ export interface UpdateAssistantDto {
   filesToAdd?: FileUploadDto[]; // New files to upload
   skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
+  maxToolCallsPerTurn?: number | null;
+  maxToolRoundsPerTurn?: number | null;
 }
 
 // Supporting types
@@ -383,6 +397,14 @@ export interface CrewMemberDto {
   avatarUrl?: string;
   isGlobal: boolean;
   displayOrder: number;
+  maxToolCallsPerInvocation?: number | null;
+  maxToolCallsPerTurn?: number | null;
+  maxToolRoundsPerTurn?: number | null;
+}
+
+export interface CrewMemberLimitDto {
+  assistantId: string;
+  maxToolCallsPerInvocation?: number | null;
 }
 
 // Catalog types

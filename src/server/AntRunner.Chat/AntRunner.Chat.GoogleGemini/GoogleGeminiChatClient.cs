@@ -22,6 +22,8 @@ public sealed class GoogleGeminiChatClient : IChatCompletionClient
     private readonly string? _defaultModel;
     private readonly ILogger<GoogleGeminiChatClient> _logger;
 
+    public bool SupportsToolChoiceNone => false;
+
     public GoogleGeminiChatClient(
         HttpClient httpClient,
         GoogleGeminiChatConfig config,

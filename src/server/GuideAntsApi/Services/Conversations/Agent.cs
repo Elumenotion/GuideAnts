@@ -52,6 +52,7 @@ public static class Agent
         using var scope = _serviceProvider.CreateScope();
         var chatClientFactory = scope.ServiceProvider.GetRequiredService<IChatCompletionClientFactory>();
         var chatModelResolver = scope.ServiceProvider.GetRequiredService<IChatModelResolver>();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
         var augmentedInstructions = instructions;
         var triggeringToolCallId = context.TriggeringToolCallId;
@@ -126,13 +127,30 @@ public static class Agent
             source: "agent_invocation");
 
         // Create child context for nested invocations
+        int? memberOverride = null;
+        if (context.AssistantId.HasValue)
+        {
+            memberOverride = await db.GuideMembers
+                .AsNoTracking()
+                .Where(gm => gm.GuideId == context.AssistantId.Value && gm.Assistant.Name == assistantName)
+                .Select(gm => gm.MaxToolCallsPerInvocation)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var childToolLimitState = ToolLimitState.ForNestedInvoke(
+            context.ToolLimitState,
+            assistant.MaxToolCallsPerTurn,
+            assistant.MaxToolRoundsPerTurn,
+            memberOverride: memberOverride);
+
         var childContext = context with
         {
             CurrentInvocationId = invocationId,
             NotebookConversationMessageId = null,
             InvocationDepth = context.InvocationDepth + 1,
             TriggeringToolCallId = null, // Will be set by ThreadRun for nested calls
-            AssistantId = assistant.Id   // The invoked assistant's ID for usage attribution
+            AssistantId = assistant.Id,   // The invoked assistant's ID for usage attribution
+            ToolLimitState = childToolLimitState
         };
 
         // Track metrics during streaming; tool calls are counted from persisted

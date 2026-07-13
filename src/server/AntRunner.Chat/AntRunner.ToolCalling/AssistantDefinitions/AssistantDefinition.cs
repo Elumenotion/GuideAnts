@@ -135,4 +135,18 @@ public class AssistantDefinition
     [JsonPropertyName("skills")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<SkillDescriptor>? Skills { get; set; }
+
+    /// <summary>
+    /// Max server-executed tool invocations in one ThreadRun. Null = unlimited.
+    /// </summary>
+    [JsonPropertyName("max_tool_calls_per_turn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxToolCallsPerTurn { get; set; }
+
+    /// <summary>
+    /// Max LLM rounds with tool_calls in one ThreadRun. Null = unlimited.
+    /// </summary>
+    [JsonPropertyName("max_tool_rounds_per_turn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxToolRoundsPerTurn { get; set; }
 }

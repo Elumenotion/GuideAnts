@@ -23,6 +23,8 @@ public sealed class HuggingFaceChatClient : IChatCompletionClient
     private readonly string? _defaultModel;
     private readonly ILogger<HuggingFaceChatClient> _logger;
 
+    public bool SupportsToolChoiceNone => false;
+
     public HuggingFaceChatClient(
         HttpClient httpClient,
         HuggingFaceChatConfig config,

@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using AntRunner.Chat;
 using AntRunner.Chat.Abstractions;
+using AntRunner.ToolCalling;
 using FluentAssertions;
 
 namespace GuideAntsApi.Tests.Services.Providers;
@@ -251,5 +252,81 @@ public sealed class ThreadRunTests
         combined.CompletionTokens.Should().Be(125);
         combined.CachedPromptTokens.Should().Be(15);
         combined.TotalTokens.Should().Be(425);
+    }
+
+    [TestMethod]
+    public void InjectLimitToolResults_AddsSyntheticToolMessagePerCall()
+    {
+        var limitState = new ToolLimitState(1, null, 1, 1, LimitEscalationPhase.SoftBlocked);
+        var messages = new List<ChatMessage>();
+        var toolCalls = new List<ChatToolCall>
+        {
+            new()
+            {
+                Id = "call_limit",
+                Type = "function",
+                Function = new ChatToolCallFunction
+                {
+                    Name = "search",
+                    Arguments = System.Text.Json.JsonSerializer.SerializeToElement(new { q = "x" })
+                }
+            }
+        };
+
+        Invoke<Task>("InjectLimitToolResultsAsync", toolCalls, messages, limitState, null).GetAwaiter().GetResult();
+
+        messages.Should().ContainSingle(m => m.Role == ChatRole.Tool);
+        messages[0].GetText().Should().Contain("Tool call limit reached");
+    }
+
+    [TestMethod]
+    public void EnsureLimitReachedSystemNudge_AddsSystemMessageOnce()
+    {
+        var messages = new List<ChatMessage>();
+
+        Invoke<object>("EnsureLimitReachedSystemNudge", messages, null);
+        Invoke<object>("EnsureLimitReachedSystemNudge", messages, null);
+
+        messages.Should().ContainSingle(m =>
+            m.Role == ChatRole.System &&
+            m.GetText().Contains("Tool call limit reached for this turn", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ForceCompleteOnToolLimit_AddsAssistantSummaryMessage()
+    {
+        var messages = new List<ChatMessage>();
+
+        Invoke<object>("ForceCompleteOnToolLimit", messages, null);
+
+        messages.Should().ContainSingle(m =>
+            m.Role == ChatRole.Assistant &&
+            m.GetText().Contains("maximum number of tool calls", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void BuildCompactedHistoryForLimitSummary_OmitsToolAndToolCallAssistantMessages()
+    {
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.User, "question"),
+            new(ChatRole.Assistant, [new ChatContent("calling")], toolCalls:
+            [
+                new ChatToolCall
+                {
+                    Id = "c1",
+                    Type = "function",
+                    Function = new ChatToolCallFunction { Name = "search", Arguments = default }
+                }
+            ]),
+            new ChatMessage("c1", "search", [new ChatContent("result")]),
+            new(ChatRole.Assistant, "answer")
+        };
+
+        var compacted = Invoke<List<ChatMessage>>("BuildCompactedHistoryForLimitSummary", messages);
+
+        compacted.Should().HaveCount(2);
+        compacted[0].Role.Should().Be(ChatRole.User);
+        compacted[1].GetText().Should().Be("answer");
     }
 }
