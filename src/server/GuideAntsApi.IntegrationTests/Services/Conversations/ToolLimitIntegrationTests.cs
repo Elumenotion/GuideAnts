@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using AntRunner.Chat;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -139,6 +140,7 @@ public sealed class ToolLimitIntegrationTests : BaseEndpointTest
             assistant.Updated = DateTime.UtcNow;
         }
         await db.SaveChangesAsync();
+        AssistantUtility.ClearCache(assistantName);
     }
 
     private static async Task<(Guid projectId, Guid notebookId)> SeedProjectNotebookAsync(ApplicationDbContext db)
