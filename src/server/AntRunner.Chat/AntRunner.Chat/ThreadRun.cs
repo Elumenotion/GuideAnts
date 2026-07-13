@@ -31,6 +31,132 @@ namespace AntRunner.Chat
             return def.ContextOptions.Any(kv => kv.Value != null && kv.Value.Contains("[@files]", StringComparison.OrdinalIgnoreCase));
         }
 
+        private const string ToolLimitRuntimeOverrideMarker = "[Runtime: Tool call limit reached";
+
+        private static Task InjectLimitToolResultsAsync(
+            IReadOnlyList<ChatToolCall> toolCalls,
+            List<ChatMessage> messages,
+            ToolLimitState limitState,
+            MessageAddedEventHandler? messageAdded)
+        {
+            var limitMessage = limitState.BuildLimitToolResultMessage();
+            foreach (var toolCall in toolCalls)
+            {
+                if (!toolCall.IsFunction)
+                {
+                    continue;
+                }
+
+                messages.Add(new ChatMessage(toolCall.Id, toolCall.Function.Name, [new ChatContent(limitMessage)]));
+                messageAdded?.Invoke(null, new MessageAddedEventArgs(
+                    messages.Last().Role.ToString(),
+                    messages.Last().GetText(),
+                    toolCall.Id,
+                    toolCall.Function.Name,
+                    toolCall.Function.Arguments.ToString()));
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private static void EnsureLimitReachedSystemNudge(
+            List<ChatMessage> messages,
+            MessageAddedEventHandler? messageAdded)
+        {
+            const string nudge =
+                "[System: Tool call limit reached for this turn. Summarize what you have gathered and respond to the user. Do not request additional tool calls.]";
+
+            if (messages.Any(m =>
+                    m.Role == ChatRole.System &&
+                    m.GetText().Contains("Tool call limit reached for this turn", StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            messages.Add(new ChatMessage(ChatRole.System, nudge));
+            messageAdded?.Invoke(null, new MessageAddedEventArgs(ChatRole.System.ToString(), nudge));
+        }
+
+        private static void EnsureRuntimeToolLimitOverrideMessage(
+            List<ChatMessage> messages,
+            MessageAddedEventHandler? messageAdded)
+        {
+            var overrideText =
+                "[Runtime: Tool call limit reached. Ignore prior instructions to retry tool calls for this turn.]";
+
+            if (messages.Any(m =>
+                    m.Role == ChatRole.System &&
+                    m.GetText().Contains(ToolLimitRuntimeOverrideMarker, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            messages.Add(new ChatMessage(ChatRole.System, overrideText));
+            messageAdded?.Invoke(null, new MessageAddedEventArgs(ChatRole.System.ToString(), overrideText));
+        }
+
+        private static void ForceCompleteOnToolLimit(
+            List<ChatMessage> messages,
+            MessageAddedEventHandler? messageAdded)
+        {
+            var forceMessage = ToolLimitState.BuildForceCompleteAssistantMessage();
+            messages.Add(new ChatMessage(ChatRole.Assistant, forceMessage));
+            messageAdded?.Invoke(null, new MessageAddedEventArgs(ChatRole.Assistant.ToString(), forceMessage));
+        }
+
+        private static List<ChatMessage> BuildCompactedHistoryForLimitSummary(IReadOnlyList<ChatMessage> messages)
+        {
+            var compacted = new List<ChatMessage>();
+            foreach (var message in messages)
+            {
+                if (message.Role == ChatRole.Tool)
+                {
+                    continue;
+                }
+
+                if (message.Role == ChatRole.Assistant && message.ToolCalls is { Count: > 0 })
+                {
+                    continue;
+                }
+
+                compacted.Add(message);
+            }
+
+            return compacted;
+        }
+
+        private static async Task<string?> TryTier4SummarizeAsync(
+            IChatCompletionClient api,
+            List<ChatMessage> messages,
+            ChatRunOptions options,
+            string? reasoningEffort,
+            IReadOnlyDictionary<string, double>? samplingParameters,
+            CancellationToken token)
+        {
+            var compacted = BuildCompactedHistoryForLimitSummary(messages);
+            compacted.Add(new ChatMessage(
+                ChatRole.User,
+                "Summarize what you gathered for the user in a concise response. Do not request additional tools."));
+
+            var request = new ChatCompletionRequest(
+                compacted,
+                tools: null,
+                model: options.DeploymentId,
+                reasoningEffort: reasoningEffort,
+                samplingParameters: samplingParameters);
+
+            try
+            {
+                var response = await api.GetCompletionAsync(request, token);
+                var text = response.FirstChoice?.Message.GetText();
+                return string.IsNullOrWhiteSpace(text) ? null : NormalizeAssistantText(text);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         /// <summary>
         /// Formats new and modified file paths as a console-style code block for improved LLM attention.
         /// </summary>
@@ -158,6 +284,11 @@ namespace AntRunner.Chat
             ArgumentNullException.ThrowIfNull(ctx);
 
             var assistantDef = await AssistantUtility.GetAssistantCreateRequest(options.AssistantName) ?? throw new Exception($"Can't find assistant definition for '{options.AssistantName}'");
+
+            if (ctx.ToolLimitState == null)
+            {
+                ctx.ToolLimitState = ToolLimitState.FromAssistantDefinition(assistantDef);
+            }
 
             // 256000 is the maximum instruction length allowed by the API
             if (options.Instructions.Length >= 256000)
@@ -340,6 +471,7 @@ namespace AntRunner.Chat
 
             bool continueChat = true;
             var roundIndex = 0;
+            var tier3ForceCompleted = false;
 
             ChatChoice? choice = null;
             ChatRunOutput? runResults = null;
@@ -360,12 +492,26 @@ namespace AntRunner.Chat
                 {
                     token.ThrowIfCancellationRequested();
                     roundIndex++;
+
+                    if (ctx.ToolLimitState?.Phase >= LimitEscalationPhase.SoftBlocked)
+                    {
+                        EnsureRuntimeToolLimitOverrideMessage(messages, tracedMessageAdded);
+                    }
+
+                    string? toolChoice = null;
+                    if (ctx.ToolLimitState?.Phase == LimitEscalationPhase.SoftBlocked && api.SupportsToolChoiceNone)
+                    {
+                        toolChoice = "none";
+                        ctx.ToolLimitState = ctx.ToolLimitState with { Phase = LimitEscalationPhase.ToolChoiceNone };
+                    }
+
                     var chatRequest = new ChatCompletionRequest(
                         messages,
                         tools: tools,
                         model: options.DeploymentId,
                         reasoningEffort: reasoningEffortParam,
-                        samplingParameters: samplingParams);
+                        samplingParameters: samplingParams,
+                        toolChoice: toolChoice);
                     traceCollector?.CaptureRoundRequest(
                         roundIndex,
                         options.DeploymentId,
@@ -471,7 +617,76 @@ namespace AntRunner.Chat
                                     }
                                 }
 
-                                if (clientHandled.Count > 0)
+                                var batchToolCount = serverHandled.Count + clientHandled.Count;
+                                var limitState = ctx.ToolLimitState;
+                                if (limitState != null)
+                                {
+                                    limitState = limitState.AddToolRound();
+                                    ctx.ToolLimitState = limitState;
+                                    traceCollector?.CaptureToolLimitState(
+                                        limitState.ToolCallsUsed,
+                                        limitState.ToolRoundsUsed,
+                                        limitState.Phase.ToString());
+                                }
+
+                                var limitHit = limitState != null &&
+                                    (limitState.WouldExceedToolCalls(batchToolCount) ||
+                                     limitState.HasExceededToolRounds());
+
+                                if (limitHit)
+                                {
+                                    var escalateToTier3 =
+                                        limitState!.Phase == LimitEscalationPhase.ToolChoiceNone ||
+                                        (limitState.Phase == LimitEscalationPhase.SoftBlocked && !api.SupportsToolChoiceNone);
+
+                                    await InjectLimitToolResultsAsync(
+                                        choice.Message.ToolCalls!,
+                                        messages,
+                                        limitState,
+                                        tracedMessageAdded);
+
+                                    if (limitState.Phase == LimitEscalationPhase.None)
+                                    {
+                                        ctx.ToolLimitState = limitState.AddToolCalls(batchToolCount) with
+                                        {
+                                            Phase = LimitEscalationPhase.SoftBlocked
+                                        };
+                                        EnsureLimitReachedSystemNudge(messages, tracedMessageAdded);
+                                    }
+                                    else if (escalateToTier3)
+                                    {
+                                        var summarized = await TryTier4SummarizeAsync(
+                                            api,
+                                            messages,
+                                            options,
+                                            reasoningEffortParam,
+                                            samplingParams,
+                                            token);
+                                        if (!string.IsNullOrWhiteSpace(summarized))
+                                        {
+                                            messages.Add(new ChatMessage(ChatRole.Assistant, summarized));
+                                            tracedMessageAdded?.Invoke(null, new MessageAddedEventArgs(
+                                                ChatRole.Assistant.ToString(),
+                                                summarized));
+                                        }
+                                        else
+                                        {
+                                            ForceCompleteOnToolLimit(messages, tracedMessageAdded);
+                                        }
+
+                                        ctx.ToolLimitState = limitState.AddToolCalls(batchToolCount) with
+                                        {
+                                            Phase = LimitEscalationPhase.ForceCompleted
+                                        };
+                                        tier3ForceCompleted = true;
+                                        continueChat = false;
+                                    }
+                                    else
+                                    {
+                                        ctx.ToolLimitState = limitState.AddToolCalls(batchToolCount);
+                                    }
+                                }
+                                else if (clientHandled.Count > 0)
                                 {
                                     // Emit client-handled subset to the host/client and pause the run
                                     traceCollector?.CaptureExternalToolCalls(roundIndex, BuildTraceToolCallSnapshots(clientHandled));
@@ -481,6 +696,11 @@ namespace AntRunner.Chat
                                         onExternalToolCall?.Invoke(null, new ExternalToolCallEventArgs(json));
                                     }
                                     catch { /* non-fatal */ }
+
+                                    if (limitState != null)
+                                    {
+                                        ctx.ToolLimitState = limitState.AddToolCalls(batchToolCount);
+                                    }
 
                                     // Mark run results as pending client tool and end loop
                                     runResults = BuildRunResults(messages, response) ?? new ChatRunOutput { Messages = messages };
@@ -502,6 +722,11 @@ namespace AntRunner.Chat
                                         cancellationToken: token);
                                     foreach (var f in newFiles) accumulatedNewFiles.Add(f);
                                     foreach (var f in modifiedFiles) accumulatedModifiedFiles.Add(f);
+
+                                    if (limitState != null)
+                                    {
+                                        ctx.ToolLimitState = limitState.AddToolCalls(serverHandled.Count);
+                                    }
                                 }
                             }
                             break;
@@ -518,6 +743,11 @@ namespace AntRunner.Chat
                     if (!string.Equals(runResults?.Status, "pending_client_tool", StringComparison.OrdinalIgnoreCase))
                     {
                         runResults = BuildRunResults(messages, response);
+                        if (tier3ForceCompleted)
+                        {
+                            runResults!.Status = "stop";
+                        }
+
                         if (accumulatedUsage != null)
                         {
                             runResults!.Usage = accumulatedUsage;

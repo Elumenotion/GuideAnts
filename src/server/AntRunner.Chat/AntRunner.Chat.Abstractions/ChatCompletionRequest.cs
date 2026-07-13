@@ -23,17 +23,25 @@ public sealed class ChatCompletionRequest
     [JsonIgnore]
     public IReadOnlyDictionary<string, double>? SamplingParameters { get; }
 
+    /// <summary>
+    /// Optional tool-choice override for limit escalation (Tier 2). Only <c>"none"</c> is used today.
+    /// </summary>
+    [JsonPropertyName("tool_choice")]
+    public string? ToolChoice { get; }
+
     public ChatCompletionRequest(
         IReadOnlyList<ChatMessage> messages,
         IReadOnlyList<ChatToolDefinition>? tools = null,
         string? model = null,
         string? reasoningEffort = null,
-        IReadOnlyDictionary<string, double>? samplingParameters = null)
+        IReadOnlyDictionary<string, double>? samplingParameters = null,
+        string? toolChoice = null)
     {
         Messages = messages ?? [];
         Tools = tools;
         Model = model;
         ReasoningEffort = reasoningEffort;
         SamplingParameters = samplingParameters;
+        ToolChoice = toolChoice;
     }
 }

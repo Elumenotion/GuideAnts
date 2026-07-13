@@ -562,6 +562,31 @@ public sealed class LlamaCppChatClientTests
     }
 
     [TestMethod]
+    public async Task GetCompletionAsync_SendsToolChoiceNone_WhenLimitEscalationRequestsIt()
+    {
+        string? capturedBody = null;
+        var handler = new StaticResponseHandler(async httpRequest =>
+        {
+            capturedBody = await httpRequest.Content!.ReadAsStringAsync();
+            return JsonResponse("""{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""");
+        });
+
+        var client = CreateClient(handler, profileData: CreateQwen35ProfileData());
+        var request = new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, "hi")],
+            tools: [new ChatToolDefinition(new ChatFunctionDefinition("search", "search", null))],
+            model: "qwen3.5-27b",
+            toolChoice: "none");
+
+        await client.GetCompletionAsync(request);
+
+        capturedBody.Should().NotBeNull();
+        using var doc = JsonDocument.Parse(capturedBody!);
+        doc.RootElement.GetProperty("tool_choice").GetString().Should().Be("none");
+        doc.RootElement.GetProperty("tools").GetArrayLength().Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task GetCompletionAsync_OmitsProfileToolFields_WhenToolsAbsent()
     {
         string? capturedBody = null;

@@ -68,6 +68,12 @@ public sealed record InvocationContext(
     /// </summary>
     public Action<ToolActivityUpdate>? ToolActivitySink { get; set; }
 
+    /// <summary>
+    /// Per-turn tool call budget and escalation phase for this ThreadRun scope.
+    /// Inherited by nested Agent.Invoke and evaluator reopen (not reset).
+    /// </summary>
+    public ToolLimitState? ToolLimitState { get; set; }
+
     public bool IsPublished { get; init; } = CheckIsPublished(NotebookId);
 
     private static bool CheckIsPublished(Guid notebookId)

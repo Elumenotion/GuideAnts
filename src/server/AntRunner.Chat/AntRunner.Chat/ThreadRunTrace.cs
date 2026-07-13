@@ -33,6 +33,8 @@ public interface IThreadRunTraceCollector
         string? toolCallsJson);
 
     void CaptureTerminalStatus(string status, string? errorMessage = null);
+
+    void CaptureToolLimitState(int toolCallsUsed, int toolRoundsUsed, string escalationPhase);
 }
 
 public sealed record ThreadRunTraceMessageSnapshot(

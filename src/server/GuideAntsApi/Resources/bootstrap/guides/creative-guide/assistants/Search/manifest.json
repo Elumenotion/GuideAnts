@@ -1,6 +1,7 @@
 {
   "name": "Search",
   "description": "I have tools to search the web for content and images and to find facts in files in this notebook.",
+  "max_tool_calls_per_turn": 12,
   "tools": [
     {
       "type": "ReadWeb"

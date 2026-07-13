@@ -23,6 +23,8 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
     private readonly string? _defaultModel;
     private readonly ILogger<OpenRouterChatClient> _logger;
 
+    public bool SupportsToolChoiceNone => true;
+
     public OpenRouterChatClient(
         HttpClient httpClient,
         OpenRouterChatConfig config,
@@ -182,7 +184,8 @@ public sealed class OpenRouterChatClient : IChatCompletionClient
                 Temperature: temperature,
                 TopP: topP,
                 ReasoningEffort: request.ReasoningEffort,
-                Stream: stream)
+                Stream: stream,
+                ToolChoice: request.ToolChoice)
             {
                 Extensions = extensions
             };
@@ -636,7 +639,8 @@ internal sealed record OpenRouterChatRequest(
     double? Temperature,
     [property: JsonPropertyName("top_p")] double? TopP,
     [property: JsonPropertyName("reasoning_effort")] string? ReasoningEffort,
-    bool Stream)
+    bool Stream,
+    [property: JsonPropertyName("tool_choice")] string? ToolChoice = null)
 {
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extensions { get; init; }

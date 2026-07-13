@@ -29,6 +29,8 @@ public record AssistantDetailsDto(
 ) {
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
     public List<AssistantSkillDto>? Skills { get; init; }
+    public int? MaxToolCallsPerTurn { get; init; }
+    public int? MaxToolRoundsPerTurn { get; init; }
 }
 
 // Create assistant request
@@ -52,6 +54,8 @@ public record CreateAssistantDto(
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
     public List<AssistantSkillSaveDto>? Skills { get; init; }
+    public int? MaxToolCallsPerTurn { get; init; }
+    public int? MaxToolRoundsPerTurn { get; init; }
 }
 
 // Update assistant request
@@ -76,4 +80,6 @@ public record UpdateAssistantDto(
     public Guid? ProjectId { get; init; }
     public List<EnvironmentVariableDto>? EnvironmentVariables { get; init; }
     public List<AssistantSkillSaveDto>? Skills { get; init; }
+    public int? MaxToolCallsPerTurn { get; init; }
+    public int? MaxToolRoundsPerTurn { get; init; }
 }

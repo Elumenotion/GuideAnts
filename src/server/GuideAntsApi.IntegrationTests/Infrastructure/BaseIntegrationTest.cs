@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using AntRunner.Chat;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
@@ -39,6 +40,9 @@ public abstract class BaseIntegrationTest : IAsyncDisposable
     {
         if (SharedFactory == null)
             throw new InvalidOperationException("SharedFactory is not initialized. Ensure ClassInitialize ran properly.");
+
+        FakeChatCompletionBehavior.Instance.Reset();
+        AssistantUtility.ClearAllCache();
 
         // Create a fresh client for each test method
         Client = SharedFactory.CreateClient();

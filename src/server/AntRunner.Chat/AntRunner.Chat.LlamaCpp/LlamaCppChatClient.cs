@@ -25,6 +25,8 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
     private readonly ILogger<LlamaCppChatClient> _logger;
     private readonly IReadOnlyList<OutputStripRule> _assistantOutputStripRules;
 
+    public bool SupportsToolChoiceNone => true;
+
     public LlamaCppChatClient(
         HttpClient httpClient,
         LlamaCppConfig config,
@@ -503,6 +505,11 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
             var mappedTools = request.Tools.Select(MapTool).ToList();
             body["tools"] = JsonSerializer.SerializeToNode(mappedTools, RequestJsonOptions);
             ApplyProfileToolFields(body);
+        }
+
+        if (string.Equals(request.ToolChoice, "none", StringComparison.Ordinal))
+        {
+            body["tool_choice"] = "none";
         }
 
         MergeSamplingParameters(body, request);
