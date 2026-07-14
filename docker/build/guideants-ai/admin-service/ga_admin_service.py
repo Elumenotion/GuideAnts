@@ -34,7 +34,7 @@ from engine_proxy import (  # noqa: E402
     TTS_ENGINE_BASE_URL,
     proxy_to_engine,
 )
-from warmup_orchestrator import configure_warmup_orchestrator, maybe_auto_apply_on_startup  # noqa: E402
+from warmup_orchestrator import apply_warmup_on_startup, configure_warmup_orchestrator  # noqa: E402
 from warmup_routes import ROUTER as WARMUP_ROUTER  # noqa: E402
 
 
@@ -89,7 +89,7 @@ APP.mount("/sd", sd_service.APP)
 async def on_startup() -> None:
     configure_warmup_orchestrator(log_event=lambda event, **fields: print({"event": event, **fields}, flush=True))
     await sd_service.on_startup()
-    maybe_auto_apply_on_startup()
+    apply_warmup_on_startup()
 
 
 @APP.on_event("shutdown")

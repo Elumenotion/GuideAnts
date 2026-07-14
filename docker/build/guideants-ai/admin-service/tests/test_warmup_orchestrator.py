@@ -19,10 +19,13 @@ import warmup_orchestrator
 from warmup_orchestrator import (
     _aux_services_to_drain_before_llama,
     _run_reconcile_loop,
+    _run_startup_apply,
+    apply_warmup_on_startup,
     compute_transitions,
     request_warmup_apply,
 )
 from warmup_state import (
+    APPLY_STATUS_PENDING,
     APPLY_STATUS_APPLYING,
     APPLY_STATUS_APPLIED,
     atomic_write_warmup_state,
@@ -100,6 +103,43 @@ class WarmupOrchestratorTests(unittest.TestCase):
             result = request_warmup_apply()
             self.assertTrue(result["noop"])
             self.assertEqual(result["appliedRevision"], 1)
+
+    @mock.patch("warmup_orchestrator._start_startup_worker_if_needed", return_value=True)
+    def test_apply_warmup_on_startup_initializes_state_and_starts_loader(self, mock_start) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ini_path = os.path.join(tmp, "warmup-desired.ini")
+            state_path = os.path.join(tmp, ".warmup-state.json")
+            os.environ["GA_WARMUP_DESIRED_PATH"] = ini_path
+            os.environ["GA_WARMUP_STATE_PATH"] = state_path
+            document = _sample_document_with_sections()
+            write_warmup_desired(document)
+            atomic_write_warmup_state(
+                build_warmup_state_document(
+                    desired_revision=1,
+                    applied_revision=1,
+                    apply_status=APPLY_STATUS_APPLIED,
+                    apply_error=None,
+                    desired_sha256=document.content_fingerprint(),
+                    services={
+                        SERVICE_LLAMA: {
+                            "desired": "warm",
+                            "applied": "warm",
+                            "phase": "ready",
+                            "routerAlias": "Qwen-Test",
+                        }
+                    },
+                )
+            )
+
+            apply_warmup_on_startup()
+
+            state = read_warmup_state()
+            self.assertIsNotNone(state)
+            assert state is not None
+            self.assertEqual(state["appliedRevision"], 0)
+            self.assertEqual(state["applyStatus"], APPLY_STATUS_PENDING)
+            self.assertEqual(state["services"][SERVICE_LLAMA]["applied"], "idle")
+            mock_start.assert_called_once()
 
     @mock.patch("warmup_orchestrator._start_apply_worker_if_needed", return_value=True)
     def test_request_apply_starts_worker_when_pending(self, _mock_start) -> None:
@@ -295,6 +335,32 @@ class WarmupReconcileExecutionTests(unittest.TestCase):
         self.assertEqual([c for c in engine.calls if c[0].startswith("llama")], [])
         self.assertEqual(final_state["applyStatus"], APPLY_STATUS_APPLIED)
         self.assertEqual(final_state["appliedRevision"], 2)
+
+    def test_startup_apply_loads_warm_services_from_ini(self) -> None:
+        engine = FakeEngine()
+        self._patch_engine(engine)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["GA_WARMUP_DESIRED_PATH"] = os.path.join(tmp, "warmup-desired.ini")
+            os.environ["GA_WARMUP_STATE_PATH"] = os.path.join(tmp, ".warmup-state.json")
+
+            document = _sample_document(revision=1, sections=self._all_warm_aux())
+            document.sections[SERVICE_LLAMA] = WarmupServiceSection(desired="warm", router_alias="Primary")
+            write_warmup_desired(document)
+            atomic_write_warmup_state(
+                build_initial_state_from_desired(document, desired_sha256=document.content_fingerprint())
+            )
+
+            _run_startup_apply()
+            final_state = read_warmup_state()
+
+        self.assertEqual([c for c in engine.calls if c[0] == "llama-load"], [("llama-load", "Primary")])
+        self.assertEqual(
+            [svc for kind, svc in engine.calls if kind == "aux-load"],
+            ["SpeechTranscription", "Embeddings", "SpeechSynthesis", "ImageGeneration"],
+        )
+        self.assertEqual(final_state["applyStatus"], APPLY_STATUS_APPLIED)
+        self.assertEqual(final_state["appliedRevision"], 1)
 
 
 if __name__ == "__main__":

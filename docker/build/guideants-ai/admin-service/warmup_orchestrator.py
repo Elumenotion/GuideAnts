@@ -31,6 +31,7 @@ from warmup_state import (
     APPLY_STATUS_IDLE,
     APPLY_STATUS_PENDING,
     atomic_write_warmup_state,
+    build_initial_state_from_desired,
     mutate_warmup_state,
     read_warmup_state,
 )
@@ -330,6 +331,118 @@ def _reconcile_aux(service: str, section: WarmupServiceSection, action: str) -> 
     return True
 
 
+def _cold_start_load_map(document: WarmupDesiredDocument) -> dict[str, str]:
+    """Warm services to load on container cold start. Engines are empty — no unloads."""
+    actions: dict[str, str] = {}
+    for service in (SERVICE_LLAMA, *AUX_SERVICES):
+        section = document.sections.get(service)
+        if section is not None and section.desired == "warm":
+            actions[service] = "load"
+    return actions
+
+
+def _execute_action_map(
+    desired: WarmupDesiredDocument,
+    state: dict[str, Any],
+    action_map: dict[str, str],
+) -> bool:
+    ok = True
+
+    llama_action = action_map.get(SERVICE_LLAMA)
+    drain_aux = _llama_needs_gpu_drain(action_map, desired)
+    gpu_reload_set = _aux_services_to_drain_before_llama(desired, state) if drain_aux else set()
+    if drain_aux:
+        to_drain = set(gpu_reload_set)
+        for service in AUX_UNLOAD_ORDER:
+            action = action_map.get(service)
+            if action == "unload":
+                to_drain.add(service)
+        for service in AUX_UNLOAD_ORDER:
+            if service not in to_drain:
+                continue
+            section = desired.sections.get(service)
+            if section is None:
+                continue
+            if not _reconcile_aux(service, section, "unload"):
+                ok = False
+
+    if SERVICE_LLAMA in action_map:
+        llama_section = desired.sections.get(SERVICE_LLAMA)
+        if llama_section is not None:
+            if not _reconcile_llama(llama_section, action_map[SERVICE_LLAMA]):
+                ok = False
+
+    for service in AUX_LOAD_ORDER:
+        action = action_map.get(service)
+        if action != "load" and service not in gpu_reload_set:
+            continue
+        section = desired.sections.get(service)
+        if section is None:
+            continue
+        if not _reconcile_aux(service, section, "load"):
+            ok = False
+
+    for service in AUX_UNLOAD_ORDER:
+        action = action_map.get(service)
+        if action != "unload":
+            continue
+        section = desired.sections.get(service)
+        if section is None:
+            continue
+        if drain_aux and llama_action in {"load", "unload"}:
+            continue
+        if not _reconcile_aux(service, section, "unload"):
+            ok = False
+
+    return ok
+
+
+def _run_startup_apply() -> None:
+    """Container cold start: load warm services from warmup-desired.ini."""
+    try:
+        desired = read_warmup_desired()
+        if desired is None:
+            return
+
+        state = read_warmup_state()
+        if state is None:
+            return
+
+        action_map = _cold_start_load_map(desired)
+        if not action_map:
+            _set_apply_meta(
+                apply_status=APPLY_STATUS_APPLIED,
+                apply_error=None,
+                applied_revision=desired.revision,
+                in_progress_revision=None,
+            )
+            return
+
+        _set_apply_meta(
+            apply_status=APPLY_STATUS_APPLYING,
+            apply_error=None,
+            in_progress_revision=desired.revision,
+        )
+
+        ok = _execute_action_map(desired, state, action_map)
+        if ok:
+            _set_apply_meta(
+                apply_status=APPLY_STATUS_APPLIED,
+                apply_error=None,
+                applied_revision=desired.revision,
+                in_progress_revision=None,
+            )
+        else:
+            _set_apply_meta(
+                apply_status=APPLY_STATUS_FAILED,
+                apply_error="one or more services failed to load on startup",
+                in_progress_revision=None,
+            )
+    except Exception as exc:  # noqa: BLE001 — background worker must not crash silently
+        _log("warmup_startup_failed", reason=str(exc))
+        _set_apply_meta(apply_status=APPLY_STATUS_FAILED, apply_error=str(exc), in_progress_revision=None)
+
+
 def _run_reconcile_loop() -> None:
     try:
         while True:
@@ -367,58 +480,7 @@ def _run_reconcile_loop() -> None:
                 in_progress_revision=target_revision,
             )
 
-            ok = True
-
-            # Unload aux in D11 order when needed (or when llama change requires drain).
-            llama_action = action_map.get(SERVICE_LLAMA)
-            drain_aux = _llama_needs_gpu_drain(action_map, desired)
-            # Aux that are warm and must stay warm, but have to be temporarily unloaded to
-            # free GPU for the llama change. These MUST be reloaded after the llama reconcile.
-            gpu_reload_set = _aux_services_to_drain_before_llama(desired, state) if drain_aux else set()
-            if drain_aux:
-                to_drain = set(gpu_reload_set)
-                for service in AUX_UNLOAD_ORDER:
-                    action = action_map.get(service)
-                    if action == "unload":
-                        to_drain.add(service)
-                for service in AUX_UNLOAD_ORDER:
-                    if service not in to_drain:
-                        continue
-                    section = desired.sections.get(service)
-                    if section is None:
-                        continue
-                    if not _reconcile_aux(service, section, "unload"):
-                        ok = False
-
-            if SERVICE_LLAMA in action_map:
-                llama_section = desired.sections.get(SERVICE_LLAMA)
-                if llama_section is not None:
-                    if not _reconcile_llama(llama_section, action_map[SERVICE_LLAMA]):
-                        ok = False
-
-            for service in AUX_LOAD_ORDER:
-                action = action_map.get(service)
-                # Load services that changed to warm, plus any that were GPU-drained for the
-                # llama change and must be restored to their warm desired state.
-                if action != "load" and service not in gpu_reload_set:
-                    continue
-                section = desired.sections.get(service)
-                if section is None:
-                    continue
-                if not _reconcile_aux(service, section, "load"):
-                    ok = False
-
-            for service in AUX_UNLOAD_ORDER:
-                action = action_map.get(service)
-                if action != "unload":
-                    continue
-                section = desired.sections.get(service)
-                if section is None:
-                    continue
-                if drain_aux and llama_action in {"load", "unload"}:
-                    continue  # already unloaded above when draining for llama
-                if not _reconcile_aux(service, section, "unload"):
-                    ok = False
+            ok = _execute_action_map(desired, state, action_map)
 
             # Re-read desired in case revision changed mid-apply.
             latest = read_warmup_desired()
@@ -445,14 +507,22 @@ def _run_reconcile_loop() -> None:
         _set_apply_meta(apply_status=APPLY_STATUS_FAILED, apply_error=str(exc), in_progress_revision=None)
 
 
-def _start_apply_worker_if_needed() -> bool:
+def _start_worker(target: Callable[[], None], *, thread_name: str) -> bool:
     global _APPLY_THREAD
     with _APPLY_THREAD_LOCK:
         if _APPLY_THREAD is not None and _APPLY_THREAD.is_alive():
             return False
-        _APPLY_THREAD = threading.Thread(target=_run_reconcile_loop, name="warmup-orchestrator", daemon=True)
+        _APPLY_THREAD = threading.Thread(target=target, name=thread_name, daemon=True)
         _APPLY_THREAD.start()
         return True
+
+
+def _start_apply_worker_if_needed() -> bool:
+    return _start_worker(_run_reconcile_loop, thread_name="warmup-orchestrator")
+
+
+def _start_startup_worker_if_needed() -> bool:
+    return _start_worker(_run_startup_apply, thread_name="warmup-startup")
 
 
 def request_warmup_apply() -> dict[str, Any]:
@@ -516,13 +586,18 @@ def request_warmup_apply() -> dict[str, Any]:
     }
 
 
-def maybe_auto_apply_on_startup() -> None:
-    """Container startup hook: apply when desiredRevision > appliedRevision."""
+def apply_warmup_on_startup() -> None:
+    """Container startup: load warm services from warmup-desired.ini."""
     desired = read_warmup_desired()
-    state = read_warmup_state()
     if desired is None:
         return
-    applied_revision = int((state or {}).get("appliedRevision") or 0)
-    if desired.revision > applied_revision:
-        _log("warmup_auto_apply_on_startup", desiredRevision=desired.revision, appliedRevision=applied_revision)
-        request_warmup_apply()
+
+    # Fresh state for this process; volume state from a prior container is not authoritative.
+    atomic_write_warmup_state(
+        build_initial_state_from_desired(
+            desired,
+            desired_sha256=desired.content_fingerprint(),
+        )
+    )
+    _log("warmup_startup", desiredRevision=desired.revision)
+    _start_startup_worker_if_needed()
