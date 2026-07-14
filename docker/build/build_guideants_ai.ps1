@@ -2,9 +2,7 @@ param(
     [switch]$RebuildBase,
     [switch]$All,
     [ValidateSet('cpu', 'cuda13', 'rocm', 'slim', 'vulkan')]
-    [string]$Backend,
-  # Git branch or tag cloned during the Docker audiocpp-*-builder stage (see Dockerfile.* AUDIOCPP_REF).
-    [string]$AudioCppRef = 'release-0.2'
+    [string]$Backend
 )
 
 $ErrorActionPreference = 'Stop'
@@ -278,7 +276,6 @@ Write-Host "Image tag:     $imageTag"
 Write-Host "Latest alias:  $latestImageTag"
 Write-Host "Deps target:   $depsTarget"
 Write-Host "Rebuild base:  $RebuildBase"
-Write-Host "audio.cpp ref: $AudioCppRef"
 Write-Host ""
 
 if (-not (Test-Path $requirementsSrc)) {
@@ -357,16 +354,12 @@ Copy-Item -Path $requirementsSrc -Destination $reqDest -Force
 
 Write-Host "Build context staged." -ForegroundColor Green
 
-$audioCppRefFile = Join-Path $buildStateDir 'audio-cpp-ref.txt'
-Set-Content -Path $audioCppRefFile -Value $AudioCppRef -Encoding UTF8 -NoNewline
-
 $depsHashInputs = @(
     $dockerfilePath,
     (Join-Path $buildContext 'asr-requirements.txt'),
     (Join-Path $buildContext 'tts-requirements.txt'),
     (Join-Path $buildContext 'emb-requirements.txt'),
-    $reqDest,
-    $audioCppRefFile
+    $reqDest
 )
 $depsHash = (Get-CombinedHash -Paths $depsHashInputs).Substring(0, 12)
 $depsTag = "guideants-ai-deps:${Backend}-${depsHash}"
@@ -399,7 +392,6 @@ try {
             }
         }
         $depsBuildArgs += @(
-            '--build-arg', "AUDIOCPP_REF=$AudioCppRef",
             '--target', $depsTarget,
             '-t', $depsTag,
             '-t', $depsCacheTag,
@@ -434,7 +426,6 @@ try {
     $dockerArgs += @(
         '--cache-from', "type=local,src=$depsCachePath",
         '--cache-from', "type=local,src=$finalCachePath",
-        '--build-arg', "AUDIOCPP_REF=$AudioCppRef",
         '--build-arg', "$depsImageArg=$depsTag",
         '--target', $fullTarget,
         '-t', $imageTag,

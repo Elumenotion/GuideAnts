@@ -4,7 +4,6 @@
 # stable-diffusion.cpp builders (baked by target choice)
 # =============================================================================
 ARG SDCPP_REF=master
-ARG AUDIOCPP_REF=release-0.2
 ARG SD_CUDA_ARCHITECTURES="75;80;86;89;90"
 ARG AUDIO_CUDA_ARCHITECTURES="75;80;86;89;90"
 ARG GA_DEPS_CUDA13_IMAGE=deps-cuda13
@@ -51,7 +50,6 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} h
     && strip /out/sd-cli /out/sd-server || true
 
 FROM nvidia/cuda:13.0.0-devel-ubuntu24.04 AS audiocpp-cuda-builder
-ARG AUDIOCPP_REF
 ARG AUDIO_CUDA_ARCHITECTURES
 ARG GA_UBUNTU_MIRROR_URL
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
@@ -70,7 +68,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends build-essential ca-certificates cmake git \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --recursive --depth 1 --shallow-submodules --branch ${AUDIOCPP_REF} https://github.com/0xShug0/audio.cpp /src/audio.cpp \
+RUN git clone --recursive --depth 1 --shallow-submodules --branch main https://github.com/0xShug0/audio.cpp /src/audio.cpp \
     && cmake -S /src/audio.cpp -B /src/audio.cpp/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DENGINE_ENABLE_CUDA=ON \

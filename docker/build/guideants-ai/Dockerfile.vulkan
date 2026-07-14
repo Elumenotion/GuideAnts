@@ -4,7 +4,6 @@
 # Vulkan stable-diffusion.cpp builder
 # =============================================================================
 ARG SDCPP_REF=master
-ARG AUDIOCPP_REF=release-0.2
 ARG GA_DEPS_VULKAN_IMAGE=deps-vulkan
 ARG GA_UBUNTU_MIRROR_URL=http://archive.ubuntu.com/ubuntu
 ARG PYTHON311_VERSION=3.11.11
@@ -54,7 +53,6 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} h
     && strip /out/sd-cli /out/sd-server || true
 
 FROM ubuntu:24.04 AS audiocpp-vulkan-builder
-ARG AUDIOCPP_REF
 ARG GA_UBUNTU_MIRROR_URL
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
         sed -i \
@@ -77,7 +75,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         build-essential ca-certificates cmake git \
         libvulkan-dev glslang-tools glslc spirv-headers \
     && rm -rf /var/lib/apt/lists/*
-RUN git clone --recursive --depth 1 --shallow-submodules --branch ${AUDIOCPP_REF} https://github.com/0xShug0/audio.cpp /src/audio.cpp \
+RUN git clone --recursive --depth 1 --shallow-submodules --branch main https://github.com/0xShug0/audio.cpp /src/audio.cpp \
     && cmake -S /src/audio.cpp -B /src/audio.cpp/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DENGINE_ENABLE_CUDA=OFF \

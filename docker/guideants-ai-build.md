@@ -180,15 +180,14 @@ Supported switches:
 
 - none: prompt for backend, build final GuideAnts AI image
 - `-RebuildBase`: prompt for backend, force rebuild without cache
-- `-AudioCppRef <branch|tag>`: audio.cpp git ref cloned during `audiocpp_server` compile (default `release-0.2`; use `main` for Release 0.3 WIP)
 - `-All`: build GuideAnts AI, PlantUML, MSSQL, and the compose-used WebAPI+UI image
 - `-RebuildBase -All`: full no-cache GuideAnts AI build plus additional images
 
-Example (CUDA 13, fresh compile from `audio.cpp` `main`):
+Example (CUDA 13, fresh compile):
 
 ```powershell
 cd docker\build
-.\build_guideants_ai.ps1 -Backend cuda13 -RebuildBase -AudioCppRef main
+.\build_guideants_ai.ps1 -Backend cuda13 -RebuildBase
 cd ..\docker
 docker compose -f docker-compose.cuda.yml up -d --force-recreate guideants-ai
 ```
