@@ -16,8 +16,13 @@ export function LimitNumberField({
   onChange,
   onErrorChange,
 }: LimitNumberFieldProps) {
-  const [rawValue, setRawValue] = useState<string | null>(null);
-  const displayValue = rawValue ?? (value === undefined ? '' : String(value));
+  const [isFocused, setIsFocused] = useState(false);
+  const [rawValue, setRawValue] = useState('');
+  const displayValue = isFocused
+    ? rawValue
+    : value === undefined
+      ? ''
+      : String(value);
   const parsed = parseOptionalPositiveInt(displayValue);
   const error = parsed.ok ? undefined : parsed.error;
 
@@ -40,6 +45,14 @@ export function LimitNumberField({
         id={id}
         min={1}
         value={displayValue}
+        onFocus={() => {
+          setIsFocused(true);
+          setRawValue(value === undefined ? '' : String(value));
+        }}
+        onBlur={() => {
+          setIsFocused(false);
+          setRawValue('');
+        }}
         onChange={(event) => handleChange(event.target.value)}
         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         placeholder="No limit"

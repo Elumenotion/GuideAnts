@@ -176,7 +176,7 @@ public sealed class LocalAiDesiredStateBuilderTests
     }
 
     [TestMethod]
-    public async Task BuildIniAsync_ImageGenerationLocalWithoutModelId_WritesIdle()
+    public async Task BuildIniAsync_ImageGenerationLocalWithoutModelId_Throws()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -201,11 +201,10 @@ public sealed class LocalAiDesiredStateBuilderTests
             new StubHttpClientFactory(),
             NullLogger<LocalAiDesiredStateBuilder>.Instance);
 
-        var ini = await builder.BuildIniAsync();
+        var act = () => builder.BuildIniAsync();
 
-        ini.Should().Contain("[ImageGeneration]");
-        ini.Should().Contain("enabled = off");
-        ini.Should().NotContain("bundle_id =");
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*no model or bundle configured in ServiceModes*");
     }
 
     private sealed class StubHttpClientFactory : IHttpClientFactory

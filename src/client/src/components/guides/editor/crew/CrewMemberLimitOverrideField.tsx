@@ -1,14 +1,14 @@
 import { LimitNumberField } from '../toolLimits/LimitNumberField';
 
 interface CrewMemberLimitOverrideFieldProps {
-  assistantName: string;
+  assistantId: string;
   value?: number;
   onChange: (value: number | undefined) => void;
   onDirtyChange?: () => void;
 }
 
 export function CrewMemberLimitOverrideField({
-  assistantName,
+  assistantId,
   value,
   onChange,
   onDirtyChange,
@@ -16,7 +16,8 @@ export function CrewMemberLimitOverrideField({
   return (
     <div className="mt-2">
       <LimitNumberField
-        id={`crew-member-limit-${assistantName.replace(/\s+/g, '-').toLowerCase()}`}
+        key={assistantId}
+        id={`crew-member-limit-${assistantId}`}
         label="Max tool calls per invocation"
         value={value}
         onChange={(nextValue) => {

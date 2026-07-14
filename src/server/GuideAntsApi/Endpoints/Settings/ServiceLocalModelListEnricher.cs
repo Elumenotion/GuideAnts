@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using GuideAntsApi.Endpoints;
 using GuideAntsApi.Options;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 using Microsoft.AspNetCore.Http;
@@ -55,9 +56,9 @@ internal static class ServiceLocalModelListEnricher
                     statusCode: StatusCodes.Status502BadGateway);
             }
 
-            var selectedBundleId = await ResolveSelectedImageBundleIdAsync(
+            var selectedBundleId = await ConfiguredLocalServiceSelectionSync.ResolveOrSyncImageBundleAsync(
                     settings,
-                    body,
+                    ServiceLocalModelListEnricher.ReadConfiguredActiveBundleId(body),
                     cancellationToken)
                 .ConfigureAwait(false);
             var enriched = ApplyImageBundleSelection(body, selectedBundleId);
@@ -65,36 +66,7 @@ internal static class ServiceLocalModelListEnricher
         }
     }
 
-    private static async Task<string?> ResolveSelectedImageBundleIdAsync(
-        IApplicationSettingsService settings,
-        string upstreamBody,
-        CancellationToken cancellationToken)
-    {
-        var modes = await settings
-            .GetServiceModesAsync(RoutedServiceNames.ImageGeneration, cancellationToken)
-            .ConfigureAwait(false);
-        var localSection = $"{LocalServiceHostsOptions.SectionName}:ImageGenerationBaseUrl";
-        var localMode = modes.FirstOrDefault(mode =>
-            string.Equals(mode.ProviderSection, localSection, StringComparison.OrdinalIgnoreCase));
-        var selected = localMode?.ModelId?.Trim();
-        if (!string.IsNullOrWhiteSpace(selected))
-        {
-            return selected;
-        }
-
-        var legacyMarker = TryReadLegacyActiveBundleMarker(upstreamBody);
-        if (string.IsNullOrWhiteSpace(legacyMarker))
-        {
-            return null;
-        }
-
-        await settings
-            .SetServiceModeModelIdAsync(RoutedServiceNames.ImageGeneration, legacyMarker, cancellationToken)
-            .ConfigureAwait(false);
-        return legacyMarker;
-    }
-
-    private static string? TryReadLegacyActiveBundleMarker(string upstreamBody)
+    public static string? ReadConfiguredActiveBundleId(string upstreamBody)
     {
         try
         {

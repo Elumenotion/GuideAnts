@@ -142,10 +142,36 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
 
         try
         {
+            await EnsureConfiguredLocalSelectionsSyncedAsync(cancellationToken).ConfigureAwait(false);
+
             var ini = await _desiredStateBuilder.BuildIniAsync(options, cancellationToken).ConfigureAwait(false);
-            await _orchestrationClient.PutDesiredAsync(ini, cancellationToken: cancellationToken)
+            var writeResult = await _orchestrationClient
+                .PutDesiredAsync(ini, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            await _orchestrationClient.ApplyAsync(cancellationToken).ConfigureAwait(false);
+
+            if (await ShouldRequestWarmupApplyAsync(writeResult, cancellationToken).ConfigureAwait(false))
+            {
+                if (writeResult.Changed)
+                {
+                    _logger.LogInformation(
+                        "Warmup desired INI was out of date; wrote revision {Revision}.",
+                        writeResult.Revision);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Warmup desired INI is correct; applying revision {Revision} to engines.",
+                        writeResult.Revision);
+                }
+
+                await _orchestrationClient.ApplyAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Warmup desired INI is correct and applied at revision {Revision}.",
+                    writeResult.Revision);
+            }
 
             if (waitForCompletion)
             {
@@ -299,6 +325,22 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
                 }
             }
 
+            else
+            {
+                var persistedRef = await ResolvePersistedLocalModeModelRefAsync(serviceId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(persistedRef))
+                {
+                    var refKind = string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)
+                        ? "bundle"
+                        : "model";
+                    return new LocalServiceReconcileResult(
+                        LocalServiceReconcileOutcome.Failed,
+                        $"No local {refKind} is configured in ServiceModes. "
+                        + $"Select an active local {refKind} before loading.");
+                }
+            }
+
             options = new WarmupDesiredBuildOptions();
         }
 
@@ -317,6 +359,62 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
             _logger.LogWarning(ex, "Reconcile failed for '{ServiceId}'.", LogValueSanitizer.Sanitize(serviceId));
             return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Failed, ex.Message);
         }
+    }
+
+    private async Task EnsureConfiguredLocalSelectionsSyncedAsync(CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
+        await ConfiguredLocalServiceSelectionSync
+            .SyncAllWarmLocalServicesAsync(
+                settings,
+                _configuration,
+                _httpClientFactory,
+                IsLocalRoutingWarmAsync,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<bool> IsLocalRoutingWarmAsync(string serviceId, CancellationToken cancellationToken) =>
+        await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false)
+        == LocalRoutingDesiredState.Warm;
+
+    private async Task<bool> ShouldRequestWarmupApplyAsync(
+        WarmupDesiredWriteResult writeResult,
+        CancellationToken cancellationToken)
+    {
+        if (writeResult.Changed)
+        {
+            return true;
+        }
+
+        var status = await _orchestrationClient.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (status.DesiredRevision > status.AppliedRevision)
+        {
+            return true;
+        }
+
+        if (string.Equals(status.ApplyStatus, "failed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status.ApplyStatus, "pending", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return OrchestratorNeedsLoad(status);
+    }
+
+    private static bool OrchestratorNeedsLoad(WarmupStatusDocument status)
+    {
+        foreach (var serviceStatus in status.Services.Values)
+        {
+            if (string.Equals(serviceStatus.Desired, "on", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(serviceStatus.Phase, "ready", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<LocalServiceReconcileResult> MapServiceOutcomeAsync(
@@ -417,6 +515,34 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
         || string.Equals(serviceId, RoutedServiceNames.Embeddings, StringComparison.Ordinal)
         || string.Equals(serviceId, RoutedServiceNames.SpeechSynthesis, StringComparison.Ordinal)
         || string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal);
+
+    private async Task<string?> ResolvePersistedLocalModeModelRefAsync(
+        string serviceId,
+        CancellationToken cancellationToken)
+    {
+        var localProviderSection = serviceId switch
+        {
+            RoutedServiceNames.SpeechTranscription => $"{LocalServiceHostsOptions.SectionName}:SpeechTranscriptionBaseUrl",
+            RoutedServiceNames.Embeddings => $"{LocalServiceHostsOptions.SectionName}:EmbeddingsBaseUrl",
+            RoutedServiceNames.SpeechSynthesis => $"{LocalServiceHostsOptions.SectionName}:SpeechSynthesisBaseUrl",
+            RoutedServiceNames.ImageGeneration => $"{LocalServiceHostsOptions.SectionName}:ImageGenerationBaseUrl",
+            _ => null,
+        };
+
+        if (localProviderSection is null)
+        {
+            return null;
+        }
+
+        var modes = await _serviceModeResolver
+            .GetModesAsync(serviceId, cancellationToken)
+            .ConfigureAwait(false);
+        var localMode = modes.FirstOrDefault(mode =>
+            string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase));
+        return localMode?.ModelId?.Trim() is { Length: > 0 } modelId
+            ? modelId
+            : null;
+    }
 
     private enum LocalRoutingDesiredState
     {

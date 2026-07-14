@@ -554,7 +554,8 @@ public sealed partial class ApplicationSettingsService
         var (row, payload) = await LoadOrCreateServiceModesRowAsync(cancellationToken).ConfigureAwait(false);
         var canonicalService = CanonicalizeServiceName(contract.ServiceId);
         var modes = ServiceModesPayload.ReadModesFor(payload, canonicalService).ToList();
-        if (FindModeForProvider(modes, provider.ProviderSectionKey) != null)
+        var existingMode = FindModeForProvider(modes, provider.ProviderSectionKey);
+        if (existingMode is not null)
         {
             return;
         }
@@ -598,11 +599,22 @@ public sealed partial class ApplicationSettingsService
         }
 
         var localProviderSection = ResolveLocalProviderSectionKey(canonicalService);
-        var targetMode = !string.IsNullOrWhiteSpace(localProviderSection)
-            ? modes.FirstOrDefault(mode =>
-                string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase))
-            : null;
-        targetMode ??= activeMode;
+        ServiceMode? targetMode;
+        if (!string.IsNullOrWhiteSpace(localProviderSection))
+        {
+            targetMode = modes.FirstOrDefault(mode =>
+                string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase));
+            if (targetMode is null)
+            {
+                throw new InvalidOperationException(
+                    $"Service '{serviceId}' has no local service mode for '{localProviderSection}'. "
+                    + "Activate the local provider before selecting a model or bundle.");
+            }
+        }
+        else
+        {
+            targetMode = activeMode;
+        }
 
         if (string.Equals(targetMode.ModelId, trimmed, StringComparison.Ordinal))
         {

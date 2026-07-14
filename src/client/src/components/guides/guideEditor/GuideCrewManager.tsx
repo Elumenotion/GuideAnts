@@ -150,9 +150,12 @@ export function GuideCrewManager({
       searchTerm ? a.name.toLowerCase().includes(searchTerm.toLowerCase()) : true
     );
 
-  const selectedOptions = selectedAssistantIds
-    .map((id) => availableOptions.find((a) => a.id === id))
-    .filter((a): a is AssistantOption => !!a);
+  const selectedMembers = selectedAssistantIds
+    .map((assistantId) => {
+      const assistant = availableOptions.find((option) => option.id === assistantId);
+      return assistant ? { assistantId, assistant } : null;
+    })
+    .filter((member): member is { assistantId: string; assistant: AssistantOption } => member !== null);
 
   const handleAdd = (id: string) => {
     onChange([...selectedAssistantIds, id]);
@@ -264,18 +267,18 @@ export function GuideCrewManager({
           <div className="border border-gray-300 rounded-md overflow-hidden" data-tour-id="guide.crew.selected.panel">
             <div className="bg-blue-50 px-4 py-3 border-b border-blue-300">
               <h3 className="text-sm font-medium text-blue-900">
-                Selected Members ({selectedOptions.length})
+                Selected Members ({selectedMembers.length})
               </h3>
             </div>
             <div className="max-h-[25rem] overflow-y-auto" data-tour-id="guide.crew.selected.list">
-              {selectedOptions.length === 0 ? (
+              {selectedMembers.length === 0 ? (
                 <div className="p-4 text-center text-sm text-gray-500">
                   No crew members yet. Add assistants from the left panel.
                 </div>
               ) : (
                 <div className="divide-y divide-gray-200">
-                  {selectedOptions.map((assistant, index) => (
-                    <div key={assistant.id} className="p-3 flex items-center gap-2 hover:bg-gray-50">
+                  {selectedMembers.map(({ assistantId, assistant }, index) => (
+                    <div key={assistantId} className="p-3 flex items-center gap-2 hover:bg-gray-50">
                       {/* Reorder buttons */}
                       <div className="flex flex-col gap-0.5">
                         <button
@@ -293,7 +296,7 @@ export function GuideCrewManager({
                         <button
                           type="button"
                           onClick={() => handleMoveDown(index)}
-                          disabled={index === selectedOptions.length - 1}
+                          disabled={index === selectedMembers.length - 1}
                           className="p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed"
                           title="Move down"
                           data-tour-id="guide.crew.reorder.down"
@@ -331,12 +334,12 @@ export function GuideCrewManager({
                           projectId={projectId}
                           assistantId={assistant.id}
                           assistantName={assistant.name}
-                          initialMaxToolCallsPerTurn={crewMemberLimitById[assistant.id]}
+                          initialMaxToolCallsPerTurn={crewMemberLimitById[assistantId]}
                         />
                         <CrewMemberLimitOverrideField
-                          assistantName={assistant.name}
-                          value={crewMemberInvocationLimits[assistant.id]}
-                          onChange={(value) => onInvocationLimitChange(assistant.id, value)}
+                          assistantId={assistantId}
+                          value={crewMemberInvocationLimits[assistantId]}
+                          onChange={(value) => onInvocationLimitChange(assistantId, value)}
                           onDirtyChange={onDirtyChange}
                         />
                       </div>

@@ -266,8 +266,8 @@ public static class SettingsServiceLocalModelsEndpoints
         //  - ASR / TTS / Embeddings: optional model_path or model_id selects a specific
         //    downloaded model folder; the ref is persisted verbatim on ServiceModes
         //    and written into warmup-desired.ini as model_path before apply.
-        //  - Image Generation: bundle id is persisted on ServiceModes and required in
-        //    warmup-desired.ini when desired=warm (set via select-active).
+        //  - Image Generation: bundle_id (or model_path/model_id alias) is persisted on
+        //    ServiceModes and written into warmup-desired.ini as bundle_id before apply.
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/load", async (
             string serviceId,
             [FromBody] JsonElement payload,
@@ -284,9 +284,13 @@ public static class SettingsServiceLocalModelsEndpoints
             }
 
             string? requestedModelRef = null;
-            if (!isImageGeneration)
+            if (isImageGeneration)
             {
-                if (LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_path", out var modelPath))
+                if (LocalServiceAdminRouting.TryGetNonEmptyString(payload, "bundle_id", out var bundleId))
+                {
+                    requestedModelRef = bundleId;
+                }
+                else if (LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_path", out var modelPath))
                 {
                     requestedModelRef = modelPath;
                 }
@@ -294,6 +298,14 @@ public static class SettingsServiceLocalModelsEndpoints
                 {
                     requestedModelRef = modelId;
                 }
+            }
+            else if (LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_path", out var modelPath))
+            {
+                requestedModelRef = modelPath;
+            }
+            else if (LocalServiceAdminRouting.TryGetNonEmptyString(payload, "model_id", out var modelId))
+            {
+                requestedModelRef = modelId;
             }
 
             var result = await warmup

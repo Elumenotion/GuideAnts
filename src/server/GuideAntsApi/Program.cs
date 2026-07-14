@@ -227,8 +227,9 @@ public class Program
 
         ServiceRoutingStartupValidator.Validate(app.Services.GetRequiredService<IConfiguration>());
 
-        // Run local AI warmup asynchronously after host startup so slow model loads
-        // (especially image generation) do not block API availability.
+        // API startup: build the correct warmup-desired.ini for every local service,
+        // write it when out of date, then POST /warmup/apply. ga-admin runs the same
+        // apply path again on AI container startup (apply_warmup_on_startup).
         app.Lifetime.ApplicationStarted.Register(() =>
         {
             _ = Task.Run(async () =>
