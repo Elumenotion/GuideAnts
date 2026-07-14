@@ -202,8 +202,9 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
                 .ConfigureAwait(false);
             var localMode = modes.FirstOrDefault(mode =>
                 string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase));
-            var modelId = localMode?.ModelId?.Trim();
-            return string.IsNullOrWhiteSpace(modelId) ? null : modelId;
+            return localMode?.ModelId?.Trim() is { Length: > 0 } modelId
+                ? modelId
+                : null;
         }
         catch (Exception ex)
         {

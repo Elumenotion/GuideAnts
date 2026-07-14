@@ -153,8 +153,10 @@
         "config.json",
         "model.safetensors",
         "tokenizer.json",
+        "tokenizer_config.json",
         "audio_tokenizer/config.json",
-        "audio_tokenizer/model.safetensors"
+        "audio_tokenizer/model.safetensors",
+        "audio_tokenizer/preprocessor_config.json"
       ],
       "layout": "hf_snapshot",
       "format": "safetensors",

@@ -116,9 +116,8 @@ def post_aux_load(service_id: str, model_ref: str | None, *, load_field: str = "
         if not model_ref or not model_ref.strip():
             return False
         bundle_id = model_ref.strip()
-        select_url = f"{base.rstrip('/')}/admin/bundles/{urllib.parse.quote(bundle_id, safe='')}/select-active"
-        _post_json(select_url, None, timeout=min(timeout, 120.0))
-        status, _ = _post_json(f"{base.rstrip('/')}/admin/load", None, timeout=timeout)
+        body = {"bundle_id": bundle_id}
+        status, _ = _post_json(f"{base.rstrip('/')}/admin/load", body, timeout=timeout)
         return status in (200, 201, 202, 204, 409)
     body = _aux_load_body(model_ref, load_field=load_field)
     status, _ = _post_json(f"{base.rstrip('/')}/admin/load", body, timeout=timeout)
@@ -163,8 +162,13 @@ def wait_aux_ready(service_id: str, *, expected_model_ref: str | None = None) ->
                     healthy = engine.get("healthy")
                     if process_alive is True and healthy is True:
                         if expected_model_ref:
-                            active_bundle = str(payload.get("activeBundleId") or engine.get("loadedBundleId") or "")
-                            if active_bundle and active_bundle != expected_model_ref.strip():
+                            engine = payload.get("engine") or {}
+                            loaded_bundle = str(
+                                engine.get("loadedBundleId")
+                                or payload.get("loadedBundleId")
+                                or ""
+                            ).strip()
+                            if loaded_bundle and loaded_bundle != expected_model_ref.strip():
                                 time.sleep(POLL_INTERVAL_SECONDS)
                                 continue
                         return True

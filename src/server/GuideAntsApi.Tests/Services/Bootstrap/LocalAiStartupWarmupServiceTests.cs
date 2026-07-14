@@ -388,8 +388,20 @@ public sealed class LocalAiStartupWarmupServiceTests
             return Task.FromResult(_localMode);
         }
 
-        public Task<IReadOnlyList<ServiceMode>> GetModesAsync(string serviceName, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public Task<IReadOnlyList<ServiceMode>> GetModesAsync(string serviceName, CancellationToken cancellationToken = default)
+        {
+            if (!string.Equals(serviceName, _serviceName, StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult<IReadOnlyList<ServiceMode>>(Array.Empty<ServiceMode>());
+            }
+
+            if (!_gate.Activated)
+            {
+                return Task.FromResult<IReadOnlyList<ServiceMode>>(Array.Empty<ServiceMode>());
+            }
+
+            return Task.FromResult<IReadOnlyList<ServiceMode>>(new[] { _localMode });
+        }
     }
 
     private static IHttpClientFactory CreateHttpClientFactory() =>

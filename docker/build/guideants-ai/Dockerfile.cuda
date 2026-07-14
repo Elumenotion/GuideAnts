@@ -83,6 +83,7 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${AUDIOCPP_REF
     && mkdir -p /out \
     && if [ -f /src/audio.cpp/build/bin/audiocpp_server ]; then cp /src/audio.cpp/build/bin/audiocpp_server /out/audiocpp_server; \
        else echo "audiocpp_server binary was not produced by audio.cpp CUDA build" && exit 1; fi \
+    && cp -r /src/audio.cpp/model_specs /out/model_specs \
     && (strip /out/audiocpp_server || true)
 
 
@@ -219,6 +220,7 @@ COPY --from=pydeps-cuda13-builder /opt/venv /opt/venv
 COPY --from=sd-cli-cuda-builder /out/sd-cli /usr/local/bin/sd-cli
 COPY --from=sd-cli-cuda-builder /out/sd-server /usr/local/bin/sd-server
 COPY --from=audiocpp-cuda-builder /out/audiocpp_server /usr/local/bin/audiocpp_server
+COPY --from=audiocpp-cuda-builder /out/model_specs /app/model_specs
 RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server /usr/local/bin/audiocpp_server
 
 RUN --mount=type=cache,target=/root/.cache/pip \

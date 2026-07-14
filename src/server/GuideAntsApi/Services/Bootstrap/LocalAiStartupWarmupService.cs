@@ -332,12 +332,19 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
                 $"Warmup status did not include '{serviceId}'.");
         }
 
-        if (string.Equals(serviceStatus.Phase, "failed", StringComparison.OrdinalIgnoreCase)
-            || !string.IsNullOrWhiteSpace(serviceStatus.Error))
+        if (string.Equals(serviceStatus.Phase, "failed", StringComparison.OrdinalIgnoreCase))
         {
             return new LocalServiceReconcileResult(
                 LocalServiceReconcileOutcome.Failed,
                 serviceStatus.Error ?? "Orchestrator reported failure.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(serviceStatus.Error)
+            && !string.Equals(serviceStatus.Phase, "ready", StringComparison.OrdinalIgnoreCase))
+        {
+            return new LocalServiceReconcileResult(
+                LocalServiceReconcileOutcome.Failed,
+                serviceStatus.Error);
         }
 
         if (expectWarm)

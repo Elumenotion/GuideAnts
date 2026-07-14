@@ -70,7 +70,9 @@ type EngineState = {
 
 type BundleListPayload = {
   modelDir?: string;
+  selectedBundleId?: string | null;
   activeBundleId?: string | null;
+  legacyMarkerBundleId?: string | null;
   loadedBundleId?: string | null;
   engine?: EngineState;
   items?: BundleListItem[];
@@ -327,6 +329,10 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
   const engine = payload?.engine;
   const engineAlive = Boolean(engine?.processAlive);
   const loadedBundleId = payload?.loadedBundleId ?? engine?.loadedBundleId ?? null;
+  const selectedBundleId =
+    payload?.selectedBundleId
+    ?? payload?.activeBundleId
+    ?? null;
 
   useEffect(() => {
     if (!onRuntimeReadinessChange) {
@@ -376,7 +382,7 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
       });
       return;
     }
-    if (!payload?.activeBundleId) {
+    if (!selectedBundleId) {
       onRuntimeReadinessChange({
         serviceId: SERVICE_ID,
         ready: false,
@@ -410,7 +416,7 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
     hasInFlightOperation,
     loadedBundleId,
     onRuntimeReadinessChange,
-    payload?.activeBundleId,
+    selectedBundleId,
     phase,
   ]);
 
@@ -556,12 +562,8 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
   };
 
   const handleActivate = async (bundleId: string) => {
-    // Activation triggers a hot-swap on the SD service when an engine is
-    // already loaded (stop current sd-server subprocess, start a new one
-    // against the newly-active bundle). When unloaded, it just updates the
-    // active_bundle.json marker on disk so the next /admin/load picks it up.
-    // Either way, we refresh the list so the Loaded badge and engine state
-    // reflect reality.
+    // Selection is persisted on ServiceModes and written into warmup-desired.ini
+    // by the web API reconcile path; the SD engine loads via orchestrator apply.
     setActionError(null);
     setBusyBundleId(bundleId);
     try {

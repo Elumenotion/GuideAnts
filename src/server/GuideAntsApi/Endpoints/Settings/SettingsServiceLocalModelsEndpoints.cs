@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.HuggingFace;
+using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Endpoints.Settings;
 
@@ -15,6 +16,7 @@ public static class SettingsServiceLocalModelsEndpoints
             string serviceId,
             IHttpClientFactory httpClientFactory,
             IConfiguration configuration,
+            IApplicationSettingsService settings,
             CancellationToken cancellationToken) =>
         {
             var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
@@ -27,6 +29,15 @@ public static class SettingsServiceLocalModelsEndpoints
                 ? "/admin/bundles"
                 : "/admin/models";
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{adminBase}{path}");
+            if (string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal))
+            {
+                return await ServiceLocalModelListEnricher.ProxyAndEnrichImageBundlesAsync(
+                    httpClientFactory.CreateClient(),
+                    request,
+                    settings,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             return await LocalServiceAdminRouting.ProxyAsync(
                 httpClientFactory.CreateClient(), request, cancellationToken);
         })

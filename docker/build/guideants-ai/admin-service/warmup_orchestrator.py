@@ -184,6 +184,8 @@ def _set_service_phase(
         entry["phase"] = phase
         if error is not None:
             entry["error"] = error
+        else:
+            entry.pop("error", None)
         if clear_loaded_refs:
             entry.pop("modelId", None)
             entry.pop("bundleId", None)
