@@ -24,6 +24,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     private readonly ILlamaRuntimeCoordinator _coordinator;
     private readonly IChatModelResolver _chatModelResolver;
     private readonly ILocalAiStartupWarmupService _localAiWarmupService;
+    private readonly ILocalAiWarmupService _localAiWarmup;
     private readonly ILogger<NotebookModelRuntimeService> _logger;
 
     // Singleton state for operations. In a multi-node deployment, this would need to be distributed.
@@ -41,6 +42,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         ILlamaRuntimeCoordinator coordinator,
         IChatModelResolver chatModelResolver,
         ILocalAiStartupWarmupService localAiWarmupService,
+        ILocalAiWarmupService localAiWarmup,
         ILogger<NotebookModelRuntimeService> logger)
     {
         _context = context;
@@ -50,6 +52,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         _coordinator = coordinator;
         _chatModelResolver = chatModelResolver;
         _localAiWarmupService = localAiWarmupService;
+        _localAiWarmup = localAiWarmup;
         _logger = logger;
     }
 
@@ -285,16 +288,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
             throw new ArgumentException("Notebook not found", nameof(notebookId));
         }
 
-        List<ModelDto> requiredModels;
-        try
-        {
-            requiredModels = await GetRequiredLlamaModelsAsync(notebook, assistantId, cancellationToken).ConfigureAwait(false);
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new InvalidOperationException("Cannot determine models to unload: " + ex.Message, ex);
-        }
-
         var op = new ModelLoadOperationDto
         {
             OperationId = Guid.NewGuid().ToString(),
@@ -313,17 +306,13 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                     op.State = "unloading";
                     InvalidateRouterModelsCache();
 
-                    var requiredRouterIds = requiredModels
-                        .Where(m => m.RuntimeConfig != null)
-                        .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId))
-                        .ToHashSet();
-
-                    foreach (var id in requiredRouterIds)
-                    {
-                        await using var _ = await _coordinator.AcquireAliasLockAsync(id, CancellationToken.None)
-                            .ConfigureAwait(false);
-                        await _llamaClient.UnloadModelAsync(id, CancellationToken.None).ConfigureAwait(false);
-                    }
+                    // Return to the default routed warmup state via the orchestrator, the single
+                    // authority for llama load/unload ordering (D6/D11). The orchestrator reconciles
+                    // away any notebook-specific aliases that are not part of the default desired
+                    // state, so we no longer unload individual aliases through _llamaClient here.
+                    await _localAiWarmup.SyncDesiredAndApplyAsync(
+                        waitForCompletion: true,
+                        cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
                     op.State = "ready";
                     op.CompletedAt = DateTime.UtcNow;
@@ -347,23 +336,29 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
 
     private async Task ProcessLoadOperationAsync(ModelLoadOperationDto op, List<ModelDto> requiredModels)
     {
-        var auxiliaryServicesWereUnloaded = false;
+        var warmup = _localAiWarmup;
+        var drainedAuxForChat = false;
 
         try
         {
             await _loadLock.WaitAsync();
             InvalidateRouterModelsCache();
 
-            // Guarantee LLM-first GPU ownership during model switches by
-            // draining non-chat local services before changing router aliases.
-            op.State = "unloading";
-            await _localAiWarmupService.UnloadAuxiliaryServicesAsync(CancellationToken.None).ConfigureAwait(false);
-            auxiliaryServicesWereUnloaded = true;
-            
             var requiredRouterIds = requiredModels
                 .Where(m => m.RuntimeConfig != null)
                 .Select(m => NormalizeRouterModelId(m.RuntimeConfig!.RouterModelId))
                 .ToHashSet();
+
+            var primaryRouterId = requiredRouterIds.OrderBy(id => id, StringComparer.Ordinal).First();
+
+            // Chat special case (D6): drain aux via INI+apply, then reconcile extra llama aliases
+            // directly because INI carries a single [llama].router_alias.
+            op.State = "unloading";
+            await warmup.SyncDesiredAndApplyAsync(
+                new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true },
+                waitForCompletion: true,
+                CancellationToken.None).ConfigureAwait(false);
+            drainedAuxForChat = true;
 
             var routerStateAtStart = await GetRouterModelsAsync(useCache: false, CancellationToken.None);
             var loadedRouterIds = routerStateAtStart.Data
@@ -381,8 +376,6 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 op.State = "unloading";
                 foreach (var id in toUnload)
                 {
-                    // R-12.10: per-alias coordinator lock prevents the settings-UI from
-                    // racing an unload while we're serving this notebook's load request.
                     await using var _unloadLock = await _coordinator.AcquireAliasLockAsync(id, CancellationToken.None);
                     await _llamaClient.UnloadModelAsync(id);
                 }
@@ -433,9 +426,11 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
                 }
             }
 
-            // Keep ASR/Emb/TTS/SD hot after a successful LLM switch.
             op.State = "loading";
-            await _localAiWarmupService.EnsureAuxiliaryServicesLoadedAsync(CancellationToken.None).ConfigureAwait(false);
+            await warmup.SyncDesiredAndApplyAsync(
+                new WarmupDesiredBuildOptions { LlamaRouterAliasOverride = primaryRouterId },
+                waitForCompletion: true,
+                CancellationToken.None).ConfigureAwait(false);
 
             op.State = "ready";
             op.CompletedAt = DateTime.UtcNow;
@@ -449,21 +444,23 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
         }
         finally
         {
-            if (auxiliaryServicesWereUnloaded
+            if (drainedAuxForChat
                 && !string.Equals(op.State, "ready", StringComparison.Ordinal))
             {
                 try
                 {
                     _logger.LogInformation(
-                        "Load operation {OperationId} failed after auxiliary unload; reloading auxiliary services.",
+                        "Load operation {OperationId} failed after auxiliary drain; restoring routed warmup desired state.",
                         op.OperationId);
-                    await _localAiWarmupService.EnsureAuxiliaryServicesLoadedAsync(CancellationToken.None).ConfigureAwait(false);
+                    await warmup.SyncDesiredAndApplyAsync(
+                        waitForCompletion: false,
+                        cancellationToken: CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception reloadEx)
                 {
                     _logger.LogError(
                         reloadEx,
-                        "Failed reloading auxiliary local services after operation {OperationId} failure.",
+                        "Failed restoring warmup desired state after operation {OperationId} failure.",
                         op.OperationId);
                 }
             }

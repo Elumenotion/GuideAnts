@@ -78,4 +78,23 @@ describe('fileCache utility', () => {
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });
+
+  it('disables cache when indexedDB open hangs', async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const openDBMock = vi.fn().mockImplementation(() => new Promise(() => {}));
+
+    vi.doMock('idb', () => ({ openDB: openDBMock }));
+
+    // @ts-ignore
+    global.indexedDB = {};
+
+    const { getCachedFile } = await importFresh();
+    const pending = getCachedFile('p', 'f');
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(pending).resolves.toBeNull();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+    vi.useRealTimers();
+  });
 }); 

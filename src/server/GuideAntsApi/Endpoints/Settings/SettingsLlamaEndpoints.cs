@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using GuideAntsApi.Models.Settings;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.LlamaCpp.LocalModelOnboarding;
 using GuideAntsApi.Services.Routing;
@@ -95,9 +96,8 @@ public static class SettingsLlamaEndpoints
         llamaGroup.MapPost("/runtime/load", async (
             [FromBody] LlamaRuntimeLoadRequest request,
             IConfiguration configuration,
-            ILlamaServerRuntimeClient llamaClient,
             ILlamaRuntimeCoordinator coordinator,
-            GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService localAiWarmup,
+            ILocalAiWarmupService localAiWarmup,
             CancellationToken cancellationToken) =>
         {
             if (!SettingsGroupFactory.HasConfiguredLlamaRuntime(configuration))
@@ -123,31 +123,19 @@ public static class SettingsLlamaEndpoints
             }
 
             await using var _ = handle;
-            var auxiliaryServicesWereUnloaded = false;
             try
             {
-                await localAiWarmup.UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
-                auxiliaryServicesWereUnloaded = true;
-
-                await llamaClient.LoadModelAsync(request.RouterModelId, cancellationToken);
-
-                await localAiWarmup.EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
+                await localAiWarmup.SyncDesiredAndApplyAsync(
+                    new WarmupDesiredBuildOptions
+                    {
+                        LlamaRouterAliasOverride = request.RouterModelId.Trim(),
+                    },
+                    waitForCompletion: true,
+                    cancellationToken).ConfigureAwait(false);
                 return Results.Ok();
             }
             catch (Exception ex)
             {
-                if (auxiliaryServicesWereUnloaded)
-                {
-                    try
-                    {
-                        await localAiWarmup.EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        // Preserve the original runtime load failure.
-                    }
-                }
-
                 return Results.Problem(ex.Message);
             }
         })

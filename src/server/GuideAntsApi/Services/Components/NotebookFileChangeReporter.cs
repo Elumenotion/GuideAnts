@@ -1,5 +1,4 @@
 using AntRunner.ToolCalling;
-using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 
@@ -13,7 +12,15 @@ public static class NotebookFileChangeReporter
 {
     /// <summary>
     /// Scans the notebook working directory and returns CWD-relative paths for new and modified files.
-    /// Call this BEFORE database sync to detect changes.
+    /// Call this BEFORE database sync to surface change hints to the assistant.
+    /// <para>
+    /// This is a best-effort, metadata-only heuristic: modification is inferred from a difference in
+    /// file size or last-write time, NOT from content hashing. It intentionally trades precision for
+    /// speed so the post-execution hot path never opens or hashes file contents. The authoritative
+    /// reconciliation in <see cref="NotebookFileSyncService"/> still hashes each file (SHA-256) and is
+    /// the source of truth; a content change that preserves both size and timestamp will be caught by
+    /// that sync even though it is not reported here. Do not reintroduce hashing on this path.
+    /// </para>
     /// </summary>
     public static async Task<(List<string> NewFiles, List<string> ModifiedFiles)> DetectChangesAsync(
         IServiceProvider serviceProvider,
@@ -30,7 +37,7 @@ public static class NotebookFileChangeReporter
 
         var dbFiles = await dbContext.NotebookFiles
             .Where(f => f.NotebookId == context.NotebookId)
-            .ToDictionaryAsync(f => f.RelativePath, f => new { f.FileSize, f.LastModifiedUtc, f.FileHash });
+            .ToDictionaryAsync(f => f.RelativePath, f => new { f.FileSize, f.LastModifiedUtc });
 
         var resourceFileNames = dbFiles.Keys
             .Where(p => p.StartsWith("Resources/", StringComparison.OrdinalIgnoreCase) ||
@@ -63,17 +70,33 @@ public static class NotebookFileChangeReporter
                 continue;
             }
 
-            var fileInfo = new FileInfo(localFile);
-            var fileSize = fileInfo.Length;
-            var lastModifiedUtc = fileInfo.LastWriteTimeUtc;
-            var fileHash = ComputeSha256(localFile);
+            long fileSize;
+            DateTime lastModifiedUtc;
+            try
+            {
+                var fileInfo = new FileInfo(localFile);
+                if (!fileInfo.Exists)
+                {
+                    // File vanished between enumeration and inspection (e.g. a transient script temp file).
+                    continue;
+                }
+
+                fileSize = fileInfo.Length;
+                lastModifiedUtc = fileInfo.LastWriteTimeUtc;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort reporting: a single unreadable/locked file must not abort the whole report.
+                logger?.LogDebug(ex, "Skipping file during change reporting due to access error: {Path}", dbRelativePath);
+                continue;
+            }
 
             // Convert to CWD-relative path for the assistant
             var cwdRelativePath = ConvertToCwdRelativePath(dbRelativePath, context.IsPublished, context.RunId);
 
             if (dbFiles.TryGetValue(dbRelativePath, out var dbFile))
             {
-                if (dbFile.FileSize != fileSize || dbFile.LastModifiedUtc != lastModifiedUtc || dbFile.FileHash != fileHash)
+                if (dbFile.FileSize != fileSize || dbFile.LastModifiedUtc != lastModifiedUtc)
                 {
                     modifiedFiles.Add(cwdRelativePath);
                 }
@@ -83,6 +106,13 @@ public static class NotebookFileChangeReporter
                 newFiles.Add(cwdRelativePath);
             }
         }
+
+        logger?.LogDebug(
+            "Notebook {NotebookId} change report: {NewCount} new, {ModifiedCount} modified (of {ScannedCount} files scanned)",
+            context.NotebookId,
+            newFiles.Count,
+            modifiedFiles.Count,
+            localFiles.Length);
 
         return (newFiles, modifiedFiles);
     }
@@ -277,14 +307,6 @@ public static class NotebookFileChangeReporter
         var rootWithAltSeparator = rootFullPath + Path.AltDirectorySeparatorChar;
         return candidateFullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase) ||
                candidateFullPath.StartsWith(rootWithAltSeparator, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string ComputeSha256(string filePath)
-    {
-        using var sha = SHA256.Create();
-        using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        var hash = sha.ComputeHash(stream);
-        return Convert.ToHexString(hash);
     }
 }
 

@@ -97,7 +97,6 @@ services:
       - GA_LLAMA_MODELS_MAX=1
       - GA_LLAMA_NO_AUTOLOAD=1
       - GA_LLAMA_CTX_SIZE=${GA_LLAMA_CTX_SIZE:-32768}
-      - GA_LLAMA_FORCE_ROUTER_CTX=${GA_LLAMA_FORCE_ROUTER_CTX:-1}
       - GA_LLAMA_THREADS=16
       # dzn cannot place KV tensors on Vulkan buffers (llama aborts on large models).
       # Weights still offload via auto ngl; KV stays in system RAM. parallel=1 keeps

@@ -192,13 +192,13 @@ namespace GuideAntsApi.Services
                         {
                             using var scope = _serviceProvider.CreateScope();
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                            await syncService.SyncNotebookAsync(context.NotebookId);
-                            _logger?.LogInformation("Database synchronized for notebook {NotebookId} after image generation", context.NotebookId);
+                            await syncService.QueueNotebookSyncAsync(context.NotebookId);
+                            _logger?.LogInformation("Queued notebook sync for {NotebookId} after image generation", context.NotebookId);
                         }
                         catch (Exception syncEx)
                         {
-                            _logger?.LogError(syncEx, "Failed to sync database after image generation");
-                            stdErrBuffer.AppendLine($"Warning: Image generated but failed to sync database: {syncEx.Message}");
+                            _logger?.LogError(syncEx, "Failed to queue notebook sync after image generation");
+                            stdErrBuffer.AppendLine($"Warning: Image generated but failed to queue notebook sync: {syncEx.Message}");
                         }
                     }
 
@@ -500,13 +500,13 @@ namespace GuideAntsApi.Services
                         {
                             using var scope = _serviceProvider.CreateScope();
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                            await syncService.SyncNotebookAsync(context.NotebookId);
-                            _logger?.LogInformation("Database synchronized for notebook {NotebookId} after image edit", context.NotebookId);
+                            await syncService.QueueNotebookSyncAsync(context.NotebookId);
+                            _logger?.LogInformation("Queued notebook sync for {NotebookId} after image edit", context.NotebookId);
                         }
                         catch (Exception syncEx)
                         {
-                            _logger?.LogError(syncEx, "Failed to sync database after image edit");
-                            stdErrBuffer.AppendLine($"Warning: Image generated but failed to sync database: {syncEx.Message}");
+                            _logger?.LogError(syncEx, "Failed to queue notebook sync after image edit");
+                            stdErrBuffer.AppendLine($"Warning: Image generated but failed to queue notebook sync: {syncEx.Message}");
                         }
                     }
 

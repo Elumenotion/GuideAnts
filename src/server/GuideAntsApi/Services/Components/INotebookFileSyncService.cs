@@ -22,9 +22,9 @@ public interface INotebookFileSyncService
 
     /// <summary>
     /// Enqueues notebook reconciliation for background processing.
-    /// Prefer <see cref="SyncNotebookAsync"/> after tool or assistant writes so
-    /// <c>NotebookFiles</c> rows exist before the client requests file content; use this
-    /// when a full sync is optional or already ran synchronously.
+    /// Use after tool, assistant, or wire writes so chat and HTTP handlers never block on a
+    /// full notebook walk. <see cref="SyncNotebookAsync"/> remains for explicit/manual sync
+    /// and background job handlers.
     /// </summary>
     /// <param name="notebookId">Notebook identifier.</param>
     /// <param name="cancellationToken">Cancellation token for the enqueue operation.</param>

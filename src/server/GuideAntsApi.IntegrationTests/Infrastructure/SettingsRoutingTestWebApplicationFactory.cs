@@ -40,7 +40,7 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
             services.AddSingleton<IRouterModelsConfigService>(RouterStub);
 
             services.RemoveAll<ILocalAiStartupWarmupService>();
-            services.AddSingleton<ILocalAiStartupWarmupService, NoOpLocalAiStartupWarmupService>();
+            services.AddSingleton<ILocalAiStartupWarmupService>(_ => new StubLocalAiWarmupService(LlamaStub));
 
             // Restore production chat factory so chat resolver + validator
             // chain is observable in Phase G tests. The base factory installs
@@ -51,9 +51,19 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
         });
     }
 
-    private sealed class NoOpLocalAiStartupWarmupService : ILocalAiStartupWarmupService
+    /// <summary>
+    /// Stand-in for ga-admin warmup apply. Settings <c>/runtime/load</c> now
+    /// routes through <see cref="ILocalAiWarmupService.SyncDesiredAndApplyAsync"/>;
+    /// for Phase G HTTP tests we delegate llama alias loads to
+    /// <see cref="StubLlamaServerRuntimeClient"/> so inventory/state assertions
+    /// and R-12 concurrency gates still observe the runtime client.
+    /// </summary>
+    private sealed class StubLocalAiWarmupService(StubLlamaServerRuntimeClient llamaStub)
+        : ILocalAiStartupWarmupService, ILocalAiWarmupService
     {
         public bool IsWarmupInProgress => false;
+
+        public bool IsApplyInProgress => false;
 
         public Task WarmupAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -73,5 +83,31 @@ public sealed class SettingsRoutingTestWebApplicationFactory : TestWebApplicatio
             string serviceId,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle));
+
+        public async Task SyncDesiredAndApplyAsync(
+            WarmupDesiredBuildOptions? options = null,
+            bool waitForCompletion = false,
+            CancellationToken cancellationToken = default)
+        {
+            var alias = options?.LlamaRouterAliasOverride?.Trim();
+            if (string.IsNullOrWhiteSpace(alias))
+            {
+                return;
+            }
+
+            await llamaStub.LoadModelAsync(alias, cancellationToken).ConfigureAwait(false);
+        }
+
+        public Task<WarmupStatusDocument> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WarmupStatusDocument(
+                SchemaVersion: 1,
+                DesiredRevision: 0,
+                AppliedRevision: 0,
+                InProgressRevision: null,
+                ApplyStatus: "idle",
+                ApplyError: null,
+                DesiredSha256: string.Empty,
+                WrittenAt: string.Empty,
+                Services: new Dictionary<string, WarmupServiceStatus>()));
     }
 }

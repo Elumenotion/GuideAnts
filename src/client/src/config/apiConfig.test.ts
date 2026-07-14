@@ -8,10 +8,12 @@ async function loadApiConfig() {
 describe('apiConfig', () => {
   const env = import.meta.env as unknown as Record<string, string | undefined>;
   const originalApiUrl = env.VITE_API_URL;
+  const originalApiProxyTarget = env.VITE_API_PROXY_TARGET;
   const originalElectron = (window as any).electron;
 
   afterEach(() => {
     env.VITE_API_URL = originalApiUrl;
+    env.VITE_API_PROXY_TARGET = originalApiProxyTarget;
     (window as any).electron = originalElectron;
     delete window.__RUNTIME_CONFIG__;
   });
@@ -75,5 +77,41 @@ describe('apiConfig', () => {
     const resolved = resolveAgainstApiBase('/api/projects', 'https://api.example.com/api');
     expect(resolved.origin).toBe('https://api.example.com');
     expect(resolved.pathname).toBe('/api/projects');
+  });
+
+  test('resolveExternalApiUrl uses page origin for browser same-origin API base', async () => {
+    delete window.__RUNTIME_CONFIG__;
+    env.VITE_API_URL = '/api';
+    env.VITE_API_PROXY_TARGET = 'http://localhost:5107';
+    (window as any).electron = undefined;
+    const { resolveExternalApiUrl } = await loadApiConfig();
+
+    expect(resolveExternalApiUrl('/published/openai/pub-1/v1')).toBe(
+      `${window.location.origin}/api/published/openai/pub-1/v1`,
+    );
+  });
+
+  test('resolveExternalApiUrl uses proxy target for Electron dev same-origin API base', async () => {
+    delete window.__RUNTIME_CONFIG__;
+    env.VITE_API_URL = '/api';
+    env.VITE_API_PROXY_TARGET = 'http://localhost:5107';
+    (window as any).electron = {};
+    const { resolveExternalApiUrl } = await loadApiConfig();
+
+    expect(resolveExternalApiUrl('/published/openai/pub-1/v1')).toBe(
+      'http://localhost:5107/api/published/openai/pub-1/v1',
+    );
+  });
+
+  test('resolveExternalApiUrl preserves absolute API base in Electron production', async () => {
+    delete window.__RUNTIME_CONFIG__;
+    env.VITE_API_URL = 'http://localhost:5107/api';
+    env.VITE_API_PROXY_TARGET = undefined;
+    (window as any).electron = {};
+    const { resolveExternalApiUrl } = await loadApiConfig();
+
+    expect(resolveExternalApiUrl('/published/openai/pub-1/v1')).toBe(
+      'http://localhost:5107/api/published/openai/pub-1/v1',
+    );
   });
 });

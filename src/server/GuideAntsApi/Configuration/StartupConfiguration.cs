@@ -109,7 +109,18 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSandboxAdminProxy, GuideAntsApi.Services.SystemGuide.SystemGuideSandboxAdminProxy>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder, GuideAntsApi.Services.Bootstrap.RuntimeProfileSeeder>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiDesiredStateBuilder, GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>();
+        services.AddHttpClient<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupOrchestrationClient, GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient>(client =>
+        {
+            var config = configuration.GetSection("LlamaCpp");
+            var baseUrl = config["BaseUrl"]
+                ?? throw new InvalidOperationException("LlamaCpp:BaseUrl is required.");
+            client.BaseAddress = DeriveLlamaAdminBaseUri(baseUrl);
+            client.Timeout = TimeSpan.FromHours(4);
+        });
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService, GuideAntsApi.Services.Bootstrap.LocalAiStartupWarmupService>();
+        services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService>(
+            static sp => (GuideAntsApi.Services.Bootstrap.ILocalAiWarmupService)sp.GetRequiredService<GuideAntsApi.Services.Bootstrap.ILocalAiStartupWarmupService>());
         services.AddHostedService<GuideAntsApi.Services.Bootstrap.LocalAiRuntimeWatchdogHostedService>();
         phaseLogger?.Invoke("ConfigureServices.RegisterServices.CoreServices");
 

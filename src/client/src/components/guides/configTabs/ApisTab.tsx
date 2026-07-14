@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { API_BASE_URL } from '../../../config/apiConfig';
+import { resolveExternalApiUrl } from '../../../config/apiConfig';
 
 export type WireApiEndpointFlagKey =
   | 'models'
@@ -87,25 +87,17 @@ export function ApisTab({
   const [activeExampleTab, setActiveExampleTab] = useState<WireApiExampleTabId>('chat');
 
   const openAiBaseUrl = useMemo(() => {
-    const resolvedApiBase = new URL(API_BASE_URL, window.location.origin);
-    const apiBasePath = resolvedApiBase.pathname === '/'
-      ? ''
-      : resolvedApiBase.pathname.replace(/\/+$/, '');
     const pubPath = publishedGuideId
       ? `/published/openai/${publishedGuideId}/v1`
       : '/published/openai/{pubId}/v1';
-    return `${window.location.origin}${apiBasePath}${pubPath}`;
+    return resolveExternalApiUrl(pubPath);
   }, [publishedGuideId]);
 
   const anthropicBaseUrl = useMemo(() => {
-    const resolvedApiBase = new URL(API_BASE_URL, window.location.origin);
-    const apiBasePath = resolvedApiBase.pathname === '/'
-      ? ''
-      : resolvedApiBase.pathname.replace(/\/+$/, '');
     const pubPath = publishedGuideId
       ? `/published/anthropic/${publishedGuideId}/v1`
       : '/published/anthropic/{pubId}/v1';
-    return `${window.location.origin}${apiBasePath}${pubPath}`;
+    return resolveExternalApiUrl(pubPath);
   }, [publishedGuideId]);
 
   const authMode = hasApiKey ? 'api_key' : authWebhookUrl.trim() ? 'webhook' : 'anonymous';

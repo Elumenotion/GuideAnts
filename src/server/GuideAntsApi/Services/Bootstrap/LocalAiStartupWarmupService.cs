@@ -1,76 +1,28 @@
-using System.Net;
-using System.Text;
-using System.Text.Json.Nodes;
 using GuideAnts.Logging;
 using GuideAntsApi.Configuration;
-using GuideAntsApi.DataModel;
-using GuideAntsApi.Endpoints;
 using GuideAntsApi.Options;
-using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
-using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Services.Bootstrap;
 
 public interface ILocalAiStartupWarmupService
 {
-    /// <summary>
-    /// True while <see cref="WarmupAllAsync"/> is running. Used by runtime status
-    /// checks so the UI can wait for startup model loads instead of issuing a
-    /// duplicate load request.
-    /// </summary>
     bool IsWarmupInProgress { get; }
 
-    /// <summary>
-    /// Ensures local AI services are loaded and ready in deterministic order:
-    /// unload auxiliary services, default llama-cpp chat target, then non-chat local services.
-    /// </summary>
     Task WarmupAllAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Ensures the configured global default chat model is loaded when it maps
-    /// to a llama-cpp catalog row.
-    /// </summary>
     Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Ensures local non-chat services are loaded and ready.
-    /// </summary>
     Task EnsureAuxiliaryServicesLoadedAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Unloads local non-chat services and waits until they report unloaded.
-    /// </summary>
     Task UnloadAuxiliaryServicesAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Single authority for reconciling one auxiliary (non-chat) local service to its
-    /// desired state. This is the ONLY sanctioned way to load/unload an aux service in
-    /// response to a user action (settings "Load", toolbar select/power, config change):
-    /// callers write desired state (active provider + chosen model) and invoke this; they
-    /// must NOT call the engine <c>/admin/load</c> or <c>/admin/unload</c> directly.
-    ///
-    /// Behaviour, driven purely by routing (which provider is active for the service):
-    ///  - routing is local  → load <paramref name="requestedModelRef"/> (or the resolved
-    ///    active/default model) and wait for readiness; the single-model engine supersedes
-    ///    whatever was loaded before, so "the rest" is implicitly unloaded.
-    ///  - routing is remote → unload (nothing local should be loaded).
-    ///  - routing unknown    → leave engine state unchanged.
-    ///
-    /// A load requested while the service is NOT the active provider is refused
-    /// (<see cref="LocalServiceReconcileOutcome.NotActiveProvider"/>): per D11 a locally
-    /// routed service is warm and a non-local service must load nothing.
-    /// </summary>
     Task<LocalServiceReconcileResult> ReconcileLocalServiceAsync(
         string serviceId,
         string? requestedModelRef = null,
         CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Unloads the local engine for <paramref name="serviceId"/> without changing
-    /// which provider is active. Used by toolbar power-off while local routing stays selected.
-    /// </summary>
     Task<LocalServiceReconcileResult> PowerOffLocalServiceEngineAsync(
         string serviceId,
         CancellationToken cancellationToken = default);
@@ -78,324 +30,167 @@ public interface ILocalAiStartupWarmupService
 
 public enum LocalServiceReconcileOutcome
 {
-    /// <summary>Service routed local and is loaded + ready.</summary>
     Warm,
-
-    /// <summary>Service routed remote/off and is unloaded.</summary>
     Idle,
-
-    /// <summary>A load was requested but the service is not the active provider; nothing loaded.</summary>
     NotActiveProvider,
-
-    /// <summary>Local admin base URL is not configured for this service.</summary>
     Unavailable,
-
-    /// <summary>Routing could not be resolved; engine state left unchanged.</summary>
     RoutingUnknown,
-
-    /// <summary>The load/unload was issued but the service did not reach the desired state in time.</summary>
     Timeout,
-
-    /// <summary>The reconcile failed (load/unload request errored).</summary>
     Failed
 }
 
 public sealed record LocalServiceReconcileResult(LocalServiceReconcileOutcome Outcome, string? Detail = null);
 
-internal sealed record AuxiliaryLoadAttemptResult(bool Success, string? CatalogEntryId);
+public interface ILocalAiWarmupService
+{
+    bool IsApplyInProgress { get; }
 
-public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
+    Task SyncDesiredAndApplyAsync(
+        WarmupDesiredBuildOptions? options = null,
+        bool waitForCompletion = false,
+        CancellationToken cancellationToken = default);
+
+    Task<WarmupStatusDocument> GetStatusAsync(CancellationToken cancellationToken = default);
+}
+
+public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, ILocalAiWarmupService
 {
     private int _warmupInProgress;
 
     public bool IsWarmupInProgress => Volatile.Read(ref _warmupInProgress) > 0;
 
+    public bool IsApplyInProgress => IsWarmupInProgress;
+
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
-    private static readonly string[] AuxiliaryServiceLoadOrder =
-    {
-        "SpeechTranscription",
-        "Embeddings",
-        "SpeechSynthesis",
-        "ImageGeneration"
-    };
-    private static readonly string[] AuxiliaryServiceUnloadOrder =
-    {
-        "ImageGeneration",
-        "SpeechSynthesis",
-        "Embeddings",
-        "SpeechTranscription"
-    };
+    private static readonly TimeSpan ApplyTimeout = TimeSpan.FromMinutes(45);
 
     private readonly IConfiguration _configuration;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILlamaRuntimeCoordinator _coordinator;
+    private readonly ILocalAiDesiredStateBuilder _desiredStateBuilder;
+    private readonly ILocalAiWarmupOrchestrationClient _orchestrationClient;
     private readonly IServiceModeResolver _serviceModeResolver;
     private readonly ILogger<LocalAiStartupWarmupService> _logger;
 
     public LocalAiStartupWarmupService(
         IConfiguration configuration,
         IServiceScopeFactory scopeFactory,
-        IHttpClientFactory httpClientFactory,
-        ILlamaRuntimeCoordinator coordinator,
+        ILocalAiDesiredStateBuilder desiredStateBuilder,
+        ILocalAiWarmupOrchestrationClient orchestrationClient,
         IServiceModeResolver serviceModeResolver,
         ILogger<LocalAiStartupWarmupService> logger)
     {
         _configuration = configuration;
         _scopeFactory = scopeFactory;
-        _httpClientFactory = httpClientFactory;
-        _coordinator = coordinator;
+        _desiredStateBuilder = desiredStateBuilder;
+        _orchestrationClient = orchestrationClient;
         _serviceModeResolver = serviceModeResolver;
         _logger = logger;
     }
 
-    public async Task WarmupAllAsync(CancellationToken cancellationToken = default)
+    public Task WarmupAllAsync(CancellationToken cancellationToken = default) =>
+        SyncDesiredAndApplyAsync(waitForCompletion: false, cancellationToken: cancellationToken);
+
+    public Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default) =>
+        SyncDesiredAndApplyAsync(waitForCompletion: true, cancellationToken: cancellationToken);
+
+    public Task EnsureAuxiliaryServicesLoadedAsync(CancellationToken cancellationToken = default) =>
+        SyncDesiredAndApplyAsync(waitForCompletion: true, cancellationToken: cancellationToken);
+
+    public Task UnloadAuxiliaryServicesAsync(CancellationToken cancellationToken = default) =>
+        SyncDesiredAndApplyAsync(
+            new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true },
+            waitForCompletion: true,
+            cancellationToken: cancellationToken);
+
+    public async Task SyncDesiredAndApplyAsync(
+        WarmupDesiredBuildOptions? options = null,
+        bool waitForCompletion = false,
+        CancellationToken cancellationToken = default)
     {
-        if (Interlocked.CompareExchange(ref _warmupInProgress, 1, 0) != 0)
+        if (!IsOrchestrationConfigured())
         {
-            _logger.LogDebug("Skipping duplicate local AI warmup; another warmup is already in progress.");
+            _logger.LogDebug("Skipping warmup sync: local AI orchestration is not configured.");
+            return;
+        }
+
+        var entered = Interlocked.CompareExchange(ref _warmupInProgress, 1, 0) == 0;
+        if (!entered)
+        {
+            if (waitForCompletion)
+            {
+                await WaitForApplyCompleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             return;
         }
 
         try
         {
-            // Drain GPU/RAM from auxiliary services (including any container autoload)
-            // before the LLM claims memory. Llama must become usable before aux reload
-            // because auxiliary warmup can take minutes and must not block chat.
-            await UnloadAuxiliaryServicesAsync(cancellationToken).ConfigureAwait(false);
-            await EnsureDefaultLlamaLoadedAsync(cancellationToken).ConfigureAwait(false);
+            var ini = await _desiredStateBuilder.BuildIniAsync(options, cancellationToken).ConfigureAwait(false);
+            await _orchestrationClient.PutDesiredAsync(ini, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            await _orchestrationClient.ApplyAsync(cancellationToken).ConfigureAwait(false);
+
+            if (waitForCompletion)
+            {
+                await WaitForApplyCompleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Local AI warmup sync failed.");
+            if (waitForCompletion)
+            {
+                throw;
+            }
         }
         finally
         {
             Interlocked.Decrement(ref _warmupInProgress);
         }
-
-        try
-        {
-            await EnsureAuxiliaryServicesLoadedAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Auxiliary local AI service warmup failed. Llama chat remains available.");
-        }
     }
 
-    public async Task EnsureDefaultLlamaLoadedAsync(CancellationToken cancellationToken = default)
-    {
-        if (!RuntimeConfigurationPlaceholders.HasUsableUrl(_configuration["LlamaCpp:BaseUrl"]))
-        {
-            _logger.LogDebug("Skipping default llama reconcile: LlamaCpp:BaseUrl is not configured.");
-            return;
-        }
-
-        var alias = await ResolveConfiguredDefaultRouterAliasAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(alias))
-        {
-            await UnloadAllLoadedLlamaAliasesAsync(cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        try
-        {
-            await EnsureLlamaAliasLoadedFirstAsync(alias, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Failed to preload default llama alias '{Alias}'. Startup will continue.",
-                alias);
-        }
-    }
-
-    public async Task EnsureAuxiliaryServicesLoadedAsync(CancellationToken cancellationToken = default)
-    {
-        foreach (var serviceId in AuxiliaryServiceLoadOrder)
-        {
-            await EnsureLocalServiceLoadedAndReadyAsync(serviceId, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    public async Task UnloadAuxiliaryServicesAsync(CancellationToken cancellationToken = default)
-    {
-        foreach (var serviceId in AuxiliaryServiceUnloadOrder)
-        {
-            await EnsureLocalServiceUnloadedAsync(serviceId, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private async Task<string?> ResolveConfiguredDefaultRouterAliasAsync(CancellationToken cancellationToken)
-    {
-        var defaultModelId = (_configuration["ChatDefaults:DefaultModelId"] ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(defaultModelId))
-        {
-            _logger.LogInformation("No ChatDefaults:DefaultModelId configured. Skipping default llama preload.");
-            return null;
-        }
-
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var row = await db.Models
-            .AsNoTracking()
-            .Where(m => m.ModelId == defaultModelId)
-            .Select(m => new { m.ModelId, m.Provider, m.RuntimeConfigJson, m.IsActive })
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        if (row is null)
-        {
-            _logger.LogWarning(
-                "ChatDefaults:DefaultModelId '{ModelId}' was not found in catalog; skipping default llama preload.",
-                defaultModelId);
-            return null;
-        }
-
-        if (!row.IsActive)
-        {
-            _logger.LogWarning(
-                "ChatDefaults:DefaultModelId '{ModelId}' is inactive; skipping default llama preload.",
-                defaultModelId);
-            return null;
-        }
-
-        if (!string.Equals(row.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogInformation(
-                "ChatDefaults:DefaultModelId '{ModelId}' uses provider '{Provider}', not llama-cpp; skipping local llama preload.",
-                defaultModelId,
-                row.Provider);
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(row.RuntimeConfigJson))
-        {
-            _logger.LogWarning(
-                "Default llama model '{ModelId}' is missing RuntimeConfigJson; skipping preload.",
-                defaultModelId);
-            return null;
-        }
-
-        try
-        {
-            var parsed = LocalRuntimeConfigurationParser.ParseRequired(defaultModelId, row.RuntimeConfigJson);
-            return parsed.RouterModelId;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Default llama model '{ModelId}' has invalid RuntimeConfigJson; skipping preload.",
-                defaultModelId);
-            return null;
-        }
-    }
-
-    private async Task EnsureLlamaAliasLoadedFirstAsync(string routerAlias, CancellationToken cancellationToken)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var llamaClient = scope.ServiceProvider.GetRequiredService<ILlamaServerRuntimeClient>();
-
-        var models = await SafeListLlamaModelsAsync(llamaClient, cancellationToken).ConfigureAwait(false);
-        if (models is null)
-        {
-            _logger.LogWarning("Unable to query llama runtime inventory before default load.");
-            return;
-        }
-
-        var loadedAliases = models.Data
-            .Where(IsRouterModelLoaded)
-            .Select(m => m.Id)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        foreach (var loaded in loadedAliases.Where(id => !string.Equals(id, routerAlias, StringComparison.Ordinal)))
-        {
-            try
-            {
-                await using var unloadLock = await _coordinator
-                    .AcquireAliasLockAsync(loaded, cancellationToken)
-                    .ConfigureAwait(false);
-                await llamaClient.UnloadModelAsync(loaded, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed unloading non-default llama alias '{Alias}' during warmup.", loaded);
-            }
-        }
-
-        var targetLoaded = loadedAliases.Any(id => string.Equals(id, routerAlias, StringComparison.Ordinal));
-        var targetLoading = models.Data.Any(m =>
-            string.Equals(m.Id, routerAlias, StringComparison.Ordinal)
-            && IsRouterModelLoading(m));
-        if (!targetLoaded && !targetLoading)
-        {
-            await using var loadLock = await _coordinator
-                .AcquireAliasLockAsync(routerAlias, cancellationToken)
-                .ConfigureAwait(false);
-            await llamaClient.LoadModelAsync(routerAlias, cancellationToken).ConfigureAwait(false);
-        }
-        else if (targetLoading)
-        {
-            _logger.LogDebug("Default llama alias '{Alias}' is already loading.", routerAlias);
-        }
-
-        var readyTimeout = TimeSpan.FromSeconds(ReadPositiveInt("GA_LLAMA_READY_TIMEOUT_SECONDS", 900));
-        var isLoaded = await WaitUntilAsync(async ct =>
-        {
-            var state = await SafeListLlamaModelsAsync(llamaClient, ct).ConfigureAwait(false);
-            if (state is null)
-            {
-                return false;
-            }
-
-            return state.Data.Any(m =>
-                string.Equals(m.Id, routerAlias, StringComparison.Ordinal)
-                && IsRouterModelLoaded(m));
-        }, readyTimeout, cancellationToken).ConfigureAwait(false);
-
-        if (!isLoaded)
-        {
-            _logger.LogWarning(
-                "Timed out waiting for default llama alias '{Alias}' to report loaded.",
-                routerAlias);
-        }
-        else
-        {
-            _logger.LogInformation("Default llama alias '{Alias}' is loaded.", routerAlias);
-        }
-    }
-
-    private async Task<LlamaModelsResponse?> SafeListLlamaModelsAsync(
-        ILlamaServerRuntimeClient llamaClient,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await llamaClient.ListModelsAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to list llama models.");
-            return null;
-        }
-    }
+    public Task<WarmupStatusDocument> GetStatusAsync(CancellationToken cancellationToken = default) =>
+        _orchestrationClient.GetStatusAsync(cancellationToken);
 
     public async Task<LocalServiceReconcileResult> PowerOffLocalServiceEngineAsync(
         string serviceId,
         CancellationToken cancellationToken = default)
     {
-        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
-        if (string.IsNullOrWhiteSpace(adminBase))
+        if (!IsLocalAuxiliaryService(serviceId))
         {
             return new LocalServiceReconcileResult(
                 LocalServiceReconcileOutcome.Unavailable,
-                $"Local admin base URL is not configured for '{serviceId}'.");
+                $"Service '{serviceId}' does not support local engine power-off.");
         }
 
-        return await ReconcileIdleAsync(serviceId, adminBase, cancellationToken).ConfigureAwait(false);
+        if (!IsOrchestrationConfigured())
+        {
+            return new LocalServiceReconcileResult(
+                LocalServiceReconcileOutcome.Unavailable,
+                "Local warmup orchestration is not configured.");
+        }
+
+        var options = new WarmupDesiredBuildOptions
+        {
+            ServiceDesiredOverrides = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [serviceId] = "idle",
+            },
+        };
+
+        try
+        {
+            await SyncDesiredAndApplyAsync(options, waitForCompletion: true, cancellationToken)
+                .ConfigureAwait(false);
+            return await MapServiceOutcomeAsync(serviceId, expectWarm: false, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Power-off reconcile failed for '{ServiceId}'.", LogValueSanitizer.Sanitize(serviceId));
+            return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Failed, ex.Message);
+        }
     }
 
     public async Task<LocalServiceReconcileResult> ReconcileLocalServiceAsync(
@@ -403,12 +198,18 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
         string? requestedModelRef = null,
         CancellationToken cancellationToken = default)
     {
-        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
-        if (string.IsNullOrWhiteSpace(adminBase))
+        if (!IsLocalAuxiliaryService(serviceId))
         {
             return new LocalServiceReconcileResult(
                 LocalServiceReconcileOutcome.Unavailable,
-                $"Local admin base URL is not configured for '{serviceId}'.");
+                $"Service '{serviceId}' does not support local reconcile.");
+        }
+
+        if (!IsOrchestrationConfigured())
+        {
+            return new LocalServiceReconcileResult(
+                LocalServiceReconcileOutcome.Unavailable,
+                "Local warmup orchestration is not configured.");
         }
 
         var routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
@@ -422,713 +223,153 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
             routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
         }
 
-        switch (routing)
+        if (routing == LocalRoutingDesiredState.Unknown)
         {
-            case LocalRoutingDesiredState.Warm:
-                return await ReconcileWarmAsync(serviceId, adminBase, requestedModelRef, cancellationToken)
-                    .ConfigureAwait(false);
-
-            case LocalRoutingDesiredState.Idle:
-                if (!string.IsNullOrWhiteSpace(requestedModelRef))
-                {
-                    // A specific model was requested but this service is not the active
-                    // provider. Loading it would violate the single-authority rule (only the
-                    // active provider may be warm), so refuse instead of loading + immediately
-                    // idling.
-                    _logger.LogInformation(
-                        "Refusing load for '{ServiceId}': it is not the active provider (routing is remote/off).",
-                        LogValueSanitizer.Sanitize(serviceId));
-                    return new LocalServiceReconcileResult(
-                        LocalServiceReconcileOutcome.NotActiveProvider,
-                        $"'{serviceId}' is not the active provider; nothing was loaded.");
-                }
-
-                return await ReconcileIdleAsync(serviceId, adminBase, cancellationToken).ConfigureAwait(false);
-
-            default:
-                _logger.LogWarning(
-                    "Skipping '{ServiceId}' reconcile: routing resolution failed; leaving engine state unchanged.",
-                    LogValueSanitizer.Sanitize(serviceId));
-                return new LocalServiceReconcileResult(
-                    LocalServiceReconcileOutcome.RoutingUnknown,
-                    $"Routing for '{serviceId}' could not be resolved.");
+            return new LocalServiceReconcileResult(
+                LocalServiceReconcileOutcome.RoutingUnknown,
+                $"Routing for '{serviceId}' could not be resolved.");
         }
-    }
 
-    private async Task<LocalServiceReconcileResult> ReconcileWarmAsync(
-        string serviceId,
-        string adminBase,
-        string? requestedModelRef,
-        CancellationToken cancellationToken)
-    {
-        try
+        if (routing == LocalRoutingDesiredState.Idle && !string.IsNullOrWhiteSpace(requestedModelRef))
         {
-            var loadResult = await TriggerLocalServiceLoadAsync(serviceId, adminBase, requestedModelRef, cancellationToken)
-                .ConfigureAwait(false);
-            if (!loadResult.Success)
+            return new LocalServiceReconcileResult(
+                LocalServiceReconcileOutcome.NotActiveProvider,
+                $"'{serviceId}' is not the active provider; nothing was loaded.");
+        }
+
+        WarmupDesiredBuildOptions options;
+        if (routing == LocalRoutingDesiredState.Idle)
+        {
+            options = new WarmupDesiredBuildOptions
             {
-                return new LocalServiceReconcileResult(
-                    LocalServiceReconcileOutcome.Failed,
-                    $"Load request for '{serviceId}' did not succeed.");
+                ServiceDesiredOverrides = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [serviceId] = "idle",
+                },
+            };
+        }
+        else
+        {
+            var overrides = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (!string.IsNullOrWhiteSpace(requestedModelRef))
+            {
+                overrides[serviceId] = requestedModelRef.Trim();
             }
 
-            var persisted = await TryPersistConfiguredServiceModeModelIdAsync(
+            options = new WarmupDesiredBuildOptions
+            {
+                ModelIdOverrides = overrides.Count > 0 ? overrides : null,
+            };
+        }
+
+        try
+        {
+            await SyncDesiredAndApplyAsync(options, waitForCompletion: true, cancellationToken)
+                .ConfigureAwait(false);
+            return await MapServiceOutcomeAsync(
                     serviceId,
-                    requestedModelRef,
-                    loadResult.CatalogEntryId,
+                    expectWarm: routing == LocalRoutingDesiredState.Warm,
                     cancellationToken)
                 .ConfigureAwait(false);
-            if (!persisted)
-            {
-                return new LocalServiceReconcileResult(
-                    LocalServiceReconcileOutcome.Failed,
-                    $"Load for '{serviceId}' succeeded but the selected model id was not persisted to ServiceModes.");
-            }
-
-            var ready = await WaitForLocalServiceReadyAsync(serviceId, adminBase, cancellationToken).ConfigureAwait(false);
-            if (!ready)
-            {
-                _logger.LogWarning(
-                    "Timed out waiting for local service '{ServiceId}' readiness after load.",
-                    LogValueSanitizer.Sanitize(serviceId));
-                return new LocalServiceReconcileResult(
-                    LocalServiceReconcileOutcome.Timeout,
-                    $"'{serviceId}' did not report ready after load.");
-            }
-
-            _logger.LogInformation("Local service '{ServiceId}' is ready.", LogValueSanitizer.Sanitize(serviceId));
-            return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Warm);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Local service '{ServiceId}' load failed.", LogValueSanitizer.Sanitize(serviceId));
+            _logger.LogWarning(ex, "Reconcile failed for '{ServiceId}'.", LogValueSanitizer.Sanitize(serviceId));
             return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Failed, ex.Message);
         }
     }
 
-    private async Task<LocalServiceReconcileResult> ReconcileIdleAsync(
+    private async Task<LocalServiceReconcileResult> MapServiceOutcomeAsync(
         string serviceId,
-        string adminBase,
+        bool expectWarm,
         CancellationToken cancellationToken)
     {
-        try
+        var status = await _orchestrationClient.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (!status.Services.TryGetValue(serviceId, out var serviceStatus))
         {
-            var unloaded = await TriggerLocalServiceUnloadAsync(serviceId, adminBase, cancellationToken)
-                .ConfigureAwait(false);
-            if (!unloaded)
+            return new LocalServiceReconcileResult(
+                LocalServiceReconcileOutcome.Failed,
+                $"Warmup status did not include '{serviceId}'.");
+        }
+
+        if (string.Equals(serviceStatus.Phase, "failed", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(serviceStatus.Error))
+        {
+            return new LocalServiceReconcileResult(
+                LocalServiceReconcileOutcome.Failed,
+                serviceStatus.Error ?? "Orchestrator reported failure.");
+        }
+
+        var applied = serviceStatus.Applied.Trim().ToLowerInvariant();
+        if (expectWarm)
+        {
+            if (applied == "warm")
             {
-                return new LocalServiceReconcileResult(
-                    LocalServiceReconcileOutcome.Failed,
-                    $"Unload request for '{serviceId}' did not succeed.");
+                return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Warm);
             }
 
-            var isUnloaded = await WaitForLocalServiceUnloadedAsync(serviceId, adminBase, cancellationToken)
-                .ConfigureAwait(false);
-            if (!isUnloaded)
+            if (string.Equals(status.ApplyStatus, "applying", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status.ApplyStatus, "pending", StringComparison.OrdinalIgnoreCase))
             {
                 return new LocalServiceReconcileResult(
                     LocalServiceReconcileOutcome.Timeout,
-                    $"'{serviceId}' did not report unloaded.");
+                    $"Timed out waiting for '{serviceId}' to become warm.");
             }
 
-            _logger.LogInformation("Local service '{ServiceId}' is unloaded.", LogValueSanitizer.Sanitize(serviceId));
+            return new LocalServiceReconcileResult(
+                LocalServiceReconcileOutcome.Timeout,
+                $"Service '{serviceId}' did not reach warm state.");
+        }
+
+        if (applied == "idle")
+        {
             return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle);
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Local service '{ServiceId}' unload failed.", LogValueSanitizer.Sanitize(serviceId));
-            return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Failed, ex.Message);
-        }
+
+        return new LocalServiceReconcileResult(
+            LocalServiceReconcileOutcome.Timeout,
+            $"Service '{serviceId}' did not reach idle state.");
     }
 
-    private async Task EnsureLocalServiceLoadedAndReadyAsync(string serviceId, CancellationToken cancellationToken)
+    private async Task WaitForApplyCompleteAsync(CancellationToken cancellationToken)
     {
-        var routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
-        if (routing != LocalRoutingDesiredState.Warm)
-        {
-            if (routing == LocalRoutingDesiredState.Unknown)
-            {
-                _logger.LogWarning(
-                    "Skipping {ServiceId} warmup: routing resolution failed.",
-                    serviceId);
-            }
-
-            return;
-        }
-
-        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
-        if (string.IsNullOrWhiteSpace(adminBase))
-        {
-            _logger.LogDebug("Skipping {ServiceId} warmup: local admin base URL not configured.", serviceId);
-            return;
-        }
-
-        try
-        {
-            var loadResult = await TriggerLocalServiceLoadAsync(serviceId, adminBase, requestedModelRef: null, cancellationToken).ConfigureAwait(false);
-            if (!loadResult.Success)
-            {
-                return;
-            }
-
-            var ready = await WaitForLocalServiceReadyAsync(serviceId, adminBase, cancellationToken).ConfigureAwait(false);
-            if (!ready)
-            {
-                _logger.LogWarning(
-                    "Timed out waiting for local service '{ServiceId}' readiness after load.",
-                    serviceId);
-                return;
-            }
-
-            _logger.LogInformation("Local service '{ServiceId}' is ready.", serviceId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Local service '{ServiceId}' warmup failed. Startup will continue.",
-                serviceId);
-        }
-    }
-
-    private async Task EnsureLocalServiceUnloadedAsync(string serviceId, CancellationToken cancellationToken)
-    {
-        var routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false);
-        if (routing == LocalRoutingDesiredState.Warm)
-        {
-            // Warm services are unloaded in the reverse-order pass before llama load, then reloaded.
-        }
-        else if (routing == LocalRoutingDesiredState.Unknown)
-        {
-            _logger.LogWarning(
-                "Skipping {ServiceId} unload: routing resolution failed; leaving engine state unchanged.",
-                serviceId);
-            return;
-        }
-
-        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, _configuration);
-        if (string.IsNullOrWhiteSpace(adminBase))
-        {
-            _logger.LogDebug("Skipping {ServiceId} unload: local admin base URL not configured.", serviceId);
-            return;
-        }
-
-        try
-        {
-            var unloaded = await TriggerLocalServiceUnloadAsync(serviceId, adminBase, cancellationToken).ConfigureAwait(false);
-            if (!unloaded)
-            {
-                return;
-            }
-
-            var isUnloaded = await WaitForLocalServiceUnloadedAsync(serviceId, adminBase, cancellationToken).ConfigureAwait(false);
-            if (!isUnloaded)
-            {
-                _logger.LogWarning(
-                    "Timed out waiting for local service '{ServiceId}' to report unloaded.",
-                    serviceId);
-                return;
-            }
-
-            _logger.LogInformation("Local service '{ServiceId}' is unloaded.", serviceId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Local service '{ServiceId}' unload failed. Continuing llama load flow.",
-                serviceId);
-        }
-    }
-
-    private async Task<AuxiliaryLoadAttemptResult> TriggerLocalServiceLoadAsync(
-        string serviceId,
-        string adminBase,
-        string? requestedModelRef,
-        CancellationToken cancellationToken)
-    {
-        var client = _httpClientFactory.CreateClient();
-        var timeout = TimeSpan.FromSeconds(GetServiceReadyTimeoutSeconds(serviceId));
-        var deadline = DateTime.UtcNow + timeout;
-        Exception? lastError = null;
-
-        var isImageGeneration = string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal);
-
-        // Image Generation records the desired bundle via a select-active marker; the load
-        // endpoint then starts the engine against whatever bundle is marked active. When the
-        // caller requested a specific bundle, set that marker first so the load resolves to it.
-        if (isImageGeneration && !string.IsNullOrWhiteSpace(requestedModelRef))
-        {
-            await TrySelectActiveImageBundleAsync(client, adminBase, requestedModelRef, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
+        var deadline = DateTime.UtcNow + ApplyTimeout;
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            try
+            var status = await _orchestrationClient.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            if (status.DesiredRevision <= status.AppliedRevision
+                && !string.Equals(status.ApplyStatus, "applying", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(status.ApplyStatus, "pending", StringComparison.OrdinalIgnoreCase))
             {
-                JsonObject? body = null;
-                if (!isImageGeneration)
+                if (string.Equals(status.ApplyStatus, "failed", StringComparison.OrdinalIgnoreCase))
                 {
-                    var resolved = ResolveAuxiliaryModelRef(
-                        requestedModelRef,
-                        await ResolveConfiguredServiceModeModelRefAsync(serviceId, cancellationToken).ConfigureAwait(false));
-                    if (resolved is null)
-                    {
-                        _logger.LogWarning(
-                            "Skipping load for service '{ServiceId}': no model is configured in ServiceModes and no explicit model was requested.",
-                            LogValueSanitizer.Sanitize(serviceId));
-                        return new AuxiliaryLoadAttemptResult(false, null);
-                    }
-
-                    body = new JsonObject();
-                    WriteAuxiliaryLoadModelRef(body, resolved);
+                    throw new InvalidOperationException(status.ApplyError ?? "Warmup apply failed.");
                 }
 
-                using var request = new HttpRequestMessage(HttpMethod.Post, $"{adminBase}/admin/load")
-                {
-                    Content = body is null
-                        ? null
-                        : new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
-                };
-
-                using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Conflict)
-                {
-                    return new AuxiliaryLoadAttemptResult(true, TryReadCatalogEntryId(responseBody));
-                }
-
-                if ((int)response.StatusCode is >= 400 and not (int)HttpStatusCode.Conflict)
-                {
-                    _logger.LogWarning(
-                        "Load request for service '{ServiceId}' was rejected ({StatusCode}) and will not be retried: {Body}",
-                        LogValueSanitizer.Sanitize(serviceId),
-                        (int)response.StatusCode,
-                        LogValueSanitizer.Sanitize(Truncate(responseBody, 512)));
-                    return new AuxiliaryLoadAttemptResult(false, null);
-                }
-
-                _logger.LogDebug(
-                    "Load request for service '{ServiceId}' returned {StatusCode}: {Body}",
-                    LogValueSanitizer.Sanitize(serviceId),
-                    (int)response.StatusCode,
-                    LogValueSanitizer.Sanitize(Truncate(responseBody, 512)));
-            }
-            catch (Exception ex)
-            {
-                lastError = ex;
+                return;
             }
 
             await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
         }
 
-        if (lastError is not null)
-        {
-            _logger.LogWarning(lastError, "Failed issuing startup load for service '{ServiceId}'.", LogValueSanitizer.Sanitize(serviceId));
-        }
-        else
-        {
-            _logger.LogWarning("Failed issuing startup load for service '{ServiceId}' within timeout.", LogValueSanitizer.Sanitize(serviceId));
-        }
-
-        return new AuxiliaryLoadAttemptResult(false, null);
+        throw new TimeoutException("Timed out waiting for warmup orchestrator to finish applying.");
     }
 
-    private sealed record ResolvedAuxiliaryModelRef(string Value, bool UseCatalogModelId);
+    private bool IsOrchestrationConfigured() =>
+        RuntimeConfigurationPlaceholders.HasUsableUrl(_configuration["LlamaCpp:BaseUrl"]);
 
-    private static ResolvedAuxiliaryModelRef? ResolveAuxiliaryModelRef(string? requestedModelRef, string? configuredModelId)
-    {
-        if (!string.IsNullOrWhiteSpace(requestedModelRef))
-        {
-            var trimmed = requestedModelRef.Trim();
-            return new ResolvedAuxiliaryModelRef(trimmed, UseCatalogModelId: ShouldUseCatalogModelId(trimmed, fromConfiguredServiceMode: false));
-        }
-
-        if (!string.IsNullOrWhiteSpace(configuredModelId))
-        {
-            var trimmed = configuredModelId.Trim();
-            return new ResolvedAuxiliaryModelRef(trimmed, UseCatalogModelId: true);
-        }
-
-        return null;
-    }
-
-    private static bool ShouldUseCatalogModelId(string modelRef, bool fromConfiguredServiceMode) =>
-        fromConfiguredServiceMode
-        || !modelRef.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase);
-
-    private static void WriteAuxiliaryLoadModelRef(JsonObject body, ResolvedAuxiliaryModelRef resolved)
-    {
-        if (resolved.UseCatalogModelId)
-        {
-            body["model_id"] = resolved.Value;
-            return;
-        }
-
-        body["model_path"] = resolved.Value;
-    }
-
-    private async Task<string?> ResolveConfiguredServiceModeModelRefAsync(
-        string serviceId,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var mode = await _serviceModeResolver
-                .ResolveAsync(serviceId, modeId: null, cancellationToken)
-                .ConfigureAwait(false);
-            var modelId = mode.ModelId?.Trim();
-            return string.IsNullOrWhiteSpace(modelId) ? null : modelId;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(
-                ex,
-                "Failed resolving configured ServiceModes ModelId for service '{ServiceId}'.",
-                LogValueSanitizer.Sanitize(serviceId));
-            return null;
-        }
-    }
-
-    private async Task<bool> TryPersistConfiguredServiceModeModelIdAsync(
-        string serviceId,
-        string? requestedModelRef,
-        string? loadedCatalogEntryId,
-        CancellationToken cancellationToken)
-    {
-        var persistId = loadedCatalogEntryId?.Trim();
-        if (string.IsNullOrWhiteSpace(persistId)
-            && !string.IsNullOrWhiteSpace(requestedModelRef)
-            && ShouldUseCatalogModelId(requestedModelRef.Trim(), fromConfiguredServiceMode: false))
-        {
-            persistId = requestedModelRef.Trim();
-        }
-
-        if (string.IsNullOrWhiteSpace(persistId))
-        {
-            _logger.LogWarning(
-                "Load for service '{ServiceId}' succeeded but no catalog model id was available to persist.",
-                LogValueSanitizer.Sanitize(serviceId));
-            return false;
-        }
-
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
-            await settings.SetServiceModeModelIdAsync(serviceId, persistId, cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Loaded service '{ServiceId}' but failed to persist configured model id '{ModelId}' to ServiceModes.",
-                LogValueSanitizer.Sanitize(serviceId),
-                LogValueSanitizer.Sanitize(persistId));
-            return false;
-        }
-    }
-
-    private static string? TryReadCatalogEntryId(string responseBody)
-    {
-        if (string.IsNullOrWhiteSpace(responseBody))
-        {
-            return null;
-        }
-
-        try
-        {
-            var root = JsonNode.Parse(responseBody) as JsonObject;
-            var catalogEntryId = root?["catalogEntryId"]?.GetValue<string>()?.Trim();
-            return string.IsNullOrWhiteSpace(catalogEntryId) ? null : catalogEntryId;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private async Task<bool> TriggerLocalServiceUnloadAsync(
-        string serviceId,
-        string adminBase,
-        CancellationToken cancellationToken)
-    {
-        var client = _httpClientFactory.CreateClient();
-        var timeout = TimeSpan.FromSeconds(GetServiceReadyTimeoutSeconds(serviceId));
-        var deadline = DateTime.UtcNow + timeout;
-        Exception? lastError = null;
-
-        while (DateTime.UtcNow < deadline)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Post, $"{adminBase}/admin/unload");
-                using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Conflict)
-                {
-                    return true;
-                }
-
-                _logger.LogDebug(
-                    "Unload request for service '{ServiceId}' returned {StatusCode}: {Body}",
-                    LogValueSanitizer.Sanitize(serviceId),
-                    (int)response.StatusCode,
-                    LogValueSanitizer.Sanitize(Truncate(responseBody, 512)));
-            }
-            catch (Exception ex)
-            {
-                lastError = ex;
-            }
-
-            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (lastError is not null)
-        {
-            _logger.LogWarning(lastError, "Failed issuing unload for service '{ServiceId}'.", LogValueSanitizer.Sanitize(serviceId));
-        }
-        else
-        {
-            _logger.LogWarning("Failed issuing unload for service '{ServiceId}' within timeout.", LogValueSanitizer.Sanitize(serviceId));
-        }
-
-        return false;
-    }
-
-    private async Task<bool> WaitForLocalServiceReadyAsync(
-        string serviceId,
-        string adminBase,
-        CancellationToken cancellationToken)
-    {
-        var client = _httpClientFactory.CreateClient();
-        var timeout = TimeSpan.FromSeconds(GetServiceReadyTimeoutSeconds(serviceId));
-
-        if (string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal))
-        {
-            return await WaitUntilAsync(async ct =>
-            {
-                try
-                {
-                    using var response = await client.GetAsync($"{adminBase}/health", ct).ConfigureAwait(false);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        return false;
-                    }
-
-                    var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                    if (string.IsNullOrWhiteSpace(body))
-                    {
-                        return true;
-                    }
-
-                    var root = JsonNode.Parse(body) as JsonObject;
-                    var processAlive = root?["engine"]?["processAlive"]?.GetValue<bool?>();
-                    var healthy = root?["engine"]?["healthy"]?.GetValue<bool?>();
-
-                    if (processAlive.HasValue && healthy.HasValue)
-                    {
-                        return processAlive.Value && healthy.Value;
-                    }
-
-                    if (processAlive.HasValue)
-                    {
-                        return processAlive.Value;
-                    }
-
-                    var status = root?["status"]?.GetValue<string>();
-                    return string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase);
-                }
-                catch
-                {
-                    return false;
-                }
-            }, timeout, cancellationToken).ConfigureAwait(false);
-        }
-
-        return await WaitUntilAsync(async ct =>
-        {
-            try
-            {
-                using var response = await client.GetAsync($"{adminBase}/ready", ct).ConfigureAwait(false);
-                return response.IsSuccessStatusCode;
-            }
-            catch
-            {
-                return false;
-            }
-        }, timeout, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<bool> WaitForLocalServiceUnloadedAsync(
-        string serviceId,
-        string adminBase,
-        CancellationToken cancellationToken)
-    {
-        var client = _httpClientFactory.CreateClient();
-        var timeout = TimeSpan.FromSeconds(GetServiceReadyTimeoutSeconds(serviceId));
-
-        if (string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal))
-        {
-            return await WaitUntilAsync(async ct =>
-            {
-                try
-                {
-                    using var response = await client.GetAsync($"{adminBase}/health", ct).ConfigureAwait(false);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        return false;
-                    }
-
-                    var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                    if (string.IsNullOrWhiteSpace(body))
-                    {
-                        return false;
-                    }
-
-                    var root = JsonNode.Parse(body) as JsonObject;
-                    var status = root?["status"]?.GetValue<string>();
-                    if (string.Equals(status, "unloaded", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-
-                    var processAlive = root?["engine"]?["processAlive"]?.GetValue<bool?>();
-                    return processAlive.HasValue && !processAlive.Value;
-                }
-                catch
-                {
-                    return false;
-                }
-            }, timeout, cancellationToken).ConfigureAwait(false);
-        }
-
-        return await WaitUntilAsync(async ct =>
-        {
-            try
-            {
-                using var response = await client.GetAsync($"{adminBase}/ready", ct).ConfigureAwait(false);
-                return !response.IsSuccessStatusCode;
-            }
-            catch
-            {
-                return false;
-            }
-        }, timeout, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task TrySelectActiveImageBundleAsync(
-        HttpClient client,
-        string adminBase,
-        string bundleId,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var request = new HttpRequestMessage(
-                HttpMethod.Post,
-                $"{adminBase}/admin/bundles/{Uri.EscapeDataString(bundleId)}/select-active");
-            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                _logger.LogWarning(
-                    "Select-active for image bundle '{BundleId}' returned {StatusCode}: {Body}",
-                    LogValueSanitizer.Sanitize(bundleId),
-                    (int)response.StatusCode,
-                    LogValueSanitizer.Sanitize(Truncate(responseBody, 512)));
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to select active image bundle '{BundleId}'.", LogValueSanitizer.Sanitize(bundleId));
-        }
-    }
-
-    private async Task<bool> WaitUntilAsync(
-        Func<CancellationToken, Task<bool>> predicate,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
-    {
-        var started = DateTime.UtcNow;
-        while (DateTime.UtcNow - started < timeout)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (await predicate(cancellationToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
-        }
-
-        return false;
-    }
-
-    private int GetServiceReadyTimeoutSeconds(string serviceId)
-    {
-        return serviceId switch
-        {
-            "SpeechTranscription" => ReadPositiveInt("GA_ASR_READY_TIMEOUT_SECONDS", 900),
-            "SpeechSynthesis" => ReadPositiveInt("GA_TTS_READY_TIMEOUT_SECONDS", 900),
-            "Embeddings" => ReadPositiveInt("GA_EMB_READY_TIMEOUT_SECONDS", 900),
-            "ImageGeneration" => ReadPositiveInt("GA_SD_READY_TIMEOUT_SECONDS", 900),
-            _ => 900
-        };
-    }
-
-    private int ReadPositiveInt(string key, int fallback)
-    {
-        var raw = _configuration[key];
-        if (int.TryParse(raw, out var parsed) && parsed > 0)
-        {
-            return parsed;
-        }
-
-        return fallback;
-    }
-
-    private static bool IsRouterModelLoaded(LlamaModelData model)
-    {
-        if (!string.IsNullOrWhiteSpace(model.Status?.Value))
-        {
-            return string.Equals(model.Status.Value, "loaded", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (!string.IsNullOrWhiteSpace(model.State))
-        {
-            return string.Equals(model.State, "loaded", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
-    }
-
-    private static bool IsRouterModelLoading(LlamaModelData model)
-    {
-        if (!string.IsNullOrWhiteSpace(model.Status?.Value))
-        {
-            return string.Equals(model.Status.Value, "loading", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (!string.IsNullOrWhiteSpace(model.State))
-        {
-            return string.Equals(model.State, "loading", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
-    }
+    private static bool IsLocalAuxiliaryService(string serviceId) =>
+        string.Equals(serviceId, RoutedServiceNames.SpeechTranscription, StringComparison.Ordinal)
+        || string.Equals(serviceId, RoutedServiceNames.Embeddings, StringComparison.Ordinal)
+        || string.Equals(serviceId, RoutedServiceNames.SpeechSynthesis, StringComparison.Ordinal)
+        || string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal);
 
     private enum LocalRoutingDesiredState
     {
         Warm,
         Idle,
-        Unknown
+        Unknown,
     }
 
     private static string? TryGetLocalProviderId(string serviceId) =>
@@ -1138,15 +379,9 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
             RoutedServiceNames.Embeddings => ServiceProviderIds.EmbeddingsLocalEmbHttp,
             RoutedServiceNames.SpeechTranscription => ServiceProviderIds.SpeechTranscriptionLocalAsrHttp,
             RoutedServiceNames.SpeechSynthesis => ServiceProviderIds.SpeechSynthesisLocalTtsHttp,
-            _ => null
+            _ => null,
         };
 
-    /// <summary>
-    /// Local model download/list proxies straight to the container admin API, but load /
-    /// select-active reconcile through routing. When the user operates on a local model
-    /// (or routing was never configured), activate the local provider automatically so
-    /// the same settings surface does not require a separate "Save and activate" click.
-    /// </summary>
     private async Task<bool> TryEnsureLocalProviderRoutedForModelOperationAsync(
         string serviceId,
         LocalRoutingDesiredState routing,
@@ -1195,11 +430,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
     {
         var expectedLocalProviderSection = serviceId switch
         {
-            RoutedServiceNames.SpeechTranscription => "LocalServiceHosts:SpeechTranscriptionBaseUrl",
-            RoutedServiceNames.Embeddings => "LocalServiceHosts:EmbeddingsBaseUrl",
-            RoutedServiceNames.SpeechSynthesis => "LocalServiceHosts:SpeechSynthesisBaseUrl",
-            RoutedServiceNames.ImageGeneration => "LocalServiceHosts:ImageGenerationBaseUrl",
-            _ => null
+            RoutedServiceNames.SpeechTranscription => $"{LocalServiceHostsOptions.SectionName}:SpeechTranscriptionBaseUrl",
+            RoutedServiceNames.Embeddings => $"{LocalServiceHostsOptions.SectionName}:EmbeddingsBaseUrl",
+            RoutedServiceNames.SpeechSynthesis => $"{LocalServiceHostsOptions.SectionName}:SpeechSynthesisBaseUrl",
+            RoutedServiceNames.ImageGeneration => $"{LocalServiceHostsOptions.SectionName}:ImageGenerationBaseUrl",
+            _ => null,
         };
 
         if (expectedLocalProviderSection is null)
@@ -1218,72 +453,15 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService
                 return LocalRoutingDesiredState.Warm;
             }
 
-            _logger.LogInformation(
-                "Local {ServiceId} should be idle: default mode '{ModeId}' routes to provider section '{ProviderSection}', not local '{LocalProviderSection}'.",
-                LogValueSanitizer.Sanitize(serviceId),
-                LogValueSanitizer.Sanitize(mode.ModeId),
-                LogValueSanitizer.Sanitize(mode.ProviderSection),
-                LogValueSanitizer.Sanitize(expectedLocalProviderSection));
             return LocalRoutingDesiredState.Idle;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Could not resolve routing mode for {ServiceId}; treating as unknown (do not warm).",
+                "Could not resolve routing mode for {ServiceId}; treating as unknown.",
                 LogValueSanitizer.Sanitize(serviceId));
             return LocalRoutingDesiredState.Unknown;
         }
-    }
-
-    private async Task UnloadAllLoadedLlamaAliasesAsync(CancellationToken cancellationToken)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var llamaClient = scope.ServiceProvider.GetRequiredService<ILlamaServerRuntimeClient>();
-
-        var models = await SafeListLlamaModelsAsync(llamaClient, cancellationToken).ConfigureAwait(false);
-        if (models is null)
-        {
-            _logger.LogWarning("Unable to query llama runtime inventory for idle unload.");
-            return;
-        }
-
-        var loadedAliases = models.Data
-            .Where(IsRouterModelLoaded)
-            .Select(m => m.Id)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        foreach (var loaded in loadedAliases)
-        {
-            try
-            {
-                await using var unloadLock = await _coordinator
-                    .AcquireAliasLockAsync(loaded, cancellationToken)
-                    .ConfigureAwait(false);
-                await llamaClient.UnloadModelAsync(loaded, cancellationToken).ConfigureAwait(false);
-                _logger.LogInformation("Unloaded llama alias '{Alias}' (default chat is not llama-cpp).", loaded);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed unloading llama alias '{Alias}' during idle reconcile.", loaded);
-            }
-        }
-    }
-
-    private static string Truncate(string? value, int maxChars)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return string.Empty;
-        }
-
-        if (value.Length <= maxChars)
-        {
-            return value;
-        }
-
-        return value[..maxChars] + "...";
     }
 }

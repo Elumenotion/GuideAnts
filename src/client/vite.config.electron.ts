@@ -18,6 +18,17 @@ export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
   const env = loadEnv(mode, process.cwd(), '')
   const analyze = process.env.ANALYZE === 'true'
+  const configuredApiUrl = env.VITE_API_URL?.trim()
+  const explicitProxyTarget = env.VITE_API_PROXY_TARGET?.trim()
+  let proxyTarget: string | undefined = explicitProxyTarget
+  if (!proxyTarget && configuredApiUrl && /^https?:\/\//i.test(configuredApiUrl)) {
+    try {
+      proxyTarget = new URL(configuredApiUrl).origin
+    } catch {
+      proxyTarget = undefined
+    }
+  }
+  const useDevProxy = Boolean(proxyTarget && configuredApiUrl?.startsWith('/'))
   
   return {
     plugins: [
@@ -78,6 +89,25 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      strictPort: true,
+      ...(useDevProxy
+        ? {
+            proxy: {
+              '/api': {
+                target: proxyTarget,
+                changeOrigin: true,
+              },
+              '/chat': {
+                target: proxyTarget,
+                changeOrigin: true,
+              },
+              '/sandbox': {
+                target: proxyTarget,
+                changeOrigin: true,
+              },
+            },
+          }
+        : {}),
     },
   }
 })

@@ -2,6 +2,8 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
+using GuideAntsApi.Options;
+using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Settings;
 
@@ -28,18 +30,21 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
     private readonly IApplicationSettingsService _settings;
     private readonly ILlamaRuntimeInventoryService _inventory;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILocalAiWarmupOrchestrationClient? _warmupOrchestrationClient;
     private readonly ILogger<RoutingReadinessService> _logger;
 
     public RoutingReadinessService(
         IApplicationSettingsService settings,
         ILlamaRuntimeInventoryService inventory,
         IServiceScopeFactory scopeFactory,
-        ILogger<RoutingReadinessService> logger)
+        ILogger<RoutingReadinessService> logger,
+        ILocalAiWarmupOrchestrationClient? warmupOrchestrationClient = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _warmupOrchestrationClient = warmupOrchestrationClient;
     }
 
     public async Task<ModeReadinessDto> ProbeModeAsync(string service, string modeId, CancellationToken cancellationToken = default)
@@ -117,6 +122,8 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
                 blockers.AddRange(llamaResult.Blockers);
             }
         }
+
+        blockers.AddRange(await ProbeWarmupOrchestratorBlockersAsync(service, mode, cancellationToken).ConfigureAwait(false));
 
         return new ModeReadinessDto(
             Service: service,
@@ -345,6 +352,52 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         _ = modelId;
         return Array.Empty<string>();
     }
+
+    private async Task<IReadOnlyList<string>> ProbeWarmupOrchestratorBlockersAsync(
+        string service,
+        ServiceModeDto mode,
+        CancellationToken cancellationToken)
+    {
+        if (_warmupOrchestrationClient is null
+            || string.IsNullOrWhiteSpace(mode.ProviderSection)
+            || !IsLocalServiceProviderSection(mode.ProviderSection))
+        {
+            return Array.Empty<string>();
+        }
+
+        try
+        {
+            var status = await _warmupOrchestrationClient.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            if (!status.Services.TryGetValue(service, out var serviceStatus))
+            {
+                return Array.Empty<string>();
+            }
+
+            if (string.Equals(serviceStatus.Desired, "warm", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(serviceStatus.Applied, "warm", StringComparison.OrdinalIgnoreCase))
+            {
+                var detail = string.IsNullOrWhiteSpace(serviceStatus.Error)
+                    ? $"phase={serviceStatus.Phase}"
+                    : serviceStatus.Error;
+                return
+                [
+                    $"{BlockerKeys.RuntimeState}: warmup orchestrator has not applied warm state for '{service}' ({detail})."
+                ];
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Warmup orchestrator status unavailable for service '{Service}'.", service);
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private static bool IsLocalServiceProviderSection(string providerSection) =>
+        string.Equals(providerSection, $"{LocalServiceHostsOptions.SectionName}:SpeechTranscriptionBaseUrl", StringComparison.Ordinal)
+        || string.Equals(providerSection, $"{LocalServiceHostsOptions.SectionName}:EmbeddingsBaseUrl", StringComparison.Ordinal)
+        || string.Equals(providerSection, $"{LocalServiceHostsOptions.SectionName}:SpeechSynthesisBaseUrl", StringComparison.Ordinal)
+        || string.Equals(providerSection, $"{LocalServiceHostsOptions.SectionName}:ImageGenerationBaseUrl", StringComparison.Ordinal);
 
     private string? _configurationForSection(string section, string field)
     {

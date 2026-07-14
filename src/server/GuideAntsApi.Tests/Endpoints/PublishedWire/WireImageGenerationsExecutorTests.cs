@@ -68,10 +68,13 @@ public sealed class WireImageGenerationsExecutorTests
         syncService.Verify(
             s => s.SyncNotebookAsync(It.IsAny<Guid>()),
             Times.Never);
+        syncService.Verify(
+            s => s.QueueNotebookSyncAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [TestMethod]
-    public async Task ExecuteAsync_PublishedPath_SyncsAfterWrite()
+    public async Task ExecuteAsync_PublishedPath_QueuesSyncAfterWrite()
     {
         var imageBytes = new byte[] { 9, 8, 7 };
         var imageService = new Mock<INotebookImageService>(MockBehavior.Strict);
@@ -98,7 +101,7 @@ public sealed class WireImageGenerationsExecutorTests
             .Returns(Task.CompletedTask);
 
         syncService
-            .Setup(s => s.SyncNotebookAsync(notebookId))
+            .Setup(s => s.QueueNotebookSyncAsync(notebookId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var http = new DefaultHttpContext();
@@ -117,7 +120,7 @@ public sealed class WireImageGenerationsExecutorTests
             syncDatabaseAfterWrite: true,
             recordUsageAsync: (_, _, _) => Task.CompletedTask);
 
-        syncService.Verify(s => s.SyncNotebookAsync(notebookId), Times.Once);
+        syncService.Verify(s => s.QueueNotebookSyncAsync(notebookId, It.IsAny<CancellationToken>()), Times.Once);
         imageService.Verify(
             s => s.GenerateImageAsync(
                 It.IsAny<string>(),
