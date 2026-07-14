@@ -363,6 +363,21 @@ function NotebookDetailsContent() {
                             title: 'Model Load Failed',
                             message: op?.errorDetails || 'Local model load operation failed.'
                         });
+                    } else if (
+                        runtimeStatus.activeOperation.operationId === '__external_loading__'
+                        && projectId
+                        && notebookId
+                    ) {
+                        const status = await api.projects.notebooks.conversations.checkLlamaRuntime(
+                            projectId,
+                            notebookId,
+                            targetAssistantId
+                        );
+                        if (status?.state === 'failed' || status?.state === 'requires_load' || status?.state === 'ready') {
+                            applyRuntimeStatus(status, targetAssistantId);
+                            return;
+                        }
+                        setRuntimeStatus((prev: any) => ({ ...prev, state: 'loading', activeOperation: op }));
                     } else {
                         setRuntimeStatus((prev: any) => ({ ...prev, state: 'loading', activeOperation: op }));
                     }

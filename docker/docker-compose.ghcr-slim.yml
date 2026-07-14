@@ -122,6 +122,7 @@ services:
       - ScriptExecution__AdminToken=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
 
       - LlamaCpp__BaseUrl=http://127.0.0.1:9/llama-cpp
+      - LlamaCpp__TimeoutSeconds=${GA_LLAMA_CPP_TIMEOUT_SECONDS:-600}
       - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox
       - ServiceRouting__Containers__plantuml__BaseUrl=http://plantuml:80
       - HF_TOKEN=${HF_TOKEN:-}

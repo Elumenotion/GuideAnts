@@ -49,13 +49,18 @@ services:
       - GA_LLAMA_MODELS_MAX=1
       - GA_LLAMA_NO_AUTOLOAD=1
       - GA_LLAMA_CTX_SIZE=262144
-      - GA_LLAMA_THREADS=16
-      - GA_LLAMA_PARALLEL=5
       - GA_LLAMA_CACHE_RAM=8192
-      - GA_LLAMA_KV_UNIFIED=1
+      - GA_LLAMA_KV_UNIFIED=${GA_LLAMA_KV_UNIFIED:-1}
       - GA_LLAMA_JINJA=1
       - GA_LLAMA_CONT_BATCH=1
       - GA_LLAMA_NO_MMAP=0
+      # Global router knobs (propagate to every spawned child instance).
+      - GA_LLAMA_FLASH_ATTN=${GA_LLAMA_FLASH_ATTN:-on}
+      - GA_LLAMA_CACHE_TYPE_K=${GA_LLAMA_CACHE_TYPE_K:-q8_0}
+      - GA_LLAMA_CACHE_TYPE_V=${GA_LLAMA_CACHE_TYPE_V:-q8_0}
+      - GA_LLAMA_THREADS=${GA_LLAMA_THREADS:-16}
+      # Qwen-VL grounding accuracy requires >=1024 image tokens.
+      - GA_LLAMA_IMAGE_MIN_TOKENS=1024
       - GA_ASR_HOST=127.0.0.1
       - GA_ASR_PORT=8082
       - GA_ASR_MODEL_DIR=/models-local/asr
@@ -217,6 +222,7 @@ services:
       - ScriptExecution__AgentToken=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - ScriptExecution__AdminToken=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
       - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
+      - LlamaCpp__TimeoutSeconds=${GA_LLAMA_CPP_TIMEOUT_SECONDS:-600}
       - ServiceRouting__Containers__guideants-ai__BaseUrl=http://guideants-ai:80/sandbox
       - ServiceRouting__Containers__plantuml__BaseUrl=http://plantuml:80
       - HF_TOKEN=${HF_TOKEN:-}

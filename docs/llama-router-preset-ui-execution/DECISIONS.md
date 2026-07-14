@@ -69,10 +69,9 @@ product implementation continues.
   with the resolved curated preset.
 - Operator Customize/custom patching may use `presetMode: "merge"` and changes only
   submitted extras.
-- Known fleet-only keys are rejected by the alias API with an error that identifies
-  the Fleet llama server editor.
-- The fleet editor is schema-driven and accepts supported fleet keys only. Unknown
-  keys are not sent to compose.
+- Known router-shell keys (`models-preset`, `models-max`, `no-autoload`, …) are rejected on
+  alias presets. All other llama-server switches are model-scoped and belong in the alias
+  preset (`router-models.ini`), including `parallel`, `threads`, and `jinja`.
 - Unknown well-formed keys in the alias editor are accepted as alias-scoped, logged
   in the operation, and any child-spawn error is surfaced against that key.
 - Duplicate keys under case/alias normalization, control characters, blank keys,
@@ -118,7 +117,6 @@ Canonical routes:
 - `POST /api/settings/llama/installations/{modelId}/adopt`
 - `GET /api/settings/llama/router/entries`
 - `PUT /api/settings/llama/router/entries/{alias}`
-- fleet routes from D4.
 - `GET /api/settings/llama/migration/status`
 - `GET /api/settings/llama/migration/issues`
 
@@ -128,7 +126,6 @@ Internal llama-admin routes and payload fixtures frozen in Phase 0:
 - `GET /admin/catalog/{catalogId}/quants`
 - `POST /downloads` and `GET /downloads/{operationId}`
 - `GET /router/entries` and `POST /router/entries`
-- `GET /runtime/fleet-preset` and `PUT /runtime/fleet-preset`
 
 The old internal download/status routes may remain temporarily for in-flight upgrade
 compatibility, but new clients use operations. Compatibility code must preserve the

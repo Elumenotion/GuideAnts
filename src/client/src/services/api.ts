@@ -43,8 +43,6 @@ import {
     AdoptInstallationRequestDto,
     AdoptPreviewResponseDto,
     LifecycleOperationResponseDto,
-    FleetLlamaPresetResponseDto,
-    FleetLlamaPresetPutRequestDto,
     LlamaMigrationStatusResponseDto,
     LlamaMigrationIssuesResponseDto,
     LlamaRouterEntriesResponseDto,
@@ -1511,15 +1509,6 @@ export const api = {
                     body: JSON.stringify(request),
                 },
             ),
-
-        getLlamaFleetPreset: () =>
-            callApi<FleetLlamaPresetResponseDto>('/settings/llama/runtime/fleet-preset'),
-
-        putLlamaFleetPreset: (request: FleetLlamaPresetPutRequestDto) =>
-            callApi<FleetLlamaPresetResponseDto>('/settings/llama/runtime/fleet-preset', {
-                method: 'PUT',
-                body: JSON.stringify(request),
-            }),
 
         getLlamaMigrationStatus: () =>
             callApi<LlamaMigrationStatusResponseDto>('/settings/llama/migration/status'),

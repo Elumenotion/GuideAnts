@@ -5,9 +5,12 @@
 ## Mission
 
 Complete the operator-managed surfaces: custom HF, attach existing alias, full
-alias-preset editor, fleet llama settings, installed curated summary, change quant,
+alias-preset editor, installed curated summary, change quant,
 repair, Customize, and curated adoption. Remove legacy advanced fields from the
 normal curated add/edit experience.
+
+> **Fleet panel superseded:** There is no Fleet llama Settings panel. Router-process keys
+> (`parallel`, `threads`, …) use `GA_LLAMA_*` in docker-compose. Do not build fleet UI.
 
 ## Read first
 
@@ -27,13 +30,12 @@ normal curated add/edit experience.
 ## Hard guardrails
 
 - Curated normal edit remains presentation + read-only technical/install state.
-- Alias and fleet preset editors are separate and explain precedence.
-- Fleet-scoped keys cannot be saved through alias editor.
+- Router-process-scoped keys cannot be saved through the alias preset editor; errors point to `GA_LLAMA_*` in docker-compose.
 - Custom flow infers no profile, projector, context, preset, revision, or artifacts.
 - Attach does not offer to rewrite the alias preset.
 - Customize requires explicit confirmation and explains tracking consequences.
 - Adoption shows every difference before confirmation and never fills unknown data.
-- Desired/applied fleet mismatch and migration issues remain visible.
+- Migration issues remain visible when applicable.
 - Reuse existing UI primitives and icon libraries.
 
 ## Tasks
@@ -46,7 +48,7 @@ normal curated add/edit experience.
    profile, target directory, and full alias preset. Require all necessary values.
 4. Build structured alias preset editor:
    key/value rows, add/remove, duplicate/reserved/value validation, live INI preview,
-   replace/merge intent, and link to Fleet settings for fleet-scoped keys.
+   replace/merge intent; router-process keys rejected with `GA_LLAMA_*` guidance.
 5. Build Attach flow listing unbound artifact-backed aliases; require catalog
    identity/profile and show existing preset read-only.
 6. Replace normal llama catalog edit fields with:
@@ -56,12 +58,11 @@ normal curated add/edit experience.
 7. Add actions:
    - Change quant modal using current live groups and explicit choice;
    - Repair confirmation/progress using recorded source;
-   - technical configuration view (effective fleet + alias);
+   - technical configuration view (effective alias preset);
    - Customize confirmation and operator editor;
    - adoption comparison/diff and confirmation.
-8. Add Fleet llama server panel under Models & Runtime:
-   typed proposal §4.7.3 fields, validation, effective precedence help, save/restart,
-   desired/applied revisions/status/error, retry apply.
+8. ~~Add Fleet llama server panel under Models & Runtime~~ **SUPERSEDED — never shipped; do not build.**
+   Router-process keys use `GA_LLAMA_*` in docker-compose instead.
 9. Add migration issue panel/actions. Show unmapped `loadParams`, profile policy
    disagreement, and operator-managed classification without hiding models.
 10. Remove normal add/edit fields and serializers for load JSON, row-level parallel
@@ -69,7 +70,7 @@ normal curated add/edit experience.
     mode. Retain profile editing only in Runtime Profiles.
 11. Keep Settings and Home custom/attach behavior mapped through shared contracts.
 12. Add component/parity tests for all modes/actions, preset validation/preview,
-    fleet save failure/reconcile, loaded lifecycle progress, migration issues,
+    loaded lifecycle progress, migration issues,
     management transitions, and removed-field absence.
 13. Run client-focused CodeQL/manual checks for unsafe URL/HTML/secret rendering and
     advanced input handling.

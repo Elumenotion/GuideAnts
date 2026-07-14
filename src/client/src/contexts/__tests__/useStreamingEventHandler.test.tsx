@@ -155,6 +155,25 @@ describe('useStreamingEventHandler error branch', () => {
     }));
   });
 
+  it('shows recovery warning without opening the crash modal when local inference times out', () => {
+    const { handler, showToast } = mountHandler();
+
+    handler({
+      type: 'error',
+      data: {
+        code: 'local_llm_timeout',
+        message: 'The local model exceeded its inference deadline and is being recovered.',
+        type: 'LlamaInferenceTimeoutException',
+      },
+    });
+
+    expect(dispatchEventSpy).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'warning',
+      title: 'Local Model Recovering',
+    }));
+  });
+
   it('shows warning toast for AttachmentNotReadyException', () => {
     const { handler, showToast } = mountHandler();
 

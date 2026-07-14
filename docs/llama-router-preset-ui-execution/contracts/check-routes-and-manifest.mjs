@@ -18,8 +18,6 @@ const d8PublicRoutes = [
   'POST /api/settings/llama/installations/{modelId}/adopt',
   'GET /api/settings/llama/router/entries',
   'PUT /api/settings/llama/router/entries/{alias}',
-  'GET /api/settings/llama/runtime/fleet-preset',
-  'PUT /api/settings/llama/runtime/fleet-preset',
   'GET /api/settings/llama/migration/status',
   'GET /api/settings/llama/migration/issues',
 ];
@@ -31,8 +29,6 @@ const d8InternalRoutes = [
   'GET /downloads/{operationId}',
   'GET /router/entries',
   'POST /router/entries',
-  'GET /runtime/fleet-preset',
-  'PUT /runtime/fleet-preset',
 ];
 
 const existingPublicLlamaRoutes = [

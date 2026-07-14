@@ -1,7 +1,7 @@
 {
   "profileId": "qwen3_6",
   "displayName": "Qwen 3.6",
-  "description": "Profile for Qwen 3.6 model family. Thinking via chat_template_kwargs.enable_thinking.",
+  "description": "Profile for Qwen 3.6 model family. Thinking via chat_template_kwargs.enable_thinking and llama.cpp thinking_budget_tokens.",
   "providers": ["llama-cpp"],
   "combineSystemAndDeveloperMessages": true,
   "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
@@ -14,14 +14,27 @@
     "repetition_penalty": { "key": "repetition_penalty", "label": "Repetition Penalty", "description": "Penalizes repeated tokens (1.0=disabled)", "min": 1.0, "max": 2.0, "step": 0.1, "default": 1.0, "displayOrder": 5, "exposedInGuideBuilder": false }
   },
   "thinkingControlJson": {
-    "defaultChoice": "enabled",
+    "defaultChoice": "medium",
     "choiceActions": {
       "none": [
         { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": false },
         { "target": "RequestField", "key": "reasoning_format", "value": "none" }
       ],
       "enabled": [
-        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true }
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true },
+        { "target": "RequestField", "key": "thinking_budget_tokens", "value": 4096 }
+      ],
+      "low": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true },
+        { "target": "RequestField", "key": "thinking_budget_tokens", "value": 1024 }
+      ],
+      "medium": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true },
+        { "target": "RequestField", "key": "thinking_budget_tokens", "value": 4096 }
+      ],
+      "high": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true },
+        { "target": "RequestField", "key": "thinking_budget_tokens", "value": 8192 }
       ]
     }
   },

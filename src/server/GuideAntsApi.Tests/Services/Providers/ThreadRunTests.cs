@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using AntRunner.Chat;
 using AntRunner.Chat.Abstractions;
+using AntRunner.Chat.LlamaCpp;
 using AntRunner.ToolCalling;
 using FluentAssertions;
 
@@ -45,6 +46,26 @@ public sealed class ThreadRunTests
     }
 
     [TestMethod]
+    public void IsFatalChatRunException_RecognizesWrappedLlamaInferenceTimeout()
+    {
+        var timeout = new LlamaInferenceTimeoutException("qwen3.5-27b", 600);
+        var nestedFailure = new ChatConversationException(timeout, chatRunOutput: null);
+        var toolInvocationFailure = new TargetInvocationException(nestedFailure);
+
+        Invoke<bool>("IsFatalChatRunException", toolInvocationFailure).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public void IsFatalChatRunException_DoesNotTerminateConversationForOrdinaryToolFailure()
+    {
+        var toolFailure = new ChatConversationException(
+            new InvalidOperationException("tool failed"),
+            chatRunOutput: null);
+
+        Invoke<bool>("IsFatalChatRunException", toolFailure).Should().BeFalse();
+    }
+
+    [TestMethod]
     public void FormatFileChangesConsole_RendersNewAndModifiedSections()
     {
         var result = Invoke<string>(
@@ -72,6 +93,86 @@ public sealed class ThreadRunTests
         result.Should().NotContain("# New Files");
         result.Should().Contain("# Modified Files");
         result.Should().Contain("only-modified.txt");
+    }
+
+    [TestMethod]
+    public void BuildEvaluatorDialog_ExcludesEmptyTerminalAssistantMessage()
+    {
+        var output = new ChatRunOutput
+        {
+            LastMessage = string.Empty,
+            ConversationMessages =
+            [
+                new ThreadConversationMessage
+                {
+                    MessageType = ThreadConversationMessageType.User,
+                    Message = "create the podcast"
+                },
+                new ThreadConversationMessage
+                {
+                    MessageType = ThreadConversationMessageType.Assistant,
+                    Message = string.Empty
+                },
+                new ThreadConversationMessage
+                {
+                    MessageType = ThreadConversationMessageType.Tool,
+                    Message = "podcast created"
+                },
+                new ThreadConversationMessage
+                {
+                    MessageType = ThreadConversationMessageType.Assistant,
+                    Message = string.Empty
+                }
+            ]
+        };
+
+        var result = Invoke<string>("BuildEvaluatorDialog", output);
+
+        result.Should().Contain("User: create the podcast");
+        result.Should().Contain("Tool: podcast created");
+        result.Should().EndWith("Tool: podcast created\n");
+    }
+
+    [TestMethod]
+    public void BuildEvaluatorDialog_RemovesOnlyTerminalResponse_WhenTextAppearsEarlier()
+    {
+        var output = new ChatRunOutput
+        {
+            LastMessage = "same text",
+            ConversationMessages =
+            [
+                new ThreadConversationMessage
+                {
+                    MessageType = ThreadConversationMessageType.User,
+                    Message = "same text"
+                },
+                new ThreadConversationMessage
+                {
+                    MessageType = ThreadConversationMessageType.Assistant,
+                    Message = "same text"
+                }
+            ]
+        };
+
+        var result = Invoke<string>("BuildEvaluatorDialog", output);
+
+        result.Should().Contain("User: same text");
+        result.Should().NotContain("Assistant: same text");
+    }
+
+    [TestMethod]
+    public void ApplyAccumulatedFileChanges_PopulatesPartialResult()
+    {
+        var output = new ChatRunOutput();
+
+        Invoke<object>(
+            "ApplyAccumulatedFileChanges",
+            output,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "podcast.wav" },
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "notes.md" });
+
+        output.NewFiles.Should().Equal("podcast.wav");
+        output.ModifiedFiles.Should().Equal("notes.md");
     }
 
     [TestMethod]

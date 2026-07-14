@@ -25,6 +25,23 @@ namespace AntRunner.Chat
         // Tracks which files have already been announced in a conversation to avoid duplicates
         private static readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, byte>> ConversationFileAnnouncements = new();
 
+        private static bool IsFatalChatRunException(Exception exception)
+        {
+            if (exception is IChatRunFatalException)
+            {
+                return true;
+            }
+
+            if (exception is AggregateException aggregate
+                && aggregate.InnerExceptions.Any(IsFatalChatRunException))
+            {
+                return true;
+            }
+
+            return exception.InnerException != null
+                && IsFatalChatRunException(exception.InnerException);
+        }
+
         private static bool AssistantHasFilesContextOption(AssistantDefinition def)
         {
             if (def.ContextOptions == null) return false;
@@ -183,6 +200,55 @@ namespace AntRunner.Chat
             }
             sb.Append("```");
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Builds the conversation portion of an evaluator request without the terminal assistant
+        /// response. This is structural so an empty response, or response text repeated earlier in
+        /// the conversation, cannot make string replacement ambiguous.
+        /// </summary>
+        private static string BuildEvaluatorDialog(ChatRunOutput runResults)
+        {
+            if (runResults.ConversationMessages.Count == 0 ||
+                runResults.ConversationMessages[^1].MessageType != ThreadConversationMessageType.Assistant)
+            {
+                throw new InvalidOperationException(
+                    "Evaluator input requires a terminal assistant conversation message.");
+            }
+
+            var sb = new StringBuilder();
+            string? lastMessageType = null;
+            foreach (var message in runResults.ConversationMessages.Take(runResults.ConversationMessages.Count - 1))
+            {
+                var messageType = message.MessageType.ToString();
+                sb.Append(lastMessageType == messageType ? "\n" : $"\n{messageType}: ");
+                sb.Append(message.Message);
+                sb.Append('\n');
+                lastMessageType = messageType;
+            }
+
+            return sb.ToString();
+        }
+
+        private static void ApplyAccumulatedFileChanges(
+            ChatRunOutput? runResults,
+            IReadOnlyCollection<string> accumulatedNewFiles,
+            IReadOnlyCollection<string> accumulatedModifiedFiles)
+        {
+            if (runResults == null)
+            {
+                return;
+            }
+
+            if (accumulatedNewFiles.Count > 0)
+            {
+                runResults.NewFiles = [.. accumulatedNewFiles];
+            }
+
+            if (accumulatedModifiedFiles.Count > 0)
+            {
+                runResults.ModifiedFiles = [.. accumulatedModifiedFiles];
+            }
         }
 
         /// <summary>
@@ -752,13 +818,22 @@ namespace AntRunner.Chat
                         {
                             runResults!.Usage = accumulatedUsage;
                         }
+
+                        // Preserve completed tool side effects before evaluator processing. If an
+                        // evaluator fails, the partial result still reports files already created.
+                        ApplyAccumulatedFileChanges(
+                            runResults,
+                            accumulatedNewFiles,
+                            accumulatedModifiedFiles);
                     }
 
                     if (choice.FinishReason == "stop" && !string.IsNullOrEmpty(options.Evaluator) && runResults != null)
                     {
                         while (evaluatorTurnCounter < 2)
                         {
-                            var evaluatedPrompt = (runResults?.Dialog?.Replace(runResults.LastMessage, string.Empty) ?? "").Replace("User:", "MessageFromUser:").Replace("Assistant:", "MessageFromLLM:");
+                            var evaluatedPrompt = BuildEvaluatorDialog(runResults)
+                                .Replace("User:", "MessageFromUser:")
+                                .Replace("Assistant:", "MessageFromLLM:");
 
                             evaluatorTurnCounter++;
                             var evaluatorOptions = new ChatRunOptions()
@@ -783,13 +858,10 @@ namespace AntRunner.Chat
                 }
 
                 // Store accumulated files in the result for bubbling up to parent
-                if (runResults != null)
-                {
-                    if (accumulatedNewFiles.Count > 0)
-                        runResults.NewFiles = [.. accumulatedNewFiles];
-                    if (accumulatedModifiedFiles.Count > 0)
-                        runResults.ModifiedFiles = [.. accumulatedModifiedFiles];
-                }
+                ApplyAccumulatedFileChanges(
+                    runResults,
+                    accumulatedNewFiles,
+                    accumulatedModifiedFiles);
 
                 traceCollector?.CaptureTerminalStatus(runResults?.Status ?? (choice?.FinishReason ?? "unknown"));
                 return runResults;
@@ -815,6 +887,10 @@ namespace AntRunner.Chat
             }
             catch (Exception ex)
             {
+                ApplyAccumulatedFileChanges(
+                    runResults,
+                    accumulatedNewFiles,
+                    accumulatedModifiedFiles);
                 traceCollector?.CaptureTerminalStatus("failed", ex.Message);
                 throw new ChatConversationException(ex, runResults);
             }
@@ -1503,6 +1579,24 @@ namespace AntRunner.Chat
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                             {
                                 throw;
+                            }
+                            catch (Exception ex) when (IsFatalChatRunException(ex))
+                            {
+                                // A nested inference timeout must terminate the parent conversation.
+                                // Returning it as tool output would allow the parent run to keep processing.
+                                throw;
+                            }
+                            catch (ChatConversationException ex) when (ex.ChatRunOutput != null)
+                            {
+                                // A nested agent can fail after a tool has already created files.
+                                // Keep the failure visible while preserving those structured side effects.
+                                output = SerializeToolResult(new ScriptExecutionResult
+                                {
+                                    StandardOutput = ex.ChatRunOutput.LastMessage,
+                                    StandardError = $"ERROR: {ex.Message}",
+                                    NewFiles = ex.ChatRunOutput.NewFiles,
+                                    ModifiedFiles = ex.ChatRunOutput.ModifiedFiles
+                                });
                             }
                             catch (Exception ex)
                             {

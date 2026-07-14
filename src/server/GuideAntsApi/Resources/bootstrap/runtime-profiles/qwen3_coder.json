@@ -1,7 +1,7 @@
 {
   "profileId": "qwen3_coder",
   "displayName": "Qwen3 Coder",
-  "description": "Agentic coding profile for Qwen3-Coder family.",
+  "description": "Agentic coding profile for Qwen3-Coder family. Thinking off by default; optional budgets via thinking_budget_tokens.",
   "providers": ["llama-cpp"],
   "combineSystemAndDeveloperMessages": true,
   "thoughtBlockPattern": "<think>[\\s\\S]*?</think>",
@@ -19,7 +19,20 @@
         { "target": "RequestField", "key": "reasoning_format", "value": "none" }
       ],
       "enabled": [
-        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true }
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true },
+        { "target": "RequestField", "key": "thinking_budget_tokens", "value": 4096 }
+      ],
+      "low": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true },
+        { "target": "RequestField", "key": "thinking_budget_tokens", "value": 1024 }
+      ],
+      "medium": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true },
+        { "target": "RequestField", "key": "thinking_budget_tokens", "value": 4096 }
+      ],
+      "high": [
+        { "target": "NestedRequestField", "key": "chat_template_kwargs.enable_thinking", "value": true },
+        { "target": "RequestField", "key": "thinking_budget_tokens", "value": 8192 }
       ]
     }
   },

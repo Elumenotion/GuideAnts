@@ -229,6 +229,8 @@ export function useStreamingEventHandler(
           //   'local_llm_oom'       — classified CUDA/OOM response body from llama-server
           //   'local_llm_crashed'   — 5xx without OOM markers, or mid-stream socket drop
           //   'local_llm_not_ready' — 400 "no model loaded"; runtime is up but idle
+          //   'local_llm_timeout'    — inference deadline expired; automatic recovery started
+          //   'local_llm_recovering' — automatic recovery currently owns the model
           // See GuideAntsApi/Services/Conversations/StreamingErrorEnvelope.cs.
           const errorCode = event.data?.code;
 
@@ -267,6 +269,13 @@ export function useStreamingEventHandler(
                 assistantId: undefined
               }
             }));
+          } else if (errorCode === 'local_llm_timeout' || errorCode === 'local_llm_recovering') {
+            showToast({
+              type: 'warning',
+              title: 'Local Model Recovering',
+              message: displayMessage,
+              duration: 10000
+            });
           } else if (errorType === 'AttachmentNotReadyException') {
             showToast({
               type: 'warning',

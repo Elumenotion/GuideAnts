@@ -23,6 +23,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
     private readonly string? _deploymentId;
     private readonly LlamaCppRuntimeProfileData? _profileData;
     private readonly ILogger<LlamaCppChatClient> _logger;
+    private readonly ILlamaInferenceTimeoutObserver _timeoutObserver;
     private readonly IReadOnlyList<OutputStripRule> _assistantOutputStripRules;
 
     public bool SupportsToolChoiceNone => true;
@@ -32,13 +33,15 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         LlamaCppConfig config,
         string? deploymentId,
         LlamaCppRuntimeProfileData? profileData = null,
-        ILogger<LlamaCppChatClient>? logger = null)
+        ILogger<LlamaCppChatClient>? logger = null,
+        ILlamaInferenceTimeoutObserver? timeoutObserver = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _deploymentId = deploymentId;
         _profileData = profileData;
         _logger = logger ?? NullLogger<LlamaCppChatClient>.Instance;
+        _timeoutObserver = timeoutObserver ?? NullLlamaInferenceTimeoutObserver.Instance;
         _assistantOutputStripRules = BuildAssistantOutputStripRules();
     }
 
@@ -46,13 +49,30 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         ChatCompletionRequest request,
         CancellationToken cancellationToken = default)
     {
+        await _timeoutObserver
+            .EnsureInferenceAvailableAsync(_deploymentId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await ExecuteWithInferenceDeadlineAsync(
+            effectiveToken => GetCompletionCoreAsync(request, effectiveToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ChatCompletionResponse> GetCompletionCoreAsync(
+        ChatCompletionRequest request,
+        CancellationToken cancellationToken)
+    {
         var (jsonBody, diagnosticInfo) = BuildRequestBody(request, stream: false);
         LogRequestPayload(jsonBody, diagnosticInfo);
         var requestJson = jsonBody.ToJsonString(RequestJsonOptions);
         using var httpRequest = BuildHttpRequest(requestJson);
-        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        await EnsureSuccessWithDiagnosticsAsync(response, requestJson, diagnosticInfo, cancellationToken);
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var response = await _httpClient.SendAsync(
+            httpRequest,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessWithDiagnosticsAsync(response, requestJson, diagnosticInfo, cancellationToken)
+            .ConfigureAwait(false);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
         using var doc = JsonDocument.Parse(payload);
         return ParseCompletionResponse(doc.RootElement, _assistantOutputStripRules);
@@ -63,23 +83,45 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         Action<ChatCompletionChunk> onChunk,
         CancellationToken cancellationToken = default)
     {
+        await _timeoutObserver
+            .EnsureInferenceAvailableAsync(_deploymentId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return await ExecuteWithInferenceDeadlineAsync(
+            effectiveToken => StreamCompletionCoreAsync(request, onChunk, effectiveToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ChatCompletionResponse> StreamCompletionCoreAsync(
+        ChatCompletionRequest request,
+        Action<ChatCompletionChunk> onChunk,
+        CancellationToken cancellationToken)
+    {
         var (jsonBody, diagnosticInfo) = BuildRequestBody(request, stream: true);
         LogRequestPayload(jsonBody, diagnosticInfo);
         var requestJson = jsonBody.ToJsonString(RequestJsonOptions);
         using var httpRequest = BuildHttpRequest(requestJson);
-        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        await EnsureSuccessWithDiagnosticsAsync(response, requestJson, diagnosticInfo, cancellationToken);
+        using var response = await _httpClient.SendAsync(
+            httpRequest,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessWithDiagnosticsAsync(response, requestJson, diagnosticInfo, cancellationToken)
+            .ConfigureAwait(false);
 
         var accumulator = new StreamingAccumulator(_assistantOutputStripRules);
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var reader = new StreamReader(stream);
 
-            while (!reader.EndOfStream)
+            while (true)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var rawLine = await reader.ReadLineAsync();
+                var rawLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (rawLine is null)
+                {
+                    break;
+                }
+
                 if (string.IsNullOrWhiteSpace(rawLine))
                 {
                     continue;
@@ -120,6 +162,44 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
 
         accumulator.FlushPendingAssistantText(onChunk);
         return accumulator.ToResponse();
+    }
+
+    private async Task<T> ExecuteWithInferenceDeadlineAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken callerCancellationToken)
+    {
+        using var deadlineCancellation = new CancellationTokenSource();
+        if (_config.TimeoutSeconds > 0)
+        {
+            deadlineCancellation.CancelAfter(TimeSpan.FromSeconds(_config.TimeoutSeconds));
+        }
+
+        using var effectiveCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            callerCancellationToken,
+            deadlineCancellation.Token);
+
+        try
+        {
+            return await operation(effectiveCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (
+            deadlineCancellation.IsCancellationRequested
+            && !callerCancellationToken.IsCancellationRequested)
+        {
+            var routerModelId = string.IsNullOrWhiteSpace(_deploymentId)
+                ? "(unknown)"
+                : _deploymentId;
+
+            _logger.LogError(
+                ex,
+                "llama.cpp inference exceeded its owned deadline. RouterModelId={RouterModelId} TimeoutSeconds={TimeoutSeconds}. "
+                + "Requesting forceful runtime recovery.",
+                LogValueSanitizer.Sanitize(routerModelId),
+                _config.TimeoutSeconds);
+
+            _ = _timeoutObserver.RequestRecoveryAsync(routerModelId, _config.TimeoutSeconds);
+            throw new LlamaInferenceTimeoutException(routerModelId, _config.TimeoutSeconds, ex);
+        }
     }
 
     private static bool IsMidStreamTransportFailure(Exception ex) =>

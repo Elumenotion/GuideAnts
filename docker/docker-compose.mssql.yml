@@ -48,6 +48,7 @@ services:
       SettingsSecrets__ActiveKeyId: local-dev
       "SettingsSecrets__Keys__local-dev": MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
       LlamaCpp__BaseUrl: http://127.0.0.1:9/llama-cpp
+      LlamaCpp__TimeoutSeconds: ${GA_LLAMA_CPP_TIMEOUT_SECONDS:-600}
       "ServiceRouting__Containers__guideants-ai__BaseUrl": http://127.0.0.1:9/sandbox
     restart: unless-stopped
 

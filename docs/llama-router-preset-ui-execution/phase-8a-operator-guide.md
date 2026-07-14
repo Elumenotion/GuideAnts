@@ -1,5 +1,11 @@
 # Curated Local Llama — Phase 8A Operator Guide
 
+> **Per-model server args:** In router mode (`--models-preset`), every llama-server switch
+> for a loaded model (`parallel`, `threads`, `jinja`, `ctx-size`, `flash-attn`, …) belongs
+> in that model's alias preset (`router-models.ini`). Edit via Settings → Models & Runtime →
+> Catalog → llama-cpp row → **Router preset**. Compose `GA_LLAMA_*` values apply only in
+> standalone mode (no router INI); they must not clobber per-alias INI in router mode.
+
 ## Authoritative stores
 
 | Concern | Authoritative store | Notes |
@@ -7,9 +13,8 @@
 | Catalog definitions | `docker/build/guideants-ai/llama-admin-service/catalog/manifest.json` | Shipped in image; versioned by `catalogVersion` |
 | Installation provenance | SQL `LocalModelInstallations` | Repository, revision, quant, artifacts, preset snapshot |
 | Durable operations | SQL `LocalModelOperations` | Survives API and llama-admin restart |
-| Fleet llama argv | SQL `FleetLlamaRuntimeSettings` | Desired/applied revisions; not compose edits |
-| Per-alias router preset | `router-models.ini` via llama-admin | Inventory reads live INI |
-| Runtime profile tool policy | SQL `RuntimeProfiles.requestFieldsWhenToolsPresent` | Not per-model row fields |
+| Per-alias llama-server argv | `router-models.ini` via llama-admin | All model switches including `parallel`; curated defaults in manifest `routerPreset` |
+| Runtime profile tool policy | SQL `RuntimeProfiles.requestFieldsWhenToolsPresent` | Chat API request fields when tools present — not llama-server spawn args |
 | Model identity | SQL `Models.runtimeConfigJson` | Minimal JSON: `routerModelId` + `runtimeProfileId` only |
 
 ## Curated install lifecycle
@@ -27,13 +32,15 @@
 - **Customize**: transitions curated installation to `operatorManaged`; retains provenance history.
 - **Adopt**: compares operator-managed artifacts to a curated definition; never invents repository/revision/quant.
 
-## Fleet desired vs applied
+## Router preset editing
 
-- `PUT /api/settings/llama/runtime/fleet-preset` writes desired preset + bumps `desiredRevision`.
-- llama-admin applies fleet argv and reports `appliedRevision` / `applyStatus`.
-- Mismatch (`pendingRestart`, `applyError`) is visible in Settings until restart confirms.
+| Key class | Examples | Where |
+| --- | --- | --- |
+| Model alias preset | `parallel`, `threads`, `ctx-size`, `jinja`, `flash-attn`, `tensor-split`, MTP/vision keys | Settings catalog row → Router preset (persisted to INI) |
+| Router shell (blocked on alias) | `models-preset`, `models-max`, `no-autoload` | `start-llama.sh` / compose bootstrap only |
+| Infrastructure (blocked on alias) | `model`, `mmproj`, `version` | Written by llama-admin from install paths |
 
-First-boot compose `GA_LLAMA_*` values seed SQL only when the fleet row is empty; they do not override an existing desired preset.
+After saving a router preset, reload the model if it is already loaded so llama-server picks up INI changes.
 
 ## Migration report
 
@@ -61,7 +68,7 @@ Re-run migration is idempotent: identical issues are not duplicated.
 | --- | --- |
 | Catalog empty / 502 | llama-admin health, manifest present in image |
 | Quants 403 | HF token in server settings (never browser payload) |
-| Fleet stuck pending | `GET /api/settings/llama/runtime/fleet-preset` applied vs desired |
+| `parallel` / compose change has no effect | Router mode ignores `GA_LLAMA_PARALLEL` on CLI — set `parallel` on the model's alias preset |
 | Load 409 on alias | Concurrent load/unload; wait for lock release |
 | Migration pending count | Legacy `runtimeConfigJson` not yet minimal |
 

@@ -75,8 +75,11 @@ public static class StartupConfiguration
 
     private static void RegisterServices(IServiceCollection services, IConfiguration configuration, Action<string>? phaseLogger = null)
     {
-        // Default HttpClient used by CreateClient() (e.g. published conversation stream) — 300s timeout for long-running LLM/tool calls
-        services.AddHttpClient(Microsoft.Extensions.Options.Options.DefaultName).ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(300));
+        // The default client is passed into chat factories by conversation streams.
+        // Keep it aligned with the provider timeout instead of imposing a separate five-minute limit.
+        var llamaTimeoutSeconds = configuration.GetValue<int>("LlamaCpp:TimeoutSeconds", 600);
+        services.AddHttpClient(Microsoft.Extensions.Options.Options.DefaultName).ConfigureHttpClient(
+            client => client.Timeout = TimeSpan.FromSeconds(Math.Max(1, llamaTimeoutSeconds)));
         // HttpClient factory is already registered via AddHttpClient<ISpeechTranscriptionService>
         // Individual services now use IHttpClientFactory.CreateClient() for proper connection management
         services.AddReverseProxy();
@@ -184,6 +187,11 @@ public static class StartupConfiguration
             client.BaseAddress = DeriveLlamaAdminBaseUri(baseUrl);
             client.Timeout = TimeSpan.FromHours(4);
         });
+        services.Configure<LlamaInferenceTimeoutRecoveryOptions>(
+            configuration.GetSection(LlamaInferenceTimeoutRecoveryOptions.SectionName));
+        services.AddSingleton<LlamaInferenceTimeoutRecoveryService>();
+        services.AddSingleton<ILlamaInferenceTimeoutObserver>(provider =>
+            provider.GetRequiredService<LlamaInferenceTimeoutRecoveryService>());
         services.AddScoped<ILlamaRouterIniSyncService, LlamaRouterIniSyncService>();
         services.AddScoped<GuideAntsApi.Services.LlamaCpp.INotebookModelRuntimeService, GuideAntsApi.Services.LlamaCpp.NotebookModelRuntimeService>();
         services.AddSingleton<IRouterModelsConfigService, RouterModelsConfigService>();
@@ -326,9 +334,14 @@ public static class StartupConfiguration
         {
             var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
             var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+            var timeoutObserver = provider.GetRequiredService<ILlamaInferenceTimeoutObserver>();
             var llamaConfig = new LlamaCppConfig();
             configuration.GetSection("LlamaCpp").Bind(llamaConfig);
-            return new LlamaCppChatClientFactory(httpClientFactory, llamaConfig, loggerFactory);
+            return new LlamaCppChatClientFactory(
+                httpClientFactory,
+                llamaConfig,
+                loggerFactory,
+                timeoutObserver);
         });
         services.AddSingleton(provider =>
         {

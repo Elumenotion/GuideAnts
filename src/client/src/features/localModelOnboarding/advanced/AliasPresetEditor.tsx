@@ -10,6 +10,8 @@ export interface AliasPresetEditorProps {
   rows: PresetKeyValue[];
   onChange: (rows: PresetKeyValue[]) => void;
   alias: string;
+  /** Merged into INI preview only (e.g. ctx-size edited in dedicated fields). */
+  previewPreset?: Record<string, string>;
   readOnly?: boolean;
   presetMode?: 'replace' | 'merge';
   onPresetModeChange?: (mode: 'replace' | 'merge') => void;
@@ -19,12 +21,16 @@ export function AliasPresetEditor({
   rows,
   onChange,
   alias,
+  previewPreset,
   readOnly = false,
   presetMode = 'replace',
   onPresetModeChange,
 }: AliasPresetEditorProps) {
   const validationErrors = useMemo(() => validateAliasPresetRows(rows), [rows]);
-  const preview = useMemo(() => buildAliasIniPreview(alias, presetRecordFromRows(rows)), [alias, rows]);
+  const preview = useMemo(
+    () => buildAliasIniPreview(alias, { ...presetRecordFromRows(rows), ...(previewPreset ?? {}) }),
+    [alias, previewPreset, rows],
+  );
 
   const updateRow = (index: number, patch: Partial<PresetKeyValue>) => {
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));

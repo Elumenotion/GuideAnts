@@ -67,17 +67,61 @@ class RouterPresetTests(unittest.TestCase):
         self.assertEqual(entries["alias"].extras["ctx-size"], "8192")
         self.assertEqual(entries["alias"].extras["cache-ram"], "1024")
 
+    def test_merge_mode_clears_context_size_when_explicitly_null(self) -> None:
+        with open(router.ROUTER_CONFIG_PATH, "w", encoding="utf-8") as handle:
+            handle.write(
+                "version = 1\n\n[alias]\nmodel = /m/a.gguf\nmmproj = \nctx-size = 4096\nspec-type = draft-mtp\n"
+            )
+        router.upsert_router_entry(
+            "alias",
+            "/m/a.gguf",
+            "",
+            preset={"spec-type": "draft-mtp"},
+            preset_mode="merge",
+            update_context=True,
+            context_size=None,
+            trigger_reload=False,
+        )
+        entries = router.read_router_entries()
+        self.assertNotIn("ctx-size", entries["alias"].extras)
+        self.assertEqual(entries["alias"].extras["spec-type"], "draft-mtp")
+
+    def test_merge_mode_clears_cache_ram_when_explicitly_null(self) -> None:
+        with open(router.ROUTER_CONFIG_PATH, "w", encoding="utf-8") as handle:
+            handle.write(
+                "version = 1\n\n[alias]\nmodel = /m/a.gguf\nmmproj = \nctx-size = 4096\ncache-ram = 1024\n"
+            )
+        router.upsert_router_entry(
+            "alias",
+            "/m/a.gguf",
+            "",
+            preset={"ctx-size": "4096"},
+            preset_mode="merge",
+            update_cache=True,
+            cache_ram_mib=None,
+            trigger_reload=False,
+        )
+        entries = router.read_router_entries()
+        self.assertNotIn("cache-ram", entries["alias"].extras)
+        self.assertEqual(entries["alias"].extras["ctx-size"], "4096")
+
     def test_rejects_infrastructure_keys_in_preset(self) -> None:
         from guideants_hf.preset_validation import PresetValidationError, normalize_preset_map
 
         with self.assertRaises(PresetValidationError):
             normalize_preset_map({"model": "/bad"})
 
-    def test_rejects_fleet_keys_in_preset(self) -> None:
+    def test_rejects_router_shell_keys_in_preset(self) -> None:
         from guideants_hf.preset_validation import PresetValidationError, normalize_preset_map
 
         with self.assertRaises(PresetValidationError):
-            normalize_preset_map({"parallel": "4"})
+            normalize_preset_map({"models-preset": "/models-local/router-models.ini"})
+
+    def test_accepts_parallel_in_alias_preset(self) -> None:
+        from guideants_hf.preset_validation import normalize_preset_map
+
+        preset = normalize_preset_map({"parallel": "2", "ctx-size": "131072"})
+        self.assertEqual(preset["parallel"], "2")
 
     def test_fixture_preset_shape(self) -> None:
         fixture = json.loads((CONTRACTS_ROOT / "admin-router-entries-post-request.fixture.json").read_text(encoding="utf-8"))

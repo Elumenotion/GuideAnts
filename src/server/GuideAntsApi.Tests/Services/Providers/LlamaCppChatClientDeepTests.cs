@@ -332,7 +332,7 @@ public sealed class LlamaCppChatClientDeepTests
             ThoughtBlockPattern: @"<think>[\s\S]*?</think>",
             SamplingDefaults: new Dictionary<string, double> { ["temperature"] = 0.7, ["top_p"] = 0.8 },
             ThinkingControl: new ThinkingControl(
-                "enabled",
+                "medium",
                 new Dictionary<string, IReadOnlyList<ThinkingAction>>
                 {
                     ["none"] = new List<ThinkingAction>
@@ -342,7 +342,23 @@ public sealed class LlamaCppChatClientDeepTests
                     },
                     ["enabled"] = new List<ThinkingAction>
                     {
-                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true)
+                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
+                        new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 4096)
+                    },
+                    ["low"] = new List<ThinkingAction>
+                    {
+                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
+                        new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 1024)
+                    },
+                    ["medium"] = new List<ThinkingAction>
+                    {
+                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
+                        new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 4096)
+                    },
+                    ["high"] = new List<ThinkingAction>
+                    {
+                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
+                        new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 8192)
                     }
                 }),
             RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>
