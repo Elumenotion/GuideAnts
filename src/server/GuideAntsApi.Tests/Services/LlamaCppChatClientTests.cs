@@ -13,6 +13,12 @@ namespace GuideAntsApi.Tests.Services;
 public sealed class LlamaCppChatClientTests
 {
     [TestMethod]
+    public void Config_DefaultInferenceTimeout_IsTenMinutes()
+    {
+        new LlamaCppConfig().TimeoutSeconds.Should().Be(600);
+    }
+
+    [TestMethod]
     public async Task GetCompletionAsync_MapsToolCallsThinkingAndUsage()
     {
         const string responseJson = """
@@ -119,6 +125,33 @@ public sealed class LlamaCppChatClientTests
 
         root.TryGetProperty("reasoning_format", out _).Should().BeFalse();
         root.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean().Should().BeTrue();
+        root.GetProperty("thinking_budget_tokens").GetInt32().Should().Be(4096);
+    }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_AppliesThinkingBudget_WhenReasoningIsLow()
+    {
+        string? capturedBody = null;
+        var handler = new StaticResponseHandler(async httpRequest =>
+        {
+            capturedBody = await httpRequest.Content!.ReadAsStringAsync();
+            return JsonResponse("""{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""");
+        });
+
+        var client = CreateClient(handler);
+        var request = new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, "hi")],
+            model: "qwen3.5-27b",
+            reasoningEffort: "low");
+
+        await client.GetCompletionAsync(request);
+
+        capturedBody.Should().NotBeNull();
+        using var doc = JsonDocument.Parse(capturedBody!);
+        var root = doc.RootElement;
+
+        root.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean().Should().BeTrue();
+        root.GetProperty("thinking_budget_tokens").GetInt32().Should().Be(1024);
     }
 
     [TestMethod]
@@ -144,6 +177,7 @@ public sealed class LlamaCppChatClientTests
 
         root.TryGetProperty("reasoning_format", out _).Should().BeFalse();
         root.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean().Should().BeTrue();
+        root.GetProperty("thinking_budget_tokens").GetInt32().Should().Be(4096);
     }
 
     [TestMethod]
@@ -795,6 +829,74 @@ public sealed class LlamaCppChatClientTests
         ex.Which.Reason.Should().Be(LlamaRuntimeCrashReason.Crashed);
     }
 
+    [TestMethod]
+    public async Task GetCompletionAsync_InternalDeadline_QueuesForcefulRecovery()
+    {
+        var observer = new RecordingTimeoutObserver();
+        var client = CreateClient(
+            new BlockingHandler(),
+            config: new LlamaCppConfig
+            {
+                BaseUrl = "http://localhost:8000",
+                TimeoutSeconds = 1
+            },
+            timeoutObserver: observer);
+
+        var act = async () => await client.GetCompletionAsync(BuildRequest());
+
+        var ex = await act.Should().ThrowAsync<LlamaInferenceTimeoutException>();
+        ex.Which.RouterModelId.Should().Be("qwen3.5-27b");
+        ex.Which.TimeoutSeconds.Should().Be(1);
+        observer.RecoveryRequests.Should().ContainSingle()
+            .Which.Should().Be(("qwen3.5-27b", 1));
+    }
+
+    [TestMethod]
+    public async Task StreamCompletionAsync_InternalDeadline_CancelsBodyReadAndQueuesRecovery()
+    {
+        var observer = new RecordingTimeoutObserver();
+        var handler = new StaticResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new BlockingReadStream())
+            {
+                Headers = { ContentType = new MediaTypeHeaderValue("text/event-stream") }
+            }
+        });
+        var client = CreateClient(
+            handler,
+            config: new LlamaCppConfig
+            {
+                BaseUrl = "http://localhost:8000",
+                TimeoutSeconds = 1
+            },
+            timeoutObserver: observer);
+
+        var act = async () => await client.StreamCompletionAsync(BuildRequest(), _ => { });
+
+        await act.Should().ThrowAsync<LlamaInferenceTimeoutException>();
+        observer.RecoveryRequests.Should().ContainSingle();
+    }
+
+    [TestMethod]
+    public async Task GetCompletionAsync_CallerCancellation_DoesNotQueueRecovery()
+    {
+        var observer = new RecordingTimeoutObserver();
+        var client = CreateClient(
+            new BlockingHandler(),
+            config: new LlamaCppConfig
+            {
+                BaseUrl = "http://localhost:8000",
+                TimeoutSeconds = 30
+            },
+            timeoutObserver: observer);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        var act = async () => await client.GetCompletionAsync(BuildRequest(), cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        observer.RecoveryRequests.Should().BeEmpty();
+    }
+
     private sealed class ThrowingStream : Stream
     {
         public override bool CanRead => true;
@@ -815,7 +917,8 @@ public sealed class LlamaCppChatClientTests
         HttpMessageHandler handler,
         string deploymentId = "qwen3.5-27b",
         LlamaCppRuntimeProfileData? profileData = null,
-        LlamaCppConfig? config = null)
+        LlamaCppConfig? config = null,
+        ILlamaInferenceTimeoutObserver? timeoutObserver = null)
     {
         var httpClient = new HttpClient(handler);
         config ??= new LlamaCppConfig
@@ -827,7 +930,12 @@ public sealed class LlamaCppChatClientTests
 
         profileData ??= CreateQwen35ProfileData();
 
-        return new LlamaCppChatClient(httpClient, config, deploymentId, profileData);
+        return new LlamaCppChatClient(
+            httpClient,
+            config,
+            deploymentId,
+            profileData,
+            timeoutObserver: timeoutObserver);
     }
 
     private static LlamaCppRuntimeProfileData CreateQwen35ProfileData()
@@ -838,7 +946,7 @@ public sealed class LlamaCppChatClientTests
             ThoughtBlockPattern: @"<think>[\s\S]*?</think>",
             SamplingDefaults: new Dictionary<string, double> { ["temperature"] = 0.7, ["top_p"] = 0.8 },
             ThinkingControl: new ThinkingControl(
-                "enabled",
+                "medium",
                 new Dictionary<string, IReadOnlyList<ThinkingAction>>
                 {
                     ["none"] = new List<ThinkingAction>
@@ -848,7 +956,23 @@ public sealed class LlamaCppChatClientTests
                     },
                     ["enabled"] = new List<ThinkingAction>
                     {
-                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true)
+                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
+                        new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 4096)
+                    },
+                    ["low"] = new List<ThinkingAction>
+                    {
+                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
+                        new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 1024)
+                    },
+                    ["medium"] = new List<ThinkingAction>
+                    {
+                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
+                        new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 4096)
+                    },
+                    ["high"] = new List<ThinkingAction>
+                    {
+                        new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
+                        new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 8192)
                     }
                 }),
             RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>
@@ -929,6 +1053,72 @@ public sealed class LlamaCppChatClientTests
             CancellationToken cancellationToken)
         {
             return _responseFactory(request);
+        }
+    }
+
+    private sealed class BlockingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Unreachable.");
+        }
+    }
+
+    private sealed class BlockingReadStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override async Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingTimeoutObserver : ILlamaInferenceTimeoutObserver
+    {
+        public List<(string RouterModelId, int TimeoutSeconds)> RecoveryRequests { get; } = [];
+
+        public Task EnsureInferenceAvailableAsync(
+            string? routerModelId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task<LlamaInferenceRecoveryResult> RequestRecoveryAsync(
+            string routerModelId,
+            int timeoutSeconds)
+        {
+            RecoveryRequests.Add((routerModelId, timeoutSeconds));
+            return Task.FromResult(new LlamaInferenceRecoveryResult(
+                routerModelId,
+                Succeeded: true,
+                EscalatedToServerRestart: false,
+                Error: null));
         }
     }
 }

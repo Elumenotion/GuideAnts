@@ -58,6 +58,33 @@ public sealed class StreamingErrorEnvelopeTests
   }
 
   [TestMethod]
+  public void Build_Maps_llama_inference_timeout_to_recovery_code()
+  {
+    var inner = new LlamaInferenceTimeoutException("qwen3.5-27b", 300);
+    var ex = new ChatConversationException(inner, chatRunOutput: null);
+
+    var json = Serialize(StreamingErrorEnvelope.Build(ex));
+
+    json.GetProperty("code").GetString().Should().Be("local_llm_timeout");
+    json.GetProperty("routerModelId").GetString().Should().Be("qwen3.5-27b");
+    json.GetProperty("timeoutSeconds").GetInt32().Should().Be(300);
+  }
+
+  [TestMethod]
+  public void Build_Maps_active_timeout_recovery_to_recovering_code()
+  {
+    var ex = new LlamaRuntimeCrashedException(
+      LlamaRuntimeCrashReason.Recovering,
+      "Runtime recovery is active.",
+      statusCode: null,
+      upstreamDetail: null);
+
+    var json = Serialize(StreamingErrorEnvelope.Build(ex));
+
+    json.GetProperty("code").GetString().Should().Be("local_llm_recovering");
+  }
+
+  [TestMethod]
   public void Build_Adds_auth_action_for_unauthorized_http_errors()
   {
     var ex = new HttpRequestException("401 Unauthorized", null, HttpStatusCode.Unauthorized);

@@ -43,7 +43,7 @@ States: `BLOCKED` · `READY` · `IN_PROGRESS` · `GATE_FAILED` · `DONE`.
 | 4 | `task-phase-4-curated-install.md` | **DONE** | 1 | **pass** | identity-only add, SQL operation authority |
 | 5 | `task-phase-5-lifecycle-api.md` | **DONE** | 1 | **pass** | change-quant, repair, adopt, custom, attach |
 | 6 | `task-phase-6-curated-frontend.md` | **DONE** | 1 | **pass** | Settings+Home curated flow |
-| 7 | `task-phase-7-advanced-frontend.md` | **DONE** | 1 | **pass** | fleet panel, lifecycle UI, three-choice |
+| 7 | `task-phase-7-advanced-frontend.md` | **DONE** | 1 | **pass** | lifecycle UI, three-choice (no fleet panel — superseded) |
 | 8A | `task-phase-8a-release-automation.md` | **DONE** | 1 | **pass*** | *image rebuild + client endpoint scan pending |
 | 8B | `task-phase-8b-live-qualification.md` | **BLOCKED** | 1 | **blocked** | no HF token; stale local images |
 

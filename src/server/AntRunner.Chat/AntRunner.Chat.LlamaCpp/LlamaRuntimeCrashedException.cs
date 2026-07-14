@@ -10,8 +10,9 @@ namespace AntRunner.Chat.LlamaCpp;
 ///   OutOfMemory -> crash modal (restart + reload, warn operator the last model was too big)
 ///   Crashed     -> crash modal (restart + reload)
 ///   NotReady    -> load modal   (no restart needed — just load a model)
+///   Recovering  -> transient notice while automatic timeout recovery owns the model
 ///
-/// Keeping all three on one exception/enum lets the SSE envelope and client share one branching
+/// Keeping these states on one exception/enum lets the SSE envelope and client share one branching
 /// surface (<c>code</c> field) instead of spawning a second "service unavailable" exception type.
 /// </summary>
 public enum LlamaRuntimeCrashReason
@@ -27,7 +28,13 @@ public enum LlamaRuntimeCrashReason
     /// "the server does not have a model loaded" error). The UI should prompt the user to
     /// load a model — a restart is not required and would be wasteful.
     /// </summary>
-    NotReady
+    NotReady,
+
+    /// <summary>
+    /// Automatic timeout recovery currently owns the router alias. New inference must not be
+    /// admitted until the model child has been replaced and verified.
+    /// </summary>
+    Recovering
 }
 
 public sealed class LlamaRuntimeCrashedException : Exception

@@ -148,15 +148,28 @@ public sealed class LlamaNegativeContractTests
     }
 
     [TestMethod]
-    public void RouterPreset_FleetScopedKey_ThrowsPresetInvalid()
+    public void RouterPreset_RouterShellKey_ThrowsPresetInvalid()
     {
         var act = () => RouterPresetValidator.ValidateAndNormalize(new Dictionary<string, string>
         {
-            ["parallel"] = "4",
+            ["models-preset"] = "/models-local/router-models.ini",
         });
 
         var ex = act.Should().Throw<AddModelException>();
         ex.Which.Code.Should().Be(CuratedInstallErrorCodes.PresetInvalid);
+    }
+
+    [TestMethod]
+    public void RouterPreset_ModelScopedParallel_AllowsPreset()
+    {
+        var preset = RouterPresetValidator.ValidateAndNormalize(new Dictionary<string, string>
+        {
+            ["parallel"] = "2",
+            ["ctx-size"] = "131072",
+        });
+
+        preset["parallel"].Should().Be("2");
+        preset["ctx-size"].Should().Be("131072");
     }
 
     [TestMethod]

@@ -881,19 +881,6 @@ export interface LifecycleOperationResponseDto {
   status: string;
 }
 
-export interface FleetLlamaPresetResponseDto {
-  desiredRevision: number;
-  appliedRevision: number;
-  applyStatus: string;
-  applyError?: string | null;
-  preset: Record<string, unknown>;
-}
-
-export interface FleetLlamaPresetPutRequestDto {
-  expectedRevision: number;
-  preset: Record<string, unknown>;
-}
-
 export interface LlamaMigrationStatusResponseDto {
   completedModels: number;
   pendingModels: number;

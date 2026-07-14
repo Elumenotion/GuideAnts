@@ -5,8 +5,9 @@ import { getErrorMessage } from '../../../pages/settings/utils';
 import { TextActionButton } from '../../../pages/settings/components/shared/ActionButtons';
 import { AliasPresetEditor } from '../advanced/AliasPresetEditor';
 import {
-  presetRecordFromRows,
-  presetRowsFromRecord,
+  buildEffectivePresetRecord,
+  filterManagedPresetRows,
+  splitManagedPresetFromRecord,
   validateAliasPresetRows,
   type PresetKeyValue,
 } from '../routerPreset';
@@ -23,18 +24,16 @@ function parseOptionalPositiveInt(raw: string): number | null {
   return value;
 }
 
-function upsertPresetRow(rows: PresetKeyValue[], key: string, value: string): PresetKeyValue[] {
-  const trimmedKey = key.trim();
-  const next = rows.filter((row) => row.key.trim().toLowerCase() !== trimmedKey.toLowerCase());
-  if (!value.trim()) {
-    return next;
-  }
-  return [...next, { key: trimmedKey, value: value.trim() }];
-}
-
-function presetRowValue(rows: PresetKeyValue[], key: string): string {
-  const match = rows.find((row) => row.key.trim().toLowerCase() === key.toLowerCase());
-  return match?.value ?? '';
+function resolveManagedDrafts(
+  preset: Record<string, string>,
+  routerEntry: LlamaRouterEntryDto | null,
+): { ctxSizeDraft: string; cacheRamDraft: string; rows: PresetKeyValue[] } {
+  const split = splitManagedPresetFromRecord(preset);
+  return {
+    ctxSizeDraft: split.ctxSize || (routerEntry?.contextSize?.toString() ?? ''),
+    cacheRamDraft: split.cacheRam || (routerEntry?.cacheRamMib?.toString() ?? ''),
+    rows: split.rows,
+  };
 }
 
 export interface AliasPresetSavePanelProps {
@@ -58,20 +57,33 @@ export function AliasPresetSavePanel({
     return fallbackPreset;
   }, [fallbackPreset, routerEntry?.preset]);
 
-  const [rows, setRows] = useState<PresetKeyValue[]>(() => presetRowsFromRecord(authoritativePreset));
+  const [rows, setRows] = useState<PresetKeyValue[]>(() =>
+    resolveManagedDrafts(authoritativePreset, routerEntry).rows,
+  );
+  const [ctxSizeDraft, setCtxSizeDraft] = useState(
+    () => resolveManagedDrafts(authoritativePreset, routerEntry).ctxSizeDraft,
+  );
+  const [cacheRamDraft, setCacheRamDraft] = useState(
+    () => resolveManagedDrafts(authoritativePreset, routerEntry).cacheRamDraft,
+  );
   const [presetMode, setPresetMode] = useState<'replace' | 'merge'>('merge');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setRows(presetRowsFromRecord(authoritativePreset));
+    const next = resolveManagedDrafts(authoritativePreset, routerEntry);
+    setRows(next.rows);
+    setCtxSizeDraft(next.ctxSizeDraft);
+    setCacheRamDraft(next.cacheRamDraft);
     setSaveError(null);
     setSaveMessage(null);
-  }, [alias, authoritativePreset]);
+  }, [alias, authoritativePreset, routerEntry]);
 
-  const ctxSize = presetRowValue(rows, 'ctx-size') || (routerEntry?.contextSize?.toString() ?? '');
-  const cacheRam = presetRowValue(rows, 'cache-ram') || (routerEntry?.cacheRamMib?.toString() ?? '');
+  const effectivePreset = useMemo(
+    () => buildEffectivePresetRecord(rows, ctxSizeDraft, cacheRamDraft),
+    [cacheRamDraft, ctxSizeDraft, rows],
+  );
   const validationErrors = useMemo(() => validateAliasPresetRows(rows), [rows]);
   const canSave = !!routerEntry && validationErrors.length === 0 && !saving;
 
@@ -89,15 +101,14 @@ export function AliasPresetSavePanel({
     setSaveError(null);
     setSaveMessage(null);
     try {
-      const preset = presetRecordFromRows(rows);
       await api.settings.putLlamaRouterEntry(alias, {
         alias,
         modelPath: routerEntry.modelPath,
         mmprojPath: routerEntry.mmprojPath ?? '',
-        preset,
+        preset: effectivePreset,
         presetMode,
-        contextSize: parseOptionalPositiveInt(ctxSize),
-        cacheRamMib: parseOptionalPositiveInt(cacheRam),
+        contextSize: parseOptionalPositiveInt(ctxSizeDraft),
+        cacheRamMib: parseOptionalPositiveInt(cacheRamDraft),
       });
       setSaveMessage('Router preset saved. Loaded models may restart to apply changes.');
       await onSaved?.();
@@ -124,8 +135,8 @@ export function AliasPresetSavePanel({
           <input
             type="text"
             inputMode="numeric"
-            value={ctxSize}
-            onChange={(event) => setRows((previous) => upsertPresetRow(previous, 'ctx-size', event.target.value))}
+            value={ctxSizeDraft}
+            onChange={(event) => setCtxSizeDraft(event.target.value)}
             className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm"
             placeholder="e.g. 131072"
             spellCheck={false}
@@ -136,8 +147,8 @@ export function AliasPresetSavePanel({
           <input
             type="text"
             inputMode="numeric"
-            value={cacheRam}
-            onChange={(event) => setRows((previous) => upsertPresetRow(previous, 'cache-ram', event.target.value))}
+            value={cacheRamDraft}
+            onChange={(event) => setCacheRamDraft(event.target.value)}
             className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm"
             placeholder="optional"
             spellCheck={false}
@@ -147,8 +158,9 @@ export function AliasPresetSavePanel({
 
       <AliasPresetEditor
         rows={rows}
-        onChange={setRows}
+        onChange={(nextRows) => setRows(filterManagedPresetRows(nextRows))}
         alias={alias}
+        previewPreset={effectivePreset}
         presetMode={presetMode}
         onPresetModeChange={setPresetMode}
       />

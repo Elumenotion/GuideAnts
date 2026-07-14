@@ -190,6 +190,11 @@ def upsert_router_entry(
         if incoming_preset or preset is not None or update_context or update_cache:
             extras = apply_preset_mode(extras, incoming_preset, preset_mode)
 
+        if update_context and context_size is None:
+            _strip_extras_matching_incoming(extras, _ctx_l)
+        if update_cache and cache_ram_mib is None:
+            _strip_extras_matching_incoming(extras, _cache_l)
+
         entries[alias_trimmed] = RouterSection(
             model=model_path.strip(),
             mmproj=mmproj_path.strip(),

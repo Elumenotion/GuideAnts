@@ -17,6 +17,8 @@ namespace GuideAntsApi.Services.Conversations;
 ///   local_llm_oom       — CUDA/allocator OOM; crash modal -> restart -> load
 ///   local_llm_crashed   — 5xx or mid-stream drop; crash modal -> restart -> load
 ///   local_llm_not_ready — runtime up but no model loaded; straight to load dialog
+///   local_llm_timeout   — GuideAnts inference deadline expired; automatic recovery started
+///   local_llm_recovering — automatic timeout recovery currently owns the model
 /// </summary>
 internal static class StreamingErrorEnvelope
 {
@@ -24,6 +26,21 @@ internal static class StreamingErrorEnvelope
     {
         var inner = ex is ChatConversationException chatEx ? chatEx.InnerException : ex.InnerException;
         var display = ex is ChatConversationException && inner != null ? inner : ex;
+
+        var timeout = ex as LlamaInferenceTimeoutException
+                      ?? inner as LlamaInferenceTimeoutException;
+        if (timeout != null)
+        {
+            return new
+            {
+                code = "local_llm_timeout",
+                message = timeout.Message,
+                type = nameof(LlamaInferenceTimeoutException),
+                routerModelId = timeout.RouterModelId,
+                timeoutSeconds = timeout.TimeoutSeconds,
+                timestamp = DateTime.UtcNow
+            };
+        }
 
         // Either layer may throw the runtime exception directly, or wrap it inside a
         // ChatConversationException. Handle both without the caller caring.
@@ -36,6 +53,7 @@ internal static class StreamingErrorEnvelope
             {
                 LlamaRuntimeCrashReason.OutOfMemory => "local_llm_oom",
                 LlamaRuntimeCrashReason.NotReady => "local_llm_not_ready",
+                LlamaRuntimeCrashReason.Recovering => "local_llm_recovering",
                 _ => "local_llm_crashed"
             };
 

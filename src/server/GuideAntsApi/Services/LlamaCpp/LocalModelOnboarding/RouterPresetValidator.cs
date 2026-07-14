@@ -12,27 +12,17 @@ public static class RouterPresetValidator
         "version",
     };
 
-    private static readonly HashSet<string> FleetScopedKeys = new(StringComparer.OrdinalIgnoreCase)
+    /// <summary>
+    /// Router shell bootstrap keys belong on the llama-server process CLI
+    /// (<c>start-llama.sh</c>), not in per-alias <c>router-models.ini</c> presets.
+    /// All other llama-server switches are model-scoped and editable on the alias preset.
+    /// </summary>
+    private static readonly HashSet<string> RouterShellKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "models-preset",
         "models-max",
         "no-models-autoload",
         "no-autoload",
-        "threads",
-        "parallel",
-        "n-gpu-layers",
-        "gpu-layers",
-        "kv-offload",
-        "no-kv-offload",
-        "kv-unified",
-        "jinja",
-        "cont-batching",
-        "no-mmap",
-        "flash-attn",
-        "cache-type-k",
-        "cache-type-v",
-        "tensor-split",
-        "cuda-visible-devices",
     };
 
     private static readonly Regex ControlCharRegex = new(@"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", RegexOptions.Compiled);
@@ -83,13 +73,13 @@ public static class RouterPresetValidator
                     remediation: "Fix the curated definition preset.");
             }
 
-            if (FleetScopedKeys.Contains(key))
+            if (RouterShellKeys.Contains(key))
             {
                 throw new AddModelException(
                     CuratedInstallErrorCodes.PresetInvalid,
                     step: "validation",
-                    message: $"Preset key '{key}' is fleet-scoped. Use the Fleet llama server editor.",
-                    remediation: "Remove fleet-scoped keys from the alias preset.");
+                    message: $"Preset key '{key}' is router-shell infrastructure and cannot be set on a model alias.",
+                    remediation: "Remove router-shell keys from the alias preset.");
             }
 
             if (seenLower.TryGetValue(key, out var prior) && !string.Equals(prior, key, StringComparison.Ordinal))

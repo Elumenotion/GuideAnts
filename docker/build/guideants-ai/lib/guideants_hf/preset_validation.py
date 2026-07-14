@@ -7,27 +7,15 @@ from typing import Any
 
 INFRASTRUCTURE_KEYS = frozenset({"model", "mmproj", "version"})
 
-FLEET_SCOPED_KEYS = frozenset(
+# Router shell bootstrap keys belong on the llama-server process CLI (start-llama.sh),
+# not in per-alias router-models.ini presets. All other llama-server switches are
+# model-scoped and may be set on the alias preset.
+ROUTER_SHELL_KEYS = frozenset(
     {
         "models-preset",
         "models-max",
         "no-models-autoload",
         "no-autoload",
-        "threads",
-        "parallel",
-        "n-gpu-layers",
-        "gpu-layers",
-        "kv-offload",
-        "no-kv-offload",
-        "kv-unified",
-        "jinja",
-        "cont-batching",
-        "no-mmap",
-        "flash-attn",
-        "cache-type-k",
-        "cache-type-v",
-        "tensor-split",
-        "cuda-visible-devices",
     }
 )
 
@@ -66,10 +54,10 @@ def validate_preset_key(key: str) -> str:
             "PRESET_INFRASTRUCTURE_KEY",
             f"Preset cannot include infrastructure key '{normalized}'.",
         )
-    if lower in FLEET_SCOPED_KEYS:
+    if lower in ROUTER_SHELL_KEYS:
         raise PresetValidationError(
-            "PRESET_FLEET_KEY",
-            f"Preset key '{normalized}' is fleet-scoped. Use the Fleet llama server editor.",
+            "PRESET_ROUTER_SHELL_KEY",
+            f"Preset key '{normalized}' is router-shell infrastructure and cannot be set on a model alias.",
         )
     return normalized
 

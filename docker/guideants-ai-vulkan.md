@@ -144,8 +144,8 @@ Vulkan llama defaults differ from ROCm on dzn: model weights offload to GPU
 KV tensors on Vulkan buffers aborts large models. Embeddings use llama-server on Vulkan
 (`GA_EMB_DEVICE=vulkan`, `-ngl auto`). Flash attention defaults to **off** on this
 backend (Qwen + Mesa Dozen/dzn; Ollama #14854); native Linux RADV hosts can set
-`GA_LLAMA_FLASH_ATTN=on` in `.env`. Per-alias `ctx-size` in `router-models.ini` is owned by
-Settings (install seeds once; operator edits persist across restart).
+`GA_LLAMA_FLASH_ATTN=on` in `.env`. Per-alias `ctx-size` lives in `router-models.ini`
+(catalog defaults at install; editable in Settings).
 
 > **Note:** the bare-file default targets Windows. On a native-Linux host *without* the
 > `GA_VULKAN_*` env set, `${GA_VULKAN_DEVICE:-/dev/dxg}` resolves to `/dev/dxg`, which doesn't

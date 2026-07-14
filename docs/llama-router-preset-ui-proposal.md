@@ -1,5 +1,10 @@
 # Curated Local Llama Model UX and Configuration Proposal
 
+> **Superseded operator paths:** There is no Settings “Fleet llama server” panel and no
+> `/api/settings/llama/runtime/fleet-preset` API. Router-process switches such as `parallel`,
+> `threads`, and `jinja` are configured via `GA_LLAMA_*` on the `guideants-ai` container.
+> See `docs/llama-router-preset-ui-execution/ux-redo-plan.md` for the current subtraction plan.
+
 Last updated: 2026-07-10
 
 This document proposes a curated-first local llama experience in which an operator normally chooses

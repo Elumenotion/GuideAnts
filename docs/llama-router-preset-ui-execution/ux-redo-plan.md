@@ -175,7 +175,7 @@ Target: **one table**, load/unload/attach. No second diagnostic surface.
 These may remain in `api.ts` until a dead-code pass; **no component may call them**:
 
 - `customizeLlamaInstallation`
-- `getLlamaFleetPreset` / `putLlamaFleetPreset` (misnamed `/runtime/fleet-preset` — delete endpoints)
+- `getLlamaFleetPreset` / `putLlamaFleetPreset` — **removed** from client API.
 - `getLlamaMigrationStatus` / `getLlamaMigrationIssues`
 
 ### Tests to update or delete
@@ -375,7 +375,7 @@ Mirror every removed client call with endpoint removal or `410 Gone`.
 | `LlamaInstallationDetailDto.ManagementMode` | Remove from API response (keep DB column internal if still useful) |
 | `LlamaInstallationProvenanceSummaryDto.ManagementMode` | Remove |
 | `LlamaRuntimeInventoryItemDto.FleetPreset` (`FleetPresetSummaryDto`) | **Remove** — revision algebra is not operator-facing |
-| `FleetLlamaPresetResponseDto`, `FleetLlamaPresetPutRequestDto` | **Remove** with endpoints |
+| `FleetLlamaPresetResponseDto`, `FleetLlamaPresetPutRequestDto` | **Removed** from client types |
 
 **Tests to update:** `LlamaAuthorizationEndpointsTests` (customize route), `CuratedInstallTests`, `LocalModelLifecycleTests`, `ManagementModeInvalid`, `/runtime/fleet-preset` contract tests.
 

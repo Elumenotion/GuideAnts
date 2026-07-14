@@ -9,8 +9,9 @@ set -e
 # the router CLI when --models-preset is active.
 #
 # Alias-controlled knobs (not set on router CLI when models-preset is in use):
-#   --ctx-size  (alias key: ctx-size)
-#   --cache-ram (alias key: cache-ram)
+#   All llama-server switches except router shell bootstrap (models-preset,
+#   models-max, no-autoload, host, port). Per-alias values live in
+#   router-models.ini and must not be passed here or they clobber INI.
 
 FLEET_PROJECTION_DIR="${GA_LLAMA_FLEET_PROJECTION_DIR:-/models-local/llama/runtime/fleet}"
 FLEET_PROJECTION_FILE="${FLEET_PROJECTION_DIR}/fleet-projection.json"
@@ -103,37 +104,21 @@ fi
 ARGS+=(--host "${GA_LLAMA_HOST:-127.0.0.1}")
 ARGS+=(--port "${GA_LLAMA_PORT:-8080}")
 if [ "$ROUTER_MODE" = "0" ]; then
-    # Standalone mode (no preset INI). These knobs apply to the single loaded model.
+    # Standalone mode (no preset INI). Process-level GA_LLAMA_* apply to the single model.
     [ -n "$GA_LLAMA_CTX_SIZE" ] && ARGS+=(--ctx-size "$GA_LLAMA_CTX_SIZE")
     [ -n "$GA_LLAMA_CACHE_RAM" ] && ARGS+=(--cache-ram "$GA_LLAMA_CACHE_RAM")
+    [ -n "$GA_LLAMA_THREADS" ] && ARGS+=(--threads "$GA_LLAMA_THREADS")
+    [ -n "$GA_LLAMA_PARALLEL" ] && ARGS+=(--parallel "$GA_LLAMA_PARALLEL")
+    [ -n "$GA_LLAMA_GPU_LAYERS" ] && ARGS+=(--n-gpu-layers "$GA_LLAMA_GPU_LAYERS")
+    [ "$GA_LLAMA_KV_OFFLOAD" = "0" ] && ARGS+=(--no-kv-offload)
+    [ "$GA_LLAMA_KV_OFFLOAD" = "1" ] && ARGS+=(--kv-offload)
+    [ "$GA_LLAMA_KV_UNIFIED" = "1" ] && ARGS+=(--kv-unified)
+    [ -n "$GA_LLAMA_JINJA" ] && [ "$GA_LLAMA_JINJA" != "0" ] && ARGS+=(--jinja)
+    [ "$GA_LLAMA_CONT_BATCH" = "1" ] && ARGS+=(--cont-batching)
+    [ "$GA_LLAMA_NO_MMAP" = "1" ] && ARGS+=(--no-mmap)
+    [ -n "$GA_LLAMA_FLASH_ATTN" ] && ARGS+=(--flash-attn "$GA_LLAMA_FLASH_ATTN")
+    [ -n "$GA_LLAMA_CACHE_TYPE_K" ] && ARGS+=(--cache-type-k "$GA_LLAMA_CACHE_TYPE_K")
+    [ -n "$GA_LLAMA_CACHE_TYPE_V" ] && ARGS+=(--cache-type-v "$GA_LLAMA_CACHE_TYPE_V")
+    [ -n "$GA_LLAMA_TENSOR_SPLIT" ] && ARGS+=(--tensor-split "$GA_LLAMA_TENSOR_SPLIT")
 fi
-[ -n "$GA_LLAMA_THREADS" ] && ARGS+=(--threads "$GA_LLAMA_THREADS")
-[ -n "$GA_LLAMA_PARALLEL" ] && ARGS+=(--parallel "$GA_LLAMA_PARALLEL")
-[ -n "$GA_LLAMA_GPU_LAYERS" ] && ARGS+=(--n-gpu-layers "$GA_LLAMA_GPU_LAYERS")
-# Vulkan can fail scheduler reservation when KV-cache tensors are placed on
-# the GPU for some model families. Keep this as an explicit env-controlled
-# base preset because router mode propagates it to child instances.
-[ "$GA_LLAMA_KV_OFFLOAD" = "0" ] && ARGS+=(--no-kv-offload)
-[ "$GA_LLAMA_KV_OFFLOAD" = "1" ] && ARGS+=(--kv-offload)
-[ "$GA_LLAMA_KV_UNIFIED" = "1" ] && ARGS+=(--kv-unified)
-[ -n "$GA_LLAMA_JINJA" ] && [ "$GA_LLAMA_JINJA" != "0" ] && ARGS+=(--jinja)
-[ "$GA_LLAMA_CONT_BATCH" = "1" ] && ARGS+=(--cont-batching)
-[ "$GA_LLAMA_NO_MMAP" = "1" ] && ARGS+=(--no-mmap)
-# Global runtime knobs that intentionally DO propagate from the router base
-# preset into every spawned child instance (unlike ctx-size/cache-ram, which
-# are left per-alias). --flash-attn takes a literal value (on|off|auto);
-# cache-type-v quantization requires flash attention to be enabled. The
-# image-min-tokens is per-alias in router-models.ini (Qwen-VL only). Do not set
-# GA_LLAMA_IMAGE_MIN_TOKENS globally — it propagates to every child and breaks
-# models whose mmproj image_max_pixels is below the 1024-token floor.
-[ -n "$GA_LLAMA_FLASH_ATTN" ] && ARGS+=(--flash-attn "$GA_LLAMA_FLASH_ATTN")
-[ -n "$GA_LLAMA_CACHE_TYPE_K" ] && ARGS+=(--cache-type-k "$GA_LLAMA_CACHE_TYPE_K")
-[ -n "$GA_LLAMA_CACHE_TYPE_V" ] && ARGS+=(--cache-type-v "$GA_LLAMA_CACHE_TYPE_V")
-# --tensor-split sets the per-GPU layer proportion (comma list, e.g. "7,1").
-# Indices follow this process's visible-device order: with
-# GA_LLAMA_CUDA_VISIBLE_DEVICES=1,0 the FIRST proportion targets physical GPU 1
-# (5090) and the second targets physical GPU 0 (4090), so a larger first value
-# biases layers onto the 5090. Empty => llama.cpp's default free-VRAM heuristic
-# (which mis-splits here because the 4090 is shared with asr/tts/emb/sd).
-[ -n "$GA_LLAMA_TENSOR_SPLIT" ] && ARGS+=(--tensor-split "$GA_LLAMA_TENSOR_SPLIT")
 exec /app/llama-server "${ARGS[@]}"

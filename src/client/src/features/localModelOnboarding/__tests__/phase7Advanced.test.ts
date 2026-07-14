@@ -1,17 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { buildGgufArtifactGroups } from '../artifactGroups';
-import { buildAliasIniPreview, validateAliasPresetRows } from '../routerPreset';
+import { buildAliasIniPreview, buildEffectivePresetRecord, validateAliasPresetRows } from '../routerPreset';
 
 describe('routerPreset', () => {
-  it('accepts llama-server preset keys on the model row', () => {
-    const errors = validateAliasPresetRows([{ key: 'parallel', value: '4' }]);
+  it('accepts model-scoped llama-server preset keys on the alias row', () => {
+    const errors = validateAliasPresetRows([{ key: 'parallel', value: '2' }]);
     expect(errors).toEqual([]);
+  });
+
+  it('rejects router-shell keys on the alias row', () => {
+    const errors = validateAliasPresetRows([{ key: 'models-preset', value: '/ini/path' }]);
+    expect(errors.some((error) => error.includes('router-shell'))).toBe(true);
   });
 
   it('builds INI preview', () => {
     const preview = buildAliasIniPreview('alias-a', { 'ctx-size': '8192' });
     expect(preview).toContain('[alias-a]');
     expect(preview).toContain('ctx-size = 8192');
+  });
+
+  it('builds effective preset from dedicated managed fields', () => {
+    const preset = buildEffectivePresetRecord(
+      [{ key: 'spec-type', value: 'draft-mtp' }],
+      '131072',
+      '',
+    );
+    expect(preset).toEqual({ 'ctx-size': '131072', 'spec-type': 'draft-mtp' });
   });
 });
 
