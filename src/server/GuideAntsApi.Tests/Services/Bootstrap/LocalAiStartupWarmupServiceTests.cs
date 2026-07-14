@@ -64,12 +64,13 @@ public sealed class LocalAiStartupWarmupServiceTests
             builder,
             orchestration.Object,
             modeResolver,
+            CreateHttpClientFactory(),
             NullLogger<LocalAiStartupWarmupService>.Instance);
 
         await service.SyncDesiredAndApplyAsync(waitForCompletion: false);
 
         capturedIni.Should().NotBeNullOrWhiteSpace();
-        capturedIni.Should().Contain("model_id = qwen3_embedding_0_6b");
+        capturedIni.Should().Contain("model_path = qwen3_embedding_0_6b");
         orchestration.VerifyAll();
     }
 
@@ -100,6 +101,7 @@ public sealed class LocalAiStartupWarmupServiceTests
             builder.Object,
             orchestration.Object,
             modeResolver,
+            CreateHttpClientFactory(),
             NullLogger<LocalAiStartupWarmupService>.Instance);
 
         var result = await service.ReconcileLocalServiceAsync(
@@ -107,6 +109,103 @@ public sealed class LocalAiStartupWarmupServiceTests
             requestedModelRef: "qwen3_asr_0_6b");
 
         result.Outcome.Should().Be(LocalServiceReconcileOutcome.NotActiveProvider);
+    }
+
+    [TestMethod]
+    public async Task ReconcileLocalServiceAsync_PersistsFolderRefVerbatim()
+    {
+        string? capturedIni = null;
+        var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
+        orchestration
+            .Setup(c => c.PutDesiredAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
+            .Callback<string, int?, CancellationToken>((ini, _, _) => capturedIni = ini)
+            .ReturnsAsync(new WarmupDesiredWriteResult(Revision: 2, Sha256: "abc", Changed: true));
+        orchestration
+            .Setup(c => c.ApplyAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WarmupApplyResult(
+                Ok: true,
+                Noop: false,
+                Continue: false,
+                Started: true,
+                DesiredRevision: 2,
+                AppliedRevision: 0,
+                ApplyStatus: "applying"));
+        orchestration
+            .Setup(c => c.GetStatusAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WarmupStatusDocument(
+                SchemaVersion: 1,
+                DesiredRevision: 2,
+                AppliedRevision: 2,
+                InProgressRevision: null,
+                ApplyStatus: "applied",
+                ApplyError: null,
+                DesiredSha256: "abc",
+                WrittenAt: "2026-07-12T19:00:00Z",
+                Services: new Dictionary<string, WarmupServiceStatus>(StringComparer.Ordinal)
+                {
+                    [RoutedServiceNames.SpeechSynthesis] = new WarmupServiceStatus(
+                        Desired: "on",
+                        Applied: "on",
+                        Phase: "ready",
+                        Error: null,
+                        PlanRef: "OmniVoice",
+                        RouterAlias: null,
+                        ModelId: "OmniVoice",
+                        BundleId: null),
+                }));
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LlamaCpp:BaseUrl"] = "http://localhost:8080/llama-cpp",
+            })
+            .Build();
+
+        var routingGate = new RoutingActivationGate();
+        routingGate.Activate();
+        var modeResolver = new GatedServiceModeResolver(
+            routingGate,
+            RoutedServiceNames.SpeechSynthesis,
+            new ServiceMode(
+                ModeId: "local",
+                ProviderSection: "LocalServiceHosts:SpeechSynthesisBaseUrl",
+                ModelId: "chatterbox",
+                RequestPresetJson: null,
+                Enabled: true,
+                IsDefault: true));
+
+        var settingsMock = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        settingsMock
+            .Setup(s => s.SetServiceModeModelIdAsync(
+                RoutedServiceNames.SpeechSynthesis,
+                "OmniVoice",
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .Callback(() => modeResolver.SetModelId("OmniVoice"));
+
+        var builder = new LocalAiDesiredStateBuilder(
+            configuration,
+            new ServiceScopeFactoryStub(settingsMock.Object),
+            modeResolver,
+            CreateHttpClientFactory(),
+            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+
+        var service = new LocalAiStartupWarmupService(
+            configuration,
+            new ServiceScopeFactoryStub(settingsMock.Object),
+            builder,
+            orchestration.Object,
+            modeResolver,
+            CreateHttpClientFactory(),
+            NullLogger<LocalAiStartupWarmupService>.Instance);
+
+        var result = await service.ReconcileLocalServiceAsync(
+            RoutedServiceNames.SpeechSynthesis,
+            requestedModelRef: "OmniVoice");
+
+        result.Outcome.Should().Be(LocalServiceReconcileOutcome.Warm);
+        capturedIni.Should().Contain("model_path = OmniVoice");
+        settingsMock.VerifyAll();
     }
 
     [TestMethod]
@@ -140,10 +239,11 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Services: new Dictionary<string, WarmupServiceStatus>(StringComparer.Ordinal)
                 {
                     [ImageGenerationOptions.SectionName] = new WarmupServiceStatus(
-                        Desired: "warm",
-                        Applied: "warm",
+                        Desired: "on",
+                        Applied: "on",
                         Phase: "ready",
                         Error: null,
+                        PlanRef: "flux2-klein-4b-q4ks",
                         RouterAlias: null,
                         ModelId: null,
                         BundleId: "flux2-klein-4b-q4ks"),
@@ -187,6 +287,13 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Providers: [],
                 Readiness: new ServiceEditorReadinessDto("ready", [], [])))
             .Callback(() => routingGate.Activate());
+        settingsMock
+            .Setup(s => s.SetServiceModeModelIdAsync(
+                ImageGenerationOptions.SectionName,
+                "flux2-klein-4b-q4ks",
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .Callback(() => modeResolver.SetModelId("flux2-klein-4b-q4ks"));
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
@@ -201,6 +308,7 @@ public sealed class LocalAiStartupWarmupServiceTests
             builder,
             orchestration.Object,
             modeResolver,
+            CreateHttpClientFactory(),
             NullLogger<LocalAiStartupWarmupService>.Instance);
 
         var result = await service.ReconcileLocalServiceAsync(
@@ -253,7 +361,7 @@ public sealed class LocalAiStartupWarmupServiceTests
     {
         private readonly RoutingActivationGate _gate;
         private readonly string _serviceName;
-        private readonly ServiceMode _localMode;
+        private ServiceMode _localMode;
 
         public GatedServiceModeResolver(RoutingActivationGate gate, string serviceName, ServiceMode localMode)
         {
@@ -261,6 +369,9 @@ public sealed class LocalAiStartupWarmupServiceTests
             _serviceName = serviceName;
             _localMode = localMode;
         }
+
+        public void SetModelId(string modelId) =>
+            _localMode = _localMode with { ModelId = modelId };
 
         public Task<ServiceMode> ResolveAsync(string serviceName, string? modeId, CancellationToken cancellationToken = default)
         {
@@ -277,8 +388,20 @@ public sealed class LocalAiStartupWarmupServiceTests
             return Task.FromResult(_localMode);
         }
 
-        public Task<IReadOnlyList<ServiceMode>> GetModesAsync(string serviceName, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public Task<IReadOnlyList<ServiceMode>> GetModesAsync(string serviceName, CancellationToken cancellationToken = default)
+        {
+            if (!string.Equals(serviceName, _serviceName, StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult<IReadOnlyList<ServiceMode>>(Array.Empty<ServiceMode>());
+            }
+
+            if (!_gate.Activated)
+            {
+                return Task.FromResult<IReadOnlyList<ServiceMode>>(Array.Empty<ServiceMode>());
+            }
+
+            return Task.FromResult<IReadOnlyList<ServiceMode>>(new[] { _localMode });
+        }
     }
 
     private static IHttpClientFactory CreateHttpClientFactory() =>

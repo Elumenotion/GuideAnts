@@ -9,12 +9,12 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from warmup_desired_ini import (
-    SERVICE_LLAMA,
     WARMUP_SERVICE_SECTIONS,
     WarmupDesiredDocument,
     WarmupServiceSection,
     read_warmup_desired,
     resolve_warmup_desired_path,
+    section_execution_ref,
 )
 
 WARMUP_STATE_PATH = "/models-local/.warmup-state.json"
@@ -41,20 +41,25 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _loaded_ref_from_service_state(service_state: dict[str, Any]) -> str | None:
+    if service_state.get("routerAlias"):
+        return str(service_state["routerAlias"])
+    if service_state.get("bundleId"):
+        return str(service_state["bundleId"])
+    if service_state.get("modelId"):
+        return str(service_state["modelId"])
+    return None
+
+
 def _service_state_from_section(section_name: str, section: WarmupServiceSection) -> dict[str, Any]:
-    applied = "idle"
+    """Fresh service state — plan ref from INI, nothing loaded yet."""
+    plan_ref = section_execution_ref(section_name, section)
     state: dict[str, Any] = {
-        "desired": section.desired,
-        "applied": applied,
         "phase": SERVICE_PHASE_IDLE,
         "error": None,
     }
-    if section_name == SERVICE_LLAMA and section.router_alias:
-        state["routerAlias"] = section.router_alias
-    if section.model_id:
-        state["modelId"] = section.model_id
-    if section.bundle_id:
-        state["bundleId"] = section.bundle_id
+    if plan_ref:
+        state["planRef"] = plan_ref
     return state
 
 
@@ -80,7 +85,7 @@ def build_warmup_state_document(
     written_at: str | None = None,
 ) -> dict[str, Any]:
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "desiredRevision": desired_revision,
         "appliedRevision": applied_revision,
         "inProgressRevision": in_progress_revision,
@@ -142,7 +147,7 @@ def sync_state_after_desired_write(
     desired_sha256: str,
     changed: bool,
 ) -> dict[str, Any]:
-    """Update warmup state after a desired INI write."""
+    """Update warmup state after a runtime plan write."""
     with WARMUP_STATE_LOCK:
         current = _read_warmup_state_unlocked()
         if current is None:
@@ -151,6 +156,7 @@ def sync_state_after_desired_write(
             return state
 
         next_state = dict(current)
+        next_state["schemaVersion"] = 2
         next_state["desiredRevision"] = document.revision
         next_state["desiredSha256"] = desired_sha256
         next_state["writtenAt"] = _utc_now_iso()
@@ -159,13 +165,37 @@ def sync_state_after_desired_write(
         for section_name in WARMUP_SERVICE_SECTIONS:
             section = document.sections.get(section_name)
             if section is None:
-                services.pop(section_name, None)
+                prior = services.get(section_name)
+                if prior and _loaded_ref_from_service_state(prior):
+                    services[section_name] = {
+                        "phase": prior.get("phase", SERVICE_PHASE_IDLE),
+                        "error": prior.get("error"),
+                        **_loaded_ref_fields(prior),
+                    }
+                else:
+                    services.pop(section_name, None)
                 continue
-            prior = services.get(section_name) or {}
-            updated = _service_state_from_section(section_name, section)
-            updated["applied"] = prior.get("applied", "idle")
-            updated["phase"] = prior.get("phase", SERVICE_PHASE_IDLE)
-            updated["error"] = prior.get("error")
+
+            prior = dict(services.get(section_name) or {})
+            plan_ref = section_execution_ref(section_name, section)
+            updated: dict[str, Any] = {
+                "phase": prior.get("phase", SERVICE_PHASE_IDLE),
+                "error": prior.get("error"),
+            }
+            if plan_ref:
+                updated["planRef"] = plan_ref
+            else:
+                updated.pop("planRef", None)
+
+            for key in ("modelId", "bundleId", "routerAlias"):
+                if key in prior:
+                    updated[key] = prior[key]
+
+            loaded_ref = _loaded_ref_from_service_state(prior)
+            if plan_ref and loaded_ref and plan_ref != loaded_ref:
+                updated["phase"] = SERVICE_PHASE_IDLE
+                updated["error"] = None
+
             services[section_name] = updated
         next_state["services"] = services
 
@@ -175,6 +205,14 @@ def sync_state_after_desired_write(
 
         atomic_write_warmup_state(next_state)
         return next_state
+
+
+def _loaded_ref_fields(prior: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for key in ("modelId", "bundleId", "routerAlias"):
+        if key in prior:
+            fields[key] = prior[key]
+    return fields
 
 
 def mutate_warmup_state(mutator: Callable[[dict[str, Any]], None]) -> dict[str, Any]:

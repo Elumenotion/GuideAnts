@@ -262,4 +262,56 @@ describe('TtsToolbarPanel', () => {
     expect(screen.getByRole('button', { name: /load selected local local model/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /load selected local local model/i })).toHaveTextContent('Loading...');
   });
+
+  it('shows API errors when selecting a local model fails', async () => {
+    vi.clearAllMocks();
+    const user = userEvent.setup();
+    vi.mocked(api.settings.localModels.selectActive).mockRejectedValueOnce(
+      Object.assign(new Error('model_id OmniVoice is not in the curated TTS catalog'), { status: 400 })
+    );
+
+    render(
+      <TtsToolbarPanel
+        service={{
+          serviceId: 'SpeechSynthesis',
+          displayName: 'Speech Synthesis',
+          kind: 'tts',
+          status: 'ready',
+          summary: 'ready',
+          activeProviderId: 'SpeechSynthesis.LocalTts.Http',
+          activeProviderLabel: 'Local',
+          supportsLocalRuntimePower: true,
+          localRuntimeOn: false,
+          providerOptions: [
+            {
+              providerId: 'SpeechSynthesis.LocalTts.Http',
+              displayName: 'LocalServiceHosts:SpeechSynthesisBaseUrl',
+              providerKind: 'LocalHttp',
+              canActivate: true,
+              blockers: [],
+              providerSection: 'LocalServiceHosts:SpeechSynthesisBaseUrl',
+              modelId: null,
+            },
+          ],
+          selection: null,
+          blockers: [],
+          localModelOptions: [
+            { modelRef: 'OmniVoice', displayLabel: 'OmniVoice', isComplete: true, isActive: false },
+          ],
+          inProgressOperationId: null,
+          inProgressState: null,
+        }}
+        projectId="p1"
+        notebookId="n1"
+        conversationId="c1"
+        inFlight={false}
+        setInFlight={vi.fn()}
+        onRefresh={vi.fn(async () => {})}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('option', { name: /OmniVoice/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('model_id OmniVoice is not in the curated TTS catalog');
+  });
 });

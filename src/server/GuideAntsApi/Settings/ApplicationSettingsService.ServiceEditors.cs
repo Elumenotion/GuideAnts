@@ -597,19 +597,36 @@ public sealed partial class ApplicationSettingsService
                 $"Service '{serviceId}' has no default service mode; cannot persist configured model id.");
         }
 
-        if (string.Equals(activeMode.ModelId, trimmed, StringComparison.Ordinal))
+        var localProviderSection = ResolveLocalProviderSectionKey(canonicalService);
+        var targetMode = !string.IsNullOrWhiteSpace(localProviderSection)
+            ? modes.FirstOrDefault(mode =>
+                string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase))
+            : null;
+        targetMode ??= activeMode;
+
+        if (string.Equals(targetMode.ModelId, trimmed, StringComparison.Ordinal))
         {
             return;
         }
 
         var updatedModes = modes
-            .Select(mode => string.Equals(mode.ModeId, activeMode.ModeId, StringComparison.Ordinal)
+            .Select(mode => string.Equals(mode.ModeId, targetMode.ModeId, StringComparison.Ordinal)
                 ? mode with { ModelId = trimmed }
                 : mode)
             .ToList();
         ServiceModesPayload.WriteModesFor(payload, canonicalService, updatedModes, activeMode.ModeId);
         await PersistServiceModesAsync(row, payload, cancellationToken).ConfigureAwait(false);
     }
+
+    private static string? ResolveLocalProviderSectionKey(string serviceId) =>
+        serviceId switch
+        {
+            RoutedServiceNames.SpeechTranscription => $"{LocalServiceHostsOptions.SectionName}:SpeechTranscriptionBaseUrl",
+            RoutedServiceNames.Embeddings => $"{LocalServiceHostsOptions.SectionName}:EmbeddingsBaseUrl",
+            RoutedServiceNames.SpeechSynthesis => $"{LocalServiceHostsOptions.SectionName}:SpeechSynthesisBaseUrl",
+            RoutedServiceNames.ImageGeneration => $"{LocalServiceHostsOptions.SectionName}:ImageGenerationBaseUrl",
+            _ => null,
+        };
 
     private static string? ResolveInitialServiceModeModelId(string serviceId, string providerId) =>
         LocalAuxiliaryCatalogDefaults.TryGetDefaultCatalogModelId(serviceId, providerId);

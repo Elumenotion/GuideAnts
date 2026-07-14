@@ -345,7 +345,7 @@ def resolve_bundle_dir(model_dir: str, bundle_id: str) -> str:
     return bundle_path
 
 
-def resolve_runtime_config() -> SdRuntimeConfig:
+def resolve_runtime_config(*, bundle_id: str | None = None) -> SdRuntimeConfig:
     model_dir = os.getenv("GA_SD_MODEL_DIR", "/models-local/sd")
 
     server_path = (os.getenv("GA_SD_SERVER_PATH") or "").strip()
@@ -354,18 +354,11 @@ def resolve_runtime_config() -> SdRuntimeConfig:
     elif not os.path.isabs(server_path):
         server_path = shutil.which(server_path) or server_path
 
-    # The active bundle is the single authority for diffusion / VAE / text
-    # encoder paths. Operators no longer configure these via environment
-    # variables at all — if no bundle is active, the service refuses to
-    # start. There is no hardcoded filename fallback on purpose: silent
-    # defaults have repeatedly caused the service to launch against files the
-    # operator did not pick.
-    selected_bundle = read_active_bundle(model_dir)
+    selected_bundle = (bundle_id or "").strip()
     if not selected_bundle:
         raise RuntimeError(
-            "No active Stable Diffusion bundle is selected. Download a "
-            "bundle and mark it active via the /admin/bundles endpoints "
-            "before starting the SD service."
+            "bundle_id is required. Selection is owned by ServiceModes; "
+            "warmup orchestration must call POST /admin/load with bundle_id."
         )
 
     bundle_paths = expected_bundle_paths(model_dir, selected_bundle)
@@ -475,10 +468,16 @@ def read_active_bundle(model_dir: str) -> str | None:
     try:
         with open(marker, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
-            bundle_id = payload.get("bundleId")
-            return validate_bundle_id(str(bundle_id)) if bundle_id else None
+        bundle_id = str(payload.get("bundleId") or "").strip()
+        return bundle_id or None
     except Exception:
         return None
+
+
+def write_active_bundle_marker(model_dir: str, bundle_id: str) -> None:
+    marker = active_bundle_file(model_dir)
+    with open(marker, "w", encoding="utf-8") as handle:
+        json.dump({"bundleId": bundle_id, "updatedAtUtc": utc_now_iso()}, handle)
 
 
 def expected_bundle_paths(model_dir: str, bundle_id: str) -> dict[str, str]:
@@ -672,7 +671,6 @@ def role_directory_ready(path: str) -> bool:
 
 def list_bundles(model_dir: str) -> list[dict[str, Any]]:
     root = bundle_root_dir(model_dir)
-    active_bundle = read_active_bundle(model_dir)
     bundles: list[dict[str, Any]] = []
     try:
         bundle_ids = sorted(os.listdir(root))
@@ -696,7 +694,6 @@ def list_bundles(model_dir: str) -> list[dict[str, Any]]:
             }
             bundle: dict[str, Any] = {
                 "bundleId": bundle_id,
-                "active": bundle_id == active_bundle,
                 "roles": role_state,
                 "complete": all(role["ready"] for role in role_state.values()),
             }
@@ -724,7 +721,6 @@ def list_bundles(model_dir: str) -> list[dict[str, Any]]:
             bundles.append(
                 {
                     "bundleId": bundle_id,
-                    "active": bundle_id == active_bundle,
                     "roles": {
                         role: {"path": path, "ready": False}
                         for role, path in roles.items()
@@ -1180,20 +1176,20 @@ def stop_engine() -> None:
     STATE.engine_started_at_utc = None
 
 
-def start_engine() -> tuple[bool, str | None]:
+def start_engine(*, bundle_id: str) -> tuple[bool, str | None]:
     """
-    Resolve the currently-active bundle, spawn sd-server, and wait until it
-    answers /v1/models. Caller must hold ENGINE_LOCK.
+    Load ``bundle_id`` into sd-server. Caller must hold ENGINE_LOCK.
 
-    Returns ``(ok, error)``. On failure the subprocess (if any) is terminated,
-    STATE is cleared back to "unloaded", and ``STATE.config_error`` is
-    populated so the next /health / /admin/bundles read surfaces the reason.
+    Returns ``(ok, error)``. On success writes active_bundle.json as a derived
+    record of the last bundle that was loaded successfully.
     """
     if is_engine_process_alive():
-        return True, None
+        if STATE.loaded_bundle_id == bundle_id:
+            return True, None
+        stop_engine()
 
     try:
-        config = resolve_runtime_config()
+        config = resolve_runtime_config(bundle_id=bundle_id)
     except RuntimeError as exc:
         config_error = truncate_text(str(exc), 2048)
         STATE.config = None
@@ -1205,7 +1201,7 @@ def start_engine() -> tuple[bool, str | None]:
         return False, STATE.config_error
 
     STATE.config = config
-    STATE.loaded_bundle_id = read_active_bundle(config.model_dir)
+    STATE.loaded_bundle_id = bundle_id
     command = build_sd_server_command(config)
     log_event(
         "sd_engine_start",
@@ -1227,6 +1223,7 @@ def start_engine() -> tuple[bool, str | None]:
         wait_for_engine_ready(config)
         STATE.loaded_at_utc = utc_now_iso()
         STATE.config_error = None
+        write_active_bundle_marker(config.model_dir, bundle_id)
         log_event(
             "sd_engine_ready",
             bundleId=STATE.loaded_bundle_id,
@@ -1893,7 +1890,7 @@ async def admin_list_bundles() -> JSONResponse:
         status_code=200,
         content={
             "modelDir": model_dir,
-            "activeBundleId": read_active_bundle(model_dir),
+            "legacyMarkerBundleId": read_active_bundle(model_dir),
             "loadedBundleId": loaded_id,
             "engine": engine_state_dict(),
             "items": items,
@@ -1951,113 +1948,67 @@ async def admin_cancel_bundle_operation(operation_id: str) -> JSONResponse:
 
 @APP.post("/admin/bundles/{bundle_id}/select-active")
 async def admin_select_active_bundle(bundle_id: str) -> JSONResponse:
-    model_dir = _require_model_dir()
-    bundle_id = require_valid_bundle_id(bundle_id)
-    bundle = next((item for item in list_bundles(model_dir) if item["bundleId"] == bundle_id), None)
-    if bundle is None:
-        raise HTTPException(status_code=404, detail="bundle not found")
-    if not bundle.get("complete"):
-        missing = [name for name, role in bundle.get("roles", {}).items() if not role.get("ready")]
-        raise HTTPException(status_code=409, detail=f"bundle is incomplete; missing roles: {', '.join(missing)}")
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Bundle selection is owned by ServiceModes. Use the GuideAnts "
+            "select-active API, which writes warmup-desired.ini and calls "
+            "POST /admin/load with bundle_id."
+        ),
+    )
 
-    if not ENGINE_LOCK.acquire(blocking=False):
-        raise HTTPException(
-            status_code=409,
-            detail="engine lifecycle operation already in progress; retry in a moment",
-        )
-    try:
-        marker = active_bundle_file(model_dir)
-        with open(marker, "w", encoding="utf-8") as handle:
-            json.dump({"bundleId": bundle_id, "updatedAtUtc": utc_now_iso()}, handle)
 
-        # Marker-only path: when no engine is running, simply record the new
-        # active bundle and let the next /admin/load pick it up.
-        if not is_engine_process_alive():
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "ok": True,
-                    "action": "marker-updated",
-                    "activeBundleId": bundle_id,
-                    "engine": engine_state_dict(),
-                },
-            )
-
-        # Hot-swap path: tear down the current engine, then start a fresh one
-        # which will read the new active marker and load the new bundle's
-        # files into memory. Failure leaves the engine unloaded so the UI
-        # surfaces the error instead of silently running against stale
-        # weights.
-        log_event(
-            "sd_engine_hot_swap_start",
-            fromBundleId=STATE.loaded_bundle_id,
-            toBundleId=bundle_id,
-        )
-        stop_engine()
-        ok, err = start_engine()
-        if ok:
-            log_event(
-                "sd_engine_hot_swap_complete",
-                bundleId=STATE.loaded_bundle_id,
-            )
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "ok": True,
-                    "action": "hot-swapped",
-                    "activeBundleId": bundle_id,
-                    "engine": engine_state_dict(),
-                },
-            )
-        log_event(
-            "sd_engine_hot_swap_failed",
-            toBundleId=bundle_id,
-            error=truncate_text(err or "", 2048),
-        )
-        return JSONResponse(
-            status_code=503,
-            content={
-                "ok": False,
-                "action": "hot-swap-failed",
-                "activeBundleId": bundle_id,
-                "error": "engine_start_failed",
-                "engine": engine_state_dict(),
-            },
-        )
-    finally:
-        ENGINE_LOCK.release()
+class AdminLoadRequest(BaseModel):
+    bundle_id: str | None = None
 
 
 @APP.post("/admin/load")
-async def admin_load() -> JSONResponse:
+async def admin_load(payload: AdminLoadRequest | None = None) -> JSONResponse:
     """
-    Start the sd-server subprocess using whichever bundle is marked active on
-    disk. If the engine is already running, this is a no-op that returns the
-    current state. Serialized with /admin/unload and /admin/bundles/.../select-
-    active via ENGINE_LOCK.
+    Load ``bundle_id`` into sd-server. Selection authority is upstream
+    (ServiceModes → warmup INI → orchestrator); this endpoint only executes
+    the load request it is given.
     """
+    bundle_id = require_valid_bundle_id((payload.bundle_id if payload else "") or "")
+    model_dir = _require_model_dir()
+    bundle = next((item for item in list_bundles(model_dir) if item["bundleId"] == bundle_id), None)
+    if bundle is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "bundle not found"})
+    if not bundle.get("complete"):
+        missing = [name for name, role in bundle.get("roles", {}).items() if not role.get("ready")]
+        return JSONResponse(
+            status_code=409,
+            content={
+                "ok": False,
+                "error": "bundle_incomplete",
+                "missingRoles": missing,
+            },
+        )
+
     if not ENGINE_LOCK.acquire(blocking=False):
         return JSONResponse(
             status_code=409,
             content={"ok": False, "error": "engine lifecycle operation already in progress"},
         )
     try:
-        if is_engine_process_alive():
+        if is_engine_process_alive() and STATE.loaded_bundle_id == bundle_id:
             return JSONResponse(
                 status_code=200,
                 content={
                     "ok": True,
                     "action": "noop-already-loaded",
+                    "bundleId": bundle_id,
                     "engine": engine_state_dict(),
                 },
             )
-        ok, err = start_engine()
+        ok, err = start_engine(bundle_id=bundle_id)
         if ok:
             return JSONResponse(
                 status_code=200,
                 content={
                     "ok": True,
                     "action": "loaded",
+                    "bundleId": bundle_id,
                     "engine": engine_state_dict(),
                 },
             )
@@ -2066,7 +2017,8 @@ async def admin_load() -> JSONResponse:
             content={
                 "ok": False,
                 "action": "load-failed",
-                "error": "engine_start_failed",
+                "error": err or "engine_start_failed",
+                "bundleId": bundle_id,
                 "engine": engine_state_dict(),
             },
         )
@@ -2125,8 +2077,8 @@ async def admin_unload() -> JSONResponse:
 async def admin_delete_bundle(bundle_id: str) -> JSONResponse:
     model_dir = _require_model_dir()
     bundle_id = require_valid_bundle_id(bundle_id)
-    if read_active_bundle(model_dir) == bundle_id:
-        raise HTTPException(status_code=409, detail="cannot remove active bundle")
+    if STATE.loaded_bundle_id == bundle_id:
+        raise HTTPException(status_code=409, detail="cannot remove loaded bundle")
 
     try:
         target = resolve_bundle_dir(model_dir, bundle_id)

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from guideants_hf.catalog_completeness import gguf_model_entry_is_complete
 from guideants_hf.catalog_download import download_catalog_entry_files
 from guideants_hf.operations import find_in_flight_operation
 
@@ -655,12 +656,14 @@ def list_model_entries() -> list[dict[str, Any]]:
             size_bytes = os.path.getsize(full_path) if os.path.isfile(full_path) else 0
         except OSError:
             size_bytes = 0
+        catalog_match = catalog_entry_for_gguf_filename(name)
         items.append(
             {
                 "modelRef": name,
                 "path": full_path,
                 "isDirectory": os.path.isdir(full_path),
                 "sizeBytes": size_bytes,
+                "complete": catalog_match is not None and gguf_model_entry_is_complete(full_path),
                 "active": bool(active_ref and (active_ref == name or active_ref == full_path)),
             }
         )

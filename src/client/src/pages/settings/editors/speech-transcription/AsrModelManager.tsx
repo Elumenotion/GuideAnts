@@ -26,6 +26,7 @@ type AsrModelEntry = {
   isDirectory?: boolean;
   sizeBytes?: number;
   active?: boolean;
+  complete?: boolean;
 };
 
 type AsrListPayload = {
@@ -350,9 +351,10 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
                 </tr>
               ) : null}
               {items.map((m) => {
+                const isIncomplete = m.complete === false;
                 const isBusyRow =
                   engineBusy !== null && engineBusy.op === 'load' && engineBusy.modelRef === m.modelRef;
-                const disableLoad = engineBusy !== null || hasInFlightDownload || !!m.active;
+                const disableLoad = engineBusy !== null || hasInFlightDownload || !!m.active || isIncomplete;
                 const disableRemove = engineBusy !== null || hasInFlightDownload || !!m.active;
                 return (
                   <tr key={m.modelRef} className="border-t border-gray-100">
@@ -364,6 +366,10 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
                       {m.active ? (
                         <span className="inline-flex items-center rounded bg-blue-100 px-2 py-0.5 font-semibold text-blue-800">
                           Loaded
+                        </span>
+                      ) : isIncomplete ? (
+                        <span className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 font-semibold text-amber-900">
+                          Incomplete download
                         </span>
                       ) : (
                         <span className="text-gray-500">—</span>
@@ -384,6 +390,8 @@ export function AsrModelManager({ enabled, onDownloadOperationChange, onRuntimeR
                           title={
                             m.active
                               ? 'This model is already loaded.'
+                              : isIncomplete
+                              ? 'Download is incomplete. Wait for the download to finish or remove and re-download.'
                               : 'Load this model into the ASR engine.'
                           }
                         />

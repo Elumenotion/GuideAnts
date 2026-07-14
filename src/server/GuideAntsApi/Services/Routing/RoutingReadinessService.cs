@@ -373,15 +373,24 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
                 return Array.Empty<string>();
             }
 
-            if (string.Equals(serviceStatus.Desired, "warm", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(serviceStatus.Applied, "warm", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(serviceStatus.PlanRef)
+                && !string.Equals(serviceStatus.Phase, "ready", StringComparison.OrdinalIgnoreCase))
             {
                 var detail = string.IsNullOrWhiteSpace(serviceStatus.Error)
                     ? $"phase={serviceStatus.Phase}"
                     : serviceStatus.Error;
                 return
                 [
-                    $"{BlockerKeys.RuntimeState}: warmup orchestrator has not applied warm state for '{service}' ({detail})."
+                    $"{BlockerKeys.RuntimeState}: runtime plan not loaded for '{service}' ({detail})."
+                ];
+            }
+
+            if (!string.IsNullOrWhiteSpace(serviceStatus.PlanRef)
+                && !LoadedRefMatchesPlan(serviceStatus))
+            {
+                return
+                [
+                    $"{BlockerKeys.RuntimeState}: loaded model does not match runtime plan for '{service}'."
                 ];
             }
         }
@@ -391,6 +400,20 @@ public sealed class RoutingReadinessService : IRoutingReadinessService
         }
 
         return Array.Empty<string>();
+    }
+
+    private static bool LoadedRefMatchesPlan(WarmupServiceStatus serviceStatus)
+    {
+        var planRef = serviceStatus.PlanRef?.Trim();
+        if (string.IsNullOrWhiteSpace(planRef))
+        {
+            return true;
+        }
+
+        var loadedRef = serviceStatus.RouterAlias?.Trim()
+            ?? serviceStatus.ModelId?.Trim()
+            ?? serviceStatus.BundleId?.Trim();
+        return string.Equals(planRef, loadedRef, StringComparison.Ordinal);
     }
 
     private static bool IsLocalServiceProviderSection(string providerSection) =>

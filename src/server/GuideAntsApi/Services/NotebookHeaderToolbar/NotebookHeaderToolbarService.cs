@@ -508,7 +508,17 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             isImage,
             cancellationToken).ConfigureAwait(false);
 
-        var selection = BuildSelectionForService(state, isImage, localModels);
+        var selectedLocalRef = ResolveSelectedLocalModelRef(state, localProviderId);
+        if (isImage)
+        {
+            localModels = MarkImageBundleSelection(localModels, selectedLocalRef);
+        }
+        else
+        {
+            localModels = MarkVoiceModelSelection(localModels, selectedLocalRef);
+        }
+
+        var selection = BuildSelectionForService(state, isImage, localModels, selectedLocalRef);
         var runtimeProbe = supportsPower
             ? await ProbeLocalRuntimeAsync(serviceId, isImage, cancellationToken).ConfigureAwait(false)
             : new LocalRuntimeProbe(false, false, false, false);
@@ -637,24 +647,74 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
     private static NotebookToolbarSelectionDto? BuildSelectionForService(
         ServiceEditorStateDto state,
         bool isImage,
-        IReadOnlyList<NotebookToolbarLocalModelOptionDto> localModels)
+        IReadOnlyList<NotebookToolbarLocalModelOptionDto> localModels,
+        string? selectedLocalRef)
     {
-        if (isImage)
+        if (!string.IsNullOrWhiteSpace(selectedLocalRef))
         {
-            var act = localModels.FirstOrDefault(m => m.IsActive);
             return new NotebookToolbarSelectionDto(
-                act?.ModelRef,
-                act != null ? $"active: {act.ModelRef}" : "no active bundle");
+                selectedLocalRef,
+                $"active: {selectedLocalRef}");
         }
 
-        var active = localModels.FirstOrDefault(m => m.IsActive);
-        var pick = active ?? localModels.FirstOrDefault(m => m.ModelRef.Length > 0);
+        if (isImage)
+        {
+            return new NotebookToolbarSelectionDto(null, "no active bundle");
+        }
+
+        var pick = localModels.FirstOrDefault(m => m.ModelRef.Length > 0);
         if (pick == null)
         {
             return new NotebookToolbarSelectionDto(null, "no installed local models");
         }
 
         return new NotebookToolbarSelectionDto(pick.ModelRef, pick.ModelRef);
+    }
+
+    private static string? ResolveSelectedLocalModelRef(
+        ServiceEditorStateDto state,
+        string localProviderId)
+    {
+        var localProvider = state.Providers.FirstOrDefault(p =>
+            string.Equals(p.ProviderId, localProviderId, StringComparison.Ordinal));
+        return localProvider is null ? null : ExtractModelId(localProvider);
+    }
+
+    private static IReadOnlyList<NotebookToolbarLocalModelOptionDto> MarkImageBundleSelection(
+        IReadOnlyList<NotebookToolbarLocalModelOptionDto> localModels,
+        string? selectedLocalRef)
+    {
+        if (string.IsNullOrWhiteSpace(selectedLocalRef))
+        {
+            return localModels;
+        }
+
+        return localModels
+            .Select(model => model with
+            {
+                IsActive = string.Equals(model.ModelRef, selectedLocalRef, StringComparison.Ordinal),
+                DisplayLabel = string.Equals(model.ModelRef, selectedLocalRef, StringComparison.Ordinal)
+                    ? $"{model.ModelRef} (active)"
+                    : model.DisplayLabel,
+            })
+            .ToList();
+    }
+
+    private static IReadOnlyList<NotebookToolbarLocalModelOptionDto> MarkVoiceModelSelection(
+        IReadOnlyList<NotebookToolbarLocalModelOptionDto> localModels,
+        string? selectedLocalRef)
+    {
+        if (string.IsNullOrWhiteSpace(selectedLocalRef))
+        {
+            return localModels;
+        }
+
+        return localModels
+            .Select(model => model with
+            {
+                IsActive = string.Equals(model.ModelRef, selectedLocalRef, StringComparison.Ordinal),
+            })
+            .ToList();
     }
 
     private async Task<LocalRuntimeProbe> ProbeLocalRuntimeAsync(
@@ -753,7 +813,6 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         if (items is null) return Array.Empty<NotebookToolbarLocalModelOptionDto>();
 
         var list = new List<NotebookToolbarLocalModelOptionDto>();
-        var activeId = root?["activeBundleId"]?.GetValue<string>();
         foreach (var it in items)
         {
             if (it?["bundleId"]?.GetValue<string>() is not { } id)
@@ -761,9 +820,9 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
                 continue;
             }
             var complete = it["complete"]?.GetValue<bool>() ?? false;
-            var active = string.Equals(id, activeId, StringComparison.Ordinal);
-            var label = active ? $"{id} (active)" : id;
-            list.Add(new NotebookToolbarLocalModelOptionDto(id, label, complete, active));
+            var loaded = it["loaded"]?.GetValue<bool>() ?? false;
+            var label = loaded ? $"{id} (loaded)" : id;
+            list.Add(new NotebookToolbarLocalModelOptionDto(id, label, complete, IsActive: false));
         }
         return list;
     }
@@ -805,7 +864,8 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             var active = it?["active"]?.GetValue<bool>() is true
                 || it?["activeModel"]?.GetValue<bool>() is true
                 || string.Equals(id, it?["active_model_id"]?.GetValue<string>(), StringComparison.Ordinal);
-            list.Add(new NotebookToolbarLocalModelOptionDto(id, label, true, active));
+            var complete = it?["complete"]?.GetValue<bool>() ?? false;
+            list.Add(new NotebookToolbarLocalModelOptionDto(id, label, complete, active));
         }
         return list;
     }

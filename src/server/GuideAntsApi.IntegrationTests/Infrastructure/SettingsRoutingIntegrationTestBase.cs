@@ -23,21 +23,57 @@ namespace GuideAntsApi.IntegrationTests.Infrastructure;
 [TestClass]
 public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
 {
+    private static int _sharedFactoryRefCount;
+    private static readonly SemaphoreSlim SharedFactoryGate = new(1, 1);
+
     protected static SettingsRoutingTestWebApplicationFactory? SharedFactory;
     protected HttpClient Client { get; private set; } = null!;
 
     public static async Task InitializeSharedFactoryAsync(TestContext context)
     {
-        SharedFactory = new SettingsRoutingTestWebApplicationFactory();
-        await SharedFactory.InitializeAsync();
+        await SharedFactoryGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (SharedFactory is null)
+            {
+                SharedFactory = new SettingsRoutingTestWebApplicationFactory();
+                await SharedFactory.InitializeAsync().ConfigureAwait(false);
+            }
+
+            Interlocked.Increment(ref _sharedFactoryRefCount);
+        }
+        finally
+        {
+            SharedFactoryGate.Release();
+        }
     }
 
     public static async Task DisposeSharedFactoryAsync()
     {
-        if (SharedFactory != null)
+        await SharedFactoryGate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            await SharedFactory.DisposeAsync();
-            SharedFactory = null;
+            var remaining = Interlocked.Decrement(ref _sharedFactoryRefCount);
+            if (remaining > 0)
+            {
+                return;
+            }
+
+            if (remaining < 0)
+            {
+                Interlocked.Increment(ref _sharedFactoryRefCount);
+                return;
+            }
+
+            if (SharedFactory is not null)
+            {
+                await SharedFactory.DisposeAsync().ConfigureAwait(false);
+                SharedFactory = null;
+            }
+        }
+        finally
+        {
+            SharedFactoryGate.Release();
         }
     }
 

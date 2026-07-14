@@ -123,11 +123,21 @@ public sealed class LocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchestrati
         {
             foreach (var (serviceId, entry) in parsed.Services)
             {
+                var planRef = entry.PlanRef?.Trim();
+                var loadedRef = entry.RouterAlias?.Trim()
+                    ?? entry.ModelId?.Trim()
+                    ?? entry.BundleId?.Trim();
+                var phase = entry.Phase ?? "idle";
+                var hasPlan = !string.IsNullOrWhiteSpace(planRef);
+                var isReady = string.Equals(phase, "ready", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(loadedRef);
+
                 services[serviceId] = new WarmupServiceStatus(
-                    Desired: entry.Desired ?? "idle",
-                    Applied: entry.Applied ?? "idle",
-                    Phase: entry.Phase ?? "idle",
+                    Desired: hasPlan ? "on" : "off",
+                    Applied: isReady ? "on" : "off",
+                    Phase: phase,
                     Error: entry.Error,
+                    PlanRef: planRef,
                     RouterAlias: entry.RouterAlias,
                     ModelId: entry.ModelId,
                     BundleId: entry.BundleId);
@@ -192,6 +202,9 @@ public sealed class LocalAiWarmupOrchestrationClient : ILocalAiWarmupOrchestrati
 
         [JsonPropertyName("error")]
         public string? Error { get; set; }
+
+        [JsonPropertyName("planRef")]
+        public string? PlanRef { get; set; }
 
         [JsonPropertyName("routerAlias")]
         public string? RouterAlias { get; set; }

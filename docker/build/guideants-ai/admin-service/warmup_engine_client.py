@@ -96,30 +96,45 @@ def _get_json(url: str, timeout: float) -> tuple[int, Any]:
         return status, text
 
 
-def _aux_load_body(model_ref: str | None) -> dict[str, str] | None:
+def _aux_load_body(model_ref: str | None, *, load_field: str = "model_path") -> dict[str, str] | None:
     if not model_ref or not model_ref.strip():
         return None
     trimmed = model_ref.strip()
     if trimmed.lower().endswith(".gguf"):
         return {"model_path": trimmed}
-    return {"model_id": trimmed}
+    if load_field == "model_id":
+        return {"model_id": trimmed}
+    return {"model_path": trimmed}
 
 
-def post_aux_load(service_id: str, model_ref: str | None) -> bool:
+def post_aux_load(service_id: str, model_ref: str | None, *, load_field: str = "model_path") -> bool:
     base = SERVICE_ENGINE_BASE_URLS.get(service_id)
     if not base:
         return False
     timeout = float(READY_TIMEOUT_SECONDS.get(service_id, 900))
     if service_id == "ImageGeneration":
-        if model_ref and model_ref.strip():
-            bundle_id = model_ref.strip()
-            select_url = f"{base.rstrip('/')}/admin/bundles/{urllib.parse.quote(bundle_id, safe='')}/select-active"
-            _post_json(select_url, None, timeout=min(timeout, 120.0))
-        status, _ = _post_json(f"{base.rstrip('/')}/admin/load", None, timeout=timeout)
+        if not model_ref or not model_ref.strip():
+            return False
+        bundle_id = model_ref.strip()
+        body = {"bundle_id": bundle_id}
+        status, _ = _post_json(f"{base.rstrip('/')}/admin/load", body, timeout=timeout)
         return status in (200, 201, 202, 204, 409)
-    body = _aux_load_body(model_ref)
+    body = _aux_load_body(model_ref, load_field=load_field)
     status, _ = _post_json(f"{base.rstrip('/')}/admin/load", body, timeout=timeout)
     return status in (200, 201, 202, 204, 409)
+
+
+def _aux_ready_matches_expected(payload: dict[str, Any], expected_model_ref: str) -> bool:
+    expected = expected_model_ref.strip()
+    if not expected:
+        return True
+    candidates = {
+        str(payload.get("modelRef") or payload.get("model_ref") or "").strip(),
+        str(payload.get("catalogEntryId") or payload.get("catalog_entry_id") or "").strip(),
+        str(payload.get("bundleId") or payload.get("bundle_id") or "").strip(),
+    }
+    candidates.discard("")
+    return bool(candidates) and expected in candidates
 
 
 def post_aux_unload(service_id: str) -> bool:
@@ -131,7 +146,7 @@ def post_aux_unload(service_id: str) -> bool:
     return status in (200, 201, 202, 204, 409)
 
 
-def wait_aux_ready(service_id: str) -> bool:
+def wait_aux_ready(service_id: str, *, expected_model_ref: str | None = None) -> bool:
     base = SERVICE_ENGINE_BASE_URLS.get(service_id)
     if not base:
         return False
@@ -146,6 +161,16 @@ def wait_aux_ready(service_id: str) -> bool:
                     process_alive = engine.get("processAlive")
                     healthy = engine.get("healthy")
                     if process_alive is True and healthy is True:
+                        if expected_model_ref:
+                            engine = payload.get("engine") or {}
+                            loaded_bundle = str(
+                                engine.get("loadedBundleId")
+                                or payload.get("loadedBundleId")
+                                or ""
+                            ).strip()
+                            if loaded_bundle and loaded_bundle != expected_model_ref.strip():
+                                time.sleep(POLL_INTERVAL_SECONDS)
+                                continue
                         return True
                     if process_alive is True and healthy is None:
                         return True
@@ -156,8 +181,12 @@ def wait_aux_ready(service_id: str) -> bool:
             time.sleep(POLL_INTERVAL_SECONDS)
         return False
     while time.monotonic() < deadline:
-        status, _ = _get_json(f"{base.rstrip('/')}/ready", timeout=5.0)
+        status, payload = _get_json(f"{base.rstrip('/')}/ready", timeout=5.0)
         if status == 200:
+            if expected_model_ref and isinstance(payload, dict):
+                if not _aux_ready_matches_expected(payload, expected_model_ref):
+                    time.sleep(POLL_INTERVAL_SECONDS)
+                    continue
             return True
         time.sleep(POLL_INTERVAL_SECONDS)
     return False

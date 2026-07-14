@@ -561,7 +561,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                 {
                     return JsonResponse(
                         HttpStatusCode.OK,
-                        """[{"model_id":"chatterbox","activeModel":true,"model_path":"/models/chatterbox"}]""");
+                        """[{"model_id":"chatterbox","activeModel":true,"model_path":"/models/chatterbox","complete":true}]""");
                 }
 
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -613,7 +613,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                 {
                     return JsonResponse(
                         HttpStatusCode.OK,
-                        """[{"model_id":"chatterbox","activeModel":true,"model_path":"/models/chatterbox"}]""");
+                        """[{"model_id":"chatterbox","activeModel":true,"model_path":"/models/chatterbox","complete":true}]""");
                 }
 
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -625,6 +625,63 @@ public sealed class NotebookHeaderToolbarServiceTests
         tts.Status.Should().Be("requiresLoad");
         tts.InProgressState.Should().BeNull();
         tts.Summary.Should().Contain("Load the local model");
+    }
+
+    [TestMethod]
+    public async Task GetToolbarAsync_MarksIncompleteLocalTtsModels_WhenInventoryReportsIncomplete()
+    {
+        await using var db = CreateDb();
+        var notebook = await SeedNotebookAsync(db);
+
+        var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        settings
+            .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<SettingsModelDto>());
+        settings
+            .Setup(x => x.GetServiceEditorStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string serviceId, CancellationToken _) =>
+                string.Equals(serviceId, RoutedServiceNames.SpeechSynthesis, StringComparison.Ordinal)
+                    ? CreateLocalServiceState(
+                        RoutedServiceNames.SpeechSynthesis,
+                        ServiceProviderIds.SpeechSynthesisLocalTtsHttp,
+                        "LocalServiceHosts:SpeechSynthesisBaseUrl")
+                    : CreateReadyServiceState(serviceId));
+
+        var sut = CreateSut(
+            db,
+            notebook.Id,
+            settings.Object,
+            httpClientFactory: CreateHttpClientFactory(request =>
+            {
+                if (request.RequestUri?.AbsolutePath.Contains("/ready", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return JsonResponse(
+                        HttpStatusCode.ServiceUnavailable,
+                        """{"ready":false,"loaded":false,"loading":false,"warmupEnabled":true,"warmupSucceeded":false}""");
+                }
+
+                if (request.RequestUri?.AbsolutePath.Contains("/admin/models", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return JsonResponse(
+                        HttpStatusCode.OK,
+                        """
+                        [
+                          {"modelRef":"chatterbox","activeModel":true,"complete":true},
+                          {"modelRef":"OmniVoice","activeModel":false,"complete":false}
+                        ]
+                        """);
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }));
+
+        var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
+        var tts = toolbar.Services.Single(service => service.Kind == "tts");
+
+        tts.LocalModelOptions.Should().Contain(option =>
+            option.ModelRef == "chatterbox" && option.IsComplete);
+        tts.LocalModelOptions.Should().Contain(option =>
+            option.ModelRef == "OmniVoice" && !option.IsComplete);
     }
 
     private static async Task<Notebook> SeedNotebookAsync(ApplicationDbContext db)

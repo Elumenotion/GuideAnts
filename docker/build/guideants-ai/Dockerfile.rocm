@@ -94,6 +94,7 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${AUDIOCPP_REF
     && mkdir -p /out \
     && if [ -f /src/audio.cpp/build/bin/audiocpp_server ]; then cp /src/audio.cpp/build/bin/audiocpp_server /out/audiocpp_server; \
        else echo "audiocpp_server binary was not produced by audio.cpp HIP build" && exit 1; fi \
+    && cp -r /src/audio.cpp/model_specs /out/model_specs \
     && (strip /out/audiocpp_server || true)
 
 FROM python:${PYTHON311_VERSION}-slim-bookworm AS python311-runtime
@@ -268,6 +269,7 @@ COPY --from=pydeps-rocm-builder /opt/venv /opt/venv
 COPY --from=sd-cli-rocm-builder /out/sd-cli /usr/local/bin/sd-cli
 COPY --from=sd-cli-rocm-builder /out/sd-server /usr/local/bin/sd-server
 COPY --from=audiocpp-rocm-builder /out/audiocpp_server /usr/local/bin/audiocpp_server
+COPY --from=audiocpp-rocm-builder /out/model_specs /app/model_specs
 RUN chmod +x /usr/local/bin/sd-cli /usr/local/bin/sd-server /usr/local/bin/audiocpp_server \
     && ldd /usr/local/bin/audiocpp_server | grep -q 'libomp.so =>' \
     && ldd /usr/local/bin/audiocpp_server | grep -vq 'not found'

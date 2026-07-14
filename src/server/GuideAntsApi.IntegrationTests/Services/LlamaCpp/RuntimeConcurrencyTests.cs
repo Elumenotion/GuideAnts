@@ -36,13 +36,6 @@ namespace GuideAntsApi.IntegrationTests.Services.LlamaCpp;
 [TestCategory("RuntimeLoadOps")]
 public sealed class RuntimeConcurrencyTests : SettingsRoutingIntegrationTestBase
 {
-    [TestInitialize]
-    public override async Task BaseTestInitialize()
-    {
-        await base.BaseTestInitialize();
-        EnsureRuntimeLoadTestsEnabled();
-    }
-
     [ClassInitialize]
     public static async Task ClassInit(TestContext ctx)
     {
@@ -53,22 +46,6 @@ public sealed class RuntimeConcurrencyTests : SettingsRoutingIntegrationTestBase
     public static async Task ClassCleanup()
     {
         await DisposeSharedFactoryAsync();
-    }
-
-    private static void EnsureRuntimeLoadTestsEnabled()
-    {
-        var flag = Environment.GetEnvironmentVariable("GA_ENABLE_RUNTIME_LOAD_TESTS");
-        var enabled = string.Equals(flag, "1", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase);
-
-        if (enabled)
-        {
-            return;
-        }
-
-        Assert.Inconclusive(
-            "Runtime load/unload integration tests are disabled by default. " +
-            "Set GA_ENABLE_RUNTIME_LOAD_TESTS=1 to enable.");
     }
 
     /// <summary>

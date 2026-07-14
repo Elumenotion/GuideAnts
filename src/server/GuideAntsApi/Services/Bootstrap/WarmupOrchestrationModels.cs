@@ -19,6 +19,7 @@ public sealed record WarmupServiceStatus(
     string Applied,
     string Phase,
     string? Error,
+    string? PlanRef,
     string? RouterAlias,
     string? ModelId,
     string? BundleId);
