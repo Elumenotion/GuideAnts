@@ -805,7 +805,8 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             var active = it?["active"]?.GetValue<bool>() is true
                 || it?["activeModel"]?.GetValue<bool>() is true
                 || string.Equals(id, it?["active_model_id"]?.GetValue<string>(), StringComparison.Ordinal);
-            list.Add(new NotebookToolbarLocalModelOptionDto(id, label, true, active));
+            var complete = it?["complete"]?.GetValue<bool>() ?? false;
+            list.Add(new NotebookToolbarLocalModelOptionDto(id, label, complete, active));
         }
         return list;
     }

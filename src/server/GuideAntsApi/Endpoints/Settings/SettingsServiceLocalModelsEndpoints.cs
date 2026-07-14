@@ -252,10 +252,11 @@ public static class SettingsServiceLocalModelsEndpoints
         // requested while the service is not the active provider is refused (409), per
         // the rule that a non-active local service must load nothing.
         //
-        //  - ASR / TTS / Embeddings: optional model_path selects a specific downloaded
-        //    model; omit it to (re)load the resolved active/default model.
-        //  - Image Generation: the request body is ignored; the active bundle on disk is
-        //    authoritative (set via /local-models/{bundleId}/select-active).
+        //  - ASR / TTS / Embeddings: optional model_path or model_id selects a specific
+        //    downloaded model folder; the ref is persisted verbatim on ServiceModes
+        //    and written into warmup-desired.ini as model_path before apply.
+        //  - Image Generation: bundle id is persisted on ServiceModes and required in
+        //    warmup-desired.ini when desired=warm (set via select-active).
         serviceEditorsGroup.MapPost("/{serviceId}/local-models/load", async (
             string serviceId,
             [FromBody] JsonElement payload,

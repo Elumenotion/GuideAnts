@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from guideants_hf.catalog_completeness import catalog_entry_for_directory_name, directory_model_entry_is_complete
 from guideants_hf.catalog_download import download_catalog_entry_files
 from guideants_hf.engine_process import format_engine_exit_error
 from guideants_hf.operations import find_in_flight_operation
@@ -1155,11 +1156,13 @@ def list_model_entries() -> list[dict[str, Any]]:
         if name.startswith("."):
             continue
         full_path = os.path.join(model_dir, name)
+        catalog_entry = catalog_entry_for_directory_name(name, CATALOG["entries"])
         items.append(
             {
                 "modelRef": name,
                 "path": full_path,
                 "isDirectory": os.path.isdir(full_path),
+                "complete": directory_model_entry_is_complete(full_path, catalog_entry),
                 "activeModel": bool(active_model and (active_model == name or active_model == full_path)),
                 "activeTokenizer": False,
             }

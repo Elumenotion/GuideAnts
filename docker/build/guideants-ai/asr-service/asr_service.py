@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from guideants_hf.catalog_completeness import catalog_entry_for_directory_name, directory_model_entry_is_complete
 from guideants_hf.catalog_download import download_catalog_entry_files, verify_required_files
 from guideants_hf.engine_process import format_engine_exit_error
 from guideants_hf.operations import find_in_flight_operation
@@ -791,12 +792,14 @@ def list_model_entries() -> list[dict[str, Any]]:
             size_bytes = os.path.getsize(full_path) if os.path.isfile(full_path) else 0
         except OSError:
             size_bytes = 0
+        catalog_entry = catalog_entry_for_directory_name(name, CATALOG["entries"])
         items.append(
             {
                 "modelRef": name,
                 "path": full_path,
                 "isDirectory": os.path.isdir(full_path),
                 "sizeBytes": size_bytes,
+                "complete": directory_model_entry_is_complete(full_path, catalog_entry),
                 "active": bool(active_ref and (active_ref == name or active_ref == full_path)),
             }
         )

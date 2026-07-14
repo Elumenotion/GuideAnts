@@ -1,4 +1,4 @@
-"""Warmup desired-state INI parsing and atomic writes (no FastAPI dependency)."""
+"""Warmup runtime INI — execution plan on disk (load ref = on, enabled = off = off)."""
 
 from __future__ import annotations
 
@@ -22,18 +22,26 @@ AUX_SERVICES = (
 )
 WARMUP_SERVICE_SECTIONS = (SERVICE_LLAMA,) + AUX_SERVICES
 
-VALID_DESIRED = frozenset({"warm", "idle"})
 HEADER_VERSION_KEY = "version"
 HEADER_REVISION_KEY = "revision"
 HEADER_UPDATED_AT_KEY = "updated_at_utc"
+ENABLED_OFF = "off"
+
+# Legacy INI only — never written on serialize.
+LEGACY_DESIRED_WARM = "warm"
+LEGACY_DESIRED_IDLE = "idle"
 
 
 @dataclass
 class WarmupServiceSection:
-    desired: str
+    """One service entry in the runtime execution plan."""
+
+    enabled: bool | None = None
     router_alias: str | None = None
+    model_path: str | None = None
     model_id: str | None = None
     bundle_id: str | None = None
+    desired: str | None = None  # legacy read only
     extras: dict[str, str] = field(default_factory=dict)
 
 
@@ -69,15 +77,66 @@ class WarmupDesiredValidationError(ValueError):
     pass
 
 
+def aux_section_model_ref(section: WarmupServiceSection) -> str | None:
+    """Disk-shaped ref for aux services (model_path preferred, model_id legacy)."""
+    if (section.model_path or "").strip():
+        return section.model_path.strip()
+    if (section.model_id or "").strip():
+        return section.model_id.strip()
+    return None
+
+
+def aux_section_load_request(
+    section: WarmupServiceSection,
+    *,
+    service: str | None = None,
+) -> tuple[str | None, str]:
+    """Return (ref, load_json_field) for aux engine /admin/load."""
+    if (section.model_path or "").strip():
+        trimmed = section.model_path.strip()
+        if trimmed.lower().endswith(".gguf"):
+            return trimmed, "model_path"
+        if service == "Embeddings":
+            return trimmed, "model_id"
+        return trimmed, "model_path"
+    if (section.model_id or "").strip():
+        trimmed = section.model_id.strip()
+        if trimmed.lower().endswith(".gguf"):
+            return trimmed, "model_path"
+        return trimmed, "model_id"
+    return None, "model_path"
+
+
+def section_execution_ref(section_name: str, section: WarmupServiceSection) -> str | None:
+    """Load instruction from the plan, or None when the service should be off."""
+    if section_is_off(section):
+        return None
+    if section_name == SERVICE_LLAMA:
+        return (section.router_alias or "").strip() or None
+    if section_name == "ImageGeneration":
+        return (section.bundle_id or "").strip() or None
+    return aux_section_model_ref(section)
+
+
+def section_is_off(section: WarmupServiceSection) -> bool:
+    if section.enabled is False:
+        return True
+    enabled_raw = (section.extras.get("enabled") or "").strip().lower()
+    if enabled_raw == ENABLED_OFF:
+        return True
+    if section.desired and section.desired.strip().lower() == LEGACY_DESIRED_IDLE:
+        return True
+    return False
+
+
+def section_should_load(section_name: str, section: WarmupServiceSection | None) -> bool:
+    if section is None:
+        return False
+    return section_execution_ref(section_name, section) is not None
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _normalize_desired(value: str) -> str:
-    normalized = value.strip().lower()
-    if normalized not in VALID_DESIRED:
-        raise WarmupDesiredValidationError(f"desired must be one of {sorted(VALID_DESIRED)}; got '{value}'.")
-    return normalized
 
 
 def _validate_section_name(name: str) -> None:
@@ -89,6 +148,7 @@ def _validate_section_name(name: str) -> None:
 
 
 def validate_warmup_desired(document: WarmupDesiredDocument) -> None:
+    """Validate documents submitted for write (API PUT). Disk reads do not validate."""
     if document.version != 1:
         raise WarmupDesiredValidationError(f"version must be 1; got {document.version}.")
     if document.revision < 0:
@@ -96,25 +156,34 @@ def validate_warmup_desired(document: WarmupDesiredDocument) -> None:
 
     for section_name, section in document.sections.items():
         _validate_section_name(section_name)
-        desired = _normalize_desired(section.desired)
-        if desired == "warm":
-            if section_name == SERVICE_LLAMA:
-                if not (section.router_alias or "").strip():
-                    raise WarmupDesiredValidationError(
-                        f"[{section_name}] desired=warm requires router_alias."
-                    )
-            elif section_name == "ImageGeneration":
-                # bundle_id is optional: when omitted the orchestrator loads the
-                # active bundle already marked on disk (legacy local-SD behavior).
-                pass
-            else:
-                if not (section.model_id or "").strip():
-                    raise WarmupDesiredValidationError(
-                        f"[{section_name}] desired=warm requires model_id."
-                    )
+        if section_is_off(section):
+            continue
+        ref = section_execution_ref(section_name, section)
+        if not ref:
+            raise WarmupDesiredValidationError(
+                f"[{section_name}] must set enabled = off or include a load ref "
+                f"(router_alias, model_path, or bundle_id)."
+            )
+        legacy_desired = (section.desired or "").strip().lower()
+        if legacy_desired == LEGACY_DESIRED_WARM and not ref:
+            raise WarmupDesiredValidationError(
+                f"[{section_name}] legacy desired=warm without a load ref is invalid."
+            )
 
 
-def parse_warmup_desired_ini(text: str) -> WarmupDesiredDocument:
+def _coerce_enabled_field(fields: dict[str, str]) -> bool | None:
+    enabled_raw = fields.get("enabled")
+    if enabled_raw is None:
+        return None
+    normalized = enabled_raw.strip().lower()
+    if normalized == ENABLED_OFF:
+        return False
+    if normalized in {"on", "true", "1"}:
+        return True
+    return None
+
+
+def _parse_warmup_desired_ini_raw(text: str) -> WarmupDesiredDocument:
     version = 1
     revision = 0
     updated_at_utc = ""
@@ -126,16 +195,27 @@ def parse_warmup_desired_ini(text: str) -> WarmupDesiredDocument:
         nonlocal current_name, current_fields
         if not current_name:
             return
-        desired_raw = current_fields.get("desired", "idle")
+        enabled = _coerce_enabled_field(current_fields)
+        desired_raw = current_fields.get("desired")
         section = WarmupServiceSection(
+            enabled=enabled,
             desired=desired_raw,
             router_alias=current_fields.get("router_alias"),
+            model_path=current_fields.get("model_path"),
             model_id=current_fields.get("model_id"),
             bundle_id=current_fields.get("bundle_id"),
             extras={
                 key: value
                 for key, value in current_fields.items()
-                if key not in {"desired", "router_alias", "model_id", "bundle_id"}
+                if key
+                not in {
+                    "desired",
+                    "enabled",
+                    "router_alias",
+                    "model_path",
+                    "model_id",
+                    "bundle_id",
+                }
             },
         )
         sections[current_name] = section
@@ -153,8 +233,7 @@ def parse_warmup_desired_ini(text: str) -> WarmupDesiredDocument:
         if "=" not in line:
             continue
         key, value = line.split("=", 1)
-        key_raw = key.strip()
-        key_lower = key_raw.lower()
+        key_lower = key.strip().lower()
         value = value.strip()
         if current_name is None:
             if key_lower == HEADER_VERSION_KEY:
@@ -167,12 +246,16 @@ def parse_warmup_desired_ini(text: str) -> WarmupDesiredDocument:
         current_fields[key_lower] = value
 
     flush_current()
-    document = WarmupDesiredDocument(
+    return WarmupDesiredDocument(
         version=version,
         revision=revision,
         updated_at_utc=updated_at_utc,
         sections=sections,
     )
+
+
+def parse_warmup_desired_ini(text: str) -> WarmupDesiredDocument:
+    document = _parse_warmup_desired_ini_raw(text)
     validate_warmup_desired(document)
     return document
 
@@ -198,14 +281,19 @@ def serialize_warmup_desired_ini(
         if section is None:
             continue
         lines.append(f"[{section_name}]")
-        lines.append(f"desired = {section.desired}")
+        if section_is_off(section):
+            lines.append(f"enabled = {ENABLED_OFF}")
         if section.router_alias:
             lines.append(f"router_alias = {section.router_alias}")
+        if section.model_path:
+            lines.append(f"model_path = {section.model_path}")
         if section.model_id:
             lines.append(f"model_id = {section.model_id}")
         if section.bundle_id:
             lines.append(f"bundle_id = {section.bundle_id}")
         for extra_key in sorted(section.extras.keys()):
+            if extra_key == "enabled":
+                continue
             lines.append(f"{extra_key} = {section.extras[extra_key]}")
         lines.append("")
 
@@ -247,13 +335,13 @@ def resolve_warmup_desired_path() -> str:
 
 
 def read_warmup_desired() -> WarmupDesiredDocument | None:
+    """Read persisted INI without validation — stale volume state must not brick startup."""
     path = resolve_warmup_desired_path()
     with WARMUP_FILE_LOCK:
         if not os.path.exists(path):
             return None
         with open(path, "r", encoding="utf-8") as handle:
-            content = handle.read()
-        return parse_warmup_desired_ini(content)
+            return _parse_warmup_desired_ini_raw(handle.read())
 
 
 def write_warmup_desired(
@@ -270,7 +358,7 @@ def write_warmup_desired(
         prior: WarmupDesiredDocument | None = None
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as handle:
-                prior = parse_warmup_desired_ini(handle.read())
+                prior = _parse_warmup_desired_ini_raw(handle.read())
 
         if expected_revision is not None:
             current_revision = prior.revision if prior is not None else 0

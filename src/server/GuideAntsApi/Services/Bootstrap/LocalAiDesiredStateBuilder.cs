@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Endpoints;
@@ -14,11 +13,9 @@ public sealed class WarmupDesiredBuildOptions
 {
     public IReadOnlyDictionary<string, string>? ServiceDesiredOverrides { get; init; }
 
-    public IReadOnlyDictionary<string, string>? ModelIdOverrides { get; init; }
-
     public string? LlamaRouterAliasOverride { get; init; }
 
-    /// <summary>When true, all auxiliary services are written as idle regardless of routing.</summary>
+    /// <summary>When true, all auxiliary services are written as off regardless of routing.</summary>
     public bool ForceAuxiliaryIdle { get; init; }
 }
 
@@ -95,12 +92,11 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
 
         if (string.IsNullOrWhiteSpace(alias))
         {
-            builder.AppendLine("desired = idle");
+            builder.AppendLine("enabled = off");
             builder.AppendLine();
             return;
         }
 
-        builder.AppendLine("desired = warm");
         builder.AppendLine($"router_alias = {alias}");
         builder.AppendLine();
     }
@@ -113,48 +109,66 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
     {
         builder.AppendLine($"[{serviceId}]");
 
-        if (options.ForceAuxiliaryIdle)
-        {
-            builder.AppendLine("desired = idle");
-            builder.AppendLine();
-            return;
-        }
+        var persistedLocalRef = await ResolvePersistedLocalModeModelRefAsync(serviceId, cancellationToken)
+            .ConfigureAwait(false);
 
         if (options.ServiceDesiredOverrides is not null
             && options.ServiceDesiredOverrides.TryGetValue(serviceId, out var desiredOverride)
             && !string.IsNullOrWhiteSpace(desiredOverride))
         {
             var normalized = desiredOverride.Trim().ToLowerInvariant();
-            builder.AppendLine($"desired = {normalized}");
-            if (normalized == "warm")
+            if (normalized is "warm" or "on")
             {
-                var modelRef = await ResolveAuxiliaryModelRefAsync(serviceId, options, cancellationToken)
-                    .ConfigureAwait(false);
-                AppendAuxiliaryWarmModelRef(builder, serviceId, modelRef);
+                AppendAuxiliaryExecutionPlan(
+                    builder,
+                    serviceId,
+                    loadRef: persistedLocalRef,
+                    routingWarm: true);
+            }
+            else
+            {
+                AppendAuxiliaryExecutionPlan(
+                    builder,
+                    serviceId,
+                    loadRef: persistedLocalRef,
+                    routingWarm: false);
             }
 
             builder.AppendLine();
             return;
         }
 
-        var routing = await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken)
-            .ConfigureAwait(false);
-        if (routing == LocalRoutingDesiredState.Warm)
-        {
-            var modelRef = await ResolveAuxiliaryModelRefAsync(serviceId, options, cancellationToken)
-                .ConfigureAwait(false);
-            builder.AppendLine("desired = warm");
-            AppendAuxiliaryWarmModelRef(builder, serviceId, modelRef);
-        }
-        else
-        {
-            builder.AppendLine("desired = idle");
-        }
+        var routingWarm = !options.ForceAuxiliaryIdle
+            && await IsLocalRoutingWarmAsync(serviceId, cancellationToken).ConfigureAwait(false);
 
+        AppendAuxiliaryExecutionPlan(
+            builder,
+            serviceId,
+            loadRef: persistedLocalRef,
+            routingWarm: routingWarm);
         builder.AppendLine();
     }
 
-    private static void AppendAuxiliaryWarmModelRef(StringBuilder builder, string serviceId, string? modelRef)
+    private static void AppendAuxiliaryExecutionPlan(
+        StringBuilder builder,
+        string serviceId,
+        string? loadRef,
+        bool routingWarm)
+    {
+        if (routingWarm && !string.IsNullOrWhiteSpace(loadRef))
+        {
+            AppendAuxiliaryLoadRef(builder, serviceId, loadRef);
+            return;
+        }
+
+        builder.AppendLine("enabled = off");
+        if (!string.IsNullOrWhiteSpace(loadRef))
+        {
+            AppendAuxiliaryLoadRef(builder, serviceId, loadRef);
+        }
+    }
+
+    private static void AppendAuxiliaryLoadRef(StringBuilder builder, string serviceId, string? modelRef)
     {
         if (string.IsNullOrWhiteSpace(modelRef))
         {
@@ -167,104 +181,55 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
         }
         else
         {
-            builder.AppendLine($"model_id = {modelRef}");
+            builder.AppendLine($"model_path = {modelRef}");
         }
     }
 
-    private async Task<string?> ResolveAuxiliaryModelRefAsync(
+    private async Task<string?> ResolvePersistedLocalModeModelRefAsync(
         string serviceId,
-        WarmupDesiredBuildOptions options,
         CancellationToken cancellationToken)
     {
-        if (options.ModelIdOverrides is not null
-            && options.ModelIdOverrides.TryGetValue(serviceId, out var overrideRef)
-            && !string.IsNullOrWhiteSpace(overrideRef))
-        {
-            return overrideRef.Trim();
-        }
-
-        if (string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal))
-        {
-            return await ResolveImageGenerationBundleRefAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        return await ResolveConfiguredServiceModeModelRefAsync(serviceId, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    private async Task<string?> ResolveImageGenerationBundleRefAsync(CancellationToken cancellationToken)
-    {
-        var fromMode = await ResolveConfiguredServiceModeModelRefAsync(
-                RoutedServiceNames.ImageGeneration,
-                cancellationToken)
-            .ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(fromMode))
-        {
-            return fromMode;
-        }
-
-        // Local SD marks the active bundle on disk; ServiceModes often has no ModelId.
-        var adminBase = LocalServiceAdminRouting.ResolveAdminBase(
-            RoutedServiceNames.ImageGeneration,
-            _configuration);
-        if (adminBase is null)
+        var localProviderSection = ResolveLocalProviderSection(serviceId);
+        if (localProviderSection is null)
         {
             return null;
         }
 
         try
         {
-            using var client = _httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(30);
-            using var response = await client
-                .GetAsync($"{adminBase.TrimEnd('/')}/admin/bundles", cancellationToken)
+            var modes = await _serviceModeResolver
+                .GetModesAsync(serviceId, cancellationToken)
                 .ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogDebug(
-                    "ImageGeneration bundle inventory returned {StatusCode}.",
-                    (int)response.StatusCode);
-                return null;
-            }
-
-            var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            using var document = JsonDocument.Parse(json);
-            if (document.RootElement.TryGetProperty("activeBundleId", out var active)
-                && active.ValueKind == JsonValueKind.String)
-            {
-                var bundleId = active.GetString()?.Trim();
-                return string.IsNullOrWhiteSpace(bundleId) ? null : bundleId;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed resolving active ImageGeneration bundle from local SD admin.");
-        }
-
-        return null;
-    }
-
-    private async Task<string?> ResolveConfiguredServiceModeModelRefAsync(
-        string serviceId,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var mode = await _serviceModeResolver
-                .ResolveAsync(serviceId, modeId: null, cancellationToken)
-                .ConfigureAwait(false);
-            var modelId = mode.ModelId?.Trim();
+            var localMode = modes.FirstOrDefault(mode =>
+                string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase));
+            var modelId = localMode?.ModelId?.Trim();
             return string.IsNullOrWhiteSpace(modelId) ? null : modelId;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(
                 ex,
-                "Failed resolving configured ServiceModes ModelId for service '{ServiceId}'.",
+                "Failed resolving persisted local ServiceModes ModelId for service '{ServiceId}'.",
                 serviceId);
             return null;
         }
     }
+
+    private async Task<bool> IsLocalRoutingWarmAsync(
+        string serviceId,
+        CancellationToken cancellationToken) =>
+        await ResolveLocalRoutingDesiredStateAsync(serviceId, cancellationToken).ConfigureAwait(false)
+        == LocalRoutingDesiredState.Warm;
+
+    private static string? ResolveLocalProviderSection(string serviceId) =>
+        serviceId switch
+        {
+            RoutedServiceNames.SpeechTranscription => $"{LocalServiceHostsOptions.SectionName}:SpeechTranscriptionBaseUrl",
+            RoutedServiceNames.Embeddings => $"{LocalServiceHostsOptions.SectionName}:EmbeddingsBaseUrl",
+            RoutedServiceNames.SpeechSynthesis => $"{LocalServiceHostsOptions.SectionName}:SpeechSynthesisBaseUrl",
+            RoutedServiceNames.ImageGeneration => $"{LocalServiceHostsOptions.SectionName}:ImageGenerationBaseUrl",
+            _ => null,
+        };
 
     private async Task<string?> ResolveConfiguredDefaultRouterAliasAsync(CancellationToken cancellationToken)
     {
@@ -319,14 +284,7 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
         string serviceId,
         CancellationToken cancellationToken)
     {
-        var expectedLocalProviderSection = serviceId switch
-        {
-            RoutedServiceNames.SpeechTranscription => $"{LocalServiceHostsOptions.SectionName}:SpeechTranscriptionBaseUrl",
-            RoutedServiceNames.Embeddings => $"{LocalServiceHostsOptions.SectionName}:EmbeddingsBaseUrl",
-            RoutedServiceNames.SpeechSynthesis => $"{LocalServiceHostsOptions.SectionName}:SpeechSynthesisBaseUrl",
-            RoutedServiceNames.ImageGeneration => $"{LocalServiceHostsOptions.SectionName}:ImageGenerationBaseUrl",
-            _ => null,
-        };
+        var expectedLocalProviderSection = ResolveLocalProviderSection(serviceId);
 
         if (expectedLocalProviderSection is null)
         {

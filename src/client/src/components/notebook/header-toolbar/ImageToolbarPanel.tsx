@@ -4,6 +4,8 @@ import { textButtonClassName } from '../../../pages/settings/components/shared/A
 import type { ServicePanelCommonProps } from './types';
 import { WORKSPACE_CONTROLS_COPY, serviceStatusHeadline, statusToneClass, toolbarProviderOptionLabel } from './toolbarFormatters';
 import { ServiceLocalRuntimePowerSection } from './ServiceLocalRuntimePowerSection';
+import { ToolbarActionError } from './ToolbarActionError';
+import { useToolbarAsyncAction } from './useToolbarAsyncAction';
 
 export function ImageToolbarPanel({
   service,
@@ -12,6 +14,7 @@ export function ImageToolbarPanel({
   onOpenSettings,
   showWorkspaceCopy = true,
 }: ServicePanelCommonProps) {
+  const { error, run } = useToolbarAsyncAction(setInFlight);
   const activeProviderIsLocal = service.supportsLocalRuntimePower;
   const localProvider = service.providerOptions.find((provider) =>
     provider.providerKind.toLowerCase().includes('local')
@@ -20,37 +23,31 @@ export function ImageToolbarPanel({
     (provider) => provider.providerId !== localProvider?.providerId
   );
 
-  const setProvider = async (providerId: string) => {
-    setInFlight(true);
-    try {
+  const setProvider = (providerId: string) => {
+    void run(async () => {
       const updated = await api.settings.services.updateActiveProvider(service.serviceId, providerId);
       if (updated.activeProviderId !== providerId) {
-        console.error(
-          `[toolbar][image] provider switch mismatch: requested='${providerId}' actual='${updated.activeProviderId}'`
+        throw new Error(
+          `Provider switch failed: requested '${providerId}' but active is '${updated.activeProviderId}'.`
         );
       }
       await onRefresh();
-    } finally {
-      setInFlight(false);
-    }
+    });
   };
 
-  const setModel = async (modelRef: string) => {
-    setInFlight(true);
-    try {
+  const setModel = (modelRef: string) => {
+    void run(async () => {
       if (localProvider && service.activeProviderId !== localProvider.providerId) {
         const updated = await api.settings.services.updateActiveProvider(service.serviceId, localProvider.providerId);
         if (updated.activeProviderId !== localProvider.providerId) {
-          console.error(
-            `[toolbar][image] provider switch mismatch: requested='${localProvider.providerId}' actual='${updated.activeProviderId}'`
+          throw new Error(
+            `Provider switch failed: requested '${localProvider.providerId}' but active is '${updated.activeProviderId}'.`
           );
         }
       }
       await api.settings.localModels.selectActive(service.serviceId, modelRef);
       await onRefresh();
-    } finally {
-      setInFlight(false);
-    }
+    });
   };
 
   return (
@@ -60,6 +57,7 @@ export function ImageToolbarPanel({
       {service.blockers.length > 0 && (
         <div className="text-xs text-red-700">{service.blockers[0]}</div>
       )}
+      <ToolbarActionError message={error} />
 
       <div className="space-y-1">
         {cloudModelOptions.map((provider) => {
@@ -72,7 +70,7 @@ export function ImageToolbarPanel({
                 provider.canActivate ? '' : 'opacity-60'
               } ${isCurrentProvider ? 'ring-2 ring-emerald-400/60 bg-emerald-50 font-medium' : ''}`}
               disabled={!provider.canActivate}
-              onClick={() => void setProvider(provider.providerId)}
+              onClick={() => setProvider(provider.providerId)}
               title={provider.canActivate ? undefined : provider.blockers[0] ?? 'Provider is blocked.'}
               role="option"
               aria-selected={isCurrentProvider}
@@ -96,12 +94,14 @@ export function ImageToolbarPanel({
                 model.isComplete ? '' : 'opacity-50'
               } ${isCurrent ? 'ring-2 ring-emerald-400/60 bg-emerald-50 font-medium' : ''}`}
               disabled={!model.isComplete}
-              onClick={() => void setModel(model.modelRef)}
+              onClick={() => setModel(model.modelRef)}
+              title={model.isComplete ? undefined : 'Download is incomplete. Finish the download in Settings.'}
               role="option"
               aria-selected={isCurrent}
             >
               {model.displayLabel}
               {isCurrent && !model.displayLabel.includes('(active)') ? ' ✓' : ''}
+              {!model.isComplete ? ' (incomplete)' : ''}
             </button>
           );
         })}

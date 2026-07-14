@@ -4,6 +4,7 @@ set -euo pipefail
 REBUILD_BASE=false
 BUILD_ALL=false
 BACKEND=""
+AUDIOCPP_REF="release-0.2"
 
 usage() {
   cat <<'EOF'
@@ -13,6 +14,7 @@ Options:
   --rebuild-base         Rebuild dependency/base layers without cache
   --all                  Removed; use build_support_images.sh after backend builds
   --backend <value>      Backend: cpu | cuda13 | rocm | slim | vulkan
+  --audio-cpp-ref <ref>  audio.cpp git branch/tag for audiocpp_server build (default: release-0.2)
   -h, --help             Show help
 EOF
 }
@@ -29,6 +31,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --backend)
       BACKEND="${2:-}"
+      shift 2
+      ;;
+    --audio-cpp-ref)
+      AUDIOCPP_REF="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -209,6 +215,7 @@ echo "Image tag:     $IMAGE_TAG"
 echo "Latest alias:  $LATEST_IMAGE_TAG"
 echo "Deps target:   $DEPS_TARGET"
 echo "Rebuild base:  $REBUILD_BASE"
+echo "audio.cpp ref: $AUDIOCPP_REF"
 if [[ "$BUILD_ALL" == "true" ]]; then
   echo "All images:    Yes"
 fi
@@ -248,12 +255,18 @@ cp "$REQUIREMENTS_SRC" "$REQ_DEST"
 
 echo "Build context staged."
 
+BUILD_STATE_DIR="$DOCKER_ROOT/.build-state"
+mkdir -p "$BUILD_STATE_DIR"
+AUDIOCPP_REF_FILE="$BUILD_STATE_DIR/audio-cpp-ref.txt"
+printf '%s' "$AUDIOCPP_REF" > "$AUDIOCPP_REF_FILE"
+
 DEPS_HASH_INPUTS=(
   "$DOCKERFILE_PATH"
   "$BUILD_CONTEXT/asr-requirements.txt"
   "$BUILD_CONTEXT/tts-requirements.txt"
   "$BUILD_CONTEXT/emb-requirements.txt"
   "$REQ_DEST"
+  "$AUDIOCPP_REF_FILE"
 )
 DEPS_HASH="$(get_combined_hash "${DEPS_HASH_INPUTS[@]}")"
 DEPS_HASH="${DEPS_HASH:0:12}"
@@ -288,6 +301,7 @@ if [[ "$REBUILD_BASE" == "true" || "$DEPS_EXISTS" != "true" ]]; then
     fi
   fi
   DEPS_BUILD_ARGS+=(
+    --build-arg "AUDIOCPP_REF=$AUDIOCPP_REF"
     --target "$DEPS_TARGET"
     -t "$DEPS_TAG"
     -t "$DEPS_CACHE_TAG"
@@ -314,6 +328,7 @@ DOCKER_ARGS+=(
   --cache-from "type=local,src=$DEPS_CACHE_PATH"
   --cache-from "type=local,src=$FINAL_CACHE_PATH"
   --cache-from "$DEPS_CACHE_TAG"
+  --build-arg "AUDIOCPP_REF=$AUDIOCPP_REF"
   --build-arg "${DEPS_IMAGE_ARG}=$DEPS_TAG"
   --target "$FULL_TARGET"
   -t "$IMAGE_TAG"

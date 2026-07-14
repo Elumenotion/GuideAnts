@@ -9,9 +9,14 @@ from typing import Any, Callable
 from warmup_desired_ini import (
     SERVICE_LLAMA,
     AUX_SERVICES,
+    WARMUP_SERVICE_SECTIONS,
     WarmupDesiredDocument,
     WarmupServiceSection,
+    aux_section_load_request,
     read_warmup_desired,
+    section_execution_ref,
+    section_is_off,
+    section_should_load,
 )
 from warmup_engine_client import (
     list_llama_models,
@@ -76,15 +81,7 @@ class ServiceTransition:
     action: str  # load | unload | noop
 
 
-def _service_model_ref(section_name: str, section: WarmupServiceSection) -> str | None:
-    if section_name == SERVICE_LLAMA:
-        return section.router_alias
-    if section_name == "ImageGeneration":
-        return section.bundle_id
-    return section.model_id
-
-
-def _applied_model_ref(service_state: dict[str, Any]) -> str | None:
+def _loaded_model_ref(service_state: dict[str, Any]) -> str | None:
     if service_state.get("routerAlias"):
         return str(service_state["routerAlias"])
     if service_state.get("bundleId"):
@@ -96,26 +93,23 @@ def _applied_model_ref(service_state: dict[str, Any]) -> str | None:
 
 def _needs_transition(
     section_name: str,
-    desired_section: WarmupServiceSection,
+    plan_section: WarmupServiceSection | None,
     service_state: dict[str, Any] | None,
 ) -> ServiceTransition:
     prior = service_state or {}
-    applied = str(prior.get("applied", "idle")).lower()
-    desired = desired_section.desired
-    desired_ref = _service_model_ref(section_name, desired_section)
-    applied_ref = _applied_model_ref(prior)
+    loaded_ref = _loaded_model_ref(prior)
+    plan_ref = (
+        section_execution_ref(section_name, plan_section)
+        if plan_section is not None
+        else None
+    )
 
-    if desired == "idle":
-        if applied == "warm":
+    if plan_ref is None:
+        if loaded_ref:
             return ServiceTransition(section_name, "unload")
         return ServiceTransition(section_name, "noop")
 
-    # desired warm
-    if applied != "warm":
-        return ServiceTransition(section_name, "load")
-    if desired_ref and applied_ref and desired_ref != applied_ref:
-        return ServiceTransition(section_name, "load")
-    if desired_ref and not applied_ref:
+    if loaded_ref != plan_ref:
         return ServiceTransition(section_name, "load")
     return ServiceTransition(section_name, "noop")
 
@@ -127,17 +121,11 @@ def compute_transitions(
     services = state.get("services") or {}
     transitions: list[ServiceTransition] = []
 
-    llama_section = document.sections.get(SERVICE_LLAMA)
-    if llama_section is not None:
+    for section_name in WARMUP_SERVICE_SECTIONS:
+        section = document.sections.get(section_name)
         transitions.append(
-            _needs_transition(SERVICE_LLAMA, llama_section, services.get(SERVICE_LLAMA))
+            _needs_transition(section_name, section, services.get(section_name))
         )
-
-    for service in AUX_SERVICES:
-        section = document.sections.get(service)
-        if section is None:
-            continue
-        transitions.append(_needs_transition(service, section, services.get(service)))
 
     return transitions
 
@@ -151,7 +139,7 @@ def _llama_needs_gpu_drain(transitions: dict[str, str], document: WarmupDesiredD
     if llama_action in {"load", "unload"}:
         return True
     llama_section = document.sections.get(SERVICE_LLAMA)
-    if llama_section is None or llama_section.desired != "warm":
+    if not section_should_load(SERVICE_LLAMA, llama_section):
         return False
     # Loading aux while llama is not warm may still be fine; only drain when llama itself changes.
     return False
@@ -161,16 +149,15 @@ def _aux_services_to_drain_before_llama(
     document: WarmupDesiredDocument,
     state: dict[str, Any],
 ) -> set[str]:
-    """D11 GPU drain: unload every aux that should stay warm but is currently applied warm."""
+    """D11 GPU drain: unload every aux that stays in the plan but is currently loaded."""
     services = state.get("services") or {}
     to_drain: set[str] = set()
     for service in AUX_UNLOAD_ORDER:
         section = document.sections.get(service)
-        if section is None or section.desired != "warm":
+        if not section_should_load(service, section):
             continue
         entry = services.get(service) or {}
-        applied = str(entry.get("applied", "idle")).lower()
-        if applied == "warm":
+        if _loaded_model_ref(entry):
             to_drain.add(service)
     return to_drain
 
@@ -185,17 +172,34 @@ def _set_service_phase(
     service: str,
     *,
     phase: str,
-    applied: str | None = None,
     error: str | None = None,
+    model_id: str | None = None,
+    bundle_id: str | None = None,
+    router_alias: str | None = None,
+    clear_loaded_refs: bool = False,
 ) -> None:
     def mutate(state: dict[str, Any]) -> None:
         services = dict(state.get("services") or {})
         entry = dict(services.get(service) or {})
         entry["phase"] = phase
-        if applied is not None:
-            entry["applied"] = applied
         if error is not None:
             entry["error"] = error
+        if clear_loaded_refs:
+            entry.pop("modelId", None)
+            entry.pop("bundleId", None)
+            entry.pop("routerAlias", None)
+        if model_id is not None:
+            entry["modelId"] = model_id
+            entry.pop("bundleId", None)
+            entry.pop("routerAlias", None)
+        if bundle_id is not None:
+            entry["bundleId"] = bundle_id
+            entry.pop("modelId", None)
+            entry.pop("routerAlias", None)
+        if router_alias is not None:
+            entry["routerAlias"] = router_alias
+            entry.pop("modelId", None)
+            entry.pop("bundleId", None)
         services[service] = entry
         state["services"] = services
 
@@ -234,7 +238,7 @@ def _unload_llama_to_idle() -> bool:
         elif not wait_llama_unloaded(alias):
             ok = False
     if ok:
-        _set_service_phase(SERVICE_LLAMA, phase=SERVICE_PHASE_IDLE, applied="idle", error=None)
+        _set_service_phase(SERVICE_LLAMA, phase=SERVICE_PHASE_IDLE, error=None, clear_loaded_refs=True)
     else:
         _set_service_phase(SERVICE_LLAMA, phase=SERVICE_PHASE_FAILED, error="llama unload timed out")
     return ok
@@ -251,6 +255,17 @@ def _is_llama_loaded_entry(entry: dict[str, Any]) -> bool:
 
 
 def _load_llama_alias(alias: str) -> bool:
+    for entry in list_llama_models():
+        entry_id = entry.get("id")
+        if isinstance(entry_id, str) and entry_id == alias and _is_llama_loaded_entry(entry):
+            _set_service_phase(
+                SERVICE_LLAMA,
+                phase=SERVICE_PHASE_READY,
+                error=None,
+                router_alias=alias,
+            )
+            return True
+
     loaded_aliases = [
         str(entry.get("id"))
         for entry in list_llama_models()
@@ -271,7 +286,12 @@ def _load_llama_alias(alias: str) -> bool:
     if not wait_llama_loaded(alias):
         _set_service_phase(SERVICE_LLAMA, phase=SERVICE_PHASE_FAILED, error="llama load timed out")
         return False
-    _set_service_phase(SERVICE_LLAMA, phase=SERVICE_PHASE_READY, applied="warm", error=None)
+    _set_service_phase(
+        SERVICE_LLAMA,
+        phase=SERVICE_PHASE_READY,
+        error=None,
+        router_alias=alias,
+    )
     return ok
 
 
@@ -279,22 +299,16 @@ def _reconcile_llama(section: WarmupServiceSection, action: str) -> bool:
     if action == "unload":
         return _unload_llama_to_idle()
     if action == "load":
-        alias = (section.router_alias or "").strip()
+        alias = section_execution_ref(SERVICE_LLAMA, section)
         if not alias:
             _set_service_phase(
                 SERVICE_LLAMA,
                 phase=SERVICE_PHASE_FAILED,
-                error="llama desired warm but router_alias is missing",
+                error="llama plan missing router_alias",
             )
             return False
         return _load_llama_alias(alias)
     return True
-
-
-def _model_ref_for_aux(service: str, section: WarmupServiceSection) -> str | None:
-    if service == "ImageGeneration":
-        return section.bundle_id
-    return section.model_id
 
 
 def _reconcile_aux(service: str, section: WarmupServiceSection, action: str) -> bool:
@@ -306,37 +320,61 @@ def _reconcile_aux(service: str, section: WarmupServiceSection, action: str) -> 
         if not wait_aux_unloaded(service):
             _set_service_phase(service, phase=SERVICE_PHASE_FAILED, error="unload timed out")
             return False
-        _set_service_phase(service, phase=SERVICE_PHASE_IDLE, applied="idle", error=None)
+        _set_service_phase(service, phase=SERVICE_PHASE_IDLE, error=None, clear_loaded_refs=True)
         return True
 
     if action == "load":
-        model_ref = _model_ref_for_aux(service, section)
+        if service == "ImageGeneration":
+            model_ref = section_execution_ref(service, section)
+            load_field = "model_path"
+            if not model_ref:
+                _set_service_phase(
+                    service,
+                    phase=SERVICE_PHASE_FAILED,
+                    error="plan missing bundle_id",
+                )
+                return False
+        else:
+            model_ref, load_field = aux_section_load_request(section, service=service)
         if service != "ImageGeneration" and not model_ref:
             _set_service_phase(
                 service,
                 phase=SERVICE_PHASE_FAILED,
-                error="desired warm but model_id is missing",
+                error="plan missing model_path",
             )
             return False
         _set_service_phase(service, phase=SERVICE_PHASE_LOADING)
-        if not post_aux_load(service, model_ref):
+        if not post_aux_load(service, model_ref, load_field=load_field):
             _set_service_phase(service, phase=SERVICE_PHASE_FAILED, error="load request failed")
             return False
-        if not wait_aux_ready(service):
-            _set_service_phase(service, phase=SERVICE_PHASE_FAILED, error="ready timed out")
+        if not wait_aux_ready(service, expected_model_ref=model_ref):
+            _set_service_phase(service, phase=SERVICE_PHASE_FAILED, error="ready timed out or model mismatch")
             return False
-        _set_service_phase(service, phase=SERVICE_PHASE_READY, applied="warm", error=None)
+        if service == "ImageGeneration":
+            _set_service_phase(
+                service,
+                phase=SERVICE_PHASE_READY,
+                error=None,
+                bundle_id=model_ref,
+            )
+        else:
+            _set_service_phase(
+                service,
+                phase=SERVICE_PHASE_READY,
+                error=None,
+                model_id=model_ref,
+            )
         return True
 
     return True
 
 
 def _cold_start_load_map(document: WarmupDesiredDocument) -> dict[str, str]:
-    """Warm services to load on container cold start. Engines are empty — no unloads."""
+    """Services with a load ref in the plan — cold start only loads, never unloads."""
     actions: dict[str, str] = {}
-    for service in (SERVICE_LLAMA, *AUX_SERVICES):
+    for service in WARMUP_SERVICE_SECTIONS:
         section = document.sections.get(service)
-        if section is not None and section.desired == "warm":
+        if section_should_load(service, section):
             actions[service] = "load"
     return actions
 

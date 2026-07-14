@@ -3,20 +3,22 @@ using GuideAntsApi.Services.Routing;
 namespace GuideAntsApi.Tests.TestUtils;
 
 /// <summary>
-/// Test fake for <see cref="IServiceModeResolver"/> that returns a preconfigured
-/// <see cref="ServiceMode"/> per service name. Use to drive provider-routed
+/// Test fake for <see cref="IServiceModeResolver"/> that returns preconfigured
+/// <see cref="ServiceMode"/> rows per service name. Use to drive provider-routed
 /// services from unit tests without the full database-backed resolver.
 /// </summary>
 internal sealed class FakeServiceModeResolver : IServiceModeResolver
 {
-    private readonly Dictionary<string, ServiceMode> _modesByService;
+    private readonly Dictionary<string, IReadOnlyList<ServiceMode>> _modesByService;
 
     public FakeServiceModeResolver(params (string ServiceName, ServiceMode Mode)[] modes)
     {
-        _modesByService = modes.ToDictionary(
-            m => m.ServiceName,
-            m => m.Mode,
-            StringComparer.OrdinalIgnoreCase);
+        _modesByService = modes
+            .GroupBy(m => m.ServiceName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<ServiceMode>)g.Select(x => x.Mode).ToList(),
+                StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -35,21 +37,31 @@ internal sealed class FakeServiceModeResolver : IServiceModeResolver
 
     public Task<ServiceMode> ResolveAsync(string serviceName, string? modeId, CancellationToken cancellationToken = default)
     {
-        if (!_modesByService.TryGetValue(serviceName, out var mode))
+        if (!_modesByService.TryGetValue(serviceName, out var modes) || modes.Count == 0)
         {
             throw RoutingException.ModeNotFound(serviceName, modeId ?? "default");
         }
 
-        return Task.FromResult(mode);
+        if (string.IsNullOrWhiteSpace(modeId))
+        {
+            var selected = modes.FirstOrDefault(m => m.IsDefault && m.Enabled)
+                ?? modes.FirstOrDefault(m => m.IsDefault)
+                ?? modes[0];
+            return Task.FromResult(selected);
+        }
+
+        var explicitMode = modes.FirstOrDefault(m => string.Equals(m.ModeId, modeId, StringComparison.Ordinal))
+            ?? throw RoutingException.ModeNotFound(serviceName, modeId);
+        return Task.FromResult(explicitMode);
     }
 
     public Task<IReadOnlyList<ServiceMode>> GetModesAsync(string serviceName, CancellationToken cancellationToken = default)
     {
-        if (!_modesByService.TryGetValue(serviceName, out var mode))
+        if (!_modesByService.TryGetValue(serviceName, out var modes))
         {
             return Task.FromResult<IReadOnlyList<ServiceMode>>(Array.Empty<ServiceMode>());
         }
 
-        return Task.FromResult<IReadOnlyList<ServiceMode>>(new[] { mode });
+        return Task.FromResult(modes);
     }
 }

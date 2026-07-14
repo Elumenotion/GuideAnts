@@ -69,6 +69,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
     private readonly ILocalAiDesiredStateBuilder _desiredStateBuilder;
     private readonly ILocalAiWarmupOrchestrationClient _orchestrationClient;
     private readonly IServiceModeResolver _serviceModeResolver;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<LocalAiStartupWarmupService> _logger;
 
     public LocalAiStartupWarmupService(
@@ -77,6 +78,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
         ILocalAiDesiredStateBuilder desiredStateBuilder,
         ILocalAiWarmupOrchestrationClient orchestrationClient,
         IServiceModeResolver serviceModeResolver,
+        IHttpClientFactory httpClientFactory,
         ILogger<LocalAiStartupWarmupService> logger)
     {
         _configuration = configuration;
@@ -84,6 +86,7 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
         _desiredStateBuilder = desiredStateBuilder;
         _orchestrationClient = orchestrationClient;
         _serviceModeResolver = serviceModeResolver;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -102,10 +105,17 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
             waitForCompletion: true,
             cancellationToken: cancellationToken);
 
-    public async Task SyncDesiredAndApplyAsync(
+    public Task SyncDesiredAndApplyAsync(
         WarmupDesiredBuildOptions? options = null,
         bool waitForCompletion = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        SyncDesiredAndApplyCoreAsync(options, waitForCompletion, allowRetry: true, cancellationToken);
+
+    private async Task SyncDesiredAndApplyCoreAsync(
+        WarmupDesiredBuildOptions? options,
+        bool waitForCompletion,
+        bool allowRetry,
+        CancellationToken cancellationToken)
     {
         if (!IsOrchestrationConfigured())
         {
@@ -119,6 +129,12 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
             if (waitForCompletion)
             {
                 await WaitForApplyCompleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (allowRetry && options is not null)
+            {
+                await SyncDesiredAndApplyCoreAsync(options, waitForCompletion, allowRetry: false, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             return;
@@ -250,16 +266,40 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
         }
         else
         {
-            var overrides = new Dictionary<string, string>(StringComparer.Ordinal);
             if (!string.IsNullOrWhiteSpace(requestedModelRef))
             {
-                overrides[serviceId] = requestedModelRef.Trim();
+                var trimmedRef = requestedModelRef.Trim();
+                if (!LocalServiceModelRefRules.IsLoadableLocalModelRef(trimmedRef))
+                {
+                    var refKind = string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)
+                        ? "bundle id"
+                        : "local model path";
+                    return new LocalServiceReconcileResult(
+                        LocalServiceReconcileOutcome.Failed,
+                        $"Model reference '{trimmedRef}' is not a valid {refKind}.");
+                }
+
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
+                    await settings
+                        .SetServiceModeModelIdAsync(serviceId, trimmedRef, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Could not persist configured model ref for '{ServiceId}'.",
+                        LogValueSanitizer.Sanitize(serviceId));
+                    return new LocalServiceReconcileResult(
+                        LocalServiceReconcileOutcome.Failed,
+                        ex.Message);
+                }
             }
 
-            options = new WarmupDesiredBuildOptions
-            {
-                ModelIdOverrides = overrides.Count > 0 ? overrides : null,
-            };
+            options = new WarmupDesiredBuildOptions();
         }
 
         try
@@ -300,10 +340,10 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
                 serviceStatus.Error ?? "Orchestrator reported failure.");
         }
 
-        var applied = serviceStatus.Applied.Trim().ToLowerInvariant();
         if (expectWarm)
         {
-            if (applied == "warm")
+            if (string.Equals(serviceStatus.Phase, "ready", StringComparison.OrdinalIgnoreCase)
+                && HasLoadedRef(serviceStatus))
             {
                 return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Warm);
             }
@@ -321,7 +361,8 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
                 $"Service '{serviceId}' did not reach warm state.");
         }
 
-        if (applied == "idle")
+        if (string.Equals(serviceStatus.Phase, "idle", StringComparison.OrdinalIgnoreCase)
+            && !HasLoadedRef(serviceStatus))
         {
             return new LocalServiceReconcileResult(LocalServiceReconcileOutcome.Idle);
         }
@@ -330,6 +371,11 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
             LocalServiceReconcileOutcome.Timeout,
             $"Service '{serviceId}' did not reach idle state.");
     }
+
+    private static bool HasLoadedRef(WarmupServiceStatus serviceStatus) =>
+        !string.IsNullOrWhiteSpace(serviceStatus.RouterAlias)
+        || !string.IsNullOrWhiteSpace(serviceStatus.ModelId)
+        || !string.IsNullOrWhiteSpace(serviceStatus.BundleId);
 
     private async Task WaitForApplyCompleteAsync(CancellationToken cancellationToken)
     {

@@ -26,6 +26,7 @@ type TtsModelEntry = {
   isDirectory?: boolean;
   activeModel?: boolean;
   activeTokenizer?: boolean;
+  complete?: boolean;
 };
 
 type TtsListPayload = {
@@ -346,9 +347,10 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
               ) : null}
               {items.map((m) => {
                 const isLoaded = !!m.activeModel;
+                const isIncomplete = m.complete === false;
                 const isBusyRow =
                   engineBusy !== null && engineBusy.op === 'load' && engineBusy.modelRef === m.modelRef;
-                const disableLoad = engineBusy !== null || hasInFlightDownload || isLoaded;
+                const disableLoad = engineBusy !== null || hasInFlightDownload || isLoaded || isIncomplete;
                 const disableRemove = engineBusy !== null || hasInFlightDownload || isLoaded || !!m.activeTokenizer;
                 return (
                   <tr key={m.modelRef} className="border-t border-gray-100">
@@ -366,7 +368,15 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
                             Loaded (tokenizer)
                           </span>
                         ) : null}
-                        {!m.activeModel && !m.activeTokenizer ? <span className="text-gray-500">—</span> : null}
+                        {!m.activeModel && !m.activeTokenizer ? (
+                          isIncomplete ? (
+                            <span className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 font-semibold text-amber-900">
+                              Incomplete download
+                            </span>
+                          ) : (
+                            <span className="text-gray-500">—</span>
+                          )
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-right">
@@ -384,6 +394,8 @@ export function TtsModelManager({ enabled, onDownloadOperationChange, onRuntimeR
                           title={
                             isLoaded
                               ? 'This model is already loaded.'
+                              : isIncomplete
+                              ? 'Download is incomplete. Wait for the download to finish or remove and re-download.'
                               : 'Load this model into the TTS engine.'
                           }
                         />

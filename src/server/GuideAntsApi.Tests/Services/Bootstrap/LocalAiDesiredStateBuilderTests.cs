@@ -14,7 +14,7 @@ namespace GuideAntsApi.Tests.Services.Bootstrap;
 public sealed class LocalAiDesiredStateBuilderTests
 {
     [TestMethod]
-    public async Task BuildIniAsync_EmbeddingsLocalWithModel_WritesWarmAndModelId()
+    public async Task BuildIniAsync_EmbeddingsLocalWithModel_WritesWarmAndModelPath()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -63,10 +63,10 @@ public sealed class LocalAiDesiredStateBuilderTests
         var ini = await builder.BuildIniAsync();
 
         ini.Should().Contain("[Embeddings]");
-        ini.Should().Contain("desired = warm");
-        ini.Should().Contain("model_id = qwen3_embedding_0_6b");
+        ini.Should().Contain("model_path = qwen3_embedding_0_6b");
+        ini.Should().NotContain("desired = warm");
         ini.Should().Contain("[SpeechTranscription]");
-        ini.Should().Contain("desired = idle");
+        ini.Should().Contain("enabled = off");
     }
 
     [TestMethod]
@@ -98,18 +98,90 @@ public sealed class LocalAiDesiredStateBuilderTests
         var ini = await builder.BuildIniAsync(new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true });
 
         ini.Should().Contain("[Embeddings]");
-        ini.Should().Contain("desired = idle");
-        ini.Should().NotContain("model_id = qwen3_embedding_0_6b");
+        ini.Should().Contain("enabled = off");
+        ini.Should().Contain("model_path = qwen3_embedding_0_6b");
     }
 
     [TestMethod]
-    public async Task BuildIniAsync_ImageGenerationLocal_UsesActiveBundleFromSdAdmin()
+    public async Task BuildIniAsync_ImageGenerationRemoteActive_PreservesLocalBundleIdAsOff()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["LlamaCpp:BaseUrl"] = "http://localhost:8080/llama-cpp",
-                ["LocalServiceHosts:ImageGenerationBaseUrl"] = "http://guideants-ai:80",
+            })
+            .Build();
+
+        var modeResolver = new FakeServiceModeResolver(
+            (RoutedServiceNames.ImageGeneration, new ServiceMode(
+                ModeId: "ImageGeneration.OpenRouter.Image",
+                ProviderSection: "OpenRouter",
+                ModelId: "recraft/recraft-v4",
+                RequestPresetJson: null,
+                Enabled: true,
+                IsDefault: true)),
+            (RoutedServiceNames.ImageGeneration, new ServiceMode(
+                ModeId: "ImageGeneration.LocalSd.Http",
+                ProviderSection: "LocalServiceHosts:ImageGenerationBaseUrl",
+                ModelId: "flux2-klein-4b-q4ks",
+                RequestPresetJson: null,
+                Enabled: true,
+                IsDefault: false)));
+
+        var builder = new LocalAiDesiredStateBuilder(
+            configuration,
+            new ServiceScopeFactoryStub(),
+            modeResolver,
+            new StubHttpClientFactory(),
+            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+
+        var ini = await builder.BuildIniAsync();
+
+        ini.Should().Contain("[ImageGeneration]");
+        ini.Should().Contain("enabled = off");
+        ini.Should().Contain("bundle_id = flux2-klein-4b-q4ks");
+    }
+
+    [TestMethod]
+    public async Task BuildIniAsync_ImageGenerationLocal_UsesPersistedServiceModeBundleId()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LlamaCpp:BaseUrl"] = "http://localhost:8080/llama-cpp",
+            })
+            .Build();
+
+        var modeResolver = new FakeServiceModeResolver(
+            (RoutedServiceNames.ImageGeneration, new ServiceMode(
+                ModeId: "default",
+                ProviderSection: "LocalServiceHosts:ImageGenerationBaseUrl",
+                ModelId: "flux2-klein-4b-q4ks",
+                RequestPresetJson: null,
+                Enabled: true,
+                IsDefault: true)));
+
+        var builder = new LocalAiDesiredStateBuilder(
+            configuration,
+            new ServiceScopeFactoryStub(),
+            modeResolver,
+            new StubHttpClientFactory(),
+            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+
+        var ini = await builder.BuildIniAsync();
+
+        ini.Should().Contain("[ImageGeneration]");
+        ini.Should().Contain("bundle_id = flux2-klein-4b-q4ks");
+        ini.Should().NotContain("desired = warm");
+    }
+
+    [TestMethod]
+    public async Task BuildIniAsync_ImageGenerationLocalWithoutModelId_WritesIdle()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LlamaCpp:BaseUrl"] = "http://localhost:8080/llama-cpp",
             })
             .Build();
 
@@ -122,30 +194,18 @@ public sealed class LocalAiDesiredStateBuilderTests
                 Enabled: true,
                 IsDefault: true)));
 
-        var httpFactory = new StubHttpClientFactory(
-            new Dictionary<string, HttpResponseMessage>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["http://guideants-ai:80/sd/admin/bundles"] = new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        """{"activeBundleId":"flux2-klein-4b-q4ks","items":[]}""",
-                        Encoding.UTF8,
-                        "application/json"),
-                },
-            });
-
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
             new ServiceScopeFactoryStub(),
             modeResolver,
-            httpFactory,
+            new StubHttpClientFactory(),
             NullLogger<LocalAiDesiredStateBuilder>.Instance);
 
         var ini = await builder.BuildIniAsync();
 
         ini.Should().Contain("[ImageGeneration]");
-        ini.Should().Contain("desired = warm");
-        ini.Should().Contain("bundle_id = flux2-klein-4b-q4ks");
+        ini.Should().Contain("enabled = off");
+        ini.Should().NotContain("bundle_id =");
     }
 
     private sealed class StubHttpClientFactory : IHttpClientFactory
