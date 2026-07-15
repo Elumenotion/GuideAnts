@@ -52,13 +52,13 @@ namespace AntRunner.Chat
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError(ex, "Failed to load assistant definition for {AssistantName}", assistantName);
+                    Logger.LogError(ex, "Failed to load assistant definition for {AssistantName}", LogValueSanitizer.Sanitize(assistantName));
 
                     if (TryGetCachedDefinition(cacheKey, out cachedDefinition))
                     {
                         Logger.LogWarning(
                             "Serving cached assistant definition for {AssistantName} after load failure",
-                            assistantName);
+                            LogValueSanitizer.Sanitize(assistantName));
                         return cachedDefinition;
                     }
 
@@ -152,7 +152,7 @@ namespace AntRunner.Chat
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogWarning(ex, "Failed to parse context options for assistant {AssistantName}", assistantName);
+                    Logger.LogWarning(ex, "Failed to parse context options for assistant {AssistantName}", LogValueSanitizer.Sanitize(assistantName));
                 }
             }
 
@@ -174,7 +174,7 @@ namespace AntRunner.Chat
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogWarning(ex, "Failed to parse sampling parameters for assistant {AssistantName}", assistantName);
+                    Logger.LogWarning(ex, "Failed to parse sampling parameters for assistant {AssistantName}", LogValueSanitizer.Sanitize(assistantName));
                 }
             }
 
@@ -268,7 +268,7 @@ namespace AntRunner.Chat
                             Logger.LogWarning(
                                 ex,
                                 "Failed to generate schema for tool operation {Operation}",
-                                matchingOperation.Value);
+                                LogValueSanitizer.Sanitize(matchingOperation.Value));
                         }
                     }
                 }
@@ -305,7 +305,7 @@ namespace AntRunner.Chat
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Failed to inject registered tool {OperationId}", operationId);
+                Logger.LogWarning(ex, "Failed to inject registered tool {OperationId}", LogValueSanitizer.Sanitize(operationId));
             }
         }
 

@@ -178,7 +178,7 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Failed to load assistant {AssistantName} from database", assistantName);
+                Logger.LogError(ex, "Failed to load assistant {AssistantName} from database", LogValueSanitizer.Sanitize(assistantName));
                 throw;
             }
         }
