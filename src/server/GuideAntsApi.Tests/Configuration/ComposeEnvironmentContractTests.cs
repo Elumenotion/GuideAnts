@@ -401,6 +401,7 @@ public sealed class ComposeEnvironmentContractTests
 
         if (key.Equals("ACCEPT_EULA", StringComparison.OrdinalIgnoreCase)
             || key.Equals("MSSQL_DB_NAME", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("MSSQL_PID", StringComparison.OrdinalIgnoreCase)
             || key.Equals("MSSQL_SA_PASSWORD", StringComparison.OrdinalIgnoreCase))
         {
             return true;

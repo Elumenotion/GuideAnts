@@ -636,6 +636,8 @@ public class GuidesService(
         await _context.SaveChangesAsync();
         await StageMcpSandboxSetupIfNeededAsync(dto.ProjectId, guide.Id, dto.CustomTools);
 
+        AssistantDefinitionCacheInvalidator.Invalidate(guide.Name);
+
         return new GuideDto(
             guide.Id,
             guide.Name,
@@ -665,8 +667,7 @@ public class GuidesService(
         await _context.SaveChangesAsync();
 
         // Invalidate caches to ensure deleted guide is no longer accessible
-        AssistantUtility.ClearCache(guideName);
-        ThreadRun.ClearRequestBuilderCache(guideName);
+        AssistantDefinitionCacheInvalidator.Invalidate(guideName);
 
         return true;
     }
@@ -1057,8 +1058,7 @@ public class GuidesService(
         await _context.SaveChangesAsync();
 
         // Invalidate caches to ensure deleted assistant is no longer accessible
-        AssistantUtility.ClearCache(assistantName);
-        ThreadRun.ClearRequestBuilderCache(assistantName);
+        AssistantDefinitionCacheInvalidator.Invalidate(assistantName);
 
         return true;
     }
@@ -2232,8 +2232,7 @@ public class GuidesService(
         await _context.SaveChangesAsync();
 
         // Invalidate caches to ensure updated assistant definition and OpenAPI schemas are reloaded
-        AssistantUtility.ClearCache(assistant.Name);
-        ThreadRun.ClearRequestBuilderCache(assistant.Name);
+        AssistantDefinitionCacheInvalidator.Invalidate(assistant.Name);
 
         return assistant;
     }

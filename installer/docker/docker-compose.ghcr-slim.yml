@@ -92,6 +92,7 @@ services:
         target: /app/ContentFiles
     environment:
       - ACCEPT_EULA=Y
+      - MSSQL_PID=Developer
       - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
       - MSSQL_DB_NAME=${GA_DB_NAME:-guideants-dev}
       - ASPNETCORE_ENVIRONMENT=Development

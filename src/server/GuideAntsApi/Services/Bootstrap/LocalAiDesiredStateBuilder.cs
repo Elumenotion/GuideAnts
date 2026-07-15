@@ -155,6 +155,13 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
         string? loadRef,
         bool routingWarm)
     {
+        if (routingWarm && string.IsNullOrWhiteSpace(loadRef))
+        {
+            throw new InvalidOperationException(
+                $"Service '{serviceId}' is routed to the local provider but has no model or bundle "
+                + "configured in ServiceModes. Select an active local model or bundle before warming.");
+        }
+
         if (routingWarm && !string.IsNullOrWhiteSpace(loadRef))
         {
             AppendAuxiliaryLoadRef(builder, serviceId, loadRef);

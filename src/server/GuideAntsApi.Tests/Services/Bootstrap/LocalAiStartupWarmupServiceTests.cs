@@ -42,25 +42,29 @@ public sealed class LocalAiStartupWarmupServiceTests
             })
             .Build();
 
+        var embeddingsMode = new ServiceMode(
+            ModeId: "default",
+            ProviderSection: "LocalServiceHosts:EmbeddingsBaseUrl",
+            ModelId: "qwen3_embedding_0_6b",
+            RequestPresetJson: null,
+            Enabled: true,
+            IsDefault: true);
         var modeResolver = new FakeServiceModeResolver(
-            (RoutedServiceNames.Embeddings, new ServiceMode(
-                ModeId: "default",
-                ProviderSection: "LocalServiceHosts:EmbeddingsBaseUrl",
-                ModelId: "qwen3_embedding_0_6b",
-                RequestPresetJson: null,
-                Enabled: true,
-                IsDefault: true)));
+            (RoutedServiceNames.Embeddings, embeddingsMode));
+
+        var (settingsMock, _) = CreateSettingsMock(
+            (RoutedServiceNames.Embeddings, embeddingsMode));
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
-            new ServiceScopeFactoryStub(),
+            new ServiceScopeFactoryStub(settingsMock.Object),
             modeResolver,
             CreateHttpClientFactory(),
             NullLogger<LocalAiDesiredStateBuilder>.Instance);
 
         var service = new LocalAiStartupWarmupService(
             configuration,
-            new ServiceScopeFactoryStub(),
+            new ServiceScopeFactoryStub(settingsMock.Object),
             builder,
             orchestration.Object,
             modeResolver,
@@ -174,14 +178,19 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Enabled: true,
                 IsDefault: true));
 
-        var settingsMock = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        var (settingsMock, setPersistedModelId) = CreateSettingsMock(
+            (RoutedServiceNames.SpeechSynthesis, modeResolver.LocalMode));
         settingsMock
             .Setup(s => s.SetServiceModeModelIdAsync(
                 RoutedServiceNames.SpeechSynthesis,
                 "OmniVoice",
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask)
-            .Callback(() => modeResolver.SetModelId("OmniVoice"));
+            .Callback(() =>
+            {
+                setPersistedModelId(RoutedServiceNames.SpeechSynthesis, "OmniVoice");
+                modeResolver.SetModelId("OmniVoice");
+            });
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
@@ -268,7 +277,8 @@ public sealed class LocalAiStartupWarmupServiceTests
                 Enabled: true,
                 IsDefault: true));
 
-        var settingsMock = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        var (settingsMock, setPersistedModelId) = CreateSettingsMock(
+            (ImageGenerationOptions.SectionName, modeResolver.LocalMode));
         settingsMock
             .Setup(s => s.EnsureServiceModeExistsAsync(
                 ImageGenerationOptions.SectionName,
@@ -293,7 +303,11 @@ public sealed class LocalAiStartupWarmupServiceTests
                 "flux2-klein-4b-q4ks",
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask)
-            .Callback(() => modeResolver.SetModelId("flux2-klein-4b-q4ks"));
+            .Callback(() =>
+            {
+                setPersistedModelId(ImageGenerationOptions.SectionName, "flux2-klein-4b-q4ks");
+                modeResolver.SetModelId("flux2-klein-4b-q4ks");
+            });
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
@@ -370,6 +384,8 @@ public sealed class LocalAiStartupWarmupServiceTests
             _localMode = localMode;
         }
 
+        public ServiceMode LocalMode => _localMode;
+
         public void SetModelId(string modelId) =>
             _localMode = _localMode with { ModelId = modelId };
 
@@ -403,6 +419,54 @@ public sealed class LocalAiStartupWarmupServiceTests
             return Task.FromResult<IReadOnlyList<ServiceMode>>(new[] { _localMode });
         }
     }
+
+    private static (Mock<IApplicationSettingsService> Mock, Action<string, string> SetPersistedModelId) CreateSettingsMock(
+        params (string ServiceId, ServiceMode Mode)[] modesByService)
+    {
+        var modes = modesByService.ToDictionary(
+            entry => entry.ServiceId,
+            entry => ToServiceModeDto(entry.ServiceId, entry.Mode),
+            StringComparer.Ordinal);
+
+        var settingsMock = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        foreach (var (serviceId, _) in modesByService)
+        {
+            settingsMock
+                .Setup(s => s.GetServiceModesAsync(serviceId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() =>
+                {
+                    lock (modes)
+                    {
+                        return modes.TryGetValue(serviceId, out var mode)
+                            ? new[] { mode }
+                            : Array.Empty<ServiceModeDto>();
+                    }
+                });
+        }
+
+        void SetPersistedModelId(string serviceId, string modelId)
+        {
+            lock (modes)
+            {
+                if (modes.TryGetValue(serviceId, out var mode))
+                {
+                    modes[serviceId] = mode with { ModelId = modelId };
+                }
+            }
+        }
+
+        return (settingsMock, SetPersistedModelId);
+    }
+
+    private static ServiceModeDto ToServiceModeDto(string serviceId, ServiceMode mode) =>
+        new(
+            serviceId,
+            mode.ModeId,
+            mode.ProviderSection,
+            mode.ModelId,
+            mode.RequestPresetJson,
+            mode.Enabled,
+            mode.IsDefault);
 
     private static IHttpClientFactory CreateHttpClientFactory() =>
         new ServiceCollection().AddHttpClient().BuildServiceProvider().GetRequiredService<IHttpClientFactory>();

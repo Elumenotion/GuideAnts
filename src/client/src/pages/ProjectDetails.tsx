@@ -21,6 +21,7 @@ import { FileInUseDialog } from '../components/common/FileInUseDialog';
 import { FileUsageInNotebookDto } from '../types/api';
 import { useProjectFilesPolling } from '../hooks/useProjectFilesPolling';
 import { useProjectNotebooksPolling } from '../hooks/useProjectNotebooksPolling';
+import { useProjectScheduledJobs } from '../hooks/useProjectScheduledJobs';
 import { useToast } from '../components/common/Toast';
 import MarkdownViewer from '../components/common/MarkdownViewer';
 import DefaultProjectHomeMd from '../content/default-project-home.md?raw';
@@ -246,6 +247,27 @@ export default function ProjectDetails() {
         projectId: projectId || '',
         enabled: !!(projectId && project),
         pollInterval: 60000
+    });
+
+    const [scheduledJobDialogsOpen, setScheduledJobDialogsOpen] = useState(false);
+
+    const selectedScheduledJobId =
+        selectedItem?.type === 'jobSchedule' ? selectedItem.id : null;
+
+    const {
+        jobs: scheduledJobs,
+        selectedJobDetail,
+        isLoadingJobs: isLoadingScheduledJobs,
+        isLoadingDetail: isLoadingScheduledJobDetail,
+        detailError: scheduledJobDetailError,
+        refreshAll: refreshScheduledJobs,
+        applyJobDetail,
+        patchJob,
+        patchSelectedJobFields,
+    } = useProjectScheduledJobs({
+        projectId: projectId || '',
+        selectedJobId: selectedScheduledJobId,
+        enabled: !!(projectId && project && isOwner() && !scheduledJobDialogsOpen),
     });
 
     const [isAddingLink, setIsAddingLink] = useState(false);
@@ -831,7 +853,12 @@ export default function ProjectDetails() {
                     <ScheduledJobContent
                         projectId={project.id}
                         jobId={selectedItem.id}
+                        job={selectedJobDetail}
+                        isLoading={isLoadingScheduledJobDetail}
+                        error={scheduledJobDetailError}
                         canRun={isOwner()}
+                        onRefresh={refreshScheduledJobs}
+                        onJobFieldsPatch={patchSelectedJobFields}
                     />
                 );
             }
@@ -842,7 +869,9 @@ export default function ProjectDetails() {
         isAddingLink, isAddingFolder, selectedItem, project, 
         isAutoHome, canEdit, handleFileDeleted, handleItemSelect, 
         handleAddFolder, isEditing, setIsEditing,
-        isOwner, refreshProject, setSelectedItem
+        isOwner, refreshProject, setSelectedItem,
+        selectedJobDetail, isLoadingScheduledJobDetail, scheduledJobDetailError,
+        refreshScheduledJobs, patchSelectedJobFields
     ]);
 
 
@@ -905,7 +934,13 @@ export default function ProjectDetails() {
                             onCreateNotebook={canEdit() ? handleCreateNotebook : undefined}
                             onCreateNotebookFromFile={canEdit() ? handleCreateNotebookFromFile : undefined}
                             onCreateNotebookFromFiles={canEdit() ? handleCreateNotebookFromFiles : undefined}
-    
+                            scheduledJobs={scheduledJobs}
+                            isLoadingScheduledJobs={isLoadingScheduledJobs}
+                            refreshScheduledJobs={refreshScheduledJobs}
+                            onScheduledJobDialogOpenChange={setScheduledJobDialogsOpen}
+                            applyScheduledJobDetail={applyJobDetail}
+                            patchScheduledJob={patchJob}
+                            selectedScheduledJobDetail={selectedJobDetail}
                                 homePageContentFileId={project.homePageContentFileId}
                                 onSetHomePage={canEdit() ? handleSetHomePage : undefined}
                                 onFileContentChanged={(fileId, newVersion) => {

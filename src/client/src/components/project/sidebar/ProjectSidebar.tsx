@@ -23,6 +23,7 @@ import { CreateEditScheduledJobDialog } from '../dialogs/CreateEditScheduledJobD
 import { ScheduledJobRunHistoryDialog } from '../dialogs/ScheduledJobRunHistoryDialog';
 import { scheduledJobsApi } from '../../../services/scheduledJobs';
 import type { ProjectScheduledJobDetailDto, ProjectScheduledJobSummaryDto } from '../../../types/scheduledJob';
+import { formatNextRun } from '../../../lib/scheduledJobDateTime';
 
 // Props for the extracted NotebookListItem component
 interface NotebookListItemProps {
@@ -215,6 +216,17 @@ interface ProjectSidebarProps {
     onSetHomePage?: (fileId: string | null) => Promise<void>;
     // File version change notification
     onFileContentChanged?: (fileId: string, newVersion: number) => void;
+    // Scheduled jobs — when provided, sidebar shares the parent's polled state
+    scheduledJobs?: ProjectScheduledJobSummaryDto[];
+    isLoadingScheduledJobs?: boolean;
+    refreshScheduledJobs?: () => void;
+    onScheduledJobDialogOpenChange?: (open: boolean) => void;
+    applyScheduledJobDetail?: (job: ProjectScheduledJobDetailDto) => void;
+    patchScheduledJob?: (
+        jobId: string,
+        fields: Partial<Pick<ProjectScheduledJobSummaryDto, 'isEnabled' | 'nextRunUtc' | 'lastRunUtc' | 'lastRunStatus' | 'scheduleSummary' | 'updatedUtc' | 'name'>>
+    ) => void;
+    selectedScheduledJobDetail?: ProjectScheduledJobDetailDto | null;
 }
 
 // NOTE: Historical helper removed. We now rely on the real tree everywhere.
@@ -249,7 +261,14 @@ export function ProjectSidebar({
     onCreateNotebookFromFiles,
     homePageContentFileId,
     onSetHomePage,
-    onFileContentChanged
+    onFileContentChanged,
+    scheduledJobs: scheduledJobsOverride,
+    isLoadingScheduledJobs: isLoadingScheduledJobsOverride,
+    refreshScheduledJobs: refreshScheduledJobsOverride,
+    onScheduledJobDialogOpenChange,
+    applyScheduledJobDetail,
+    patchScheduledJob,
+    selectedScheduledJobDetail,
 }: ProjectSidebarProps) {
     const { showToast } = useToast();
     const navigate = useNavigate();
@@ -372,19 +391,31 @@ export function ProjectSidebar({
 
     const [showCreateScheduledJobDialog, setShowCreateScheduledJobDialog] = useState(false);
     const [editingScheduledJob, setEditingScheduledJob] = useState<ProjectScheduledJobDetailDto | null>(null);
-    const [historyScheduledJob, setHistoryScheduledJob] = useState<ProjectScheduledJobSummaryDto | null>(null);
+    const [historyScheduledJob, setHistoryScheduledJob] = useState<{
+        job: ProjectScheduledJobSummaryDto;
+        runOnOpen: boolean;
+    } | null>(null);
 
     const isScheduledJobDialogOpen =
         showCreateScheduledJobDialog || Boolean(historyScheduledJob);
 
-    const {
-        jobs: scheduledJobs,
-        isLoading: isLoadingScheduledJobs,
-        refresh: refreshScheduledJobs,
-    } = useProjectScheduledJobsPolling({
+    const internalScheduledJobsPolling = useProjectScheduledJobsPolling({
         projectId: project.id,
-        enabled: isCurrentUserOwner && !isScheduledJobDialogOpen,
+        enabled:
+            isCurrentUserOwner &&
+            !isScheduledJobDialogOpen &&
+            scheduledJobsOverride === undefined,
     });
+
+    const scheduledJobs = scheduledJobsOverride ?? internalScheduledJobsPolling.jobs;
+    const isLoadingScheduledJobs =
+        isLoadingScheduledJobsOverride ?? internalScheduledJobsPolling.isLoading;
+    const refreshScheduledJobs =
+        refreshScheduledJobsOverride ?? internalScheduledJobsPolling.refresh;
+
+    useEffect(() => {
+        onScheduledJobDialogOpenChange?.(isScheduledJobDialogOpen);
+    }, [isScheduledJobDialogOpen, onScheduledJobDialogOpenChange]);
     const [showScheduledJobContextMenu, setShowScheduledJobContextMenu] = useState(false);
     const [scheduledJobContextMenuPos, setScheduledJobContextMenuPos] = useState({ x: 0, y: 0 });
     const [selectedContextScheduledJobId, setSelectedContextScheduledJobId] = useState<string | null>(null);
@@ -591,14 +622,33 @@ export function ProjectSidebar({
             setShowScheduledJobContextMenu(false);
             return;
         }
+
+        const jobId = selectedScheduledJob.id;
+        const previousState = {
+            isEnabled: selectedScheduledJob.isEnabled,
+            nextRunUtc: selectedScheduledJob.nextRunUtc,
+        };
+        const nextEnabled = !previousState.isEnabled;
+
+        patchScheduledJob?.(jobId, {
+            isEnabled: nextEnabled,
+            nextRunUtc: nextEnabled ? previousState.nextRunUtc : null,
+        });
+
         setIsScheduledJobActionPending(true);
         try {
-            const detail = await scheduledJobsApi.get(project.id, selectedScheduledJob.id);
-            await scheduledJobsApi.update(project.id, selectedScheduledJob.id, {
+            const cachedDetail =
+                selectedScheduledJobDetail?.id === jobId
+                    ? selectedScheduledJobDetail
+                    : editingScheduledJob?.id === jobId
+                        ? editingScheduledJob
+                        : null;
+            const detail = cachedDetail ?? await scheduledJobsApi.get(project.id, jobId);
+            const updated = await scheduledJobsApi.update(project.id, jobId, {
                 name: detail.name,
                 jobType: detail.jobType,
                 notebookId: detail.notebookId,
-                isEnabled: !detail.isEnabled,
+                isEnabled: nextEnabled,
                 timeZoneId: detail.timeZoneId,
                 schedule: detail.friendlySchedule,
                 conversationTitle: detail.conversationTitle,
@@ -606,8 +656,16 @@ export function ProjectSidebar({
                 assistantName: detail.assistantName,
                 scriptNotebookFileId: detail.scriptNotebookFileId,
             });
-            refreshScheduledJobs();
+            applyScheduledJobDetail?.(updated);
+            showToast({
+                type: 'success',
+                title: updated.isEnabled ? 'Job enabled' : 'Job disabled',
+                message: updated.isEnabled
+                    ? `Next run: ${formatNextRun(updated.nextRunUtc, updated.timeZoneId, true)}`
+                    : 'Automatic runs are paused until you enable this job again.',
+            });
         } catch (error) {
+            patchScheduledJob?.(jobId, previousState);
             showToast({
                 type: 'error',
                 title: 'Failed to update scheduled job',
@@ -619,33 +677,15 @@ export function ProjectSidebar({
         }
     };
 
-    const handleRunScheduledJobNow = async () => {
-        if (!selectedContextScheduledJobId) {
+    const handleRunScheduledJobNow = () => {
+        if (!selectedScheduledJob) {
             setShowScheduledJobContextMenu(false);
             return;
         }
-        const jobId = selectedContextScheduledJobId;
-        setIsScheduledJobActionPending(true);
-        try {
-            await scheduledJobsApi.runNow(project.id, jobId);
-            onItemSelect('jobSchedule', jobId);
-            window.dispatchEvent(new CustomEvent('scheduled-job-run-triggered', { detail: { jobId } }));
-            showToast({
-                type: 'success',
-                title: 'Run started',
-                message: 'The job is running. Check run history for status and output.',
-            });
-            refreshScheduledJobs();
-        } catch (error) {
-            showToast({
-                type: 'error',
-                title: 'Failed to run job',
-                message: error instanceof Error ? error.message : 'Please try again.',
-            });
-        } finally {
-            setIsScheduledJobActionPending(false);
-            setShowScheduledJobContextMenu(false);
-        }
+
+        onItemSelect('jobSchedule', selectedScheduledJob.id);
+        setHistoryScheduledJob({ job: selectedScheduledJob, runOnOpen: true });
+        setShowScheduledJobContextMenu(false);
     };
 
     const handleDeleteScheduledJobRequest = () => {
@@ -682,7 +722,7 @@ export function ProjectSidebar({
             setShowScheduledJobContextMenu(false);
             return;
         }
-        setHistoryScheduledJob(selectedScheduledJob);
+        setHistoryScheduledJob({ job: selectedScheduledJob, runOnOpen: false });
         setShowScheduledJobContextMenu(false);
     };
 
@@ -1204,7 +1244,7 @@ export function ProjectSidebar({
                                 setShowCreateScheduledJobDialog(true);
                             }}
                             showAddButton
-                            disabled={disabled || isLoadingScheduledJobs || isScheduledJobActionPending}
+                            disabled={disabled || (isLoadingScheduledJobs && scheduledJobs.length === 0) || isScheduledJobActionPending}
                             data-tour-id="sidebar.section.jobSchedule"
                         >
                             {scheduledJobs.length === 0 ? (
@@ -1405,7 +1445,10 @@ export function ProjectSidebar({
                             setShowCreateScheduledJobDialog(false);
                             setEditingScheduledJob(null);
                         }}
-                        onSaved={refreshScheduledJobs}
+                        onSaved={(savedJob) => {
+                            applyScheduledJobDetail?.(savedJob);
+                            refreshScheduledJobs();
+                        }}
                         notebooks={currentNotebooks}
                         job={editingScheduledJob}
                         disabled={disabled || isScheduledJobActionPending}
@@ -1414,9 +1457,19 @@ export function ProjectSidebar({
                     {historyScheduledJob && (
                         <ScheduledJobRunHistoryDialog
                             projectId={project.id}
-                            job={historyScheduledJob}
-                            isOpen={Boolean(historyScheduledJob)}
-                            onClose={() => setHistoryScheduledJob(null)}
+                            job={historyScheduledJob.job}
+                            isOpen
+                            runOnOpen={historyScheduledJob.runOnOpen}
+                            canRun={historyScheduledJob.runOnOpen}
+                            onClose={() => {
+                                setHistoryScheduledJob(null);
+                                refreshScheduledJobs();
+                            }}
+                            onTimingFieldsUpdate={(fields) => {
+                                if (historyScheduledJob) {
+                                    patchScheduledJob?.(historyScheduledJob.job.id, fields);
+                                }
+                            }}
                         />
                     )}
 

@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace GuideAntsApi.DataModel.Models;
 
 [Index(nameof(ScheduledJobId), nameof(StartedUtc))]
+[Index(nameof(ScheduledJobId), nameof(Status))]
 public class ProjectScheduledJobRun
 {
     [Key]

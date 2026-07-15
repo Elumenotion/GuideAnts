@@ -235,7 +235,7 @@ public sealed class DatabaseStorageDeepTests
     }
 
     [TestMethod]
-    public async Task GetAssistantMetadata_NoConnectionString_ReturnsNull()
+    public async Task GetAssistant_NoConnectionString_ReturnsNull()
     {
         const string key = "ConnectionStrings:DefaultConnection";
         var original = Environment.GetEnvironmentVariable(key);
@@ -243,8 +243,9 @@ public sealed class DatabaseStorageDeepTests
         {
             Environment.SetEnvironmentVariable(key, null);
 
-            (await DatabaseStorage.GetAssistantMetadata("anything")).Should().BeNull();
             (await DatabaseStorage.GetAssistant("anything")).Should().BeNull();
+
+            (await DatabaseStorage.GetAssistantMetadata("anything")).Should().BeNull();
             (await DatabaseStorage.GetAssistantAvatarAsync("anything")).Should().BeNull();
             (await DatabaseStorage.GetAssistantConversationStartersAsync("anything")).Should().BeNull();
         }

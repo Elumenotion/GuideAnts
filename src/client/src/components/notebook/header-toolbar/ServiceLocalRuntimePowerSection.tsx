@@ -36,8 +36,16 @@ export function ServiceLocalRuntimePowerSection({
 
   const powerOn = () => {
     void run(async () => {
-      const request = activeModelRef ? { model_path: activeModelRef } : {};
-      await api.settings.localModels.load(service.serviceId, request);
+      if (!activeModelRef) {
+        throw new Error(`Select a ${resourceLabel.toLowerCase()} before loading.`);
+      }
+
+      if (service.serviceId === 'ImageGeneration') {
+        await api.settings.localModels.selectActive(service.serviceId, activeModelRef);
+      } else {
+        await api.settings.localModels.load(service.serviceId, { model_path: activeModelRef });
+      }
+
       await onRefresh();
     });
   };

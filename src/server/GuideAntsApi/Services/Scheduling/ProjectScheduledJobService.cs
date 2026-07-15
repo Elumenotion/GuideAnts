@@ -67,13 +67,26 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
         CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var jobs = await db.ProjectScheduledJobs.AsNoTracking()
-            .Include(j => j.Notebook)
+        var rows = await db.ProjectScheduledJobs.AsNoTracking()
             .Where(j => j.ProjectId == projectId)
             .OrderBy(j => j.Name)
+            .Select(j => new ScheduledJobSummaryRow(
+                j.Id,
+                j.Name,
+                j.JobType,
+                j.NotebookId,
+                j.Notebook.Title,
+                j.IsEnabled,
+                j.CronExpression,
+                j.TimeZoneId,
+                j.NextRunUtc,
+                j.LastRunUtc,
+                j.LastRunStatus,
+                j.CreatedUtc,
+                j.UpdatedUtc))
             .ToListAsync(cancellationToken);
 
-        return jobs.Select(MapSummary).ToList();
+        return rows.Select(MapSummary).ToList();
     }
 
     public async Task<ProjectScheduledJobDetailDto?> GetAsync(
@@ -82,8 +95,8 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
         CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var job = await LoadJobDetailQuery(db, projectId, jobId, cancellationToken);
-        return job == null ? null : MapDetail(job);
+        var row = await LoadJobDetailRowAsync(db, projectId, jobId, cancellationToken);
+        return row == null ? null : MapDetail(row);
     }
 
     public async Task<ProjectScheduledJobDetailDto> CreateAsync(
@@ -133,7 +146,7 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
         db.ProjectScheduledJobs.Add(job);
         await db.SaveChangesAsync(cancellationToken);
 
-        var loaded = await LoadJobDetailQuery(db, projectId, job.Id, cancellationToken)
+        var loaded = await LoadJobDetailRowAsync(db, projectId, job.Id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to load created scheduled job.");
         return MapDetail(loaded);
     }
@@ -179,7 +192,7 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
 
         await db.SaveChangesAsync(cancellationToken);
 
-        var loaded = await LoadJobDetailQuery(db, projectId, job.Id, cancellationToken)
+        var loaded = await LoadJobDetailRowAsync(db, projectId, job.Id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to load updated scheduled job.");
         return MapDetail(loaded);
     }
@@ -198,16 +211,20 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
     public async Task EnqueueManualRunAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var exists = await db.ProjectScheduledJobs.AsNoTracking()
-            .AnyAsync(j => j.Id == jobId && j.ProjectId == projectId, cancellationToken);
-        if (!exists)
+        var state = await db.ProjectScheduledJobs.AsNoTracking()
+            .Where(j => j.Id == jobId && j.ProjectId == projectId)
+            .Select(j => new
+            {
+                HasRunningRun = j.Runs.Any(r => r.Status == ProjectScheduledJobRunStatus.Running)
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (state == null)
         {
             throw new KeyNotFoundException($"Scheduled job {jobId} was not found.");
         }
 
-        var hasRunningRun = await db.ProjectScheduledJobRuns
-            .AnyAsync(r => r.ScheduledJobId == jobId && r.Status == ProjectScheduledJobRunStatus.Running, cancellationToken);
-        if (hasRunningRun)
+        if (state.HasRunningRun)
         {
             throw new InvalidOperationException("A run is already in progress for this scheduled job.");
         }
@@ -247,8 +264,8 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
             .Select(r => new ProjectScheduledJobRunSummaryDto(
                 r.Id,
                 r.TriggeredBy.ToString(),
-                r.StartedUtc,
-                r.CompletedUtc,
+                AsUtc(r.StartedUtc),
+                AsUtc(r.CompletedUtc),
                 r.Status.ToString(),
                 r.ErrorMessage,
                 r.CreatedConversationId,
@@ -268,15 +285,17 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
         await EnsureJobBelongsToProjectAsync(db, projectId, jobId, cancellationToken);
 
         var run = await db.ProjectScheduledJobRuns.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == runId && r.ScheduledJobId == jobId, cancellationToken);
+            .FirstOrDefaultAsync(
+                r => r.Id == runId && r.ScheduledJobId == jobId,
+                cancellationToken);
 
         return run == null
             ? null
             : new ProjectScheduledJobRunDetailDto(
                 run.Id,
                 run.TriggeredBy.ToString(),
-                run.StartedUtc,
-                run.CompletedUtc,
+                AsUtc(run.StartedUtc),
+                AsUtc(run.CompletedUtc),
                 run.Status.ToString(),
                 run.ErrorMessage,
                 run.StandardOutput,
@@ -285,68 +304,154 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
                 run.ExitCode);
     }
 
-    private static async Task<ProjectScheduledJob?> LoadJobDetailQuery(
+    private static async Task EnsureJobBelongsToProjectAsync(
+        ApplicationDbContext db,
+        Guid projectId,
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        if (!await db.ProjectScheduledJobs.AsNoTracking()
+                .AnyAsync(j => j.Id == jobId && j.ProjectId == projectId, cancellationToken))
+        {
+            throw new KeyNotFoundException($"Scheduled job {jobId} was not found.");
+        }
+    }
+
+    private static async Task<ScheduledJobDetailRow?> LoadJobDetailRowAsync(
         ApplicationDbContext db,
         Guid projectId,
         Guid jobId,
         CancellationToken cancellationToken) =>
         await db.ProjectScheduledJobs.AsNoTracking()
-            .Include(j => j.Notebook)
-            .Include(j => j.ScriptNotebookFile)
-            .FirstOrDefaultAsync(j => j.Id == jobId && j.ProjectId == projectId, cancellationToken);
+            .Where(j => j.Id == jobId && j.ProjectId == projectId)
+            .Select(j => new ScheduledJobDetailRow(
+                j.Id,
+                j.Name,
+                j.JobType,
+                j.NotebookId,
+                j.Notebook.Title,
+                j.IsEnabled,
+                j.CronExpression,
+                j.TimeZoneId,
+                j.ConversationTitle,
+                j.Prompt,
+                j.AssistantName,
+                j.ScriptNotebookFileId,
+                j.ScriptNotebookFile != null ? j.ScriptNotebookFile.RelativePath : null,
+                j.ExposeSandboxWireApi,
+                j.WireTargetAssistantId,
+                j.WireAttributionConversationTitle,
+                j.WireCreateAttributionConversationPerRun,
+                j.WireDailyLimitUsd,
+                j.WireMonthlyLimitUsd,
+                j.NextRunUtc,
+                j.LastRunUtc,
+                j.LastRunStatus,
+                j.CreatedByUserId,
+                j.CreatedUtc,
+                j.UpdatedUtc))
+            .FirstOrDefaultAsync(cancellationToken);
 
-    private ProjectScheduledJobSummaryDto MapSummary(ProjectScheduledJob job)
+    private static DateTime AsUtc(DateTime value) =>
+        value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+    private static DateTime? AsUtc(DateTime? value) =>
+        value.HasValue ? AsUtc(value.Value) : null;
+
+    private sealed record ScheduledJobSummaryRow(
+        Guid Id,
+        string Name,
+        ProjectScheduledJobType JobType,
+        Guid NotebookId,
+        string NotebookTitle,
+        bool IsEnabled,
+        string CronExpression,
+        string TimeZoneId,
+        DateTime? NextRunUtc,
+        DateTime? LastRunUtc,
+        ProjectScheduledJobLastRunStatus? LastRunStatus,
+        DateTime CreatedUtc,
+        DateTime UpdatedUtc);
+
+    private sealed record ScheduledJobDetailRow(
+        Guid Id,
+        string Name,
+        ProjectScheduledJobType JobType,
+        Guid NotebookId,
+        string NotebookTitle,
+        bool IsEnabled,
+        string CronExpression,
+        string TimeZoneId,
+        string? ConversationTitle,
+        string? Prompt,
+        string? AssistantName,
+        Guid? ScriptNotebookFileId,
+        string? ScriptRelativePath,
+        bool ExposeSandboxWireApi,
+        Guid? WireTargetAssistantId,
+        string? WireAttributionConversationTitle,
+        bool WireCreateAttributionConversationPerRun,
+        decimal? WireDailyLimitUsd,
+        decimal? WireMonthlyLimitUsd,
+        DateTime? NextRunUtc,
+        DateTime? LastRunUtc,
+        ProjectScheduledJobLastRunStatus? LastRunStatus,
+        Guid CreatedByUserId,
+        DateTime CreatedUtc,
+        DateTime UpdatedUtc);
+
+    private ProjectScheduledJobSummaryDto MapSummary(ScheduledJobSummaryRow row)
     {
-        var friendly = _scheduleBuilder.ParseToFriendly(job.CronExpression);
+        var friendly = _scheduleBuilder.ParseToFriendly(row.CronExpression);
         return new ProjectScheduledJobSummaryDto(
-            job.Id,
-            job.Name,
-            job.JobType.ToString(),
-            job.NotebookId,
-            job.Notebook.Title,
-            job.IsEnabled,
-            job.CronExpression,
-            job.TimeZoneId,
-            _cronScheduleService.GetHumanReadableSummary(job.CronExpression, job.TimeZoneId, friendly),
+            row.Id,
+            row.Name,
+            row.JobType.ToString(),
+            row.NotebookId,
+            row.NotebookTitle,
+            row.IsEnabled,
+            row.CronExpression,
+            row.TimeZoneId,
+            _cronScheduleService.GetHumanReadableSummary(row.CronExpression, row.TimeZoneId, friendly),
             friendly,
-            job.NextRunUtc,
-            job.LastRunUtc,
-            job.LastRunStatus?.ToString(),
-            job.CreatedUtc,
-            job.UpdatedUtc);
+            AsUtc(row.NextRunUtc),
+            AsUtc(row.LastRunUtc),
+            row.LastRunStatus?.ToString(),
+            AsUtc(row.CreatedUtc),
+            AsUtc(row.UpdatedUtc));
     }
 
-    private ProjectScheduledJobDetailDto MapDetail(ProjectScheduledJob job)
+    private ProjectScheduledJobDetailDto MapDetail(ScheduledJobDetailRow row)
     {
-        var friendly = _scheduleBuilder.ParseToFriendly(job.CronExpression);
+        var friendly = _scheduleBuilder.ParseToFriendly(row.CronExpression);
         return new ProjectScheduledJobDetailDto(
-            job.Id,
-            job.Name,
-            job.JobType.ToString(),
-            job.NotebookId,
-            job.Notebook.Title,
-            job.IsEnabled,
-            job.CronExpression,
-            job.TimeZoneId,
-            _cronScheduleService.GetHumanReadableSummary(job.CronExpression, job.TimeZoneId, friendly),
+            row.Id,
+            row.Name,
+            row.JobType.ToString(),
+            row.NotebookId,
+            row.NotebookTitle,
+            row.IsEnabled,
+            row.CronExpression,
+            row.TimeZoneId,
+            _cronScheduleService.GetHumanReadableSummary(row.CronExpression, row.TimeZoneId, friendly),
             friendly,
-            job.ConversationTitle,
-            job.Prompt,
-            job.AssistantName,
-            job.ScriptNotebookFileId,
-            job.ScriptNotebookFile?.RelativePath,
-            job.ExposeSandboxWireApi,
-            job.WireTargetAssistantId,
-            job.WireAttributionConversationTitle,
-            job.WireCreateAttributionConversationPerRun,
-            job.WireDailyLimitUsd,
-            job.WireMonthlyLimitUsd,
-            job.NextRunUtc,
-            job.LastRunUtc,
-            job.LastRunStatus?.ToString(),
-            job.CreatedByUserId,
-            job.CreatedUtc,
-            job.UpdatedUtc);
+            row.ConversationTitle,
+            row.Prompt,
+            row.AssistantName,
+            row.ScriptNotebookFileId,
+            row.ScriptRelativePath,
+            row.ExposeSandboxWireApi,
+            row.WireTargetAssistantId,
+            row.WireAttributionConversationTitle,
+            row.WireCreateAttributionConversationPerRun,
+            row.WireDailyLimitUsd,
+            row.WireMonthlyLimitUsd,
+            AsUtc(row.NextRunUtc),
+            AsUtc(row.LastRunUtc),
+            row.LastRunStatus?.ToString(),
+            row.CreatedByUserId,
+            AsUtc(row.CreatedUtc),
+            AsUtc(row.UpdatedUtc));
     }
 
     private string BuildAndValidateSchedule(FriendlyScheduleDto schedule, string timeZoneId)
@@ -387,14 +492,6 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
         if (!await db.Projects.AsNoTracking().AnyAsync(p => p.Id == projectId, ct))
         {
             throw new KeyNotFoundException($"Project {projectId} was not found.");
-        }
-    }
-
-    private static async Task EnsureJobBelongsToProjectAsync(ApplicationDbContext db, Guid projectId, Guid jobId, CancellationToken ct)
-    {
-        if (!await db.ProjectScheduledJobs.AsNoTracking().AnyAsync(j => j.Id == jobId && j.ProjectId == projectId, ct))
-        {
-            throw new KeyNotFoundException($"Scheduled job {jobId} was not found.");
         }
     }
 

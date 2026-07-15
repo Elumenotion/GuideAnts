@@ -411,6 +411,7 @@ describe('AddAiServicesWizard', () => {
     );
 
     const providerSelect = await screen.findByLabelText(/provider/i);
+    expect(providerSelect).toHaveValue('local-ai');
     expect(within(providerSelect).getByRole('option', { name: 'Microsoft Foundry' })).toBeInTheDocument();
     expect(within(providerSelect).getByRole('option', { name: 'Google Gemini' })).toBeInTheDocument();
   });
@@ -449,6 +450,7 @@ describe('AddAiServicesWizard', () => {
     await screen.findByLabelText(/provider/i);
     expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
 
+    fireEvent.change(screen.getByLabelText(/provider/i), { target: { value: 'foundry' } });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
     await screen.findByRole('heading', { name: /Microsoft Foundry connection details/i });
@@ -518,6 +520,7 @@ describe('AddAiServicesWizard', () => {
     );
 
     await screen.findByLabelText(/provider/i);
+    fireEvent.change(screen.getByLabelText(/provider/i), { target: { value: 'foundry' } });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await screen.findByRole('heading', { name: /Microsoft Foundry connection details/i });
     fireEvent.change(screen.getByLabelText(/resource/i), { target: { value: 'my-foundry-resource' } });
