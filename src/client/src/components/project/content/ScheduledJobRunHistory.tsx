@@ -63,6 +63,11 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     jobId: null,
     triggered: false,
   });
+  /** True only after this session triggered a run — controls auto-following the in-flight run. */
+  const followRunningRunRef = useRef(false);
+  /** Set when the user explicitly picks a row; blocks auto-follow from overriding their choice. */
+  const userPinnedRunIdRef = useRef<string | null>(null);
+  const selectedRunRef = useRef<ProjectScheduledJobRunDetailDto | null>(null);
   const pageSize = 10;
 
   const refreshTimingFields = useCallback(async () => {
@@ -102,7 +107,14 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     }
   }, [projectId, jobId, page, onError]);
 
-  const openRunDetail = useCallback(async (runId: string, options?: { silent?: boolean }) => {
+  const openRunDetail = useCallback(async (
+    runId: string,
+    options?: { silent?: boolean; userInitiated?: boolean },
+  ) => {
+    if (options?.userInitiated) {
+      userPinnedRunIdRef.current = runId;
+    }
+
     try {
       const detail = await scheduledJobsApi.getRun(projectId, jobId, runId);
       setSelectedRun(detail);
@@ -115,9 +127,17 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     }
   }, [projectId, jobId, onError]);
 
+  const closeRunDetail = useCallback(() => {
+    userPinnedRunIdRef.current = null;
+    setSelectedRun(null);
+  }, []);
+
   const beginPolling = useCallback(() => {
+    followRunningRunRef.current = true;
     setPollRunsUntil(Date.now() + 120_000);
     setPage(1);
+    userPinnedRunIdRef.current = null;
+    setSelectedRun(null);
   }, []);
 
   const triggerRunNow = useCallback(async () => {
@@ -144,11 +164,22 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     setSelectedRun(null);
     setPollRunsUntil(null);
     runOnOpenSessionRef.current = { jobId: null, triggered: false };
+    followRunningRunRef.current = false;
+    userPinnedRunIdRef.current = null;
   }, [projectId, jobId]);
+
+  useEffect(() => {
+    userPinnedRunIdRef.current = null;
+    setSelectedRun(null);
+  }, [page]);
 
   useEffect(() => {
     void loadRuns();
   }, [loadRuns]);
+
+  useEffect(() => {
+    selectedRunRef.current = selectedRun;
+  }, [selectedRun]);
 
   useEffect(() => {
     if (!runOnOpen || !canRun) {
@@ -181,14 +212,26 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
 
   const hasRunningRun = runs.some((run) => run.status === 'Running');
   const latestRun = runs[0] ?? null;
-  const isActive = isStartingRun || hasRunningRun || (pollRunsUntil != null && Date.now() < pollRunsUntil);
+  const isActive = isStartingRun || hasRunningRun || pollRunsUntil != null;
 
   useEffect(() => {
     onActivityChange?.(isActive);
   }, [isActive, onActivityChange]);
 
   useEffect(() => {
-    const shouldPoll = hasRunningRun || isStartingRun || (pollRunsUntil != null && Date.now() < pollRunsUntil);
+    if (!hasRunningRun && !isStartingRun) {
+      followRunningRunRef.current = false;
+    }
+  }, [hasRunningRun, isStartingRun]);
+
+  useEffect(() => {
+    if (!hasRunningRun && !isStartingRun && pollRunsUntil != null) {
+      setPollRunsUntil(null);
+    }
+  }, [hasRunningRun, isStartingRun, pollRunsUntil]);
+
+  useEffect(() => {
+    const shouldPoll = hasRunningRun || isStartingRun || pollRunsUntil != null;
     if (!shouldPoll) {
       return;
     }
@@ -196,32 +239,23 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     const intervalId = window.setInterval(() => {
       void loadRuns({ silent: true });
       void refreshTimingFields();
-      if (selectedRun?.status === 'Running') {
-        void openRunDetail(selectedRun.id, { silent: true });
-      }
-      if (pollRunsUntil != null && Date.now() >= pollRunsUntil && !hasRunningRun && !isStartingRun) {
-        setPollRunsUntil(null);
+
+      const current = selectedRunRef.current;
+      if (current?.status === 'Running') {
+        void openRunDetail(current.id, { silent: true });
       }
     }, 3000);
 
     return () => window.clearInterval(intervalId);
-  }, [
-    hasRunningRun,
-    isStartingRun,
-    pollRunsUntil,
-    loadRuns,
-    openRunDetail,
-    refreshTimingFields,
-    selectedRun,
-  ]);
+  }, [hasRunningRun, isStartingRun, pollRunsUntil, loadRuns, openRunDetail, refreshTimingFields]);
 
   useEffect(() => {
-    const runningRun = runs.find((run) => run.status === 'Running');
-    if (!runningRun) {
+    if (!followRunningRunRef.current || userPinnedRunIdRef.current) {
       return;
     }
 
-    if (selectedRun?.id === runningRun.id && selectedRun.status === 'Running') {
+    const runningRun = runs.find((run) => run.status === 'Running');
+    if (!runningRun || selectedRun?.id === runningRun.id) {
       return;
     }
 
@@ -292,7 +326,13 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
               {runs.map((run) => (
                 <tr
                   key={run.id}
-                  className={`border-b border-gray-100 ${run.status === 'Running' ? 'bg-blue-50/60' : ''}`}
+                  className={`border-b border-gray-100 ${
+                    selectedRun?.id === run.id
+                      ? 'bg-blue-100'
+                      : run.status === 'Running'
+                        ? 'bg-blue-50/60'
+                        : ''
+                  }`}
                 >
                   <td className="py-2 pr-4">{formatInUserLocal(run.startedUtc)}</td>
                   <td className={`py-2 pr-4 ${statusClassName(run.status)}`}>{run.status}</td>
@@ -301,9 +341,9 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
                     <button
                       type="button"
                       className="text-blue-600 hover:underline"
-                      onClick={() => openRunDetail(run.id)}
+                      onClick={() => void openRunDetail(run.id, { userInitiated: true })}
                     >
-                      View output
+                      {run.status === 'Running' ? 'View progress' : 'View output'}
                     </button>
                   </td>
                 </tr>
@@ -314,18 +354,33 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
 
         {selectedRun && (
           <div className="mt-6 border border-gray-200 rounded-md p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-medium text-gray-900">Run details</h4>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h4 className="font-medium text-gray-900">
+                  Run details — {formatInUserLocal(selectedRun.startedUtc)}
+                </h4>
+                <p className={`text-sm ${statusClassName(selectedRun.status)}`}>
+                  {selectedRun.status} · {selectedRun.triggeredBy}
+                </p>
+              </div>
               <button
                 type="button"
-                className="text-sm text-gray-500 hover:text-gray-700"
-                onClick={() => setSelectedRun(null)}
+                className="text-sm text-gray-500 hover:text-gray-700 shrink-0"
+                onClick={closeRunDetail}
               >
                 Close details
               </button>
             </div>
+            {selectedRun.status === 'Running' && (
+              <p className="text-sm text-blue-700">
+                This run is still in progress. Details will update automatically.
+              </p>
+            )}
             {selectedRun.errorMessage && (
-              <p className="text-sm text-red-700">{selectedRun.errorMessage}</p>
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2">
+                <p className="text-xs font-medium text-red-800 mb-1">Error</p>
+                <p className="text-sm text-red-700 whitespace-pre-wrap">{selectedRun.errorMessage}</p>
+              </div>
             )}
             {jobType === 'NewConversation' && selectedRun.createdConversationId && (
               <button
@@ -336,18 +391,28 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
                 Open conversation
               </button>
             )}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">stdout</label>
-              <pre className="text-xs bg-gray-50 border rounded p-3 overflow-auto max-h-48 whitespace-pre-wrap">
-                {selectedRun.standardOutput || '(empty)'}
-              </pre>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">stderr</label>
-              <pre className="text-xs bg-gray-50 border rounded p-3 overflow-auto max-h-48 whitespace-pre-wrap">
-                {selectedRun.standardError || '(empty)'}
-              </pre>
-            </div>
+            {jobType === 'NewConversation' && selectedRun.standardOutput && (
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedRun.standardOutput}</p>
+            )}
+            {jobType === 'RunPythonScript' && selectedRun.exitCode != null && (
+              <p className="text-sm text-gray-600">Exit code: {selectedRun.exitCode}</p>
+            )}
+            {(jobType === 'RunPythonScript' || selectedRun.standardOutput) && jobType !== 'NewConversation' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">stdout</label>
+                <pre className="text-xs bg-gray-50 border rounded p-3 overflow-auto max-h-48 whitespace-pre-wrap">
+                  {selectedRun.standardOutput || 'No output'}
+                </pre>
+              </div>
+            )}
+            {(jobType === 'RunPythonScript' || selectedRun.standardError) && (
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">stderr</label>
+                <pre className="text-xs bg-gray-50 border rounded p-3 overflow-auto max-h-48 whitespace-pre-wrap">
+                  {selectedRun.standardError || 'No output'}
+                </pre>
+              </div>
+            )}
           </div>
         )}
       </div>
