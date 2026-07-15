@@ -3,6 +3,7 @@ import { UsageSummaryDto, UsageDetailsQuery, PagedResultDto, UsageEventDto, Usag
 import type { UpdateCurrentUserRequest, UserDto } from '../types/user';
 import type { AuthMeResponse, AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest } from '../types/auth';
 import { getCachedFile, cacheFile } from '../utils/fileCache';
+import { dedupeInFlight } from '../utils/inFlightRequests';
 import { FileLineageEvent } from '../types/fileLineage';
 import type { NotebookChatReadinessDto } from '../types/notebookToolbar';
 import {
@@ -908,8 +909,9 @@ export const api = {
 
         // Folder management endpoints
         folders: {
-            getFolderTree: (projectId: string) => 
-                callApi<FolderTreeDto>(`/projects/${projectId}/folders/tree`),
+            getFolderTree: (projectId: string) =>
+                dedupeInFlight(`project-folder-tree:${projectId}`, () =>
+                    callApi<FolderTreeDto>(`/projects/${projectId}/folders/tree`)),
             
             getFolders: (projectId: string) => 
                 callApi<ProjectFolderDto[]>(`/projects/${projectId}/folders`),
@@ -1073,7 +1075,8 @@ export const api = {
                 callApi<import('../types/notebook').NotebookFileDto[]>(`/projects/${projectId}/notebooks/${notebookId}/files`),
             
             getNotebookFolderTree: (projectId: string, notebookId: string) =>
-                callApi<import('../types/notebook').NotebookFolderTreeDto>(`/projects/${projectId}/notebooks/${notebookId}/files/tree`),
+                dedupeInFlight(`notebook-folder-tree:${projectId}:${notebookId}`, () =>
+                    callApi<import('../types/notebook').NotebookFolderTreeDto>(`/projects/${projectId}/notebooks/${notebookId}/files/tree`)),
             
             uploadNotebookFiles: async (projectId: string, notebookId: string, files: File[], targetRelativePath: string, index: boolean) => {
                 const formData = new FormData();

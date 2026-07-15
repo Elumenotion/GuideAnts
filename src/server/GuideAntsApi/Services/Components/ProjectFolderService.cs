@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.StaticFiles;
@@ -15,6 +16,20 @@ public class ProjectFolderService : IProjectFolderService
     private const int DefaultLinkedMountTreeMaxDepth = 3;
     private const int DefaultLinkedMountTreeScanBudgetMs = 2500;
 
+    // The project folder tree is polled roughly once per minute per viewer. The mount
+    // scan cache TTL must comfortably exceed that poll interval, otherwise the cache
+    // expires in every gap between polls and each poll re-walks the (potentially huge)
+    // host directory. Project files change through our own API (uploads/deletes are
+    // DB-backed and known to the server), so unlike notebooks we don't need to re-scan
+    // aggressively to discover out-of-band changes; a couple of minutes bounds staleness
+    // for the read-only host-mount overlay while cutting the scan rate dramatically.
+    private const int DefaultProjectMountTreeCacheSeconds = 120;
+
+    // Shared across all instances/requests so concurrent folder-tree polls for the same
+    // mount reuse a single filesystem scan instead of re-walking the host directory
+    // (which can hit the maxFiles/maxDepth/scanBudget limits) on every poll.
+    private static readonly ConcurrentDictionary<string, MountScanCacheEntry> MountScanCache = new(StringComparer.Ordinal);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly string _storagePath;
@@ -23,6 +38,7 @@ public class ProjectFolderService : IProjectFolderService
     private readonly int _linkedMountTreeMaxFiles;
     private readonly int _linkedMountTreeMaxDepth;
     private readonly TimeSpan _linkedMountTreeScanBudget;
+    private readonly TimeSpan _projectMountTreeCacheTtl;
     private readonly FileExtensionContentTypeProvider _contentTypeProvider = new();
 
     public ProjectFolderService(
@@ -46,6 +62,9 @@ public class ProjectFolderService : IProjectFolderService
         _linkedMountTreeScanBudget = TimeSpan.FromMilliseconds(ReadPositiveInt(
             configuration["FileStorage:LinkedMountTreeScanBudgetMs"],
             DefaultLinkedMountTreeScanBudgetMs, min: 250, max: 30000));
+        _projectMountTreeCacheTtl = TimeSpan.FromSeconds(ReadPositiveInt(
+            configuration["FileStorage:ProjectMountTreeCacheSeconds"],
+            DefaultProjectMountTreeCacheSeconds, min: 1, max: 3600));
     }
 
     // Backward-compatible overload used by tests.
@@ -667,34 +686,74 @@ using var scope = CreateDbScope();
 
         foreach (var mount in mounts)
         {
-            var scanRoots = new List<HostMountDirectoryScanner.MountRoot>
-            {
-                new(mount.LeafName, mount.ContainerSourcePath)
-            };
-
-            var scanResult = HostMountDirectoryScanner.Scan(
-                scanRoots,
-                _linkedMountTreeMaxFiles,
-                _linkedMountTreeMaxDepth,
-                _linkedMountTreeScanBudget,
-                _logger);
-
-            if (scanResult.WasTruncated)
-            {
-                _logger.LogWarning(
-                    "Project mount tree enumeration was truncated for mount {MountId} (maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
-                    mount.Id,
-                    _linkedMountTreeMaxFiles,
-                    _linkedMountTreeMaxDepth,
-                    (int)_linkedMountTreeScanBudget.TotalMilliseconds);
-            }
-
+            var scanResult = GetOrScanMount(mount);
             var mountRootNode = BuildMountFolderTree(mount, scanResult.Files);
             mountNodes.Add(mountRootNode);
         }
 
         return mountNodes;
     }
+
+    /// <summary>
+    /// Returns the mount's scanned files from the shared cache when a fresh entry exists,
+    /// otherwise performs the budgeted filesystem scan and caches the result. This keeps
+    /// repeated folder-tree polls from re-walking the host directory every request.
+    /// </summary>
+    private HostMountDirectoryScanner.ScanResult GetOrScanMount(HostFolderMount mount)
+    {
+        var now = DateTimeOffset.UtcNow;
+        PruneExpiredMountScanCache(now);
+
+        var cacheKey = BuildMountScanCacheKey(mount);
+        if (MountScanCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > now)
+        {
+            return cached.Result;
+        }
+
+        var scanRoots = new List<HostMountDirectoryScanner.MountRoot>
+        {
+            new(mount.LeafName, mount.ContainerSourcePath)
+        };
+
+        var scanResult = HostMountDirectoryScanner.Scan(
+            scanRoots,
+            _linkedMountTreeMaxFiles,
+            _linkedMountTreeMaxDepth,
+            _linkedMountTreeScanBudget,
+            _logger);
+
+        if (scanResult.WasTruncated)
+        {
+            _logger.LogWarning(
+                "Project mount tree enumeration was truncated for mount {MountId} (maxFiles={MaxFiles}, maxDepth={MaxDepth}, scanBudgetMs={ScanBudgetMs}).",
+                mount.Id,
+                _linkedMountTreeMaxFiles,
+                _linkedMountTreeMaxDepth,
+                (int)_linkedMountTreeScanBudget.TotalMilliseconds);
+        }
+
+        MountScanCache[cacheKey] = new MountScanCacheEntry(
+            ExpiresUtc: DateTimeOffset.UtcNow + _projectMountTreeCacheTtl,
+            Result: scanResult);
+
+        return scanResult;
+    }
+
+    private static string BuildMountScanCacheKey(HostFolderMount mount) =>
+        $"{mount.Id:N}|{mount.LeafName}|{mount.ContainerSourcePath}";
+
+    private static void PruneExpiredMountScanCache(DateTimeOffset now)
+    {
+        foreach (var kvp in MountScanCache)
+        {
+            if (kvp.Value.ExpiresUtc <= now)
+            {
+                MountScanCache.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
+    private sealed record MountScanCacheEntry(DateTimeOffset ExpiresUtc, HostMountDirectoryScanner.ScanResult Result);
 
     private FolderTreeDto BuildMountFolderTree(
         HostFolderMount mount,

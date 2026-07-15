@@ -264,7 +264,6 @@ export default function ProjectDetails() {
         deleteFolder,
         moveFile,
         uploadFiles: uploadFilesToFolder,
-        fetchFolderTree
     } = useFolderOperations(projectId || '');
 
     // Stable, non-remounting default home content (bundled markdown)
@@ -274,12 +273,8 @@ export default function ProjectDetails() {
         </div>
     ), []);
 
-    // Load folder tree when project is available
-    useEffect(() => {
-        if (projectId) {
-            fetchFolderTree();
-        }
-    }, [projectId, fetchFolderTree]);
+    // The sidebar folder tree is owned by useProjectFilesPolling (initial fetch + polling)
+    // and ProjectProvider's loadProject. No separate fetch is needed here.
 
     
 
@@ -313,9 +308,10 @@ export default function ProjectDetails() {
     // Stable callback for file deletion to prevent preview re-renders
     const handleFileDeleted = useCallback(async () => {
         await refreshProject();
-        await fetchFolderTree();
+        // Refresh the visible sidebar tree (polling hook), not the unused folder-ops state.
+        refreshSidebarFiles();
         setSelectedItem(null);
-    }, [refreshProject, fetchFolderTree, setSelectedItem]);
+    }, [refreshProject, refreshSidebarFiles, setSelectedItem]);
 
     const handleSetHomePage = async (fileId: string | null) => {
         if (!projectId) return;
