@@ -99,6 +99,7 @@ export function PublishGuideDialog({
   const isEditMode = !!publishedGuide;
   const [activeTab, setActiveTab] = useState<TabId>('general');
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   
   // General
   const [friendlyName, setFriendlyName] = useState(publishedGuide?.friendlyName || '');
@@ -218,6 +219,10 @@ export function PublishGuideDialog({
     return () => clearTimeout(timer);
   }, [friendlyName, validateFriendlyName]);
 
+  useEffect(() => {
+    setSubmitError(null);
+  }, [friendlyName, authWebhookUrl, hasApiKey]);
+
   const setWireApiEndpointFlag = (key: WireApiEndpointFlagKey, value: boolean) => {
     setWireApiEndpointFlags((prev) => ({ ...prev, [key]: value }));
   };
@@ -245,9 +250,14 @@ export function PublishGuideDialog({
 
     // Prevent both friendly name and authentication (webhook or API key)
     if (friendlyName.trim() && (authWebhookUrl.trim() || hasApiKey)) {
-      alert('A Published Guide cannot have both a Public URL (Friendly Name) and Authentication. Public URLs are for anonymous access only. Please clear one of them.');
+      setSubmitError(
+        'A published guide cannot have both a public URL (friendly name) and authentication. Public URLs are for anonymous access only — clear the friendly name or remove authentication.',
+      );
+      setActiveTab('auth');
       return;
     }
+
+    setSubmitError(null);
 
     const isAppIdentityAuth = publishedGuide?.authMode === 'AppIdentity';
 
@@ -467,6 +477,12 @@ export function PublishGuideDialog({
               </div>
             </div>
           )}
+
+          {submitError ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+              {submitError}
+            </div>
+          ) : null}
 
           {/* Read-only Info (edit mode only) */}
           {isEditMode && publishedGuide && (

@@ -63,7 +63,7 @@ internal static class ConfiguredLocalServiceSelectionSync
         string? configuredBundleIdFromSd,
         CancellationToken cancellationToken)
     {
-        var persisted = await ReadPersistedLocalModelRefAsync(
+        var persisted = await TryReadPersistedLocalModelRefAsync(
                 settings,
                 RoutedServiceNames.ImageGeneration,
                 cancellationToken)
@@ -91,7 +91,7 @@ internal static class ConfiguredLocalServiceSelectionSync
         IHttpClientFactory httpClientFactory,
         CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(await ReadPersistedLocalModelRefAsync(
+        if (!string.IsNullOrWhiteSpace(await TryReadPersistedLocalModelRefAsync(
                     settings,
                     RoutedServiceNames.ImageGeneration,
                     cancellationToken)
@@ -137,7 +137,7 @@ internal static class ConfiguredLocalServiceSelectionSync
         IHttpClientFactory httpClientFactory,
         CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(await ReadPersistedLocalModelRefAsync(settings, serviceId, cancellationToken)
+        if (!string.IsNullOrWhiteSpace(await TryReadPersistedLocalModelRefAsync(settings, serviceId, cancellationToken)
                 .ConfigureAwait(false)))
         {
             return;
@@ -216,7 +216,7 @@ internal static class ConfiguredLocalServiceSelectionSync
         return null;
     }
 
-    private static async Task<string?> ReadPersistedLocalModelRefAsync(
+    public static async Task<string?> TryReadPersistedLocalModelRefAsync(
         IApplicationSettingsService settings,
         string serviceId,
         CancellationToken cancellationToken)

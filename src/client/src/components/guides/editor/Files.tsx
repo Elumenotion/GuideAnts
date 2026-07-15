@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { FaFile, FaCode, FaTimes, FaPlus, FaEye, FaSpinner, FaExclamationTriangle, FaCheckCircle, FaDownload } from 'react-icons/fa';
+import { useToast } from '../../common/Toast';
 import { FileUploadDto, FileDto, MarkdownExtractionStatus } from '../../../types/guides';
 import { isMarkdownExtractionSupported, SUPPORTED_MARKDOWN_EXTRACTION_EXTENSIONS } from '../../../utils/fileTypeSupport';
 import { isMaterializableSkillPayloadPath } from './executablePayload';
@@ -14,6 +15,7 @@ interface FilesProps {
 }
 
 export function Files({ existingFiles, newFiles, onExistingFilesChange, onNewFilesChange, onPreviewMarkdown, onDownloadFile }: FilesProps) {
+  const { showToast } = useToast();
   const vectorStoreInputRef = useRef<HTMLInputElement>(null);
   const codeInterpreterInputRef = useRef<HTMLInputElement>(null);
 
@@ -81,12 +83,11 @@ export function Files({ existingFiles, newFiles, onExistingFilesChange, onNewFil
     try {
       // Validate file type for VectorStore
       if (folderKind === 'VectorStore' && !isMarkdownExtractionSupported(file.name, file.type)) {
-        alert(
-          `File type not supported for content extraction.\n\n` +
-          `Supported types: PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), ` +
-          `Images (JPEG, PNG, BMP, TIFF, HEIF), Text files (.txt, .md, .html, .json, .xml, .csv, .tsv)\n\n` +
-          `File: ${file.name}`
-        );
+        showToast({
+          type: 'warning',
+          title: 'Unsupported file type',
+          message: `${file.name} cannot be extracted for search. Supported types include PDF, Office documents, images, and common text formats.`,
+        });
         return null;
       }
 
@@ -114,7 +115,11 @@ export function Files({ existingFiles, newFiles, onExistingFilesChange, onNewFil
       return fileUpload;
     } catch (error) {
       console.error('File upload error:', error);
-      alert(`Failed to upload file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showToast({
+        type: 'error',
+        title: 'Failed to upload file',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
       return null;
     }
   };

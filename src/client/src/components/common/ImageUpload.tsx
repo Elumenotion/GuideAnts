@@ -10,13 +10,16 @@ interface ImageUploadProps {
 export function ImageUpload({ currentImageUrl, onChange, label }: ImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [fileTypeError, setFileTypeError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (file: File) => {
     if (!file.type.startsWith('image/')) {
-      alert('Please select an image file');
+      setFileTypeError('Please select an image file (PNG, JPG, GIF, or similar).');
       return;
     }
+
+    setFileTypeError(null);
 
     // Create preview
     const reader = new FileReader();
@@ -52,6 +55,7 @@ export function ImageUpload({ currentImageUrl, onChange, label }: ImageUploadPro
 
   const handleClear = () => {
     setPreview(null);
+    setFileTypeError(null);
     onChange(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -63,6 +67,11 @@ export function ImageUpload({ currentImageUrl, onChange, label }: ImageUploadPro
   return (
     <div className="space-y-2">
       {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
+      {fileTypeError ? (
+        <p className="text-sm text-red-700" role="alert">
+          {fileTypeError}
+        </p>
+      ) : null}
       
       {displayImage ? (
         <div className="relative inline-block">

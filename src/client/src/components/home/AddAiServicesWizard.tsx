@@ -14,6 +14,7 @@ import {
   OPENAI_CORE_SECTION,
   OPENROUTER_SECTION,
   WIZARD_STEPS,
+  DEFAULT_WIZARD_PROVIDER,
 } from './addAiServicesWizard/constants';
 import { CoreConnectionStep } from './addAiServicesWizard/steps/CoreConnectionStep';
 import { FinishStep } from './addAiServicesWizard/steps/FinishStep';
@@ -148,7 +149,7 @@ const OPTIONAL_SERVICE_KEYS: OptionalServiceKey[] = [
 
 export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings }: AddAiServicesWizardProps) {
   const [step, setStep] = useState<AddAiServicesWizardStep>('provider');
-  const [provider, setProvider] = useState<AddAiServicesWizardProvider>('foundry');
+  const [provider, setProvider] = useState<AddAiServicesWizardProvider>(DEFAULT_WIZARD_PROVIDER);
   const [dontAutoOpenAgain, setDontAutoOpenAgain] = useState(false);
 
   const [snapshot, setSnapshot] = useState<WizardLoadSnapshot | null>(null);
@@ -390,7 +391,7 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
     setLoading(true);
     setGlobalError(null);
     setStep('provider');
-    setProvider('foundry');
+    setProvider(DEFAULT_WIZARD_PROVIDER);
     setDontAutoOpenAgain(false);
 
     void (async () => {

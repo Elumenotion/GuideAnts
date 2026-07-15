@@ -1,3 +1,4 @@
+import { forwardRef, useImperativeHandle } from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -29,8 +30,15 @@ vi.mock('../providers/AzureOpenAiResponsesForm', () => ({
 vi.mock('../providers/AnthropicForm', () => ({
   AnthropicEditForm: () => <div>anthropic-form</div>,
 }));
+const saveRouterPreset = vi.fn();
+
 vi.mock('../providers/LlamaCppForm', () => ({
-  LlamaCppEditForm: () => <div>llama-cpp-form</div>,
+  LlamaCppEditForm: forwardRef(function MockLlamaCppEditForm(_props, ref) {
+    useImperativeHandle(ref, () => ({
+      saveRouterPreset,
+    }));
+    return <div>llama-cpp-form</div>;
+  }),
 }));
 vi.mock('../providers/GoogleGeminiForm', () => ({
   GoogleGeminiEditForm: () => <div>google-gemini-form</div>,
@@ -53,6 +61,18 @@ const openAiModel: SettingsModelDto = {
   updated: '2026-01-02T00:00:00Z',
 };
 
+const llamaModel: SettingsModelDto = {
+  modelId: 'llama/qwen',
+  displayName: 'Qwen Local',
+  description: 'local model',
+  provider: 'llama-cpp',
+  displayOrder: 2,
+  isActive: true,
+  runtimeConfigJson: JSON.stringify({ runtimeProfileId: 'qwen3_6' }),
+  created: '2026-01-01T00:00:00Z',
+  updated: '2026-01-02T00:00:00Z',
+};
+
 const profile = {
   profileId: 'openai_default',
   displayName: 'OpenAI Default',
@@ -70,6 +90,7 @@ describe('CatalogRowEditModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.settings.updateModel).mockResolvedValue(undefined as never);
+    saveRouterPreset.mockResolvedValue(undefined);
   });
 
   it('renders provider form and saves catalog edits', async () => {
@@ -102,6 +123,45 @@ describe('CatalogRowEditModal', () => {
       );
       expect(onSaved).toHaveBeenCalled();
       expect(onClose).toHaveBeenCalled();
+    });
+  });
+
+  it('saves router preset before catalog metadata for llama-cpp rows', async () => {
+    const user = userEvent.setup();
+    const callOrder: string[] = [];
+    saveRouterPreset.mockImplementation(async () => {
+      callOrder.push('router-preset');
+    });
+    vi.mocked(api.settings.updateModel).mockImplementation(async () => {
+      callOrder.push('catalog');
+      return undefined as never;
+    });
+
+    render(
+      <CatalogRowEditModal
+        model={llamaModel}
+        orderedModels={[llamaModel]}
+        profiles={[]}
+        profilesLoading={false}
+        isOpen
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('llama-cpp-form')).toBeInTheDocument();
+    const displayNameInput = screen.getByDisplayValue('Qwen Local');
+    await user.clear(displayNameInput);
+    await user.type(displayNameInput, 'Updated Qwen');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(saveRouterPreset).toHaveBeenCalled();
+      expect(api.settings.updateModel).toHaveBeenCalledWith(
+        'llama/qwen',
+        expect.objectContaining({ displayName: 'Updated Qwen' }),
+      );
+      expect(callOrder).toEqual(['router-preset', 'catalog']);
     });
   });
 

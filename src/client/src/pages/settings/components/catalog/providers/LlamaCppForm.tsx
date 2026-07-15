@@ -1,5 +1,9 @@
+import { forwardRef } from 'react';
 import type { CatalogEditState } from '../../../types';
-import { LlamaInstalledSummary } from '../../../../../features/localModelOnboarding/installed/LlamaInstalledSummary';
+import {
+  LlamaInstalledSummary,
+  type LlamaInstalledSummaryHandle,
+} from '../../../../../features/localModelOnboarding/installed/LlamaInstalledSummary';
 import { CustomHfOnboardingForm } from '../../../../../features/localModelOnboarding/advanced/CustomHfOnboardingForm';
 import { AttachAliasOnboardingForm } from '../../../../../features/localModelOnboarding/advanced/AttachAliasOnboardingForm';
 import type { ProviderAddForm, ProviderEditForm } from './types';
@@ -36,23 +40,24 @@ export function LlamaCppAddForm({
   );
 }
 
-export function LlamaCppEditForm({
-  value,
-  onChange,
-  onDetailChanged,
-  sharedProfileModelCount,
-}: Omit<ProviderEditForm, 'profiles' | 'profilesLoading' | 'inventory'> & {
-  onDetailChanged?: () => Promise<void>;
-  sharedProfileModelCount?: number;
-}) {
+export type LlamaCppEditFormHandle = LlamaInstalledSummaryHandle;
+
+export const LlamaCppEditForm = forwardRef<
+  LlamaCppEditFormHandle,
+  Omit<ProviderEditForm, 'profiles' | 'profilesLoading' | 'inventory'> & {
+    onDetailChanged?: () => Promise<void>;
+    sharedProfileModelCount?: number;
+  }
+>(function LlamaCppEditForm({ value, onChange, onDetailChanged, sharedProfileModelCount }, ref) {
   void onChange;
   return (
     <LlamaInstalledSummary
+      ref={ref}
       modelId={value.modelId}
       sharedProfileModelCount={sharedProfileModelCount}
       onChanged={onDetailChanged}
     />
   );
-}
+});
 
 export type { CatalogEditState };
