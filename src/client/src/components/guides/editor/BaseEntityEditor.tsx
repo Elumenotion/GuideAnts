@@ -1071,6 +1071,26 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
     setIsDirty(true);
   }, [formData]);
 
+  const handleCrewMemberInvocationLimitChange = useCallback(
+    (assistantId: string, maxToolCallsPerInvocation: number | undefined) => {
+      setFormData((prev) => {
+        const crewMemberInvocationLimits = {
+          ...prev.crewMemberInvocationLimits,
+          [assistantId]: maxToolCallsPerInvocation,
+        };
+        if (areFormValuesEqual(prev.crewMemberInvocationLimits, crewMemberInvocationLimits)) {
+          return prev;
+        }
+        return {
+          ...prev,
+          crewMemberInvocationLimits,
+        };
+      });
+      setIsDirty(true);
+    },
+    [],
+  );
+
   const handlePreviewMarkdown = useCallback((fileId: string) => {
     setPreviewFileId(fileId);
     setShowMarkdownPreview(true);
@@ -1298,13 +1318,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               crewMemberLimitById={formData.crewMemberLimitById}
               crewMemberInvocationLimits={formData.crewMemberInvocationLimits}
               onChange={(crewMemberIds) => updateForm({ crewMemberIds })}
-              onInvocationLimitChange={(assistantId, maxToolCallsPerInvocation) =>
-                updateForm({
-                  crewMemberInvocationLimits: {
-                    ...formData.crewMemberInvocationLimits,
-                    [assistantId]: maxToolCallsPerInvocation,
-                  },
-                })}
+              onInvocationLimitChange={handleCrewMemberInvocationLimitChange}
               onDirtyChange={() => setIsDirty(true)}
             />
           )}

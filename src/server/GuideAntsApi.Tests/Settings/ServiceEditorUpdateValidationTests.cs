@@ -363,6 +363,52 @@ public sealed class ServiceEditorUpdateValidationTests
     }
 
     [TestMethod]
+    public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForLocalImageGeneration()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+
+        await service.EnsureServiceModeExistsAsync(
+            "ImageGeneration",
+            ServiceProviderIds.ImageGenerationLocalSdHttp,
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("ImageGeneration", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "LocalServiceHosts:ImageGenerationBaseUrl", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "flux2-klein-4b-q4ks", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task EnsureServiceModeExistsAsync_DoesNotAlterExistingLocalImageMode_WhenModelIdIsNull()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildConfiguration();
+        var service = CreateService(db, configuration);
+        SeedServiceModes(db, "ImageGeneration",
+        [
+            new ServiceMode(
+                "local",
+                "LocalServiceHosts:ImageGenerationBaseUrl",
+                null,
+                null,
+                Enabled: true,
+                IsDefault: true),
+        ]);
+
+        await service.EnsureServiceModeExistsAsync(
+            "ImageGeneration",
+            ServiceProviderIds.ImageGenerationLocalSdHttp,
+            CancellationToken.None);
+
+        var modes = await service.GetServiceModesAsync("ImageGeneration", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "LocalServiceHosts:ImageGenerationBaseUrl", StringComparison.Ordinal)
+            && mode.ModelId == null);
+    }
+
+    [TestMethod]
     public async Task SetServiceModeModelIdAsync_PersistsOntoActiveEnabledDefaultMode()
     {
         await using var db = CreateDbContext();
