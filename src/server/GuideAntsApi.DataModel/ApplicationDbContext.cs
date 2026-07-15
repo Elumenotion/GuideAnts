@@ -513,7 +513,7 @@ namespace GuideAntsApi.DataModel
                     Id = new Guid("b0000000-0000-0000-0000-000000000001"),
                     ToolType = "ReadWeb",
                     DisplayName = "Read Web",
-                    Description = "Reads a web page and returns markdown of the content.",
+                    Description = "Reads a web page URL and extracts requested content from it.",
                     Category = "Search",
                     IsActive = true,
                     DisplayOrder = 1,

@@ -1,16 +1,11 @@
 using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.Attributes;
 using AntRunner.ToolCalling.Functions;
-using System.Text.RegularExpressions;
 
 namespace AntRunner.Chat;
 
 public static class AssistantToolWrappers
 {
-    private static readonly Regex HttpUrlRegex = new(
-        @"https?://[^\s<>()""']+",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
     /// <summary>
     /// Reads a web page and returns markdown of the content.
     /// </summary>
@@ -20,17 +15,20 @@ public static class AssistantToolWrappers
     )]
     [RequiresNotebookContext]
     public static async Task<ScriptExecutionResult> ReadWeb(
-        [Parameter(Description = "Required. A url to a page and a question or statement that the assitant will use to extract relevant content. Example 'what is the timeout of the foo operation? http://www.example.com/doc'")]
+        [Parameter(Description = "Required. Absolute HTTP or HTTPS URL of the page to read.", Required = true)]
+        string url,
+
+        [Parameter(Description = "Required. Question or statement describing what content to extract from the page.", Required = true)]
         string instructions,
-        
+
         [Parameter(Description = "Invocation context", Hidden = true)]
         InvocationContext? context = null)
     {
-        if (!ContainsAbsoluteHttpUrl(instructions))
+        if (!TryCreateHttpUri(url, out _))
         {
             const string errorMessage =
-                "ERROR: Missing URL for ReadWeb. Provide an absolute HTTP/HTTPS URL in `instructions` and try again. " +
-                "Example: \"Summarize this article: https://example.com/article\".";
+                "ERROR: Invalid URL for ReadWeb. Provide an absolute HTTP/HTTPS URL in `url` and try again. " +
+                "Example: \"https://example.com/article\".";
 
             return new ScriptExecutionResult
             {
@@ -39,28 +37,33 @@ public static class AssistantToolWrappers
             };
         }
 
-        var result = await Agent.Invoke("Read Web", instructions, context!);
+        if (string.IsNullOrWhiteSpace(instructions))
+        {
+            const string errorMessage =
+                "ERROR: Missing instructions for ReadWeb. Provide a question or statement in `instructions` describing what to extract from the page.";
+
+            return new ScriptExecutionResult
+            {
+                StandardOutput = errorMessage,
+                StandardError = errorMessage
+            };
+        }
+
+        var prompt = $"{instructions.Trim()}\n\n{url.Trim()}";
+        var result = await Agent.Invoke("Read Web", prompt, context!);
         return result;
     }
 
-    private static bool ContainsAbsoluteHttpUrl(string? text)
+    private static bool TryCreateHttpUri(string? url, out Uri uri)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        if (Uri.TryCreate(url, UriKind.Absolute, out uri!) &&
+            (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+             uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
         {
-            return false;
+            return true;
         }
 
-        foreach (Match match in HttpUrlRegex.Matches(text))
-        {
-            var candidate = match.Value.TrimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}');
-            if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri) &&
-                (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-                 uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-        }
-
+        uri = null!;
         return false;
     }
 }
