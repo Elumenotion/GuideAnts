@@ -27,6 +27,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="GuideAnts.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\GuideAnts.Logging\GuideAnts.Logging.csproj" />
     <ProjectReference Include="..\AntRunner.Chat.Abstractions\AntRunner.Chat.Abstractions.csproj" />
     <ProjectReference Include="..\AntRunner.ToolCalling\AntRunner.ToolCalling.csproj" />
     <ProjectReference Include="..\..\GuideAnts.Usage\GuideAnts.Usage.csproj" />

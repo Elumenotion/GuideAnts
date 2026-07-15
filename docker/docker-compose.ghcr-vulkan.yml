@@ -7,6 +7,7 @@ services:
     container_name: mssql-express
     environment:
       - ACCEPT_EULA=Y
+      - MSSQL_PID=Developer
       - MSSQL_SA_PASSWORD=${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}
     healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${GA_SQL_SA_PASSWORD:-YourStrong!Passw0rd}' -Q 'SELECT 1' -C -No | grep -q 1"]

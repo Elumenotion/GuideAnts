@@ -45,6 +45,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         await db.SaveChangesAsync();
 
         var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
         settings
             .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(
@@ -176,6 +177,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         await db.SaveChangesAsync();
 
         var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
         settings
             .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(
@@ -284,6 +286,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         await db.SaveChangesAsync();
 
         var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
         settings
             .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(
@@ -425,6 +428,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         await db.SaveChangesAsync();
 
         var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
         settings
             .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(
@@ -531,6 +535,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         var notebook = await SeedNotebookAsync(db);
 
         var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
         settings
             .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<SettingsModelDto>());
@@ -583,6 +588,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         var notebook = await SeedNotebookAsync(db);
 
         var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
         settings
             .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<SettingsModelDto>());
@@ -634,6 +640,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         var notebook = await SeedNotebookAsync(db);
 
         var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
         settings
             .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<SettingsModelDto>());
@@ -682,6 +689,88 @@ public sealed class NotebookHeaderToolbarServiceTests
             option.ModelRef == "chatterbox" && option.IsComplete);
         tts.LocalModelOptions.Should().Contain(option =>
             option.ModelRef == "OmniVoice" && !option.IsComplete);
+    }
+
+    [TestMethod]
+    public async Task GetToolbarAsync_MarksActiveImageBundle_FromPersistedServiceModes()
+    {
+        await using var db = CreateDb();
+        var notebook = await SeedNotebookAsync(db);
+        const string bundleId = "FLUX.2-dev-GGUF-Q5_K_M";
+
+        var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
+        settings
+            .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<SettingsModelDto>());
+        settings
+            .Setup(x => x.GetServiceEditorStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string serviceId, CancellationToken _) =>
+                string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)
+                    ? CreateLocalServiceState(
+                        RoutedServiceNames.ImageGeneration,
+                        ServiceProviderIds.ImageGenerationLocalSdHttp,
+                        "LocalServiceHosts:ImageGenerationBaseUrl")
+                    : CreateReadyServiceState(serviceId));
+        settings
+            .Setup(x => x.GetServiceModesAsync(RoutedServiceNames.ImageGeneration, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new ServiceModeDto(
+                    RoutedServiceNames.ImageGeneration,
+                    "local",
+                    "LocalServiceHosts:ImageGenerationBaseUrl",
+                    bundleId,
+                    null,
+                    Enabled: true,
+                    IsDefault: true),
+            ]);
+
+        var sut = CreateSut(
+            db,
+            notebook.Id,
+            settings.Object,
+            httpClientFactory: CreateHttpClientFactory(request =>
+            {
+                if (request.RequestUri?.AbsolutePath.Contains("/health", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return JsonResponse(
+                        HttpStatusCode.OK,
+                        """{"status":"ok","engine":{"processAlive":true,"healthy":true}}""");
+                }
+
+                if (request.RequestUri?.AbsolutePath.Contains("/admin/bundles", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return JsonResponse(
+                        HttpStatusCode.OK,
+                        $$"""
+                        {
+                          "items": [
+                            {"bundleId":"{{bundleId}}","complete":true,"loaded":true},
+                            {"bundleId":"flux2-klein-4b-q4ks","complete":true,"loaded":false}
+                          ]
+                        }
+                        """);
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }));
+
+        var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
+        var image = toolbar.Services.Single(service => service.Kind == "image");
+
+        image.LocalModelOptions.Should().Contain(option =>
+            option.ModelRef == bundleId && option.IsActive);
+        image.LocalModelOptions.Single(option => option.IsActive).DisplayLabel.Should().Be($"{bundleId} (active)");
+        image.Selection!.ResourceId.Should().Be(bundleId);
+        image.Summary.Should().Contain(bundleId);
+    }
+
+    private static void SetupToolbarServiceModesDefaults(Mock<IApplicationSettingsService> settings)
+    {
+        settings
+            .Setup(x => x.GetServiceModesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<ServiceModeDto>());
     }
 
     private static async Task<Notebook> SeedNotebookAsync(ApplicationDbContext db)

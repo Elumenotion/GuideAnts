@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { api } from '../../../services/api';
 import type { LlamaInstallationDetailDto, LlamaRouterEntryDto } from '../../../types/settings';
 import { getErrorMessage } from '../../../pages/settings/utils';
 import { formatBytes } from '../curated/format';
 import { ChangeQuantModal } from './ChangeQuantModal';
-import { AliasPresetSavePanel } from './AliasPresetSavePanel';
+import { AliasPresetSavePanel, type AliasPresetSavePanelHandle } from './AliasPresetSavePanel';
 import { ModelChatBehaviorPanel } from './ModelChatBehaviorPanel';
 import { TextActionButton } from '../../../pages/settings/components/shared/ActionButtons';
+
+export interface LlamaInstalledSummaryHandle {
+  saveRouterPreset: () => Promise<void>;
+}
 
 export interface LlamaInstalledSummaryProps {
   modelId: string;
@@ -14,7 +18,9 @@ export interface LlamaInstalledSummaryProps {
   onChanged?: () => Promise<void>;
 }
 
-export function LlamaInstalledSummary({ modelId, sharedProfileModelCount, onChanged }: LlamaInstalledSummaryProps) {
+export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, LlamaInstalledSummaryProps>(
+  function LlamaInstalledSummary({ modelId, sharedProfileModelCount, onChanged }, ref) {
+  const presetPanelRef = useRef<AliasPresetSavePanelHandle>(null);
   const [detail, setDetail] = useState<LlamaInstallationDetailDto | null>(null);
   const [routerEntry, setRouterEntry] = useState<LlamaRouterEntryDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,6 +53,20 @@ export function LlamaInstalledSummary({ modelId, sharedProfileModelCount, onChan
     await onChanged?.();
   };
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      saveRouterPreset: async () => {
+        const panel = presetPanelRef.current;
+        if (!panel) {
+          throw new Error('Router preset editor is still loading.');
+        }
+        await panel.saveRouterPreset();
+      },
+    }),
+    [],
+  );
+
   if (loading) {
     return <p className="text-sm text-gray-600">Loading installation detail…</p>;
   }
@@ -64,10 +84,10 @@ export function LlamaInstalledSummary({ modelId, sharedProfileModelCount, onChan
   return (
     <div className="space-y-4">
       <AliasPresetSavePanel
+        ref={presetPanelRef}
         alias={detail.routerModelId}
         routerEntry={routerEntry}
         fallbackPreset={detail.routerPresetSnapshot}
-        onSaved={handleChanged}
       />
 
       <ModelChatBehaviorPanel
@@ -148,4 +168,5 @@ export function LlamaInstalledSummary({ modelId, sharedProfileModelCount, onChan
       />
     </div>
   );
-}
+},
+);

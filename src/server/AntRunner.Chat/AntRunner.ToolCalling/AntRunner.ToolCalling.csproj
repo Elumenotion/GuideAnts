@@ -34,6 +34,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="GuideAnts.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\GuideAnts.Logging\GuideAnts.Logging.csproj" />
     <ProjectReference Include="..\..\GuideAntsApi.DataModel\GuideAntsApi.DataModel.csproj" />
   </ItemGroup>
 

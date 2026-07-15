@@ -59,6 +59,8 @@ export const WIZARD_PROVIDER_OPTIONS: readonly {
   },
 ] as const;
 
+export const DEFAULT_WIZARD_PROVIDER: AddAiServicesWizardProvider = WIZARD_PROVIDER_OPTIONS[0].id;
+
 export const FOUNDRY_CORE_SECTION = 'AzureOpenAI';
 export const GEMINI_CORE_SECTION = 'GoogleGeminiApi';
 export const OPENAI_CORE_SECTION = 'OpenAI';

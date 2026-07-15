@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Endpoints;
+using GuideAntsApi.Endpoints.Settings;
 using GuideAntsApi.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
@@ -59,6 +60,10 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         public bool IsOperational =>
             Loaded && !Loading && !PostLoadWarming && !StartupWarmupRunning;
     }
+
+    private sealed record LocalModelInventoryLoadResult(
+        IReadOnlyList<NotebookToolbarLocalModelOptionDto> Models,
+        JsonNode? Root);
 
     public async Task<NotebookHeaderToolbarDto> GetToolbarAsync(
         Guid notebookId,
@@ -502,19 +507,37 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             status = "degraded";
         }
 
-        var localModels = await TryLoadLocalModelInventoryAsync(
+        var inventory = await TryLoadLocalModelInventoryAsync(
             serviceId,
             localListPath,
             isImage,
             cancellationToken).ConfigureAwait(false);
+        var localModels = inventory.Models;
 
-        var selectedLocalRef = ResolveSelectedLocalModelRef(state, localProviderId);
+        string? selectedLocalRef;
         if (isImage)
         {
+            selectedLocalRef = await ConfiguredLocalServiceSelectionSync.ResolveOrSyncImageBundleAsync(
+                    _settings,
+                    inventory.Root is null
+                        ? null
+                        : ServiceLocalModelListEnricher.ReadConfiguredActiveBundleId(inventory.Root.ToJsonString()),
+                    cancellationToken)
+                .ConfigureAwait(false);
             localModels = MarkImageBundleSelection(localModels, selectedLocalRef);
         }
         else
         {
+            selectedLocalRef = await ConfiguredLocalServiceSelectionSync.TryReadPersistedLocalModelRefAsync(
+                    _settings,
+                    serviceId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(selectedLocalRef))
+            {
+                selectedLocalRef = ResolveSelectedLocalModelRef(state, localProviderId);
+            }
+
             localModels = MarkVoiceModelSelection(localModels, selectedLocalRef);
         }
 
@@ -778,7 +801,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         }
     }
 
-    private async Task<IReadOnlyList<NotebookToolbarLocalModelOptionDto>> TryLoadLocalModelInventoryAsync(
+    private async Task<LocalModelInventoryLoadResult> TryLoadLocalModelInventoryAsync(
         string serviceId,
         string listPath,
         bool isImage,
@@ -787,7 +810,9 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         var json = await HttpGetLocalAdminJsonAsync(serviceId, listPath, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(json))
         {
-            return Array.Empty<NotebookToolbarLocalModelOptionDto>();
+            return new LocalModelInventoryLoadResult(
+                Array.Empty<NotebookToolbarLocalModelOptionDto>(),
+                null);
         }
 
         try
@@ -795,15 +820,17 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             var node = JsonNode.Parse(json);
             if (isImage)
             {
-                return ParseImageBundles(node);
+                return new LocalModelInventoryLoadResult(ParseImageBundles(node), node);
             }
 
-            return ParseVoiceModels(node);
+            return new LocalModelInventoryLoadResult(ParseVoiceModels(node), node);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Local inventory parse for {ServiceId}", serviceId);
-            return Array.Empty<NotebookToolbarLocalModelOptionDto>();
+            return new LocalModelInventoryLoadResult(
+                Array.Empty<NotebookToolbarLocalModelOptionDto>(),
+                null);
         }
     }
 

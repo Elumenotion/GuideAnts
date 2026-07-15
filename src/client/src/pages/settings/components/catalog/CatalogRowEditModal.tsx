@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { api } from '../../../../services/api';
 import { LlamaRuntimeInventoryItemDto, SettingsModelDto, SettingsRuntimeProfileDto } from '../../../../types/settings';
 import { CatalogEditState } from '../../types';
@@ -11,7 +11,7 @@ import { AzureOpenAiChatEditForm } from './providers/AzureOpenAiChatForm';
 import { AzureOpenAiResponsesEditForm } from './providers/AzureOpenAiResponsesForm';
 import { GoogleGeminiEditForm } from './providers/GoogleGeminiForm';
 import { HuggingFaceInferenceEditForm } from './providers/HuggingFaceInferenceForm';
-import { LlamaCppEditForm } from './providers/LlamaCppForm';
+import { LlamaCppEditForm, type LlamaCppEditFormHandle } from './providers/LlamaCppForm';
 import { OpenAiChatEditForm } from './providers/OpenAiChatForm';
 import { OpenAiResponsesEditForm } from './providers/OpenAiResponsesForm';
 import { OpenRouterEditForm } from './providers/OpenRouterForm';
@@ -46,7 +46,8 @@ function renderEditForm(
   profilesLoading: boolean,
   inventory: LlamaRuntimeInventoryItemDto[] | undefined,
   sharedProfileModelCount: number,
-  onDetailChanged?: () => Promise<void>
+  onDetailChanged?: () => Promise<void>,
+  llamaFormRef?: RefObject<LlamaCppEditFormHandle | null>,
 ) {
   const props = {
     value,
@@ -69,6 +70,7 @@ function renderEditForm(
     case 'llama-cpp':
       return (
         <LlamaCppEditForm
+          ref={llamaFormRef}
           {...props}
           sharedProfileModelCount={sharedProfileModelCount}
           onDetailChanged={onDetailChanged}
@@ -98,6 +100,7 @@ export function CatalogRowEditModal({
   const [value, setValue] = useState<CatalogEditState | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const llamaFormRef = useRef<LlamaCppEditFormHandle>(null);
 
   useEffect(() => {
     if (!isOpen || !model) {
@@ -118,6 +121,9 @@ export function CatalogRowEditModal({
     setSaving(true);
     setError(null);
     try {
+      if (value.provider === 'llama-cpp') {
+        await llamaFormRef.current?.saveRouterPreset();
+      }
       const selectedProfile = profiles.find((profile) => profile.profileId === value.runtimeProfileId.trim());
       const request = buildCatalogEditRequest(value, {
         runtimeConfigJson: model.runtimeConfigJson ?? undefined,
@@ -222,6 +228,7 @@ export function CatalogRowEditModal({
                 parseRuntimeProfileId(model?.runtimeConfigJson) ?? value.runtimeProfileId,
               ),
               onSaved,
+              llamaFormRef,
             )}
           </div>
 

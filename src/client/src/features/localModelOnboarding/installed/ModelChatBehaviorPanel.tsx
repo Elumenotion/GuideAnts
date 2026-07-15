@@ -6,6 +6,7 @@ import {
   buildProfileUpdateRequest,
   createProfileFormFromContractShape,
 } from '../../../pages/settings/utils';
+import { ConfirmationDialog } from '../../../components/common/ConfirmationDialog';
 import { RuntimeProfileEditor } from '../../../pages/settings/components/RuntimeProfileEditor';
 import { TextActionButton } from '../../../pages/settings/components/shared/ActionButtons';
 import type { ProfileFormState } from '../../../pages/settings/types';
@@ -32,6 +33,7 @@ export function ModelChatBehaviorPanel({
   const [documentError, setDocumentError] = useState<string | null>(null);
   const [repairOpen, setRepairOpen] = useState(false);
   const [adoptOpen, setAdoptOpen] = useState(false);
+  const [sharedProfileSaveConfirmOpen, setSharedProfileSaveConfirmOpen] = useState(false);
 
   const isCurated = !!detail.catalogId;
 
@@ -64,15 +66,6 @@ export function ModelChatBehaviorPanel({
       return;
     }
 
-    if (sharedProfileModelCount > 1) {
-      const confirmed = window.confirm(
-        `This updates chat behavior for all models using profile ${detail.runtimeProfileId}. Continue?`,
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
-
     setDocumentSaving(true);
     setDocumentError(null);
     setDocumentMessage(null);
@@ -86,6 +79,17 @@ export function ModelChatBehaviorPanel({
     } finally {
       setDocumentSaving(false);
     }
+  };
+
+  const requestSaveProfileDocument = () => {
+    if (!profileForm) {
+      return;
+    }
+    if (sharedProfileModelCount > 1) {
+      setSharedProfileSaveConfirmOpen(true);
+      return;
+    }
+    void saveProfileDocument();
   };
 
   const handleLifecycleCompleted = async () => {
@@ -137,7 +141,7 @@ export function ModelChatBehaviorPanel({
               value={profileForm}
               onChange={handleProfileFormChange}
               disableIdentityFields
-              onSubmit={() => void saveProfileDocument()}
+              onSubmit={requestSaveProfileDocument}
               submitting={documentSaving}
               submitLabel="Save profile document"
             />
@@ -166,6 +170,19 @@ export function ModelChatBehaviorPanel({
           setAdoptOpen(false);
           await handleLifecycleCompleted();
         }}
+      />
+      <ConfirmationDialog
+        isOpen={sharedProfileSaveConfirmOpen}
+        onClose={() => setSharedProfileSaveConfirmOpen(false)}
+        onConfirm={() => {
+          setSharedProfileSaveConfirmOpen(false);
+          void saveProfileDocument();
+        }}
+        title="Update shared profile"
+        message={`This updates chat behavior for all models using profile ${detail.runtimeProfileId}.`}
+        confirmText="Save profile document"
+        confirmButtonClass="bg-blue-600 hover:bg-blue-700 text-white"
+        isLoading={documentSaving}
       />
     </div>
   );

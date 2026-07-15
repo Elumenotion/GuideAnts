@@ -167,7 +167,7 @@ Skill body content
     {
         AssistantUtility.ClearCache(guideName);
         var cacheType = typeof(AssistantUtility).GetNestedType("CachedAssistant", BindingFlags.NonPublic)!;
-        var entry = Activator.CreateInstance(cacheType, definition, null, DateTime.UtcNow)!;
+        var entry = Activator.CreateInstance(cacheType, definition)!;
         var cache = typeof(AssistantUtility)
             .GetField("AssistantDefinitionCache", BindingFlags.Static | BindingFlags.NonPublic)!
             .GetValue(null)!;

@@ -91,4 +91,34 @@ describe('ModelChatBehaviorPanel', () => {
       );
     });
   });
+
+  it('confirms before saving a shared runtime profile', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.updateRuntimeProfile).mockResolvedValue({
+      profileId: 'qwen3_6',
+      displayName: 'Qwen 3.6',
+      combineSystemAndDeveloperMessages: true,
+      samplingParametersJson: '{}',
+      thinkingControlJson: '{}',
+      requestFieldsWhenToolsPresentJson: '{}',
+      providers: ['llama-cpp'],
+      created: '2026-01-01T00:00:00Z',
+    } as never);
+
+    render(<ModelChatBehaviorPanel detail={detail as never} sharedProfileModelCount={2} />);
+    await screen.findByText('Qwen 3.6');
+
+    await user.click(screen.getByText('Edit profile document (advanced)'));
+    await user.click(screen.getByRole('button', { name: 'Save profile document' }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Update shared profile' })).toBeInTheDocument();
+    expect(api.settings.updateRuntimeProfile).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('confirm'));
+
+    await waitFor(() => {
+      expect(api.settings.updateRuntimeProfile).toHaveBeenCalledWith('qwen3_6', expect.any(Object));
+    });
+  });
 });

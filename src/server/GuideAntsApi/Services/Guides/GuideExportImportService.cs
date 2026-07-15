@@ -1111,6 +1111,12 @@ public class GuideExportImportService : IGuideExportImportService
             await _assistantSkillMetaSync.SyncAssistantAsync(assistantId);
         }
 
+        AssistantDefinitionCacheInvalidator.Invalidate(guideName);
+        foreach (var assistantName in customAssistantIds.Keys)
+        {
+            AssistantDefinitionCacheInvalidator.Invalidate(assistantName);
+        }
+
         return new ImportGuideResultDto(
             true,
             guideId,
@@ -1201,6 +1207,8 @@ public class GuideExportImportService : IGuideExportImportService
         // Create markdown shadows and enqueue indexing jobs for imported files
         await CreateMarkdownShadowsForAssistantAsync(assistantId);
         await _assistantSkillMetaSync.SyncAssistantAsync(assistantId);
+
+        AssistantDefinitionCacheInvalidator.Invalidate(name);
 
         return new ImportGuideResultDto(
             true,

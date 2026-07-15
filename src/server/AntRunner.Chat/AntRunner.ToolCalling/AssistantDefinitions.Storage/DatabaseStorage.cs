@@ -2,6 +2,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using AntRunner.ToolCalling.Functions;
@@ -14,6 +15,8 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
     public class DatabaseStorage
     {
         public const int MaxSkillsPerAssistant = 50;
+
+        private static readonly ILogger Logger = ToolCallingDiagnostics.CreateLogger<DatabaseStorage>();
 
         /// <summary>
         /// Creates a new ApplicationDbContext instance using connection string from environment.
@@ -28,7 +31,11 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
             }
 
             var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
-            optionsBuilder.UseSqlServer(connectionString);
+            optionsBuilder.UseSqlServer(connectionString, sqlOptions =>
+            {
+                sqlOptions.EnableRetryOnFailure(maxRetryCount: 5, maxRetryDelay: TimeSpan.FromSeconds(10), errorNumbersToAdd: null);
+                sqlOptions.CommandTimeout(60);
+            });
             return new ApplicationDbContext(optionsBuilder.Options);
         }
 
@@ -133,33 +140,46 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
         /// </summary>
         public static async Task<AssistantStorageMetadata?> GetAssistant(string assistantName)
         {
+            ApplicationDbContext context;
             try
             {
-                using var context = CreateContext();
-                
-                var assistant = await context.Assistants
-                    .AsNoTracking()
-                    .Include(a => a.Model)
-                    .Include(a => a.Tools).ThenInclude(t => t.Tool)
-                    .Include(a => a.OpenApiSchemas).ThenInclude(s => s.Operations)
-                    .Include(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider)
-                    .Include(a => a.Files)
-                    .Include(a => a.SkillMetas)
-                    .Include(a => a.ContextOptions)
-                    .Include(a => a.ConversationStarters)
-                    .Include(a => a.CrewMembers).ThenInclude(m => m.Assistant)
-                    .Where(a => a.Name == assistantName && a.IsActive)
-                    .OrderBy(a => a.IsGlobal)
-                    .FirstOrDefaultAsync();
-
-                if (assistant == null) return null;
-
-                // Materialize to AssistantDefinition format
-                return MaterializeAssistant(assistant);
+                context = CreateContext();
             }
-            catch
+            catch (InvalidOperationException ex)
             {
+                Logger.LogError(ex, "Database context is not configured for assistant load");
                 return null;
+            }
+
+            try
+            {
+                await using (context)
+                {
+                    var assistant = await context.Assistants
+                        .AsNoTracking()
+                        .AsSplitQuery()
+                        .Include(a => a.Model)
+                        .Include(a => a.Tools).ThenInclude(t => t.Tool)
+                        .Include(a => a.OpenApiSchemas).ThenInclude(s => s.Operations)
+                        .Include(a => a.OpenApiSchemas).ThenInclude(s => s.AuthProvider)
+                        .Include(a => a.Files)
+                        .Include(a => a.SkillMetas)
+                        .Include(a => a.ContextOptions)
+                        .Include(a => a.ConversationStarters)
+                        .Include(a => a.CrewMembers).ThenInclude(m => m.Assistant)
+                        .Where(a => a.Name == assistantName && a.IsActive)
+                        .OrderBy(a => a.IsGlobal)
+                        .FirstOrDefaultAsync();
+
+                    if (assistant == null) return null;
+
+                    return MaterializeAssistant(assistant);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to load assistant {AssistantName} from database", LogValueSanitizer.Sanitize(assistantName));
+                throw;
             }
         }
 

@@ -20,7 +20,7 @@ interface CreateEditScheduledJobDialogProps {
   projectId: string;
   isOpen: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (job: ProjectScheduledJobDetailDto) => void;
   notebooks: ProjectNotebook[];
   job?: ProjectScheduledJobDetailDto | null;
   disabled?: boolean;
@@ -293,12 +293,10 @@ export function CreateEditScheduledJobDialog({
     setIsSubmitting(true);
     setError(null);
     try {
-      if (job) {
-        await scheduledJobsApi.update(projectId, job.id, payload);
-      } else {
-        await scheduledJobsApi.create(projectId, payload);
-      }
-      onSaved();
+      const saved = job
+        ? await scheduledJobsApi.update(projectId, job.id, payload)
+        : await scheduledJobsApi.create(projectId, payload);
+      onSaved(saved);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save scheduled job');

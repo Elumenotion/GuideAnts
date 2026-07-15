@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { PublishGuideDialog } from '../PublishGuideDialog';
 
@@ -71,5 +71,40 @@ describe('PublishGuideDialog general flow', () => {
     await user.click(screen.getAllByRole('button', { name: 'Deactivate' })[0]);
     await user.click(screen.getAllByRole('button', { name: 'Deactivate' })[1]);
     expect(onDeactivate).toHaveBeenCalled();
+  });
+
+  it('shows an inline validation error when public URL and auth conflict on form submit', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+
+    render(
+      <PublishGuideDialog
+        guideName="Demo Guide"
+        guideId="guide-1"
+        publishedGuide={{
+          id: 'pub-1',
+          guideId: 'guide-1',
+          guideName: 'Demo Guide',
+          notebookId: 'notebook-1',
+          projectId: 'project-1',
+          friendlyName: 'demo-guide',
+          created: '2026-01-01T00:00:00Z',
+          active: true,
+        }}
+        onUpdate={onUpdate}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Auth' }));
+    const webhookInput = screen.getByLabelText(/authentication webhook url/i);
+    await user.type(webhookInput, 'https://example.com/auth');
+
+    const form = document.querySelector('form');
+    expect(form).toBeTruthy();
+    fireEvent.submit(form!);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/cannot have both a public url/i);
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 });

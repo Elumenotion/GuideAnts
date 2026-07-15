@@ -3,6 +3,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Moq;
 using FluentAssertions;
+using AntRunner.Chat;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Conversations;
@@ -19,6 +20,7 @@ public class ConversationManagerTests
     private IMemoryCache _cache = null!;
     private Mock<ILogger<ConversationManager>> _loggerMock = null!;
     private ConversationManager _manager = null!;
+    private string? _originalConnectionString;
 
     private Guid _conversationId;
     private Guid _notebookId;
@@ -27,6 +29,11 @@ public class ConversationManagerTests
     [TestInitialize]
     public void Setup()
     {
+        const string connectionStringKey = "ConnectionStrings:DefaultConnection";
+        _originalConnectionString = Environment.GetEnvironmentVariable(connectionStringKey);
+        Environment.SetEnvironmentVariable(connectionStringKey, null);
+        AssistantUtility.ClearAllCache();
+
         // Generate unique IDs for each test
         _conversationId = Guid.NewGuid();
         _notebookId = Guid.NewGuid();
@@ -65,6 +72,8 @@ public class ConversationManagerTests
     [TestCleanup]
     public void Cleanup()
     {
+        Environment.SetEnvironmentVariable("ConnectionStrings:DefaultConnection", _originalConnectionString);
+        AssistantUtility.ClearAllCache();
         _context.Database.EnsureDeleted();
         _context.Dispose();
         _cache.Dispose();

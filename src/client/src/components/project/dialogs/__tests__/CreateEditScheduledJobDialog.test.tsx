@@ -101,7 +101,7 @@ describe('CreateEditScheduledJobDialog', () => {
         }),
       );
     });
-    expect(onSaved).toHaveBeenCalled();
+    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-new' }));
     expect(onClose).toHaveBeenCalled();
   });
 
