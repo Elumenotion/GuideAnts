@@ -56,7 +56,7 @@ export function ScheduleBuilder({
             id="hourly-interval"
             type="number"
             min={1}
-            max={59}
+            max={60}
             value={schedule.hourlyIntervalMinutes ?? 60}
             onChange={(e) => update({ hourlyIntervalMinutes: Number(e.target.value) })}
             disabled={disabled}
