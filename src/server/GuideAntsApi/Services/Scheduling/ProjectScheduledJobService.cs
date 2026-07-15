@@ -251,9 +251,10 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
         pageSize = Math.Clamp(pageSize, 1, 100);
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        await EnsureJobBelongsToProjectAsync(db, projectId, jobId, cancellationToken);
 
         var query = db.ProjectScheduledJobRuns.AsNoTracking()
-            .Where(r => r.ScheduledJobId == jobId && r.ScheduledJob.ProjectId == projectId);
+            .Where(r => r.ScheduledJobId == jobId);
 
         var total = await query.CountAsync(cancellationToken);
         var items = await query
@@ -281,10 +282,11 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
         CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        await EnsureJobBelongsToProjectAsync(db, projectId, jobId, cancellationToken);
 
         var run = await db.ProjectScheduledJobRuns.AsNoTracking()
             .FirstOrDefaultAsync(
-                r => r.Id == runId && r.ScheduledJobId == jobId && r.ScheduledJob.ProjectId == projectId,
+                r => r.Id == runId && r.ScheduledJobId == jobId,
                 cancellationToken);
 
         return run == null
@@ -300,6 +302,19 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
                 run.StandardError,
                 run.CreatedConversationId,
                 run.ExitCode);
+    }
+
+    private static async Task EnsureJobBelongsToProjectAsync(
+        ApplicationDbContext db,
+        Guid projectId,
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        if (!await db.ProjectScheduledJobs.AsNoTracking()
+                .AnyAsync(j => j.Id == jobId && j.ProjectId == projectId, cancellationToken))
+        {
+            throw new KeyNotFoundException($"Scheduled job {jobId} was not found.");
+        }
     }
 
     private static async Task<ScheduledJobDetailRow?> LoadJobDetailRowAsync(
