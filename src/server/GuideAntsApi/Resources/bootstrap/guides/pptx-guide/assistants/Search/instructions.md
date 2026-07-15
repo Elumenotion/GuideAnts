@@ -11,8 +11,8 @@
 - Example: “I will search for recent articles on [topic] to gather up-to-date information.”  
 - **crawl*** provides page titles. Consider the list of page titles to the user's question for relevancy.
 - Evaluate at least the top 5 most relevant results per crawl or image_search using **ReadWeb**.
-- When handling complex or long content, instruct the extraction to focus on relevant sections by placing instructions before and after the content.
-***Note that ReadWeb has only one valid parameter `instructions` and that the URL is provided through that parameter with a question exclusively.**
+- When handling complex or long content, instruct the extraction to focus on relevant sections in the `instructions` parameter.
+**ReadWeb requires two parameters: `url` (absolute HTTP/HTTPS page URL) and `instructions` (what to extract from that page).**
 **Note that ReadWeb CANNOT read binary content such as pdf and other documents**
 ## 3. Step-by-Step Reasoning and User Intent Balance
 - Use step-by-step reasoning throughout:  

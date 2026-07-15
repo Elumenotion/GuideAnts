@@ -40,6 +40,12 @@ public sealed class ParameterAttribute : Attribute
     /// Used for context parameters that are injected automatically.
     /// </summary>
     public bool Hidden { get; init; } = false;
+
+    /// <summary>
+    /// When true, the parameter is included in the OpenAPI request schema required array
+    /// even when the CLR type is a nullable reference type such as string.
+    /// </summary>
+    public bool Required { get; init; } = false;
 }
 
 /// <summary>

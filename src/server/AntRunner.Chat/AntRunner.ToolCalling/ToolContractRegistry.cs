@@ -231,8 +231,9 @@ public static class ToolContractRegistry
             var propertySchema = BuildParameterSchema(parameter, paramAttr);
             properties[parameter.Name!] = propertySchema;
             
-            // Add to required if no default value and not nullable
-            if (!parameter.HasDefaultValue && !IsNullableType(parameter.ParameterType))
+            // Add to required when explicitly marked or when no default and non-nullable value type.
+            if (paramAttr?.Required == true ||
+                (!parameter.HasDefaultValue && !IsNullableType(parameter.ParameterType)))
             {
                 required.Add(parameter.Name!);
             }

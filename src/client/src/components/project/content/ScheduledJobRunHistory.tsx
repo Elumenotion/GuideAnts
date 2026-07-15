@@ -24,6 +24,14 @@ interface ScheduledJobRunHistoryProps {
   onActivityChange?: (active: boolean) => void;
 }
 
+interface ScheduledJobRunTriggeredEventDetail {
+  jobId: string;
+  sourceId?: string;
+}
+
+const POLL_WINDOW_MS = 120_000;
+const POLL_INTERVAL_MS = 2000;
+
 function statusClassName(status: ProjectScheduledJobRunSummaryDto['status']): string {
   switch (status) {
     case 'Running':
@@ -68,7 +76,14 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
   /** Set when the user explicitly picks a row; blocks auto-follow from overriding their choice. */
   const userPinnedRunIdRef = useRef<string | null>(null);
   const selectedRunRef = useRef<ProjectScheduledJobRunDetailDto | null>(null);
+  const pageRef = useRef(page);
+  const currentTopRunIdRef = useRef<string | null>(null);
+  const expectedNewTopRunIdRef = useRef<string | null>(null);
+  const eventSourceIdRef = useRef(`scheduled-job-run-history-${Math.random().toString(36).slice(2)}`);
   const pageSize = 10;
+
+  pageRef.current = page;
+  currentTopRunIdRef.current = runs[0]?.id ?? null;
 
   const refreshTimingFields = useCallback(async () => {
     if (!onTimingFieldsUpdate) {
@@ -87,15 +102,20 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     }
   }, [projectId, jobId, onTimingFieldsUpdate]);
 
-  const loadRuns = useCallback(async (options?: { silent?: boolean }) => {
+  const loadRuns = useCallback(async (options?: { silent?: boolean; pageOverride?: number }) => {
+    const targetPage = options?.pageOverride ?? pageRef.current;
+
     if (!options?.silent) {
       setIsLoadingRuns(true);
     }
 
     try {
-      const result = await scheduledJobsApi.listRuns(projectId, jobId, page, pageSize);
+      const result = await scheduledJobsApi.listRuns(projectId, jobId, targetPage, pageSize);
       setRuns(result.items);
       setTotalCount(result.totalCount);
+      if (options?.pageOverride != null && options.pageOverride !== pageRef.current) {
+        setPage(options.pageOverride);
+      }
       return result.items;
     } catch (err) {
       onError?.(err instanceof Error ? err.message : 'Failed to load run history');
@@ -105,7 +125,7 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
         setIsLoadingRuns(false);
       }
     }
-  }, [projectId, jobId, page, onError]);
+  }, [projectId, jobId, onError]);
 
   const openRunDetail = useCallback(async (
     runId: string,
@@ -113,6 +133,7 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
   ) => {
     if (options?.userInitiated) {
       userPinnedRunIdRef.current = runId;
+      followRunningRunRef.current = false;
     }
 
     try {
@@ -134,11 +155,14 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
 
   const beginPolling = useCallback(() => {
     followRunningRunRef.current = true;
-    setPollRunsUntil(Date.now() + 120_000);
+    expectedNewTopRunIdRef.current = currentTopRunIdRef.current;
+    setPollRunsUntil(Date.now() + POLL_WINDOW_MS);
     setPage(1);
     userPinnedRunIdRef.current = null;
     setSelectedRun(null);
-  }, []);
+    void loadRuns({ silent: true, pageOverride: 1 });
+    void refreshTimingFields();
+  }, [loadRuns, refreshTimingFields]);
 
   const triggerRunNow = useCallback(async () => {
     if (!canRun || isStartingRun) {
@@ -149,15 +173,18 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     try {
       await scheduledJobsApi.runNow(projectId, jobId);
       beginPolling();
-      window.dispatchEvent(new CustomEvent('scheduled-job-run-triggered', { detail: { jobId } }));
-      void loadRuns({ silent: true });
-      void refreshTimingFields();
+      window.dispatchEvent(new CustomEvent<ScheduledJobRunTriggeredEventDetail>('scheduled-job-run-triggered', {
+        detail: {
+          jobId,
+          sourceId: eventSourceIdRef.current,
+        },
+      }));
     } catch (err) {
       onError?.(err instanceof Error ? err.message : 'Failed to start job run');
     } finally {
       setIsStartingRun(false);
     }
-  }, [beginPolling, canRun, isStartingRun, jobId, loadRuns, onError, projectId, refreshTimingFields]);
+  }, [beginPolling, canRun, isStartingRun, jobId, onError, projectId]);
 
   useEffect(() => {
     setPage(1);
@@ -165,6 +192,7 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     setPollRunsUntil(null);
     runOnOpenSessionRef.current = { jobId: null, triggered: false };
     followRunningRunRef.current = false;
+    expectedNewTopRunIdRef.current = null;
     userPinnedRunIdRef.current = null;
   }, [projectId, jobId]);
 
@@ -175,7 +203,7 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
 
   useEffect(() => {
     void loadRuns();
-  }, [loadRuns]);
+  }, [loadRuns, page]);
 
   useEffect(() => {
     selectedRunRef.current = selectedRun;
@@ -197,46 +225,62 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
 
   useEffect(() => {
     const handleRunTriggered = (event: Event) => {
-      const detail = (event as CustomEvent<{ jobId: string }>).detail;
+      const detail = (event as CustomEvent<ScheduledJobRunTriggeredEventDetail>).detail;
       if (detail?.jobId !== jobId) {
         return;
       }
+      if (detail?.sourceId === eventSourceIdRef.current) {
+        return;
+      }
       beginPolling();
-      void loadRuns({ silent: true });
-      void refreshTimingFields();
     };
 
     window.addEventListener('scheduled-job-run-triggered', handleRunTriggered);
     return () => window.removeEventListener('scheduled-job-run-triggered', handleRunTriggered);
-  }, [beginPolling, jobId, loadRuns, refreshTimingFields]);
+  }, [beginPolling, jobId]);
 
   const hasRunningRun = runs.some((run) => run.status === 'Running');
   const latestRun = runs[0] ?? null;
-  const isActive = isStartingRun || hasRunningRun || pollRunsUntil != null;
+  const isPolling = pollRunsUntil != null && Date.now() < pollRunsUntil;
+  const isActive = isStartingRun || hasRunningRun || isPolling;
 
   useEffect(() => {
     onActivityChange?.(isActive);
   }, [isActive, onActivityChange]);
 
   useEffect(() => {
-    if (!hasRunningRun && !isStartingRun) {
-      followRunningRunRef.current = false;
+    if (!isPolling) {
+      return;
     }
-  }, [hasRunningRun, isStartingRun]);
 
-  useEffect(() => {
-    if (!hasRunningRun && !isStartingRun && pollRunsUntil != null) {
+    const remaining = pollRunsUntil! - Date.now();
+    if (remaining <= 0) {
       setPollRunsUntil(null);
+      return;
     }
-  }, [hasRunningRun, isStartingRun, pollRunsUntil]);
+
+    const timeoutId = window.setTimeout(() => {
+      setPollRunsUntil(null);
+      followRunningRunRef.current = false;
+    }, remaining);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isPolling, pollRunsUntil]);
 
   useEffect(() => {
-    const shouldPoll = hasRunningRun || isStartingRun || pollRunsUntil != null;
+    if (!hasRunningRun && !isStartingRun && !isPolling) {
+      followRunningRunRef.current = false;
+      expectedNewTopRunIdRef.current = null;
+    }
+  }, [hasRunningRun, isStartingRun, isPolling]);
+
+  useEffect(() => {
+    const shouldPoll = hasRunningRun || isStartingRun || isPolling;
     if (!shouldPoll) {
       return;
     }
 
-    const intervalId = window.setInterval(() => {
+    const tick = () => {
       void loadRuns({ silent: true });
       void refreshTimingFields();
 
@@ -244,10 +288,12 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
       if (current?.status === 'Running') {
         void openRunDetail(current.id, { silent: true });
       }
-    }, 3000);
+    };
 
+    tick();
+    const intervalId = window.setInterval(tick, POLL_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, [hasRunningRun, isStartingRun, pollRunsUntil, loadRuns, openRunDetail, refreshTimingFields]);
+  }, [hasRunningRun, isStartingRun, isPolling, loadRuns, openRunDetail, refreshTimingFields]);
 
   useEffect(() => {
     if (!followRunningRunRef.current || userPinnedRunIdRef.current) {
@@ -255,12 +301,26 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     }
 
     const runningRun = runs.find((run) => run.status === 'Running');
-    if (!runningRun || selectedRun?.id === runningRun.id) {
+    if (runningRun) {
+      expectedNewTopRunIdRef.current = runningRun.id;
+      if (selectedRun?.id !== runningRun.id) {
+        void openRunDetail(runningRun.id, { silent: true });
+      }
       return;
     }
 
-    void openRunDetail(runningRun.id, { silent: true });
-  }, [openRunDetail, runs, selectedRun]);
+    if (!isPolling) {
+      return;
+    }
+
+    const newestRun = runs[0];
+    if (!newestRun || selectedRun?.id === newestRun.id || newestRun.id === expectedNewTopRunIdRef.current) {
+      return;
+    }
+
+    expectedNewTopRunIdRef.current = newestRun.id;
+    void openRunDetail(newestRun.id, { silent: true });
+  }, [isPolling, openRunDetail, runs, selectedRun]);
 
   const openConversation = (conversationId: string) => {
     navigate(`/projects/${projectId}/notebooks/${notebookId}`, {
@@ -275,7 +335,7 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
 
   const content = (
     <>
-      {(isStartingRun || hasRunningRun) && (
+      {(isStartingRun || hasRunningRun || isPolling) && (
         <div className={`${embedded ? 'px-6' : 'px-4'} pt-4`}>
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-md flex items-start gap-3">
             <svg className="w-5 h-5 text-blue-600 animate-spin mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" aria-hidden="true">
@@ -285,7 +345,11 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
             <div className="min-w-0 flex-1 space-y-2">
               <div>
                 <p className="text-sm font-medium text-blue-900">
-                  {isStartingRun ? 'Starting run…' : 'Run in progress'}
+                  {isStartingRun
+                    ? 'Starting run…'
+                    : hasRunningRun
+                      ? 'Run in progress'
+                      : 'Waiting for run to appear…'}
                 </p>
                 <p className="text-xs text-blue-700">
                   Status updates automatically. You can close this dialog and the job will keep running.
@@ -310,7 +374,7 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
           <p className="text-sm text-gray-500">Loading runs…</p>
         ) : runs.length === 0 ? (
           <p className="text-sm text-gray-500">
-            {isStartingRun ? 'Waiting for the run to appear…' : 'No runs recorded yet.'}
+            {isStartingRun || isPolling ? 'Waiting for the run to appear…' : 'No runs recorded yet.'}
           </p>
         ) : (
           <table className="min-w-full text-sm">

@@ -141,14 +141,14 @@ public sealed class ProjectScheduledJobSchedulerTests
     }
 
     [TestMethod]
-    public async Task EnqueueManualRunAsync_ThrowsWhenRunAlreadyInProgress()
+    public async Task EnqueueManualRunAsync_ReconcilesOrphanedRunAndEnqueuesManualRun()
     {
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"manual-overlap-{Guid.NewGuid():N}");
+        var projectId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
         await using (var db = new ApplicationDbContext(options))
         {
-            var projectId = Guid.NewGuid();
-            var notebookId = Guid.NewGuid();
-            var jobId = Guid.NewGuid();
             db.Projects.Add(new Project { Id = projectId, Title = "Project", Slug = $"proj-{Guid.NewGuid():N}" });
             db.Notebooks.Add(new Notebook
             {
@@ -179,17 +179,93 @@ public sealed class ProjectScheduledJobSchedulerTests
                 StartedUtc = DateTime.UtcNow
             });
             await db.SaveChangesAsync();
-
-            var service = new ProjectScheduledJobService(
-                new TestDbContextFactory(options),
-                new ScheduleBuilderService(),
-                new CronScheduleService(),
-                new CapturingJobQueueService());
-
-            var act = () => service.EnqueueManualRunAsync(projectId, jobId);
-            await act.Should().ThrowAsync<InvalidOperationException>()
-                .WithMessage("*already in progress*");
         }
+
+        var queue = new CapturingJobQueueService();
+        var service = new ProjectScheduledJobService(
+            new TestDbContextFactory(options),
+            new ScheduleBuilderService(),
+            new CronScheduleService(),
+            queue);
+
+        await service.EnqueueManualRunAsync(projectId, jobId);
+
+        queue.Enqueued.Should().ContainSingle();
+        queue.Enqueued[0].JobType.Should().Be(ProjectScheduledJobExecutionJob.JobType);
+        var payload = queue.Enqueued[0].Payload.Should().BeOfType<ProjectScheduledJobExecutionJob>().Subject;
+        payload.ScheduledJobId.Should().Be(jobId);
+        payload.TriggeredBy.Should().Be(ProjectScheduledJobTrigger.Manual.ToString());
+
+        await using var verifyDb = new ApplicationDbContext(options);
+        var run = await verifyDb.ProjectScheduledJobRuns.SingleAsync(r => r.ScheduledJobId == jobId);
+        run.Status.Should().Be(ProjectScheduledJobRunStatus.Failed);
+        run.CompletedUtc.Should().NotBeNull();
+        run.ErrorMessage.Should().Contain("process restart");
+    }
+
+    [TestMethod]
+    public async Task EnqueueManualRunAsync_ThrowsWhenRunAlreadyInProgressAndQueueItemIsProcessing()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"manual-overlap-processing-{Guid.NewGuid():N}");
+        var projectId = Guid.NewGuid();
+        var notebookId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+
+        await using (var db = new ApplicationDbContext(options))
+        {
+            db.Projects.Add(new Project { Id = projectId, Title = "Project", Slug = $"proj-{Guid.NewGuid():N}" });
+            db.Notebooks.Add(new Notebook
+            {
+                Id = notebookId,
+                ProjectId = projectId,
+                Title = "Notebook",
+                Slug = $"nb-{Guid.NewGuid():N}"
+            });
+            db.ProjectScheduledJobs.Add(new ProjectScheduledJob
+            {
+                Id = jobId,
+                ProjectId = projectId,
+                NotebookId = notebookId,
+                Name = "Overlap test",
+                JobType = ProjectScheduledJobType.NewConversation,
+                CronExpression = "0 9 * * *",
+                TimeZoneId = "UTC",
+                Prompt = "hello",
+                AssistantName = "assistant",
+                CreatedByUserId = Guid.NewGuid(),
+                RowVersion = DefaultRowVersion
+            });
+            db.ProjectScheduledJobRuns.Add(new ProjectScheduledJobRun
+            {
+                ScheduledJobId = jobId,
+                TriggeredBy = ProjectScheduledJobTrigger.Manual,
+                Status = ProjectScheduledJobRunStatus.Running,
+                StartedUtc = DateTime.UtcNow
+            });
+            db.JobQueue.Add(new JobQueue
+            {
+                JobType = ProjectScheduledJobExecutionJob.JobType,
+                PayloadJson = System.Text.Json.JsonSerializer.Serialize(
+                    new ProjectScheduledJobExecutionJob(jobId, ProjectScheduledJobTrigger.Manual.ToString())),
+                Status = JobStatus.Processing,
+                RowVersion = DefaultRowVersion
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new ProjectScheduledJobService(
+            new TestDbContextFactory(options),
+            new ScheduleBuilderService(),
+            new CronScheduleService(),
+            new CapturingJobQueueService());
+
+        var act = () => service.EnqueueManualRunAsync(projectId, jobId);
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already in progress*");
+
+        await using var verifyDb = new ApplicationDbContext(options);
+        var run = await verifyDb.ProjectScheduledJobRuns.SingleAsync(r => r.ScheduledJobId == jobId);
+        run.Status.Should().Be(ProjectScheduledJobRunStatus.Running);
     }
 
     private static async Task<(IServiceScopeFactory ScopeFactory, Guid JobId)> CreateSchedulerScopeAsync(

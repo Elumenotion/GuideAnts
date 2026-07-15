@@ -211,20 +211,18 @@ public sealed class ProjectScheduledJobService : IProjectScheduledJobService
     public async Task EnqueueManualRunAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var state = await db.ProjectScheduledJobs.AsNoTracking()
-            .Where(j => j.Id == jobId && j.ProjectId == projectId)
-            .Select(j => new
-            {
-                HasRunningRun = j.Runs.Any(r => r.Status == ProjectScheduledJobRunStatus.Running)
-            })
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (state == null)
+        var exists = await db.ProjectScheduledJobs.AsNoTracking()
+            .AnyAsync(j => j.Id == jobId && j.ProjectId == projectId, cancellationToken);
+        if (!exists)
         {
             throw new KeyNotFoundException($"Scheduled job {jobId} was not found.");
         }
 
-        if (state.HasRunningRun)
+        var gate = await ProjectScheduledJobInFlightGuard.ReconcileBeforeExecutionAsync(
+            db,
+            jobId,
+            cancellationToken);
+        if (gate == ProjectScheduledJobExecutionGate.SkipDuplicate)
         {
             throw new InvalidOperationException("A run is already in progress for this scheduled job.");
         }
