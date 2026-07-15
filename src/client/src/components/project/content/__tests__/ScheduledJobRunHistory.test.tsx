@@ -108,6 +108,72 @@ describe('ScheduledJobRunHistory', () => {
     }, { timeout: 2000 });
   });
 
+  it('reloads page 1 when a run is triggered from elsewhere', async () => {
+    let listCalls = 0;
+    vi.mocked(scheduledJobsApi.listRuns).mockImplementation(async (_projectId, _jobId, page) => {
+      listCalls += 1;
+      if (listCalls === 1) {
+        return {
+          items: [
+            {
+              id: 'run-old',
+              triggeredBy: 'Schedule',
+              startedUtc: '2026-07-15T17:30:00Z',
+              status: 'Failed',
+            },
+          ],
+          totalCount: 1,
+          page,
+          pageSize: 10,
+        };
+      }
+
+      expect(page).toBe(1);
+      return {
+        items: [
+          {
+            id: 'run-new',
+            triggeredBy: 'Manual',
+            startedUtc: '2026-07-15T18:00:00Z',
+            status: 'Running',
+          },
+        ],
+        totalCount: 2,
+        page: 1,
+        pageSize: 10,
+      };
+    });
+    vi.mocked(scheduledJobsApi.getRun).mockResolvedValue({
+      id: 'run-new',
+      triggeredBy: 'Manual',
+      startedUtc: '2026-07-15T18:00:00Z',
+      status: 'Running',
+      standardOutput: null,
+      standardError: null,
+    });
+
+    render(
+      <MemoryRouter>
+        <ScheduledJobRunHistory
+          projectId="project-1"
+          jobId="job-1"
+          notebookId="notebook-1"
+          jobType="NewConversation"
+          embedded
+        />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Failed');
+
+    window.dispatchEvent(new CustomEvent('scheduled-job-run-triggered', { detail: { jobId: 'job-1' } }));
+
+    await waitFor(() => {
+      expect(scheduledJobsApi.listRuns).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('Manual')).toBeInTheDocument();
+  });
+
   it('shows failed run errors instead of empty stdout panels for conversation jobs', async () => {
     const user = userEvent.setup();
 

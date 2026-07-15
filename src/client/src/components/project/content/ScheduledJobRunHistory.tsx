@@ -68,7 +68,10 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
   /** Set when the user explicitly picks a row; blocks auto-follow from overriding their choice. */
   const userPinnedRunIdRef = useRef<string | null>(null);
   const selectedRunRef = useRef<ProjectScheduledJobRunDetailDto | null>(null);
+  const pageRef = useRef(page);
   const pageSize = 10;
+
+  pageRef.current = page;
 
   const refreshTimingFields = useCallback(async () => {
     if (!onTimingFieldsUpdate) {
@@ -87,15 +90,20 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     }
   }, [projectId, jobId, onTimingFieldsUpdate]);
 
-  const loadRuns = useCallback(async (options?: { silent?: boolean }) => {
+  const loadRuns = useCallback(async (options?: { silent?: boolean; pageOverride?: number }) => {
+    const targetPage = options?.pageOverride ?? pageRef.current;
+
     if (!options?.silent) {
       setIsLoadingRuns(true);
     }
 
     try {
-      const result = await scheduledJobsApi.listRuns(projectId, jobId, page, pageSize);
+      const result = await scheduledJobsApi.listRuns(projectId, jobId, targetPage, pageSize);
       setRuns(result.items);
       setTotalCount(result.totalCount);
+      if (options?.pageOverride != null && options.pageOverride !== pageRef.current) {
+        setPage(options.pageOverride);
+      }
       return result.items;
     } catch (err) {
       onError?.(err instanceof Error ? err.message : 'Failed to load run history');
@@ -105,7 +113,7 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
         setIsLoadingRuns(false);
       }
     }
-  }, [projectId, jobId, page, onError]);
+  }, [projectId, jobId, onError]);
 
   const openRunDetail = useCallback(async (
     runId: string,
@@ -113,6 +121,7 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
   ) => {
     if (options?.userInitiated) {
       userPinnedRunIdRef.current = runId;
+      followRunningRunRef.current = false;
     }
 
     try {
@@ -138,7 +147,9 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
     setPage(1);
     userPinnedRunIdRef.current = null;
     setSelectedRun(null);
-  }, []);
+    void loadRuns({ silent: true, pageOverride: 1 });
+    void refreshTimingFields();
+  }, [loadRuns, refreshTimingFields]);
 
   const triggerRunNow = useCallback(async () => {
     if (!canRun || isStartingRun) {
@@ -150,8 +161,6 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
       await scheduledJobsApi.runNow(projectId, jobId);
       beginPolling();
       window.dispatchEvent(new CustomEvent('scheduled-job-run-triggered', { detail: { jobId } }));
-      void loadRuns({ silent: true });
-      void refreshTimingFields();
     } catch (err) {
       onError?.(err instanceof Error ? err.message : 'Failed to start job run');
     } finally {
@@ -202,13 +211,11 @@ export const ScheduledJobRunHistory = memo(function ScheduledJobRunHistory({
         return;
       }
       beginPolling();
-      void loadRuns({ silent: true });
-      void refreshTimingFields();
     };
 
     window.addEventListener('scheduled-job-run-triggered', handleRunTriggered);
     return () => window.removeEventListener('scheduled-job-run-triggered', handleRunTriggered);
-  }, [beginPolling, jobId, loadRuns, refreshTimingFields]);
+  }, [beginPolling, jobId]);
 
   const hasRunningRun = runs.some((run) => run.status === 'Running');
   const latestRun = runs[0] ?? null;
