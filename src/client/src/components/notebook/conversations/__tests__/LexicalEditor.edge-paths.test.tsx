@@ -74,7 +74,6 @@ describe('LexicalEditor – edge paths', () => {
           window.setTimeout(() => setStep(1), 100);
         } else if (step === 1) {
           ref.current!.toggleSourceMode();
-          window.setTimeout(() => setStep(2), 100);
         }
       }, [step]);
       return <LexicalEditor ref={ref} showToolbar={false} onReady={() => {}} />;

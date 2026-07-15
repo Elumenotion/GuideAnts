@@ -177,4 +177,125 @@ public class ProjectFolderServiceTests
         tree.Should().NotBeNull();
         tree.SubFolders.Should().ContainSingle(f => f.Name == "Parent");
     }
+
+    [TestMethod]
+    public async Task GetFolderTreeAsync_ProjectMountScan_IsCachedWithinTtl()
+    {
+        // Arrange: a project-scope host mount pointing at a temp directory with one file.
+        var mountDir = Path.Combine(_tempDirectory, "mount_source");
+        Directory.CreateDirectory(mountDir);
+        await File.WriteAllTextAsync(Path.Combine(mountDir, "a.txt"), "a");
+
+        _context.HostFolderMounts.Add(new HostFolderMount
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = _projectId,
+            Scope = HostFolderMountScope.Project,
+            NotebookId = null,
+            SourceKind = SourceKind.LocalPath,
+            DisplayName = "MyMount",
+            LeafName = "MyMount",
+            MountKey = Guid.NewGuid().ToString("N"),
+            SourceSpec = @"D:\mount\source",
+            ContainerSourcePath = mountDir,
+            Status = HostFolderMountStatus.Active,
+            CreatedByUserId = Guid.NewGuid()
+        });
+        await _context.SaveChangesAsync();
+
+        // First call scans the filesystem and caches the result (default 15s TTL).
+        var firstTree = await _service.GetFolderTreeAsync(_projectId);
+        CollectMountFileNames(firstTree, "MyMount").Should().BeEquivalentTo(["a.txt"]);
+
+        // Add a new file to the mount on disk after the scan was cached.
+        await File.WriteAllTextAsync(Path.Combine(mountDir, "b.txt"), "b");
+
+        // Second call within the TTL must reuse the cached scan and NOT observe b.txt.
+        var secondTree = await _service.GetFolderTreeAsync(_projectId);
+        CollectMountFileNames(secondTree, "MyMount").Should().BeEquivalentTo(["a.txt"]);
+    }
+
+    [TestMethod]
+    public async Task GetFolderTreeAsync_ProjectMountScan_ReScansAfterTtlExpires()
+    {
+        // Regression guard: the cache TTL must actually be honored. A TTL shorter than the
+        // poll interval means every poll re-scans; here we prove expiry triggers a fresh scan.
+        var mountDir = Path.Combine(_tempDirectory, "mount_source_ttl");
+        Directory.CreateDirectory(mountDir);
+        await File.WriteAllTextAsync(Path.Combine(mountDir, "a.txt"), "a");
+
+        var configMock = new Mock<IConfiguration>();
+        configMock.Setup(c => c["FileStorage:Path"]).Returns(_tempDirectory);
+        configMock.Setup(c => c["FileStorage:ProjectMountTreeCacheSeconds"]).Returns("1");
+        var service = new ProjectFolderService(CreateScopeFactory(_context), configMock.Object);
+
+        _context.HostFolderMounts.Add(new HostFolderMount
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = _projectId,
+            Scope = HostFolderMountScope.Project,
+            NotebookId = null,
+            SourceKind = SourceKind.LocalPath,
+            DisplayName = "TtlMount",
+            LeafName = "TtlMount",
+            MountKey = Guid.NewGuid().ToString("N"),
+            SourceSpec = @"D:\mount\source",
+            ContainerSourcePath = mountDir,
+            Status = HostFolderMountStatus.Active,
+            CreatedByUserId = Guid.NewGuid()
+        });
+        await _context.SaveChangesAsync();
+
+        var firstTree = await service.GetFolderTreeAsync(_projectId);
+        CollectMountFileNames(firstTree, "TtlMount").Should().BeEquivalentTo(["a.txt"]);
+
+        await File.WriteAllTextAsync(Path.Combine(mountDir, "b.txt"), "b");
+
+        // Wait past the 1s TTL so the next call re-scans and observes the new file.
+        await Task.Delay(1200);
+
+        var secondTree = await service.GetFolderTreeAsync(_projectId);
+        CollectMountFileNames(secondTree, "TtlMount").Should().BeEquivalentTo(["a.txt", "b.txt"]);
+    }
+
+    private static List<string> CollectMountFileNames(FolderTreeDto tree, string mountLeafName)
+    {
+        var mountRoot = FindFolder(tree, mountLeafName);
+        if (mountRoot == null)
+        {
+            return [];
+        }
+
+        var names = new List<string>();
+        CollectFileNames(mountRoot, names);
+        return names;
+    }
+
+    private static FolderTreeDto? FindFolder(FolderTreeDto node, string name)
+    {
+        if (string.Equals(node.Name, name, StringComparison.Ordinal))
+        {
+            return node;
+        }
+
+        foreach (var child in node.SubFolders)
+        {
+            var found = FindFolder(child, name);
+            if (found != null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private static void CollectFileNames(FolderTreeDto node, List<string> names)
+    {
+        names.AddRange(node.Files.Select(f => f.FileName));
+        foreach (var child in node.SubFolders)
+        {
+            CollectFileNames(child, names);
+        }
+    }
 }

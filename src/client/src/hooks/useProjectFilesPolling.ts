@@ -8,6 +8,48 @@ interface UseProjectFilesPollingProps {
     pollInterval?: number; // milliseconds, default 10s
 }
 
+/**
+ * Structural comparison of two project folder trees. Returns true when the trees are
+ * identical, so the polling hook can keep the same reference and avoid re-renders that
+ * interrupt user interactions (mirrors the notebook polling hook's behavior).
+ */
+function areTreesEqual(a: FolderTreeDto | null, b: FolderTreeDto | null): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+
+    if (a.id !== b.id ||
+        a.name !== b.name ||
+        a.relativePath !== b.relativePath ||
+        a.isHostMount !== b.isHostMount ||
+        a.mountId !== b.mountId ||
+        a.mountStatus !== b.mountStatus ||
+        a.isLinked !== b.isLinked) {
+        return false;
+    }
+
+    if (a.files.length !== b.files.length) return false;
+    for (let i = 0; i < a.files.length; i++) {
+        const fileA = a.files[i];
+        const fileB = b.files[i];
+        if (fileA.id !== fileB.id ||
+            fileA.fileName !== fileB.fileName ||
+            fileA.relativePath !== fileB.relativePath ||
+            fileA.fileSize !== fileB.fileSize ||
+            fileA.latestVersion !== fileB.latestVersion) {
+            return false;
+        }
+    }
+
+    if (a.subFolders.length !== b.subFolders.length) return false;
+    for (let i = 0; i < a.subFolders.length; i++) {
+        if (!areTreesEqual(a.subFolders[i], b.subFolders[i])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 export function useProjectFilesPolling({
     projectId,
     enabled = true,
@@ -37,7 +79,9 @@ export function useProjectFilesPolling({
             
             // Check if request was aborted after API call
             if (!signal?.aborted) {
-                setFolderTree(tree);
+                // Only update state when the tree actually changed. Keeping the same
+                // reference on no-op polls prevents unnecessary re-renders.
+                setFolderTree(prev => (areTreesEqual(prev, tree) ? prev : tree));
                 setLastUpdated(new Date());
                 //console.log(`📁 Project files updated: ${tree ? 'tree loaded' : 'no tree'}`);
             }
