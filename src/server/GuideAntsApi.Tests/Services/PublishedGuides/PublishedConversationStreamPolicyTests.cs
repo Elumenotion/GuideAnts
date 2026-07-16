@@ -6,6 +6,8 @@ using GuideAntsApi.Tests.BackgroundJobs;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 
 namespace GuideAntsApi.Tests.Services.PublishedGuides;
 
@@ -35,7 +37,11 @@ public sealed class PublishedConversationStreamPolicyTests
         services.AddSingleton<IDbContextFactory<ApplicationDbContext>>(sp => sp.GetRequiredService<TestDbContextFactory>());
         services.AddScoped<ApplicationDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         var provider = services.BuildServiceProvider();
-        var policy = new PublishedConversationStreamPolicy(provider.GetRequiredService<IServiceScopeFactory>());
+        var distributedLock = new Mock<GuideAntsApi.Services.Conversations.IDistributedConversationLock>();
+        var policy = new PublishedConversationStreamPolicy(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConversationStreamLockCoordinator(distributedLock.Object),
+            NullLogger<PublishedConversationStreamPolicy>.Instance);
 
         var identity = await policy.ResolveUserIdentityAsync(userId, userId.ToString(), CancellationToken.None);
 

@@ -1,7 +1,9 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 
 namespace GuideAntsApi.BackgroundJobs;
@@ -14,10 +16,14 @@ public class BackgroundJobProcessor : BackgroundService
     private readonly IActiveJobExecutionRegistry _activeExecutionRegistry;
     private readonly Dictionary<string, SemaphoreSlim> _concurrencyLimits;
     private readonly Dictionary<string, IJobHandler> _jobHandlers;
+    private readonly HashSet<string> _lockGatedJobTypes;
+    private readonly AdaptiveLoopBackoff _loopBackoff;
+    private DateTime _lastLockGateLogUtc = DateTime.MinValue;
 
     public BackgroundJobProcessor(
         IServiceProvider serviceProvider,
         IOptions<JobProcessorOptions> options,
+        IOptions<JobRetryOptions> retryOptions,
         IActiveJobExecutionRegistry activeExecutionRegistry,
         ILogger<BackgroundJobProcessor> logger)
     {
@@ -25,6 +31,7 @@ public class BackgroundJobProcessor : BackgroundService
         _options = options.Value;
         _activeExecutionRegistry = activeExecutionRegistry;
         _logger = logger;
+        _loopBackoff = new AdaptiveLoopBackoff(retryOptions.Value.LoopBackoffSeconds);
         
         // Initialize concurrency limits for each job type
         _concurrencyLimits = new Dictionary<string, SemaphoreSlim>();
@@ -32,6 +39,10 @@ public class BackgroundJobProcessor : BackgroundService
         {
             _concurrencyLimits[jobType] = new SemaphoreSlim(jobOptions.MaxConcurrency, jobOptions.MaxConcurrency);
         }
+
+        _lockGatedJobTypes = _options.ConversationLockGate.Enabled
+            ? new HashSet<string>(_options.ConversationLockGate.GatedJobTypes, StringComparer.Ordinal)
+            : [];
 
         // Initialize job handlers dictionary
         _jobHandlers = new Dictionary<string, IJobHandler>();
@@ -62,6 +73,7 @@ public class BackgroundJobProcessor : BackgroundService
             {
                 await ProcessAvailableJobsAsync(stoppingToken);
                 await CleanupExpiredLeasesAsync(stoppingToken);
+                _loopBackoff.Reset();
                 
                 // Short delay to prevent tight loop, add small jitter per-iteration to reduce herd effects
                 var pollSeconds = Math.Max(1, _options.PollingIntervalSeconds);
@@ -75,7 +87,7 @@ public class BackgroundJobProcessor : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in background job processing");
-                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken); // Back off on error
+                await Task.Delay(_loopBackoff.NextDelayWithJitter(rng), stoppingToken);
             }
         }
 
@@ -111,12 +123,32 @@ public class BackgroundJobProcessor : BackgroundService
     private async Task ProcessAvailableJobsAsync(CancellationToken ct)
     {
         var tasks = new List<Task>();
+        bool? hasActiveConversationLock = null;
+        bool? bothChatAndEmbeddingsUseLocalAi = null;
         
         // Process each job type within its concurrency limit
         foreach (var (jobType, jobOptions) in _options.JobTypes)
         {
             if (!_concurrencyLimits.TryGetValue(jobType, out var limit))
                 continue;
+
+            if (_lockGatedJobTypes.Contains(jobType))
+            {
+                bothChatAndEmbeddingsUseLocalAi ??= await BothChatAndEmbeddingsUseLocalAiAsync(ct);
+                if (bothChatAndEmbeddingsUseLocalAi.Value)
+                {
+                    hasActiveConversationLock ??= await HasActiveConversationLockAsync(ct);
+                    if (ConversationLockJobGate.ShouldDeferJobType(
+                            jobType,
+                            _options.ConversationLockGate,
+                            hasActiveConversationLock.Value,
+                            bothChatAndEmbeddingsUseLocalAi.Value))
+                    {
+                        MaybeLogLockGateActive();
+                        continue;
+                    }
+                }
+            }
 
             // Check if we can process more jobs of this type
             while (limit.CurrentCount > 0 && !ct.IsCancellationRequested)
@@ -144,6 +176,41 @@ public class BackgroundJobProcessor : BackgroundService
         }
     }
 
+    private async Task<bool> HasActiveConversationLockAsync(CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>();
+        await using var context = await dbFactory.CreateDbContextAsync(ct);
+        var now = DateTime.UtcNow;
+        return await context.ConversationLocks.AnyAsync(l => l.ExpiresAt > now, ct);
+    }
+
+    private async Task<bool> BothChatAndEmbeddingsUseLocalAiAsync(CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var eligibility = scope.ServiceProvider.GetService<IConversationLockGateEligibility>();
+        if (eligibility is null)
+        {
+            return false;
+        }
+
+        return await eligibility.BothUseLocalAiAsync(ct);
+    }
+
+    private void MaybeLogLockGateActive()
+    {
+        var now = DateTime.UtcNow;
+        var throttle = TimeSpan.FromSeconds(Math.Max(5, _options.ConversationLockGate.LogThrottleSeconds));
+        if (now - _lastLockGateLogUtc < throttle)
+        {
+            return;
+        }
+
+        _lastLockGateLogUtc = now;
+        _logger.LogDebug(
+            "Deferring extraction/indexing job claims while chat and embeddings use local AI and at least one conversation lock is active");
+    }
+
     private async Task ProcessSingleJobAsync(string jobType, JobTypeOptions jobOptions, SemaphoreSlim limit, CancellationToken ct)
     {
         JobQueue? claimedJob = null;
@@ -166,12 +233,17 @@ public class BackgroundJobProcessor : BackgroundService
             if (!_jobHandlers.TryGetValue(claimedJob.JobType, out var handler))
             {
                 _logger.LogError("No handler found for job type {JobType}, failing job {JobId}", claimedJob.JobType, claimedJob.Id);
-                await jobQueueService.FailAsync(claimedJob.Id, claimedJob.ClaimToken, $"No handler registered for job type: {claimedJob.JobType}", ct: ct);
+                await jobQueueService.FailAsync(
+                    claimedJob.Id,
+                    claimedJob.ClaimToken,
+                    $"No handler registered for job type: {claimedJob.JobType}",
+                    JobFailureClass.PermanentMissingInput,
+                    ct);
                 return;
             }
 
             // Process the job
-            bool success;
+            JobExecutionResult result;
             using var processingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             using var leaseRenewalCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var leaseRenewalTask = RenewLeaseLoopAsync(
@@ -184,12 +256,12 @@ public class BackgroundJobProcessor : BackgroundService
 
             try
             {
-                success = await handler.HandleAsync(claimedJob.PayloadJson, processingCts.Token);
+                result = await handler.HandleAsync(claimedJob.PayloadJson, processingCts.Token);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Job handler threw exception for job {JobId} of type {JobType}", claimedJob.Id, claimedJob.JobType);
-                success = false;
+                result = JobExecutionResult.RetryableTransient(ex.Message);
             }
             finally
             {
@@ -205,7 +277,7 @@ public class BackgroundJobProcessor : BackgroundService
             }
 
             // Update job status
-            if (success)
+            if (result.IsSuccess)
             {
                 var completed = await jobQueueService.CompleteAsync(claimedJob.Id, claimedJob.ClaimToken, ct);
                 if (completed)
@@ -222,22 +294,26 @@ public class BackgroundJobProcessor : BackgroundService
             }
             else
             {
-                var failed = await jobQueueService.FailAsync(claimedJob.Id, claimedJob.ClaimToken, "Job handler returned false", ct: ct);
+                var failureClass = result.FailureClass ?? JobFailureClass.RetryableTransient;
+                var errorMessage = result.ErrorMessage ?? "Job handler returned failure";
+                var failed = await jobQueueService.FailAsync(claimedJob.Id, claimedJob.ClaimToken, errorMessage, failureClass, ct);
                 var attemptNumber = claimedJob.Attempts + 1;
                 if (failed)
                 {
                     _logger.LogError(
-                        "Job handler returned false for job {JobId} of type {JobType} on attempt {Attempt}/{MaxAttempts}. Payload: {PayloadJson}",
+                        "Job handler failed for job {JobId} of type {JobType} on attempt {Attempt}/{MaxAttempts} ({FailureClass}). Payload: {PayloadJson}. Error: {Error}",
                         claimedJob.Id,
                         claimedJob.JobType,
                         attemptNumber,
                         claimedJob.MaxAttempts,
-                        claimedJob.PayloadJson);
+                        failureClass,
+                        claimedJob.PayloadJson,
+                        errorMessage);
                 }
                 else
                 {
                     _logger.LogError(
-                        "Job handler returned false for {JobId} ({JobType}) on attempt {Attempt}/{MaxAttempts}, and fail update was not applied (likely lease/token mismatch). Payload: {PayloadJson}",
+                        "Job handler failed for {JobId} ({JobType}) on attempt {Attempt}/{MaxAttempts}, and fail update was not applied (likely lease/token mismatch). Payload: {PayloadJson}",
                         claimedJob.Id,
                         claimedJob.JobType,
                         attemptNumber,

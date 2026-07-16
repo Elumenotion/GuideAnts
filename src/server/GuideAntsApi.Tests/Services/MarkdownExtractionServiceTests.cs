@@ -98,7 +98,7 @@ public sealed class MarkdownExtractionServiceTests
 
         public Task<JobQueue?> TryClaimAsync(string? jobType, int leaseSeconds, CancellationToken ct = default) => Task.FromResult<JobQueue?>(null);
         public Task<bool> CompleteAsync(Guid id, Guid claimToken, CancellationToken ct = default) => Task.FromResult(false);
-        public Task<bool> FailAsync(Guid id, Guid claimToken, string error, int baseDelaySeconds = 10, CancellationToken ct = default) => Task.FromResult(false);
+        public Task<bool> FailAsync(Guid id, Guid claimToken, string error, JobFailureClass failureClass = JobFailureClass.RetryableTransient, CancellationToken ct = default) => Task.FromResult(false);
         public Task<int> RequeueExpiredAsync(CancellationToken ct = default) => Task.FromResult(0);
         public Task<int> RequeueAllProcessingAsync(CancellationToken ct = default) => Task.FromResult(0);
         public Task<bool> RenewLeaseAsync(Guid id, Guid claimToken, int additionalSeconds, CancellationToken ct = default) => Task.FromResult(false);

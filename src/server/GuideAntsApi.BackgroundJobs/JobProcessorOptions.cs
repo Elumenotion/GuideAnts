@@ -18,6 +18,8 @@ public class JobProcessorOptions
     /// Configuration for each job type
     /// </summary>
     public Dictionary<string, JobTypeOptions> JobTypes { get; set; } = new();
+
+    public ConversationLockGateOptions ConversationLockGate { get; set; } = new();
 }
 
 public class JobTypeOptions
@@ -32,4 +34,3 @@ public class JobTypeOptions
     /// </summary>
     public int LeaseSeconds { get; set; } = 300; // 5 minutes default
 }
-

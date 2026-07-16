@@ -355,7 +355,7 @@ public sealed class ProjectScheduledJobSchedulerTests
         public Task<bool> CompleteAsync(Guid id, Guid claimToken, CancellationToken ct = default)
             => throw new NotImplementedException();
 
-        public Task<bool> FailAsync(Guid id, Guid claimToken, string error, int baseDelaySeconds = 10, CancellationToken ct = default)
+        public Task<bool> FailAsync(Guid id, Guid claimToken, string error, JobFailureClass failureClass = JobFailureClass.RetryableTransient, CancellationToken ct = default)
             => throw new NotImplementedException();
 
         public Task<int> RequeueExpiredAsync(CancellationToken ct = default)

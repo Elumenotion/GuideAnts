@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Options;
 using GuideAntsApi.BackgroundJobs.Services;
@@ -24,9 +25,10 @@ public sealed class ExtractAssistantFileMarkdownHandlerTests
             new BackgroundJobTestHelpers.CapturingJobQueueService(),
             BackgroundJobTestHelpers.CreateConfiguration(Path.GetTempPath()));
 
-        var success = await handler.HandleAsync(new ExtractAssistantFileMarkdownJob(Guid.NewGuid()), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractAssistantFileMarkdownJob(Guid.NewGuid()), CancellationToken.None);
 
-        success.Should().BeFalse();
+        result.IsSuccess.Should().BeFalse();
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
     }
 
     [TestMethod]
@@ -71,9 +73,9 @@ public sealed class ExtractAssistantFileMarkdownHandlerTests
             new BackgroundJobTestHelpers.CapturingJobQueueService(),
             BackgroundJobTestHelpers.CreateConfiguration(Path.GetTempPath()));
 
-        var success = await handler.HandleAsync(new ExtractAssistantFileMarkdownJob(assistantFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractAssistantFileMarkdownJob(assistantFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         docIntel.VerifyNoOtherCalls();
     }
 }

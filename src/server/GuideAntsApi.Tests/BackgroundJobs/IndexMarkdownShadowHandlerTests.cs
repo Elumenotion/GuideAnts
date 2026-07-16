@@ -20,9 +20,9 @@ public sealed class IndexMarkdownShadowHandlerTests
             indexer.Object,
             BackgroundJobTestHelpers.CreateConfiguration(Path.GetTempPath()));
 
-        var success = await handler.HandleAsync(new IndexNotebookMarkdownShadowJob(Guid.NewGuid()), CancellationToken.None);
+        var result = await handler.HandleAsync(new IndexNotebookMarkdownShadowJob(Guid.NewGuid()), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         indexer.VerifyNoOtherCalls();
     }
 
@@ -37,9 +37,9 @@ public sealed class IndexMarkdownShadowHandlerTests
             indexer.Object,
             BackgroundJobTestHelpers.CreateConfiguration(Path.GetTempPath()));
 
-        var success = await handler.HandleAsync(new IndexContentMarkdownShadowJob(Guid.NewGuid()), CancellationToken.None);
+        var result = await handler.HandleAsync(new IndexContentMarkdownShadowJob(Guid.NewGuid()), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         indexer.VerifyNoOtherCalls();
     }
 
@@ -54,9 +54,9 @@ public sealed class IndexMarkdownShadowHandlerTests
             indexer.Object,
             BackgroundJobTestHelpers.CreateConfiguration(Path.GetTempPath()));
 
-        var success = await handler.HandleAsync(new IndexAssistantFileMarkdownShadowJob(Guid.NewGuid()), CancellationToken.None);
+        var result = await handler.HandleAsync(new IndexAssistantFileMarkdownShadowJob(Guid.NewGuid()), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         indexer.VerifyNoOtherCalls();
     }
 }

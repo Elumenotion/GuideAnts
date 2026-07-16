@@ -96,8 +96,8 @@ public sealed class RebuildEmbeddingsHandlerTests
             embeddings,
             queue);
 
-        var success = await handler.HandleAsync(new RebuildEmbeddingsJob(), CancellationToken.None);
-        success.Should().BeTrue();
+        var result = await handler.HandleAsync(new RebuildEmbeddingsJob(), CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
 
         await using var verify = new ApplicationDbContext(options);
         var chunks = await verify.DocumentChunks
@@ -215,9 +215,9 @@ public sealed class RebuildEmbeddingsHandlerTests
             embeddings,
             queue);
 
-        var success = await handler.HandleAsync(new RebuildEmbeddingsJob(), CancellationToken.None);
+        var result = await handler.HandleAsync(new RebuildEmbeddingsJob(), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         embeddings.CallCount.Should().Be(0, "no chunks exist yet, so only backfill queueing should happen");
         queue.Enqueued.Should().ContainSingle();
         queue.Enqueued[0].JobType.Should().Be(nameof(IndexAssistantFileMarkdownShadowJob).Replace("Job", string.Empty));
@@ -286,7 +286,7 @@ public sealed class RebuildEmbeddingsHandlerTests
         public Task<bool> CompleteAsync(Guid id, Guid claimToken, CancellationToken ct = default)
             => throw new NotImplementedException();
 
-        public Task<bool> FailAsync(Guid id, Guid claimToken, string error, int baseDelaySeconds = 10, CancellationToken ct = default)
+        public Task<bool> FailAsync(Guid id, Guid claimToken, string error, JobFailureClass failureClass = JobFailureClass.RetryableTransient, CancellationToken ct = default)
             => throw new NotImplementedException();
 
         public Task<int> RequeueExpiredAsync(CancellationToken ct = default)

@@ -149,6 +149,7 @@ public static class StartupConfiguration
         services.AddScoped<IConversationHistoryBuilder, ConversationHistoryBuilder>();
         services.AddScoped<IConversationPersistence, ConversationPersistence>();
         services.AddScoped<IConversationUsageReporter, ConversationUsageReporter>();
+        services.AddScoped<ConversationStreamLockCoordinator>();
         services.AddScoped<PrivateConversationStreamPolicy>();
         services.AddScoped<PublishedConversationStreamPolicy>();
         services.AddScoped<IConversationStreamEngine, ConversationStreamEngine>();
@@ -423,6 +424,7 @@ public static class StartupConfiguration
         
         // Background Jobs - replaces individual hosted services with queue-based processing
         services.AddBackgroundJobs(configuration);
+        services.AddSingleton<GuideAntsApi.BackgroundJobs.IConversationLockGateEligibility, GuideAntsApi.Services.ConversationLockGate.ConversationLockGateEligibility>();
         
         // Register job handlers
         services.AddJobHandler<GuideAntsApi.BackgroundJobs.Jobs.TestJobHandler>();

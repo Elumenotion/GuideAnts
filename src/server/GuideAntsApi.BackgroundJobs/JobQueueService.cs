@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -11,15 +12,18 @@ public class JobQueueService : IJobQueueService
 {
     private readonly IDbContextFactory<ApplicationDbContext> _dbFactory;
     private readonly IActiveJobExecutionRegistry _activeExecutionRegistry;
+    private readonly JobRetryPolicy _retryPolicy;
     private readonly ILogger<JobQueueService> _logger;
 
     public JobQueueService(
         IDbContextFactory<ApplicationDbContext> dbFactory,
         IActiveJobExecutionRegistry activeExecutionRegistry,
+        IOptions<JobRetryOptions> retryOptions,
         ILogger<JobQueueService> logger)
     {
         _dbFactory = dbFactory;
         _activeExecutionRegistry = activeExecutionRegistry;
+        _retryPolicy = new JobRetryPolicy(retryOptions.Value);
         _logger = logger;
     }
 
@@ -34,7 +38,7 @@ public class JobQueueService : IJobQueueService
             Priority = priority,
             AvailableAt = availableAt ?? DateTime.UtcNow,
             CorrelationId = correlationId,
-            MaxAttempts = maxAttempts ?? 5
+            MaxAttempts = maxAttempts ?? _retryPolicy.DefaultMaxAttempts
         };
 
         context.JobQueue.Add(job);
@@ -112,22 +116,22 @@ public class JobQueueService : IJobQueueService
         return success;
     }
 
-    public async Task<bool> FailAsync(Guid id, Guid claimToken, string error, int baseDelaySeconds = 10, CancellationToken ct = default)
+    public async Task<bool> FailAsync(Guid id, Guid claimToken, string error, JobFailureClass failureClass = JobFailureClass.RetryableTransient, CancellationToken ct = default)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(ct);
 
-        // Get current job metadata for retry logic
         var meta = await context.JobQueue
             .Where(j => j.Id == id)
-            .Select(j => new { j.Attempts, j.MaxAttempts })
+            .Select(j => new { j.Attempts, j.MaxAttempts, j.Created })
             .FirstOrDefaultAsync(ct);
 
         if (meta == null) return false;
 
         var attemptsNext = meta.Attempts + 1;
-        var willRetry = attemptsNext < meta.MaxAttempts;
         var now = DateTime.UtcNow;
-        var nextAvailable = willRetry ? now.AddSeconds(Math.Pow(2, meta.Attempts) * baseDelaySeconds) : (DateTime?)null;
+        var plan = _retryPolicy.PlanFailure(failureClass, meta.Attempts, meta.MaxAttempts, meta.Created, now);
+        var willRetry = plan.WillRetry;
+        var nextAvailable = plan.NextAvailableAt;
 
         int affected;
         if (willRetry)
@@ -164,8 +168,8 @@ public class JobQueueService : IJobQueueService
             }
             else
             {
-                _logger.LogError("Job {JobId} permanently failed after {Attempts} attempts: {Error}", 
-                    id, attemptsNext, LogValueSanitizer.Sanitize(error));
+                _logger.LogError("Job {JobId} permanently failed after {Attempts} attempts ({FailureClass}): {Error}", 
+                    id, attemptsNext, failureClass, LogValueSanitizer.Sanitize(error));
             }
         }
 
@@ -191,6 +195,7 @@ public class JobQueueService : IJobQueueService
                 j.ClaimToken,
                 j.Attempts,
                 j.MaxAttempts,
+                j.Created,
                 j.LeaseUntil
             })
             .ToListAsync(ct);
@@ -206,7 +211,17 @@ public class JobQueueService : IJobQueueService
         // Expired lease counts as an attempt so long-running jobs cannot churn forever.
         foreach (var candidate in reclaimable)
         {
-            if (candidate.Attempts + 1 >= candidate.MaxAttempts)
+            var attemptsNext = candidate.Attempts + 1;
+            var delay = _retryPolicy.ComputeDelay(candidate.Attempts);
+            var canRetry = _retryPolicy.CanRetry(
+                JobFailureClass.RetryableTransient,
+                attemptsNext,
+                candidate.MaxAttempts,
+                candidate.Created,
+                now,
+                delay);
+
+            if (!canRetry)
             {
                 failed += await context.JobQueue
                     .Where(j => j.Id == candidate.Id && j.ClaimToken == candidate.ClaimToken && j.Status == JobStatus.Processing)
@@ -220,6 +235,7 @@ public class JobQueueService : IJobQueueService
             }
             else
             {
+                var nextAvailable = now.Add(delay);
                 requeued += await context.JobQueue
                     .Where(j => j.Id == candidate.Id && j.ClaimToken == candidate.ClaimToken && j.Status == JobStatus.Processing)
                     .ExecuteUpdateAsync(s => s
@@ -228,7 +244,7 @@ public class JobQueueService : IJobQueueService
                         .SetProperty(j => j.Status, JobStatus.Pending)
                         .SetProperty(j => j.ClaimToken, Guid.Empty) // Reset to unclaimed
                         .SetProperty(j => j.LeaseUntil, (DateTime?)null)
-                        .SetProperty(j => j.AvailableAt, now)
+                        .SetProperty(j => j.AvailableAt, nextAvailable)
                         .SetProperty(j => j.UpdatedUtc, now), ct);
             }
         }

@@ -26,7 +26,7 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
 
     public override string JobType => nameof(SyncNotebookJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(SyncNotebookJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(SyncNotebookJob payload, CancellationToken cancellationToken)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
@@ -36,7 +36,7 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
         if (notebook == null)
         {
             Logger.LogWarning("Notebook {NotebookId} not found for sync", payload.NotebookId);
-            return true; // treat as handled
+            return JobExecutionResult.Success(); // treat as handled
         }
 
         var storageBase = _configuration["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured");
@@ -154,12 +154,12 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
         catch (DbUpdateException dbEx) when (dbEx.InnerException?.Message?.Contains("IX_NotebookFiles_RelativePath_NotebookId") == true)
         {
             Logger.LogWarning("Constraint violation during sync for notebook {NotebookId} - file already exists", payload.NotebookId);
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (DbUpdateConcurrencyException cx)
         {
             Logger.LogWarning(cx, "Concurrency conflict during sync for notebook {NotebookId}; treating as no-op", payload.NotebookId);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         // Enqueue processing for newly created files
@@ -175,7 +175,7 @@ public sealed class SyncNotebookHandler : JobHandlerBase<SyncNotebookJob>
             await EnqueueIndexingJobForFile(context, updatedFile, cancellationToken);
         }
 
-        return true;
+        return JobExecutionResult.Success();
     }
 
     private async Task EnqueueIndexingJobForFile(ApplicationDbContext context, NotebookFile file, CancellationToken cancellationToken)

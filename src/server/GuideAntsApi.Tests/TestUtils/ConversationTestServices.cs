@@ -12,6 +12,7 @@ using GuideAnts.Usage;
 using GuideAntsApi.Services.Conversations.Queries;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Routing;
+using GuideAntsApi.DataModel.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -86,9 +87,10 @@ internal static class ConversationTestServices
     {
         var lockService = distributedLock ?? Mock.Of<IDistributedConversationLock>();
         var hub = broadcastHub ?? Mock.Of<IConversationBroadcastHub>();
+        var lockCoordinator = new ConversationStreamLockCoordinator(lockService);
         var streamPolicy = new PrivateConversationStreamPolicy(
             hub,
-            lockService,
+            lockCoordinator,
             scopeFactory,
             Mock.Of<ILogger<PrivateConversationStreamPolicy>>());
         var streamEngine = new ConversationStreamEngine(
@@ -136,7 +138,29 @@ internal static class ConversationTestServices
         IConfiguration? configuration = null,
         ILogger<PublishedConversationService>? logger = null)
     {
-        var streamPolicy = new PublishedConversationStreamPolicy(scopeFactory);
+        var distributedLock = new Mock<IDistributedConversationLock>();
+        distributedLock
+            .Setup(l => l.TryAcquireLockAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid conversationId, string userName, CancellationToken _) =>
+                LockAcquisitionResult.Acquired(new ConversationLock
+                {
+                    ConversationId = conversationId,
+                    LockedByUserName = userName,
+                    LockedAt = DateTime.UtcNow,
+                    ExpiresAt = DateTime.UtcNow.AddMinutes(5)
+                }));
+        distributedLock
+            .Setup(l => l.RenewLockAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        distributedLock
+            .Setup(l => l.ReleaseLockAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var lockCoordinator = new ConversationStreamLockCoordinator(distributedLock.Object);
+        var streamPolicy = new PublishedConversationStreamPolicy(
+            scopeFactory,
+            lockCoordinator,
+            Mock.Of<ILogger<PublishedConversationStreamPolicy>>());
         var streamEngine = new ConversationStreamEngine(
             httpClientFactory ?? Mock.Of<IHttpClientFactory>(),
             chatClientFactory,
@@ -145,13 +169,14 @@ internal static class ConversationTestServices
             scopeFactory,
             Mock.Of<ILogger<ConversationStreamEngine>>());
 
+        var undoLockService = Mock.Of<IDistributedConversationLock>();
         var privateStreamPolicy = new PrivateConversationStreamPolicy(
             Mock.Of<IConversationBroadcastHub>(),
-            Mock.Of<IDistributedConversationLock>(),
+            new ConversationStreamLockCoordinator(undoLockService),
             scopeFactory,
             Mock.Of<ILogger<PrivateConversationStreamPolicy>>());
         var undoService = new ConversationUndoService(
-            Mock.Of<IDistributedConversationLock>(),
+            undoLockService,
             Mock.Of<IConversationBroadcastHub>(),
             privateStreamPolicy,
             scopeFactory,

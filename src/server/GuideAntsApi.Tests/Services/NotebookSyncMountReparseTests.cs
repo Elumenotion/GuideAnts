@@ -171,8 +171,8 @@ public sealed class NotebookSyncMountReparseTests
                 BackgroundJobTestHelpers.CreateConfiguration(tempRoot),
                 new BackgroundJobTestHelpers.CapturingJobQueueService());
 
-            var success = await handler.HandleAsync(new SyncNotebookJob(notebookId), CancellationToken.None);
-            success.Should().BeTrue();
+            var result = await handler.HandleAsync(new SyncNotebookJob(notebookId), CancellationToken.None);
+            result.IsSuccess.Should().BeTrue();
 
             await using var verify = new ApplicationDbContext(options);
             var files = await verify.NotebookFiles.Where(f => f.NotebookId == notebookId).ToListAsync();

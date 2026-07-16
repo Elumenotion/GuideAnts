@@ -40,14 +40,11 @@ public record GuideUsageConversationsPageDto(
 );
 
 /// <summary>
-/// Aggregated API usage row grouped by source, endpoint, alias, provider mode, and status family.
+/// Aggregated API usage row grouped by source channel and endpoint.
 /// </summary>
 public record GuideApiUsageRowDto(
     string SourceChannel,
     string Endpoint,
-    string Alias,
-    string ProviderServiceMode,
-    string StatusFamily,
     int Events,
     decimal ChargeUsd
 );

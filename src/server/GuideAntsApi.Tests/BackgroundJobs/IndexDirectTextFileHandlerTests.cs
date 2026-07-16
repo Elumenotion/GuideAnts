@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Services.Indexing;
 using GuideAntsApi.DataModel;
@@ -22,9 +23,10 @@ public sealed class IndexDirectTextFileHandlerTests
             BackgroundJobTestHelpers.CreateConfiguration(Path.GetTempPath()),
             indexer.Object);
 
-        var success = await handler.HandleAsync(new IndexDirectTextFileJob(Guid.NewGuid(), IsContentFile: false), CancellationToken.None);
+        var result = await handler.HandleAsync(new IndexDirectTextFileJob(Guid.NewGuid(), IsContentFile: false), CancellationToken.None);
 
-        success.Should().BeFalse();
+        result.IsSuccess.Should().BeFalse();
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
         indexer.VerifyNoOtherCalls();
     }
 
@@ -66,9 +68,9 @@ public sealed class IndexDirectTextFileHandlerTests
                 BackgroundJobTestHelpers.CreateConfiguration(storageRoot),
                 indexer.Object);
 
-            var success = await handler.HandleAsync(new IndexDirectTextFileJob(notebookFileId, IsContentFile: false), CancellationToken.None);
+            var result = await handler.HandleAsync(new IndexDirectTextFileJob(notebookFileId, IsContentFile: false), CancellationToken.None);
 
-            success.Should().BeTrue();
+            result.IsSuccess.Should().BeTrue();
             indexer.Verify(
                 x => x.IndexNotebookFileAsync(
                     notebookFileId,
