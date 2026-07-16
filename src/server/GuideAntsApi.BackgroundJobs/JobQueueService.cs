@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GuideAntsApi.BackgroundJobs.Jobs;
+using GuideAntsApi.BackgroundJobs.Scheduling;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 
@@ -300,6 +301,10 @@ public class JobQueueService : IJobQueueService
                 .SetProperty(j => j.ClaimToken, Guid.Empty) // Reset to unclaimed
                 .SetProperty(j => j.LeaseUntil, (DateTime?)null)
                 .SetProperty(j => j.UpdatedUtc, now), ct);
+
+        // Queue items are reconciled before scheduled-job runs. If the scheduler ran first on
+        // startup it may have skipped failing runs that still had Processing queue rows.
+        await ProjectScheduledJobInFlightGuard.FailOrphanedRunningRunsAsync(context, ct);
 
         return affected;
     }

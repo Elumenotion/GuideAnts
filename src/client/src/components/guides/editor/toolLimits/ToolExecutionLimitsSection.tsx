@@ -37,8 +37,11 @@ export function ToolExecutionLimitsSection({
           Execution limits
         </h3>
         <p className="text-sm text-gray-600 mt-1">
-          When reached, the assistant receives a limit message and must finish the turn with gathered
-          results. Does not affect published conversation turn limits.
+          When reached, the assistant must stop calling tools and finish its response with gathered
+          results. Applies within one assistant response (private notebook and published conversations).
+          Separate from{' '}
+          <span className="font-medium text-gray-700">Max Conversation Turns</span> in the publish
+          dialog, which caps how many user messages a published conversation allows.
         </p>
       </div>
 

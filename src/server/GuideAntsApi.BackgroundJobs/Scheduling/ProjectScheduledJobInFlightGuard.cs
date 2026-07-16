@@ -4,22 +4,22 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using Microsoft.EntityFrameworkCore;
 
-namespace GuideAntsApi.Services.Scheduling;
+namespace GuideAntsApi.BackgroundJobs.Scheduling;
 
-internal enum ProjectScheduledJobExecutionGate
+public enum ProjectScheduledJobExecutionGate
 {
     Proceed,
     SkipDuplicate
 }
 
-internal static class ProjectScheduledJobInFlightGuard
+public static class ProjectScheduledJobInFlightGuard
 {
     private static readonly JsonSerializerOptions PayloadJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    internal static async Task FailOrphanedRunningRunsAsync(ApplicationDbContext db, CancellationToken cancellationToken)
+    public static async Task FailOrphanedRunningRunsAsync(ApplicationDbContext db, CancellationToken cancellationToken)
     {
         var runningRuns = await db.ProjectScheduledJobRuns
             .Where(r => r.Status == ProjectScheduledJobRunStatus.Running)
@@ -57,7 +57,7 @@ internal static class ProjectScheduledJobInFlightGuard
         }
     }
 
-    internal static async Task<ProjectScheduledJobExecutionGate> ReconcileBeforeExecutionAsync(
+    public static async Task<ProjectScheduledJobExecutionGate> ReconcileBeforeExecutionAsync(
         ApplicationDbContext db,
         Guid scheduledJobId,
         CancellationToken cancellationToken)
@@ -93,7 +93,7 @@ internal static class ProjectScheduledJobInFlightGuard
         return ProjectScheduledJobExecutionGate.Proceed;
     }
 
-    internal static Task<bool> HasInFlightQueueItemAsync(
+    public static Task<bool> HasInFlightQueueItemAsync(
         ApplicationDbContext db,
         Guid scheduledJobId,
         CancellationToken cancellationToken) =>
@@ -146,7 +146,7 @@ internal static class ProjectScheduledJobInFlightGuard
         return scheduledJobIds;
     }
 
-    internal static ProjectScheduledJobExecutionJob? TryDeserializePayload(string payloadJson)
+    public static ProjectScheduledJobExecutionJob? TryDeserializePayload(string payloadJson)
     {
         try
         {

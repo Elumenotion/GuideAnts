@@ -3,7 +3,7 @@ using FluentAssertions;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
-using GuideAntsApi.Services.Scheduling;
+using GuideAntsApi.BackgroundJobs.Scheduling;
 using GuideAntsApi.Tests.BackgroundJobs;
 using Microsoft.EntityFrameworkCore;
 
