@@ -12,6 +12,7 @@ COMPOSE_MODE="ghcr"     # ghcr | local
 HEALTH_URL="http://localhost:5107/"
 HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
 ROCM_RUNTIME_OVERRIDE_FILE="docker-compose.rocm-runtime.generated.yml"
+VOICE_PACK_OVERRIDE_FILE="docker-compose.voice-pack.local.yml"
 START_COMMAND="start_macos.sh"
 DOCKER_DIR=""
 DOCKER_DIRECTORY=""
@@ -59,6 +60,7 @@ BACKEND=${SELECTED_BACKEND:-}
 COMPOSE_MODE=${COMPOSE_MODE}
 COMPOSE_FILE=${COMPOSE_FILE}
 HOST_MOUNT_OVERRIDE_FILE=${HOST_MOUNT_OVERRIDE_FILE}
+VOICE_PACK_OVERRIDE_FILE=${VOICE_PACK_OVERRIDE_FILE}
 DOCKER_DIRECTORY=${DOCKER_DIRECTORY}
 START_COMMAND=${START_COMMAND}
 LAST_RUN_EPOCH=$(date +%s)
@@ -207,6 +209,14 @@ if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
     log "Including ROCm runtime override: $ROCM_RUNTIME_OVERRIDE_FILE"
   else
     warn "Ignoring invalid ROCm runtime override $DOCKER_DIRECTORY/$ROCM_RUNTIME_OVERRIDE_FILE."
+  fi
+fi
+if [[ -f "$VOICE_PACK_OVERRIDE_FILE" ]]; then
+  if docker compose -f "$COMPOSE_FILE" -f "$VOICE_PACK_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    compose_args+=(-f "$VOICE_PACK_OVERRIDE_FILE")
+    log "Including voice pack override: $VOICE_PACK_OVERRIDE_FILE"
+  else
+    warn "Ignoring invalid voice pack override $DOCKER_DIRECTORY/$VOICE_PACK_OVERRIDE_FILE."
   fi
 fi
 docker compose "${compose_args[@]}" --env-file "$ENV_FILE" up -d
