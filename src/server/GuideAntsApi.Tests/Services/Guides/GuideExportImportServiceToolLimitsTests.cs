@@ -31,7 +31,6 @@ public sealed class GuideExportImportServiceToolLimitsTests
                 Description = "crew",
                 Instructions = "crew help",
                 MaxToolCallsPerTurn = 8,
-                MaxToolRoundsPerTurn = 2,
                 Created = DateTime.UtcNow,
             };
 
@@ -43,7 +42,6 @@ public sealed class GuideExportImportServiceToolLimitsTests
                 Description = "desc",
                 Instructions = "help",
                 MaxToolCallsPerTurn = 15,
-                MaxToolRoundsPerTurn = 4,
                 Created = DateTime.UtcNow,
                 CrewMembers =
                 [
@@ -70,7 +68,6 @@ public sealed class GuideExportImportServiceToolLimitsTests
         using var guideManifestReader = new StreamReader(archive.GetEntry("manifest.json")!.Open());
         using var guideManifest = JsonDocument.Parse(await guideManifestReader.ReadToEndAsync());
         guideManifest.RootElement.GetProperty("max_tool_calls_per_turn").GetInt32().Should().Be(15);
-        guideManifest.RootElement.GetProperty("max_tool_rounds_per_turn").GetInt32().Should().Be(4);
         guideManifest.RootElement.GetProperty("crew")[0]
             .GetProperty("max_tool_calls_per_invocation").GetInt32().Should().Be(5);
 
@@ -78,7 +75,6 @@ public sealed class GuideExportImportServiceToolLimitsTests
             archive.GetEntry("assistants/Limited Crew Assistant/manifest.json")!.Open());
         using var crewManifest = JsonDocument.Parse(await crewManifestReader.ReadToEndAsync());
         crewManifest.RootElement.GetProperty("max_tool_calls_per_turn").GetInt32().Should().Be(8);
-        crewManifest.RootElement.GetProperty("max_tool_rounds_per_turn").GetInt32().Should().Be(2);
 
         var importOptions = BackgroundJobTestHelpers.CreateInMemoryOptions($"tool-limits-import-{Guid.NewGuid():N}");
         await using var importContext = new ApplicationDbContext(importOptions);
@@ -92,13 +88,11 @@ public sealed class GuideExportImportServiceToolLimitsTests
             .SingleAsync(a => a.Id == importResult.GuideId);
 
         importedGuide.MaxToolCallsPerTurn.Should().Be(15);
-        importedGuide.MaxToolRoundsPerTurn.Should().Be(4);
         importedGuide.CrewMembers.Single().MaxToolCallsPerInvocation.Should().Be(5);
 
         var importedCrew = await importContext.Assistants
             .SingleAsync(a => a.Name == "Limited Crew Assistant" && a.Kind == AssistantKind.Assistant);
         importedCrew.MaxToolCallsPerTurn.Should().Be(8);
-        importedCrew.MaxToolRoundsPerTurn.Should().Be(2);
     }
 
     [TestMethod]

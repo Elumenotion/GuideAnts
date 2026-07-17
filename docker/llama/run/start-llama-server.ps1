@@ -170,8 +170,7 @@ $dockerArgs = @(
     # of truth.
     '-e', 'GA_SD_TIMEOUT_SECONDS=900',
     '-e', 'GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=120',
-    '-e', 'GA_SD_STEPS=4',
-    '-e', 'GA_SD_CFG_SCALE=1.0',
+    # Sampling (steps/cfg/method) comes from the active SD bundle definition only.
     '-e', 'GA_SD_STRENGTH=0.75',
     '-e', 'GA_SD_OFFLOAD_TO_CPU=0',
     '-e', 'GA_SD_DIFFUSION_FA=1',

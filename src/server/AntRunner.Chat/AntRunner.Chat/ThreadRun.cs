@@ -48,15 +48,16 @@ namespace AntRunner.Chat
             return def.ContextOptions.Any(kv => kv.Value != null && kv.Value.Contains("[@files]", StringComparison.OrdinalIgnoreCase));
         }
 
-        private const string ToolLimitRuntimeOverrideMarker = "[Runtime: Tool call limit reached";
+        private const string ToolLimitRuntimeOverrideMarker = ToolLimitState.RuntimeOverrideMarker;
 
         private static Task InjectLimitToolResultsAsync(
             IReadOnlyList<ChatToolCall> toolCalls,
             List<ChatMessage> messages,
             ToolLimitState limitState,
+            int pendingCalls,
             MessageAddedEventHandler? messageAdded)
         {
-            var limitMessage = limitState.BuildLimitToolResultMessage();
+            var limitMessage = limitState.BuildLimitToolResultMessage(pendingCalls);
             foreach (var toolCall in toolCalls)
             {
                 if (!toolCall.IsFunction)
@@ -78,14 +79,14 @@ namespace AntRunner.Chat
 
         private static void EnsureLimitReachedSystemNudge(
             List<ChatMessage> messages,
+            ToolLimitState limitState,
             MessageAddedEventHandler? messageAdded)
         {
-            const string nudge =
-                "[System: Tool call limit reached for this turn. Summarize what you have gathered and respond to the user. Do not request additional tool calls.]";
+            var nudge = limitState.BuildSystemNudgeMessage(ToolLimitHitKind.ToolCalls);
 
             if (messages.Any(m =>
                     m.Role == ChatRole.System &&
-                    m.GetText().Contains("Tool call limit reached for this turn", StringComparison.Ordinal)))
+                    m.GetText().Contains("was reached for this turn", StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }
@@ -96,14 +97,14 @@ namespace AntRunner.Chat
 
         private static void EnsureRuntimeToolLimitOverrideMessage(
             List<ChatMessage> messages,
+            ToolLimitState limitState,
             MessageAddedEventHandler? messageAdded)
         {
-            var overrideText =
-                "[Runtime: Tool call limit reached. Ignore prior instructions to retry tool calls for this turn.]";
+            var overrideText = limitState.BuildRuntimeOverrideSystemMessage();
 
             if (messages.Any(m =>
                     m.Role == ChatRole.System &&
-                    m.GetText().Contains(ToolLimitRuntimeOverrideMarker, StringComparison.Ordinal)))
+                    m.GetText().Contains(ToolLimitState.RuntimeOverrideMarker, StringComparison.Ordinal)))
             {
                 return;
             }
@@ -116,7 +117,7 @@ namespace AntRunner.Chat
             List<ChatMessage> messages,
             MessageAddedEventHandler? messageAdded)
         {
-            var forceMessage = ToolLimitState.BuildForceCompleteAssistantMessage();
+            var forceMessage = ToolLimitState.BuildForceCompleteAssistantMessage(ToolLimitHitKind.ToolCalls);
             messages.Add(new ChatMessage(ChatRole.Assistant, forceMessage));
             messageAdded?.Invoke(null, new MessageAddedEventArgs(ChatRole.Assistant.ToString(), forceMessage));
         }
@@ -561,7 +562,7 @@ namespace AntRunner.Chat
 
                     if (ctx.ToolLimitState?.Phase >= LimitEscalationPhase.SoftBlocked)
                     {
-                        EnsureRuntimeToolLimitOverrideMessage(messages, tracedMessageAdded);
+                        EnsureRuntimeToolLimitOverrideMessage(messages, ctx.ToolLimitState, tracedMessageAdded);
                     }
 
                     string? toolChoice = null;
@@ -685,19 +686,17 @@ namespace AntRunner.Chat
 
                                 var batchToolCount = serverHandled.Count + clientHandled.Count;
                                 var limitState = ctx.ToolLimitState;
+                                ToolLimitHitKind limitHitKind = ToolLimitHitKind.None;
                                 if (limitState != null)
                                 {
-                                    limitState = limitState.AddToolRound();
+                                    limitHitKind = limitState.EvaluateLimitHit(batchToolCount);
                                     ctx.ToolLimitState = limitState;
                                     traceCollector?.CaptureToolLimitState(
                                         limitState.ToolCallsUsed,
-                                        limitState.ToolRoundsUsed,
                                         limitState.Phase.ToString());
                                 }
 
-                                var limitHit = limitState != null &&
-                                    (limitState.WouldExceedToolCalls(batchToolCount) ||
-                                     limitState.HasExceededToolRounds());
+                                var limitHit = limitHitKind != ToolLimitHitKind.None;
 
                                 if (limitHit)
                                 {
@@ -709,15 +708,17 @@ namespace AntRunner.Chat
                                         choice.Message.ToolCalls!,
                                         messages,
                                         limitState,
+                                        batchToolCount,
                                         tracedMessageAdded);
 
                                     if (limitState.Phase == LimitEscalationPhase.None)
                                     {
                                         ctx.ToolLimitState = limitState.AddToolCalls(batchToolCount) with
                                         {
-                                            Phase = LimitEscalationPhase.SoftBlocked
+                                            Phase = LimitEscalationPhase.SoftBlocked,
+                                            LastHitKind = limitHitKind
                                         };
-                                        EnsureLimitReachedSystemNudge(messages, tracedMessageAdded);
+                                        EnsureLimitReachedSystemNudge(messages, limitState, tracedMessageAdded);
                                     }
                                     else if (escalateToTier3)
                                     {
@@ -742,7 +743,8 @@ namespace AntRunner.Chat
 
                                         ctx.ToolLimitState = limitState.AddToolCalls(batchToolCount) with
                                         {
-                                            Phase = LimitEscalationPhase.ForceCompleted
+                                            Phase = LimitEscalationPhase.ForceCompleted,
+                                            LastHitKind = limitHitKind
                                         };
                                         tier3ForceCompleted = true;
                                         continueChat = false;

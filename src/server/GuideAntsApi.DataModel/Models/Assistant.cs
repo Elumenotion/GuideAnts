@@ -127,11 +127,6 @@ namespace GuideAntsApi.DataModel.Models
         public int? MaxToolCallsPerTurn { get; set; }
 
         /// <summary>
-        /// Max LLM rounds with tool_calls finish_reason in one ThreadRun. Null = unlimited.
-        /// </summary>
-        public int? MaxToolRoundsPerTurn { get; set; }
-
-        /// <summary>
         /// Explicit discriminator of record behavior: Assistant or Guide.
         /// Guides enable crew and template-aware orchestration paths.
         /// </summary>

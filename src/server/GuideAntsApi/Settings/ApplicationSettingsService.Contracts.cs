@@ -1,6 +1,25 @@
+using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 
 namespace GuideAntsApi.Settings;
+
+public partial interface IApplicationSettingsService
+{
+    Task<IReadOnlyList<ImageGenerationBundleDefinitionDto>> GetImageGenerationBundleDefinitionsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<ImageGenerationBundleDefinitionDto?> GetImageGenerationBundleDefinitionAsync(
+        string bundleId,
+        CancellationToken cancellationToken = default);
+
+    Task<ImageGenerationBundleDefinitionDto> UpsertImageGenerationBundleDefinitionAsync(
+        ImageGenerationBundleDefinitionDto definition,
+        CancellationToken cancellationToken = default);
+
+    Task ReplaceImageGenerationBundleDefinitionsAsync(
+        IReadOnlyList<ImageGenerationBundleDefinitionDto> definitions,
+        CancellationToken cancellationToken = default);
+}
 
 public sealed partial class ApplicationSettingsService
 {

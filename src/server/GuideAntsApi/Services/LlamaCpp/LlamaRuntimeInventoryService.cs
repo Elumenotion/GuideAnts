@@ -1,6 +1,7 @@
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GuideAntsApi.Services.LlamaCpp;
 
@@ -11,24 +12,67 @@ public interface ILlamaRuntimeInventoryService
 
 public sealed class LlamaRuntimeInventoryService : ILlamaRuntimeInventoryService
 {
+    private const string InventoryCacheKey = "llama.runtime.inventory";
+    private static readonly TimeSpan InventoryCacheTtl = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan InventoryFailureCacheTtl = TimeSpan.FromSeconds(2);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IRouterModelsConfigService _routerModels;
     private readonly ILlamaServerRuntimeClient _llamaClient;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<LlamaRuntimeInventoryService> _logger;
 
     public LlamaRuntimeInventoryService(
         IServiceScopeFactory scopeFactory,
         IRouterModelsConfigService routerModels,
         ILlamaServerRuntimeClient llamaClient,
+        IMemoryCache cache,
         ILogger<LlamaRuntimeInventoryService> logger)
     {
         _scopeFactory = scopeFactory;
         _routerModels = routerModels;
         _llamaClient = llamaClient;
+        _cache = cache;
         _logger = logger;
     }
 
     public async Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> GetInventoryAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cache.TryGetValue(InventoryCacheKey, out IReadOnlyList<LlamaRuntimeInventoryItemDto>? cached)
+            && cached is not null)
+        {
+            return cached;
+        }
+
+        try
+        {
+            var inventory = await BuildInventoryAsync(cancellationToken).ConfigureAwait(false);
+            _cache.Set(
+                InventoryCacheKey,
+                inventory,
+                new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = InventoryCacheTtl,
+                    Size = 1
+                });
+            return inventory;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to build llama runtime inventory.");
+            _cache.Set(
+                InventoryCacheKey,
+                Array.Empty<LlamaRuntimeInventoryItemDto>(),
+                new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = InventoryFailureCacheTtl,
+                    Size = 1
+                });
+            return Array.Empty<LlamaRuntimeInventoryItemDto>();
+        }
+    }
+
+    private async Task<IReadOnlyList<LlamaRuntimeInventoryItemDto>> BuildInventoryAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();

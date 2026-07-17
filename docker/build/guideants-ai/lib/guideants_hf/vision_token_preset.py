@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from guideants_hf.router_mmproj import preset_disables_mmproj
+
 VISION_TOKEN_PRESET_KEYS = frozenset({"image-min-tokens", "image-max-tokens"})
 
 # Gemma 4 mmproj caps image_max_pixels at 645120; 645120 / 2304 = 280 tokens.
@@ -14,6 +16,12 @@ GEMMA_IMAGE_MAX_TOKENS = "280"
 QWEN_IMAGE_MIN_TOKENS = "1024"
 
 
+def strip_vision_token_extras(extras: dict[str, str]) -> None:
+    for key in list(extras.keys()):
+        if key.strip().lower() in VISION_TOKEN_PRESET_KEYS:
+            del extras[key]
+
+
 def apply_alias_vision_token_preset(alias: str, preset: dict[str, str]) -> dict[str, str]:
     """Strip vision token keys and re-apply family-specific values for *alias*."""
     normalized = {
@@ -21,6 +29,8 @@ def apply_alias_vision_token_preset(alias: str, preset: dict[str, str]) -> dict[
         for key, value in preset.items()
         if key.strip().lower() not in VISION_TOKEN_PRESET_KEYS
     }
+    if preset_disables_mmproj(normalized):
+        return normalized
     alias_lower = alias.strip().lower()
     if re.search(r"qwen", alias_lower):
         normalized["image-min-tokens"] = QWEN_IMAGE_MIN_TOKENS
@@ -62,6 +72,12 @@ def normalize_router_ini_text(text: str) -> str:
             cleaned.append(raw_line)
 
         normalized_extras = apply_alias_vision_token_preset(current_alias, extras)
+        if preset_disables_mmproj(extras):
+            normalized_extras = {
+                key: value
+                for key, value in normalized_extras.items()
+                if key.strip().lower() not in VISION_TOKEN_PRESET_KEYS
+            }
         vision_keys = {
             key.lower()
             for key in normalized_extras

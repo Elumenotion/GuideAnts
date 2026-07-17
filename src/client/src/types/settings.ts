@@ -1,3 +1,30 @@
+export interface ImageGenerationBundleDefinitionSamplingDto {
+  steps: number;
+  cfgScale: number;
+  samplingMethod: string;
+}
+
+export interface ImageGenerationBundleDefinitionRoleDto {
+  repo: string;
+  file: string;
+}
+
+export interface ImageGenerationBundleDefinitionDto {
+  bundleId: string;
+  revision?: string | null;
+  updatedAtUtc?: string | null;
+  roles: {
+    diffusion: ImageGenerationBundleDefinitionRoleDto;
+    vae: ImageGenerationBundleDefinitionRoleDto;
+    textEncoder: ImageGenerationBundleDefinitionRoleDto;
+  };
+  sampling: ImageGenerationBundleDefinitionSamplingDto;
+}
+
+export interface ImageGenerationBundleDefinitionListDto {
+  items: ImageGenerationBundleDefinitionDto[];
+}
+
 export interface SettingsSectionSummaryDto {
   sectionName: string;
   hasSecrets: boolean;

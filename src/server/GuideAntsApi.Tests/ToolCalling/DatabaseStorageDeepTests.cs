@@ -235,6 +235,39 @@ public sealed class DatabaseStorageDeepTests
     }
 
     [TestMethod]
+    public void SelectDeclaredReasoningEffort_OmitsWhenModelDeclaresNoChoices()
+    {
+        // Local ChatDefaults vocab (enabled) must not passthrough to OpenRouter/HF rows
+        // that have empty ReasoningChoicesJson.
+        Invoke<string?>("SelectDeclaredReasoningEffort", "enabled", Array.Empty<string>())
+            .Should().BeNull();
+        Invoke<string?>("SelectDeclaredReasoningEffort", "high", Array.Empty<string>())
+            .Should().BeNull();
+    }
+
+    [TestMethod]
+    public void SelectDeclaredReasoningEffort_OmitsWhenRequestedNotInModelChoices()
+    {
+        IReadOnlyList<string> openRouterChoices = ["max", "high", "medium", "low", "minimal", "none"];
+        Invoke<string?>("SelectDeclaredReasoningEffort", "enabled", openRouterChoices)
+            .Should().BeNull();
+    }
+
+    [TestMethod]
+    public void SelectDeclaredReasoningEffort_ReturnsMatchedLocalAndCloudChoices()
+    {
+        IReadOnlyList<string> localChoices = ["none", "enabled"];
+        Invoke<string?>("SelectDeclaredReasoningEffort", "enabled", localChoices)
+            .Should().Be("enabled");
+        Invoke<string?>("SelectDeclaredReasoningEffort", "ENABLED", localChoices)
+            .Should().Be("enabled");
+
+        IReadOnlyList<string> openRouterChoices = ["max", "high", "medium", "low", "minimal", "none"];
+        Invoke<string?>("SelectDeclaredReasoningEffort", "high", openRouterChoices)
+            .Should().Be("high");
+    }
+
+    [TestMethod]
     public async Task GetAssistant_NoConnectionString_ReturnsNull()
     {
         const string key = "ConnectionStrings:DefaultConnection";

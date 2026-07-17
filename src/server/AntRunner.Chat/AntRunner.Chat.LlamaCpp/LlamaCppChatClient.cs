@@ -343,6 +343,15 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
 
         var upstreamExcerpt = ExtractUpstreamDetail(responseBody);
 
+        // llama-server returns 500 when the loaded preset has no mmproj but the request includes
+        // images. That is a capability mismatch, not a runtime crash — route to the generic error
+        // surface instead of the restart modal.
+        if (ResponseBodyIndicatesVisionNotSupported(responseBody))
+        {
+            throw new InvalidOperationException(
+                "This model does not support image attachments. Remove the image from your message or enable vision (mmproj) in the model preset.");
+        }
+
         // Classify 5xx responses so the API/UI can prompt the user to restart the local runtime
         // instead of showing a 1MB HttpRequestException.Message.
         if ((int)response.StatusCode >= 500)
@@ -427,6 +436,31 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         return false;
     }
 
+    // llama-server body when /v1/chat/completions includes image parts but the loaded preset
+    // has no mmproj (including no-mmproj overrides). Status is 500 upstream; kept narrow so a
+    // generic internal error is never misclassified as a vision-capability rejection.
+    private static readonly string[] VisionNotSupportedMarkers =
+    [
+        "image input is not supported",
+    ];
+
+    private static bool ResponseBodyIndicatesVisionNotSupported(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return false;
+        }
+
+        foreach (var marker in VisionNotSupportedMarkers)
+        {
+            if (body.Contains(marker, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // CUDA / llama.cpp OOM markers observed across upstream builds. Matching is case-insensitive
     // and the body is already capped to ~8KB by the diagnostic path above, so this is safe to run

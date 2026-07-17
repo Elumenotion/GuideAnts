@@ -64,4 +64,7 @@ export GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS="${GA_SD_WARMUP_REQUEST_TIMEOUT_SECO
 export GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP="${GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP:-1}"
 apply_cuda_visible_devices_override "GA_SD_CUDA_VISIBLE_DEVICES"
 
+# Stale sd_service bytecode must not shadow sd_service.py (bind mounts, image layer cache).
+find /app/sd-service -type f -name 'sd_service.cpython-*.pyc' -delete 2>/dev/null || true
+
 exec /opt/venv/bin/python /app/admin-service/ga_admin_service.py

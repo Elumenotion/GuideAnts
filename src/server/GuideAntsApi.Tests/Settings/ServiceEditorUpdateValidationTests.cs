@@ -377,7 +377,7 @@ public sealed class ServiceEditorUpdateValidationTests
         var modes = await service.GetServiceModesAsync("ImageGeneration", CancellationToken.None);
         modes.Should().Contain(mode =>
             string.Equals(mode.ProviderSection, "LocalServiceHosts:ImageGenerationBaseUrl", StringComparison.Ordinal)
-            && string.Equals(mode.ModelId, "flux2-klein-4b-q4ks", StringComparison.Ordinal));
+            && string.Equals(mode.ModelId, "flux2-klein-4b", StringComparison.Ordinal));
     }
 
     [TestMethod]

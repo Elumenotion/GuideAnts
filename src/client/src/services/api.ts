@@ -1747,6 +1747,41 @@ export const api = {
             /** ASR / TTS only: /ready passthrough. */
             runtimeReadinessOutcome: (serviceId: string) => fetchRuntimeReadinessOutcome(serviceId),
         },
+
+        imageGenerationBundles: {
+            list: () =>
+                callApi<import('./api.settings').ImageGenerationBundleDefinitionListDto>(
+                    '/settings/services/ImageGeneration/bundle-definitions'
+                ),
+
+            get: (bundleId: string) =>
+                callApi<import('./api.settings').ImageGenerationBundleDefinitionResponse>(
+                    `/settings/services/ImageGeneration/bundle-definitions/${encodeURIComponent(bundleId)}`
+                ),
+
+            upsert: (bundleId: string, definition: import('./api.settings').ImageGenerationBundleDefinitionRequest) =>
+                callApi<import('./api.settings').ImageGenerationBundleDefinitionResponse>(
+                    `/settings/services/ImageGeneration/bundle-definitions/${encodeURIComponent(bundleId)}`,
+                    {
+                        method: 'PUT',
+                        body: JSON.stringify(definition),
+                    }
+                ),
+
+            import: (definition: import('./api.settings').ImageGenerationBundleDefinitionRequest) =>
+                callApi<import('./api.settings').ImageGenerationBundleDefinitionResponse>(
+                    '/settings/services/ImageGeneration/bundle-definitions/import',
+                    {
+                        method: 'POST',
+                        body: JSON.stringify({ definition }),
+                    }
+                ),
+
+            export: (bundleId: string) =>
+                callApi<import('./api.settings').ImageGenerationBundleDefinitionResponse>(
+                    `/settings/services/ImageGeneration/bundle-definitions/${encodeURIComponent(bundleId)}/export`
+                ),
+        },
     },
     usage: {
         getSummary: (from: string, to: string, bucket: UsageBucket) => {

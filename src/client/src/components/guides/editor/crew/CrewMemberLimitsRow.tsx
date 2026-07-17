@@ -64,7 +64,7 @@ export function CrewMemberLimitsRow({
   return (
     <div className="mt-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-xs text-gray-600">
-        Tool calls per turn:{' '}
+        Max tools per response:{' '}
         {loading ? (
           <span className="text-gray-500">Loading…</span>
         ) : (

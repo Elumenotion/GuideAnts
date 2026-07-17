@@ -142,6 +142,11 @@ if (-not $SkipDocker) {
         $composeArgs += @('-f', $hostMountOverride)
     }
 
+    $voicePackOverride = 'docker-compose.voice-pack.local.yml'
+    if (Test-Path (Join-Path $dockerDir $voicePackOverride)) {
+        $composeArgs += @('-f', $voicePackOverride)
+    }
+
     $depServices = @(
         'mssql-express',
         'guideants-ai',

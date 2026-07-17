@@ -331,6 +331,20 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
         },
         new()
         {
+            SectionName = ImageGenerationBundleDefinitionContracts.SettingsSectionName,
+            Properties =
+            [
+                new(
+                    ImageGenerationBundleDefinitionContracts.BundlesPayloadProperty,
+                    $"{ImageGenerationBundleDefinitionContracts.SettingsSectionName}:{ImageGenerationBundleDefinitionContracts.BundlesPayloadProperty}")
+            ],
+            BootstrapPayloadFactory = _ => new JsonObject
+            {
+                [ImageGenerationBundleDefinitionContracts.BundlesPayloadProperty] = new JsonObject(),
+            },
+        },
+        new()
+        {
             SectionName = "Embeddings",
             Properties =
             [

@@ -696,7 +696,7 @@ public sealed class NotebookHeaderToolbarServiceTests
     {
         await using var db = CreateDb();
         var notebook = await SeedNotebookAsync(db);
-        const string bundleId = "FLUX.2-dev-GGUF-Q5_K_M";
+        const string bundleId = "FLUX.2-dev";
 
         var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
         SetupToolbarServiceModesDefaults(settings);
@@ -747,7 +747,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                         {
                           "items": [
                             {"bundleId":"{{bundleId}}","complete":true,"loaded":true},
-                            {"bundleId":"flux2-klein-4b-q4ks","complete":true,"loaded":false}
+                            {"bundleId":"flux2-klein-4b","complete":true,"loaded":false}
                           ]
                         }
                         """);

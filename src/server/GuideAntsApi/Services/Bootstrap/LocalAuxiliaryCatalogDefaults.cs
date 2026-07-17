@@ -39,7 +39,7 @@ internal static class LocalAuxiliaryCatalogDefaults
         if (string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)
             && string.Equals(providerId, ServiceProviderIds.ImageGenerationLocalSdHttp, StringComparison.Ordinal))
         {
-            return "flux2-klein-4b-q4ks";
+            return "flux2-klein-4b";
         }
 
         return null;

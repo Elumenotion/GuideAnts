@@ -597,6 +597,8 @@ Startup loading behavior is configurable per service through environment variabl
 - `GA_SD_WAIT_FOR_READY_ON_STARTUP` (`1`/`0`, default `0`)
   - `1`: run an SD readiness monitor (`/sd/health`) in background during startup
   - `0`: skip SD readiness monitoring on startup
+- `GA_SD_OFFLOAD_TO_CPU` (`1`/`0`)
+- `GA_SD_BACKEND` (optional sd-server `--backend` assignment, e.g. `diffusion=cuda0&cuda1`; quote in `.env`)
 - `GA_SD_READY_TIMEOUT_SECONDS` (default `1800`)
 - `GA_SD_CUDA_VISIBLE_DEVICES` (optional explicit SD physical GPU pinning; empty value means inherit global ordering)
 - `GA_SD_VK_VISIBLE_DEVICES` (optional SD-only Vulkan device selector; empty value means inherit `GGML_VK_VISIBLE_DEVICES`)

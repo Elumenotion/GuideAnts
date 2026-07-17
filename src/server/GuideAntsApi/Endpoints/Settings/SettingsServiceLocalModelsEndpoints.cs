@@ -154,6 +154,8 @@ public static class SettingsServiceLocalModelsEndpoints
             IHttpClientFactory httpClientFactory,
             IConfiguration configuration,
             IHuggingFaceTokenResolver hfTokenResolver,
+            IApplicationSettingsService settings,
+            IBundleDefinitionProjectionService projectionService,
             CancellationToken cancellationToken) =>
         {
             var adminBase = LocalServiceAdminRouting.ResolveAdminBase(serviceId, configuration);
@@ -166,6 +168,18 @@ public static class SettingsServiceLocalModelsEndpoints
             if (validationError is not null)
             {
                 return validationError;
+            }
+
+            if (string.Equals(serviceId, "ImageGeneration", StringComparison.Ordinal))
+            {
+                var definition = SettingsImageGenerationBundleDefinitionsEndpoints.TryMapDownloadPayloadToDefinition(payload);
+                if (definition is null)
+                {
+                    return Results.BadRequest(new { error = "ImageGeneration download payload could not be mapped to a canonical bundle definition." });
+                }
+
+                await settings.UpsertImageGenerationBundleDefinitionAsync(definition, cancellationToken);
+                await projectionService.ProjectBundleAsync(definition.BundleId, cancellationToken);
             }
 
             if (ServiceLocalModelCatalogSupport.ExposesCuratedCatalog(serviceId)

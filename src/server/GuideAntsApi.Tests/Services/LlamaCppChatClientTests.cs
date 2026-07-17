@@ -740,6 +740,23 @@ public sealed class LlamaCppChatClientTests
     }
 
     [TestMethod]
+    public async Task StreamCompletionAsync_ClassifiesImageInputWithoutMmproj_AsRequestErrorNotCrash()
+    {
+        const string visionRejectedBody =
+            "{\"error\":{\"code\":500,\"message\":\"image input is not supported - hint: if this is unexpected, you may need to provide the mmproj\",\"type\":\"server_error\"}}";
+        var handler = new StaticResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent(visionRejectedBody, Encoding.UTF8, "application/json")
+        });
+        var client = CreateClient(handler);
+
+        var act = async () => await client.StreamCompletionAsync(BuildRequest(), _ => { });
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        ex.Which.Message.Should().Contain("does not support image attachments");
+    }
+
+    [TestMethod]
     public async Task StreamCompletionAsync_LeavesClientErrors_AsHttpRequestException()
     {
         var handler = new StaticResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)

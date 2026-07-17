@@ -71,6 +71,20 @@ public sealed class StreamingErrorEnvelopeTests
   }
 
   [TestMethod]
+  public void Build_Leaves_vision_capability_rejection_without_crash_code()
+  {
+    var ex = new InvalidOperationException(
+      "This model does not support image attachments. Remove the image from your message or enable vision (mmproj) in the model preset.");
+
+    var json = Serialize(StreamingErrorEnvelope.Build(ex));
+
+    json.TryGetProperty("code", out var codeEl).Should().BeTrue();
+    codeEl.ValueKind.Should().Be(JsonValueKind.Null);
+    json.GetProperty("type").GetString().Should().Be(nameof(InvalidOperationException));
+    json.GetProperty("message").GetString().Should().Contain("does not support image attachments");
+  }
+
+  [TestMethod]
   public void Build_Maps_active_timeout_recovery_to_recovering_code()
   {
     var ex = new LlamaRuntimeCrashedException(

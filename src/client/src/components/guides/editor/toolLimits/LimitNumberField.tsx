@@ -4,6 +4,7 @@ import { parseOptionalPositiveInt } from './toolLimitForm';
 interface LimitNumberFieldProps {
   id: string;
   label: string;
+  description?: string;
   value?: number;
   onChange: (value: number | undefined) => void;
   onErrorChange?: (hasError: boolean) => void;
@@ -12,6 +13,7 @@ interface LimitNumberFieldProps {
 export function LimitNumberField({
   id,
   label,
+  description,
   value,
   onChange,
   onErrorChange,
@@ -25,6 +27,9 @@ export function LimitNumberField({
       : String(value);
   const parsed = parseOptionalPositiveInt(displayValue);
   const error = parsed.ok ? undefined : parsed.error;
+  const descriptionId = description ? `${id}-description` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [descriptionId, errorId].filter(Boolean).join(' ') || undefined;
 
   const handleChange = (nextRaw: string) => {
     setRawValue(nextRaw);
@@ -40,6 +45,11 @@ export function LimitNumberField({
       <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
         {label}
       </label>
+      {description && (
+        <p id={descriptionId} className="text-xs text-gray-500 mb-2">
+          {description}
+        </p>
+      )}
       <input
         type="number"
         id={id}
@@ -57,10 +67,10 @@ export function LimitNumberField({
         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         placeholder="No limit"
         aria-invalid={error ? true : undefined}
-        aria-describedby={error ? `${id}-error` : undefined}
+        aria-describedby={describedBy}
       />
       {error && (
-        <p id={`${id}-error`} role="alert" className="text-xs text-red-600 mt-1">
+        <p id={errorId} role="alert" className="text-xs text-red-600 mt-1">
           {error}
         </p>
       )}

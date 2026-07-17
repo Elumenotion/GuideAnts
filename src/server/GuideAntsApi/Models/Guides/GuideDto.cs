@@ -34,7 +34,6 @@ public record GuideDetailsDto(
     public List<AssistantSkillDto>? Skills { get; init; }
     public SandboxWireApiConfigDto? SandboxWireApiConfig { get; init; }
     public int? MaxToolCallsPerTurn { get; init; }
-    public int? MaxToolRoundsPerTurn { get; init; }
 }
 
 // Create guide request
@@ -63,7 +62,6 @@ public record CreateGuideDto(
     public List<AssistantSkillSaveDto>? Skills { get; init; }
     public SandboxWireApiConfigDto? SandboxWireApiConfig { get; init; }
     public int? MaxToolCallsPerTurn { get; init; }
-    public int? MaxToolRoundsPerTurn { get; init; }
     public List<CrewMemberLimitDto>? CrewMemberLimits { get; init; }
 }
 
@@ -94,7 +92,6 @@ public record UpdateGuideDto(
     public List<AssistantSkillSaveDto>? Skills { get; init; }
     public SandboxWireApiConfigDto? SandboxWireApiConfig { get; init; }
     public int? MaxToolCallsPerTurn { get; init; }
-    public int? MaxToolRoundsPerTurn { get; init; }
     public List<CrewMemberLimitDto>? CrewMemberLimits { get; init; }
 }
 
@@ -197,8 +194,7 @@ public record CrewMemberDto(
     bool IsGlobal,
     int DisplayOrder,
     int? MaxToolCallsPerInvocation = null,
-    int? MaxToolCallsPerTurn = null,
-    int? MaxToolRoundsPerTurn = null
+    int? MaxToolCallsPerTurn = null
 );
 
 public record CrewMemberLimitDto(

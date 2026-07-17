@@ -140,7 +140,6 @@ public static class Agent
         var childToolLimitState = ToolLimitState.ForNestedInvoke(
             context.ToolLimitState,
             assistant.MaxToolCallsPerTurn,
-            assistant.MaxToolRoundsPerTurn,
             memberOverride: memberOverride);
 
         var childContext = context with

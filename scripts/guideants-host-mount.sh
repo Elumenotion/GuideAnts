@@ -8,6 +8,7 @@ STATE_FILE="$ROOT_DIR/.installer_state.env"
 DEFAULT_API_BASE="http://localhost:5107"
 API_PLAN_PATH="/api/internal/host-folder-mounts"
 AFFECTED_MOUNT_SERVICE_NAMES=(guideants-webapi-ui guideants-ai plantuml)
+VOICE_PACK_OVERRIDE_FILE="docker-compose.voice-pack.local.yml"
 
 usage() {
   cat <<'EOF'
@@ -354,9 +355,13 @@ remove_mount() {
 
 restart_affected_services() {
   local override_path="$ROOT_DIR/$DOCKER_DIRECTORY/$HOST_MOUNT_OVERRIDE_FILE"
+  local voice_pack_override_path="$ROOT_DIR/$DOCKER_DIRECTORY/$VOICE_PACK_OVERRIDE_FILE"
   local compose_args=(-f "$COMPOSE_FILE")
   if [[ -f "$override_path" ]]; then
     compose_args+=(-f "$HOST_MOUNT_OVERRIDE_FILE")
+  fi
+  if [[ -f "$voice_pack_override_path" ]]; then
+    compose_args+=(-f "$VOICE_PACK_OVERRIDE_FILE")
   fi
 
   log "Restarting affected services (--no-deps): ${AFFECTED_MOUNT_SERVICE_NAMES[*]}"

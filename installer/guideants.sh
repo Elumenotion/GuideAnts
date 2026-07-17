@@ -33,6 +33,7 @@ STATE_FILE="$ROOT_DIR/.installer_state.env"
 HEALTH_URL="http://localhost:5107/"
 HOST_MOUNT_OVERRIDE_FILE="docker-compose.host-mounts.generated.yml"
 ROCM_RUNTIME_OVERRIDE_FILE="docker-compose.rocm-runtime.generated.yml"
+VOICE_PACK_OVERRIDE_FILE="docker-compose.voice-pack.local.yml"
 DOCKER_DIRECTORY="docker"
 
 MODE="install"            # install | doctor
@@ -1135,6 +1136,7 @@ BACKEND=${SELECTED_BACKEND:-}
 COMPOSE_MODE=${COMPOSE_MODE}
 COMPOSE_FILE=${COMPOSE_FILE}
 HOST_MOUNT_OVERRIDE_FILE=${HOST_MOUNT_OVERRIDE_FILE}
+VOICE_PACK_OVERRIDE_FILE=${VOICE_PACK_OVERRIDE_FILE}
 DOCKER_DIRECTORY=${DOCKER_DIRECTORY}
 START_COMMAND=guideants.sh
 LAST_RUN_EPOCH=$(date +%s)
@@ -1183,6 +1185,7 @@ if [[ "$MODE" == "doctor" ]]; then
   log "Doctor mode complete. No changes were made."
   would_start="docker compose -f docker/$COMPOSE_FILE"
   [[ -f "$DOCKER_DIR/$HOST_MOUNT_OVERRIDE_FILE" ]] && would_start+=" -f docker/$HOST_MOUNT_OVERRIDE_FILE"
+  [[ -f "$DOCKER_DIR/$VOICE_PACK_OVERRIDE_FILE" ]] && would_start+=" -f docker/$VOICE_PACK_OVERRIDE_FILE"
   [[ -f "$DOCKER_DIR/$ROCM_RUNTIME_OVERRIDE_FILE" ]] && would_start+=" -f docker/$ROCM_RUNTIME_OVERRIDE_FILE"
   log "Would start: $would_start up -d"
   log "Update decision: ${UPDATE_DECISION:-skip}"
@@ -1210,6 +1213,14 @@ if [[ -f "$ROCM_RUNTIME_OVERRIDE_FILE" ]]; then
     log "Including ROCm runtime override: $ROCM_RUNTIME_OVERRIDE_FILE"
   else
     warn "Ignoring invalid ROCm runtime override docker/$ROCM_RUNTIME_OVERRIDE_FILE."
+  fi
+fi
+if [[ -f "$VOICE_PACK_OVERRIDE_FILE" ]]; then
+  if docker compose -f "$COMPOSE_FILE" -f "$VOICE_PACK_OVERRIDE_FILE" --env-file "$ENV_FILE" config >/dev/null 2>&1; then
+    compose_args+=(-f "$VOICE_PACK_OVERRIDE_FILE")
+    log "Including voice pack override: $VOICE_PACK_OVERRIDE_FILE"
+  else
+    warn "Ignoring invalid voice pack override docker/$VOICE_PACK_OVERRIDE_FILE."
   fi
 fi
 if [[ "${UPDATE_DECISION:-skip}" == "pull" ]]; then

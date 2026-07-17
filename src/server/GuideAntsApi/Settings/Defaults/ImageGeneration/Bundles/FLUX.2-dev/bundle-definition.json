@@ -1,0 +1,23 @@
+{
+  "bundleId": "FLUX.2-dev",
+  "revision": "main",
+  "roles": {
+    "diffusion": {
+      "repo": "unsloth/FLUX.2-dev-GGUF",
+      "file": "flux2-dev-Q5_K_M.gguf"
+    },
+    "vae": {
+      "repo": "black-forest-labs/FLUX.2-small-decoder",
+      "file": "full_encoder_small_decoder.safetensors"
+    },
+    "textEncoder": {
+      "repo": "unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF",
+      "file": "Mistral-Small-3.2-24B-Instruct-2506-Q2_K_L.gguf"
+    }
+  },
+  "sampling": {
+    "steps": 28,
+    "cfgScale": 1.0,
+    "samplingMethod": "euler"
+  }
+}

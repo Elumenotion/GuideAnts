@@ -275,7 +275,6 @@ public class GuideExportImportService : IGuideExportImportService
             ReasoningEffort = assistant.ReasoningEffort,
             InvocationEvaluator = assistant.InvocationEvaluator,
             MaxToolCallsPerTurn = assistant.MaxToolCallsPerTurn,
-            MaxToolRoundsPerTurn = assistant.MaxToolRoundsPerTurn,
             Tools = assistant.Tools.Select(t => new AntRunner.ToolCalling.AssistantDefinitions.ToolDefinition 
             { 
                 Type = t.Tool.ToolType 
@@ -356,11 +355,6 @@ public class GuideExportImportService : IGuideExportImportService
             if (guide.MaxToolCallsPerTurn.HasValue)
             {
                 manifestData["max_tool_calls_per_turn"] = guide.MaxToolCallsPerTurn;
-            }
-
-            if (guide.MaxToolRoundsPerTurn.HasValue)
-            {
-                manifestData["max_tool_rounds_per_turn"] = guide.MaxToolRoundsPerTurn;
             }
 
             // Add tools if present
@@ -583,7 +577,6 @@ public class GuideExportImportService : IGuideExportImportService
                 guide.InvocationEvaluator = invocationEvaluator;
                 guide.ModelId = modelId;
                 guide.MaxToolCallsPerTurn = TryReadOptionalIntProperty(manifest, "max_tool_calls_per_turn");
-                guide.MaxToolRoundsPerTurn = TryReadOptionalIntProperty(manifest, "max_tool_rounds_per_turn");
                 guide.Updated = DateTime.UtcNow;
 
                 // Wipe and replace dependent collections
@@ -606,7 +599,6 @@ public class GuideExportImportService : IGuideExportImportService
                     InvocationEvaluator = invocationEvaluator,
                     ModelId = modelId,
                     MaxToolCallsPerTurn = TryReadOptionalIntProperty(manifest, "max_tool_calls_per_turn"),
-                    MaxToolRoundsPerTurn = TryReadOptionalIntProperty(manifest, "max_tool_rounds_per_turn"),
                     Created = DateTime.UtcNow
                 };
             }
@@ -1367,7 +1359,6 @@ public class GuideExportImportService : IGuideExportImportService
             TopP = topP,
             ReasoningEffort = reasoningEffort,
             MaxToolCallsPerTurn = assistantDef.MaxToolCallsPerTurn,
-            MaxToolRoundsPerTurn = assistantDef.MaxToolRoundsPerTurn,
             Created = DateTime.UtcNow
         };
 

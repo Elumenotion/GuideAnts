@@ -15,15 +15,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from guideants_hf.catalog_download import download_repo_file
+from guideants_hf.catalog_download import lookup_hf_file_size
+from guideants_hf.transport import download_hf_file
 from guideants_hf.operations import find_in_flight_operation
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
-
-from sd_bundle_seeds import seed_default_bundle_definitions
 
 
 def utc_now_iso() -> str:
@@ -110,6 +109,28 @@ def optional_env_value(name: str) -> str | None:
     return value or None
 
 
+def _normalize_sampling(payload: Any) -> dict[str, Any] | None:
+    """
+    Require a complete sampling block: steps, cfgScale, samplingMethod.
+    There is no legitimate global sampling default — the bundle owns these.
+    """
+    if not isinstance(payload, dict):
+        return None
+    try:
+        steps = int(payload.get("steps"))
+        cfg_scale = float(payload.get("cfgScale"))
+    except (TypeError, ValueError):
+        return None
+    method = str(payload.get("samplingMethod") or "").strip()
+    if steps <= 0 or cfg_scale <= 0 or not method:
+        return None
+    return {
+        "steps": steps,
+        "cfgScale": cfg_scale,
+        "samplingMethod": method,
+    }
+
+
 def parse_size(size: str) -> tuple[int, int]:
     value = (size or "").strip().lower()
     if "x" not in value:
@@ -190,6 +211,10 @@ class SdRuntimeConfig:
     offload_to_cpu: bool
     vae_on_cpu: bool
     backend: str | None
+    params_backend: str | None
+    split_mode: str | None
+    max_vram: str | None
+    auto_fit: bool
     diffusion_fa: bool
     vulkan_visible_devices: str | None
     default_output_format: str
@@ -236,8 +261,12 @@ class DownloadBundleRequest(BaseModel):
     vae_file: str
     text_encoder_repo: str
     text_encoder_file: str
+    sampling_steps: int
+    sampling_cfg_scale: float
+    sampling_method: str
     revision: str | None = None
     hf_token: str | None = None
+    force_redownload: bool = False
 
     @field_validator(
         "bundle_id",
@@ -247,6 +276,7 @@ class DownloadBundleRequest(BaseModel):
         "vae_file",
         "text_encoder_repo",
         "text_encoder_file",
+        "sampling_method",
     )
     @classmethod
     def _require_non_empty(cls, value: str) -> str:
@@ -264,6 +294,26 @@ class DownloadBundleRequest(BaseModel):
     @classmethod
     def _validate_bundle_filename(cls, value: str) -> str:
         return validate_bundle_filename(value)
+
+    @field_validator("sampling_steps")
+    @classmethod
+    def _validate_sampling_steps(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("sampling_steps must be > 0")
+        return value
+
+    @field_validator("sampling_cfg_scale")
+    @classmethod
+    def _validate_sampling_cfg_scale(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("sampling_cfg_scale must be > 0")
+        return value
+
+
+class UpsertBundleDefinitionRequest(BaseModel):
+    revision: str | None = None
+    roles: dict[str, Any]
+    sampling: dict[str, Any]
 
 
 class SdRuntimeState:
@@ -300,6 +350,21 @@ STATE = SdRuntimeState()
 APP = FastAPI(title="GuideAnts Stable Diffusion Service", version="1.1.0")
 VALID_OUTPUT_FORMATS = {"png", "jpeg", "webp"}
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+# Canonical bundle ids may still have on-disk folders under legacy names until
+# operators rename or re-download into the canonical directory.
+LEGACY_BUNDLE_DIR_NAMES: dict[str, str] = {
+    "flux2-klein-4b": "flux2-klein-4b-q4ks",
+    "flux2-klein-9b": "flux2-klein-9b-q5",
+    "FLUX.2-dev": "FLUX.2-dev-GGUF-Q5_K_M",
+}
+
+
+def canonical_bundle_id(bundle_id: str) -> str:
+    for canonical, legacy in LEGACY_BUNDLE_DIR_NAMES.items():
+        if bundle_id == legacy:
+            return canonical
+    return bundle_id
 WARMUP_LOCK = threading.Lock()
 BUNDLE_OPS_LOCK = threading.Lock()
 BUNDLE_OPERATIONS: dict[str, dict[str, Any]] = {}
@@ -335,14 +400,59 @@ def validate_bundle_id(value: str) -> str:
     return candidate
 
 
+def list_role_asset_files(role_path: str) -> list[str]:
+    if not os.path.isdir(role_path):
+        return []
+    assets: list[str] = []
+    try:
+        for name in os.listdir(role_path):
+            if name.startswith("."):
+                continue
+            if name.endswith(".tmp") or name.endswith(".guideants-meta.json"):
+                continue
+            file_path = os.path.join(role_path, name)
+            if os.path.isfile(file_path):
+                assets.append(name)
+    except OSError:
+        return []
+    return sorted(assets)
+
+
+def role_asset_file_count(bundle_path: str) -> int:
+    total = 0
+    for subdir in ("diffusion", "vae", "text-encoder"):
+        total += len(list_role_asset_files(os.path.join(bundle_path, subdir)))
+    return total
+
+
 def resolve_bundle_dir(model_dir: str, bundle_id: str) -> str:
     safe_bundle_id = validate_bundle_id(bundle_id)
     root_real = os.path.realpath(bundle_root_dir(model_dir))
-    bundle_path = os.path.realpath(os.path.join(root_real, safe_bundle_id))
     root_prefix = root_real if root_real.endswith(os.sep) else root_real + os.sep
-    if not bundle_path.startswith(root_prefix):
+
+    candidates: list[str] = [os.path.join(root_real, safe_bundle_id)]
+    legacy_name = LEGACY_BUNDLE_DIR_NAMES.get(safe_bundle_id)
+    if legacy_name:
+        candidates.append(os.path.join(root_real, legacy_name))
+
+    best_path = os.path.join(root_real, safe_bundle_id)
+    best_count = -1
+    for candidate in candidates:
+        candidate_real = os.path.realpath(candidate)
+        if not candidate_real.startswith(root_prefix) or not os.path.isdir(candidate_real):
+            continue
+        count = role_asset_file_count(candidate_real)
+        if count > best_count:
+            best_count = count
+            best_path = candidate_real
+
+    if not best_path.startswith(root_prefix):
         raise ValueError("resolved bundle path escapes the permitted bundle directory")
-    return bundle_path
+    return best_path
+
+
+def _bundle_dir_is_populated(bundle_path: str) -> bool:
+    return role_asset_file_count(bundle_path) > 0
 
 
 def resolve_runtime_config(*, bundle_id: str | None = None) -> SdRuntimeConfig:
@@ -362,33 +472,29 @@ def resolve_runtime_config(*, bundle_id: str | None = None) -> SdRuntimeConfig:
         )
 
     bundle_paths = expected_bundle_paths(model_dir, selected_bundle)
+    definition = read_bundle_definition(model_dir, selected_bundle)
+    if definition is None:
+        raise RuntimeError(
+            f"Bundle '{selected_bundle}' has no readable bundle-definition.json."
+        )
 
-    def _only_file(path: str, role: str) -> str:
-        if not os.path.isdir(path):
+    def _required_role_file(path: str, role: str) -> str:
+        spec = role_spec_from_definition(definition, role)
+        if spec is None:
             raise RuntimeError(
-                f"Bundle '{selected_bundle}' is missing the {role} directory "
-                f"at '{path}'."
+                f"Bundle '{selected_bundle}' is missing role '{role}' in bundle-definition.json."
             )
-        files = [
-            name
-            for name in sorted(os.listdir(path))
-            if os.path.isfile(os.path.join(path, name))
-        ]
-        if not files:
+        _repo, filename = spec
+        if not bundle_role_ready(path, definition, role):
             raise RuntimeError(
-                f"Bundle '{selected_bundle}' {role} directory '{path}' is empty."
+                f"Bundle '{selected_bundle}' role '{role}' is incomplete at '{path}'. "
+                f"Expected file '{filename}' is missing, truncated, or still downloading."
             )
-        if len(files) > 1:
-            raise RuntimeError(
-                f"Bundle '{selected_bundle}' {role} directory '{path}' "
-                f"contains more than one file ({', '.join(files)}); a bundle "
-                f"role must have exactly one file."
-            )
-        return os.path.join(path, files[0])
+        return resolve_role_file_path(path, filename)
 
-    diffusion_model_path = _only_file(bundle_paths["diffusion"], "diffusion")
-    vae_path = _only_file(bundle_paths["vae"], "vae")
-    llm_path = _only_file(bundle_paths["textEncoder"], "text encoder")
+    diffusion_model_path = _required_role_file(bundle_paths["diffusion"], "diffusion")
+    vae_path = _required_role_file(bundle_paths["vae"], "vae")
+    llm_path = _required_role_file(bundle_paths["textEncoder"], "textEncoder")
 
     engine_host = (os.getenv("GA_SD_ENGINE_HOST") or "127.0.0.1").strip() or "127.0.0.1"
     engine_port = parse_positive_int(os.getenv("GA_SD_ENGINE_PORT"), 18083)
@@ -401,13 +507,20 @@ def resolve_runtime_config(*, bundle_id: str | None = None) -> SdRuntimeConfig:
     )
     poll_interval_seconds = parse_positive_float(os.getenv("GA_SD_POLL_INTERVAL_SECONDS"), 0.25)
 
-    steps = parse_positive_int(os.getenv("GA_SD_STEPS"), 4)
-    cfg_scale = parse_positive_float(os.getenv("GA_SD_CFG_SCALE"), 1.0)
+    # Sampling comes only from the active bundle definition. There is no
+    # GA_SD_STEPS / GA_SD_CFG_SCALE / GA_SD_SAMPLING_METHOD env path.
+    bundle_sampling = require_bundle_sampling(model_dir, selected_bundle)
+    steps = int(bundle_sampling["steps"])
+    cfg_scale = float(bundle_sampling["cfgScale"])
+    sampling_method = str(bundle_sampling["samplingMethod"])
     strength = parse_positive_float(os.getenv("GA_SD_STRENGTH"), 0.75)
-    sampling_method = (os.getenv("GA_SD_SAMPLING_METHOD") or "euler").strip() or "euler"
     offload_to_cpu = env_flag("GA_SD_OFFLOAD_TO_CPU", False)
     vae_on_cpu = env_flag("GA_SD_VAE_ON_CPU", False)
     backend = optional_env_value("GA_SD_BACKEND")
+    params_backend = optional_env_value("GA_SD_PARAMS_BACKEND")
+    split_mode = optional_env_value("GA_SD_SPLIT_MODE")
+    max_vram = optional_env_value("GA_SD_MAX_VRAM")
+    auto_fit = env_flag("GA_SD_AUTO_FIT", False)
     diffusion_fa = env_flag("GA_SD_DIFFUSION_FA", True)
     vulkan_visible_devices = optional_env_value("GA_SD_VK_VISIBLE_DEVICES")
     default_output_format = normalize_output_format(os.getenv("GA_SD_DEFAULT_OUTPUT_FORMAT"), "png")
@@ -444,6 +557,10 @@ def resolve_runtime_config(*, bundle_id: str | None = None) -> SdRuntimeConfig:
         offload_to_cpu=offload_to_cpu,
         vae_on_cpu=vae_on_cpu,
         backend=backend,
+        params_backend=params_backend,
+        split_mode=split_mode,
+        max_vram=max_vram,
+        auto_fit=auto_fit,
         diffusion_fa=diffusion_fa,
         vulkan_visible_devices=vulkan_visible_devices,
         default_output_format=default_output_format,
@@ -455,6 +572,10 @@ def bundle_root_dir(model_dir: str) -> str:
     root = os.path.join(model_dir, "bundles")
     os.makedirs(root, exist_ok=True)
     return root
+
+
+def bundle_operation_staging_dir(model_dir: str, operation_id: str, role: str) -> str:
+    return os.path.join(model_dir, ".staging", operation_id, role)
 
 
 def active_bundle_file(model_dir: str) -> str:
@@ -489,12 +610,24 @@ def expected_bundle_paths(model_dir: str, bundle_id: str) -> dict[str, str]:
     }
 
 
+def canonical_bundle_dir(model_dir: str, bundle_id: str) -> str:
+    safe_id = validate_bundle_id(canonical_bundle_id(bundle_id))
+    return os.path.join(bundle_root_dir(model_dir), safe_id)
+
+
+def canonical_bundle_definition_path(model_dir: str, bundle_id: str) -> str:
+    return os.path.join(canonical_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
+
+
 def bundle_definition_file(model_dir: str, bundle_id: str) -> str:
+    canonical_path = canonical_bundle_definition_path(model_dir, bundle_id)
+    if os.path.isfile(canonical_path):
+        return canonical_path
     return os.path.join(resolve_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
 
 
 def write_bundle_definition_payload(model_dir: str, bundle_id: str, payload: dict[str, Any]) -> None:
-    bundle_path = resolve_bundle_dir(model_dir, bundle_id)
+    bundle_path = canonical_bundle_dir(model_dir, bundle_id)
     os.makedirs(bundle_path, exist_ok=True)
     target = os.path.join(bundle_path, "bundle-definition.json")
     temp = f"{target}.{uuid.uuid4().hex}.tmp"
@@ -509,6 +642,11 @@ def bundle_definition_payload(request: DownloadBundleRequest, bundle_id: str | N
         "bundleId": safe_bundle_id,
         "revision": request.revision,
         "updatedAtUtc": utc_now_iso(),
+        "sampling": {
+            "steps": request.sampling_steps,
+            "cfgScale": request.sampling_cfg_scale,
+            "samplingMethod": request.sampling_method,
+        },
         "roles": {
             "diffusion": {"repo": request.diffusion_repo, "file": request.diffusion_file},
             "vae": {"repo": request.vae_repo, "file": request.vae_file},
@@ -522,7 +660,8 @@ def bundle_definition_payload(request: DownloadBundleRequest, bundle_id: str | N
 
 def write_bundle_definition(model_dir: str, request: DownloadBundleRequest, bundle_id: str | None = None) -> None:
     safe_bundle_id = validate_bundle_id(bundle_id or request.bundle_id)
-    write_bundle_definition_payload(model_dir, safe_bundle_id, bundle_definition_payload(request, safe_bundle_id))
+    payload = bundle_definition_payload(request, safe_bundle_id)
+    write_bundle_definition_payload(model_dir, safe_bundle_id, payload)
 
 
 def _normalize_bundle_definition(payload: Any) -> dict[str, Any] | None:
@@ -558,11 +697,39 @@ def _normalize_bundle_definition(payload: Any) -> dict[str, Any] | None:
         if updated_text:
             updated_at_utc = updated_text
 
-    return {
+    sampling = None
+    if "sampling" in payload:
+        # Invalid sampling is treated as absent so listing still works; load fails
+        # via require_bundle_sampling with an explicit error.
+        sampling = _normalize_sampling(payload.get("sampling"))
+
+    result: dict[str, Any] = {
         "revision": revision,
         "updatedAtUtc": updated_at_utc,
         "roles": normalized_roles,
     }
+    if sampling is not None:
+        result["sampling"] = sampling
+    return result
+
+
+def require_bundle_sampling(model_dir: str, bundle_id: str) -> dict[str, Any]:
+    definition = read_bundle_definition(model_dir, bundle_id)
+    if definition is None:
+        raise RuntimeError(
+            f"Bundle '{bundle_id}' has no readable bundle-definition.json. "
+            f"Sampling parameters (steps/cfgScale/samplingMethod) are required "
+            f"on the bundle; there is no global default."
+        )
+    sampling = definition.get("sampling")
+    normalized = _normalize_sampling(sampling)
+    if normalized is None:
+        raise RuntimeError(
+            f"Bundle '{bundle_id}' is missing a valid sampling block "
+            f"(steps, cfgScale, samplingMethod). Sampling is per-bundle; "
+            f"there is no legitimate global default."
+        )
+    return normalized
 
 
 def _single_file_name(path: str) -> str | None:
@@ -580,80 +747,57 @@ def _single_file_name(path: str) -> str | None:
     return files[0]
 
 
-def infer_bundle_definition_from_files(model_dir: str, bundle_id: str) -> dict[str, Any] | None:
-    """
-    Backfill recipe metadata for bundles materialized by setup/migration paths
-    that historically only copied files on disk and did not persist the source
-    (repo, file) tuples.
-    """
-    def infer_repo_for_role(role: str, filename: str) -> str | None:
-        if role == "vae":
-            if filename == "full_encoder_small_decoder.safetensors":
-                return "black-forest-labs/FLUX.2-small-decoder"
-            return None
-        if role == "diffusion":
-            # Example: flux-2-klein-9b-Q5_K_M.gguf -> unsloth/FLUX.2-klein-9B-GGUF
-            match = re.match(r"^flux[.-]?2-klein-(\d+)b-.*\.gguf$", filename, flags=re.IGNORECASE)
-            if not match:
-                return None
-            size = match.group(1)
-            return f"unsloth/FLUX.2-klein-{size}B-GGUF"
-        if role == "textEncoder":
-            # Example: Qwen3-8B-Q5_K_M.gguf -> unsloth/Qwen3-8B-GGUF
-            match = re.match(r"^Qwen3-(\d+)B-.*\.gguf$", filename, flags=re.IGNORECASE)
-            if not match:
-                return None
-            size = match.group(1)
-            return f"unsloth/Qwen3-{size}B-GGUF"
-        return None
-
-    role_paths = expected_bundle_paths(model_dir, bundle_id)
-    roles_payload: dict[str, dict[str, str]] = {}
-    for role, path in role_paths.items():
-        filename = _single_file_name(path)
-        if not filename:
-            return None
-        repo = infer_repo_for_role(role, filename)
-        if not repo:
-            return None
-        roles_payload[role] = {"repo": repo, "file": filename}
-
-    return {
-        "bundleId": bundle_id,
-        "revision": "main",
-        "updatedAtUtc": utc_now_iso(),
-        "roles": roles_payload,
-    }
-
 def read_bundle_definition(model_dir: str, bundle_id: str) -> dict[str, Any] | None:
     path = bundle_definition_file(model_dir, bundle_id)
-    normalized: dict[str, Any] | None = None
-    if os.path.isfile(path):
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-                normalized = _normalize_bundle_definition(payload)
-        except Exception:
-            normalized = None
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+            normalized = _normalize_bundle_definition(payload)
+    except Exception:
+        return None
 
     if normalized is None:
-        inferred = infer_bundle_definition_from_files(model_dir, bundle_id)
-        if inferred is None:
-            return None
-        try:
-            write_bundle_definition_payload(model_dir, bundle_id, inferred)
-        except Exception as exc:
-            log_event(
-                "sd_bundle_definition_backfill_failed",
-                bundleId=bundle_id,
-                error=truncate_text(str(exc), 2048),
-            )
-        normalized = inferred
+        return None
 
     return {
         "revision": normalized.get("revision"),
         "updatedAtUtc": normalized.get("updatedAtUtc"),
         "roles": normalized.get("roles"),
+        "sampling": normalized.get("sampling"),
+    }
+
+
+def upsert_bundle_definition(model_dir: str, bundle_id: str, request: UpsertBundleDefinitionRequest) -> dict[str, Any]:
+    safe_bundle_id = validate_bundle_id(bundle_id)
+    normalized = _normalize_bundle_definition(
+        {
+            "bundleId": safe_bundle_id,
+            "revision": request.revision,
+            "roles": request.roles,
+            "sampling": request.sampling,
+        }
+    )
+    if normalized is None:
+        raise ValueError("bundle definition payload is invalid")
+    sampling = _normalize_sampling(normalized.get("sampling"))
+    if sampling is None:
+        raise ValueError("bundle definition sampling block is invalid")
+
+    payload = {
+        "bundleId": safe_bundle_id,
+        "revision": normalized.get("revision"),
+        "updatedAtUtc": utc_now_iso(),
+        "roles": normalized["roles"],
+        "sampling": sampling,
+    }
+    write_bundle_definition_payload(model_dir, safe_bundle_id, payload)
+    return {
+        "revision": payload["revision"],
+        "updatedAtUtc": payload["updatedAtUtc"],
+        "roles": payload["roles"],
+        "sampling": payload["sampling"],
     }
 
 
@@ -669,11 +813,206 @@ def role_directory_ready(path: str) -> bool:
         return False
 
 
+def role_file_metadata_path(expected_file: str) -> str:
+    return f"{expected_file}.guideants-meta.json"
+
+
+def read_role_file_metadata(expected_file: str) -> dict[str, Any] | None:
+    meta_path = role_file_metadata_path(expected_file)
+    if not os.path.isfile(meta_path):
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def write_role_file_metadata(expected_file: str, *, expected_size: int, repo: str, filename: str) -> None:
+    meta_path = role_file_metadata_path(expected_file)
+    payload = {
+        "expectedSize": expected_size,
+        "repo": repo,
+        "file": filename,
+        "updatedAtUtc": utc_now_iso(),
+    }
+    temp = f"{meta_path}.{uuid.uuid4().hex}.tmp"
+    with open(temp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=True, sort_keys=True)
+    os.replace(temp, meta_path)
+
+
+def role_file_size_matches_metadata(expected_file: str) -> bool:
+    metadata = read_role_file_metadata(expected_file)
+    if metadata is None:
+        return False
+    expected_size = metadata.get("expectedSize")
+    if not isinstance(expected_size, int) or expected_size <= 0:
+        return False
+    if not os.path.isfile(expected_file):
+        return False
+    return os.path.getsize(expected_file) == expected_size
+
+
+def role_has_incomplete_download_artifact(target_path: str, filename: str) -> bool:
+    """
+    Detect legacy partial downloads written directly into the role folder before
+    staged downloads. New downloads only create ``.tmp`` files under
+    ``{model_dir}/.staging/{operationId}/``.
+    """
+    try:
+        expected_file = resolve_role_file_path(target_path, filename)
+    except ValueError:
+        return True
+    temp_path = expected_file + ".tmp"
+    return os.path.isfile(temp_path)
+
+
+def remove_legacy_role_download_artifacts(target_path: str, filename: str) -> None:
+    try:
+        expected_file = resolve_role_file_path(target_path, filename)
+    except ValueError:
+        return
+    temp_path = expected_file + ".tmp"
+    if os.path.isfile(temp_path):
+        os.remove(temp_path)
+
+
+def cleanup_bundle_operation_staging(model_dir: str, operation_id: str) -> None:
+    staging_root = os.path.join(model_dir, ".staging", operation_id)
+    if os.path.isdir(staging_root):
+        shutil.rmtree(staging_root, ignore_errors=True)
+
+
+def download_bundle_role_via_staging(
+    *,
+    model_dir: str,
+    operation_id: str,
+    role: str,
+    repo: str,
+    filename: str,
+    target_path: str,
+    hf_token: str | None,
+    revision: str | None,
+) -> None:
+    safe_filename = validate_bundle_filename(filename)
+    staging_dir = bundle_operation_staging_dir(model_dir, operation_id, role)
+    os.makedirs(staging_dir, exist_ok=True)
+    staged_file = os.path.join(staging_dir, safe_filename)
+    resolved_revision = (revision or "main").strip() or "main"
+
+    download_hf_file(
+        repo,
+        safe_filename,
+        staged_file,
+        hf_token,
+        revision=resolved_revision,
+    )
+    if not os.path.isfile(staged_file):
+        raise RuntimeError(
+            f"Expected staged file '{safe_filename}' was not produced by "
+            f"download of '{repo}' into '{staging_dir}'."
+        )
+
+    os.makedirs(target_path, exist_ok=True)
+    remove_legacy_role_download_artifacts(target_path, safe_filename)
+    expected_file = resolve_role_file_path(target_path, safe_filename)
+    if os.path.isfile(expected_file):
+        os.remove(expected_file)
+    os.replace(staged_file, expected_file)
+    verify_downloaded_role_file(
+        repo=repo,
+        filename=safe_filename,
+        expected_file=expected_file,
+        hf_token=hf_token,
+        revision=resolved_revision,
+    )
+
+
+def role_spec_from_definition(definition: dict[str, Any] | None, role: str) -> tuple[str, str] | None:
+    if definition is None:
+        return None
+    roles = definition.get("roles")
+    if not isinstance(roles, dict):
+        return None
+    role_payload = roles.get(role)
+    if not isinstance(role_payload, dict):
+        return None
+    repo = str(role_payload.get("repo") or "").strip()
+    filename = str(role_payload.get("file") or "").strip()
+    if not repo or not filename:
+        return None
+    return repo, filename
+
+
+def _hf_token_from_env() -> str | None:
+    for key in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "GA_HF_TOKEN"):
+        value = (os.getenv(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def bundle_role_ready(
+    role_path: str,
+    definition: dict[str, Any] | None,
+    role: str,
+) -> bool:
+    spec = role_spec_from_definition(definition, role)
+    if spec is None:
+        return False
+    _repo, filename = spec
+    if role_has_incomplete_download_artifact(role_path, filename):
+        return False
+    try:
+        expected_file = resolve_role_file_path(role_path, filename)
+    except ValueError:
+        return False
+    if not os.path.isfile(expected_file):
+        return False
+    if read_role_file_metadata(expected_file) is not None:
+        return role_file_size_matches_metadata(expected_file)
+    try:
+        return os.path.getsize(expected_file) > 0
+    except OSError:
+        return False
+
+
+def verify_downloaded_role_file(
+    *,
+    repo: str,
+    filename: str,
+    expected_file: str,
+    hf_token: str | None,
+    revision: str | None,
+) -> None:
+    actual_size = os.path.getsize(expected_file)
+    expected_size = lookup_hf_file_size(repo, filename, hf_token, revision)
+    if expected_size is None:
+        raise RuntimeError(
+            f"Could not resolve Hugging Face size metadata for '{filename}' in '{repo}'."
+        )
+    if actual_size != expected_size:
+        raise RuntimeError(
+            f"Downloaded '{filename}' size {actual_size} does not match Hugging Face "
+            f"expected size {expected_size}. The file may be truncated or corrupt; "
+            f"retry with force_redownload."
+        )
+    write_role_file_metadata(
+        expected_file,
+        expected_size=expected_size,
+        repo=repo,
+        filename=filename,
+    )
+
+
+
 def list_bundles(model_dir: str) -> list[dict[str, Any]]:
     root = bundle_root_dir(model_dir)
     bundles: list[dict[str, Any]] = []
     try:
-        bundle_ids = sorted(os.listdir(root))
+        folder_ids = os.listdir(root)
     except OSError as exc:
         log_event(
             "sd_bundle_root_list_failed",
@@ -682,14 +1021,26 @@ def list_bundles(model_dir: str) -> list[dict[str, Any]]:
         )
         return bundles
 
-    for bundle_id in bundle_ids:
-        bundle_path = os.path.join(root, bundle_id)
-        if not os.path.isdir(bundle_path):
+    canonical_ids: set[str] = set()
+    for folder_id in folder_ids:
+        folder_path = os.path.join(root, folder_id)
+        if not os.path.isdir(folder_path):
             continue
         try:
+            canonical_ids.add(canonical_bundle_id(validate_bundle_id(folder_id)))
+        except ValueError:
+            continue
+
+    for bundle_id in sorted(canonical_ids):
+        bundle_path = os.path.join(root, bundle_id)
+        if not os.path.isdir(bundle_path):
+            # resolve_bundle_dir may point at a legacy folder name.
+            bundle_path = resolve_bundle_dir(model_dir, bundle_id)
+        try:
             roles = expected_bundle_paths(model_dir, bundle_id)
+            definition = read_bundle_definition(model_dir, bundle_id)
             role_state = {
-                role: {"path": path, "ready": role_directory_ready(path)}
+                role: {"path": path, "ready": bundle_role_ready(path, definition, role)}
                 for role, path in roles.items()
             }
             bundle: dict[str, Any] = {
@@ -697,7 +1048,6 @@ def list_bundles(model_dir: str) -> list[dict[str, Any]]:
                 "roles": role_state,
                 "complete": all(role["ready"] for role in role_state.values()),
             }
-            definition = read_bundle_definition(model_dir, bundle_id)
             if definition is not None:
                 bundle["definition"] = definition
             bundles.append(bundle)
@@ -799,11 +1149,81 @@ def role_expected_file_ready(target_path: str, filename: str) -> bool:
     return os.path.isfile(expected_file)
 
 
+def remove_role_expected_file(target_path: str, filename: str) -> None:
+    try:
+        expected_file = resolve_role_file_path(target_path, filename)
+    except ValueError:
+        return
+    if os.path.isfile(expected_file):
+        os.remove(expected_file)
+
+
+def should_skip_hf_download(
+    target_path: str,
+    filename: str,
+    force_redownload: bool,
+    *,
+    repo: str | None = None,
+    hf_token: str | None = None,
+    revision: str | None = None,
+) -> bool:
+    if force_redownload:
+        return False
+    if role_has_incomplete_download_artifact(target_path, filename):
+        return False
+    if not role_expected_file_ready(target_path, filename):
+        return False
+    expected_file = resolve_role_file_path(target_path, filename)
+    if role_file_size_matches_metadata(expected_file):
+        return True
+    if read_role_file_metadata(expected_file) is not None:
+        return False
+    if repo:
+        expected_size = lookup_hf_file_size(repo, filename, hf_token, revision)
+        if expected_size is not None:
+            if os.path.getsize(expected_file) == expected_size:
+                ensure_role_file_metadata(
+                    repo=repo,
+                    filename=filename,
+                    expected_file=expected_file,
+                    hf_token=hf_token,
+                    revision=revision,
+                )
+                return True
+            return False
+    return True
+
+
+def ensure_role_file_metadata(
+    *,
+    repo: str,
+    filename: str,
+    expected_file: str,
+    hf_token: str | None,
+    revision: str | None,
+) -> None:
+    if role_file_size_matches_metadata(expected_file):
+        return
+    expected_size = lookup_hf_file_size(repo, filename, hf_token, revision)
+    if expected_size is None:
+        return
+    if os.path.getsize(expected_file) != expected_size:
+        return
+    write_role_file_metadata(
+        expected_file,
+        expected_size=expected_size,
+        repo=repo,
+        filename=filename,
+    )
+
+
+def request_force_redownload(request: DownloadBundleRequest) -> bool:
+    return bool(getattr(request, "force_redownload", False))
+
+
 def clear_stale_role_files(target_path: str, filename: str) -> None:
-    """
-    Remove files left by a prior recipe (e.g. a renamed gguf) without wiping
-    the role directory so huggingface_hub can resume interrupted downloads.
-    """
+    """Remove files left by a prior recipe (e.g. a renamed gguf)."""
+    remove_legacy_role_download_artifacts(target_path, filename)
     if not os.path.isdir(target_path):
         return
     safe_filename = validate_bundle_filename(filename)
@@ -828,9 +1248,14 @@ def resolve_initial_bundle_role_states(
     }
     states: dict[str, str] = {}
     for role, (repo, filename) in roles.items():
-        if bundle_role_download_needed(previous_definition, request, role, repo, filename):
-            states[role] = "queued"
-        elif role_expected_file_ready(paths[role], filename):
+        if should_skip_hf_download(
+            paths[role],
+            filename,
+            request_force_redownload(request),
+            repo=repo,
+            hf_token=(request.hf_token or "").strip() or None,
+            revision=request.revision,
+        ):
             states[role] = "ready"
         else:
             states[role] = "queued"
@@ -899,34 +1324,36 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
                 _mark_cancelled()
                 return
 
-            from huggingface_hub import snapshot_download
-
-            # Single-source HF token: whatever the .NET layer stamped in.
-            # No env fallback here — if the repo is gated and no token is
-            # configured, huggingface_hub's 401/403 is surfaced directly.
             hf_token = (request.hf_token or "").strip() or None
 
-            # Each role is pinned to exactly one file by (repo, filename). The
-            # filename is passed verbatim to huggingface_hub's allow_patterns
-            # so only that file is downloaded — no whole-repo snapshots.
             roles = {
                 "diffusion": (request.diffusion_repo, request.diffusion_file),
                 "vae": (request.vae_repo, request.vae_file),
                 "textEncoder": (request.text_encoder_repo, request.text_encoder_file),
             }
             for role, (repo, filename) in roles.items():
-                # Cooperative cancellation checkpoint before each role's blocking
-                # download. A partially-downloaded bundle stays "incomplete" and
-                # is rejected by the select-active completeness gate.
                 if _cancel_requested():
                     _mark_cancelled()
                     return
 
                 target_path = paths[role]
-                if (
-                    not bundle_role_download_needed(previous_definition, request, role, repo, filename)
-                    and role_expected_file_ready(target_path, filename)
+                if should_skip_hf_download(
+                    target_path,
+                    filename,
+                    request_force_redownload(request),
+                    repo=repo,
+                    hf_token=hf_token,
+                    revision=request.revision,
                 ):
+                    expected_file = resolve_role_file_path(target_path, filename)
+                    ensure_role_file_metadata(
+                        repo=repo,
+                        filename=filename,
+                        expected_file=expected_file,
+                        hf_token=hf_token,
+                        revision=request.revision,
+                    )
+                    clear_stale_role_files(target_path, filename)
                     with BUNDLE_OPS_LOCK:
                         BUNDLE_OPERATIONS[operation_id]["roles"][role] = "ready"
                     continue
@@ -935,22 +1362,18 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
                     BUNDLE_OPERATIONS[operation_id]["status"] = "running"
                     BUNDLE_OPERATIONS[operation_id]["roles"][role] = "downloading"
                 clear_stale_role_files(target_path, filename)
-                os.makedirs(target_path, exist_ok=True)
-                expected_file = resolve_role_file_path(target_path, filename)
-                download_repo_file(
-                    repo,
-                    filename,
-                    expected_file,
-                    hf_token,
+                if request_force_redownload(request):
+                    remove_role_expected_file(target_path, filename)
+                download_bundle_role_via_staging(
+                    model_dir=model_dir,
+                    operation_id=operation_id,
+                    role=role,
+                    repo=repo,
+                    filename=filename,
+                    target_path=target_path,
+                    hf_token=hf_token,
                     revision=request.revision,
                 )
-                if not os.path.isfile(expected_file):
-                    raise RuntimeError(
-                        f"Expected file '{filename}' was not produced by "
-                        f"download of '{repo}' into '{target_path}'. "
-                        f"Check the filename matches the repo's file listing "
-                        f"exactly (including case)."
-                    )
                 with BUNDLE_OPS_LOCK:
                     BUNDLE_OPERATIONS[operation_id]["roles"][role] = "ready"
 
@@ -973,6 +1396,8 @@ def start_bundle_download(request: DownloadBundleRequest, model_dir: str) -> dic
                     current["status"] = "failed"
                     current["error"] = str(exc)
                 current["completedAtUtc"] = utc_now_iso()
+        finally:
+            cleanup_bundle_operation_staging(model_dir, operation_id)
 
     threading.Thread(target=_run, daemon=True).start()
     return operation
@@ -1000,12 +1425,21 @@ def build_sd_server_command(config: SdRuntimeConfig) -> list[str]:
         "-1",
     ]
 
-    if config.backend:
-        command.extend(["--backend", config.backend])
-    elif config.offload_to_cpu:
-        command.append("--offload-to-cpu")
-    if not config.backend and config.vae_on_cpu:
-        command.append("--vae-on-cpu")
+    if config.auto_fit:
+        command.append("--auto-fit")
+    else:
+        if config.backend:
+            command.extend(["--backend", config.backend])
+        if config.params_backend:
+            command.extend(["--params-backend", config.params_backend])
+        elif config.offload_to_cpu:
+            command.append("--offload-to-cpu")
+        if not config.backend and config.vae_on_cpu:
+            command.append("--vae-on-cpu")
+    if config.split_mode:
+        command.extend(["--split-mode", config.split_mode])
+    if config.max_vram:
+        command.extend(["--max-vram", config.max_vram])
     if config.diffusion_fa:
         command.append("--diffusion-fa")
 
@@ -1721,9 +2155,6 @@ async def on_startup() -> None:
     # there is no bundle yet (otherwise there is no way to create the first
     # one) or when the last load failed.
     STATE.model_dir = os.getenv("GA_SD_MODEL_DIR", "/models-local/sd")
-    seeded_bundle_ids = seed_default_bundle_definitions(STATE.model_dir)
-    if seeded_bundle_ids:
-        log_event("sd_bundle_definitions_seeded", bundleIds=seeded_bundle_ids)
     STATE.startup_warmup_enabled = False
     STATE.startup_warmup_completed_at_utc = None
     STATE.startup_warmup_last_attempt_at_utc = None
@@ -1801,6 +2232,11 @@ async def health() -> dict[str, Any]:
             "samplingMethod": config.sampling_method,
             "offloadToCpu": config.offload_to_cpu,
             "vaeOnCpu": config.vae_on_cpu,
+            "backend": config.backend,
+            "paramsBackend": config.params_backend,
+            "splitMode": config.split_mode,
+            "maxVram": config.max_vram,
+            "autoFit": config.auto_fit,
             "diffusionFa": config.diffusion_fa,
             "vulkanVisibleDevices": config.vulkan_visible_devices,
         },
@@ -1909,6 +2345,17 @@ async def admin_get_bundle(bundle_id: str) -> JSONResponse:
     loaded_id = STATE.loaded_bundle_id if engine_alive else None
     bundle["loaded"] = bundle["bundleId"] == loaded_id
     return JSONResponse(status_code=200, content=bundle)
+
+
+@APP.put("/admin/bundles/{bundle_id}/definition")
+async def admin_upsert_bundle_definition(bundle_id: str, payload: UpsertBundleDefinitionRequest) -> JSONResponse:
+    model_dir = _require_model_dir()
+    bundle_id = require_valid_bundle_id(bundle_id)
+    try:
+        definition = upsert_bundle_definition(model_dir, bundle_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(status_code=200, content={"bundleId": bundle_id, "definition": definition})
 
 
 @APP.post("/admin/bundles/download")

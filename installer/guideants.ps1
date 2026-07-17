@@ -36,6 +36,7 @@ $script:HealthUrl = 'http://localhost:5107/'
 $script:ApiBase = 'http://localhost:5107'
 $script:HostMountOverrideFile = 'docker-compose.host-mounts.generated.yml'
 $script:RocmRuntimeOverrideFile = 'docker-compose.rocm-runtime.generated.yml'
+$script:VoicePackOverrideFile = 'docker-compose.voice-pack.local.yml'
 $script:DockerDirectory = 'docker'
 
 $script:Mode = 'install'
@@ -1560,6 +1561,7 @@ function Save-State {
         "COMPOSE_MODE=$($script:ComposeMode)",
         "COMPOSE_FILE=$($script:ComposeFile)",
         "HOST_MOUNT_OVERRIDE_FILE=$($script:HostMountOverrideFile)",
+        "VOICE_PACK_OVERRIDE_FILE=$($script:VoicePackOverrideFile)",
         "DOCKER_DIRECTORY=$($script:DockerDirectory)",
         'START_COMMAND=guideants.ps1',
         "LAST_RUN_EPOCH=$epoch"
@@ -1639,6 +1641,7 @@ function Start-GuideAntsStack {
         $composeArgs = @('-f', $script:ComposeFile)
         $composeArgs = Add-ComposeOverrideIfValid -ComposeArgs $composeArgs -OverrideFile $script:HostMountOverrideFile
         $composeArgs = Add-ComposeOverrideIfValid -ComposeArgs $composeArgs -OverrideFile $script:RocmRuntimeOverrideFile
+        $composeArgs = Add-ComposeOverrideIfValid -ComposeArgs $composeArgs -OverrideFile $script:VoicePackOverrideFile
 
         if ($script:UpdateDecision -eq 'pull') {
             if ($script:PullMissingServices.Count -gt 0) {
@@ -1703,6 +1706,9 @@ function Invoke-Main {
         }
         if (Test-Path -LiteralPath (Join-Path $script:DockerDir $script:RocmRuntimeOverrideFile)) {
             $wouldStart += " -f docker/$($script:RocmRuntimeOverrideFile)"
+        }
+        if (Test-Path -LiteralPath (Join-Path $script:DockerDir $script:VoicePackOverrideFile)) {
+            $wouldStart += " -f docker/$($script:VoicePackOverrideFile)"
         }
         Write-Log "Would start: $wouldStart up -d"
         Write-Log "Update decision: $($script:UpdateDecision)"

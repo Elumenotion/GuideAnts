@@ -94,9 +94,13 @@ COMPOSE_PATH="$DOCKER_DIR/$COMPOSE_FILE"
 [[ -f "$COMPOSE_PATH" ]] || fail "Compose file not found: $COMPOSE_PATH"
 
 HOST_MOUNT_OVERRIDE="$DOCKER_DIR/docker-compose.host-mounts.generated.yml"
+VOICE_PACK_OVERRIDE="$DOCKER_DIR/docker-compose.voice-pack.local.yml"
 compose_args=(-f "$COMPOSE_PATH")
 if [[ -f "$HOST_MOUNT_OVERRIDE" ]]; then
   compose_args+=(-f "$HOST_MOUNT_OVERRIDE")
+fi
+if [[ -f "$VOICE_PACK_OVERRIDE" ]]; then
+  compose_args+=(-f "$VOICE_PACK_OVERRIDE")
 fi
 
 if [[ "$BACKEND" == "rocm" ]]; then

@@ -217,8 +217,7 @@ public class GuidesService(
                 false, // IsGlobal - to be determined by business logic
                 ga.DisplayOrder ?? 0,
                 ga.MaxToolCallsPerInvocation,
-                ga.Assistant.MaxToolCallsPerTurn,
-                ga.Assistant.MaxToolRoundsPerTurn
+                ga.Assistant.MaxToolCallsPerTurn
             )).ToList();
         
         List<CrewSummaryDto> crews = [new CrewSummaryDto(guide.Id, $"{guide.Name} Crew", crewMembers)];
@@ -272,8 +271,7 @@ public class GuidesService(
             EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null,
             Skills = skills.Count > 0 ? skills : null,
             SandboxWireApiConfig = DeserializeSandboxWireApiConfig(guide.SandboxWireApiConfigJson),
-            MaxToolCallsPerTurn = guide.MaxToolCallsPerTurn,
-            MaxToolRoundsPerTurn = guide.MaxToolRoundsPerTurn
+            MaxToolCallsPerTurn = guide.MaxToolCallsPerTurn
         };
     }
 
@@ -494,7 +492,7 @@ public class GuidesService(
         }
 
         var mergedFiles = MergeCreateFiles(dto.Files, dto.Skills);
-        ValidateToolLimitFields(dto.MaxToolCallsPerTurn, dto.MaxToolRoundsPerTurn);
+        ValidateToolLimitFields(dto.MaxToolCallsPerTurn);
         ValidateCrewMemberLimitFields(dto.CrewMemberLimits);
 
         var guide = CreateAssistantEntity(
@@ -517,7 +515,6 @@ public class GuidesService(
             dto.ConversationStarters,
             dto.CrewMemberIds,
             dto.MaxToolCallsPerTurn,
-            dto.MaxToolRoundsPerTurn,
             dto.CrewMemberLimits
         );
 
@@ -596,7 +593,7 @@ public class GuidesService(
             throw new InvalidOperationException(string.Join(" ", validation.Conflicts));
         }
 
-        ValidateToolLimitFields(dto.MaxToolCallsPerTurn, dto.MaxToolRoundsPerTurn);
+        ValidateToolLimitFields(dto.MaxToolCallsPerTurn);
         ValidateCrewMemberLimitFields(dto.CrewMemberLimits);
 
         var guide = await UpdateAssistantEntityAsync(
@@ -622,7 +619,6 @@ public class GuidesService(
             dto.ConversationStarters,
             dto.CrewMemberIds,
             dto.MaxToolCallsPerTurn,
-            dto.MaxToolRoundsPerTurn,
             dto.CrewMemberLimits
         );
 
@@ -874,8 +870,7 @@ public class GuidesService(
         {
             EnvironmentVariables = environmentVariables.Count > 0 ? environmentVariables : null,
             Skills = skills.Count > 0 ? skills : null,
-            MaxToolCallsPerTurn = assistant.MaxToolCallsPerTurn,
-            MaxToolRoundsPerTurn = assistant.MaxToolRoundsPerTurn
+            MaxToolCallsPerTurn = assistant.MaxToolCallsPerTurn
         };
     }
 
@@ -889,7 +884,7 @@ public class GuidesService(
             dto.SamplingParametersJson);
 
         var mergedFiles = MergeCreateFiles(dto.Files, dto.Skills);
-        ValidateToolLimitFields(dto.MaxToolCallsPerTurn, dto.MaxToolRoundsPerTurn);
+        ValidateToolLimitFields(dto.MaxToolCallsPerTurn);
 
         var assistant = CreateAssistantEntity(
             AssistantKind.Assistant,
@@ -911,7 +906,6 @@ public class GuidesService(
             dto.ConversationStarters,
             null,
             dto.MaxToolCallsPerTurn,
-            dto.MaxToolRoundsPerTurn,
             null
         );
         _context.Assistants.Add(assistant);
@@ -998,7 +992,7 @@ public class GuidesService(
             }
         }
 
-        ValidateToolLimitFields(dto.MaxToolCallsPerTurn, dto.MaxToolRoundsPerTurn);
+        ValidateToolLimitFields(dto.MaxToolCallsPerTurn);
 
         var assistant = await UpdateAssistantEntityAsync(
             assistantId,
@@ -1023,7 +1017,6 @@ public class GuidesService(
             dto.ConversationStarters,
             null,
             dto.MaxToolCallsPerTurn,
-            dto.MaxToolRoundsPerTurn,
             null
         );
         await SaveProjectEnvironmentAsync(dto.ProjectId, assistant.Id, dto.EnvironmentVariables);
@@ -1469,20 +1462,13 @@ public class GuidesService(
     /// <summary>
     /// Core logic for creating an assistant or guide entity. Handles all shared logic.
     /// </summary>
-    private static void ValidateToolLimitFields(int? maxToolCallsPerTurn, int? maxToolRoundsPerTurn)
+    private static void ValidateToolLimitFields(int? maxToolCallsPerTurn)
     {
         if (maxToolCallsPerTurn is < 1)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(maxToolCallsPerTurn),
                 "Max tool calls per turn must be at least 1 when set.");
-        }
-
-        if (maxToolRoundsPerTurn is < 1)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(maxToolRoundsPerTurn),
-                "Max tool rounds per turn must be at least 1 when set.");
         }
     }
 
@@ -1527,7 +1513,6 @@ public class GuidesService(
         List<string>? conversationStarters,
         List<Guid>? crewMemberIds,
         int? maxToolCallsPerTurn,
-        int? maxToolRoundsPerTurn,
         List<CrewMemberLimitDto>? crewMemberLimits)
     {
         var assistant = new Assistant
@@ -1544,7 +1529,6 @@ public class GuidesService(
             ReasoningEffort = string.IsNullOrWhiteSpace(reasoningEffort) ? null : reasoningEffort.Trim(),
             SamplingParametersJson = string.IsNullOrWhiteSpace(samplingParametersJson) ? null : samplingParametersJson,
             MaxToolCallsPerTurn = maxToolCallsPerTurn,
-            MaxToolRoundsPerTurn = maxToolRoundsPerTurn,
             AvatarImageBytes = avatarImageBytes,
             AvatarContentType = avatarContentType,
             Created = DateTime.UtcNow
@@ -1796,7 +1780,6 @@ public class GuidesService(
         List<string>? conversationStarters,
         List<Guid>? crewMemberIds,
         int? maxToolCallsPerTurn,
-        int? maxToolRoundsPerTurn,
         List<CrewMemberLimitDto>? crewMemberLimits)
     {
         // Load ONLY the entity, no child collections
@@ -1816,7 +1799,6 @@ public class GuidesService(
         assistant.ReasoningEffort = string.IsNullOrWhiteSpace(reasoningEffort) ? null : reasoningEffort.Trim();
         assistant.SamplingParametersJson = string.IsNullOrWhiteSpace(samplingParametersJson) ? null : samplingParametersJson;
         assistant.MaxToolCallsPerTurn = maxToolCallsPerTurn;
-        assistant.MaxToolRoundsPerTurn = maxToolRoundsPerTurn;
         assistant.Updated = DateTime.UtcNow;
 
         // Update avatar: empty array clears it, non-empty sets it, null leaves unchanged

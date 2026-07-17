@@ -358,7 +358,7 @@ public sealed class ThreadRunTests
     [TestMethod]
     public void InjectLimitToolResults_AddsSyntheticToolMessagePerCall()
     {
-        var limitState = new ToolLimitState(1, null, 1, 1, LimitEscalationPhase.SoftBlocked);
+        var limitState = new ToolLimitState(1, 1, LimitEscalationPhase.SoftBlocked);
         var messages = new List<ChatMessage>();
         var toolCalls = new List<ChatToolCall>
         {
@@ -374,23 +374,26 @@ public sealed class ThreadRunTests
             }
         };
 
-        Invoke<Task>("InjectLimitToolResultsAsync", toolCalls, messages, limitState, null).GetAwaiter().GetResult();
+        Invoke<Task>("InjectLimitToolResultsAsync", toolCalls, messages, limitState, 1, null)
+            .GetAwaiter()
+            .GetResult();
 
         messages.Should().ContainSingle(m => m.Role == ChatRole.Tool);
-        messages[0].GetText().Should().Contain("Tool call limit reached");
+        messages[0].GetText().Should().Contain("Tool execution limit reached");
     }
 
     [TestMethod]
     public void EnsureLimitReachedSystemNudge_AddsSystemMessageOnce()
     {
         var messages = new List<ChatMessage>();
+        var limitState = new ToolLimitState(5, 5, LimitEscalationPhase.None);
 
-        Invoke<object>("EnsureLimitReachedSystemNudge", messages, null);
-        Invoke<object>("EnsureLimitReachedSystemNudge", messages, null);
+        Invoke<object>("EnsureLimitReachedSystemNudge", messages, limitState, null);
+        Invoke<object>("EnsureLimitReachedSystemNudge", messages, limitState, null);
 
         messages.Should().ContainSingle(m =>
             m.Role == ChatRole.System &&
-            m.GetText().Contains("Tool call limit reached for this turn", StringComparison.Ordinal));
+            m.GetText().Contains("was reached for this turn", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -402,7 +405,7 @@ public sealed class ThreadRunTests
 
         messages.Should().ContainSingle(m =>
             m.Role == ChatRole.Assistant &&
-            m.GetText().Contains("maximum number of tool calls", StringComparison.Ordinal));
+            m.GetText().Contains("tool execution limit", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]

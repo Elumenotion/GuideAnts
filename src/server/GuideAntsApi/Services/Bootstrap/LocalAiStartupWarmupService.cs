@@ -1,5 +1,6 @@
 using GuideAnts.Logging;
 using GuideAntsApi.Configuration;
+using GuideAntsApi.Endpoints;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
@@ -142,6 +143,8 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
 
         try
         {
+            await ProjectImageGenerationBundlesIfConfiguredAsync(cancellationToken).ConfigureAwait(false);
+
             await EnsureConfiguredLocalSelectionsSyncedAsync(cancellationToken).ConfigureAwait(false);
 
             var ini = await _desiredStateBuilder.BuildIniAsync(options, cancellationToken).ConfigureAwait(false);
@@ -642,5 +645,23 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
                 LogValueSanitizer.Sanitize(serviceId));
             return LocalRoutingDesiredState.Unknown;
         }
+    }
+
+    private async Task ProjectImageGenerationBundlesIfConfiguredAsync(CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(LocalServiceAdminRouting.ResolveAdminBase("ImageGeneration", _configuration)))
+        {
+            return;
+        }
+
+        using var projectionScope = _scopeFactory.CreateScope();
+        var bootstrapper = projectionScope.ServiceProvider.GetService<IImageGenerationBundleDefinitionBootstrapper>();
+        if (bootstrapper is null)
+        {
+            _logger.LogWarning("ImageGeneration bundle bootstrapper is not registered; skipping projection.");
+            return;
+        }
+
+        await bootstrapper.ProjectAsync(cancellationToken).ConfigureAwait(false);
     }
 }

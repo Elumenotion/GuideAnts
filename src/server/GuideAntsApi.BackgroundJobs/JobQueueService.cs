@@ -306,6 +306,10 @@ public class JobQueueService : IJobQueueService
         // startup it may have skipped failing runs that still had Processing queue rows.
         await ProjectScheduledJobInFlightGuard.FailOrphanedRunningRunsAsync(context, ct);
 
+        // Stream locks are process-owned. A restart means the holder is gone, so clear them
+        // immediately — do not wait for ExpiresAt, or the local-AI job gate stays closed.
+        await ConversationLockRestartReconciliation.ClearAllLocksAsync(context, _logger, ct);
+
         return affected;
     }
 

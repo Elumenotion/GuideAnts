@@ -22,6 +22,7 @@ public sealed class GuideAntsSystemSeeder : IGuideAntsSystemSeeder
     private readonly IGuideExportImportService _guideExportImportService;
     private readonly IGuideAntsSystemSettingsStore _settingsStore;
     private readonly InternalPublishedGuideFactory _publishedGuideFactory;
+    private readonly IImageGenerationBundleDefinitionBootstrapper _bundleDefinitionBootstrapper;
     private readonly ILogger<GuideAntsSystemSeeder> _logger;
 
     public GuideAntsSystemSeeder(
@@ -29,18 +30,22 @@ public sealed class GuideAntsSystemSeeder : IGuideAntsSystemSeeder
         ApplicationDbContext dbContext,
         IGuideExportImportService guideExportImportService,
         IGuideAntsSystemSettingsStore settingsStore,
+        IImageGenerationBundleDefinitionBootstrapper bundleDefinitionBootstrapper,
         ILogger<GuideAntsSystemSeeder> logger)
     {
         _environment = environment;
         _dbContext = dbContext;
         _guideExportImportService = guideExportImportService;
         _settingsStore = settingsStore;
+        _bundleDefinitionBootstrapper = bundleDefinitionBootstrapper;
         _publishedGuideFactory = new InternalPublishedGuideFactory(dbContext);
         _logger = logger;
     }
 
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
+        await _bundleDefinitionBootstrapper.MigrateAsync(cancellationToken).ConfigureAwait(false);
+
         var currentSettings = await _settingsStore.GetAsync(cancellationToken);
 
         var project = await ResolveSystemProjectAsync(currentSettings, cancellationToken);

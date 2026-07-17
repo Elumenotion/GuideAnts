@@ -1,5 +1,7 @@
 # Example only — copy to docker-compose.host-mounts.generated.yml for local gate checks.
 # Phase 4 owns real override generation; do not commit the generated file.
+# Custom TTS voice packs belong in docker-compose.voice-pack.local.yml (see
+# docker-compose.voice-pack.local.example.yml), not in this host-mount override.
 services:
   guideants-webapi-ui:
     volumes:

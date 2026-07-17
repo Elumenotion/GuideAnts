@@ -5,6 +5,25 @@ from typing import Any, Callable
 from guideants_hf.transport import download_hf_file, list_hf_repository_files
 
 
+def lookup_hf_file_size(
+    repository: str,
+    relative_path: str,
+    token: str | None,
+    revision: str | None = "main",
+) -> int | None:
+    normalized_path = relative_path.strip().lstrip("/")
+    if not normalized_path:
+        return None
+    for item in list_hf_repository_files(repository, token, revision):
+        if item.get("type") != "file":
+            continue
+        path = item.get("path")
+        size = item.get("size")
+        if path == normalized_path and isinstance(size, int) and size > 0:
+            return size
+    return None
+
+
 def _source_repo_spec(entry: dict[str, Any]) -> tuple[str, str, str | None]:
     source = entry["sourceRepos"][0]
     if isinstance(source, dict):
