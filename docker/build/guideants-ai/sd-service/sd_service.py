@@ -352,20 +352,6 @@ APP = FastAPI(title="GuideAnts Stable Diffusion Service", version="1.1.0")
 VALID_OUTPUT_FORMATS = {"png", "jpeg", "webp"}
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
-# Canonical bundle ids may still have on-disk folders under legacy names until
-# operators rename or re-download into the canonical directory.
-LEGACY_BUNDLE_DIR_NAMES: dict[str, str] = {
-    "flux2-klein-4b": "flux2-klein-4b-q4ks",
-    "flux2-klein-9b": "flux2-klein-9b-q5",
-    "FLUX.2-dev": "FLUX.2-dev-GGUF-Q5_K_M",
-}
-
-
-def canonical_bundle_id(bundle_id: str) -> str:
-    for canonical, legacy in LEGACY_BUNDLE_DIR_NAMES.items():
-        if bundle_id == legacy:
-            return canonical
-    return bundle_id
 WARMUP_LOCK = threading.Lock()
 BUNDLE_OPS_LOCK = threading.Lock()
 BUNDLE_OPERATIONS: dict[str, dict[str, Any]] = {}
@@ -401,31 +387,6 @@ def validate_bundle_id(value: str) -> str:
     return candidate
 
 
-def list_role_asset_files(role_path: str) -> list[str]:
-    if not os.path.isdir(role_path):
-        return []
-    assets: list[str] = []
-    try:
-        for name in os.listdir(role_path):
-            if name.startswith("."):
-                continue
-            if name.endswith(".tmp") or name.endswith(".guideants-meta.json"):
-                continue
-            file_path = os.path.join(role_path, name)
-            if os.path.isfile(file_path):
-                assets.append(name)
-    except OSError:
-        return []
-    return sorted(assets)
-
-
-def role_asset_file_count(bundle_path: str) -> int:
-    total = 0
-    for subdir in ("diffusion", "vae", "text-encoder"):
-        total += len(list_role_asset_files(os.path.join(bundle_path, subdir)))
-    return total
-
-
 def _bundle_store_root(model_dir: str) -> str:
     return os.path.realpath(bundle_root_dir(model_dir))
 
@@ -433,33 +394,59 @@ def _bundle_store_root(model_dir: str) -> str:
 def resolve_bundle_dir(model_dir: str, bundle_id: str) -> str:
     safe_bundle_id = validate_bundle_id(bundle_id)
     root_real = _bundle_store_root(model_dir)
+    bundle_path = os.path.realpath(os.path.join(root_real, safe_bundle_id))
+    ensure_inside_root(root_real, bundle_path)
+    return bundle_path
 
-    candidates: list[str] = [os.path.join(root_real, safe_bundle_id)]
-    legacy_name = LEGACY_BUNDLE_DIR_NAMES.get(safe_bundle_id)
-    if legacy_name:
-        candidates.append(os.path.join(root_real, legacy_name))
 
-    best_path = os.path.join(root_real, safe_bundle_id)
-    best_count = -1
-    for candidate in candidates:
-        candidate_real = os.path.realpath(candidate)
-        if not os.path.isdir(candidate_real):
+def _merge_bundle_directory_contents(source_root: str, dest_root: str) -> None:
+    for entry in os.listdir(source_root):
+        if entry.startswith("."):
             continue
-        try:
-            ensure_inside_root(root_real, candidate_real)
-        except PathSafetyError:
-            continue
-        count = role_asset_file_count(candidate_real)
-        if count > best_count:
-            best_count = count
-            best_path = candidate_real
-
-    ensure_inside_root(root_real, os.path.realpath(best_path))
-    return best_path
+        src_entry = os.path.join(source_root, entry)
+        dst_entry = os.path.join(dest_root, entry)
+        if os.path.isdir(src_entry):
+            if not os.path.isdir(dst_entry):
+                shutil.move(src_entry, dst_entry)
+            else:
+                _merge_bundle_directory_contents(src_entry, dst_entry)
+        elif os.path.isfile(src_entry) and not os.path.exists(dst_entry):
+            shutil.move(src_entry, dst_entry)
 
 
-def _bundle_dir_is_populated(bundle_path: str) -> bool:
-    return role_asset_file_count(bundle_path) > 0
+def migrate_bundle_folder(model_dir: str, from_bundle_id: str, to_bundle_id: str) -> dict[str, Any]:
+    from_id = validate_bundle_id(from_bundle_id)
+    to_id = validate_bundle_id(to_bundle_id)
+    if from_id == to_id:
+        return {"fromBundleId": from_id, "toBundleId": to_id, "action": "noop"}
+
+    root_real = _bundle_store_root(model_dir)
+    from_path = os.path.realpath(os.path.join(root_real, from_id))
+    to_path = os.path.realpath(os.path.join(root_real, to_id))
+    ensure_inside_root(root_real, from_path)
+    ensure_inside_root(root_real, to_path)
+
+    if not os.path.isdir(from_path):
+        return {
+            "fromBundleId": from_id,
+            "toBundleId": to_id,
+            "action": "skipped",
+            "reason": "source_missing",
+        }
+
+    if not os.path.isdir(to_path):
+        os.rename(from_path, to_path)
+        action = "renamed"
+    else:
+        _merge_bundle_directory_contents(from_path, to_path)
+        shutil.rmtree(from_path)
+        action = "merged"
+
+    active = read_active_bundle(model_dir)
+    if active == from_id:
+        write_active_bundle_marker(model_dir, to_id)
+
+    return {"fromBundleId": from_id, "toBundleId": to_id, "action": action}
 
 
 def resolve_runtime_config(*, bundle_id: str | None = None) -> SdRuntimeConfig:
@@ -617,33 +604,19 @@ def expected_bundle_paths(model_dir: str, bundle_id: str) -> dict[str, str]:
     }
 
 
-def canonical_bundle_dir(model_dir: str, bundle_id: str) -> str:
-    safe_id = validate_bundle_id(canonical_bundle_id(bundle_id))
-    root_real = _bundle_store_root(model_dir)
-    candidate = os.path.realpath(os.path.join(root_real, safe_id))
-    ensure_inside_root(root_real, candidate)
-    return candidate
-
-
-def canonical_bundle_definition_path(model_dir: str, bundle_id: str) -> str:
-    return os.path.join(canonical_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
+def bundle_definition_path(model_dir: str, bundle_id: str) -> str:
+    return os.path.join(resolve_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
 
 
 def bundle_definition_file(model_dir: str, bundle_id: str) -> str:
     root_real = _bundle_store_root(model_dir)
-    canonical_path = os.path.realpath(canonical_bundle_definition_path(model_dir, bundle_id))
-    ensure_inside_root(root_real, canonical_path)
-    if os.path.isfile(canonical_path):
-        return canonical_path
-    legacy_path = os.path.realpath(
-        os.path.join(resolve_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
-    )
-    ensure_inside_root(root_real, legacy_path)
-    return legacy_path
+    definition_path = os.path.realpath(bundle_definition_path(model_dir, bundle_id))
+    ensure_inside_root(root_real, definition_path)
+    return definition_path
 
 
 def write_bundle_definition_payload(model_dir: str, bundle_id: str, payload: dict[str, Any]) -> None:
-    bundle_path = canonical_bundle_dir(model_dir, bundle_id)
+    bundle_path = resolve_bundle_dir(model_dir, bundle_id)
     os.makedirs(bundle_path, exist_ok=True)
     target = os.path.join(bundle_path, "bundle-definition.json")
     temp = f"{target}.{uuid.uuid4().hex}.tmp"
@@ -1040,21 +1013,15 @@ def list_bundles(model_dir: str) -> list[dict[str, Any]]:
         )
         return bundles
 
-    canonical_ids: set[str] = set()
-    for folder_id in folder_ids:
+    for folder_id in sorted(folder_ids):
         folder_path = os.path.join(root, folder_id)
         if not os.path.isdir(folder_path):
             continue
         try:
-            canonical_ids.add(canonical_bundle_id(validate_bundle_id(folder_id)))
+            bundle_id = validate_bundle_id(folder_id)
         except ValueError:
             continue
-
-    for bundle_id in sorted(canonical_ids):
-        bundle_path = os.path.join(root, bundle_id)
-        if not os.path.isdir(bundle_path):
-            # resolve_bundle_dir may point at a legacy folder name.
-            bundle_path = resolve_bundle_dir(model_dir, bundle_id)
+        bundle_path = resolve_bundle_dir(model_dir, bundle_id)
         try:
             roles = expected_bundle_paths(model_dir, bundle_id)
             definition = read_bundle_definition(model_dir, bundle_id)
@@ -2345,7 +2312,7 @@ async def admin_list_bundles() -> JSONResponse:
         status_code=200,
         content={
             "modelDir": model_dir,
-            "legacyMarkerBundleId": read_active_bundle(model_dir),
+            "activeBundleMarkerId": read_active_bundle(model_dir),
             "loadedBundleId": loaded_id,
             "engine": engine_state_dict(),
             "items": items,
@@ -2383,6 +2350,24 @@ async def admin_download_bundle(payload: DownloadBundleRequest) -> JSONResponse:
     # Field-level validation is enforced by DownloadBundleRequest validators.
     operation = start_bundle_download(payload, model_dir)
     return JSONResponse(status_code=202, content=operation)
+
+
+@APP.post("/admin/bundles/migrate-folder")
+async def admin_migrate_bundle_folder(payload: dict[str, Any]) -> JSONResponse:
+    model_dir = _require_model_dir()
+    from_bundle_id = str(
+        payload.get("fromBundleId") or payload.get("from_bundle_id") or ""
+    ).strip()
+    to_bundle_id = str(
+        payload.get("toBundleId") or payload.get("to_bundle_id") or ""
+    ).strip()
+    try:
+        result = migrate_bundle_folder(model_dir, from_bundle_id, to_bundle_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PathSafetyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(status_code=200, content=result)
 
 
 @APP.get("/admin/bundles/operations/{operation_id}")

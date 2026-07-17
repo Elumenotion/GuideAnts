@@ -237,81 +237,41 @@ class SdBundleDefinitionContractTests(unittest.TestCase):
             self.assertTrue(bundle["roles"]["diffusion"]["ready"])
             self.assertFalse(bundle["complete"])
 
-    def test_list_bundles_prefers_legacy_folder_over_definition_only_canonical_stub(self) -> None:
+    def test_migrate_bundle_folder_renames_legacy_directory_to_canonical_id(self) -> None:
         with tempfile.TemporaryDirectory() as model_dir:
-            canonical_id = "flux2-klein-4b"
             legacy_id = "flux2-klein-4b-q4ks"
-            legacy_paths = sd_service.expected_bundle_paths(model_dir, legacy_id)
-            canonical_path = sd_service.resolve_bundle_dir(model_dir, canonical_id)
-            legacy_path = sd_service.resolve_bundle_dir(model_dir, legacy_id)
-            os.makedirs(canonical_path, exist_ok=True)
-            sd_service.write_bundle_definition_payload(
-                model_dir,
-                canonical_id,
-                {
-                    "bundleId": canonical_id,
-                    "revision": "main",
-                    "roles": {
-                        "diffusion": {
-                            "repo": "unsloth/FLUX.2-klein-4B-GGUF",
-                            "file": "flux-2-klein-4b-Q8_0.gguf",
-                        },
-                        "vae": {"repo": "org/vae", "file": "vae.safetensors"},
-                        "textEncoder": {"repo": "org/te", "file": "te.gguf"},
-                    },
-                    "sampling": {"steps": 4, "cfgScale": 1.0, "samplingMethod": "euler"},
-                },
-            )
-            for role, filename in (
-                ("diffusion", "flux-2-klein-4b-Q8_0.gguf"),
-                ("vae", "vae.safetensors"),
-                ("textEncoder", "te.gguf"),
-            ):
-                os.makedirs(legacy_paths[role], exist_ok=True)
-                with open(os.path.join(legacy_paths[role], filename), "wb") as handle:
-                    handle.write(b"x" * 64)
+            canonical_id = "flux2-klein-4b"
+            legacy_path = os.path.join(model_dir, "bundles", legacy_id, "diffusion")
+            os.makedirs(legacy_path, exist_ok=True)
+            with open(os.path.join(legacy_path, "flux-2-klein-4b-Q8_0.gguf"), "wb") as handle:
+                handle.write(b"x" * 64)
 
-            self.assertEqual(
-                sd_service.resolve_bundle_dir(model_dir, canonical_id),
-                legacy_path,
-            )
-            bundles = sd_service.list_bundles(model_dir)
-            bundle = next(item for item in bundles if item["bundleId"] == canonical_id)
-            self.assertTrue(bundle["complete"])
+            result = sd_service.migrate_bundle_folder(model_dir, legacy_id, canonical_id)
 
-    def test_list_bundles_resolves_legacy_disk_folder_for_canonical_id(self) -> None:
+            self.assertEqual(result["action"], "renamed")
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(
+                        model_dir,
+                        "bundles",
+                        canonical_id,
+                        "diffusion",
+                        "flux-2-klein-4b-Q8_0.gguf",
+                    )
+                )
+            )
+            self.assertFalse(os.path.isdir(os.path.join(model_dir, "bundles", legacy_id)))
+
+    def test_migrate_bundle_folder_updates_active_bundle_marker(self) -> None:
         with tempfile.TemporaryDirectory() as model_dir:
             legacy_id = "FLUX.2-dev-GGUF-Q5_K_M"
             canonical_id = "FLUX.2-dev"
-            legacy_paths = sd_service.expected_bundle_paths(model_dir, legacy_id)
-            _write_verified_role_file(
-                legacy_paths["diffusion"],
-                "flux2-dev-Q5_K_M.gguf",
-                b"x" * 128,
-                repo="unsloth/FLUX.2-dev-GGUF",
-            )
+            os.makedirs(os.path.join(model_dir, "bundles", legacy_id), exist_ok=True)
+            sd_service.write_active_bundle_marker(model_dir, legacy_id)
 
-            sd_service.write_bundle_definition_payload(
-                model_dir,
-                legacy_id,
-                {
-                    "bundleId": legacy_id,
-                    "revision": "main",
-                    "roles": {
-                        "diffusion": {
-                            "repo": "unsloth/FLUX.2-dev-GGUF",
-                            "file": "flux2-dev-Q5_K_M.gguf",
-                        },
-                        "vae": {"repo": "org/vae", "file": "vae.safetensors"},
-                        "textEncoder": {"repo": "org/te", "file": "te.gguf"},
-                    },
-                    "sampling": {"steps": 28, "cfgScale": 1.0, "samplingMethod": "euler"},
-                },
-            )
+            sd_service.migrate_bundle_folder(model_dir, legacy_id, canonical_id)
 
-            bundles = sd_service.list_bundles(model_dir)
-            self.assertEqual([item["bundleId"] for item in bundles], [canonical_id])
-            self.assertTrue(bundles[0]["roles"]["diffusion"]["ready"])
+            self.assertEqual(sd_service.read_active_bundle(model_dir), canonical_id)
 
     def test_read_bundle_definition_returns_none_when_file_missing(self) -> None:
         with tempfile.TemporaryDirectory() as model_dir:
@@ -337,7 +297,7 @@ class SdBundleDefinitionContractTests(unittest.TestCase):
             self.assertEqual(loaded["roles"]["diffusion"]["file"], "model.gguf")
             self.assertEqual(loaded["sampling"]["steps"], 4)
 
-            path = sd_service.canonical_bundle_definition_path(model_dir, "test-bundle")
+            path = sd_service.bundle_definition_path(model_dir, "test-bundle")
             self.assertTrue(os.path.isfile(path))
             with open(path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)

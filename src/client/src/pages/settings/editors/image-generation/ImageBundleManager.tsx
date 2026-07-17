@@ -80,7 +80,7 @@ type BundleListPayload = {
   modelDir?: string;
   selectedBundleId?: string | null;
   activeBundleId?: string | null;
-  legacyMarkerBundleId?: string | null;
+  activeBundleMarkerId?: string | null;
   loadedBundleId?: string | null;
   engine?: EngineState;
   items?: BundleListItem[];

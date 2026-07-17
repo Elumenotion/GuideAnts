@@ -30,6 +30,7 @@ public sealed class ImageGenerationBundleDefinitionBootstrapper : IImageGenerati
 
     public async Task ProjectAsync(CancellationToken cancellationToken = default)
     {
+        await _projectionService.MigrateLegacyBundleFoldersAsync(cancellationToken).ConfigureAwait(false);
         var projectionReport = await _projectionService.ProjectAllAsync(cancellationToken).ConfigureAwait(false);
         if (projectionReport.Failed > 0)
         {

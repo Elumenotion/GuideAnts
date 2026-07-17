@@ -25,6 +25,45 @@ public sealed class BundleDefinitionProjectionService : IBundleDefinitionProject
         _logger = logger;
     }
 
+    public async Task MigrateLegacyBundleFoldersAsync(CancellationToken cancellationToken = default)
+    {
+        var adminBase = LocalServiceAdminRouting.ResolveAdminBase("ImageGeneration", _configuration);
+        if (adminBase is null)
+        {
+            return;
+        }
+
+        foreach (var (legacyId, canonicalId) in ImageGenerationBundleDefinitionContracts.LegacyRenames)
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{adminBase}/admin/bundles/migrate-folder")
+            {
+                Content = JsonContent.Create(new
+                {
+                    fromBundleId = legacyId,
+                    toBundleId = canonicalId,
+                }),
+            };
+
+            using var response = await _httpClientFactory.CreateClient()
+                .SendAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "Migrated ImageGeneration bundle folder '{LegacyId}' -> '{CanonicalId}'.",
+                    legacyId,
+                    canonicalId);
+                continue;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new InvalidOperationException(
+                $"SD bundle folder migration failed for '{legacyId}' -> '{canonicalId}' with status {(int)response.StatusCode}: {body}");
+        }
+    }
+
     public async Task<BundleDefinitionProjectionReport> ProjectAllAsync(CancellationToken cancellationToken = default)
     {
         var definitions = await _settingsService.GetImageGenerationBundleDefinitionsAsync(cancellationToken);
