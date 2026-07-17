@@ -35,6 +35,20 @@ export function KeyValueEditor({
     onChange(newItems);
   };
 
+  const handleKeyBlur = (index: number, key: string) => {
+    const trimmed = key.trim();
+    if (trimmed !== key) {
+      handleKeyChange(index, trimmed);
+    }
+  };
+
+  const handleValueBlur = (index: number, value: string) => {
+    const trimmed = value.trim();
+    if (trimmed !== value) {
+      handleValueChange(index, trimmed);
+    }
+  };
+
   return (
     <div className="space-y-2">
       {label && <label className="block text-sm font-medium text-gray-700">{label}</label>}
@@ -46,6 +60,7 @@ export function KeyValueEditor({
               type="text"
               value={item.key}
               onChange={(e) => handleKeyChange(index, e.target.value)}
+              onBlur={(e) => handleKeyBlur(index, e.target.value)}
               placeholder={keyPlaceholder}
               className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
@@ -53,6 +68,7 @@ export function KeyValueEditor({
               type="text"
               value={item.value || ''}
               onChange={(e) => handleValueChange(index, e.target.value)}
+              onBlur={(e) => handleValueBlur(index, e.target.value)}
               placeholder={valuePlaceholder}
               className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
