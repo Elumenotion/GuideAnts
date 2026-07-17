@@ -17,7 +17,14 @@ from typing import Any
 
 from guideants_hf.catalog_download import lookup_hf_file_size
 from guideants_hf.operations import find_in_flight_operation
-from guideants_hf.path_safety import PathSafetyError, ensure_inside_root, resolve_path_under_dir
+from guideants_hf.path_safety import (
+    PathSafetyError,
+    ensure_inside_root,
+    merge_directory_contents_under_root,
+    remove_directory_under_root,
+    rename_directory_under_root,
+    resolve_path_under_dir,
+)
 from guideants_hf.transport import download_hf_file
 
 import uvicorn
@@ -399,36 +406,6 @@ def resolve_bundle_dir(model_dir: str, bundle_id: str) -> str:
     return bundle_path
 
 
-def _merge_bundle_directory_contents(
-    source_root: str,
-    dest_root: str,
-    *,
-    bundle_store_root: str,
-) -> None:
-    source_real = os.path.realpath(source_root)
-    dest_real = os.path.realpath(dest_root)
-    ensure_inside_root(bundle_store_root, source_real)
-    ensure_inside_root(bundle_store_root, dest_real)
-    for entry in os.listdir(source_real):
-        if entry.startswith("."):
-            continue
-        src_entry = resolve_path_under_dir(source_real, entry)
-        dst_entry = resolve_path_under_dir(dest_real, entry)
-        ensure_inside_root(bundle_store_root, src_entry)
-        ensure_inside_root(bundle_store_root, dst_entry)
-        if os.path.isdir(src_entry):
-            if not os.path.isdir(dst_entry):
-                shutil.move(src_entry, dst_entry)
-            else:
-                _merge_bundle_directory_contents(
-                    src_entry,
-                    dst_entry,
-                    bundle_store_root=bundle_store_root,
-                )
-        elif os.path.isfile(src_entry) and not os.path.exists(dst_entry):
-            shutil.move(src_entry, dst_entry)
-
-
 def migrate_bundle_folder(model_dir: str, from_bundle_id: str, to_bundle_id: str) -> dict[str, Any]:
     from_id = validate_bundle_id(from_bundle_id)
     to_id = validate_bundle_id(to_bundle_id)
@@ -436,10 +413,8 @@ def migrate_bundle_folder(model_dir: str, from_bundle_id: str, to_bundle_id: str
         return {"fromBundleId": from_id, "toBundleId": to_id, "action": "noop"}
 
     root_real = _bundle_store_root(model_dir)
-    from_path = os.path.realpath(os.path.join(root_real, from_id))
-    to_path = os.path.realpath(os.path.join(root_real, to_id))
-    ensure_inside_root(root_real, from_path)
-    ensure_inside_root(root_real, to_path)
+    from_path = resolve_bundle_dir(model_dir, from_id)
+    to_path = resolve_bundle_dir(model_dir, to_id)
 
     if not os.path.isdir(from_path):
         return {
@@ -450,11 +425,15 @@ def migrate_bundle_folder(model_dir: str, from_bundle_id: str, to_bundle_id: str
         }
 
     if not os.path.isdir(to_path):
-        os.rename(from_path, to_path)
+        rename_directory_under_root(root_real, from_path, to_path)
         action = "renamed"
     else:
-        _merge_bundle_directory_contents(from_path, to_path, bundle_store_root=root_real)
-        shutil.rmtree(from_path)
+        merge_directory_contents_under_root(
+            store_root=root_real,
+            source_dir=from_path,
+            dest_dir=to_path,
+        )
+        remove_directory_under_root(root_real, from_path)
         action = "merged"
 
     active = read_active_bundle(model_dir)
@@ -612,15 +591,19 @@ def write_active_bundle_marker(model_dir: str, bundle_id: str) -> None:
 
 def expected_bundle_paths(model_dir: str, bundle_id: str) -> dict[str, str]:
     base = resolve_bundle_dir(model_dir, bundle_id)
-    return {
-        "diffusion": os.path.join(base, "diffusion"),
-        "vae": os.path.join(base, "vae"),
-        "textEncoder": os.path.join(base, "text-encoder"),
+    root_real = _bundle_store_root(model_dir)
+    role_paths = {
+        "diffusion": resolve_path_under_dir(base, "diffusion"),
+        "vae": resolve_path_under_dir(base, "vae"),
+        "textEncoder": resolve_path_under_dir(base, "text-encoder"),
     }
+    for path in role_paths.values():
+        ensure_inside_root(root_real, path)
+    return role_paths
 
 
 def bundle_definition_path(model_dir: str, bundle_id: str) -> str:
-    return os.path.join(resolve_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
+    return resolve_path_under_dir(resolve_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
 
 
 def bundle_definition_file(model_dir: str, bundle_id: str) -> str:
@@ -633,7 +616,7 @@ def bundle_definition_file(model_dir: str, bundle_id: str) -> str:
 def write_bundle_definition_payload(model_dir: str, bundle_id: str, payload: dict[str, Any]) -> None:
     bundle_path = resolve_bundle_dir(model_dir, bundle_id)
     os.makedirs(bundle_path, exist_ok=True)
-    target = os.path.join(bundle_path, "bundle-definition.json")
+    target = resolve_path_under_dir(bundle_path, "bundle-definition.json")
     temp = f"{target}.{uuid.uuid4().hex}.tmp"
     with open(temp, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=True, sort_keys=True)
@@ -752,10 +735,7 @@ def _single_file_name(path: str) -> str | None:
 
 
 def read_bundle_definition(model_dir: str, bundle_id: str) -> dict[str, Any] | None:
-    path = bundle_definition_file(model_dir, bundle_id)
-    root_real = _bundle_store_root(model_dir)
-    safe_path = os.path.realpath(path)
-    ensure_inside_root(root_real, safe_path)
+    safe_path = bundle_definition_file(model_dir, bundle_id)
     if not os.path.isfile(safe_path):
         return None
     try:
@@ -1065,9 +1045,9 @@ def list_bundles(model_dir: str) -> list[dict[str, Any]]:
                 roles = expected_bundle_paths(model_dir, bundle_id)
             except Exception:
                 roles = {
-                    "diffusion": os.path.join(bundle_path, "diffusion"),
-                    "vae": os.path.join(bundle_path, "vae"),
-                    "textEncoder": os.path.join(bundle_path, "text-encoder"),
+                    "diffusion": resolve_path_under_dir(bundle_path, "diffusion"),
+                    "vae": resolve_path_under_dir(bundle_path, "vae"),
+                    "textEncoder": resolve_path_under_dir(bundle_path, "text-encoder"),
                 }
             bundles.append(
                 {

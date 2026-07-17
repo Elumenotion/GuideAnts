@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sys
 import tempfile
 import types
@@ -54,11 +55,58 @@ def _resolve_path_under_dir(parent_dir: str, filename: str) -> str:
     return candidate
 
 
+def _merge_directory_contents_under_root(
+    *,
+    store_root: str,
+    source_dir: str,
+    dest_dir: str,
+) -> None:
+    source_real = os.path.realpath(source_dir)
+    dest_real = os.path.realpath(dest_dir)
+    _ensure_inside_root(store_root, source_real)
+    _ensure_inside_root(store_root, dest_real)
+    for entry in os.listdir(source_real):
+        if entry.startswith("."):
+            continue
+        src_entry = _resolve_path_under_dir(source_real, entry)
+        dst_entry = _resolve_path_under_dir(dest_real, entry)
+        _ensure_inside_root(store_root, src_entry)
+        _ensure_inside_root(store_root, dst_entry)
+        if os.path.isdir(src_entry):
+            if not os.path.isdir(dst_entry):
+                shutil.move(src_entry, dst_entry)
+            else:
+                _merge_directory_contents_under_root(
+                    store_root=store_root,
+                    source_dir=src_entry,
+                    dest_dir=dst_entry,
+                )
+        elif os.path.isfile(src_entry) and not os.path.exists(dst_entry):
+            shutil.move(src_entry, dst_entry)
+
+
+def _rename_directory_under_root(store_root: str, source_dir: str, dest_dir: str) -> None:
+    source_real = os.path.realpath(source_dir)
+    dest_real = os.path.realpath(dest_dir)
+    _ensure_inside_root(store_root, source_real)
+    _ensure_inside_root(store_root, dest_real)
+    os.rename(source_real, dest_real)
+
+
+def _remove_directory_under_root(store_root: str, target_dir: str) -> None:
+    target_real = os.path.realpath(target_dir)
+    _ensure_inside_root(store_root, target_real)
+    shutil.rmtree(target_real)
+
+
 _path_safety = _install_module_stub(
     "guideants_hf.path_safety",
     {
         "PathSafetyError": _PathSafetyError,
         "ensure_inside_root": _ensure_inside_root,
+        "merge_directory_contents_under_root": _merge_directory_contents_under_root,
+        "remove_directory_under_root": _remove_directory_under_root,
+        "rename_directory_under_root": _rename_directory_under_root,
         "resolve_path_under_dir": _resolve_path_under_dir,
     },
 )

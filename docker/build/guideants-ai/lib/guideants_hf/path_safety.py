@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from typing import Iterable
 
 
@@ -126,6 +127,51 @@ def validate_ordered_artifact_paths(
         add_spec(path, mmproj_specs)
 
     return target_dir, model_specs, mmproj_specs
+
+
+def merge_directory_contents_under_root(
+    *,
+    store_root: str,
+    source_dir: str,
+    dest_dir: str,
+) -> None:
+    """Move files and subdirectories from source_dir into dest_dir, both under store_root."""
+    source_real = os.path.realpath(source_dir)
+    dest_real = os.path.realpath(dest_dir)
+    ensure_inside_root(store_root, source_real)
+    ensure_inside_root(store_root, dest_real)
+    for entry in os.listdir(source_real):
+        if entry.startswith("."):
+            continue
+        src_entry = resolve_path_under_dir(source_real, entry)
+        dst_entry = resolve_path_under_dir(dest_real, entry)
+        ensure_inside_root(store_root, src_entry)
+        ensure_inside_root(store_root, dst_entry)
+        if os.path.isdir(src_entry):
+            if not os.path.isdir(dst_entry):
+                shutil.move(src_entry, dst_entry)
+            else:
+                merge_directory_contents_under_root(
+                    store_root=store_root,
+                    source_dir=src_entry,
+                    dest_dir=dst_entry,
+                )
+        elif os.path.isfile(src_entry) and not os.path.exists(dst_entry):
+            shutil.move(src_entry, dst_entry)
+
+
+def rename_directory_under_root(store_root: str, source_dir: str, dest_dir: str) -> None:
+    source_real = os.path.realpath(source_dir)
+    dest_real = os.path.realpath(dest_dir)
+    ensure_inside_root(store_root, source_real)
+    ensure_inside_root(store_root, dest_real)
+    os.rename(source_real, dest_real)
+
+
+def remove_directory_under_root(store_root: str, target_dir: str) -> None:
+    target_real = os.path.realpath(target_dir)
+    ensure_inside_root(store_root, target_real)
+    shutil.rmtree(target_real)
 
 
 def delete_obsolete_repository_paths(
