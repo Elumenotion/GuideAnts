@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using FluentAssertions;
+using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Core;
@@ -31,10 +32,16 @@ public sealed class MediaExtractionClientTests
         {
             MediaBaseUrl = "http://guideants-ai:80"
         });
+        var videoOptionsMonitor = new Mock<IOptionsMonitor<VideoAudioExtractionOptions>>();
+        videoOptionsMonitor.SetupGet(x => x.CurrentValue).Returns(new VideoAudioExtractionOptions
+        {
+            TimeoutSeconds = 1800
+        });
 
         var client = new MediaExtractionClient(
             httpClient,
             optionsMonitor.Object,
+            videoOptionsMonitor.Object,
             NullLogger<MediaExtractionClient>.Instance);
 
         var result = await client.ExtractAudioAsync(new MediaExtractionRequest
@@ -49,6 +56,9 @@ public sealed class MediaExtractionClientTests
         handler.LastRequestUri.Should().Be(new Uri("http://guideants-ai/media/extract-audio"));
         handler.LastRequestBody.Should().Contain("\"sourcePath\":\".system/media-extract/abc/input.mp4\"");
         handler.LastRequestBody.Should().Contain("\"outputPath\":\".system/media-extract/abc/output.mp3\"");
+        handler.LastRequest!.Headers.TryGetValues(LocalServiceRequestHeaders.RequestTimeoutSeconds, out var timeoutValues)
+            .Should().BeTrue();
+        timeoutValues!.Single().Should().Be("1800");
     }
 
     [TestMethod]
@@ -69,10 +79,16 @@ public sealed class MediaExtractionClientTests
         {
             MediaBaseUrl = "http://guideants-ai:80"
         });
+        var videoOptionsMonitor = new Mock<IOptionsMonitor<VideoAudioExtractionOptions>>();
+        videoOptionsMonitor.SetupGet(x => x.CurrentValue).Returns(new VideoAudioExtractionOptions
+        {
+            TimeoutSeconds = 1800
+        });
 
         var client = new MediaExtractionClient(
             httpClient,
             optionsMonitor.Object,
+            videoOptionsMonitor.Object,
             NullLogger<MediaExtractionClient>.Instance);
 
         var act = async () => await client.ExtractAudioAsync(new MediaExtractionRequest
@@ -90,10 +106,12 @@ public sealed class MediaExtractionClientTests
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder = responder;
 
         public Uri? LastRequestUri { get; private set; }
+        public HttpRequestMessage? LastRequest { get; private set; }
         public string LastRequestBody { get; private set; } = string.Empty;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            LastRequest = request;
             LastRequestUri = request.RequestUri;
             LastRequestBody = request.Content is null
                 ? string.Empty

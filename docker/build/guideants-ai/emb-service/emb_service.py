@@ -17,6 +17,7 @@ from guideants_hf.catalog_completeness import gguf_model_entry_is_complete
 from guideants_hf.catalog_download import download_catalog_entry_files
 from guideants_hf.operations import find_in_flight_operation
 from ga_blocking import await_blocking
+from guideants_http.request_timeout import clamp_request_timeout_seconds, resolve_request_timeout_seconds
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -528,16 +529,23 @@ def apply_input_prefix(text: str, purpose: str, entry_id: str | None) -> str:
     return str(template).replace("{text}", text)
 
 
-def embed_via_engine(inputs: list[str], purpose: str) -> list[list[float]]:
+def embed_via_engine(
+    inputs: list[str],
+    purpose: str,
+    request_timeout_seconds: int | None = None,
+) -> list[list[float]]:
     config = STATE.config
     if config is None:
         raise RuntimeError("Embeddings engine is not loaded.")
     prefixed = [apply_input_prefix(value, purpose, STATE.catalog_entry_id) for value in inputs]
+    effective_timeout = clamp_request_timeout_seconds(
+        request_timeout_seconds or config.request_timeout_seconds
+    )
     status_code, parsed = llama_json_request(
         config,
         "POST",
         "/v1/embeddings",
-        config.request_timeout_seconds,
+        effective_timeout,
         payload={"input": prefixed},
     )
     if status_code != 200:
@@ -1037,7 +1045,18 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
 
     started = time.perf_counter()
     try:
-        vectors = await await_blocking(embed_via_engine, payload.inputs, purpose)
+        with STATE.lock:
+            config_for_timeout = STATE.config
+        request_timeout_seconds = resolve_request_timeout_seconds(
+            request.headers,
+            config_for_timeout.request_timeout_seconds if config_for_timeout is not None else 120,
+        )
+        vectors = await await_blocking(
+            embed_via_engine,
+            payload.inputs,
+            purpose,
+            request_timeout_seconds,
+        )
         dimensions = len(vectors[0]) if vectors else int(snapshot.get("dimensions") or 0)
         data = [{"index": idx, "embedding": vector} for idx, vector in enumerate(vectors)]
         latency_ms = int((time.perf_counter() - started) * 1000)

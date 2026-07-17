@@ -120,7 +120,7 @@ services:
       - GA_TTS_BACKEND=cuda
       - GA_TTS_DTYPE=float32
       - GA_TTS_CUDA_VISIBLE_DEVICES=${GA_TTS_CUDA_VISIBLE_DEVICES:-}
-      - GA_TTS_TIMEOUT_SECONDS=300
+      - GA_TTS_TIMEOUT_SECONDS=${GA_TTS_TIMEOUT_SECONDS:-300}
       - GA_TTS_MAX_NEW_TOKENS=512
       - GA_TTS_SAMPLE_RATE=24000
       - GA_TTS_VOICE=af_alloy
@@ -148,7 +148,7 @@ services:
       # GA_SD_LLM_PATH env seam any more — bundle = single source of
       # truth, set via the UI (Settings > Image generation > Set active)
       # or the admin API (PUT /admin/bundles/{id}/active).
-      - GA_SD_TIMEOUT_SECONDS=900
+      - GA_SD_TIMEOUT_SECONDS=${GA_SD_TIMEOUT_SECONDS:-900}
       - GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=${GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS:-120}
       - GA_SD_STRENGTH=0.75
       - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}

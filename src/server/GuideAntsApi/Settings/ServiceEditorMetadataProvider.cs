@@ -166,6 +166,7 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
                 [ServiceProviderIds.SpeechSynthesisLocalTtsHttp] =
                 [
                     Field("TimeoutSeconds", "int", true, operative: true),
+                    Field("ReadyTimeoutSeconds", "int", true, operative: true),
                     // Voice options are catalog-driven, not a static enum. The
                     // client populates them from the loaded model's voiceInput:
                     // voice_pack -> GET .../local-models/voice-pack, builtin ->

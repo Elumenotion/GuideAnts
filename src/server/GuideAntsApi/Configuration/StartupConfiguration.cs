@@ -197,6 +197,7 @@ public static class StartupConfiguration
         services.AddSingleton<ILlamaInferenceTimeoutObserver>(provider =>
             provider.GetRequiredService<LlamaInferenceTimeoutRecoveryService>());
         services.AddScoped<ILlamaRouterIniSyncService, LlamaRouterIniSyncService>();
+        services.AddScoped<ITtsRuntimeTimeoutSyncService, TtsRuntimeTimeoutSyncService>();
         services.AddScoped<GuideAntsApi.Services.LlamaCpp.INotebookModelRuntimeService, GuideAntsApi.Services.LlamaCpp.NotebookModelRuntimeService>();
         services.AddSingleton<IRouterModelsConfigService, RouterModelsConfigService>();
         services.AddScoped<ILlamaRuntimeInventoryService, LlamaRuntimeInventoryService>();

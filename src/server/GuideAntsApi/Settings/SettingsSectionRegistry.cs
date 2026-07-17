@@ -298,7 +298,19 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             Properties =
             [
                 new("TimeoutSeconds", "SpeechSynthesis:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 300),
-                new("MaxRetries", "SpeechSynthesis:MaxRetries", SettingsValueType.Int, DefaultValue: 3)
+                new("MaxRetries", "SpeechSynthesis:MaxRetries", SettingsValueType.Int, DefaultValue: 3),
+                new("ReadyTimeoutSeconds", "SpeechSynthesis:ReadyTimeoutSeconds", SettingsValueType.Int, DefaultValue: 1800)
+            ]
+        },
+        new()
+        {
+            SectionName = "VideoAudioExtraction",
+            Properties =
+            [
+                new("TimeoutSeconds", "VideoAudioExtraction:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 1800),
+                new("AudioFormat", "VideoAudioExtraction:AudioFormat", DefaultValue: "mp3"),
+                new("AudioQuality", "VideoAudioExtraction:AudioQuality", DefaultValue: "2"),
+                new("MaxFileSizeMB", "VideoAudioExtraction:MaxFileSizeMB", SettingsValueType.Int, DefaultValue: 2048)
             ]
         },
         new()

@@ -22,6 +22,7 @@ from guideants_hf.catalog_download import download_catalog_entry_files
 from guideants_hf.engine_process import format_engine_exit_error, read_subprocess_stderr_tail
 from guideants_hf.operations import find_in_flight_operation
 from ga_blocking import await_blocking
+from guideants_http.request_timeout import clamp_request_timeout_seconds, resolve_request_timeout_seconds
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -314,6 +315,10 @@ class SynthesizeRequest(BaseModel):
     speed: float | None = None
 
 
+class RuntimeTimeoutsRequest(BaseModel):
+    readyTimeoutSeconds: int = Field(ge=1)
+
+
 @dataclass
 class TtsRuntimeConfig:
     server_path: str
@@ -363,6 +368,10 @@ class TtsRuntimeState:
         self.warmup_latency_ms: int = 0
         self.warmup_error: str | None = None
         self.warmup_completed_at_utc: str | None = None
+        self.engine_ready_timeout_seconds: int = parse_positive_int(
+            os.getenv("GA_TTS_READY_TIMEOUT_SECONDS"),
+            1800,
+        )
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -586,7 +595,7 @@ def build_runtime_config(model_path: str, model_ref: str, entry: dict[str, Any])
         engine_base_url=f"http://{engine_host}:{engine_port}",
         engine_ready_timeout_seconds=parse_positive_int(
             os.getenv("GA_TTS_ENGINE_READY_TIMEOUT_SECONDS"),
-            parse_positive_int(os.getenv("GA_TTS_READY_TIMEOUT_SECONDS"), 1800),
+            STATE.engine_ready_timeout_seconds,
         ),
         request_timeout_seconds=parse_positive_int(os.getenv("GA_TTS_TIMEOUT_SECONDS"), 300),
         device=device,
@@ -696,7 +705,8 @@ def engine_json_request(
 
 
 def wait_for_engine_ready(config: TtsRuntimeConfig) -> None:
-    deadline = time.monotonic() + config.engine_ready_timeout_seconds
+    ready_timeout_seconds = STATE.engine_ready_timeout_seconds
+    deadline = time.monotonic() + ready_timeout_seconds
     while time.monotonic() < deadline:
         if not is_engine_process_alive():
             process = STATE.engine_process
@@ -712,7 +722,7 @@ def wait_for_engine_ready(config: TtsRuntimeConfig) -> None:
             pass
         time.sleep(0.5)
     raise RuntimeError(
-        f"Timed out waiting for audiocpp_server readiness after {config.engine_ready_timeout_seconds}s."
+        f"Timed out waiting for audiocpp_server readiness after {ready_timeout_seconds}s."
     )
 
 
@@ -836,9 +846,16 @@ def synthesize_with_engine_recovery(
     text: str,
     voice_fields: dict[str, Any],
     seed: int,
+    request_timeout_seconds: int | None = None,
 ) -> bytes:
     try:
-        return synthesize_via_engine(config, text, voice_fields, seed)
+        return synthesize_via_engine(
+            config,
+            text,
+            voice_fields,
+            seed,
+            request_timeout_seconds=request_timeout_seconds,
+        )
     except Exception as exc:
         if not restart_engine_on_failure_enabled() or not synthesis_error_is_recoverable(exc):
             raise
@@ -853,7 +870,13 @@ def synthesize_with_engine_recovery(
                 config,
                 reason=f"synthesis_failure:{type(exc).__name__}",
             )
-        return synthesize_via_engine(config, text, voice_fields, seed)
+        return synthesize_via_engine(
+            config,
+            text,
+            voice_fields,
+            seed,
+            request_timeout_seconds=request_timeout_seconds,
+        )
 
 
 def normalize_script_input(text: str) -> str:
@@ -1084,6 +1107,7 @@ def synthesize_via_engine(
     text: str,
     voice_fields: dict[str, Any],
     seed: int,
+    request_timeout_seconds: int | None = None,
 ) -> bytes:
     payload = {
         "model": config.catalog_entry_id,
@@ -1091,11 +1115,14 @@ def synthesize_via_engine(
         "seed": seed,
         **voice_fields,
     }
+    effective_timeout = clamp_request_timeout_seconds(
+        request_timeout_seconds or config.request_timeout_seconds
+    )
     status_code, body, _ = engine_json_request(
         config,
         "POST",
         "/v1/audio/speech",
-        config.request_timeout_seconds,
+        effective_timeout,
         payload=payload,
     )
     if status_code != 200:
@@ -1709,6 +1736,20 @@ async def admin_delete_model(model_ref: str) -> JSONResponse:
     return JSONResponse(status_code=200, content={"deleted": True, "modelRef": model_ref})
 
 
+@APP.put("/admin/runtime-timeouts")
+async def update_runtime_timeouts(payload: RuntimeTimeoutsRequest) -> JSONResponse:
+    with STATE.lock:
+        STATE.engine_ready_timeout_seconds = payload.readyTimeoutSeconds
+    log_event(
+        "tts_runtime_timeouts_updated",
+        readyTimeoutSeconds=payload.readyTimeoutSeconds,
+    )
+    return JSONResponse(
+        status_code=200,
+        content={"readyTimeoutSeconds": payload.readyTimeoutSeconds},
+    )
+
+
 @APP.post("/synthesize")
 async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
@@ -1838,12 +1879,17 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
         )
 
         try:
+            request_timeout_seconds = resolve_request_timeout_seconds(
+                request.headers,
+                config.request_timeout_seconds,
+            )
             wav_bytes = await await_blocking(
                 synthesize_with_engine_recovery,
                 config,
                 script_text,
                 voice_fields,
                 seed,
+                request_timeout_seconds,
             )
             duration_seconds, sampling_rate = wav_duration_seconds(wav_bytes)
             if abs(speed - 1.0) >= 1e-6:

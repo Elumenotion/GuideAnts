@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Core;
 using Microsoft.Extensions.Options;
@@ -11,15 +12,18 @@ namespace GuideAntsApi.Services.Components
 
         private readonly HttpClient _httpClient;
         private readonly IOptionsMonitor<LocalServiceHostsOptions> _localServiceHostsOptionsMonitor;
+        private readonly IOptionsMonitor<VideoAudioExtractionOptions> _videoAudioExtractionOptionsMonitor;
         private readonly ILogger<MediaExtractionClient> _logger;
 
         public MediaExtractionClient(
             HttpClient httpClient,
             IOptionsMonitor<LocalServiceHostsOptions> localServiceHostsOptionsMonitor,
+            IOptionsMonitor<VideoAudioExtractionOptions> videoAudioExtractionOptionsMonitor,
             ILogger<MediaExtractionClient> logger)
         {
             _httpClient = httpClient;
             _localServiceHostsOptionsMonitor = localServiceHostsOptionsMonitor;
+            _videoAudioExtractionOptionsMonitor = videoAudioExtractionOptionsMonitor;
             _logger = logger;
         }
 
@@ -39,6 +43,9 @@ namespace GuideAntsApi.Services.Components
             {
                 Content = JsonContent.Create(request, options: JsonOptions)
             };
+            LocalServiceRequestHeaders.ApplyRequestTimeout(
+                requestMessage,
+                Math.Max(1, _videoAudioExtractionOptionsMonitor.CurrentValue.TimeoutSeconds));
 
             using var response = await _httpClient.SendAsync(requestMessage, cancellationToken);
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);

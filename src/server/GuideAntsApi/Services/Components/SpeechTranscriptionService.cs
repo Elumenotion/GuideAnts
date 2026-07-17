@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Services.Routing;
@@ -803,6 +804,9 @@ namespace GuideAntsApi.Services.Components
                 Content = content
             };
             requestMessage.Headers.Add("x-request-id", requestId);
+            LocalServiceRequestHeaders.ApplyRequestTimeout(
+                requestMessage,
+                Math.Max(1, localOptions.TimeoutSeconds));
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, localOptions.TimeoutSeconds)));

@@ -813,6 +813,7 @@ public sealed partial class ApplicationSettingsService
 
                 if ((string.Equals(metadata.Name, "TimeoutSeconds", StringComparison.Ordinal)
                     || string.Equals(metadata.Name, "MaxRetries", StringComparison.Ordinal)
+                    || string.Equals(metadata.Name, "ReadyTimeoutSeconds", StringComparison.Ordinal)
                     || string.Equals(metadata.Name, "MaxAudioBytes", StringComparison.Ordinal))
                     && n <= 0)
                 {

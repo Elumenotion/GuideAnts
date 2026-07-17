@@ -135,6 +135,8 @@ public sealed partial class ApplicationSettingsService
         }
 
         ReloadConfiguration();
+        await TrySyncTtsReadyTimeoutAfterSectionSaveAsync(definition.SectionName, merged, cancellationToken)
+            .ConfigureAwait(false);
 
         var refreshed = await _db.ApplicationSettings
             .AsNoTracking()
@@ -143,6 +145,31 @@ public sealed partial class ApplicationSettingsService
                 cancellationToken);
 
         return (ToSectionDto(definition, refreshed), [], false);
+    }
+
+    private async Task TrySyncTtsReadyTimeoutAfterSectionSaveAsync(
+        string sectionName,
+        JsonObject merged,
+        CancellationToken cancellationToken)
+    {
+        if (_ttsRuntimeTimeoutSync == null
+            || !string.Equals(sectionName, SpeechSynthesisOptions.SectionName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var readyTimeoutSeconds = SpeechSynthesisOptions.DefaultReadyTimeoutSeconds;
+        if (merged.TryGetPropertyValue("ReadyTimeoutSeconds", out var node)
+            && node is JsonValue value
+            && value.TryGetValue<int>(out var parsed)
+            && parsed > 0)
+        {
+            readyTimeoutSeconds = parsed;
+        }
+
+        await _ttsRuntimeTimeoutSync
+            .SyncReadyTimeoutAsync(readyTimeoutSeconds, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<IReadOnlyList<string>> ValidateSectionPayloadAsync(
