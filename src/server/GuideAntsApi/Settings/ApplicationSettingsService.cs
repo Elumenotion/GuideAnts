@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
+using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.LlamaCpp;
 using Microsoft.Extensions.Options;
 
@@ -86,7 +87,8 @@ public sealed partial class ApplicationSettingsService(
     IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptionsMonitor,
     IRuntimeProfileResolver runtimeProfileResolver,
     IServiceEditorMetadataProvider? metadataProvider = null,
-    ILlamaRouterIniSyncService? llamaRouterIniSync = null) : IApplicationSettingsService
+    ILlamaRouterIniSyncService? llamaRouterIniSync = null,
+    ITtsRuntimeTimeoutSyncService? ttsRuntimeTimeoutSync = null) : IApplicationSettingsService
 {
     private readonly ApplicationDbContext _db = db;
     private readonly ISettingsSectionRegistry _registry = registry;
@@ -96,6 +98,7 @@ public sealed partial class ApplicationSettingsService(
     private readonly IRuntimeProfileResolver _runtimeProfileResolver = runtimeProfileResolver;
     private readonly IServiceEditorMetadataProvider? _injectedMetadataProvider = metadataProvider;
     private readonly ILlamaRouterIniSyncService? _llamaRouterIniSync = llamaRouterIniSync;
+    private readonly ITtsRuntimeTimeoutSyncService? _ttsRuntimeTimeoutSync = ttsRuntimeTimeoutSync;
     private IServiceEditorMetadataProvider? _metadataProvider;
     private ILegacyProtectorAccessor? _protectorAccessor;
     private static readonly HashSet<string> RuntimeOverrideSections = new(StringComparer.OrdinalIgnoreCase)

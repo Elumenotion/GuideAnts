@@ -20,7 +20,7 @@ public sealed class ServiceEditorMetadataProviderTests
 
         var fields = metadataProvider.GetProviderFields("SpeechSynthesis", "SpeechSynthesis.LocalTts.Http");
 
-        fields.Select(field => field.Name).Should().Equal("TimeoutSeconds", "VoiceName");
+        fields.Select(field => field.Name).Should().Equal("TimeoutSeconds", "ReadyTimeoutSeconds", "VoiceName");
         var voiceField = fields.Single(field => field.Name == "VoiceName");
 
         // Voice options are catalog-driven (voiceInput -> voice-pack API /

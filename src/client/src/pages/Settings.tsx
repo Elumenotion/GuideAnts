@@ -20,6 +20,7 @@ import { InfrastructureTab } from './settings/components/InfrastructureTab';
 import { ModelsRuntimeWorkspace } from './settings/components/ModelsRuntimeWorkspace';
 import { OverviewTab } from './settings/components/OverviewTab';
 import { PersonalizationTab } from './settings/components/PersonalizationTab';
+import { SandboxTab } from './settings/components/SandboxTab';
 import { ServicesTab, type ServiceKey } from './settings/components/ServicesTab';
 import { SettingsTabNavigation } from './settings/components/SettingsTabNavigation';
 import { TelemetryTab } from './settings/components/TelemetryTab';
@@ -560,6 +561,10 @@ export default function Settings() {
       );
     }
 
+    if (activeTab === 'sandbox') {
+      return <SandboxTab />;
+    }
+
     if (activeTab === 'personalization') {
       return <PersonalizationTab />;
     }
@@ -671,7 +676,7 @@ export default function Settings() {
             <div className="min-w-0">
               <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
               <p className="text-sm text-gray-600">
-                Manage service-specific provider settings, provider connections, telemetry, runtime infrastructure, and models &amp; runtime.
+                Manage service-specific provider settings, provider connections, sandbox execution, telemetry, runtime infrastructure, and models &amp; runtime.
               </p>
             </div>
           </div>

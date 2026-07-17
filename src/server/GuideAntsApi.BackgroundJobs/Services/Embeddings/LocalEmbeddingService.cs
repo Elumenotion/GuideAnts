@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.BackgroundJobs.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -72,6 +73,9 @@ internal sealed class LocalEmbeddingService(
             {
                 Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
             };
+            LocalServiceRequestHeaders.ApplyRequestTimeout(
+                request,
+                Math.Max(1, options.TimeoutSeconds));
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds)));
 

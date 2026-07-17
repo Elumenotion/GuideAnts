@@ -192,7 +192,7 @@ public sealed partial class ApplicationSettingsService
         new(
             ServiceId: SpeechSynthesisOptions.SectionName,
             SectionName: SpeechSynthesisOptions.SectionName,
-            ServiceFieldNames: ["TimeoutSeconds", "MaxRetries"],
+            ServiceFieldNames: ["TimeoutSeconds", "MaxRetries", "ReadyTimeoutSeconds"],
             Providers:
             [
                 new ProviderContract(

@@ -1,13 +1,15 @@
 interface IntInputProps {
+  id?: string;
   value: number | '';
   onChange: (value: number | '') => void;
   min?: number;
   max?: number;
 }
 
-export function IntInput({ value, onChange, min, max }: IntInputProps) {
+export function IntInput({ id, value, onChange, min, max }: IntInputProps) {
   return (
     <input
+      id={id}
       type="number"
       value={value}
       min={min}

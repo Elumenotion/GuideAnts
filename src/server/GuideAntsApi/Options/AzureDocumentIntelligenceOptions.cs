@@ -84,9 +84,11 @@ namespace GuideAntsApi.Options
     public class SpeechSynthesisOptions
     {
         public const string SectionName = "SpeechSynthesis";
+        public const int DefaultReadyTimeoutSeconds = 1800;
 
         public int TimeoutSeconds { get; set; } = 300;
         public int MaxRetries { get; set; } = 3;
+        public int ReadyTimeoutSeconds { get; set; } = DefaultReadyTimeoutSeconds;
     }
 
     public class ImageGenerationOptions

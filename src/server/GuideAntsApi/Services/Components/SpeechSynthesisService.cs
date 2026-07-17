@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Routing;
 using AntRunner.Chat.OpenRouter;
@@ -705,6 +706,9 @@ public sealed class SpeechSynthesisService : ISpeechSynthesisService
                 Content = new StringContent(payload, Encoding.UTF8, "application/json")
             };
             request.Headers.Add("x-request-id", requestId);
+            LocalServiceRequestHeaders.ApplyRequestTimeout(
+                request,
+                Math.Max(1, localOptions.TimeoutSeconds));
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, localOptions.TimeoutSeconds)));

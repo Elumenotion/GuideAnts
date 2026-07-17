@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Options;
 using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.EnvironmentVariables;
 using GuideAntsApi.Services.SandboxWireApi;
@@ -29,19 +30,22 @@ namespace GuideAntsApi.Services
         private readonly IServiceProvider _serviceProvider;
         private readonly IConfiguration _configuration;
         private readonly IOptionsMonitor<SettingsSecretsOptions> _settingsSecretsOptions;
+        private readonly IOptionsMonitor<ScriptExecutionOptions> _scriptExecutionOptions;
 
         public NotebookDockerScriptService(
             IHttpClientFactory httpClientFactory,
             ILogger<NotebookDockerScriptService> logger,
             IServiceProvider serviceProvider,
             IConfiguration configuration,
-            IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions)
+            IOptionsMonitor<SettingsSecretsOptions> settingsSecretsOptions,
+            IOptionsMonitor<ScriptExecutionOptions> scriptExecutionOptions)
         {
             _httpClientFactory = httpClientFactory;
             _logger = logger;
             _serviceProvider = serviceProvider;
             _configuration = configuration;
             _settingsSecretsOptions = settingsSecretsOptions;
+            _scriptExecutionOptions = scriptExecutionOptions;
         }
 
         /// <summary>
@@ -282,11 +286,12 @@ namespace GuideAntsApi.Services
                     ProjectId = projectId,
                     NotebookId = notebookId,
                     GuideId = guideId,
-                    Environment = environment
+                    Environment = environment,
+                    TimeoutSeconds = _scriptExecutionOptions.CurrentValue.TimeoutSeconds,
                 };
 
                 using var httpClient = _httpClientFactory.CreateClient();
-                httpClient.Timeout = TimeSpan.FromMinutes(5);
+                httpClient.Timeout = _scriptExecutionOptions.CurrentValue.HttpClientTimeout;
                 AttachAgentAuthHeader(httpClient);
 
                 var json = JsonSerializer.Serialize(request);

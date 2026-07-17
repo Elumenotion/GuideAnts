@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from guideants_http.request_timeout import resolve_request_timeout_seconds
+
 try:
     import uvicorn
 except ImportError:  # pragma: no cover - local unit tests may not have runtime deps installed
@@ -206,6 +208,7 @@ def run_ffmpeg(
 def process_extract_audio_request(
     payload: ExtractAudioRequest,
     storage_root: Path | None = None,
+    timeout_seconds: int | None = None,
 ) -> ExtractAudioResponse:
     root = (storage_root or DEFAULT_STORAGE_ROOT).resolve()
     format_info = resolve_audio_format(payload.audioFormat)
@@ -231,13 +234,14 @@ def process_extract_audio_request(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     started = time.perf_counter()
+    effective_timeout = timeout_seconds if timeout_seconds is not None else FFMPEG_TIMEOUT_SECONDS
     run_ffmpeg(
         source_path=source_path,
         output_path=output_path,
         codec=format_info["codec"],
         audio_quality=audio_quality,
         overwrite=payload.overwrite,
-        timeout_seconds=FFMPEG_TIMEOUT_SECONDS,
+        timeout_seconds=effective_timeout,
     )
 
     if not output_path.exists():
@@ -286,7 +290,8 @@ async def extract_audio(request: Request, payload: ExtractAudioRequest) -> dict[
     )
 
     try:
-        result = process_extract_audio_request(payload)
+        request_timeout_seconds = resolve_request_timeout_seconds(request.headers, FFMPEG_TIMEOUT_SECONDS)
+        result = process_extract_audio_request(payload, timeout_seconds=request_timeout_seconds)
         return result.model_dump()
     except MediaServiceError as exc:
         log_event(

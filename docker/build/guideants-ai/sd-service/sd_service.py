@@ -20,6 +20,7 @@ from guideants_hf.operations import find_in_flight_operation
 from guideants_hf.path_safety import PathSafetyError, ensure_inside_root, resolve_path_under_dir
 from guideants_hf.transport import download_hf_file
 from ga_blocking import await_blocking
+from guideants_http.request_timeout import clamp_request_timeout_seconds, resolve_request_timeout_seconds
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -515,7 +516,7 @@ def resolve_runtime_config(*, bundle_id: str | None = None) -> SdRuntimeConfig:
     engine_port = parse_positive_int(os.getenv("GA_SD_ENGINE_PORT"), 18083)
     engine_ready_timeout_seconds = parse_positive_int(os.getenv("GA_SD_ENGINE_READY_TIMEOUT_SECONDS"), 1800)
     timeout_seconds = parse_positive_int(os.getenv("GA_SD_TIMEOUT_SECONDS"), 600)
-    engine_request_timeout_seconds = parse_positive_int(os.getenv("GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS"), 120)
+    engine_request_timeout_seconds = timeout_seconds
     warmup_request_timeout_seconds = parse_positive_int(
         os.getenv("GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS"),
         max(engine_request_timeout_seconds, 120),
@@ -1780,7 +1781,7 @@ def submit_and_wait_for_job_result(
     payload: dict[str, Any],
     request_timeout_seconds: int,
 ) -> dict[str, Any]:
-    effective_request_timeout_seconds = max(1, min(request_timeout_seconds, config.timeout_seconds))
+    effective_request_timeout_seconds = clamp_request_timeout_seconds(request_timeout_seconds)
 
     submit_status, submit_body = sd_server_json_request(
         config,
@@ -1883,7 +1884,9 @@ def run_sd_generation_via_engine(
         raise RuntimeError("sd-server process is not running.")
 
     steps = steps_override if steps_override is not None else config.steps
-    effective_request_timeout_seconds = request_timeout_seconds or config.engine_request_timeout_seconds
+    effective_request_timeout_seconds = clamp_request_timeout_seconds(
+        request_timeout_seconds or config.engine_request_timeout_seconds,
+    )
     init_image_b64 = base64.b64encode(init_image_bytes).decode("ascii") if init_image_bytes is not None else None
 
     payload = build_native_sdcpp_payload(
@@ -1977,7 +1980,11 @@ def run_sd_edit_via_openai_endpoint(
     image_bytes: bytes,
     image_file_name: str,
     image_content_type: str,
+    request_timeout_seconds: int | None = None,
 ) -> bytes:
+    effective_request_timeout_seconds = clamp_request_timeout_seconds(
+        request_timeout_seconds or config.engine_request_timeout_seconds,
+    )
     # Native API currently supports webp; OpenAI edits endpoint does not.
     # Keep webp requests on native API path so behavior remains compatible.
     if output_format == "webp":
@@ -1991,6 +1998,7 @@ def run_sd_edit_via_openai_endpoint(
             n=n,
             init_image_bytes=image_bytes,
             init_image_name=image_file_name,
+            request_timeout_seconds=effective_request_timeout_seconds,
         )
 
     if not is_engine_process_alive():
@@ -2020,7 +2028,7 @@ def run_sd_edit_via_openai_endpoint(
         offloadToCpu=config.offload_to_cpu,
         vaeOnCpu=config.vae_on_cpu,
         diffusionFa=config.diffusion_fa,
-        timeoutSeconds=config.timeout_seconds,
+        timeoutSeconds=effective_request_timeout_seconds,
         engineMode="sd-server-openai-edits",
         **prompt_metadata(prompt),
     )
@@ -2036,7 +2044,7 @@ def run_sd_edit_via_openai_endpoint(
     status_code, response_body = sd_server_multipart_request(
         config=config,
         path="/v1/images/edits",
-        timeout_seconds=config.timeout_seconds,
+        timeout_seconds=effective_request_timeout_seconds,
         request_id=request_id,
         traceparent=traceparent,
         fields=form_fields,
@@ -2598,6 +2606,7 @@ async def txt2img(request: Request, payload: Txt2ImgRequest) -> JSONResponse:
 
     try:
         output_format = normalize_output_format(payload.outputFormat, config.default_output_format)
+        request_timeout_seconds = resolve_request_timeout_seconds(request.headers, config.timeout_seconds)
         image = await await_blocking(
             run_sd_generation_via_engine,
             config=config,
@@ -2607,6 +2616,7 @@ async def txt2img(request: Request, payload: Txt2ImgRequest) -> JSONResponse:
             size=payload.size,
             output_format=output_format,
             n=payload.n,
+            request_timeout_seconds=request_timeout_seconds,
         )
         response = JSONResponse(status_code=200, content=success_payload(image, request_id))
         response.headers["x-request-id"] = request_id
@@ -2659,6 +2669,7 @@ async def img2img(
         output_format = normalize_output_format(outputFormat, config.default_output_format)
         image_bytes = await image.read()
         image_bytes_len = len(image_bytes)
+        request_timeout_seconds = resolve_request_timeout_seconds(request.headers, config.timeout_seconds)
         log_event(
             "sd_img2img_request",
             size=size,
@@ -2683,6 +2694,7 @@ async def img2img(
             image_bytes=image_bytes,
             image_file_name=image.filename or "input.png",
             image_content_type=image.content_type or "application/octet-stream",
+            request_timeout_seconds=request_timeout_seconds,
         )
         response = JSONResponse(status_code=200, content=success_payload(output_image, request_id))
         response.headers["x-request-id"] = request_id

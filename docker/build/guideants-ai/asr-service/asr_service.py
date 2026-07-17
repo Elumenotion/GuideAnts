@@ -19,6 +19,7 @@ from guideants_hf.catalog_download import download_catalog_entry_files, verify_r
 from guideants_hf.engine_process import format_engine_exit_error
 from guideants_hf.operations import find_in_flight_operation
 from ga_blocking import await_blocking
+from guideants_http.request_timeout import clamp_request_timeout_seconds, resolve_request_timeout_seconds
 
 import soundfile as sf
 import uvicorn
@@ -584,6 +585,7 @@ def transcribe_via_engine(
     config: AsrEngineConfig,
     audio_path: str,
     language: str | None = None,
+    request_timeout_seconds: int | None = None,
 ) -> tuple[str, str | None]:
     payload: dict[str, Any] = {
         "model": ENGINE_MODEL_ID,
@@ -591,11 +593,14 @@ def transcribe_via_engine(
     }
     if language:
         payload["language"] = language
+    effective_timeout = clamp_request_timeout_seconds(
+        request_timeout_seconds or config.request_timeout_seconds
+    )
     status_code, parsed = engine_json_request(
         config,
         "POST",
         "/v1/audio/transcriptions",
-        config.request_timeout_seconds,
+        effective_timeout,
         payload=payload,
     )
     if status_code != 200:
@@ -1181,6 +1186,13 @@ async def transcribe(
             temp_file.write(payload)
             temp_path = temp_file.name
 
+        with STATE.lock:
+            config_for_timeout = STATE.config
+        request_timeout_seconds = resolve_request_timeout_seconds(
+            request.headers,
+            config_for_timeout.request_timeout_seconds if config_for_timeout is not None else 300,
+        )
+
         def _run_transcribe() -> tuple[str, float, str | None, str]:
             decoded_path_local = decode_audio_to_wav_16k_mono(temp_path)
             duration_seconds_local = get_audio_duration_seconds(decoded_path_local)
@@ -1193,6 +1205,7 @@ async def transcribe(
                 config_local,
                 decoded_path_local,
                 language if language else None,
+                request_timeout_seconds=request_timeout_seconds,
             )
             return text_local, duration_seconds_local, model_ref_local, decoded_path_local
 

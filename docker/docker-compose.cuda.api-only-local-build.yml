@@ -55,6 +55,7 @@ services:
       - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
       - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
       # Optional global GPU ordering for all guideants-ai workloads.
       # Value is sourced from active environment only.
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
@@ -113,7 +114,7 @@ services:
       - GA_TTS_BACKEND=cuda
       - GA_TTS_DTYPE=float32
       - GA_TTS_CUDA_VISIBLE_DEVICES=${GA_TTS_CUDA_VISIBLE_DEVICES:-}
-      - GA_TTS_TIMEOUT_SECONDS=300
+      - GA_TTS_TIMEOUT_SECONDS=${GA_TTS_TIMEOUT_SECONDS:-300}
       - GA_TTS_MAX_NEW_TOKENS=512
       - GA_TTS_SAMPLE_RATE=24000
       - GA_TTS_VOICE=af_alloy
@@ -141,7 +142,7 @@ services:
       # GA_SD_LLM_PATH env seam any more — bundle = single source of
       # truth, set via the UI (Settings > Image generation > Set active)
       # or the admin API (PUT /admin/bundles/{id}/active).
-      - GA_SD_TIMEOUT_SECONDS=900
+      - GA_SD_TIMEOUT_SECONDS=${GA_SD_TIMEOUT_SECONDS:-900}
       - GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=${GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS:-120}
       - GA_SD_STRENGTH=0.75
       - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
@@ -264,6 +265,7 @@ services:
       - DocumentServer__JwtInBody=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}
       - ScriptExecution__AgentToken=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - ScriptExecution__AdminToken=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - ScriptExecution__TimeoutSeconds=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
 
       - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
       - LlamaCpp__TimeoutSeconds=${GA_LLAMA_CPP_TIMEOUT_SECONDS:-600}
@@ -289,6 +291,7 @@ services:
       - FILE_STORAGE_ROOT=/app/ContentFiles
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
       - PLANTUML_LIMIT_SIZE=8192
     volumes:
       - type: bind

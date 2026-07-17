@@ -197,6 +197,7 @@ public static class StartupConfiguration
         services.AddSingleton<ILlamaInferenceTimeoutObserver>(provider =>
             provider.GetRequiredService<LlamaInferenceTimeoutRecoveryService>());
         services.AddScoped<ILlamaRouterIniSyncService, LlamaRouterIniSyncService>();
+        services.AddScoped<ITtsRuntimeTimeoutSyncService, TtsRuntimeTimeoutSyncService>();
         services.AddScoped<GuideAntsApi.Services.LlamaCpp.INotebookModelRuntimeService, GuideAntsApi.Services.LlamaCpp.NotebookModelRuntimeService>();
         services.AddSingleton<IRouterModelsConfigService, RouterModelsConfigService>();
         services.AddScoped<ILlamaRuntimeInventoryService, LlamaRuntimeInventoryService>();
@@ -805,6 +806,7 @@ public static class StartupConfiguration
         services.Configure<DocumentServerOptions>(configuration.GetSection(DocumentServerOptions.SectionName));
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
         services.Configure<GuideAntsApi.Options.SandboxWireApiOptions>(configuration.GetSection(GuideAntsApi.Options.SandboxWireApiOptions.SectionName));
+        services.Configure<ScriptExecutionOptions>(configuration.GetSection(ScriptExecutionOptions.SectionName));
     }
 
     private static void ValidateJwtOptions(JwtOptions jwtOptions)

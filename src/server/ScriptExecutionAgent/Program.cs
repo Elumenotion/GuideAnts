@@ -19,10 +19,11 @@ AgentLogEvent.Emit("script_agent_startup", new Dictionary<string, object?>
     ["version"] = asmVersion,
 });
 
+var executionTimeoutSeconds = GetPositiveIntEnvironmentVariable("SCRIPT_EXECUTION_TIMEOUT_SECONDS", defaultValue: 600);
 var scriptConfig = new ScriptExecutionConfig
 {
     MaxScriptSize = 1024 * 1024,
-    MaxExecutionTime = TimeSpan.FromMinutes(5),
+    MaxExecutionTime = TimeSpan.FromSeconds(executionTimeoutSeconds),
     MaxOutputSize = 1024 * 1024
 };
 
@@ -980,6 +981,11 @@ static ValidationResult ValidateExecutionRequest(ScriptExecutionRequest request,
         return environmentValidation;
     }
 
+    if (request.TimeoutSeconds is < 1 or > 7200)
+    {
+        return ValidationResult.Failure("TimeoutSeconds must be between 1 and 7200 when provided.");
+    }
+
     return ValidationResult.Success();
 }
 
@@ -1022,6 +1028,16 @@ static ValidationResult ValidateExecutionEnvironment(IReadOnlyDictionary<string,
     return ValidationResult.Success();
 }
 
+static TimeSpan ResolveExecutionTimeout(ScriptExecutionRequest request, ScriptExecutionConfig config)
+{
+    if (request.TimeoutSeconds is > 0)
+    {
+        return TimeSpan.FromSeconds(request.TimeoutSeconds.Value);
+    }
+
+    return config.MaxExecutionTime;
+}
+
 static bool GetBooleanEnvironmentVariable(string name, bool defaultValue)
 {
     var raw = Environment.GetEnvironmentVariable(name);
@@ -1031,6 +1047,17 @@ static bool GetBooleanEnvironmentVariable(string name, bool defaultValue)
     }
 
     return bool.TryParse(raw, out var parsed) ? parsed : defaultValue;
+}
+
+static int GetPositiveIntEnvironmentVariable(string name, int defaultValue)
+{
+    var raw = Environment.GetEnvironmentVariable(name);
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        return defaultValue;
+    }
+
+    return int.TryParse(raw, out var parsed) && parsed > 0 ? parsed : defaultValue;
 }
 
 static bool IsTemporaryScriptFile(string filename)
@@ -1125,7 +1152,7 @@ static async Task<ScriptExecutionResult> ExecuteScriptAsync(
         var scopedEnvironment = ScriptExecutionScopeRuntime.BuildScriptEnvironment(scope, request.Environment, request.WorkingDirectory, logger);
         var (commandFile, commandArgs) = GetScriptCommand(request.ScriptType, scriptFilePath, scope);
         (commandFile, commandArgs) = ApplyPrivacyWrapper(commandFile, commandArgs);
-        using var cts = new CancellationTokenSource(config.MaxExecutionTime);
+        using var cts = new CancellationTokenSource(ResolveExecutionTimeout(request, config));
         ScriptProcessResult run;
         if (executionIdentity is not null && OperatingSystem.IsLinux())
         {
@@ -3329,6 +3356,7 @@ public sealed record ScriptExecutionRequest
     public string NotebookId { get; init; } = string.Empty;
     public string? GuideId { get; init; }
     public IReadOnlyDictionary<string, string>? Environment { get; init; }
+    public int? TimeoutSeconds { get; init; }
 }
 
 public class ScriptExecutionResult
@@ -3341,7 +3369,7 @@ public class ScriptExecutionResult
 public class ScriptExecutionConfig
 {
     public int MaxScriptSize { get; set; } = 1024 * 1024;
-    public TimeSpan MaxExecutionTime { get; set; } = TimeSpan.FromMinutes(5);
+    public TimeSpan MaxExecutionTime { get; set; } = TimeSpan.FromSeconds(600);
     public int MaxOutputSize { get; set; } = 1024 * 1024;
 }
 

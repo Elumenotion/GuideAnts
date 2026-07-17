@@ -5,6 +5,7 @@ using System.Diagnostics;
 using FluentAssertions;
 using GuideAntsApi.BackgroundJobs.Options;
 using GuideAntsApi.BackgroundJobs.Services.Embeddings;
+using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.Extensions.Configuration;
@@ -26,6 +27,9 @@ public sealed class LocalEmbeddingServiceTests
         using var httpClient = new HttpClient(new DelegatingStubHandler(async (request, _) =>
         {
             requestUri = request.RequestUri;
+            request.Headers.TryGetValues(LocalServiceRequestHeaders.RequestTimeoutSeconds, out var timeoutValues)
+                .Should().BeTrue();
+            timeoutValues!.Single().Should().Be("30");
             requestJson = await request.Content!.ReadAsStringAsync();
             var payload = JsonSerializer.Serialize(new
             {

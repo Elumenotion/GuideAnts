@@ -4,6 +4,7 @@ export type SettingsTab =
   | 'users'
   | 'telemetry'
   | 'services'
+  | 'sandbox'
   | 'connections'
   | 'models-runtime'
   | 'infrastructure';

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Diagnostics;
+using GuideAntsApi.BackgroundJobs.Http;
 using GuideAntsApi.Services.Conversations;
 
 namespace GuideAntsApi.Services
@@ -29,6 +30,7 @@ namespace GuideAntsApi.Services
                 Content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json")
             };
             var requestId = AttachLocalSdCorrelationHeaders(request);
+            LocalServiceRequestHeaders.ApplyRequestTimeout(request, ResolveImageGenerationTimeoutSeconds());
             var stopwatch = Stopwatch.StartNew();
             _logger.LogInformation(
                 "Calling local SD txt2img. Endpoint={Endpoint}, RequestId={RequestId}, Size={Size}, N={N}, OutputFormat={OutputFormat}",
@@ -102,6 +104,7 @@ namespace GuideAntsApi.Services
                 Content = form
             };
             var requestId = AttachLocalSdCorrelationHeaders(request);
+            LocalServiceRequestHeaders.ApplyRequestTimeout(request, ResolveImageGenerationTimeoutSeconds());
             var stopwatch = Stopwatch.StartNew();
             _logger.LogInformation(
                 "Calling local SD img2img. Endpoint={Endpoint}, RequestId={RequestId}, Size={Size}, N={N}, OutputFormat={OutputFormat}, InputBytes={InputBytes}, InputContentType={InputContentType}, InputFileName={InputFileName}",
