@@ -16,6 +16,7 @@ from typing import Any
 from guideants_hf.catalog_completeness import gguf_model_entry_is_complete
 from guideants_hf.catalog_download import download_catalog_entry_files
 from guideants_hf.operations import find_in_flight_operation
+from ga_blocking import await_blocking
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -824,7 +825,11 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     log_event("emb_model_load_start", requestId=request_id, payload=payload.model_dump())
     try:
-        details = load_model_serialized(payload, force_warmup=env_flag("GA_EMB_WARMUP_ON_LOAD", default=True))
+        details = await await_blocking(
+            load_model_serialized,
+            payload,
+            force_warmup=env_flag("GA_EMB_WARMUP_ON_LOAD", default=True),
+        )
         log_event("emb_model_load_success", requestId=request_id, **details)
         return JSONResponse(
             status_code=200,
@@ -1032,7 +1037,7 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
 
     started = time.perf_counter()
     try:
-        vectors = embed_via_engine(payload.inputs, purpose)
+        vectors = await await_blocking(embed_via_engine, payload.inputs, purpose)
         dimensions = len(vectors[0]) if vectors else int(snapshot.get("dimensions") or 0)
         data = [{"index": idx, "embedding": vector} for idx, vector in enumerate(vectors)]
         latency_ms = int((time.perf_counter() - started) * 1000)

@@ -1,39 +1,31 @@
 """
 GuideAnts consolidated control-plane service (Phase 4).
 
-Absorbs llama-admin routes, SD admin + inference facade (including sd-server
-child management), and proxies ASR/TTS/emb admin traffic to the data-plane
-engines on localhost.
+Hosts llama-admin routes and warmup orchestration only. Every inference engine
+(ASR, SD, TTS, embeddings, llama-cpp) runs in its own process; nginx routes
+traffic directly to each engine port so no inference workload can block this
+control plane or any other engine.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
 _ADMIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _APP_ROOT = os.path.dirname(_ADMIN_DIR)
 if _ADMIN_DIR not in sys.path:
     sys.path.insert(0, _ADMIN_DIR)
-for _service_dir in ("llama-admin-service", "sd-service"):
-    _candidate = os.path.join(_APP_ROOT, _service_dir)
-    if _candidate not in sys.path:
-        sys.path.insert(0, _candidate)
+_llama_admin_dir = os.path.join(_APP_ROOT, "llama-admin-service")
+if _llama_admin_dir not in sys.path:
+    sys.path.insert(0, _llama_admin_dir)
 
 import llama_admin_service  # noqa: E402
-import sd_service  # noqa: E402
 
-from engine_proxy import (  # noqa: E402
-    ASR_ENGINE_BASE_URL,
-    EMB_ENGINE_BASE_URL,
-    TTS_ENGINE_BASE_URL,
-    proxy_to_engine,
-)
 from warmup_orchestrator import apply_warmup_on_startup, configure_warmup_orchestrator  # noqa: E402
 from warmup_routes import ROUTER as WARMUP_ROUTER  # noqa: E402
 
@@ -81,59 +73,11 @@ APP = FastAPI(title="GuideAnts Admin Service", version="1.0.0")
 _include_flat_routes(APP, llama_admin_service.APP)
 _include_flat_routes(APP, WARMUP_ROUTER)
 
-# SD admin + inference facade + sd-server lifecycle (nginx prefixes /sd/).
-APP.mount("/sd", sd_service.APP)
-
 
 @APP.on_event("startup")
 async def on_startup() -> None:
     configure_warmup_orchestrator(log_event=lambda event, **fields: print({"event": event, **fields}, flush=True))
-    await sd_service.on_startup()
     apply_warmup_on_startup()
-
-
-@APP.on_event("shutdown")
-async def on_shutdown() -> None:
-    await sd_service.on_shutdown()
-
-
-@APP.api_route("/asr/admin", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
-@APP.api_route(
-    "/asr/admin/",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-)
-@APP.api_route(
-    "/asr/admin/{admin_path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-)
-async def proxy_asr_admin(request: Request, admin_path: str = "") -> Any:
-    return await proxy_to_engine(request, ASR_ENGINE_BASE_URL, admin_path)
-
-
-@APP.api_route("/tts/admin", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
-@APP.api_route(
-    "/tts/admin/",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-)
-@APP.api_route(
-    "/tts/admin/{admin_path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-)
-async def proxy_tts_admin(request: Request, admin_path: str = "") -> Any:
-    return await proxy_to_engine(request, TTS_ENGINE_BASE_URL, admin_path)
-
-
-@APP.api_route("/emb/admin", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
-@APP.api_route(
-    "/emb/admin/",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-)
-@APP.api_route(
-    "/emb/admin/{admin_path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-)
-async def proxy_emb_admin(request: Request, admin_path: str = "") -> Any:
-    return await proxy_to_engine(request, EMB_ENGINE_BASE_URL, admin_path)
 
 
 if __name__ == "__main__":

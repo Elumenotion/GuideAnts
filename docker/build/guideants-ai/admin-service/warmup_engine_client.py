@@ -37,11 +37,7 @@ LLAMA_HOST = (os.getenv("GA_LLAMA_HOST") or "127.0.0.1").strip() or "127.0.0.1"
 LLAMA_PORT = _parse_positive_int(os.getenv("GA_LLAMA_PORT"), 8080)
 LLAMA_BASE_URL = f"http://{LLAMA_HOST}:{LLAMA_PORT}"
 
-GA_ADMIN_PORT = _parse_positive_int(
-    os.getenv("GA_ADMIN_PORT") or os.getenv("GA_LLAMA_ADMIN_PORT"),
-    8086,
-)
-SD_ADMIN_BASE_URL = f"http://127.0.0.1:{GA_ADMIN_PORT}/sd"
+SD_ADMIN_BASE_URL = _engine_base_url("GA_SD_HOST", "GA_SD_PORT", 8083)
 
 SERVICE_ENGINE_BASE_URLS: dict[str, str] = {
     "SpeechTranscription": ASR_ENGINE_BASE_URL,

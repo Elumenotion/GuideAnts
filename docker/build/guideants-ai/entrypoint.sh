@@ -358,6 +358,9 @@ monitor_service_readiness() {
 }
 
 # Start all services without serial wait dependencies.
+/app/start-sd.sh &
+SD_PID=$!
+
 /app/start-ga-admin.sh &
 GA_ADMIN_PID=$!
 
@@ -401,9 +404,9 @@ NGINX_PID=$!
 if [ "${GA_SD_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
     monitor_service_readiness \
         "SD service" \
-        "$GA_ADMIN_PID" \
-        "${GA_ADMIN_PORT:-${GA_LLAMA_ADMIN_PORT:-8086}}" \
-        "/sd/health" \
+        "$SD_PID" \
+        "${GA_SD_PORT:-8083}" \
+        "/health" \
         "${GA_SD_READY_TIMEOUT_SECONDS:-1800}" &
 fi
 
@@ -435,13 +438,14 @@ if [ "${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}" = "1" ]; then
 fi
 
 shutdown_all() {
-    kill "$LLAMA_PID" "$GA_ADMIN_PID" "$AGENT_PID" "$ASR_PID" "$TTS_PID" "$EMB_PID" "$MEDIA_PID" "$NGINX_PID" 2>/dev/null || true
+    kill "$LLAMA_PID" "$SD_PID" "$GA_ADMIN_PID" "$AGENT_PID" "$ASR_PID" "$TTS_PID" "$EMB_PID" "$MEDIA_PID" "$NGINX_PID" 2>/dev/null || true
 }
 
 trap "shutdown_all; exit" SIGTERM SIGINT
 
 LLAMA_REPORTED_EXIT=0
 GA_ADMIN_REPORTED_EXIT=0
+SD_REPORTED_EXIT=0
 AGENT_REPORTED_EXIT=0
 ASR_REPORTED_EXIT=0
 TTS_REPORTED_EXIT=0
@@ -482,6 +486,13 @@ while true; do
             GA_ADMIN_REPORTED_EXIT=1
         fi
         GA_ADMIN_PID=""
+    fi
+    if [ -n "${SD_PID:-}" ] && ! kill -0 "$SD_PID" 2>/dev/null; then
+        if [ "$SD_REPORTED_EXIT" = "0" ]; then
+            echo "SD service (PID $SD_PID) exited; continuing with remaining services" >&2
+            SD_REPORTED_EXIT=1
+        fi
+        SD_PID=""
     fi
     if [ -n "${AGENT_PID:-}" ] && ! kill -0 "$AGENT_PID" 2>/dev/null; then
         if [ "$AGENT_REPORTED_EXIT" = "0" ]; then

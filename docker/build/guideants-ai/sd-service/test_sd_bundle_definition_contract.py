@@ -1,7 +1,9 @@
 import json
 import os
 import sys
+import asyncio
 import tempfile
+import time
 import types
 import unittest
 
@@ -122,6 +124,11 @@ _pydantic = _install_module_stub("pydantic")
 _pydantic.BaseModel = _BaseModelStub
 _pydantic.field_validator = lambda *args, **kwargs: (lambda fn: fn)
 
+_LIB_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "lib"))
+if _LIB_ROOT not in sys.path:
+    sys.path.insert(0, _LIB_ROOT)
+
+import ga_blocking
 import sd_service
 
 
@@ -590,6 +597,25 @@ class SdBundleDefinitionContractTests(unittest.TestCase):
         finally:
             sd_service.download_hf_file = original_download
             sd_service.lookup_hf_file_size = original_lookup
+
+
+class SdAsyncBlockingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_await_blocking_does_not_starve_event_loop(self) -> None:
+        completed = asyncio.Event()
+
+        def slow_blocking() -> int:
+            time.sleep(0.05)
+            return 42
+
+        async def heartbeat() -> None:
+            await asyncio.sleep(0.01)
+            completed.set()
+
+        generation = asyncio.create_task(ga_blocking.await_blocking(slow_blocking))
+        heartbeat_task = asyncio.create_task(heartbeat())
+        result, _ = await asyncio.gather(generation, heartbeat_task)
+        self.assertTrue(completed.is_set())
+        self.assertEqual(result, 42)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from guideants_hf.catalog_completeness import catalog_entry_for_directory_name, 
 from guideants_hf.catalog_download import download_catalog_entry_files, verify_required_files
 from guideants_hf.engine_process import format_engine_exit_error
 from guideants_hf.operations import find_in_flight_operation
+from ga_blocking import await_blocking
 
 import soundfile as sf
 import uvicorn
@@ -957,7 +958,7 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     log_event("asr_model_load_start", requestId=request_id, payload=payload.model_dump())
     try:
-        details = load_model_serialized(payload)
+        details = await await_blocking(load_model_serialized, payload)
         log_event("asr_model_load_success", requestId=request_id, **details)
         return JSONResponse(status_code=200, content={"requestId": request_id, "status": "loaded", **details})
     except Exception as exc:
@@ -1180,21 +1181,22 @@ async def transcribe(
             temp_file.write(payload)
             temp_path = temp_file.name
 
-        decoded_path = decode_audio_to_wav_16k_mono(temp_path)
-        duration_seconds = get_audio_duration_seconds(decoded_path)
+        def _run_transcribe() -> tuple[str, float, str | None, str]:
+            decoded_path_local = decode_audio_to_wav_16k_mono(temp_path)
+            duration_seconds_local = get_audio_duration_seconds(decoded_path_local)
+            with STATE.lock:
+                config_local = STATE.config
+                model_ref_local = STATE.model_ref
+            if config_local is None:
+                raise RuntimeError("ASR engine is not loaded.")
+            text_local, _detected_language_local = transcribe_via_engine(
+                config_local,
+                decoded_path_local,
+                language if language else None,
+            )
+            return text_local, duration_seconds_local, model_ref_local, decoded_path_local
 
-        with STATE.lock:
-            config = STATE.config
-            model_ref = STATE.model_ref
-
-        if config is None:
-            raise RuntimeError("ASR engine is not loaded.")
-
-        text, _detected_language = transcribe_via_engine(
-            config,
-            decoded_path,
-            language if language else None,
-        )
+        text, duration_seconds, model_ref, decoded_path = await await_blocking(_run_transcribe)
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         log_event(

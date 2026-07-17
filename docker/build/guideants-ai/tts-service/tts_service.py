@@ -21,6 +21,7 @@ from guideants_hf.catalog_completeness import catalog_entry_for_directory_name, 
 from guideants_hf.catalog_download import download_catalog_entry_files
 from guideants_hf.engine_process import format_engine_exit_error, read_subprocess_stderr_tail
 from guideants_hf.operations import find_in_flight_operation
+from ga_blocking import await_blocking
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -1529,7 +1530,11 @@ async def admin_load(request: Request, payload: LoadModelRequest) -> JSONRespons
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     log_event("tts_model_load_start", requestId=request_id, payload=payload.model_dump())
     try:
-        details = load_model_serialized(payload, force_warmup=env_flag("GA_TTS_WARMUP_ON_LOAD", default=True))
+        details = await await_blocking(
+            load_model_serialized,
+            payload,
+            force_warmup=env_flag("GA_TTS_WARMUP_ON_LOAD", default=True),
+        )
         log_event("tts_model_load_success", requestId=request_id, **details)
         return JSONResponse(
             status_code=200,
@@ -1833,10 +1838,16 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
         )
 
         try:
-            wav_bytes = synthesize_with_engine_recovery(config, script_text, voice_fields, seed)
+            wav_bytes = await await_blocking(
+                synthesize_with_engine_recovery,
+                config,
+                script_text,
+                voice_fields,
+                seed,
+            )
             duration_seconds, sampling_rate = wav_duration_seconds(wav_bytes)
             if abs(speed - 1.0) >= 1e-6:
-                wav_bytes = apply_speed_with_ffmpeg(wav_bytes, speed)
+                wav_bytes = await await_blocking(apply_speed_with_ffmpeg, wav_bytes, speed)
                 duration_seconds /= speed
 
             latency_ms = int((time.perf_counter() - started) * 1000)
