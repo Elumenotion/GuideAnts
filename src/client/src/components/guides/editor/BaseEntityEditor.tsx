@@ -765,13 +765,14 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
       return;
     }
 
-    // Filter out completely empty context options
-    const contextOptionsToSave = formData.contextOptions.filter(opt => {
-      const hasKey = opt.key.trim() !== '';
-      const hasValue = (opt.value ?? '').trim() !== '';
-      return hasKey || hasValue;
-    });
-    const hasInvalidContextOptions = contextOptionsToSave.some(opt => opt.key.trim() === '');
+    // Normalize and filter context options (trim stray whitespace from paste/autocomplete)
+    const contextOptionsToSave = formData.contextOptions
+      .map((opt) => ({
+        key: opt.key.trim(),
+        value: (opt.value ?? '').trim(),
+      }))
+      .filter((opt) => opt.key !== '' || opt.value !== '');
+    const hasInvalidContextOptions = contextOptionsToSave.some(opt => opt.key === '');
     if (hasInvalidContextOptions) {
       showToast({ type: 'error', title: 'Validation Error', message: 'All context options must have a key' });
       return;
