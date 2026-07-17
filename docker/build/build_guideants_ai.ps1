@@ -41,6 +41,33 @@ function Get-CombinedHash {
     -join ($digest | ForEach-Object { $_.ToString('x2') })
 }
 
+function Write-DepsDockerfileSlice {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DockerfilePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutPath
+    )
+
+    $sliceLines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in Get-Content -Path $DockerfilePath) {
+        if ($line -match '^FROM\s+.+\s+AS\s+final-') {
+            break
+        }
+        $sliceLines.Add($line)
+    }
+
+    $slice = [string]::Join([Environment]::NewLine, $sliceLines)
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        Set-Content -Path $OutPath -Value $slice -Encoding utf8NoBOM -NoNewline
+    }
+    else {
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($OutPath, $slice, $utf8NoBom)
+    }
+}
+
 function Test-DockerImageExists {
     param(
         [Parameter(Mandatory = $true)]
@@ -354,8 +381,11 @@ Copy-Item -Path $requirementsSrc -Destination $reqDest -Force
 
 Write-Host "Build context staged." -ForegroundColor Green
 
+$depsDockerfileSlicePath = Join-Path $buildStateDir "deps-dockerfile-slice.${Backend}.txt"
+Write-DepsDockerfileSlice -DockerfilePath $dockerfilePath -OutPath $depsDockerfileSlicePath
+
 $depsHashInputs = @(
-    $dockerfilePath,
+    $depsDockerfileSlicePath,
     (Join-Path $buildContext 'asr-requirements.txt'),
     (Join-Path $buildContext 'tts-requirements.txt'),
     (Join-Path $buildContext 'emb-requirements.txt'),
