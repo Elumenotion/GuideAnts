@@ -17,7 +17,7 @@ from typing import Any
 
 from guideants_hf.catalog_download import lookup_hf_file_size
 from guideants_hf.operations import find_in_flight_operation
-from guideants_hf.path_safety import PathSafetyError, ensure_inside_root
+from guideants_hf.path_safety import PathSafetyError, ensure_inside_root, resolve_path_under_dir
 from guideants_hf.transport import download_hf_file
 
 import uvicorn
@@ -399,17 +399,32 @@ def resolve_bundle_dir(model_dir: str, bundle_id: str) -> str:
     return bundle_path
 
 
-def _merge_bundle_directory_contents(source_root: str, dest_root: str) -> None:
-    for entry in os.listdir(source_root):
+def _merge_bundle_directory_contents(
+    source_root: str,
+    dest_root: str,
+    *,
+    bundle_store_root: str,
+) -> None:
+    source_real = os.path.realpath(source_root)
+    dest_real = os.path.realpath(dest_root)
+    ensure_inside_root(bundle_store_root, source_real)
+    ensure_inside_root(bundle_store_root, dest_real)
+    for entry in os.listdir(source_real):
         if entry.startswith("."):
             continue
-        src_entry = os.path.join(source_root, entry)
-        dst_entry = os.path.join(dest_root, entry)
+        src_entry = resolve_path_under_dir(source_real, entry)
+        dst_entry = resolve_path_under_dir(dest_real, entry)
+        ensure_inside_root(bundle_store_root, src_entry)
+        ensure_inside_root(bundle_store_root, dst_entry)
         if os.path.isdir(src_entry):
             if not os.path.isdir(dst_entry):
                 shutil.move(src_entry, dst_entry)
             else:
-                _merge_bundle_directory_contents(src_entry, dst_entry)
+                _merge_bundle_directory_contents(
+                    src_entry,
+                    dst_entry,
+                    bundle_store_root=bundle_store_root,
+                )
         elif os.path.isfile(src_entry) and not os.path.exists(dst_entry):
             shutil.move(src_entry, dst_entry)
 
@@ -438,7 +453,7 @@ def migrate_bundle_folder(model_dir: str, from_bundle_id: str, to_bundle_id: str
         os.rename(from_path, to_path)
         action = "renamed"
     else:
-        _merge_bundle_directory_contents(from_path, to_path)
+        _merge_bundle_directory_contents(from_path, to_path, bundle_store_root=root_real)
         shutil.rmtree(from_path)
         action = "merged"
 

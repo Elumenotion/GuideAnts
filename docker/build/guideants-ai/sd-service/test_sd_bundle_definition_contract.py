@@ -47,11 +47,19 @@ def _ensure_inside_root(root_abs: str, candidate_abs: str) -> None:
         raise _PathSafetyError("PATH_ESCAPE", "Target path escapes the model store root.")
 
 
+def _resolve_path_under_dir(parent_dir: str, filename: str) -> str:
+    parent_real = os.path.realpath(parent_dir)
+    candidate = os.path.realpath(os.path.join(parent_real, os.path.basename(filename)))
+    _ensure_inside_root(parent_real, candidate)
+    return candidate
+
+
 _path_safety = _install_module_stub(
     "guideants_hf.path_safety",
     {
         "PathSafetyError": _PathSafetyError,
         "ensure_inside_root": _ensure_inside_root,
+        "resolve_path_under_dir": _resolve_path_under_dir,
     },
 )
 _guideants_hf.catalog_download = _catalog_download

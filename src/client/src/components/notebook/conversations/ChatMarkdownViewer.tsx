@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -504,6 +504,18 @@ const AuthenticatedContent: React.FC<{
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [retryCount, setRetryCount] = useState(0);
+    const wasStreamingRef = useRef(isStreaming);
+
+    // Turn end is the authoritative moment to fetch notebook files. Retries that
+    // fail mid-stream are hidden by the streaming placeholder; reset on completion.
+    useEffect(() => {
+        if (wasStreamingRef.current && !isStreaming) {
+            setRetryCount(0);
+            setError(null);
+            setIsLoading(false);
+        }
+        wasStreamingRef.current = isStreaming;
+    }, [isStreaming]);
 
     const apiBaseUrl = API_BASE_URL;
     const isAuthenticatedUrl = (() => {
@@ -550,6 +562,12 @@ const AuthenticatedContent: React.FC<{
         }
 
         if ((elementType === 'img' || elementType === 'video' || elementType === 'audio') && url) {
+            // Notebook files may not exist until the turn completes — defer fetch so
+            // we don't exhaust retries behind the streaming "coming up" placeholder.
+            if (isStreaming) {
+                return;
+            }
+
             // Reset states when URL changes
             setError(null);
             
@@ -581,7 +599,7 @@ const AuthenticatedContent: React.FC<{
         return () => {
             // Do not revoke cached object URLs—they may be reused by other mounts
         };
-    }, [url, isAuthenticatedUrl, elementType, retryCount]);
+    }, [url, isAuthenticatedUrl, elementType, retryCount, isStreaming]);
 
     const toApiUrl = (originalUrl: string): string => {
         try {

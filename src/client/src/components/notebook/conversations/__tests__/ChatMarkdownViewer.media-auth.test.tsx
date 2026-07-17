@@ -128,6 +128,54 @@ describe('ChatMarkdownViewer – media & authenticated content', () => {
     );
   });
 
+  it('defers authenticated image fetch until streaming ends', async () => {
+    const md = '![deferred](./Output/deferred-chart.png)';
+    const { rerender } = render(
+      <ChatMarkdownViewer text={md} projectId="proj-1" notebookId="nb-1" isStreaming />
+    );
+
+    expect(mockGetAuthenticatedUrl).not.toHaveBeenCalled();
+
+    rerender(
+      <ChatMarkdownViewer text={md} projectId="proj-1" notebookId="nb-1" isStreaming={false} />
+    );
+
+    await waitFor(() => expect(mockGetAuthenticatedUrl).toHaveBeenCalled());
+    await waitFor(() => {
+      const img = screen.getByRole('img', { name: 'deferred' }) as HTMLImageElement;
+      expect(img.src).toContain('blob:authenticated-image');
+    });
+  });
+
+  it('retries image fetch after turn ends when file was not ready yet', async () => {
+    mockGetAuthenticatedUrl
+      .mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }))
+      .mockResolvedValueOnce({
+        objectUrl: 'blob:retry-after-turn',
+        fileName: 'chart.png',
+      });
+
+    const md = '![chart](/api/projects/p/n/files/content?path=Output/retry-after-turn.png)';
+    const { rerender } = render(
+      <ChatMarkdownViewer text={md} projectId="proj-1" notebookId="nb-1" isStreaming />
+    );
+
+    expect(mockGetAuthenticatedUrl).not.toHaveBeenCalled();
+
+    rerender(
+      <ChatMarkdownViewer text={md} projectId="proj-1" notebookId="nb-1" isStreaming={false} />
+    );
+
+    await waitFor(
+      () => expect(mockGetAuthenticatedUrl.mock.calls.length).toBeGreaterThanOrEqual(2),
+      { timeout: 3000 }
+    );
+    await waitFor(() => {
+      const img = screen.getByRole('img', { name: 'chart' });
+      expect(img).toHaveAttribute('src', 'blob:retry-after-turn');
+    });
+  });
+
   it('shows streaming placeholders for authenticated video and audio', () => {
     const md = '[VIDEO:/api/projects/p/n/files/content?path=clip.mp4]\n\n[AUDIO:/api/projects/p/n/files/content?path=clip.mp3]';
     render(
