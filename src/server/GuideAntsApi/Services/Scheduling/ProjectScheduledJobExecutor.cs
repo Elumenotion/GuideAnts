@@ -1,5 +1,6 @@
 using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.Functions;
+using GuideAntsApi.BackgroundJobs.Scheduling;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Conversations;

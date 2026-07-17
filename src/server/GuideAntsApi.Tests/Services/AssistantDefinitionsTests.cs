@@ -140,7 +140,6 @@ public class AssistantDefinitionsTests
             Kind = AssistantKind.Assistant,
             IsActive = true,
             MaxToolCallsPerTurn = 12,
-            MaxToolRoundsPerTurn = 3,
             ModelId = "gpt-4.1"
         };
 
@@ -149,7 +148,6 @@ public class AssistantDefinitionsTests
         manifest.RootElement.TryGetProperty("max_tool_calls_per_turn", out var callsProp).Should().BeTrue(
             because: $"manifest keys: {string.Join(", ", manifest.RootElement.EnumerateObject().Select(p => p.Name))}");
         callsProp.GetInt32().Should().Be(12);
-        manifest.RootElement.GetProperty("max_tool_rounds_per_turn").GetInt32().Should().Be(3);
 
         var lenientOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
@@ -157,7 +155,6 @@ public class AssistantDefinitionsTests
         };
         var definition = JsonSerializer.Deserialize<AssistantDefinition>(storageMetadata.ManifestJson, lenientOptions);
         definition!.MaxToolCallsPerTurn.Should().Be(12);
-        definition.MaxToolRoundsPerTurn.Should().Be(3);
     }
 
     [TestMethod]

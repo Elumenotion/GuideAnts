@@ -38,8 +38,6 @@ public sealed class TurnTraceSegment
 
     public int? ToolLimitCallsUsed { get; set; }
 
-    public int? ToolLimitRoundsUsed { get; set; }
-
     public string? ToolLimitEscalationPhase { get; set; }
 }
 

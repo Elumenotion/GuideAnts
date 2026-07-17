@@ -256,6 +256,7 @@ COPY voice-pack/ /opt/guideants/voice-pack/
 COPY scripts/check-voice-pack-attribution.py /opt/guideants/scripts/check-voice-pack-attribution.py
 RUN python3 /opt/guideants/scripts/check-voice-pack-attribution.py /opt/guideants/voice-pack
 COPY sd-service/ /app/sd-service/
+RUN find /app/sd-service -type f -name 'sd_service.cpython-*.pyc' -delete 2>/dev/null || true
 COPY tts-service/ /app/tts-service/
 COPY emb-service/ /app/emb-service/
 COPY media-service/ /app/media-service/

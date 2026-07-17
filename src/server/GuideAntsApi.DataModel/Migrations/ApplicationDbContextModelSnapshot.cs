@@ -241,9 +241,6 @@ namespace GuideAntsApi.DataModel.Migrations
                     b.Property<int?>("MaxToolCallsPerTurn")
                         .HasColumnType("int");
 
-                    b.Property<int?>("MaxToolRoundsPerTurn")
-                        .HasColumnType("int");
-
                     b.Property<string>("MetadataJson")
                         .HasColumnType("nvarchar(max)");
 

@@ -11,6 +11,7 @@ namespace GuideAntsApi.Services.Conversations;
 /// </summary>
 public class DistributedConversationLockService : IDistributedConversationLock
 {
+    private static readonly TimeSpan DefaultLockDuration = TimeSpan.FromMinutes(5);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DistributedConversationLockService> _logger;
 
@@ -61,7 +62,7 @@ public class DistributedConversationLockService : IDistributedConversationLock
                 ConversationId = conversationId,
                 LockedByUserName = userName,
                 LockedAt = DateTime.UtcNow,
-                ExpiresAt = DateTime.UtcNow.AddMinutes(5)
+                ExpiresAt = DateTime.UtcNow.Add(DefaultLockDuration)
             };
             
             db.ConversationLocks.Add(newLock);
@@ -115,6 +116,59 @@ public class DistributedConversationLockService : IDistributedConversationLock
         {
             _logger.LogError(ex, "Error releasing lock for conversation {ConversationId}", conversationId);
             throw;
+        }
+    }
+
+    public async Task<bool> RenewLockAsync(
+        Guid conversationId,
+        string userName,
+        TimeSpan lockTtl,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(userName))
+        {
+            return false;
+        }
+
+        var ttl = lockTtl > TimeSpan.Zero ? lockTtl : DefaultLockDuration;
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        try
+        {
+            var now = DateTime.UtcNow;
+            var lockToRenew = await db.ConversationLocks
+                .Where(l => l.ConversationId == conversationId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (lockToRenew == null)
+            {
+                return false;
+            }
+
+            if (!string.Equals(lockToRenew.LockedByUserName, userName, StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Refusing to renew lock for conversation {ConversationId}: owner mismatch ({CurrentOwner} != {RequestedOwner})",
+                    conversationId,
+                    lockToRenew.LockedByUserName,
+                    userName);
+                return false;
+            }
+
+            if (lockToRenew.ExpiresAt <= now)
+            {
+                return false;
+            }
+
+            lockToRenew.ExpiresAt = now.Add(ttl);
+            await db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error renewing lock for conversation {ConversationId}", conversationId);
+            return false;
         }
     }
     

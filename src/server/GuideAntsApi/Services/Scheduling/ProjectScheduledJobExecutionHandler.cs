@@ -1,5 +1,6 @@
 using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
+using GuideAntsApi.BackgroundJobs.Scheduling;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using Microsoft.EntityFrameworkCore;
@@ -22,7 +23,7 @@ public sealed class ProjectScheduledJobExecutionHandler : JobHandlerBase<Project
 
     public override string JobType => ProjectScheduledJobExecutionJob.JobType;
 
-    public override async Task<bool> HandleAsync(ProjectScheduledJobExecutionJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(ProjectScheduledJobExecutionJob payload, CancellationToken cancellationToken)
     {
         // Job handlers are resolved once at startup and cached for the process lifetime, so this
         // handler must never hold scoped services (e.g. IConversationService and its ApplicationDbContext)
@@ -39,7 +40,7 @@ public sealed class ProjectScheduledJobExecutionHandler : JobHandlerBase<Project
         if (job == null)
         {
             Logger.LogWarning("Scheduled job {JobId} no longer exists", payload.ScheduledJobId);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         if (!Enum.TryParse<ProjectScheduledJobTrigger>(payload.TriggeredBy, ignoreCase: true, out var trigger))
@@ -53,7 +54,7 @@ public sealed class ProjectScheduledJobExecutionHandler : JobHandlerBase<Project
             Logger.LogWarning(
                 "Skipping duplicate scheduled job execution for {JobId}; another run is already in progress",
                 job.Id);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         var run = new ProjectScheduledJobRun
@@ -82,7 +83,7 @@ public sealed class ProjectScheduledJobExecutionHandler : JobHandlerBase<Project
         await db.SaveChangesAsync(cancellationToken);
 
         await PersistJobSummaryAsync(db, job, run, cronScheduleService, cancellationToken);
-        return true;
+        return JobExecutionResult.Success();
     }
 
     private static void ApplyRunResult(ProjectScheduledJobRun run, ProjectScheduledJobExecutionResult result)

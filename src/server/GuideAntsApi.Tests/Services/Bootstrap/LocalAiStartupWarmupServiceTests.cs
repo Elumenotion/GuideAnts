@@ -252,10 +252,10 @@ public sealed class LocalAiStartupWarmupServiceTests
                         Applied: "on",
                         Phase: "ready",
                         Error: null,
-                        PlanRef: "flux2-klein-4b-q4ks",
+                        PlanRef: "flux2-klein-4b",
                         RouterAlias: null,
                         ModelId: null,
-                        BundleId: "flux2-klein-4b-q4ks"),
+                        BundleId: "flux2-klein-4b"),
                 }));
 
         var configuration = new ConfigurationBuilder()
@@ -300,13 +300,13 @@ public sealed class LocalAiStartupWarmupServiceTests
         settingsMock
             .Setup(s => s.SetServiceModeModelIdAsync(
                 ImageGenerationOptions.SectionName,
-                "flux2-klein-4b-q4ks",
+                "flux2-klein-4b",
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask)
             .Callback(() =>
             {
-                setPersistedModelId(ImageGenerationOptions.SectionName, "flux2-klein-4b-q4ks");
-                modeResolver.SetModelId("flux2-klein-4b-q4ks");
+                setPersistedModelId(ImageGenerationOptions.SectionName, "flux2-klein-4b");
+                modeResolver.SetModelId("flux2-klein-4b");
             });
 
         var builder = new LocalAiDesiredStateBuilder(
@@ -327,7 +327,7 @@ public sealed class LocalAiStartupWarmupServiceTests
 
         var result = await service.ReconcileLocalServiceAsync(
             ImageGenerationOptions.SectionName,
-            requestedModelRef: "flux2-klein-4b-q4ks");
+            requestedModelRef: "flux2-klein-4b");
 
         result.Outcome.Should().Be(LocalServiceReconcileOutcome.Warm);
         settingsMock.VerifyAll();
@@ -453,6 +453,21 @@ public sealed class LocalAiStartupWarmupServiceTests
                     modes[serviceId] = mode with { ModelId = modelId };
                 }
             }
+        }
+
+        if (modesByService.Any(entry => string.Equals(entry.ServiceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)))
+        {
+            settingsMock
+                .Setup(s => s.GetImageGenerationBundleDefinitionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string bundleId, CancellationToken _) => new ImageGenerationBundleDefinitionDto(
+                    bundleId,
+                    null,
+                    null,
+                    new BundleDefinitionRolesDto(
+                        new BundleDefinitionRoleDto("org/diff", "model.gguf"),
+                        new BundleDefinitionRoleDto("org/vae", "vae.safetensors"),
+                        new BundleDefinitionRoleDto("org/te", "te.gguf")),
+                    new BundleDefinitionSamplingDto(4, 1.0, "euler")));
         }
 
         return (settingsMock, SetPersistedModelId);

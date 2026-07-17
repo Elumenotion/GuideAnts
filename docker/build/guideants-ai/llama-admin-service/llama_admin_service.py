@@ -32,7 +32,8 @@ from guideants_hf.preset_validation import (
     normalize_alias,
     normalize_preset_map,
 )
-from guideants_hf.vision_token_preset import apply_alias_vision_token_preset
+from guideants_hf.router_mmproj import preset_disables_mmproj
+from guideants_hf.vision_token_preset import apply_alias_vision_token_preset, strip_vision_token_extras
 from guideants_hf.transport import (
     build_regex_from_include_pattern,
     download_hf_file,
@@ -482,28 +483,7 @@ def remove_router_entry(alias: str) -> tuple[str, str] | None:
         removed_sec = entries.pop(alias_trimmed)
         removed = (removed_sec.model, removed_sec.mmproj)
 
-        directory = os.path.dirname(ROUTER_CONFIG_PATH)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        payload = serialize_router_ini(entries)
-
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=directory if directory else None,
-            prefix="router-models-",
-            suffix=".ini.tmp",
-        )
-        try:
-            with os.fdopen(temp_fd, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            _commit_router_ini_file(temp_path, ROUTER_CONFIG_PATH, payload)
-        finally:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+        router_ini.write_router_config_text(serialize_router_ini(entries))
 
     if removed:
         signal_llama_server_reload()
@@ -610,7 +590,8 @@ def upsert_router_entry(
     _cache_l = {x.lower() for x in _CACHE_KEYS}
 
     incoming_preset = normalize_preset_map(preset or {})
-    incoming_preset = apply_alias_vision_token_preset(alias_trimmed, incoming_preset)
+    if not preset_disables_mmproj(incoming_preset):
+        incoming_preset = apply_alias_vision_token_preset(alias_trimmed, incoming_preset)
     if update_context:
         _strip_extras_matching_incoming(incoming_preset, _ctx_l)
         if context_size is not None:
@@ -636,6 +617,8 @@ def upsert_router_entry(
             _strip_extras_matching_incoming(extras, _ctx_l)
         if update_cache and cache_ram_mib is None:
             _strip_extras_matching_incoming(extras, _cache_l)
+        if preset_disables_mmproj(extras):
+            strip_vision_token_extras(extras)
 
         entries[alias_trimmed] = _RouterSection(
             model=model_path.strip(),
@@ -643,30 +626,10 @@ def upsert_router_entry(
             extras=extras,
         )
 
-        directory = os.path.dirname(ROUTER_CONFIG_PATH)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
         payload = serialize_router_ini(entries)
         changed = payload != payload_before
         ini_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=directory if directory else None,
-            prefix="router-models-",
-            suffix=".ini.tmp",
-        )
-        try:
-            with os.fdopen(temp_fd, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            _commit_router_ini_file(temp_path, ROUTER_CONFIG_PATH, payload)
-        finally:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+        router_ini.write_router_config_text(payload)
 
     before_summary = _section_summary(prior)
     after_summary = _section_summary(entries.get(alias_trimmed))

@@ -166,12 +166,13 @@ public sealed class TurnTraceCollector : IThreadRunTraceCollector
         }
     }
 
-    public void CaptureToolLimitState(int toolCallsUsed, int toolRoundsUsed, string escalationPhase)
+    public void CaptureToolLimitState(
+        int toolCallsUsed,
+        string escalationPhase)
     {
         lock (_sync)
         {
             _segment.ToolLimitCallsUsed = toolCallsUsed;
-            _segment.ToolLimitRoundsUsed = toolRoundsUsed;
             _segment.ToolLimitEscalationPhase = escalationPhase;
         }
     }

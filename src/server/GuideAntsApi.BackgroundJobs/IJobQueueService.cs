@@ -20,9 +20,9 @@ public interface IJobQueueService
     Task<bool> CompleteAsync(Guid id, Guid claimToken, CancellationToken ct = default);
     
     /// <summary>
-    /// Mark a job as failed and schedule retry with exponential backoff
+    /// Mark a job as failed and schedule retry according to centralized retry policy
     /// </summary>
-    Task<bool> FailAsync(Guid id, Guid claimToken, string error, int baseDelaySeconds = 10, CancellationToken ct = default);
+    Task<bool> FailAsync(Guid id, Guid claimToken, string error, JobFailureClass failureClass = JobFailureClass.RetryableTransient, CancellationToken ct = default);
     
     /// <summary>
     /// Requeue jobs with expired leases
@@ -39,4 +39,3 @@ public interface IJobQueueService
     /// </summary>
     Task<bool> RenewLeaseAsync(Guid id, Guid claimToken, int additionalSeconds, CancellationToken ct = default);
 }
-

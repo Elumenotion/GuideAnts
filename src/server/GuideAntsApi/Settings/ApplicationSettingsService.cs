@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 
 namespace GuideAntsApi.Settings;
 
-public interface IApplicationSettingsService
+public partial interface IApplicationSettingsService
 {
     Task BootstrapAsync(IConfiguration bootstrapConfiguration, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SettingsSectionSummaryDto>> GetSectionSummariesAsync(CancellationToken cancellationToken = default);

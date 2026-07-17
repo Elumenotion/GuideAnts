@@ -66,7 +66,7 @@ public sealed class NotebookFileSyncServiceTests
         public Task<bool> CompleteAsync(Guid id, Guid claimToken, CancellationToken ct = default)
             => Task.FromResult(true);
 
-        public Task<bool> FailAsync(Guid id, Guid claimToken, string error, int baseDelaySeconds = 10, CancellationToken ct = default)
+        public Task<bool> FailAsync(Guid id, Guid claimToken, string error, JobFailureClass failureClass = JobFailureClass.RetryableTransient, CancellationToken ct = default)
             => Task.FromResult(true);
 
         public Task<int> RequeueExpiredAsync(CancellationToken ct = default)

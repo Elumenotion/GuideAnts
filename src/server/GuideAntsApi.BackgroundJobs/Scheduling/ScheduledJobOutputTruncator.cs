@@ -1,4 +1,4 @@
-namespace GuideAntsApi.Services.Scheduling;
+namespace GuideAntsApi.BackgroundJobs.Scheduling;
 
 public static class ScheduledJobOutputTruncator
 {

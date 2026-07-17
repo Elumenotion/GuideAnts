@@ -172,6 +172,11 @@ function Invoke-Main {
         $composeArgs += @('-f', $hostMountOverridePath)
     }
 
+    $voicePackOverridePath = Join-Path $script:DockerDir 'docker-compose.voice-pack.local.yml'
+    if (Test-Path -LiteralPath $voicePackOverridePath) {
+        $composeArgs += @('-f', $voicePackOverridePath)
+    }
+
     if ($backend -eq 'rocm') {
         $helper = Join-Path $script:RootDir 'scripts/rocm-runtime-compose.ps1'
         & $helper -DockerDir $script:DockerDir -Backend 'rocm' -RootDir $script:RootDir

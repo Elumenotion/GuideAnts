@@ -1,0 +1,23 @@
+{
+  "bundleId": "flux2-klein-9b",
+  "revision": "main",
+  "roles": {
+    "diffusion": {
+      "repo": "unsloth/FLUX.2-klein-9B-GGUF",
+      "file": "flux-2-klein-9b-Q5_K_M.gguf"
+    },
+    "vae": {
+      "repo": "black-forest-labs/FLUX.2-small-decoder",
+      "file": "full_encoder_small_decoder.safetensors"
+    },
+    "textEncoder": {
+      "repo": "unsloth/Qwen3-8B-GGUF",
+      "file": "Qwen3-8B-Q5_K_M.gguf"
+    }
+  },
+  "sampling": {
+    "steps": 4,
+    "cfgScale": 1.0,
+    "samplingMethod": "euler"
+  }
+}

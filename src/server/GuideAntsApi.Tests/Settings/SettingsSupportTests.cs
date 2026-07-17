@@ -78,6 +78,89 @@ public sealed class SettingsSupportTests
     }
 
     [TestMethod]
+    public async Task ValidateDownloadPayload_ImageGeneration_RejectsMissingSamplingFields()
+    {
+        using var doc = JsonDocument.Parse(
+            """
+            {
+              "bundle_id": "b1",
+              "diffusion_repo": "org/diff",
+              "diffusion_file": "d.gguf",
+              "vae_repo": "org/vae",
+              "vae_file": "vae.safetensors",
+              "text_encoder_repo": "org/te",
+              "text_encoder_file": "te.safetensors"
+            }
+            """);
+
+        var result = ServiceLocalModelDownloadValidator.ValidateDownloadPayload("ImageGeneration", doc.RootElement);
+
+        result.Should().NotBeNull();
+        (await ExecuteResultAsync(result!)).Should().Be(StatusCodes.Status400BadRequest);
+    }
+
+    [TestMethod]
+    public void ValidateDownloadPayload_ImageGeneration_AcceptsValidSamplingFields()
+    {
+        using var doc = JsonDocument.Parse(
+            """
+            {
+              "bundle_id": "b1",
+              "diffusion_repo": "org/diff",
+              "diffusion_file": "d.gguf",
+              "vae_repo": "org/vae",
+              "vae_file": "vae.safetensors",
+              "text_encoder_repo": "org/te",
+              "text_encoder_file": "te.safetensors",
+              "sampling_steps": 4,
+              "sampling_cfg_scale": 1.0,
+              "sampling_method": "euler"
+            }
+            """);
+
+        var result = ServiceLocalModelDownloadValidator.ValidateDownloadPayload("ImageGeneration", doc.RootElement);
+
+        result.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task ValidateImportDefinition_RejectsMissingSampling()
+    {
+        var definition = new ImageGenerationBundleDefinitionDto(
+            "bundle-a",
+            null,
+            null,
+            new BundleDefinitionRolesDto(
+                new BundleDefinitionRoleDto("org/diff", "model.gguf"),
+                new BundleDefinitionRoleDto("org/vae", "vae.safetensors"),
+                new BundleDefinitionRoleDto("org/te", "te.gguf")),
+            null!);
+
+        var result = ServiceLocalModelDownloadValidator.ValidateImportDefinition(definition);
+
+        result.Should().NotBeNull();
+        (await ExecuteResultAsync(result!)).Should().Be(StatusCodes.Status400BadRequest);
+    }
+
+    [TestMethod]
+    public async Task ValidateImportDefinition_AcceptsCanonicalDefinition()
+    {
+        var definition = new ImageGenerationBundleDefinitionDto(
+            "bundle-a",
+            "main",
+            null,
+            new BundleDefinitionRolesDto(
+                new BundleDefinitionRoleDto("org/diff", "model.gguf"),
+                new BundleDefinitionRoleDto("org/vae", "vae.safetensors"),
+                new BundleDefinitionRoleDto("org/te", "te.gguf")),
+            new BundleDefinitionSamplingDto(4, 1.0, "euler"));
+
+        var result = ServiceLocalModelDownloadValidator.ValidateImportDefinition(definition);
+
+        result.Should().BeNull();
+    }
+
+    [TestMethod]
     public async Task ValidateDownloadPayload_NonImageGeneration_RequiresModelId()
     {
         using var doc = JsonDocument.Parse("{}");

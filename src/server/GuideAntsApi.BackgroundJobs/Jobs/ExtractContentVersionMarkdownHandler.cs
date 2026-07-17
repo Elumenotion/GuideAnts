@@ -37,7 +37,7 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
 
     public override string JobType => nameof(ExtractContentVersionMarkdownJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(ExtractContentVersionMarkdownJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(ExtractContentVersionMarkdownJob payload, CancellationToken cancellationToken)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
@@ -49,12 +49,12 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
         if (shadow == null)
         {
             Logger.LogWarning("Shadow not found for ContentFileVersion {Id}", payload.ContentFileVersionId);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Shadow not found for ContentFileVersion");
         }
 
         if (shadow.Status == MarkdownExtractionStatus.Completed)
         {
-            return true; // Idempotent
+            return JobExecutionResult.Success(); // Idempotent
         }
 
         var originalVersion = shadow.OriginalVersion;
@@ -65,7 +65,7 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
             shadow.ErrorMessage = "Original file missing";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Original file missing");
         }
 
         shadow.Status = MarkdownExtractionStatus.Processing;
@@ -90,7 +90,7 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
                     shadow.ErrorMessage = null;
                     shadow.ProcessedAt = null;
                     await context.SaveChangesAsync(cancellationToken);
-                    return true; // dispatched to transcription
+                    return JobExecutionResult.Success(); // dispatched to transcription
                 }
 
                 if (!_docIntel.IsFileSizeSupported(originalVersion.FileSize))
@@ -99,7 +99,7 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
                     shadow.ErrorMessage = "File too large";
                     shadow.ProcessedAt = DateTime.UtcNow;
                     await context.SaveChangesAsync(cancellationToken);
-                    return true;
+                    return JobExecutionResult.Success();
                 }
 
                 markdownContent = await _docIntel.ExtractMarkdownAsync(fileStream, originalVersion.FileName, cancellationToken);
@@ -111,7 +111,7 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
                 shadow.ErrorMessage = "No content extracted";
                 shadow.ProcessedAt = DateTime.UtcNow;
                 await context.SaveChangesAsync(cancellationToken);
-                return true;
+                return JobExecutionResult.Success();
             }
 
             var contentHash = ComputeSha256(markdownContent);
@@ -141,7 +141,7 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
                 jobType: nameof(IndexContentMarkdownShadowJob).Replace("Job", string.Empty),
                 payload: new IndexContentMarkdownShadowJob(payload.ContentFileVersionId),
                 ct: cancellationToken);
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (Exception ex)
         {
@@ -151,7 +151,7 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
                     ex,
                     "Extraction cancelled for ContentFileVersion {Id}; leaving current shadow state unchanged.",
                     payload.ContentFileVersionId);
-                return false;
+                return JobExecutionResult.RetryableTransient("Extraction cancelled");
             }
 
             var currentStatus = await context.ContentFileMarkdownShadows
@@ -164,7 +164,7 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
                 Logger.LogInformation(
                     "Extraction encountered an exception for ContentFileVersion {Id}, but shadow is already completed. Skipping failure downgrade.",
                     payload.ContentFileVersionId);
-                return true;
+                return JobExecutionResult.Success();
             }
 
             Logger.LogError(ex, "Extraction failed for ContentFileVersion {Id}", payload.ContentFileVersionId);
@@ -172,7 +172,7 @@ public sealed class ExtractContentVersionMarkdownHandler : JobHandlerBase<Extrac
             shadow.ErrorMessage = ex.Message;
             shadow.ProcessedAt = DateTime.UtcNow;
             try { await context.SaveChangesAsync(cancellationToken); } catch { }
-            return false;
+            return JobExecutionResult.RetryableTransient(ex.Message);
         }
     }
 

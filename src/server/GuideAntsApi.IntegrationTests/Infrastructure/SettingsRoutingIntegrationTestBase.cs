@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
@@ -122,6 +123,9 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
 
         SharedFactory.LlamaStub.Reset();
         SharedFactory.RouterStub.Reset();
+
+        using var scope = SharedFactory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<IMemoryCache>().Remove("llama.runtime.inventory");
     }
 
     protected static async Task ResetRoutingStateAsync()

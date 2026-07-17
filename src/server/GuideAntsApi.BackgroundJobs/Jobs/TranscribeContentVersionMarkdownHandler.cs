@@ -32,7 +32,7 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
 
     public override string JobType => nameof(TranscribeContentVersionMarkdownJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(TranscribeContentVersionMarkdownJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(TranscribeContentVersionMarkdownJob payload, CancellationToken cancellationToken)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
@@ -44,7 +44,7 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
         if (shadow == null)
         {
             Logger.LogWarning("Shadow not found for ContentFileVersion {Id}", payload.ContentFileVersionId);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Shadow not found for ContentFileVersion");
         }
 
         var version = shadow.OriginalVersion;
@@ -55,7 +55,7 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
             shadow.ErrorMessage = "Original file missing";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Original file missing");
         }
 
         // Check supported types/sizes for transcription
@@ -65,7 +65,7 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
             shadow.ErrorMessage = "Unsupported file type for transcription";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         if (!_transcription.IsFileSizeSupported(version.FileSize))
@@ -74,7 +74,7 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
             shadow.ErrorMessage = "File too large";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         try
@@ -91,7 +91,7 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
                 shadow.ErrorMessage = "No content extracted";
                 shadow.ProcessedAt = DateTime.UtcNow;
                 await context.SaveChangesAsync(cancellationToken);
-                return true;
+                return JobExecutionResult.Success();
             }
 
             var contentHash = ComputeSha256(markdown);
@@ -122,7 +122,7 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
                 payload: new IndexContentMarkdownShadowJob(payload.ContentFileVersionId),
                 ct: cancellationToken);
 
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (Exception ex)
         {
@@ -131,7 +131,7 @@ public sealed class TranscribeContentVersionMarkdownHandler : JobHandlerBase<Tra
             shadow.ErrorMessage = ex.Message;
             shadow.ProcessedAt = DateTime.UtcNow;
             try { await context.SaveChangesAsync(cancellationToken); } catch { }
-            return false;
+            return JobExecutionResult.RetryableTransient(ex.Message);
         }
     }
 

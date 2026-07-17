@@ -6,6 +6,7 @@ import { IconActionButton, TextActionButton } from '../../components/shared/Acti
 import { LocalCapabilityFrame, type LocalCapabilityPhase } from '../../components/shared/LocalCapabilityFrame';
 import { SettingsModal } from '../../components/shared/SettingsModal';
 import type { LocalModelsUpstreamFailure } from '../../../../types/settings';
+import type { ImageGenerationBundleDefinitionDto } from '../../../../types/settings';
 import { RepositoryFilePicker, type RolePickerSpec } from '../common';
 import {
   isOperationFailedStatus,
@@ -29,9 +30,16 @@ type BundleDefinitionRole = {
   file?: string;
 };
 
+type BundleDefinitionSampling = {
+  steps?: number;
+  cfgScale?: number;
+  samplingMethod?: string;
+};
+
 type BundleDefinition = {
   revision?: string | null;
   updatedAtUtc?: string | null;
+  sampling?: BundleDefinitionSampling;
   roles?: {
     diffusion?: BundleDefinitionRole;
     vae?: BundleDefinitionRole;
@@ -72,7 +80,7 @@ type BundleListPayload = {
   modelDir?: string;
   selectedBundleId?: string | null;
   activeBundleId?: string | null;
-  legacyMarkerBundleId?: string | null;
+  activeBundleMarkerId?: string | null;
   loadedBundleId?: string | null;
   engine?: EngineState;
   items?: BundleListItem[];
@@ -100,6 +108,9 @@ interface DownloadFormValues {
   vaeFile: string;
   textEncoderRepo: string;
   textEncoderFile: string;
+  samplingSteps: string;
+  samplingCfgScale: string;
+  samplingMethod: string;
   revision: string;
 }
 
@@ -111,6 +122,9 @@ const EMPTY_DOWNLOAD_FORM: DownloadFormValues = {
   vaeFile: '',
   textEncoderRepo: '',
   textEncoderFile: '',
+  samplingSteps: '',
+  samplingCfgScale: '',
+  samplingMethod: '',
   revision: '',
 };
 
@@ -148,30 +162,124 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-function hasBundleDefinition(bundle: BundleListItem | null | undefined): boolean {
-  const roles = bundle?.definition?.roles;
+function asStringOrNumber(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return '';
+}
+
+function definitionToDownloadForm(definition: ImageGenerationBundleDefinitionDto): DownloadFormValues {
+  return {
+    bundleId: definition.bundleId,
+    diffusionRepo: definition.roles.diffusion.repo,
+    diffusionFile: definition.roles.diffusion.file,
+    vaeRepo: definition.roles.vae.repo,
+    vaeFile: definition.roles.vae.file,
+    textEncoderRepo: definition.roles.textEncoder.repo,
+    textEncoderFile: definition.roles.textEncoder.file,
+    samplingSteps: String(definition.sampling.steps),
+    samplingCfgScale: String(definition.sampling.cfgScale),
+    samplingMethod: definition.sampling.samplingMethod,
+    revision: definition.revision ?? '',
+  };
+}
+
+function downloadFormToDefinition(form: DownloadFormValues): ImageGenerationBundleDefinitionDto {
+  return {
+    bundleId: form.bundleId.trim(),
+    revision: form.revision.trim() || null,
+    roles: {
+      diffusion: { repo: form.diffusionRepo.trim(), file: form.diffusionFile.trim() },
+      vae: { repo: form.vaeRepo.trim(), file: form.vaeFile.trim() },
+      textEncoder: { repo: form.textEncoderRepo.trim(), file: form.textEncoderFile.trim() },
+    },
+    sampling: {
+      steps: Number(form.samplingSteps),
+      cfgScale: Number(form.samplingCfgScale),
+      samplingMethod: form.samplingMethod.trim(),
+    },
+  };
+}
+
+function mergeDefinitionWithRuntime(
+  definition: ImageGenerationBundleDefinitionDto,
+  runtime: BundleListItem | undefined,
+  selectedBundleId: string | null | undefined,
+): BundleListItem {
+  const isSelected = Boolean(selectedBundleId && definition.bundleId === selectedBundleId);
+  const roles = runtime?.roles ?? {
+    diffusion: { ready: false },
+    vae: { ready: false },
+    textEncoder: { ready: false },
+  };
+  const complete = runtime?.complete ?? false;
+  return {
+    bundleId: definition.bundleId,
+    active: isSelected,
+    complete,
+    loaded: runtime?.loaded,
+    definition: {
+      revision: definition.revision,
+      updatedAtUtc: definition.updatedAtUtc,
+      sampling: definition.sampling,
+      roles: definition.roles,
+    },
+    roles,
+  };
+}
+
+function hasCanonicalBundleDefinition(definition: ImageGenerationBundleDefinitionDto | null | undefined): boolean {
+  if (!definition) {
+    return false;
+  }
   return Boolean(
-    roles?.diffusion?.repo
-    && roles.diffusion.file
-    && roles.vae?.repo
-    && roles.vae.file
-    && roles.textEncoder?.repo
-    && roles.textEncoder.file
+    definition.roles.diffusion.repo
+    && definition.roles.diffusion.file
+    && definition.roles.vae.repo
+    && definition.roles.vae.file
+    && definition.roles.textEncoder.repo
+    && definition.roles.textEncoder.file
+    && definition.sampling.steps > 0
+    && definition.sampling.cfgScale > 0
+    && definition.sampling.samplingMethod.trim().length > 0
   );
 }
 
 function buildDownloadFormFromBundle(bundle: BundleListItem): DownloadFormValues {
-  const roles = bundle.definition?.roles;
-  return {
+  const definition = bundle.definition;
+  if (
+    !definition?.roles?.diffusion?.repo
+    || !definition.roles.diffusion.file
+    || !definition.roles.vae?.repo
+    || !definition.roles.vae.file
+    || !definition.roles.textEncoder?.repo
+    || !definition.roles.textEncoder.file
+    || typeof definition.sampling?.steps !== 'number'
+    || typeof definition.sampling.cfgScale !== 'number'
+    || typeof definition.sampling.samplingMethod !== 'string'
+  ) {
+    return { ...EMPTY_DOWNLOAD_FORM, bundleId: bundle.bundleId };
+  }
+
+  return definitionToDownloadForm({
     bundleId: bundle.bundleId,
-    diffusionRepo: roles?.diffusion?.repo ?? '',
-    diffusionFile: roles?.diffusion?.file ?? '',
-    vaeRepo: roles?.vae?.repo ?? '',
-    vaeFile: roles?.vae?.file ?? '',
-    textEncoderRepo: roles?.textEncoder?.repo ?? '',
-    textEncoderFile: roles?.textEncoder?.file ?? '',
-    revision: bundle.definition?.revision ?? '',
-  };
+    revision: definition.revision ?? null,
+    updatedAtUtc: definition.updatedAtUtc ?? null,
+    roles: {
+      diffusion: { repo: definition.roles.diffusion.repo, file: definition.roles.diffusion.file },
+      vae: { repo: definition.roles.vae.repo, file: definition.roles.vae.file },
+      textEncoder: { repo: definition.roles.textEncoder.repo, file: definition.roles.textEncoder.file },
+    },
+    sampling: {
+      steps: definition.sampling.steps,
+      cfgScale: definition.sampling.cfgScale,
+      samplingMethod: definition.sampling.samplingMethod,
+    },
+  });
 }
 
 function parseBundleDefinitionUpload(text: string): DownloadFormValues {
@@ -193,6 +301,7 @@ function parseBundleDefinitionUpload(text: string): DownloadFormValues {
     : isRecord(roles.text_encoder)
     ? roles.text_encoder
     : {};
+  const sampling = isRecord(parsed.sampling) ? parsed.sampling : {};
 
   const form: DownloadFormValues = {
     bundleId: asString(parsed.bundleId) || asString(parsed.bundle_id),
@@ -204,6 +313,9 @@ function parseBundleDefinitionUpload(text: string): DownloadFormValues {
       asString(textEncoder.repo) || asString(parsed.textEncoderRepo) || asString(parsed.text_encoder_repo),
     textEncoderFile:
       asString(textEncoder.file) || asString(parsed.textEncoderFile) || asString(parsed.text_encoder_file),
+    samplingSteps: asStringOrNumber(sampling.steps) || asStringOrNumber(parsed.samplingSteps) || asStringOrNumber(parsed.sampling_steps),
+    samplingCfgScale: asStringOrNumber(sampling.cfgScale) || asStringOrNumber(parsed.samplingCfgScale) || asStringOrNumber(parsed.sampling_cfg_scale),
+    samplingMethod: asStringOrNumber(sampling.samplingMethod) || asStringOrNumber(parsed.samplingMethod) || asStringOrNumber(parsed.sampling_method),
     revision: asString(parsed.revision),
   };
 
@@ -215,6 +327,9 @@ function parseBundleDefinitionUpload(text: string): DownloadFormValues {
   if (!form.vaeFile.trim()) missing.push('roles.vae.file');
   if (!form.textEncoderRepo.trim()) missing.push('roles.textEncoder.repo');
   if (!form.textEncoderFile.trim()) missing.push('roles.textEncoder.file');
+  if (!form.samplingSteps.trim()) missing.push('sampling.steps');
+  if (!form.samplingCfgScale.trim()) missing.push('sampling.cfgScale');
+  if (!form.samplingMethod.trim()) missing.push('sampling.samplingMethod');
   if (missing.length > 0) {
     throw new Error(`Bundle definition is missing required field(s): ${missing.join(', ')}.`);
   }
@@ -250,7 +365,11 @@ type BundleDialogMode = 'create' | 'view' | 'edit';
 
 export function ImageBundleManager({ enabled, onDownloadOperationChange, onRuntimeReadinessChange }: ImageBundleManagerProps) {
   const [phase, setPhase] = useState<LocalCapabilityPhase>('loading');
-  const [payload, setPayload] = useState<BundleListPayload | undefined>(undefined);
+  const [canonicalDefinitions, setCanonicalDefinitions] = useState<ImageGenerationBundleDefinitionDto[]>([]);
+  const [runtimePayload, setRuntimePayload] = useState<BundleListPayload | undefined>(undefined);
+  const [runtimeUnavailable, setRuntimeUnavailable] = useState<
+    { message: string; upstream?: LocalModelsUpstreamFailure } | undefined
+  >(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [errorUpstream, setErrorUpstream] = useState<LocalModelsUpstreamFailure | undefined>(undefined);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -278,17 +397,29 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
   const refresh = async (): Promise<void> => {
     setActionError(null);
     setPhase((prev) => (prev === 'available' ? 'available' : 'loading'));
-    const outcome = await api.settings.localModels.listOutcome(SERVICE_ID);
-    if (outcome.kind === 'available') {
+    try {
+      const list = await api.settings.imageGenerationBundles.list();
+      setCanonicalDefinitions(list.items);
       setPhase('available');
-      setPayload(outcome.payload as BundleListPayload);
       setErrorMessage(undefined);
       setErrorUpstream(undefined);
-    } else {
+    } catch (e) {
       setPhase('error');
-      setPayload(undefined);
-      setErrorMessage(outcome.message);
-      setErrorUpstream(outcome.upstream);
+      setCanonicalDefinitions([]);
+      setRuntimePayload(undefined);
+      setRuntimeUnavailable(undefined);
+      setErrorMessage(e instanceof Error ? e.message : 'Failed to load bundle definitions.');
+      setErrorUpstream(undefined);
+      return;
+    }
+
+    const outcome = await api.settings.localModels.listOutcome(SERVICE_ID);
+    if (outcome.kind === 'available') {
+      setRuntimePayload(outcome.payload as BundleListPayload);
+      setRuntimeUnavailable(undefined);
+    } else {
+      setRuntimePayload(undefined);
+      setRuntimeUnavailable({ message: outcome.message, upstream: outcome.upstream });
     }
   };
 
@@ -325,13 +456,22 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
     });
   }, [activeOperation, onDownloadOperationChange]);
 
-  const bundles = useMemo(() => payload?.items ?? [], [payload]);
-  const engine = payload?.engine;
+  const bundles = useMemo(() => {
+    const runtimeById = new Map((runtimePayload?.items ?? []).map((item) => [item.bundleId, item]));
+    const selectedBundleId =
+      runtimePayload?.selectedBundleId
+      ?? runtimePayload?.activeBundleId
+      ?? null;
+    return canonicalDefinitions.map((definition) =>
+      mergeDefinitionWithRuntime(definition, runtimeById.get(definition.bundleId), selectedBundleId)
+    );
+  }, [canonicalDefinitions, runtimePayload]);
+  const engine = runtimePayload?.engine;
   const engineAlive = Boolean(engine?.processAlive);
-  const loadedBundleId = payload?.loadedBundleId ?? engine?.loadedBundleId ?? null;
+  const loadedBundleId = runtimePayload?.loadedBundleId ?? engine?.loadedBundleId ?? null;
   const selectedBundleId =
-    payload?.selectedBundleId
-    ?? payload?.activeBundleId
+    runtimePayload?.selectedBundleId
+    ?? runtimePayload?.activeBundleId
     ?? null;
 
   useEffect(() => {
@@ -469,8 +609,9 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
     setBundleDialogPrefill(null);
     setBundleDialogLoading(true);
     try {
-      const details = (await api.settings.localModels.get(SERVICE_ID, bundle.bundleId)) as BundleListItem;
-      setBundleDialogItem(details);
+      const definition = await api.settings.imageGenerationBundles.get(bundle.bundleId);
+      const runtimeItem = bundles.find((item) => item.bundleId === bundle.bundleId);
+      setBundleDialogItem(mergeDefinitionWithRuntime(definition, runtimeItem, selectedBundleId));
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Failed to load bundle details.');
     } finally {
@@ -489,25 +630,13 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
     setActionError(null);
     setExportingBundleId(bundleId);
     try {
-      const details = (await api.settings.localModels.get(SERVICE_ID, bundleId)) as BundleListItem;
-      if (!hasBundleDefinition(details)) {
+      const definition = await api.settings.imageGenerationBundles.export(bundleId);
+      if (!hasCanonicalBundleDefinition(definition)) {
         throw new Error(
           `Bundle "${bundleId}" does not have a complete saved definition yet. Open Edit, save the recipe once, then try download definition again.`
         );
       }
-
-      const form = buildDownloadFormFromBundle(details);
-      const definition = {
-        schemaVersion: 1,
-        bundleId: form.bundleId,
-        revision: form.revision || undefined,
-        roles: {
-          diffusion: { repo: form.diffusionRepo, file: form.diffusionFile },
-          vae: { repo: form.vaeRepo, file: form.vaeFile },
-          textEncoder: { repo: form.textEncoderRepo, file: form.textEncoderFile },
-        },
-      };
-      triggerJsonDownload(bundleDefinitionFilename(form.bundleId), JSON.stringify(definition, null, 2));
+      triggerJsonDownload(bundleDefinitionFilename(definition.bundleId), JSON.stringify(definition, null, 2));
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Failed to download bundle definition.');
     } finally {
@@ -532,15 +661,22 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
     try {
       const text = await file.text();
       const parsed = parseBundleDefinitionUpload(text);
+      const definition = downloadFormToDefinition(parsed);
+      await api.settings.imageGenerationBundles.import(definition);
       await openBundleDialog('create', undefined, { prefill: parsed });
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Failed to upload bundle definition.');
     }
   };
 
-  const handleDownload = async (form: DownloadFormValues) => {
+  const handleDownload = async (
+    form: DownloadFormValues,
+    options?: { forceRedownload?: boolean },
+  ) => {
     setActionError(null);
     try {
+      const definition = downloadFormToDefinition(form);
+      await api.settings.imageGenerationBundles.upsert(definition.bundleId, definition);
       const body: Record<string, unknown> = {
         bundle_id: form.bundleId.trim(),
         diffusion_repo: form.diffusionRepo.trim(),
@@ -549,9 +685,15 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
         vae_file: form.vaeFile.trim(),
         text_encoder_repo: form.textEncoderRepo.trim(),
         text_encoder_file: form.textEncoderFile.trim(),
+        sampling_steps: Number(form.samplingSteps),
+        sampling_cfg_scale: Number(form.samplingCfgScale),
+        sampling_method: form.samplingMethod.trim(),
       };
       if (form.revision.trim()) {
         body.revision = form.revision.trim();
+      }
+      if (options?.forceRedownload) {
+        body.force_redownload = true;
       }
       const op = (await api.settings.localModels.startDownload(SERVICE_ID, body)) as OperationState;
       closeBundleDialog();
@@ -619,16 +761,28 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
         upstream={errorUpstream}
         onRefresh={phase === 'available' || phase === 'error' ? () => void refresh() : undefined}
       >
-        {payload?.modelDir ? (
+        {runtimePayload?.modelDir ? (
           <p className="text-xs text-gray-500">
-            Model directory on the SD container: <span className="font-mono">{payload.modelDir}</span>
+            Model directory on the SD container: <span className="font-mono">{runtimePayload.modelDir}</span>
           </p>
         ) : null}
 
-        <EngineStatusPanel
-          engine={engine}
-          loadedBundleId={loadedBundleId}
-        />
+        {runtimeUnavailable ? (
+          <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+            <p className="font-semibold">Local runtime unavailable</p>
+            <p className="mt-1">
+              Bundle recipes are loaded from API settings. File readiness and engine status will update when the SD
+              service responds.
+            </p>
+          </div>
+        ) : null}
+
+        {runtimePayload ? (
+          <EngineStatusPanel
+            engine={engine}
+            loadedBundleId={loadedBundleId}
+          />
+        ) : null}
 
         {activeOperation ? (
           <DownloadOperationStatus
@@ -661,7 +815,7 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
               {bundles.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-3 py-4 text-center text-sm text-gray-500">
-                    No bundles installed. Click <span className="font-medium">Download bundle</span> to fetch one.
+                    No bundles configured. Click <span className="font-medium">Add bundle</span> to define one.
                   </td>
                 </tr>
               ) : null}
@@ -712,15 +866,16 @@ export function ImageBundleManager({ enabled, onDownloadOperationChange, onRunti
                         {b.active ? (
                           <span
                             className="inline-flex items-center rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800"
-                            title="This bundle is marked active on disk and will be loaded on the next /admin/load."
+                            title="This bundle is selected in ServiceModes for local image generation."
                           >
-                            Active
+                            Selected
                           </span>
-                        ) : !bundleOperationBusy && b.complete ? (
+                        ) : null}
+                        {!bundleOperationBusy && b.complete ? (
                           <span className="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
                             Ready
                           </span>
-                        ) : !bundleOperationBusy ? (
+                        ) : !bundleOperationBusy && !b.complete ? (
                           <span className="inline-flex items-center rounded bg-red-100 px-2 py-0.5 text-xs text-red-800">
                             Incomplete
                           </span>
@@ -1076,12 +1231,13 @@ function DownloadBundleDialog({
   prefill: DownloadFormValues | null;
   loadingBundle: boolean;
   onClose: () => void;
-  onSubmit: (values: DownloadFormValues) => Promise<void>;
+  onSubmit: (values: DownloadFormValues, options?: { forceRedownload?: boolean }) => Promise<void>;
 }) {
   const [form, setForm] = useState<DownloadFormValues>(EMPTY_DOWNLOAD_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [advancedMode, setAdvancedMode] = useState(false);
+  const [forceRedownload, setForceRedownload] = useState(false);
   const readOnly = mode === 'view';
   const title =
     mode === 'create'
@@ -1104,6 +1260,7 @@ function DownloadBundleDialog({
       }
       setLocalError(null);
       setSubmitting(false);
+      setForceRedownload(false);
       // Default to the browse-first picker flow for new bundles; edit mode
       // starts in free-text because the operator is usually tweaking an
       // existing recipe and the repo file listing may not match anymore.
@@ -1131,6 +1288,9 @@ function DownloadBundleDialog({
       ['vaeFile', 'VAE file'],
       ['textEncoderRepo', 'Text encoder repo'],
       ['textEncoderFile', 'Text encoder file'],
+      ['samplingSteps', 'Sampling steps'],
+      ['samplingCfgScale', 'CFG scale'],
+      ['samplingMethod', 'Sampling method'],
     ];
     for (const [key, label] of required) {
       if (!form[key].trim()) {
@@ -1152,10 +1312,20 @@ function DownloadBundleDialog({
         return;
       }
     }
+    const parsedSteps = Number(form.samplingSteps);
+    if (!Number.isInteger(parsedSteps) || parsedSteps <= 0) {
+      setLocalError('Sampling steps must be a positive integer.');
+      return;
+    }
+    const parsedCfgScale = Number(form.samplingCfgScale);
+    if (!Number.isFinite(parsedCfgScale) || parsedCfgScale <= 0) {
+      setLocalError('CFG scale must be a positive number.');
+      return;
+    }
     setSubmitting(true);
     setLocalError(null);
     try {
-      await onSubmit(form);
+      await onSubmit(form, mode === 'edit' && forceRedownload ? { forceRedownload: true } : undefined);
     } catch (e) {
       setLocalError(e instanceof Error ? e.message : 'Failed to start download.');
     } finally {
@@ -1213,15 +1383,30 @@ function DownloadBundleDialog({
               </>
             )
             : mode === 'edit'
-            ? 'Editing reuses the same bundle id. Only roles whose repo, file, or revision changed are re-downloaded; unchanged files on disk are kept. Use Delete bundle to remove everything and start over.'
+            ? 'Editing reuses the same bundle id. Files already on disk with the exact filename are kept unless you check Re-download files. Only missing or changed roles are fetched from Hugging Face.'
             : 'Read-only view of the bundle recipe and role readiness on disk.'}
         </p>
+        {mode === 'edit' && !readOnly ? (
+          <label className="flex items-start gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={forceRedownload}
+              onChange={(event) => setForceRedownload(event.target.checked)}
+              disabled={submitting || loadingBundle}
+            />
+            <span>
+              <span className="font-semibold">Re-download files even if already on disk.</span>{' '}
+              Use after a failed or corrupt download. Leave unchecked when the correct file is already on disk (for example after fixing a filename typo).
+            </span>
+          </label>
+        ) : null}
         {mode !== 'create' && bundle ? (
           <div className="rounded border border-gray-200 bg-gray-50 p-2 text-[11px] text-gray-700">
             <p className="font-semibold text-gray-800">Current bundle state</p>
             <div className="mt-1 space-y-0.5">
               <div>
-                Active: <span className="font-medium">{bundle.active ? 'Yes' : 'No'}</span>
+                Active: <span className="font-medium">{bundle.active ? 'Yes (selected in ServiceModes)' : 'No'}</span>
               </div>
               <div>
                 Loaded: <span className="font-medium">{bundle.loaded ? 'Yes' : 'No'}</span>
@@ -1259,7 +1444,7 @@ function DownloadBundleDialog({
           label="Bundle id"
           hint={
             mode === 'create'
-              ? 'A local name you pick to identify this bundle on disk (e.g. flux2-klein-9b-q5).'
+              ? 'A local name you pick to identify this bundle on disk (e.g. flux2-klein-9b).'
               : 'Bundle id is fixed when reading or editing an existing bundle.'
           }
           value={form.bundleId}
@@ -1375,6 +1560,30 @@ function DownloadBundleDialog({
             </div>
           )}
 
+        <Field
+          label="Sampling steps"
+          hint="Per-bundle step count used for this model family."
+          value={form.samplingSteps}
+          onChange={(v) => setForm({ ...form, samplingSteps: v })}
+          dataField="samplingSteps"
+          disabled={readOnly || loadingBundle || submitting}
+        />
+        <Field
+          label="CFG scale"
+          hint="Per-bundle CFG scale (use model-recommended value)."
+          value={form.samplingCfgScale}
+          onChange={(v) => setForm({ ...form, samplingCfgScale: v })}
+          dataField="samplingCfgScale"
+          disabled={readOnly || loadingBundle || submitting}
+        />
+        <Field
+          label="Sampling method"
+          hint="Per-bundle sampler method from the bundle definition."
+          value={form.samplingMethod}
+          onChange={(v) => setForm({ ...form, samplingMethod: v })}
+          dataField="samplingMethod"
+          disabled={readOnly || loadingBundle || submitting}
+        />
         <Field
           label="Revision (optional)"
           hint="Hugging Face revision / branch. Blank uses the default branch."

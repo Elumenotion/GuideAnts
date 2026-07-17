@@ -95,7 +95,37 @@ fi
 
 ARGS=()
 ROUTER_MODE=0
-if [ -n "$GA_LLAMA_MODELS_PRESET" ]; then
+ROUTER_CANONICAL="${GA_LLAMA_MODELS_PRESET:-/models-local/router-models.ini}"
+ROUTER_RUNTIME="${GA_LLAMA_MODELS_RUNTIME_PRESET:-}"
+if [ -z "$ROUTER_RUNTIME" ]; then
+    case "$ROUTER_CANONICAL" in
+        *.ini) ROUTER_RUNTIME="${ROUTER_CANONICAL%.ini}.runtime.ini" ;;
+        *) ROUTER_RUNTIME="${ROUTER_CANONICAL}.runtime.ini" ;;
+    esac
+fi
+if [ -f "$ROUTER_CANONICAL" ]; then
+    PYTHONPATH="/app/lib:/app/llama-admin-service${PYTHONPATH:+:$PYTHONPATH}" python3 - "$ROUTER_CANONICAL" "$ROUTER_RUNTIME" <<'PY'
+import sys
+
+from guideants_hf.router_mmproj import materialize_router_ini_text
+import llama_router_ini as router_ini
+
+canonical_path, runtime_path = sys.argv[1], sys.argv[2]
+with open(canonical_path, "r", encoding="utf-8") as handle:
+    canonical = handle.read()
+runtime = materialize_router_ini_text(
+    canonical,
+    parse_router_ini=router_ini.parse_router_ini,
+    serialize_router_ini_for_runtime=router_ini.serialize_router_ini_for_runtime,
+)
+with open(runtime_path, "w", encoding="utf-8", newline="\n") as handle:
+    handle.write(runtime)
+PY
+fi
+if [ -f "$ROUTER_RUNTIME" ]; then
+    ARGS+=(--models-preset "$ROUTER_RUNTIME")
+    ROUTER_MODE=1
+elif [ -n "$GA_LLAMA_MODELS_PRESET" ]; then
     ARGS+=(--models-preset "$GA_LLAMA_MODELS_PRESET")
     ROUTER_MODE=1
 fi

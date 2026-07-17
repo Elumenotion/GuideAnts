@@ -27,14 +27,14 @@ public sealed class RetentionCleanupHandler : JobHandlerBase<RetentionCleanupJob
 
     public override string JobType => nameof(RetentionCleanupJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(RetentionCleanupJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(RetentionCleanupJob payload, CancellationToken cancellationToken)
     {
         // Respect the enabled config — if disabled, drain the job without executing.
         var enabled = _configuration.GetValue<bool>("BackgroundJobs:JobTypes:RetentionCleanup:Enabled");
         if (!enabled)
         {
             Logger.LogInformation("RetentionCleanup is disabled in configuration, skipping job for guide {GuideId}", payload.PublishedGuideId);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
@@ -46,7 +46,7 @@ public sealed class RetentionCleanupHandler : JobHandlerBase<RetentionCleanupJob
             .FirstOrDefaultAsync(g => g.Id == payload.PublishedGuideId, cancellationToken);
         if (guide is null || guide.RetentionPeriod is null)
         {
-            return true; // nothing to do
+            return JobExecutionResult.Success(); // nothing to do
         }
 
         // Cutoff is fixed at job start time. Retention 0 = delete conversations and files at least one hour older than job start (cutoff = startedAt - 1h). Otherwise cutoff = startedAt - N days. Oldest conversations are always deleted first (ordering in DeleteConversationsBottomUpAsync).
@@ -59,7 +59,7 @@ public sealed class RetentionCleanupHandler : JobHandlerBase<RetentionCleanupJob
         if (notebook == null)
         {
             Logger.LogWarning("Notebook {NotebookId} not found for retention cleanup", notebookId);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         var projectSlug = await db.Projects
@@ -120,7 +120,7 @@ public sealed class RetentionCleanupHandler : JobHandlerBase<RetentionCleanupJob
             totalConversationsDeleted,
             oldFileCount,
             elapsedMs);
-        return true;
+        return JobExecutionResult.Success();
     }
 
     // ─────────────────────────────────────────────────────────────────────

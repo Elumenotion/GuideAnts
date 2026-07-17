@@ -124,12 +124,12 @@ updated_at_utc = 2026-07-12T19:00:00Z
 
 [ImageGeneration]
 enabled = off
-bundle_id = flux2-klein-4b-q4ks
+bundle_id = flux2-klein-4b
 """
         )
         reserialized = serialize_warmup_desired_ini(document)
         self.assertIn("enabled = off", reserialized)
-        self.assertIn("bundle_id = flux2-klein-4b-q4ks", reserialized)
+        self.assertIn("bundle_id = flux2-klein-4b", reserialized)
         self.assertIsNone(section_execution_ref("ImageGeneration", document.sections["ImageGeneration"]))
 
     def test_legacy_model_id_still_validates_and_loads_via_model_id(self) -> None:

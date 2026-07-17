@@ -1,5 +1,6 @@
 using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
+using GuideAntsApi.BackgroundJobs.Scheduling;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Scheduling;

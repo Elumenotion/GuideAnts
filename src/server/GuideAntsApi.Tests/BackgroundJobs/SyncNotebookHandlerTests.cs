@@ -36,9 +36,9 @@ public sealed class SyncNotebookHandlerTests
                 BackgroundJobTestHelpers.CreateConfiguration(storageRoot),
                 queue);
 
-            var success = await handler.HandleAsync(new SyncNotebookJob(notebookId), CancellationToken.None);
+            var result = await handler.HandleAsync(new SyncNotebookJob(notebookId), CancellationToken.None);
 
-            success.Should().BeTrue();
+            result.IsSuccess.Should().BeTrue();
             await using var verify = new ApplicationDbContext(options);
             var files = await verify.NotebookFiles.Where(f => f.NotebookId == notebookId).ToListAsync();
             files.Should().ContainSingle(f => f.RelativePath == "notes.md");
@@ -67,8 +67,8 @@ public sealed class SyncNotebookHandlerTests
                 BackgroundJobTestHelpers.CreateConfiguration(storageRoot),
                 new BackgroundJobTestHelpers.CapturingJobQueueService());
 
-            var success = await handler.HandleAsync(new SyncNotebookJob(Guid.NewGuid()), CancellationToken.None);
-            success.Should().BeTrue();
+            var result = await handler.HandleAsync(new SyncNotebookJob(Guid.NewGuid()), CancellationToken.None);
+            result.IsSuccess.Should().BeTrue();
         }
         finally
         {

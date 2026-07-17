@@ -35,6 +35,14 @@ class VisionTokenPresetTests(unittest.TestCase):
         self.assertNotIn("image-min-tokens", preset)
         self.assertNotIn("image-max-tokens", preset)
 
+    def test_no_mmproj_skips_qwen_vision_token_preset(self) -> None:
+        preset = apply_alias_vision_token_preset(
+            "qwen3.6-35b-a3b",
+            {"ctx-size": "32768", "no-mmproj": ""},
+        )
+        self.assertNotIn("image-min-tokens", preset)
+        self.assertEqual(preset["ctx-size"], "32768")
+
     def test_normalize_router_ini_text_rewrites_sections(self) -> None:
         source = """version = 1
 
@@ -50,9 +58,10 @@ mmproj = /models-local/llama/qwen/mmproj.gguf
 ctx-size = 32768
 """
         normalized = normalize_router_ini_text(source)
+        gemma_section = normalized.split("[gemma-4-E4B-it-GGUF]")[1].split("[qwen3.6-35b-a3b]")[0]
         self.assertIn("image-min-tokens = 280", normalized)
         self.assertIn("image-max-tokens = 280", normalized)
-        self.assertNotIn("image-min-tokens = 1024", normalized)
+        self.assertNotIn("image-min-tokens = 1024", gemma_section)
         self.assertIn("[qwen3.6-35b-a3b]", normalized)
         qwen_section = normalized.split("[qwen3.6-35b-a3b]")[1]
         self.assertIn("image-min-tokens = 1024", qwen_section)

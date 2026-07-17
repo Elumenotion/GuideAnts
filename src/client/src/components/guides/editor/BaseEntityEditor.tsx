@@ -66,7 +66,6 @@ interface FormData {
   crewMemberIds: string[]; // Only used for guides
   sandboxWireApiConfig: SandboxWireApiConfigDto;
   maxToolCallsPerTurn?: number;
-  maxToolRoundsPerTurn?: number;
   crewMemberLimitById: Record<string, number | null | undefined>;
   crewMemberInvocationLimits: Record<string, number | undefined>;
 }
@@ -662,7 +661,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           samplingOverrides: {},
           sandboxWireApiConfig: data.sandboxWireApiConfig ?? {},
           maxToolCallsPerTurn: data.maxToolCallsPerTurn ?? undefined,
-          maxToolRoundsPerTurn: data.maxToolRoundsPerTurn ?? undefined,
           crewMemberLimitById: Object.fromEntries(
             data.crews
               .flatMap((crew) => crew.members)
@@ -706,7 +704,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
           crewMemberIds: [],
           sandboxWireApiConfig: {},
           maxToolCallsPerTurn: data.maxToolCallsPerTurn ?? undefined,
-          maxToolRoundsPerTurn: data.maxToolRoundsPerTurn ?? undefined,
           crewMemberLimitById: {},
           crewMemberInvocationLimits: {},
         });
@@ -873,7 +870,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             crewMemberIds: formData.crewMemberIds,
             sandboxWireApiConfig: formData.sandboxWireApiConfig,
             maxToolCallsPerTurn: formData.maxToolCallsPerTurn ?? null,
-            maxToolRoundsPerTurn: formData.maxToolRoundsPerTurn ?? null,
             crewMemberLimits: buildCrewMemberLimitsPayload(
               formData.crewMemberIds,
               formData.crewMemberInvocationLimits,
@@ -909,7 +905,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             skills: isGuide ? skillsToSave : undefined,
             conversationStarters: formData.conversationStarters,
             maxToolCallsPerTurn: formData.maxToolCallsPerTurn ?? null,
-            maxToolRoundsPerTurn: formData.maxToolRoundsPerTurn ?? null,
           };
 
           await api.guides.assistants.update(entityId, updateDto);
@@ -950,7 +945,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             crewMemberIds: formData.crewMemberIds,
             sandboxWireApiConfig: formData.sandboxWireApiConfig,
             maxToolCallsPerTurn: formData.maxToolCallsPerTurn ?? null,
-            maxToolRoundsPerTurn: formData.maxToolRoundsPerTurn ?? null,
             crewMemberLimits: buildCrewMemberLimitsPayload(
               formData.crewMemberIds,
               formData.crewMemberInvocationLimits,
@@ -985,7 +979,6 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             files: formData.newFiles.length > 0 ? formData.newFiles : undefined,
             conversationStarters: formData.conversationStarters,
             maxToolCallsPerTurn: formData.maxToolCallsPerTurn ?? null,
-            maxToolRoundsPerTurn: formData.maxToolRoundsPerTurn ?? null,
           };
 
           const newAssistant = await api.guides.assistants.create(createDto);
@@ -1239,13 +1232,11 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
               crewMemberIds={formData.crewMemberIds}
               sandboxWireApiConfig={formData.sandboxWireApiConfig}
               maxToolCallsPerTurn={formData.maxToolCallsPerTurn}
-              maxToolRoundsPerTurn={formData.maxToolRoundsPerTurn}
               onSelectedToolIdsChange={(selectedToolIds) => updateForm({ selectedToolIds })}
               onCustomToolsChange={(customTools) => updateForm({ customTools })}
               onEnvironmentVariablesChange={(environmentVariables) => updateForm({ environmentVariables })}
               onSandboxWireApiConfigChange={(sandboxWireApiConfig) => updateForm({ sandboxWireApiConfig })}
               onMaxToolCallsPerTurnChange={(maxToolCallsPerTurn) => updateForm({ maxToolCallsPerTurn })}
-              onMaxToolRoundsPerTurnChange={(maxToolRoundsPerTurn) => updateForm({ maxToolRoundsPerTurn })}
               onOpenApiValidationChange={setHasValidationErrors}
               onToolLimitValidationChange={setHasToolLimitErrors}
               onDirtyChange={() => setIsDirty(true)}

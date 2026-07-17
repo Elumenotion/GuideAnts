@@ -6,22 +6,26 @@ using Microsoft.EntityFrameworkCore;
 
 namespace GuideAntsApi.Services.Conversations.Streaming;
 
-public sealed class PublishedConversationStreamPolicy : IConversationStreamPolicy
+public sealed class PublishedConversationStreamPolicy : ConversationStreamPolicyBase
 {
     private readonly IServiceScopeFactory _scopeFactory;
 
-    public PublishedConversationStreamPolicy(IServiceScopeFactory scopeFactory)
+    public PublishedConversationStreamPolicy(
+        IServiceScopeFactory scopeFactory,
+        ConversationStreamLockCoordinator lockCoordinator,
+        ILogger<PublishedConversationStreamPolicy> logger)
+        : base(lockCoordinator, logger)
     {
         _scopeFactory = scopeFactory;
     }
 
-    public ConversationUsageMode UsageMode => ConversationUsageMode.Published;
+    public override ConversationUsageMode UsageMode => ConversationUsageMode.Published;
 
-    public bool SupportsExternalToolResume => true;
+    public override bool SupportsExternalToolResume => true;
 
-    public bool UsesProgressThrottling => false;
+    public override bool UsesProgressThrottling => false;
 
-    public async Task<StreamUserIdentity> ResolveUserIdentityAsync(Guid? internalUserId, string? externalUserIdentity, CancellationToken ct)
+    public override async Task<StreamUserIdentity> ResolveUserIdentityAsync(Guid? internalUserId, string? externalUserIdentity, CancellationToken ct)
     {
         if (internalUserId.HasValue)
         {
@@ -43,27 +47,16 @@ public sealed class PublishedConversationStreamPolicy : IConversationStreamPolic
         return new StreamUserIdentity(null, "User", externalUserIdentity);
     }
 
-    public ConversationFileUrlContext BuildFileUrlContext(
-        NotebookConversation conversation,
-        string? publisherId,
-        string? hostUrl) =>
-        new(
-            conversation.Notebook.ProjectId,
-            conversation.NotebookId,
-            conversation.Id,
-            publisherId,
-            hostUrl);
-
-    public string SanitizeAssistantContent(
+    public override string SanitizeAssistantContent(
         string content,
         IDictionary<string, string> filenameUrlMap,
         ConversationFileUrlContext ctx) =>
         AssistantContentSanitizer.SanitizePublishedAssistantContent(content, filenameUrlMap, ctx);
 
-    public string SanitizeToolContent(string content, ConversationFileUrlContext ctx) =>
+    public override string SanitizeToolContent(string content, ConversationFileUrlContext ctx) =>
         AssistantContentSanitizer.ConvertSandboxUrlsToPublished(content, ctx);
 
-    public void UpdateFilenameUrlMapFromToolMessage(
+    public override void UpdateFilenameUrlMapFromToolMessage(
         string sanitizedToolContent,
         ConversationFileUrlContext ctx,
         IDictionary<string, string> filenameUrlMap,
@@ -103,35 +96,6 @@ public sealed class PublishedConversationStreamPolicy : IConversationStreamPolic
         }
     }
 
-    public Task<IStreamLockHandle> TryAcquireStreamAsync(
-        Guid conversationId,
-        StreamUserIdentity user,
-        CancellationToken ct) =>
-        Task.FromResult<IStreamLockHandle>(NoOpStreamLockHandle.Instance);
-
-    public Task OnTurnCreatedAsync(Guid conversationId, StreamTurnCreatedInfo info, CancellationToken ct) =>
-        Task.CompletedTask;
-
-    public Task OnStreamingStartedAsync(Guid conversationId, StreamStreamingStartedInfo info, CancellationToken ct) =>
-        Task.CompletedTask;
-
-    public Task OnUnlockAsync(Guid conversationId, CancellationToken ct) =>
-        Task.CompletedTask;
-
-    public Task OnCompleteAsync(Guid conversationId, CancellationToken ct) =>
-        Task.CompletedTask;
-
-    public Task BroadcastStreamingProgressAsync(
-        Guid conversationId,
-        StreamUserIdentity user,
-        int contentLength,
-        int tokensProcessed,
-        CancellationToken ct) =>
-        Task.CompletedTask;
-
-    public Task BroadcastEventAsync(Guid conversationId, StreamingEvent ev, CancellationToken ct) =>
-        Task.CompletedTask;
-
     private static void filenameToPublishedUrl(
         IDictionary<string, string> filenameUrlMap,
         ConversationFileUrlContext ctx,
@@ -139,14 +103,5 @@ public sealed class PublishedConversationStreamPolicy : IConversationStreamPolic
         string relativePath)
     {
         filenameUrlMap[filename] = AssistantContentSanitizer.BuildPublishedFileUrl(ctx, relativePath);
-    }
-
-    private sealed class NoOpStreamLockHandle : IStreamLockHandle
-    {
-        public static readonly NoOpStreamLockHandle Instance = new();
-
-        public bool ConversationLockEventSent => false;
-
-        public Task<bool> ReleaseAsync(CancellationToken ct) => Task.FromResult(false);
     }
 }

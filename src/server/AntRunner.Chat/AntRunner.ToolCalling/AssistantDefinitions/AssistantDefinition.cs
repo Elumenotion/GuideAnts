@@ -143,10 +143,4 @@ public class AssistantDefinition
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxToolCallsPerTurn { get; set; }
 
-    /// <summary>
-    /// Max LLM rounds with tool_calls in one ThreadRun. Null = unlimited.
-    /// </summary>
-    [JsonPropertyName("max_tool_rounds_per_turn")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? MaxToolRoundsPerTurn { get; set; }
 }

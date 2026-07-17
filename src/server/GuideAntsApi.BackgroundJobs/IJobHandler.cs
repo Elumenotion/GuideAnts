@@ -6,7 +6,7 @@ namespace GuideAntsApi.BackgroundJobs;
 public interface IJobHandler
 {
     string JobType { get; }
-    Task<bool> HandleAsync(string payloadJson, CancellationToken cancellationToken);
+    Task<JobExecutionResult> HandleAsync(string payloadJson, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -15,6 +15,5 @@ public interface IJobHandler
 /// <typeparam name="TPayload">The payload type for this job</typeparam>
 public interface IJobHandler<TPayload> : IJobHandler
 {
-    Task<bool> HandleAsync(TPayload payload, CancellationToken cancellationToken);
+    Task<JobExecutionResult> HandleAsync(TPayload payload, CancellationToken cancellationToken);
 }
-

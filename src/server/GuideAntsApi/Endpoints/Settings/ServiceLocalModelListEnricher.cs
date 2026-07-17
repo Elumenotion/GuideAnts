@@ -71,7 +71,8 @@ internal static class ServiceLocalModelListEnricher
         try
         {
             var root = JsonNode.Parse(upstreamBody) as JsonObject;
-            var marker = root?["legacyMarkerBundleId"]?.GetValue<string>()?.Trim()
+            var marker = root?["activeBundleMarkerId"]?.GetValue<string>()?.Trim()
+                ?? root?["legacyMarkerBundleId"]?.GetValue<string>()?.Trim()
                 ?? root?["activeBundleId"]?.GetValue<string>()?.Trim();
             return string.IsNullOrWhiteSpace(marker) ? null : marker;
         }

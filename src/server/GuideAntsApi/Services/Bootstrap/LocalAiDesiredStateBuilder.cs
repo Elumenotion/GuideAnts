@@ -1,11 +1,14 @@
-using System.Text;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Endpoints;
+using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
+using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using System.Text;
 
 namespace GuideAntsApi.Services.Bootstrap;
 
@@ -112,6 +115,18 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
         var persistedLocalRef = await ResolvePersistedLocalModeModelRefAsync(serviceId, cancellationToken)
             .ConfigureAwait(false);
 
+        if (string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(persistedLocalRef))
+        {
+            var definition = await GetImageGenerationBundleDefinitionAsync(persistedLocalRef, cancellationToken)
+                .ConfigureAwait(false);
+            if (definition is null)
+            {
+                throw new InvalidOperationException(
+                    $"ImageGeneration bundle '{persistedLocalRef}' is not defined in API-owned bundle settings.");
+            }
+        }
+
         if (options.ServiceDesiredOverrides is not null
             && options.ServiceDesiredOverrides.TryGetValue(serviceId, out var desiredOverride)
             && !string.IsNullOrWhiteSpace(desiredOverride))
@@ -147,6 +162,18 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             loadRef: persistedLocalRef,
             routingWarm: routingWarm);
         builder.AppendLine();
+    }
+
+    private async Task<ImageGenerationBundleDefinitionDto?> GetImageGenerationBundleDefinitionAsync(
+        string bundleId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedBundleId = ImageGenerationBundleDefinitionContracts.NormalizeBundleId(bundleId);
+        using var scope = _scopeFactory.CreateScope();
+        var settingsService = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
+        return await settingsService
+            .GetImageGenerationBundleDefinitionAsync(normalizedBundleId, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static void AppendAuxiliaryExecutionPlan(
@@ -210,7 +237,9 @@ public sealed class LocalAiDesiredStateBuilder : ILocalAiDesiredStateBuilder
             var localMode = modes.FirstOrDefault(mode =>
                 string.Equals(mode.ProviderSection, localProviderSection, StringComparison.OrdinalIgnoreCase));
             return localMode?.ModelId?.Trim() is { Length: > 0 } modelId
-                ? modelId
+                ? string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)
+                    ? ImageGenerationBundleDefinitionContracts.NormalizeBundleId(modelId)
+                    : modelId
                 : null;
         }
         catch (Exception ex)

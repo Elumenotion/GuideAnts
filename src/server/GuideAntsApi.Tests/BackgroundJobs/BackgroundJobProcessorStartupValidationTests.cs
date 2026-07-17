@@ -25,12 +25,14 @@ public sealed class BackgroundJobProcessorStartupValidationTests
                 ["ConfiguredHandler"] = new() { MaxConcurrency = 1 }
             }
         }));
+        services.AddSingleton<IOptions<JobRetryOptions>>(OptionsFactory.Create(new JobRetryOptions()));
         services.AddSingleton(Mock.Of<IActiveJobExecutionRegistry>());
 
         var provider = services.BuildServiceProvider();
         var processor = new BackgroundJobProcessor(
             provider,
             provider.GetRequiredService<IOptions<JobProcessorOptions>>(),
+            provider.GetRequiredService<IOptions<JobRetryOptions>>(),
             provider.GetRequiredService<IActiveJobExecutionRegistry>(),
             NullLogger<BackgroundJobProcessor>.Instance);
 
@@ -49,7 +51,7 @@ public sealed class BackgroundJobProcessorStartupValidationTests
     {
         public string JobType { get; } = jobType;
 
-        public Task<bool> HandleAsync(string payloadJson, CancellationToken cancellationToken) =>
-            Task.FromResult(true);
+        public Task<JobExecutionResult> HandleAsync(string payloadJson, CancellationToken cancellationToken) =>
+            Task.FromResult(JobExecutionResult.Success());
     }
 }

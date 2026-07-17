@@ -233,6 +233,39 @@ public sealed class LlamaServerRuntimeClientTests
     }
 
     [TestMethod]
+    public void IsNonRetryableConnectionFailure_MatchesDnsResolutionFailure()
+    {
+        var ex = new HttpRequestException(
+            "Name or service not known (guideants-ai:80)",
+            new HttpRequestException("Name or service not known"));
+
+        LlamaServerRuntimeClient.IsNonRetryableConnectionFailure(ex).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task ListModelsAsync_DoesNotRetryDnsResolutionFailure()
+    {
+        var calls = 0;
+        var handler = new CapturingHandler(_ =>
+        {
+            calls++;
+            throw new HttpRequestException("Name or service not known (guideants-ai:80)");
+        });
+
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://localhost:8110/llama-cpp/")
+        };
+
+        var client = new LlamaServerRuntimeClient(httpClient, NullLogger<LlamaServerRuntimeClient>.Instance);
+
+        var act = async () => await client.ListModelsAsync();
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+        calls.Should().Be(1);
+    }
+
+    [TestMethod]
     public void MapRuntimeState_PrefersRouterFailedFlagOverUnloadedStatus()
     {
         var state = LlamaRuntimeInventoryService.MapRuntimeState(new LlamaModelData

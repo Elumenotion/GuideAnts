@@ -12,9 +12,9 @@ public sealed class TestJobHandlerTests
     {
         var handler = new TestJobHandler(NullLogger<TestJobHandler>.Instance);
 
-        var success = await handler.HandleAsync(new TestJob("hello", DelaySeconds: 0), CancellationToken.None);
+        var result = await handler.HandleAsync(new TestJob("hello", DelaySeconds: 0), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         handler.JobType.Should().Be("Test");
     }
 
@@ -23,9 +23,9 @@ public sealed class TestJobHandlerTests
     {
         var handler = new TestJobHandler(NullLogger<TestJobHandler>.Instance);
 
-        var success = await handler.HandleAsync(new TestJob("hello", DelaySeconds: 1), CancellationToken.None);
+        var result = await handler.HandleAsync(new TestJob("hello", DelaySeconds: 1), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
     }
 
     [TestMethod]

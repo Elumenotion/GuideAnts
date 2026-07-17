@@ -6,7 +6,8 @@ namespace GuideAntsApi.DataModel.Models;
 /// <summary>
 /// Represents a distributed lock on a conversation for multi-container collaboration.
 /// Ensures only one user can stream to a conversation at a time across all server instances.
-/// Locks automatically expire after 5 minutes to handle crashes/disconnects.
+/// Locks automatically expire after 5 minutes to handle disconnects.
+/// Process restart clears all locks during job-queue startup reconciliation.
 /// </summary>
 [Index(nameof(ExpiresAt))]
 public class ConversationLock

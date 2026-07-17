@@ -54,17 +54,15 @@ public sealed class GuidesServiceToolLimitsTests
         var service = GuidesServiceTestHelper.CreateGuidesService(context);
 
         var dto = EmptyCreateAssistant("Limited Search");
-        dto = dto with { MaxToolCallsPerTurn = 12, MaxToolRoundsPerTurn = 4 };
+        dto = dto with { MaxToolCallsPerTurn = 12 };
         var created = await service.CreateAssistantAsync(dto);
 
         var details = await service.GetAssistantAsync(created.Id);
         details.Should().NotBeNull();
         details!.MaxToolCallsPerTurn.Should().Be(12);
-        details.MaxToolRoundsPerTurn.Should().Be(4);
 
         var entity = await context.Assistants.AsNoTracking().SingleAsync(a => a.Id == created.Id);
         entity.MaxToolCallsPerTurn.Should().Be(12);
-        entity.MaxToolRoundsPerTurn.Should().Be(4);
     }
 
     [TestMethod]
@@ -85,11 +83,10 @@ public sealed class GuidesServiceToolLimitsTests
     [TestMethod]
     public void AssistantDefinition_deserializes_tool_limit_fields_from_manifest_json()
     {
-        const string json = """{"name":"Search","max_tool_calls_per_turn":12,"max_tool_rounds_per_turn":3}""";
+        const string json = """{"name":"Search","max_tool_calls_per_turn":12}""";
         var definition = System.Text.Json.JsonSerializer.Deserialize<AssistantDefinition>(json);
         definition.Should().NotBeNull();
         definition!.MaxToolCallsPerTurn.Should().Be(12);
-        definition.MaxToolRoundsPerTurn.Should().Be(3);
     }
 
     [TestMethod]

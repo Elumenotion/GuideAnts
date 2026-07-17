@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Services;
 using GuideAntsApi.DataModel;
@@ -26,9 +27,10 @@ public sealed class TranscribeNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, new Mock<ITranscriptionAdapter>().Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
 
-        var success = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeFalse();
+        result.IsSuccess.Should().BeFalse();
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
         (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Failed);
     }
 
@@ -45,9 +47,9 @@ public sealed class TranscribeNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, transcription.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
 
-        var success = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Skipped);
     }
 
@@ -65,9 +67,9 @@ public sealed class TranscribeNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, transcription.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
 
-        var success = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Skipped);
     }
 
@@ -88,9 +90,9 @@ public sealed class TranscribeNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, transcription.Object, queue, storage.Root);
 
-        var success = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         queue.Enqueued.Should().ContainSingle(e => e.JobType == "IndexNotebookMarkdownShadow");
 
         await using var verify = new ApplicationDbContext(options);
@@ -116,9 +118,9 @@ public sealed class TranscribeNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, transcription.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
 
-        var success = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Skipped);
     }
 
@@ -138,9 +140,10 @@ public sealed class TranscribeNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, transcription.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
 
-        var success = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new TranscribeNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeFalse();
+        result.IsSuccess.Should().BeFalse();
+        result.FailureClass.Should().Be(JobFailureClass.RetryableTransient);
 
         await using var verify = new ApplicationDbContext(options);
         var shadow = await verify.NotebookFileMarkdownShadows.SingleAsync(s => s.OriginalNotebookFileId == notebookFileId);

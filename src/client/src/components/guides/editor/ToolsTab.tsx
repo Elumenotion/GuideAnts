@@ -15,13 +15,11 @@ interface ToolsTabProps {
   crewMemberIds: string[];
   sandboxWireApiConfig: SandboxWireApiConfigDto;
   maxToolCallsPerTurn?: number;
-  maxToolRoundsPerTurn?: number;
   onSelectedToolIdsChange: (ids: string[]) => void;
   onCustomToolsChange: (tools: CustomToolDto[]) => void;
   onEnvironmentVariablesChange: (variables: EnvironmentVariableDto[]) => void;
   onSandboxWireApiConfigChange: (config: SandboxWireApiConfigDto) => void;
   onMaxToolCallsPerTurnChange: (value: number | undefined) => void;
-  onMaxToolRoundsPerTurnChange: (value: number | undefined) => void;
   onOpenApiValidationChange?: (hasErrors: boolean) => void;
   onToolLimitValidationChange?: (hasErrors: boolean) => void;
   onDirtyChange?: () => void;
@@ -38,13 +36,11 @@ export function ToolsTab({
   crewMemberIds,
   sandboxWireApiConfig,
   maxToolCallsPerTurn,
-  maxToolRoundsPerTurn,
   onSelectedToolIdsChange,
   onCustomToolsChange,
   onEnvironmentVariablesChange,
   onSandboxWireApiConfigChange,
   onMaxToolCallsPerTurnChange,
-  onMaxToolRoundsPerTurnChange,
   onOpenApiValidationChange,
   onToolLimitValidationChange,
   onDirtyChange,
@@ -107,9 +103,7 @@ export function ToolsTab({
           />
           <ToolExecutionLimitsSection
             maxToolCallsPerTurn={maxToolCallsPerTurn}
-            maxToolRoundsPerTurn={maxToolRoundsPerTurn}
             onMaxToolCallsPerTurnChange={onMaxToolCallsPerTurnChange}
-            onMaxToolRoundsPerTurnChange={onMaxToolRoundsPerTurnChange}
             onValidationChange={onToolLimitValidationChange}
             onDirtyChange={onDirtyChange}
           />

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using GuideAntsApi.Models.Settings;
+using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Endpoints.Settings;
 
@@ -77,6 +79,108 @@ internal static class ServiceLocalModelDownloadValidator
             }
         }
 
+        if (!TryGetPositiveInt(payload, "sampling_steps", out _))
+        {
+            return Results.BadRequest(new
+            {
+                error = "sampling_steps is required and must be a positive integer.",
+            });
+        }
+
+        if (!TryGetPositiveDouble(payload, "sampling_cfg_scale", out _))
+        {
+            return Results.BadRequest(new
+            {
+                error = "sampling_cfg_scale is required and must be a positive number.",
+            });
+        }
+
+        if (!LocalServiceAdminRouting.TryGetNonEmptyString(payload, "sampling_method", out _))
+        {
+            return Results.BadRequest(new
+            {
+                error = "sampling_method is required.",
+            });
+        }
+
+        if (payload.TryGetProperty("force_redownload", out var forceElement)
+            && forceElement.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+        {
+            return Results.BadRequest(new
+            {
+                error = "force_redownload must be a boolean when provided.",
+            });
+        }
+
         return null;
+    }
+
+    public static IResult? ValidateImportDefinition(ImageGenerationBundleDefinitionDto definition)
+    {
+        var errors = BundleDefinitionValidator.Validate(definition);
+        if (errors.Count == 0)
+        {
+            return null;
+        }
+
+        return Results.BadRequest(new { error = string.Join(' ', errors) });
+    }
+
+    internal static bool TryGetPositiveInt(JsonElement payload, string field, out int value)
+    {
+        value = 0;
+        if (!payload.TryGetProperty(field, out var element))
+        {
+            return false;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var numeric))
+        {
+            if (numeric > 0)
+            {
+                value = numeric;
+                return true;
+            }
+            return false;
+        }
+
+        if (element.ValueKind == JsonValueKind.String
+            && int.TryParse(element.GetString(), out var parsed)
+            && parsed > 0)
+        {
+            value = parsed;
+            return true;
+        }
+
+        return false;
+    }
+
+    internal static bool TryGetPositiveDouble(JsonElement payload, string field, out double value)
+    {
+        value = 0;
+        if (!payload.TryGetProperty(field, out var element))
+        {
+            return false;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetDouble(out var numeric))
+        {
+            if (numeric > 0)
+            {
+                value = numeric;
+                return true;
+            }
+            return false;
+        }
+
+        if (element.ValueKind == JsonValueKind.String
+            && double.TryParse(element.GetString(), out var parsed)
+            && parsed > 0)
+        {
+            value = parsed;
+            return true;
+        }
+
+        return false;
     }
 }

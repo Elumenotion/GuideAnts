@@ -91,6 +91,97 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         var modelOptions = await BuildSelectableChatModelOptionsAsync(orderedModels, cancellationToken)
             .ConfigureAwait(false);
 
+        var chat = await BuildChatSectionAsync(
+            notebookId,
+            conversationId,
+            orderedModels,
+            allModelOptions,
+            modelOptions,
+            cancellationToken).ConfigureAwait(false);
+
+        var image = await BuildRoutedServiceAsync(
+            RoutedServiceNames.ImageGeneration,
+            "Image Generation",
+            "image",
+            ServiceProviderIds.ImageGenerationLocalSdHttp,
+            "/admin/bundles",
+            isImage: true,
+            cancellationToken).ConfigureAwait(false);
+
+        var tts = await BuildRoutedServiceAsync(
+            RoutedServiceNames.SpeechSynthesis,
+            "Speech Synthesis",
+            "tts",
+            ServiceProviderIds.SpeechSynthesisLocalTtsHttp,
+            "/admin/models",
+            isImage: false,
+            cancellationToken).ConfigureAwait(false);
+
+        var asr = await BuildRoutedServiceAsync(
+            RoutedServiceNames.SpeechTranscription,
+            "Speech Transcription",
+            "asr",
+            ServiceProviderIds.SpeechTranscriptionLocalAsrHttp,
+            "/admin/models",
+            isImage: false,
+            cancellationToken).ConfigureAwait(false);
+
+        return new NotebookHeaderToolbarDto(
+            chat,
+            new[] { image, tts, asr },
+            generated);
+    }
+
+    public async Task<NotebookChatReadinessDto> GetChatReadinessAsync(
+        Guid notebookId,
+        Guid? conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await _db.Notebooks.AnyAsync(n => n.Id == notebookId, cancellationToken).ConfigureAwait(false))
+        {
+            throw new KeyNotFoundException("Notebook not found");
+        }
+
+        var models = await _settings.GetModelsAsync(cancellationToken).ConfigureAwait(false);
+        var orderedModels = models
+            .OrderBy(m => m.DisplayOrder ?? int.MaxValue)
+            .ThenBy(m => m.ModelId, StringComparer.Ordinal)
+            .ToList();
+        var allModelOptions = orderedModels
+            .Select(m => new NotebookToolbarModelOptionDto(
+                m.ModelId,
+                m.DisplayName,
+                m.Provider,
+                m.IsActive))
+            .ToList();
+
+        var chat = await BuildChatSectionAsync(
+            notebookId,
+            conversationId,
+            orderedModels,
+            allModelOptions,
+            modelOptions: Array.Empty<NotebookToolbarModelOptionDto>(),
+            cancellationToken).ConfigureAwait(false);
+
+        return new NotebookChatReadinessDto(
+            chat.EffectiveModelId,
+            chat.EffectiveModelDisplayName,
+            chat.EffectiveProvider,
+            chat.Blockers,
+            chat.SupportsLocalRuntimePower,
+            chat.LocalRuntimeOn,
+            chat.InProgressOperationId,
+            chat.InProgressState);
+    }
+
+    private async Task<NotebookToolbarChatDto> BuildChatSectionAsync(
+        Guid notebookId,
+        Guid? conversationId,
+        IReadOnlyList<SettingsModelDto> orderedModels,
+        IReadOnlyList<NotebookToolbarModelOptionDto> allModelOptions,
+        IReadOnlyList<NotebookToolbarModelOptionDto> modelOptions,
+        CancellationToken cancellationToken)
+    {
         string? effectiveModelId = null;
         string? effectiveModelDisplay = null;
         string? selectedAssistant = null;
@@ -165,10 +256,14 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         var llamaStatus = await _llamaRuntime
             .GetRuntimeStatusAsync(notebookId, assistantId, cancellationToken)
             .ConfigureAwait(false);
+        var effectiveProvider = effectiveModelId != null
+            ? orderedModels.FirstOrDefault(m => string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal))?.Provider
+            : null;
         var supportsLocalLlama = modelOptions.Any(m =>
             m.IsActive
             && string.Equals(m.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal));
+            && string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal))
+            || string.Equals(effectiveProvider, "llama-cpp", StringComparison.OrdinalIgnoreCase);
         var selectedLocalModelLoaded = supportsLocalLlama
             && !string.IsNullOrWhiteSpace(effectiveModelId)
             && llamaStatus.LoadedModels.Any(m => string.Equals(m.ModelId, effectiveModelId, StringComparison.Ordinal));
@@ -209,34 +304,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             }
         }
 
-        var image = await BuildRoutedServiceAsync(
-            RoutedServiceNames.ImageGeneration,
-            "Image Generation",
-            "image",
-            ServiceProviderIds.ImageGenerationLocalSdHttp,
-            "/admin/bundles",
-            isImage: true,
-            cancellationToken).ConfigureAwait(false);
-
-        var tts = await BuildRoutedServiceAsync(
-            RoutedServiceNames.SpeechSynthesis,
-            "Speech Synthesis",
-            "tts",
-            ServiceProviderIds.SpeechSynthesisLocalTtsHttp,
-            "/admin/models",
-            isImage: false,
-            cancellationToken).ConfigureAwait(false);
-
-        var asr = await BuildRoutedServiceAsync(
-            RoutedServiceNames.SpeechTranscription,
-            "Speech Transcription",
-            "asr",
-            ServiceProviderIds.SpeechTranscriptionLocalAsrHttp,
-            "/admin/models",
-            isImage: false,
-            cancellationToken).ConfigureAwait(false);
-
-        var chat = new NotebookToolbarChatDto(
+        return new NotebookToolbarChatDto(
             chatStatus,
             chatSummary,
             conversationId?.ToString(),
@@ -253,29 +321,6 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             chatBlockers,
             chatInProgressId,
             chatInProgressState);
-
-        return new NotebookHeaderToolbarDto(
-            chat,
-            new[] { image, tts, asr },
-            generated);
-    }
-
-    public async Task<NotebookChatReadinessDto> GetChatReadinessAsync(
-        Guid notebookId,
-        Guid? conversationId,
-        CancellationToken cancellationToken = default)
-    {
-        var toolbar = await GetToolbarAsync(notebookId, conversationId, cancellationToken).ConfigureAwait(false);
-        var chat = toolbar.Chat;
-        return new NotebookChatReadinessDto(
-            chat.EffectiveModelId,
-            chat.EffectiveModelDisplayName,
-            chat.EffectiveProvider,
-            chat.Blockers,
-            chat.SupportsLocalRuntimePower,
-            chat.LocalRuntimeOn,
-            chat.InProgressOperationId,
-            chat.InProgressState);
     }
 
     private async Task<IReadOnlyList<NotebookToolbarModelOptionDto>> BuildSelectableChatModelOptionsAsync(

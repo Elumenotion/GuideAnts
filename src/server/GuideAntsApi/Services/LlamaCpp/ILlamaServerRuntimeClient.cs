@@ -87,6 +87,8 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         TimeSpan.FromSeconds(5)
     ];
 
+    private static readonly TimeSpan ReadAttemptTimeout = TimeSpan.FromSeconds(3);
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<LlamaServerRuntimeClient> _logger;
 
@@ -168,6 +170,23 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         return responseContent.Contains("already running", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static bool IsNonRetryableConnectionFailure(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            var message = current.Message;
+            if (message.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("No such host is known", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("No address associated with hostname", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("could not resolve host", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private async Task<string> GetStringWithTransientRetryAsync(
         string requestPath,
         CancellationToken cancellationToken)
@@ -178,7 +197,9 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
         {
             try
             {
-                using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                attemptCts.CancelAfter(ReadAttemptTimeout);
+                using var response = await _httpClient.GetAsync(requestUri, attemptCts.Token);
                 var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
 
                 if (response.IsSuccessStatusCode)
@@ -296,10 +317,15 @@ public class LlamaServerRuntimeClient : ILlamaServerRuntimeClient
 
     private static bool ShouldRetryException(Exception ex, CancellationToken cancellationToken, int attempt)
     {
-        return attempt < TransientRetryDelays.Length
-            && !cancellationToken.IsCancellationRequested
-            && (ex is HttpRequestException { StatusCode: null }
-                || ex is TaskCanceledException);
+        if (attempt >= TransientRetryDelays.Length
+            || cancellationToken.IsCancellationRequested
+            || IsNonRetryableConnectionFailure(ex))
+        {
+            return false;
+        }
+
+        return ex is HttpRequestException { StatusCode: null }
+            || ex is TaskCanceledException;
     }
 
     private async Task DelayBeforeRetryAsync(

@@ -837,7 +837,7 @@ public sealed class GuideUsageServiceTests
     }
 
     [TestMethod]
-    public async Task GetGuideApiUsageReportAsync_Groups_by_source_endpoint_alias_provider_mode_and_status_family()
+    public async Task GetGuideApiUsageReportAsync_Groups_by_source_and_endpoint()
     {
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"guide-api-usage-group-{Guid.NewGuid():N}");
         var projectId = Guid.NewGuid();
@@ -914,9 +914,6 @@ public sealed class GuideUsageServiceTests
         report.Rows.Should().Contain(row =>
             row.SourceChannel == "wire_api" &&
             row.Endpoint == "embeddings" &&
-            row.Alias == "embeddings" &&
-            row.ProviderServiceMode == "emb-default" &&
-            row.StatusFamily == "success" &&
             row.Events == 2 &&
             row.ChargeUsd == 0.50m);
         report.Rows.Should().Contain(row => row.SourceChannel == "mcp" && row.Endpoint == "chat");

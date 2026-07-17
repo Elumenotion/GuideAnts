@@ -29,7 +29,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
 
     public override string JobType => nameof(TranscribeNotebookFileMarkdownJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(TranscribeNotebookFileMarkdownJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(TranscribeNotebookFileMarkdownJob payload, CancellationToken cancellationToken)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
@@ -41,7 +41,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
         if (shadow == null)
         {
             Logger.LogWarning("Notebook shadow not found for {Id}", payload.NotebookFileId);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Notebook shadow not found");
         }
 
         var originalFile = shadow.OriginalFile;
@@ -51,7 +51,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
             shadow.ErrorMessage = "Original file missing";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Original file missing");
         }
 
         // Resolve physical path
@@ -78,7 +78,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
             shadow.ErrorMessage = "Notebook file not found";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Notebook file not found");
         }
 
         var fileName = Path.GetFileName(originalFile.RelativePath);
@@ -90,7 +90,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
             shadow.ErrorMessage = "Unsupported file type for transcription";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         var fileInfo = new FileInfo(physicalPath);
@@ -100,7 +100,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
             shadow.ErrorMessage = "File too large";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         try
@@ -117,7 +117,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
                 shadow.ErrorMessage = "No content extracted";
                 shadow.ProcessedAt = DateTime.UtcNow;
                 await context.SaveChangesAsync(cancellationToken);
-                return true;
+                return JobExecutionResult.Success();
             }
 
             var contentHash = ComputeSha256(markdown);
@@ -144,7 +144,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
                 payload: new IndexNotebookMarkdownShadowJob(payload.NotebookFileId),
                 ct: cancellationToken);
 
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (Exception ex)
         {
@@ -153,7 +153,7 @@ public sealed class TranscribeNotebookFileMarkdownHandler : JobHandlerBase<Trans
             shadow.ErrorMessage = ex.Message;
             shadow.ProcessedAt = DateTime.UtcNow;
             try { await context.SaveChangesAsync(cancellationToken); } catch { }
-            return false;
+            return JobExecutionResult.RetryableTransient(ex.Message);
         }
     }
 

@@ -29,7 +29,7 @@ public sealed class IndexNotebookMarkdownShadowHandler : JobHandlerBase<IndexNot
 
     public override string JobType => nameof(IndexNotebookMarkdownShadowJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(IndexNotebookMarkdownShadowJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(IndexNotebookMarkdownShadowJob payload, CancellationToken cancellationToken)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
@@ -40,7 +40,7 @@ public sealed class IndexNotebookMarkdownShadowHandler : JobHandlerBase<IndexNot
         if (shadow == null || shadow.Status != DataModel.Models.MarkdownExtractionStatus.Completed || string.IsNullOrEmpty(shadow.StoragePath))
         {
             _log.LogInformation("Skipping indexing; shadow not ready for NotebookFile {Id}", payload.NotebookFileId);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         var projectId = shadow.OriginalFile.Notebook.ProjectId;
@@ -54,7 +54,7 @@ public sealed class IndexNotebookMarkdownShadowHandler : JobHandlerBase<IndexNot
                 "Skipping indexing without retry; markdown shadow file is missing for NotebookFile {Id}. Path={Path}",
                 payload.NotebookFileId,
                 storedPath);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         if (!string.Equals(storedPath, filePath, StringComparison.Ordinal))
@@ -68,7 +68,7 @@ public sealed class IndexNotebookMarkdownShadowHandler : JobHandlerBase<IndexNot
             shadow.IsIndexed = true;
             shadow.ErrorMessage = null;
             await context.SaveChangesAsync(cancellationToken);
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (FileNotFoundException ex)
         {
@@ -80,7 +80,7 @@ public sealed class IndexNotebookMarkdownShadowHandler : JobHandlerBase<IndexNot
                 "Skipping indexing without retry; markdown shadow file was missing during read for NotebookFile {Id}. Path={Path}",
                 payload.NotebookFileId,
                 filePath);
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (DirectoryNotFoundException ex)
         {
@@ -92,12 +92,12 @@ public sealed class IndexNotebookMarkdownShadowHandler : JobHandlerBase<IndexNot
                 "Skipping indexing without retry; markdown shadow directory was missing for NotebookFile {Id}. Path={Path}",
                 payload.NotebookFileId,
                 filePath);
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Hybrid indexing failed for NotebookFile {Id}", payload.NotebookFileId);
-            return false;
+            return JobExecutionResult.RetryableTransient(ex.Message);
         }
     }
 }

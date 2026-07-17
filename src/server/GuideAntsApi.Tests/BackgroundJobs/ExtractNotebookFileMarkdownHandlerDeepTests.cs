@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Options;
 using GuideAntsApi.BackgroundJobs.Services;
@@ -28,9 +29,10 @@ public sealed class ExtractNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, new Mock<IDocumentIntelligenceService>().Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
 
-        var success = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeFalse();
+        result.IsSuccess.Should().BeFalse();
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
         (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Failed);
     }
 
@@ -48,9 +50,9 @@ public sealed class ExtractNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, docIntel.Object, queue, storage.Root);
 
-        var success = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         queue.Enqueued.Should().ContainSingle(e => e.JobType == "TranscribeNotebookFileMarkdown");
         (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Pending);
     }
@@ -71,9 +73,9 @@ public sealed class ExtractNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, docIntel.Object, queue, storage.Root);
 
-        var success = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         queue.Enqueued.Should().ContainSingle(e => e.JobType == "IndexNotebookMarkdownShadow");
 
         await using var verify = new ApplicationDbContext(options);
@@ -99,9 +101,9 @@ public sealed class ExtractNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, docIntel.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
 
-        var success = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Skipped);
     }
 
@@ -120,9 +122,10 @@ public sealed class ExtractNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, docIntel.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
 
-        var success = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeFalse();
+        result.IsSuccess.Should().BeFalse();
+        result.FailureClass.Should().Be(JobFailureClass.RetryableTransient);
 
         await using var verify = new ApplicationDbContext(options);
         var shadow = await verify.NotebookFileMarkdownShadows.SingleAsync(s => s.OriginalNotebookFileId == notebookFileId);
@@ -145,9 +148,9 @@ public sealed class ExtractNotebookFileMarkdownHandlerDeepTests
 
         var handler = CreateHandler(options, docIntel.Object, new BackgroundJobTestHelpers.CapturingJobQueueService(), storage.Root);
 
-        var success = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         (await GetShadowStatusAsync(options, notebookFileId)).Should().Be(MarkdownExtractionStatus.Completed);
     }
 

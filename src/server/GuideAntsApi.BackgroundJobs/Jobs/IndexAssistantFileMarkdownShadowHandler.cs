@@ -26,7 +26,7 @@ public sealed class IndexAssistantFileMarkdownShadowHandler : JobHandlerBase<Ind
 
     public override string JobType => nameof(IndexAssistantFileMarkdownShadowJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(IndexAssistantFileMarkdownShadowJob payload, CancellationToken ct)
+    public override async Task<JobExecutionResult> HandleAsync(IndexAssistantFileMarkdownShadowJob payload, CancellationToken ct)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(ct);
 
@@ -40,7 +40,7 @@ public sealed class IndexAssistantFileMarkdownShadowHandler : JobHandlerBase<Ind
             string.IsNullOrEmpty(shadow.StoragePath))
         {
             Logger.LogInformation("Skipping indexing; shadow not ready for AssistantFile {AssistantFileId}", payload.AssistantFileId);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         var assistantId = shadow.OriginalFile.AssistantId;
@@ -54,7 +54,7 @@ public sealed class IndexAssistantFileMarkdownShadowHandler : JobHandlerBase<Ind
                 "Skipping indexing without retry; markdown shadow file is missing for AssistantFile {AssistantFileId}. Path={Path}",
                 payload.AssistantFileId,
                 storedPath);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         if (!string.Equals(storedPath, filePath, StringComparison.Ordinal))
@@ -74,7 +74,7 @@ public sealed class IndexAssistantFileMarkdownShadowHandler : JobHandlerBase<Ind
             shadow.IsIndexed = true;
             shadow.ErrorMessage = null;
             await context.SaveChangesAsync(ct);
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (FileNotFoundException ex)
         {
@@ -86,7 +86,7 @@ public sealed class IndexAssistantFileMarkdownShadowHandler : JobHandlerBase<Ind
                 "Skipping indexing without retry; markdown shadow file was missing during read for AssistantFile {AssistantFileId}. Path={Path}",
                 payload.AssistantFileId,
                 filePath);
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (DirectoryNotFoundException ex)
         {
@@ -98,12 +98,12 @@ public sealed class IndexAssistantFileMarkdownShadowHandler : JobHandlerBase<Ind
                 "Skipping indexing without retry; markdown shadow directory was missing for AssistantFile {AssistantFileId}. Path={Path}",
                 payload.AssistantFileId,
                 filePath);
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Hybrid indexing failed for AssistantFile {AssistantFileId}", payload.AssistantFileId);
-            return false;
+            return JobExecutionResult.RetryableTransient(ex.Message);
         }
     }
 }

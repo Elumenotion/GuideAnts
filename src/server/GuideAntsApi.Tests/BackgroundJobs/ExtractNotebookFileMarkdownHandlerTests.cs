@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.BackgroundJobs.Options;
 using GuideAntsApi.BackgroundJobs.Services;
@@ -19,9 +20,10 @@ public sealed class ExtractNotebookFileMarkdownHandlerTests
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"extract-nb-missing-{Guid.NewGuid():N}");
         var handler = CreateHandler(options, new Mock<IDocumentIntelligenceService>().Object, new BackgroundJobTestHelpers.CapturingJobQueueService());
 
-        var success = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(Guid.NewGuid()), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(Guid.NewGuid()), CancellationToken.None);
 
-        success.Should().BeFalse();
+        result.IsSuccess.Should().BeFalse();
+        result.FailureClass.Should().Be(JobFailureClass.PermanentMissingInput);
     }
 
     [TestMethod]
@@ -57,9 +59,9 @@ public sealed class ExtractNotebookFileMarkdownHandlerTests
         var docIntel = new Mock<IDocumentIntelligenceService>();
         var handler = CreateHandler(options, docIntel.Object, new BackgroundJobTestHelpers.CapturingJobQueueService());
 
-        var success = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
+        var result = await handler.HandleAsync(new ExtractNotebookFileMarkdownJob(notebookFileId), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
         docIntel.VerifyNoOtherCalls();
     }
 

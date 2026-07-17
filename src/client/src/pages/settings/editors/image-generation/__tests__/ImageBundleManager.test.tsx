@@ -62,6 +62,13 @@ vi.mock('../../../../../services/api', () => ({
         cancelOperation: vi.fn(),
         load: vi.fn(),
       },
+      imageGenerationBundles: {
+        list: vi.fn(),
+        get: vi.fn(),
+        export: vi.fn(),
+        upsert: vi.fn(),
+        import: vi.fn(),
+      },
     },
   },
 }));
@@ -72,46 +79,140 @@ import { startLocalOperationPoll } from '../../common/localOperationPolling';
 
 const mockStartPoll = vi.mocked(startLocalOperationPoll);
 
+let testDefinitions: { items: ReturnType<typeof canonicalDefinition>[] } = { items: [] };
+let testRuntimeOutcome:
+  | { kind: 'available'; payload: Record<string, unknown> }
+  | { kind: 'error'; message: string; upstream?: Record<string, unknown> } = {
+  kind: 'available',
+  payload: { items: [] },
+};
+const runtimeOutcomeQueue: Array<typeof testRuntimeOutcome> = [];
+
+function enqueueRuntimeOutcome(outcome: typeof testRuntimeOutcome): void {
+  runtimeOutcomeQueue.push(outcome);
+}
+
+function definitionFromRuntimeItem(item: Record<string, unknown>) {
+  const definition = (item.definition as Record<string, unknown> | undefined) ?? {};
+  const roles = (definition.roles as Record<string, unknown> | undefined) ?? {};
+  const sampling = (definition.sampling as Record<string, unknown> | undefined) ?? {};
+  return canonicalDefinition(String(item.bundleId), {
+    revision: (definition.revision as string | null | undefined) ?? null,
+    updatedAtUtc: (definition.updatedAtUtc as string | null | undefined) ?? null,
+    sampling: {
+      steps: typeof sampling.steps === 'number' ? sampling.steps : 4,
+      cfgScale: typeof sampling.cfgScale === 'number' ? sampling.cfgScale : 1.0,
+      samplingMethod: typeof sampling.samplingMethod === 'string' ? sampling.samplingMethod : 'euler',
+    },
+    roles: {
+      diffusion: (roles.diffusion as { repo: string; file: string }) ?? { repo: 'org/diffusion', file: 'diff.gguf' },
+      vae: (roles.vae as { repo: string; file: string }) ?? { repo: 'org/vae', file: 'vae.safetensors' },
+      textEncoder: (roles.textEncoder as { repo: string; file: string }) ?? { repo: 'org/text-encoder', file: 'enc.gguf' },
+    },
+  });
+}
+
+function queueBundleInventory(
+  runtimePayload: Record<string, unknown>,
+  options?: {
+    definitions?: ReturnType<typeof canonicalDefinition>[];
+    runtimeError?: { message: string; upstream?: Record<string, unknown> };
+  },
+): void {
+  const runtimeItems = Array.isArray(runtimePayload.items)
+    ? (runtimePayload.items as Array<Record<string, unknown>>)
+    : [];
+  testDefinitions = {
+    items:
+      options?.definitions
+      ?? runtimeItems.map((item) => definitionFromRuntimeItem(item)),
+  };
+  testRuntimeOutcome = options?.runtimeError
+    ? { kind: 'error', message: options.runtimeError.message, upstream: options.runtimeError.upstream }
+    : { kind: 'available', payload: runtimePayload };
+}
+
+function fillSamplingFields(): void {
+  fireEvent.change(screen.getByLabelText(/Sampling steps/i), { target: { value: '4' } });
+  fireEvent.change(screen.getByLabelText(/CFG scale/i), { target: { value: '1.0' } });
+  fireEvent.change(screen.getByLabelText(/Sampling method/i), { target: { value: 'euler' } });
+}
+
+const canonicalDefinition = (bundleId: string, overrides: Record<string, unknown> = {}) => ({
+  bundleId,
+  revision: null,
+  updatedAtUtc: '2026-04-20T00:00:00Z',
+  sampling: { steps: 4, cfgScale: 1.0, samplingMethod: 'euler' },
+  roles: {
+    diffusion: { repo: 'org/diffusion', file: 'diff.gguf' },
+    vae: { repo: 'org/vae', file: 'vae.safetensors' },
+    textEncoder: { repo: 'org/text-encoder', file: 'enc.gguf' },
+  },
+  ...overrides,
+});
+
+function mockConfiguredBundles(
+  definitions: ReturnType<typeof canonicalDefinition>[],
+  runtimePayload?: Record<string, unknown>,
+  runtimeError?: { message: string; upstream?: Record<string, unknown> },
+): void {
+  queueBundleInventory(runtimePayload ?? { items: [] }, { definitions, runtimeError });
+}
+
 describe('ImageBundleManager', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    testDefinitions = { items: [] };
+    testRuntimeOutcome = { kind: 'available', payload: { items: [] } };
+    runtimeOutcomeQueue.length = 0;
+    (api.settings.imageGenerationBundles.list as any).mockImplementation(async () => testDefinitions);
+    (api.settings.localModels.listOutcome as any).mockImplementation(async () => {
+      if (runtimeOutcomeQueue.length > 0) {
+        return runtimeOutcomeQueue.shift()!;
+      }
+      return testRuntimeOutcome;
+    });
+    (api.settings.imageGenerationBundles.get as any).mockImplementation(async (bundleId: string) =>
+      testDefinitions.items.find((item) => item.bundleId === bundleId) ?? canonicalDefinition(bundleId)
+    );
+    (api.settings.imageGenerationBundles.export as any).mockImplementation(async (bundleId: string) =>
+      testDefinitions.items.find((item) => item.bundleId === bundleId) ?? canonicalDefinition(bundleId)
+    );
+    (api.settings.imageGenerationBundles.upsert as any).mockImplementation(async (_bundleId: string, definition: unknown) => definition);
+    (api.settings.imageGenerationBundles.import as any).mockImplementation(async (definition: unknown) => definition);
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it('renders the full upstream proxy failure (target URL, status, body) when the local models call fails', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValueOnce({
-      kind: 'error',
-      message: 'Upstream http://guideants-ai:80/sd/admin/bundles returned 404 Not Found.',
-      upstream: {
-        upstreamTarget: 'http://guideants-ai:80/sd/admin/bundles',
-        upstreamStatus: 404,
-        upstreamStatusText: 'Not Found',
-        upstreamContentType: 'application/json',
-        upstreamBody: '{"detail":"Not Found"}',
-      },
-    });
+  it('shows configured bundles when local runtime is unavailable', async () => {
+    mockConfiguredBundles(
+      [canonicalDefinition('flux2-klein-4b')],
+      undefined,
+      {
+        message: 'Upstream http://guideants-ai:80/sd/admin/bundles returned 404 Not Found.',
+        upstream: {
+          upstreamTarget: 'http://guideants-ai:80/sd/admin/bundles',
+          upstreamStatus: 404,
+          upstreamStatusText: 'Not Found',
+          upstreamContentType: 'application/json',
+          upstreamBody: '{"detail":"Not Found"}',
+        },
+      }
+    );
 
     render(<ImageBundleManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Upstream http:\/\/guideants-ai:80\/sd\/admin\/bundles returned 404/i)).toBeInTheDocument();
+      expect(screen.getByText('flux2-klein-4b')).toBeInTheDocument();
     });
-    expect(screen.getByText('http://guideants-ai:80/sd/admin/bundles')).toBeInTheDocument();
-    // "404 Not Found" appears both in the message paragraph and the Status <dd>;
-    // both are legitimate, so assert at least one is present.
-    expect(screen.getAllByText(/404 Not Found/).length).toBeGreaterThan(0);
-    expect(screen.getByText('{"detail":"Not Found"}')).toBeInTheDocument();
-    // Error phase has no product UI (no Download bundle button).
-    expect(screen.queryByRole('button', { name: /Add bundle/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Local runtime unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Add bundle/i })).toBeInTheDocument();
   });
 
   it('renders each bundle with per-role status and disables activate for incomplete bundles', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         items: [
           {
@@ -135,8 +236,7 @@ describe('ImageBundleManager', () => {
             },
           },
         ],
-      },
-    });
+});
 
     render(<ImageBundleManager enabled />);
 
@@ -160,35 +260,30 @@ describe('ImageBundleManager', () => {
   it('hot-swaps the loaded bundle without showing any restart-required banner', async () => {
     // Before activation: engine is loaded with bundle-a (old weights), bundle-b is
     // complete but not yet active.
-    (api.settings.localModels.listOutcome as any)
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/sd',
-          activeBundleId: 'bundle-a',
-          loadedBundleId: 'bundle-a',
-          engine: { processAlive: true, loadedBundleId: 'bundle-a', pid: 123 },
-          items: [
-            {
-              bundleId: 'bundle-a',
-              active: true,
-              complete: true,
-              loaded: true,
-              roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
-            },
-            {
-              bundleId: 'bundle-b',
-              active: false,
-              complete: true,
-              loaded: false,
-              roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
-            },
-          ],
+    queueBundleInventory({
+      modelDir: '/models-local/sd',
+      activeBundleId: 'bundle-a',
+      loadedBundleId: 'bundle-a',
+      engine: { processAlive: true, loadedBundleId: 'bundle-a', pid: 123 },
+      items: [
+        {
+          bundleId: 'bundle-a',
+          active: true,
+          complete: true,
+          loaded: true,
+          roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
         },
-      })
-      // After activation the component refreshes; the SD service hot-swapped, so
-      // bundle-b is now both active and loaded.
-      .mockResolvedValueOnce({
+        {
+          bundleId: 'bundle-b',
+          active: false,
+          complete: true,
+          loaded: false,
+          roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
+        },
+      ],
+    });
+    (api.settings.localModels.selectActive as any).mockImplementation(async () => {
+      testRuntimeOutcome = {
         kind: 'available',
         payload: {
           modelDir: '/models-local/sd',
@@ -212,17 +307,18 @@ describe('ImageBundleManager', () => {
             },
           ],
         },
-      });
-    (api.settings.localModels.selectActive as any).mockResolvedValueOnce({
-      ok: true,
-      action: 'hot-swapped',
-      activeBundleId: 'bundle-b',
+      };
+      return {
+        ok: true,
+        action: 'hot-swapped',
+        activeBundleId: 'bundle-b',
+      };
     });
 
     render(<ImageBundleManager enabled />);
 
     // bundle-b's "Activate bundle" button is the one enabled initially.
-    await screen.findByText('bundle-b');
+    await screen.findAllByText('bundle-b');
     const rowsBefore = screen.getAllByRole('row');
     const bundleBRowBefore = rowsBefore.find((r) => r.textContent?.includes('bundle-b'));
     expect(bundleBRowBefore).toBeTruthy();
@@ -245,10 +341,7 @@ describe('ImageBundleManager', () => {
   });
 
   it('submits a download request with three (repo, file) pairs and surfaces the initial operation status', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-1',
       bundleId: 'my-bundle',
@@ -259,7 +352,7 @@ describe('ImageBundleManager', () => {
     render(<ImageBundleManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument();
+      expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Add bundle/i }));
@@ -275,6 +368,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
 
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
@@ -287,6 +381,9 @@ describe('ImageBundleManager', () => {
         vae_file: 'vae.safetensors',
         text_encoder_repo: 'org/text-enc',
         text_encoder_file: 'enc.gguf',
+        sampling_steps: 4,
+        sampling_cfg_scale: 1,
+        sampling_method: 'euler',
       });
     });
 
@@ -296,15 +393,12 @@ describe('ImageBundleManager', () => {
   });
 
   it('blocks submission when a required file field is empty', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
 
     render(<ImageBundleManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument();
+      expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Add bundle/i }));
@@ -317,6 +411,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
 
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
@@ -327,15 +422,12 @@ describe('ImageBundleManager', () => {
   });
 
   it('rejects filenames containing glob metacharacters before calling the api', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
 
     render(<ImageBundleManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument();
+      expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Add bundle/i }));
@@ -348,6 +440,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
 
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
@@ -358,9 +451,7 @@ describe('ImageBundleManager', () => {
   });
 
   it('shows row-level updating states while a bundle download is in flight', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         items: [
           {
@@ -375,8 +466,7 @@ describe('ImageBundleManager', () => {
             },
           },
         ],
-      },
-    });
+});
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-1',
       bundleId: 'bundle-a',
@@ -405,6 +495,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
@@ -420,9 +511,7 @@ describe('ImageBundleManager', () => {
   });
 
   it('opens View for an installed bundle and shows read-only recipe fields', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         items: [
           {
@@ -437,26 +526,16 @@ describe('ImageBundleManager', () => {
             },
           },
         ],
-      },
-    });
-    (api.settings.localModels.get as any).mockResolvedValueOnce({
+});
+    (api.settings.imageGenerationBundles.get as any).mockResolvedValueOnce({
       bundleId: 'bundle-a',
-      active: false,
-      complete: true,
-      loaded: false,
-      definition: {
-        revision: 'main',
-        updatedAtUtc: '2026-04-20T00:00:00Z',
-        roles: {
-          diffusion: { repo: 'org/diffusion', file: 'diff.gguf' },
-          vae: { repo: 'org/vae', file: 'vae.safetensors' },
-          textEncoder: { repo: 'org/text', file: 'enc.gguf' },
-        },
-      },
+      revision: 'main',
+      updatedAtUtc: '2026-04-20T00:00:00Z',
+      sampling: { steps: 4, cfgScale: 1.0, samplingMethod: 'euler' },
       roles: {
-        diffusion: { ready: true, path: '/models-local/sd/bundles/bundle-a/diffusion' },
-        vae: { ready: true, path: '/models-local/sd/bundles/bundle-a/vae' },
-        textEncoder: { ready: true, path: '/models-local/sd/bundles/bundle-a/text-encoder' },
+        diffusion: { repo: 'org/diffusion', file: 'diff.gguf' },
+        vae: { repo: 'org/vae', file: 'vae.safetensors' },
+        textEncoder: { repo: 'org/text', file: 'enc.gguf' },
       },
     });
 
@@ -466,7 +545,7 @@ describe('ImageBundleManager', () => {
     fireEvent.click(screen.getByRole('button', { name: /View details/i }));
 
     await waitFor(() => {
-      expect(api.settings.localModels.get).toHaveBeenCalledWith('ImageGeneration', 'bundle-a');
+      expect(api.settings.imageGenerationBundles.get).toHaveBeenCalledWith('bundle-a');
     });
 
     const diffusionRepo = await screen.findByLabelText(/Diffusion repo/i);
@@ -478,9 +557,7 @@ describe('ImageBundleManager', () => {
   });
 
   it('edits an installed bundle and re-downloads into the same bundle id', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         items: [
           {
@@ -495,25 +572,15 @@ describe('ImageBundleManager', () => {
             },
           },
         ],
-      },
-    });
-    (api.settings.localModels.get as any).mockResolvedValueOnce({
+});
+    (api.settings.imageGenerationBundles.get as any).mockResolvedValueOnce({
       bundleId: 'bundle-a',
-      active: false,
-      complete: true,
-      loaded: false,
-      definition: {
-        revision: 'main',
-        roles: {
-          diffusion: { repo: 'org/diffusion', file: 'old-diff.gguf' },
-          vae: { repo: 'org/vae', file: 'vae.safetensors' },
-          textEncoder: { repo: 'org/text', file: 'enc.gguf' },
-        },
-      },
+      revision: 'main',
+      sampling: { steps: 4, cfgScale: 1.0, samplingMethod: 'euler' },
       roles: {
-        diffusion: { ready: true },
-        vae: { ready: true },
-        textEncoder: { ready: true },
+        diffusion: { repo: 'org/diffusion', file: 'old-diff.gguf' },
+        vae: { repo: 'org/vae', file: 'vae.safetensors' },
+        textEncoder: { repo: 'org/text', file: 'enc.gguf' },
       },
     });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
@@ -535,7 +602,7 @@ describe('ImageBundleManager', () => {
     fireEvent.click(screen.getByRole('button', { name: /Edit bundle/i }));
 
     await waitFor(() => {
-      expect(api.settings.localModels.get).toHaveBeenCalledWith('ImageGeneration', 'bundle-a');
+      expect(api.settings.imageGenerationBundles.get).toHaveBeenCalledWith('bundle-a');
     });
 
     const bundleIdInput = await screen.findByLabelText(/Bundle id/i);
@@ -561,15 +628,16 @@ describe('ImageBundleManager', () => {
         vae_file: 'vae.safetensors',
         text_encoder_repo: 'org/text',
         text_encoder_file: 'enc.gguf',
+        sampling_steps: 4,
+        sampling_cfg_scale: 1,
+        sampling_method: 'euler',
         revision: 'main',
       });
     });
   });
 
   it('downloads a bundle definition JSON for an installed bundle', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         items: [
           {
@@ -584,25 +652,15 @@ describe('ImageBundleManager', () => {
             },
           },
         ],
-      },
-    });
-    (api.settings.localModels.get as any).mockResolvedValueOnce({
+});
+    (api.settings.imageGenerationBundles.export as any).mockResolvedValueOnce({
       bundleId: 'bundle-a',
-      active: false,
-      complete: true,
-      loaded: false,
-      definition: {
-        revision: 'main',
-        roles: {
-          diffusion: { repo: 'org/diffusion', file: 'diff.gguf' },
-          vae: { repo: 'org/vae', file: 'vae.safetensors' },
-          textEncoder: { repo: 'org/text', file: 'enc.gguf' },
-        },
-      },
+      revision: 'main',
+      sampling: { steps: 4, cfgScale: 1.0, samplingMethod: 'euler' },
       roles: {
-        diffusion: { ready: true },
-        vae: { ready: true },
-        textEncoder: { ready: true },
+        diffusion: { repo: 'org/diffusion', file: 'diff.gguf' },
+        vae: { repo: 'org/vae', file: 'vae.safetensors' },
+        textEncoder: { repo: 'org/text', file: 'enc.gguf' },
       },
     });
 
@@ -622,9 +680,9 @@ describe('ImageBundleManager', () => {
     fireEvent.click(screen.getByRole('button', { name: /Download definition/i }));
 
     await waitFor(() => {
-      expect(api.settings.localModels.get).toHaveBeenCalledWith('ImageGeneration', 'bundle-a');
+      expect(api.settings.imageGenerationBundles.export).toHaveBeenCalledWith('bundle-a');
+      expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
     });
-    expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
     const blobArg = createObjectUrlSpy.mock.calls[0][0];
     expect(blobArg).toBeTruthy();
     expect(anchorClickSpy).toHaveBeenCalled();
@@ -635,21 +693,18 @@ describe('ImageBundleManager', () => {
   });
 
   it('uploads a bundle definition JSON and prefills the download dialog', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
 
     render(<ImageBundleManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument();
+      expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument();
     });
 
     const definition = {
-      schemaVersion: 1,
       bundleId: 'bundle-from-file',
       revision: 'refs/heads/release',
+      sampling: { steps: 4, cfgScale: 1.0, samplingMethod: 'euler' },
       roles: {
         diffusion: { repo: 'org/diffusion', file: 'diff.gguf' },
         vae: { repo: 'org/vae', file: 'vae.safetensors' },
@@ -664,6 +719,7 @@ describe('ImageBundleManager', () => {
     });
 
     await waitFor(() => {
+      expect(api.settings.imageGenerationBundles.import).toHaveBeenCalled();
       expect((screen.getByLabelText(/Bundle id/i) as HTMLInputElement).value).toBe('bundle-from-file');
     });
     expect((screen.getByLabelText(/Diffusion repo/i) as HTMLInputElement).value).toBe('org/diffusion');
@@ -672,31 +728,29 @@ describe('ImageBundleManager', () => {
     expect((screen.getByLabelText(/VAE file/i) as HTMLInputElement).value).toBe('vae.safetensors');
     expect((screen.getByLabelText(/Text encoder repo/i) as HTMLInputElement).value).toBe('org/text-encoder');
     expect((screen.getByLabelText(/Text encoder file/i) as HTMLInputElement).value).toBe('enc.gguf');
+    expect((screen.getByLabelText(/Sampling steps/i) as HTMLInputElement).value).toBe('4');
+    expect((screen.getByLabelText(/CFG scale/i) as HTMLInputElement).value).toBe('1');
+    expect((screen.getByLabelText(/Sampling method/i) as HTMLInputElement).value).toBe('euler');
     expect((screen.getByLabelText(/Revision \(optional\)/i) as HTMLInputElement).value).toBe('refs/heads/release');
   });
 
   it('removes a bundle after confirmation', async () => {
-    (api.settings.localModels.listOutcome as any)
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: {
-          modelDir: '/models-local/sd',
-          items: [
-            {
-              bundleId: 'bundle-remove',
-              active: false,
-              complete: true,
-              loaded: false,
-              roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
-            },
-          ],
+    queueBundleInventory({
+      modelDir: '/models-local/sd',
+      items: [
+        {
+          bundleId: 'bundle-remove',
+          active: false,
+          complete: true,
+          loaded: false,
+          roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
         },
-      })
-      .mockResolvedValueOnce({
-        kind: 'available',
-        payload: { modelDir: '/models-local/sd', items: [] },
-      });
+      ],
+    });
+    enqueueRuntimeOutcome({ kind: 'available', payload: { modelDir: '/models-local/sd', items: [] } });
     (api.settings.localModels.remove as any).mockResolvedValueOnce({ ok: true });
+    (api.settings.imageGenerationBundles.list as any).mockImplementationOnce(async () => testDefinitions);
+    (api.settings.imageGenerationBundles.list as any).mockImplementationOnce(async () => ({ items: [] }));
 
     render(<ImageBundleManager enabled />);
 
@@ -706,14 +760,12 @@ describe('ImageBundleManager', () => {
 
     await waitFor(() => {
       expect(api.settings.localModels.remove).toHaveBeenCalledWith('ImageGeneration', 'bundle-remove');
-      expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument();
+      expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument();
     });
   });
 
   it('cancels an in-flight download operation', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         items: [
           {
@@ -724,8 +776,7 @@ describe('ImageBundleManager', () => {
             roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
           },
         ],
-      },
-    });
+});
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-cancel',
       bundleId: 'bundle-a',
@@ -750,6 +801,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
@@ -764,9 +816,7 @@ describe('ImageBundleManager', () => {
   });
 
   it('shows last engine error in the status panel', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         activeBundleId: 'bundle-a',
         loadedBundleId: null,
@@ -780,8 +830,7 @@ describe('ImageBundleManager', () => {
             roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
           },
         ],
-      },
-    });
+});
 
     render(<ImageBundleManager enabled />);
 
@@ -789,10 +838,7 @@ describe('ImageBundleManager', () => {
   });
 
   it('includes optional revision when downloading from advanced form', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-rev',
       bundleId: 'rev-bundle',
@@ -801,7 +847,7 @@ describe('ImageBundleManager', () => {
     });
 
     render(<ImageBundleManager enabled />);
-    await waitFor(() => expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /Add bundle/i }));
     fireEvent.click(await screen.findByRole('button', { name: /Advanced: free-text repo\/file/i }));
@@ -812,6 +858,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
     fireEvent.change(screen.getByLabelText(/Revision/i), { target: { value: 'main' } });
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
@@ -824,10 +871,7 @@ describe('ImageBundleManager', () => {
   });
 
   it('submits download using default repository pickers', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
       operationId: 'op-picker',
       bundleId: 'picker-bundle',
@@ -838,7 +882,7 @@ describe('ImageBundleManager', () => {
     render(<ImageBundleManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument();
+      expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Add bundle/i }));
@@ -846,6 +890,7 @@ describe('ImageBundleManager', () => {
     fireEvent.click(screen.getByText('Pick ImageGeneration.diffusion'));
     fireEvent.click(screen.getByText('Pick ImageGeneration.vae'));
     fireEvent.click(screen.getByText('Pick ImageGeneration.textEncoder'));
+    fillSamplingFields();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
@@ -857,15 +902,16 @@ describe('ImageBundleManager', () => {
         vae_file: 'vae.bin',
         text_encoder_repo: 'org/ImageGeneration.textEncoder',
         text_encoder_file: 'textEncoder.bin',
+        sampling_steps: 4,
+        sampling_cfg_scale: 1,
+        sampling_method: 'euler',
       });
     });
   });
 
   it('reports runtime readiness through callback props', async () => {
     const onRuntimeReadinessChange = vi.fn();
-    (api.settings.localModels.listOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         activeBundleId: 'bundle-a',
         loadedBundleId: 'bundle-a',
@@ -879,8 +925,7 @@ describe('ImageBundleManager', () => {
             roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
           },
         ],
-      },
-    });
+});
 
     render(<ImageBundleManager enabled onRuntimeReadinessChange={onRuntimeReadinessChange} />);
 
@@ -893,16 +938,13 @@ describe('ImageBundleManager', () => {
 
   it('reports not-ready readiness states for empty and misconfigured bundles', async () => {
     const onRuntimeReadinessChange = vi.fn();
-    (api.settings.localModels.listOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         activeBundleId: null,
         loadedBundleId: null,
         engine: { processAlive: false },
         items: [],
-      },
-    });
+});
 
     render(<ImageBundleManager enabled onRuntimeReadinessChange={onRuntimeReadinessChange} />);
 
@@ -918,13 +960,10 @@ describe('ImageBundleManager', () => {
   });
 
   it('rejects invalid and incomplete uploaded bundle definitions', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
 
     render(<ImageBundleManager enabled />);
-    await waitFor(() => expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument());
 
     const uploadInput = screen.getByLabelText(/Upload bundle definition file/i) as HTMLInputElement;
     fireEvent.change(uploadInput, {
@@ -945,9 +984,7 @@ describe('ImageBundleManager', () => {
   });
 
   it('surfaces view and edit bundle detail load failures', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         items: [
           {
@@ -958,24 +995,21 @@ describe('ImageBundleManager', () => {
             roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
           },
         ],
-      },
-    });
-    (api.settings.localModels.get as any).mockRejectedValueOnce(new Error('details offline'));
+});
+    (api.settings.imageGenerationBundles.get as any).mockRejectedValueOnce(new Error('details offline'));
 
     render(<ImageBundleManager enabled />);
     await screen.findByText('bundle-a');
     fireEvent.click(screen.getByRole('button', { name: /View details/i }));
     await waitFor(() => expect(screen.getByText(/details offline/i)).toBeInTheDocument());
 
-    (api.settings.localModels.get as any).mockRejectedValueOnce(new Error('edit load failed'));
+    (api.settings.imageGenerationBundles.get as any).mockRejectedValueOnce(new Error('edit load failed'));
     fireEvent.click(screen.getByRole('button', { name: /Edit bundle/i }));
     await waitFor(() => expect(screen.getByText(/edit load failed/i)).toBeInTheDocument());
   });
 
   it('blocks definition export when bundle recipe is incomplete', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         items: [
           {
@@ -986,15 +1020,16 @@ describe('ImageBundleManager', () => {
             roles: { diffusion: { ready: true }, vae: { ready: false }, textEncoder: { ready: true } },
           },
         ],
-      },
-    });
-    (api.settings.localModels.get as any).mockResolvedValueOnce({
+});
+    (api.settings.imageGenerationBundles.export as any).mockResolvedValueOnce({
       bundleId: 'bundle-a',
-      active: false,
-      complete: false,
-      loaded: false,
-      definition: { roles: { diffusion: { repo: 'org/d', file: 'd.gguf' } } },
-      roles: { diffusion: { ready: true }, vae: { ready: false }, textEncoder: { ready: true } },
+      revision: null,
+      sampling: { steps: 0, cfgScale: 0, samplingMethod: '' },
+      roles: {
+        diffusion: { repo: 'org/d', file: 'd.gguf' },
+        vae: { repo: '', file: '' },
+        textEncoder: { repo: '', file: '' },
+      },
     });
 
     render(<ImageBundleManager enabled />);
@@ -1006,9 +1041,7 @@ describe('ImageBundleManager', () => {
   });
 
   it('surfaces activate, remove, and cancel failures', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         items: [
           {
@@ -1019,8 +1052,7 @@ describe('ImageBundleManager', () => {
             roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
           },
         ],
-      },
-    });
+});
     (api.settings.localModels.selectActive as any).mockRejectedValueOnce(new Error('activate failed'));
     (api.settings.localModels.remove as any).mockRejectedValueOnce(new Error('remove blocked'));
     (api.settings.localModels.startDownload as any).mockResolvedValueOnce({
@@ -1050,6 +1082,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
     await waitFor(() => expect(screen.getByTitle(/Cancel this bundle operation/i)).toBeInTheDocument());
     fireEvent.click(screen.getByTitle(/Cancel this bundle operation/i));
@@ -1058,9 +1091,7 @@ describe('ImageBundleManager', () => {
 
   it('reports no-active-bundle readiness and poll unreachable errors', async () => {
     const onRuntimeReadinessChange = vi.fn();
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         activeBundleId: null,
         loadedBundleId: null,
@@ -1074,8 +1105,7 @@ describe('ImageBundleManager', () => {
             roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
           },
         ],
-      },
-    });
+});
 
     render(<ImageBundleManager enabled onRuntimeReadinessChange={onRuntimeReadinessChange} />);
     await waitFor(() => {
@@ -1110,15 +1140,14 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
     await waitFor(() => expect(screen.getAllByText(/no longer reachable/i).length).toBeGreaterThan(0));
   });
 
   it('reports engine-not-loaded readiness when an active bundle exists but engine is down', async () => {
     const onRuntimeReadinessChange = vi.fn();
-    (api.settings.localModels.listOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         activeBundleId: 'bundle-a',
         loadedBundleId: null,
@@ -1132,8 +1161,7 @@ describe('ImageBundleManager', () => {
             roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
           },
         ],
-      },
-    });
+});
 
     render(<ImageBundleManager enabled onRuntimeReadinessChange={onRuntimeReadinessChange} />);
 
@@ -1149,15 +1177,12 @@ describe('ImageBundleManager', () => {
   });
 
   it('rejects glob metacharacters in filename fields', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
 
     render(<ImageBundleManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument();
+      expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Add bundle/i }));
@@ -1169,6 +1194,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
@@ -1178,16 +1204,13 @@ describe('ImageBundleManager', () => {
   });
 
   it('surfaces generic download dialog failures for non-Error throws', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
     (api.settings.localModels.startDownload as any).mockRejectedValueOnce('network down');
 
     render(<ImageBundleManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument();
+      expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Add bundle/i }));
@@ -1199,6 +1222,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
@@ -1207,16 +1231,13 @@ describe('ImageBundleManager', () => {
   });
 
   it('surfaces download dialog submit failures from the api', async () => {
-    (api.settings.localModels.listOutcome as any).mockResolvedValue({
-      kind: 'available',
-      payload: { modelDir: '/models-local/sd', items: [] },
-    });
+    queueBundleInventory({ modelDir: '/models-local/sd', items: [] });
     (api.settings.localModels.startDownload as any).mockRejectedValueOnce(new Error('Upstream refused download'));
 
     render(<ImageBundleManager enabled />);
 
     await waitFor(() => {
-      expect(screen.getByText(/No bundles installed/i)).toBeInTheDocument();
+      expect(screen.getByText(/No bundles configured/i)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Add bundle/i }));
@@ -1228,6 +1249,7 @@ describe('ImageBundleManager', () => {
     fireEvent.change(screen.getByLabelText(/VAE file/i), { target: { value: 'vae.safetensors' } });
     fireEvent.change(screen.getByLabelText(/Text encoder repo/i), { target: { value: 'org/text-enc' } });
     fireEvent.change(screen.getByLabelText(/Text encoder file/i), { target: { value: 'enc.gguf' } });
+    fillSamplingFields();
     fireEvent.click(screen.getByRole('button', { name: /Download snapshot/i }));
 
     await waitFor(() => {
@@ -1237,9 +1259,7 @@ describe('ImageBundleManager', () => {
 
   it('reports running-without-bundle readiness when engine is alive without a loaded bundle', async () => {
     const onRuntimeReadinessChange = vi.fn();
-    (api.settings.localModels.listOutcome as any).mockResolvedValueOnce({
-      kind: 'available',
-      payload: {
+    queueBundleInventory({
         modelDir: '/models-local/sd',
         activeBundleId: 'bundle-a',
         loadedBundleId: null,
@@ -1253,8 +1273,7 @@ describe('ImageBundleManager', () => {
             roles: { diffusion: { ready: true }, vae: { ready: true }, textEncoder: { ready: true } },
           },
         ],
-      },
-    });
+});
 
     render(<ImageBundleManager enabled onRuntimeReadinessChange={onRuntimeReadinessChange} />);
 

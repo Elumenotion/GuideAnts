@@ -44,6 +44,16 @@ public interface IDistributedConversationLock
     /// Releases a lock on a conversation.
     /// </summary>
     Task ReleaseLockAsync(Guid conversationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Extends an existing lock when it is still active and owned by the same user.
+    /// Returns false when no active owned lock exists.
+    /// </summary>
+    Task<bool> RenewLockAsync(
+        Guid conversationId,
+        string userName,
+        TimeSpan lockTtl,
+        CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Gets the active lock for a conversation, if one exists and hasn't expired.

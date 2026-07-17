@@ -18,7 +18,7 @@ public class TestJobHandler : JobHandlerBase<TestJob>
 
     public override string JobType => "Test";
 
-    public override async Task<bool> HandleAsync(TestJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(TestJob payload, CancellationToken cancellationToken)
     {
         Logger.LogInformation("Processing test job with message: {Message}", LogValueSanitizer.Sanitize(payload.Message));
         
@@ -28,7 +28,7 @@ public class TestJobHandler : JobHandlerBase<TestJob>
         }
         
         Logger.LogInformation("Test job completed successfully: {Message}", LogValueSanitizer.Sanitize(payload.Message));
-        return true;
+        return JobExecutionResult.Success();
     }
 }
 

@@ -169,10 +169,13 @@ services:
       # or the admin API (PUT /admin/bundles/{id}/active).
       - GA_SD_TIMEOUT_SECONDS=900
       - GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS=${GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS:-120}
-      - GA_SD_STEPS=4
-      - GA_SD_CFG_SCALE=1.0
       - GA_SD_STRENGTH=0.75
       - GA_SD_OFFLOAD_TO_CPU=${GA_SD_OFFLOAD_TO_CPU:-0}
+      - "GA_SD_BACKEND=${GA_SD_BACKEND:-}"
+      - "GA_SD_PARAMS_BACKEND=${GA_SD_PARAMS_BACKEND:-}"
+      - "GA_SD_SPLIT_MODE=${GA_SD_SPLIT_MODE:-}"
+      - "GA_SD_MAX_VRAM=${GA_SD_MAX_VRAM:-}"
+      - GA_SD_AUTO_FIT=${GA_SD_AUTO_FIT:-0}
       - GA_SD_DIFFUSION_FA=${GA_SD_DIFFUSION_FA:-1}
       - GA_SD_VAE_ON_CPU=${GA_SD_VAE_ON_CPU:-0}
       # Optional SD-only Vulkan device selector. Empty means inherit the

@@ -31,7 +31,6 @@ export interface GuideDetailsDto {
   skills?: AssistantSkillDto[];
   sandboxWireApiConfig?: SandboxWireApiConfigDto;
   maxToolCallsPerTurn?: number | null;
-  maxToolRoundsPerTurn?: number | null;
 }
 
 export interface CreateGuideDto {
@@ -58,7 +57,6 @@ export interface CreateGuideDto {
   crewMemberIds?: string[];
   sandboxWireApiConfig?: SandboxWireApiConfigDto;
   maxToolCallsPerTurn?: number | null;
-  maxToolRoundsPerTurn?: number | null;
   crewMemberLimits?: CrewMemberLimitDto[];
 }
 
@@ -87,7 +85,6 @@ export interface UpdateGuideDto {
   crewMemberIds?: string[];
   sandboxWireApiConfig?: SandboxWireApiConfigDto;
   maxToolCallsPerTurn?: number | null;
-  maxToolRoundsPerTurn?: number | null;
   crewMemberLimits?: CrewMemberLimitDto[];
 }
 
@@ -118,7 +115,6 @@ export interface AssistantDetailsDto {
   conversationStarters: ConversationStarterDto[];
   skills?: AssistantSkillDto[];
   maxToolCallsPerTurn?: number | null;
-  maxToolRoundsPerTurn?: number | null;
 }
 
 export interface CreateAssistantDto {
@@ -142,7 +138,6 @@ export interface CreateAssistantDto {
   skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
   maxToolCallsPerTurn?: number | null;
-  maxToolRoundsPerTurn?: number | null;
 }
 
 export interface UpdateAssistantDto {
@@ -167,7 +162,6 @@ export interface UpdateAssistantDto {
   skills?: AssistantSkillSaveDto[];
   conversationStarters?: string[];
   maxToolCallsPerTurn?: number | null;
-  maxToolRoundsPerTurn?: number | null;
 }
 
 // Supporting types
@@ -399,7 +393,6 @@ export interface CrewMemberDto {
   displayOrder: number;
   maxToolCallsPerInvocation?: number | null;
   maxToolCallsPerTurn?: number | null;
-  maxToolRoundsPerTurn?: number | null;
 }
 
 export interface CrewMemberLimitDto {

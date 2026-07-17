@@ -23,6 +23,7 @@ $RootDir = Split-Path -Parent $ScriptDir
 $StateFile = Join-Path $RootDir '.installer_state.env'
 $DefaultApiBase = 'http://localhost:5107'
 $ApiPlanPath = '/api/internal/host-folder-mounts'
+$VoicePackOverrideFile = 'docker-compose.voice-pack.local.yml'
 $AffectedMountServiceNames = @(
     'guideants-webapi-ui',
     'guideants-ai',
@@ -340,6 +341,11 @@ function Restart-AffectedServices {
     $composeArgs = @('-f', $InstallerState.ComposeFile)
     if (Test-Path -LiteralPath $overridePath) {
         $composeArgs += @('-f', $InstallerState.HostMountOverrideFile)
+    }
+
+    $voicePackOverridePath = Join-Path $RootDir (Join-Path $InstallerState.DockerDirectory $VoicePackOverrideFile)
+    if (Test-Path -LiteralPath $voicePackOverridePath) {
+        $composeArgs += @('-f', $VoicePackOverrideFile)
     }
 
     $services = $Script:AffectedMountServiceNames

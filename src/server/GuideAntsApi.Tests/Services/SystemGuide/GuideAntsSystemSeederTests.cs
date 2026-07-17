@@ -202,7 +202,17 @@ public sealed class GuideAntsSystemSeederTests
             db,
             importService.Object,
             CreateStore(db),
+            CreateBundleBootstrapper(),
             NullLogger<GuideAntsSystemSeeder>.Instance);
+    }
+
+    private static IImageGenerationBundleDefinitionBootstrapper CreateBundleBootstrapper()
+    {
+        var bootstrapper = new Mock<IImageGenerationBundleDefinitionBootstrapper>(MockBehavior.Strict);
+        bootstrapper
+            .Setup(b => b.MigrateAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        return bootstrapper.Object;
     }
 
     private static async Task<ImportGuideResultDto> ResolveImportResultAsync(ApplicationDbContext db, Stream stream)

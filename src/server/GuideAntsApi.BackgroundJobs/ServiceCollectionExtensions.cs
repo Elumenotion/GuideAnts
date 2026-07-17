@@ -17,6 +17,7 @@ public static class ServiceCollectionExtensions
     {
         // Configure options
         services.Configure<JobProcessorOptions>(configuration.GetSection(JobProcessorOptions.SectionName));
+        services.Configure<JobRetryOptions>(configuration.GetSection(JobRetryOptions.SectionName));
         services.Configure<AzureDocumentIntelligenceOptions>(configuration.GetSection(AzureDocumentIntelligenceOptions.SectionName));
         services.Configure<DocumentIntelligenceOptions>(configuration.GetSection(DocumentIntelligenceOptions.SectionName));
         services.Configure<MarkdownExtractionOptions>(configuration.GetSection(MarkdownExtractionOptions.SectionName));

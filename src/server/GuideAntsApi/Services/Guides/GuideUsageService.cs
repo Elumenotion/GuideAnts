@@ -63,7 +63,6 @@ public class GuideUsageService : IGuideUsageService
     private sealed record ApiUsageSlice(
         string? SourceChannel,
         string? Operation,
-        string? MetadataJson,
         decimal ChargeUsd);
 
     // Assistants that should never appear in guide usage drill-downs.
@@ -603,27 +602,15 @@ public class GuideUsageService : IGuideUsageService
             .Select(e => new ApiUsageSlice(
                 e.SourceChannel,
                 e.Operation,
-                e.MetadataJson,
                 e.ChargeUsd ?? 0m))
             .ToListAsync();
 
         var rows = slices
             .Select(MapApiUsageSlice)
-            .GroupBy(
-                x => new
-                {
-                    x.SourceChannel,
-                    x.Endpoint,
-                    x.Alias,
-                    x.ProviderServiceMode,
-                    x.StatusFamily
-                })
+            .GroupBy(x => new { x.SourceChannel, x.Endpoint })
             .Select(g => new GuideApiUsageRowDto(
                 SourceChannel: g.Key.SourceChannel,
                 Endpoint: g.Key.Endpoint,
-                Alias: g.Key.Alias,
-                ProviderServiceMode: g.Key.ProviderServiceMode,
-                StatusFamily: g.Key.StatusFamily,
                 Events: g.Count(),
                 ChargeUsd: g.Sum(x => x.ChargeUsd)))
             .OrderByDescending(r => r.ChargeUsd)
@@ -2351,7 +2338,7 @@ public class GuideUsageService : IGuideUsageService
         };
     }
 
-    private static (string SourceChannel, string Endpoint, string Alias, string ProviderServiceMode, string StatusFamily, decimal ChargeUsd) MapApiUsageSlice(ApiUsageSlice slice)
+    private static (string SourceChannel, string Endpoint, decimal ChargeUsd) MapApiUsageSlice(ApiUsageSlice slice)
     {
         var sourceChannel = string.IsNullOrWhiteSpace(slice.SourceChannel)
             ? "conversation"
@@ -2359,99 +2346,8 @@ public class GuideUsageService : IGuideUsageService
         var endpoint = string.IsNullOrWhiteSpace(slice.Operation)
             ? "unknown"
             : slice.Operation.Trim().ToLowerInvariant();
-        var alias = "n/a";
-        var providerServiceMode = "n/a";
-        var statusFamily = "unknown";
 
-        if (!string.IsNullOrWhiteSpace(slice.MetadataJson))
-        {
-            try
-            {
-                using var metadata = JsonDocument.Parse(slice.MetadataJson);
-                var root = metadata.RootElement;
-
-                if (TryGetString(root, "endpoint", out var endpointValue))
-                {
-                    endpoint = endpointValue!.Trim().ToLowerInvariant();
-                }
-
-                if (TryGetString(root, "alias", out var aliasValue) && !string.IsNullOrWhiteSpace(aliasValue))
-                {
-                    alias = aliasValue!.Trim();
-                }
-
-                if (TryGetString(root, "providerServiceMode", out var modeValue) && !string.IsNullOrWhiteSpace(modeValue))
-                {
-                    providerServiceMode = modeValue!.Trim();
-                }
-
-                if (TryGetString(root, "status", out var statusValue))
-                {
-                    statusFamily = ResolveStatusFamily(statusValue);
-                }
-            }
-            catch (JsonException)
-            {
-                // Best effort metadata parsing for mixed historic payloads.
-            }
-        }
-
-        return (sourceChannel, endpoint, alias, providerServiceMode, statusFamily, slice.ChargeUsd);
-    }
-
-    private static bool TryGetString(JsonElement root, string propertyName, out string? value)
-    {
-        value = null;
-        if (!root.TryGetProperty(propertyName, out var element))
-        {
-            return false;
-        }
-
-        if (element.ValueKind != JsonValueKind.String)
-        {
-            return false;
-        }
-
-        value = element.GetString();
-        return true;
-    }
-
-    private static string ResolveStatusFamily(string? rawStatus)
-    {
-        if (string.IsNullOrWhiteSpace(rawStatus))
-        {
-            return "unknown";
-        }
-
-        var status = rawStatus.Trim().ToLowerInvariant();
-        if (status.StartsWith("2", StringComparison.Ordinal))
-        {
-            return "success";
-        }
-
-        if (status.StartsWith("4", StringComparison.Ordinal))
-        {
-            return "client_error";
-        }
-
-        if (status.StartsWith("5", StringComparison.Ordinal))
-        {
-            return "server_error";
-        }
-
-        if (status is "success" or "ok" or "completed")
-        {
-            return "success";
-        }
-
-        if (status.Contains("error", StringComparison.Ordinal) ||
-            status.Contains("fail", StringComparison.Ordinal) ||
-            status.Contains("denied", StringComparison.Ordinal))
-        {
-            return "server_error";
-        }
-
-        return status;
+        return (sourceChannel, endpoint, slice.ChargeUsd);
     }
 }
 

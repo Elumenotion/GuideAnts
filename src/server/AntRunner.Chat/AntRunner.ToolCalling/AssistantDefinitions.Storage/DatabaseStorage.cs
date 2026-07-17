@@ -185,6 +185,9 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
 
         /// <summary>
         /// Resolves a requested reasoning effort against the authoritative model catalog row.
+        /// Effort is emitted only when the target model declares that choice. Local thinking
+        /// vocabulary (e.g. <c>enabled</c>) must not passthrough to cloud models that declare
+        /// no choices or a different set — including under ChatDefaults OverrideAll.
         /// </summary>
         public static async Task<string?> ResolveModelReasoningEffortAsync(
             string? modelId,
@@ -204,25 +207,26 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                 .Select(m => m.ReasoningChoicesJson)
                 .FirstOrDefaultAsync(cancellationToken);
 
-            var requested = reasoningEffort.Trim();
-            var choices = ParseReasoningChoicesJson(reasoningChoicesJson);
+            return SelectDeclaredReasoningEffort(
+                reasoningEffort.Trim(),
+                ParseReasoningChoicesJson(reasoningChoicesJson));
+        }
 
+        /// <summary>
+        /// Returns <paramref name="requested"/> only when it appears in <paramref name="choices"/>.
+        /// Empty choices means the model does not accept a reasoning_effort request field.
+        /// </summary>
+        private static string? SelectDeclaredReasoningEffort(
+            string requested,
+            IReadOnlyList<string> choices)
+        {
             if (choices.Count == 0)
             {
-                return requested;
+                return null;
             }
 
-            var matched = choices.FirstOrDefault(choice =>
+            return choices.FirstOrDefault(choice =>
                 string.Equals(choice, requested, StringComparison.OrdinalIgnoreCase));
-
-            if (matched == null)
-            {
-                throw new InvalidOperationException(
-                    $"Reasoning effort '{requested}' is not a valid choice for model '{modelId}'. " +
-                    $"Allowed choices: [{string.Join(", ", choices)}].");
-            }
-
-            return matched;
         }
 
         private static List<string> ParseReasoningChoicesJson(string? reasoningChoicesJson)
@@ -260,7 +264,6 @@ namespace AntRunner.ToolCalling.AssistantDefinitions.Storage
                 model = assistant.ModelId ?? assistant.Model?.ModelId,
                 invocation_evaluator = assistant.InvocationEvaluator,
                 max_tool_calls_per_turn = assistant.MaxToolCallsPerTurn,
-                max_tool_rounds_per_turn = assistant.MaxToolRoundsPerTurn,
                 tools = BuildToolsArray(assistant),
                 tool_resources = BuildToolResources(assistant),
                 skills = BuildSkills(assistant),

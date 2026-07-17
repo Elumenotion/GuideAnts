@@ -184,9 +184,6 @@ export type GuideUsageSourceFilter = 'all' | 'conversation' | 'published_chat' |
 export interface GuideApiUsageRowDto {
   sourceChannel: string;
   endpoint: string;
-  alias: string;
-  providerServiceMode: string;
-  statusFamily: string;
   events: number;
   chargeUsd: number;
 }

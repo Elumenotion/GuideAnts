@@ -26,6 +26,7 @@
   <ItemGroup>
     <Content Remove="Resources\bootstrap\**\*" />
     <None Include="Resources\bootstrap\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="Settings\Defaults\ImageGeneration\Bundles\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

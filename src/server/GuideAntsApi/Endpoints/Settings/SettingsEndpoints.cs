@@ -9,6 +9,7 @@ public static class SettingsEndpoints
         app.MapSettingsRuntimeProfilesEndpoints();
         app.MapSettingsServiceEditorEndpoints();
         app.MapSettingsServiceLocalModelsEndpoints();
+        app.MapSettingsImageGenerationBundleDefinitionsEndpoints();
         app.MapSettingsRoutingEndpoints();
         app.MapSettingsOverviewEndpoints();
         app.MapSettingsInfrastructureEndpoints();

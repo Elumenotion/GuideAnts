@@ -22,7 +22,7 @@ public sealed class RebuildEmbeddingsHandler(
 
     public override string JobType => nameof(RebuildEmbeddingsJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(RebuildEmbeddingsJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(RebuildEmbeddingsJob payload, CancellationToken cancellationToken)
     {
         _ = payload;
 
@@ -39,7 +39,7 @@ public sealed class RebuildEmbeddingsHandler(
                 assistantQueued,
                 notebookQueued,
                 contentQueued);
-            return true;
+            return JobExecutionResult.Success();
         }
 
         // First pass: clear vectors so a model change never leaves stale embeddings behind.
@@ -113,7 +113,7 @@ public sealed class RebuildEmbeddingsHandler(
             notebookQueued,
             contentQueued);
 
-        return true;
+        return JobExecutionResult.Success();
     }
 
     private async Task<(int AssistantQueued, int NotebookQueued, int ContentQueued)> EnqueueMissingIndexJobsAsync(

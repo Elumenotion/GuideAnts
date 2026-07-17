@@ -1,0 +1,12 @@
+# Example only — copy to docker-compose.voice-pack.local.yml for a personal TTS voice pack.
+# Kept separate from docker-compose.host-mounts.generated.yml so host-folder mount
+# apply/remove cannot stomp custom voice configuration.
+services:
+  guideants-ai:
+    volumes:
+      - type: bind
+        source: ./volumes/voice-pack
+        target: /opt/guideants/custom-voice-pack
+        read_only: true
+    environment:
+      - GA_TTS_VOICE_PACK_PATH=/opt/guideants/custom-voice-pack

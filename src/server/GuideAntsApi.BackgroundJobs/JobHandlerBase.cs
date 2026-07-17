@@ -18,9 +18,9 @@ public abstract class JobHandlerBase<TPayload> : IJobHandler<TPayload>
 
     public abstract string JobType { get; }
 
-    public abstract Task<bool> HandleAsync(TPayload payload, CancellationToken cancellationToken);
+    public abstract Task<JobExecutionResult> HandleAsync(TPayload payload, CancellationToken cancellationToken);
 
-    public async Task<bool> HandleAsync(string payloadJson, CancellationToken cancellationToken)
+    public async Task<JobExecutionResult> HandleAsync(string payloadJson, CancellationToken cancellationToken)
     {
         try
         {
@@ -28,7 +28,7 @@ public abstract class JobHandlerBase<TPayload> : IJobHandler<TPayload>
             if (payload == null)
             {
                 Logger.LogError("Failed to deserialize payload for job type {JobType}: {PayloadJson}", JobType, LogValueSanitizer.Sanitize(payloadJson));
-                return false;
+                return JobExecutionResult.PermanentMissingInput("Failed to deserialize job payload");
             }
 
             return await HandleAsync(payload, cancellationToken);
@@ -36,13 +36,12 @@ public abstract class JobHandlerBase<TPayload> : IJobHandler<TPayload>
         catch (JsonException ex)
         {
             Logger.LogError(ex, "JSON deserialization failed for job type {JobType}: {PayloadJson}", JobType, LogValueSanitizer.Sanitize(payloadJson));
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Invalid job payload JSON");
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Unexpected error handling job type {JobType}", JobType);
-            return false;
+            return JobExecutionResult.RetryableTransient(ex.Message);
         }
     }
 }
-

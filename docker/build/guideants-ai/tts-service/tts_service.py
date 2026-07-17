@@ -19,7 +19,7 @@ from typing import Any
 
 from guideants_hf.catalog_completeness import catalog_entry_for_directory_name, directory_model_entry_is_complete
 from guideants_hf.catalog_download import download_catalog_entry_files
-from guideants_hf.engine_process import format_engine_exit_error
+from guideants_hf.engine_process import format_engine_exit_error, read_subprocess_stderr_tail
 from guideants_hf.operations import find_in_flight_operation
 
 import uvicorn
@@ -395,6 +395,7 @@ class TtsRuntimeState:
 STATE = TtsRuntimeState()
 APP = FastAPI(title="GuideAnts TTS Service", version="2.0.0")
 ENGINE_LOCK = threading.Lock()
+SYNTHESIS_LOCK = threading.Lock()
 MODEL_OPS_LOCK = threading.Lock()
 MODEL_DOWNLOAD_OPERATIONS: dict[str, dict[str, Any]] = {}
 
@@ -743,6 +744,115 @@ def stop_engine() -> None:
     STATE.warmup_latency_ms = 0
     STATE.warmup_error = None
     STATE.warmup_completed_at_utc = None
+
+
+def restart_engine_on_failure_enabled() -> bool:
+    return env_flag("GA_TTS_RESTART_ON_FAILURE", default=True)
+
+
+def synthesis_error_is_recoverable(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, RuntimeError):
+        message = str(exc).lower()
+        return (
+            "timed out" in message
+            or "failed to reach audiocpp_server" in message
+            or "connection refused" in message
+            or "remote end closed connection" in message
+            or "broken pipe" in message
+        )
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        if isinstance(reason, (TimeoutError, OSError)):
+            return True
+        message = str(reason).lower()
+        return "timed out" in message or "connection refused" in message
+    return False
+
+
+def _restart_engine_process_locked(config: TtsRuntimeConfig, *, reason: str) -> None:
+    """Kill and respawn audiocpp_server. Caller must hold ENGINE_LOCK."""
+    previous = STATE.engine_process
+    previous_pid = previous.pid if previous is not None else None
+    stderr_tail = read_subprocess_stderr_tail(previous)
+    log_event(
+        "tts_engine_restart_start",
+        modelRef=config.model_ref,
+        reason=reason,
+        previousPid=previous_pid,
+        engineStderrTail=stderr_tail or None,
+    )
+    stop_engine_process()
+    command = build_audiocpp_server_command(config)
+    STATE.engine_process = subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=os.environ.copy(),
+    )
+    STATE.engine_started_at_utc = utc_now_iso()
+    wait_for_engine_ready(config)
+    log_event(
+        "tts_engine_restart_success",
+        modelRef=config.model_ref,
+        reason=reason,
+        previousPid=previous_pid,
+        enginePid=STATE.engine_process.pid if STATE.engine_process is not None else None,
+    )
+
+
+def restart_engine_process(config: TtsRuntimeConfig, *, reason: str) -> None:
+    with ENGINE_LOCK:
+        _restart_engine_process_locked(config, reason=reason)
+
+
+def recover_dead_engine_before_synthesis() -> str | None:
+    """Restart a dead engine when model config is still loaded. Returns error text on failure."""
+    config = STATE.config
+    if config is None or is_engine_process_alive() or not restart_engine_on_failure_enabled():
+        return None
+    try:
+        with ENGINE_LOCK:
+            config = STATE.config
+            if config is None or is_engine_process_alive():
+                return None
+            _restart_engine_process_locked(config, reason="engine_not_alive_before_synthesize")
+    except Exception as exc:
+        log_event(
+            "tts_engine_restart_failed",
+            modelRef=config.model_ref if config is not None else None,
+            reason="engine_not_alive_before_synthesize",
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        return str(exc)
+    return None
+
+
+def synthesize_with_engine_recovery(
+    config: TtsRuntimeConfig,
+    text: str,
+    voice_fields: dict[str, Any],
+    seed: int,
+) -> bytes:
+    try:
+        return synthesize_via_engine(config, text, voice_fields, seed)
+    except Exception as exc:
+        if not restart_engine_on_failure_enabled() or not synthesis_error_is_recoverable(exc):
+            raise
+        log_event(
+            "tts_synthesize_recovering",
+            modelRef=config.model_ref,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        with ENGINE_LOCK:
+            _restart_engine_process_locked(
+                config,
+                reason=f"synthesis_failure:{type(exc).__name__}",
+            )
+        return synthesize_via_engine(config, text, voice_fields, seed)
 
 
 def normalize_script_input(text: str) -> str:
@@ -1616,140 +1726,164 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
             },
         )
 
-    snapshot = STATE.snapshot()
-    if not snapshot["loaded"]:
+    if not SYNTHESIS_LOCK.acquire(blocking=False):
         return JSONResponse(
             status_code=503,
             content={
                 "requestId": request_id,
-                "error": "model_not_loaded",
-                "message": "Load a model with /admin/load before synthesizing.",
+                "error": "synthesis_busy",
+                "message": "Another synthesis request is in progress. Retry shortly.",
             },
         )
-    if snapshot["warmupEnabled"] and not snapshot.get("warmupSucceeded"):
-        return JSONResponse(
-            status_code=503,
-            content={
-                "requestId": request_id,
-                "error": "model_not_ready",
-                "message": "TTS warmup is incomplete. Retry after /ready is healthy.",
-                "warmupError": snapshot.get("warmupError"),
-            },
-        )
-
-    config = STATE.config
-    if config is None:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "requestId": request_id,
-                "error": "model_not_loaded",
-                "message": "Load a model with /admin/load before synthesizing.",
-            },
-        )
-
-    started = time.perf_counter()
-
-    # Family-aware voice resolution. Only voice_pack / optional_ref models
-    # consult the baked voice pack; builtin/instruct/none families interpret
-    # VoiceName as a speaker id / design text / nothing (see resolve_voice_fields).
-    requested_voice = (payload.voice or "").strip()
-    if not requested_voice and config.voice_input == "voice_pack":
-        requested_voice = (STATE.voice or config.default_voice).strip()
 
     try:
-        voice_fields, resolved_voice, lang_code = resolve_voice_fields(
-            config, requested_voice or None, payload.lang_code
-        )
-    except FileNotFoundError as exc:
+        restart_error = recover_dead_engine_before_synthesis()
+        if restart_error is not None:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "requestId": request_id,
+                    "error": "engine_restart_failed",
+                    "message": "TTS engine is not running and restart failed. Check service logs for details.",
+                },
+            )
+
+        snapshot = STATE.snapshot()
+        if not snapshot["loaded"]:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "requestId": request_id,
+                    "error": "model_not_loaded",
+                    "message": "Load a model with /admin/load before synthesizing.",
+                },
+            )
+        if snapshot["warmupEnabled"] and not snapshot.get("warmupSucceeded"):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "requestId": request_id,
+                    "error": "model_not_ready",
+                    "message": "TTS warmup is incomplete. Retry after /ready is healthy.",
+                    "warmupError": snapshot.get("warmupError"),
+                },
+            )
+
+        config = STATE.config
+        if config is None:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "requestId": request_id,
+                    "error": "model_not_loaded",
+                    "message": "Load a model with /admin/load before synthesizing.",
+                },
+            )
+
+        started = time.perf_counter()
+
+        # Family-aware voice resolution. Only voice_pack / optional_ref models
+        # consult the baked voice pack; builtin/instruct/none families interpret
+        # VoiceName as a speaker id / design text / nothing (see resolve_voice_fields).
+        requested_voice = (payload.voice or "").strip()
+        if not requested_voice and config.voice_input == "voice_pack":
+            requested_voice = (STATE.voice or config.default_voice).strip()
+
+        try:
+            voice_fields, resolved_voice, lang_code = resolve_voice_fields(
+                config, requested_voice or None, payload.lang_code
+            )
+        except FileNotFoundError as exc:
+            log_event(
+                "tts_voice_pack_unavailable",
+                requestId=request_id,
+                errorType=type(exc).__name__,
+                error=str(exc),
+            )
+            return JSONResponse(
+                status_code=500,
+                content={"requestId": request_id, "error": "voice_pack_unavailable", "message": VOICE_PACK_UNAVAILABLE_MESSAGE},
+            )
+        except ValueError as exc:
+            error_code, message = voice_request_client_error(exc)
+            return JSONResponse(
+                status_code=400,
+                content={"requestId": request_id, "error": error_code, "message": message},
+            )
+
+        speed = resolve_speed(payload.speed if payload.speed is not None else STATE.speed, STATE.speed)
+        seed = seed_from_text_voice(script_text, resolved_voice or config.catalog_entry_id)
+
+        with STATE.lock:
+            if resolved_voice:
+                STATE.voice = resolved_voice
+            if lang_code:
+                STATE.lang_code = lang_code
+            STATE.speed = speed
+
         log_event(
-            "tts_voice_pack_unavailable",
-            requestId=request_id,
-            errorType=type(exc).__name__,
-            error=str(exc),
-        )
-        return JSONResponse(
-            status_code=500,
-            content={"requestId": request_id, "error": "voice_pack_unavailable", "message": VOICE_PACK_UNAVAILABLE_MESSAGE},
-        )
-    except ValueError as exc:
-        error_code, message = voice_request_client_error(exc)
-        return JSONResponse(
-            status_code=400,
-            content={"requestId": request_id, "error": error_code, "message": message},
-        )
-
-    speed = resolve_speed(payload.speed if payload.speed is not None else STATE.speed, STATE.speed)
-    seed = seed_from_text_voice(script_text, resolved_voice or config.catalog_entry_id)
-
-    with STATE.lock:
-        if resolved_voice:
-            STATE.voice = resolved_voice
-        if lang_code:
-            STATE.lang_code = lang_code
-        STATE.speed = speed
-
-    log_event(
-        "tts_synthesize_start",
-        requestId=request_id,
-        traceparent=traceparent,
-        textLength=len(script_text),
-        modelRef=snapshot.get("modelRef"),
-        voice=resolved_voice,
-        langCode=lang_code,
-        speed=speed,
-    )
-
-    try:
-        wav_bytes = synthesize_via_engine(config, script_text, voice_fields, seed)
-        duration_seconds, sampling_rate = wav_duration_seconds(wav_bytes)
-        if abs(speed - 1.0) >= 1e-6:
-            wav_bytes = apply_speed_with_ffmpeg(wav_bytes, speed)
-            duration_seconds /= speed
-
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        response = Response(content=wav_bytes, media_type="audio/wav")
-        response.headers["x-request-id"] = request_id
-        response.headers["x-model-ref"] = snapshot.get("modelRef") or ""
-        response.headers["x-audio-duration-seconds"] = f"{duration_seconds:.3f}"
-        response.headers["x-sampling-rate"] = str(sampling_rate)
-
-        log_event(
-            "tts_synthesize_success",
+            "tts_synthesize_start",
             requestId=request_id,
             traceparent=traceparent,
-            latencyMs=latency_ms,
             textLength=len(script_text),
             modelRef=snapshot.get("modelRef"),
             voice=resolved_voice,
             langCode=lang_code,
             speed=speed,
-            durationSeconds=duration_seconds,
-            samplingRate=sampling_rate,
-            outputBytes=len(wav_bytes),
         )
-        return response
-    except Exception as exc:
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        log_event(
-            "tts_synthesize_failed",
-            requestId=request_id,
-            traceparent=traceparent,
-            latencyMs=latency_ms,
-            textLength=len(script_text),
-            modelRef=snapshot.get("modelRef"),
-            errorType=type(exc).__name__,
-            error=str(exc),
-        )
-        return JSONResponse(
-            status_code=500,
-            content={
-                "requestId": request_id,
-                "error": "synthesis_failed",
-                "message": "Speech synthesis failed. Check service logs for details.",
-                "modelRef": snapshot.get("modelRef"),
-            },
-        )
+
+        try:
+            wav_bytes = synthesize_with_engine_recovery(config, script_text, voice_fields, seed)
+            duration_seconds, sampling_rate = wav_duration_seconds(wav_bytes)
+            if abs(speed - 1.0) >= 1e-6:
+                wav_bytes = apply_speed_with_ffmpeg(wav_bytes, speed)
+                duration_seconds /= speed
+
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            response = Response(content=wav_bytes, media_type="audio/wav")
+            response.headers["x-request-id"] = request_id
+            response.headers["x-model-ref"] = snapshot.get("modelRef") or ""
+            response.headers["x-audio-duration-seconds"] = f"{duration_seconds:.3f}"
+            response.headers["x-sampling-rate"] = str(sampling_rate)
+
+            log_event(
+                "tts_synthesize_success",
+                requestId=request_id,
+                traceparent=traceparent,
+                latencyMs=latency_ms,
+                textLength=len(script_text),
+                modelRef=snapshot.get("modelRef"),
+                voice=resolved_voice,
+                langCode=lang_code,
+                speed=speed,
+                durationSeconds=duration_seconds,
+                samplingRate=sampling_rate,
+                outputBytes=len(wav_bytes),
+            )
+            return response
+        except Exception as exc:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            log_event(
+                "tts_synthesize_failed",
+                requestId=request_id,
+                traceparent=traceparent,
+                latencyMs=latency_ms,
+                textLength=len(script_text),
+                modelRef=snapshot.get("modelRef"),
+                errorType=type(exc).__name__,
+                error=str(exc),
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "requestId": request_id,
+                    "error": "synthesis_failed",
+                    "message": "Speech synthesis failed. Check service logs for details.",
+                    "modelRef": snapshot.get("modelRef"),
+                },
+            )
+    finally:
+        SYNTHESIS_LOCK.release()
 
 
 def main() -> None:

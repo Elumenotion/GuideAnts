@@ -1,12 +1,15 @@
 using System.Net;
 using System.Text;
 using FluentAssertions;
+using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Routing;
+using GuideAntsApi.Settings;
 using GuideAntsApi.Tests.TestUtils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 
 namespace GuideAntsApi.Tests.Services.Bootstrap;
 
@@ -55,7 +58,7 @@ public sealed class LocalAiDesiredStateBuilderTests
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
-            new ServiceScopeFactoryStub(),
+            new ServiceScopeFactoryStub(CreateBundleSettingsService()),
             modeResolver,
             new StubHttpClientFactory(),
             NullLogger<LocalAiDesiredStateBuilder>.Instance);
@@ -90,7 +93,7 @@ public sealed class LocalAiDesiredStateBuilderTests
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
-            new ServiceScopeFactoryStub(),
+            new ServiceScopeFactoryStub(CreateBundleSettingsService()),
             modeResolver,
             new StubHttpClientFactory(),
             NullLogger<LocalAiDesiredStateBuilder>.Instance);
@@ -123,14 +126,14 @@ public sealed class LocalAiDesiredStateBuilderTests
             (RoutedServiceNames.ImageGeneration, new ServiceMode(
                 ModeId: "ImageGeneration.LocalSd.Http",
                 ProviderSection: "LocalServiceHosts:ImageGenerationBaseUrl",
-                ModelId: "flux2-klein-4b-q4ks",
+                ModelId: "flux2-klein-4b",
                 RequestPresetJson: null,
                 Enabled: true,
                 IsDefault: false)));
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
-            new ServiceScopeFactoryStub(),
+            new ServiceScopeFactoryStub(CreateBundleSettingsService()),
             modeResolver,
             new StubHttpClientFactory(),
             NullLogger<LocalAiDesiredStateBuilder>.Instance);
@@ -139,7 +142,7 @@ public sealed class LocalAiDesiredStateBuilderTests
 
         ini.Should().Contain("[ImageGeneration]");
         ini.Should().Contain("enabled = off");
-        ini.Should().Contain("bundle_id = flux2-klein-4b-q4ks");
+        ini.Should().Contain("bundle_id = flux2-klein-4b");
     }
 
     [TestMethod]
@@ -156,14 +159,14 @@ public sealed class LocalAiDesiredStateBuilderTests
             (RoutedServiceNames.ImageGeneration, new ServiceMode(
                 ModeId: "default",
                 ProviderSection: "LocalServiceHosts:ImageGenerationBaseUrl",
-                ModelId: "flux2-klein-4b-q4ks",
+                ModelId: "flux2-klein-4b",
                 RequestPresetJson: null,
                 Enabled: true,
                 IsDefault: true)));
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
-            new ServiceScopeFactoryStub(),
+            new ServiceScopeFactoryStub(CreateBundleSettingsService()),
             modeResolver,
             new StubHttpClientFactory(),
             NullLogger<LocalAiDesiredStateBuilder>.Instance);
@@ -171,7 +174,7 @@ public sealed class LocalAiDesiredStateBuilderTests
         var ini = await builder.BuildIniAsync();
 
         ini.Should().Contain("[ImageGeneration]");
-        ini.Should().Contain("bundle_id = flux2-klein-4b-q4ks");
+        ini.Should().Contain("bundle_id = flux2-klein-4b");
         ini.Should().NotContain("desired = warm");
     }
 
@@ -196,7 +199,7 @@ public sealed class LocalAiDesiredStateBuilderTests
 
         var builder = new LocalAiDesiredStateBuilder(
             configuration,
-            new ServiceScopeFactoryStub(),
+            new ServiceScopeFactoryStub(CreateBundleSettingsService()),
             modeResolver,
             new StubHttpClientFactory(),
             NullLogger<LocalAiDesiredStateBuilder>.Instance);
@@ -205,6 +208,23 @@ public sealed class LocalAiDesiredStateBuilderTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*no model or bundle configured in ServiceModes*");
+    }
+
+    private static IApplicationSettingsService CreateBundleSettingsService()
+    {
+        var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        settings
+            .Setup(s => s.GetImageGenerationBundleDefinitionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string bundleId, CancellationToken _) => new ImageGenerationBundleDefinitionDto(
+                bundleId,
+                null,
+                null,
+                new BundleDefinitionRolesDto(
+                    new BundleDefinitionRoleDto("org/diff", "model.gguf"),
+                    new BundleDefinitionRoleDto("org/vae", "vae.safetensors"),
+                    new BundleDefinitionRoleDto("org/te", "te.gguf")),
+                new BundleDefinitionSamplingDto(4, 1.0, "euler")));
+        return settings.Object;
     }
 
     private sealed class StubHttpClientFactory : IHttpClientFactory
@@ -260,12 +280,26 @@ public sealed class LocalAiDesiredStateBuilderTests
 
     private sealed class ServiceScopeFactoryStub : IServiceScopeFactory
     {
-        public IServiceScope CreateScope() => new ServiceScopeStub();
+        private readonly IApplicationSettingsService? _settingsService;
+
+        public ServiceScopeFactoryStub(IApplicationSettingsService? settingsService = null) =>
+            _settingsService = settingsService;
+
+        public IServiceScope CreateScope() => new ServiceScopeStub(_settingsService);
     }
 
     private sealed class ServiceScopeStub : IServiceScope
     {
-        public ServiceScopeStub() => ServiceProvider = new ServiceCollection().BuildServiceProvider();
+        public ServiceScopeStub(IApplicationSettingsService? settingsService)
+        {
+            var services = new ServiceCollection();
+            if (settingsService is not null)
+            {
+                services.AddSingleton(settingsService);
+            }
+
+            ServiceProvider = services.BuildServiceProvider();
+        }
 
         public IServiceProvider ServiceProvider { get; }
 

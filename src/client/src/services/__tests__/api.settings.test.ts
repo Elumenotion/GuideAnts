@@ -67,6 +67,9 @@ describe('api.settings (table-driven)', () => {
     { name: 'services.getReadiness', call: () => api.settings.services.getReadiness('SpeechSynthesis'), urlPart: '/settings/services/SpeechSynthesis/readiness', sample: {} },
     { name: 'localModels.list', call: () => api.settings.localModels.list('SpeechSynthesis'), urlPart: '/settings/services/SpeechSynthesis/local-models', sample: {} },
     { name: 'localModels.get', call: () => api.settings.localModels.get('SpeechSynthesis', 'model-ref'), urlPart: '/settings/services/SpeechSynthesis/local-models/model-ref', sample: {} },
+    { name: 'imageGenerationBundles.list', call: () => api.settings.imageGenerationBundles.list(), urlPart: '/settings/services/ImageGeneration/bundle-definitions', sample: { items: [] } },
+    { name: 'imageGenerationBundles.get', call: () => api.settings.imageGenerationBundles.get('flux2-klein-4b'), urlPart: '/settings/services/ImageGeneration/bundle-definitions/flux2-klein-4b', sample: { bundleId: 'flux2-klein-4b', sampling: { steps: 4, cfgScale: 1, samplingMethod: 'euler' }, roles: { diffusion: { repo: 'r', file: 'f' }, vae: { repo: 'r', file: 'f' }, textEncoder: { repo: 'r', file: 'f' } } } },
+    { name: 'imageGenerationBundles.export', call: () => api.settings.imageGenerationBundles.export('flux2-klein-4b'), urlPart: '/settings/services/ImageGeneration/bundle-definitions/flux2-klein-4b/export', sample: { bundleId: 'flux2-klein-4b', sampling: { steps: 4, cfgScale: 1, samplingMethod: 'euler' }, roles: { diffusion: { repo: 'r', file: 'f' }, vae: { repo: 'r', file: 'f' }, textEncoder: { repo: 'r', file: 'f' } } } },
     { name: 'localModels.getOperation', call: () => api.settings.localModels.getOperation('SpeechSynthesis', 'op-1'), urlPart: '/settings/services/SpeechSynthesis/local-models/operations/op-1', sample: {} },
     { name: 'getDownloadStatus', call: () => api.settings.getDownloadStatus('dl-1'), urlPart: '/settings/llama/downloads/dl-1', sample: { status: 'done' } },
     { name: 'getLlamaCatalog', call: () => api.settings.getLlamaCatalog(), urlPart: '/settings/llama/catalog', sample: { schemaVersion: 1, models: [] } },
@@ -183,6 +186,36 @@ describe('api.settings (table-driven)', () => {
       name: 'localModels.selectActive',
       call: () => api.settings.localModels.selectActive('SpeechSynthesis', 'model-ref'),
       urlPart: '/settings/services/SpeechSynthesis/local-models/model-ref/select-active',
+      method: 'POST',
+    },
+    {
+      name: 'imageGenerationBundles.upsert',
+      call: () =>
+        api.settings.imageGenerationBundles.upsert('flux2-klein-4b', {
+          bundleId: 'flux2-klein-4b',
+          sampling: { steps: 4, cfgScale: 1, samplingMethod: 'euler' },
+          roles: {
+            diffusion: { repo: 'r', file: 'f' },
+            vae: { repo: 'r', file: 'f' },
+            textEncoder: { repo: 'r', file: 'f' },
+          },
+        }),
+      urlPart: '/settings/services/ImageGeneration/bundle-definitions/flux2-klein-4b',
+      method: 'PUT',
+    },
+    {
+      name: 'imageGenerationBundles.import',
+      call: () =>
+        api.settings.imageGenerationBundles.import({
+          bundleId: 'flux2-klein-4b',
+          sampling: { steps: 4, cfgScale: 1, samplingMethod: 'euler' },
+          roles: {
+            diffusion: { repo: 'r', file: 'f' },
+            vae: { repo: 'r', file: 'f' },
+            textEncoder: { repo: 'r', file: 'f' },
+          },
+        }),
+      urlPart: '/settings/services/ImageGeneration/bundle-definitions/import',
       method: 'POST',
     },
     {

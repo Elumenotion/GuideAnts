@@ -16,9 +16,9 @@ public sealed class RetentionCleanupHandlerTests
             BackgroundJobTestHelpers.CreateFactory(options),
             BackgroundJobTestHelpers.CreateConfiguration(Path.GetTempPath(), retentionEnabled: false));
 
-        var success = await handler.HandleAsync(new RetentionCleanupJob(Guid.NewGuid()), CancellationToken.None);
+        var result = await handler.HandleAsync(new RetentionCleanupJob(Guid.NewGuid()), CancellationToken.None);
 
-        success.Should().BeTrue();
+        result.IsSuccess.Should().BeTrue();
     }
 
 }

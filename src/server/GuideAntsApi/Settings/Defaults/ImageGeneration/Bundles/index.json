@@ -1,0 +1,32 @@
+{
+
+  "bundles": [
+
+    {
+
+      "bundleId": "FLUX.2-dev",
+
+      "definitionPath": "FLUX.2-dev/bundle-definition.json"
+
+    },
+
+    {
+
+      "bundleId": "flux2-klein-4b",
+
+      "definitionPath": "flux2-klein-4b/bundle-definition.json"
+
+    },
+
+    {
+
+      "bundleId": "flux2-klein-9b",
+
+      "definitionPath": "flux2-klein-9b/bundle-definition.json"
+
+    }
+
+  ]
+
+}
+

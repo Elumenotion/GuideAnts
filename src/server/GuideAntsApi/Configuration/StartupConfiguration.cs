@@ -111,6 +111,9 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideCatalogFilter, GuideAntsApi.Services.SystemGuide.SystemGuideCatalogFilter>();
         services.AddScoped<GuideAntsApi.Services.SystemGuide.ISystemGuideSandboxAdminProxy, GuideAntsApi.Services.SystemGuide.SystemGuideSandboxAdminProxy>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRuntimeProfileSeeder, GuideAntsApi.Services.Bootstrap.RuntimeProfileSeeder>();
+        services.AddScoped<GuideAntsApi.Services.Bootstrap.IBundleDefinitionMigrationService, GuideAntsApi.Services.Bootstrap.BundleDefinitionMigrationService>();
+        services.AddScoped<GuideAntsApi.Services.Bootstrap.IBundleDefinitionProjectionService, GuideAntsApi.Services.Bootstrap.BundleDefinitionProjectionService>();
+        services.AddScoped<GuideAntsApi.Services.Bootstrap.IImageGenerationBundleDefinitionBootstrapper, GuideAntsApi.Services.Bootstrap.ImageGenerationBundleDefinitionBootstrapper>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.ILocalServiceAutoSelector, GuideAntsApi.Services.Bootstrap.LocalServiceAutoSelector>();
         services.AddSingleton<GuideAntsApi.Services.Bootstrap.ILocalAiDesiredStateBuilder, GuideAntsApi.Services.Bootstrap.LocalAiDesiredStateBuilder>();
         services.AddHttpClient<GuideAntsApi.Services.Bootstrap.ILocalAiWarmupOrchestrationClient, GuideAntsApi.Services.Bootstrap.LocalAiWarmupOrchestrationClient>(client =>
@@ -149,6 +152,7 @@ public static class StartupConfiguration
         services.AddScoped<IConversationHistoryBuilder, ConversationHistoryBuilder>();
         services.AddScoped<IConversationPersistence, ConversationPersistence>();
         services.AddScoped<IConversationUsageReporter, ConversationUsageReporter>();
+        services.AddScoped<ConversationStreamLockCoordinator>();
         services.AddScoped<PrivateConversationStreamPolicy>();
         services.AddScoped<PublishedConversationStreamPolicy>();
         services.AddScoped<IConversationStreamEngine, ConversationStreamEngine>();
@@ -423,6 +427,7 @@ public static class StartupConfiguration
         
         // Background Jobs - replaces individual hosted services with queue-based processing
         services.AddBackgroundJobs(configuration);
+        services.AddSingleton<GuideAntsApi.BackgroundJobs.IConversationLockGateEligibility, GuideAntsApi.Services.ConversationLockGate.ConversationLockGateEligibility>();
         
         // Register job handlers
         services.AddJobHandler<GuideAntsApi.BackgroundJobs.Jobs.TestJobHandler>();

@@ -34,7 +34,7 @@ public sealed class ExtractAssistantFileMarkdownHandler : JobHandlerBase<Extract
 
     public override string JobType => nameof(ExtractAssistantFileMarkdownJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(ExtractAssistantFileMarkdownJob payload, CancellationToken ct)
+    public override async Task<JobExecutionResult> HandleAsync(ExtractAssistantFileMarkdownJob payload, CancellationToken ct)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(ct);
 
@@ -46,12 +46,12 @@ public sealed class ExtractAssistantFileMarkdownHandler : JobHandlerBase<Extract
         if (shadow == null)
         {
             Logger.LogWarning("Shadow not found for AssistantFile {AssistantFileId}", payload.AssistantFileId);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Shadow not found for AssistantFile");
         }
 
         if (shadow.Status == MarkdownExtractionStatus.Completed)
         {
-            return true; // Idempotent
+            return JobExecutionResult.Success(); // Idempotent
         }
 
         var originalFile = shadow.OriginalFile;
@@ -61,7 +61,7 @@ public sealed class ExtractAssistantFileMarkdownHandler : JobHandlerBase<Extract
             shadow.ErrorMessage = "Original file content missing";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(ct);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Original file content missing");
         }
 
         shadow.Status = MarkdownExtractionStatus.Processing;
@@ -94,7 +94,7 @@ public sealed class ExtractAssistantFileMarkdownHandler : JobHandlerBase<Extract
                     shadow.ErrorMessage = "Unsupported file type for markdown extraction";
                     shadow.ProcessedAt = DateTime.UtcNow;
                     await context.SaveChangesAsync(ct);
-                    return true;
+                    return JobExecutionResult.Success();
                 }
                 else if (!_docIntel.IsFileSizeSupported(originalFile.ContentBytes.Length))
                 {
@@ -102,7 +102,7 @@ public sealed class ExtractAssistantFileMarkdownHandler : JobHandlerBase<Extract
                     shadow.ErrorMessage = "File too large for markdown extraction";
                     shadow.ProcessedAt = DateTime.UtcNow;
                     await context.SaveChangesAsync(ct);
-                    return true;
+                    return JobExecutionResult.Success();
                 }
                 else
                 {
@@ -116,7 +116,7 @@ public sealed class ExtractAssistantFileMarkdownHandler : JobHandlerBase<Extract
                 shadow.ErrorMessage = "No content extracted";
                 shadow.ProcessedAt = DateTime.UtcNow;
                 await context.SaveChangesAsync(ct);
-                return true;
+                return JobExecutionResult.Success();
             }
 
             var contentHash = ComputeSha256(markdownContent);
@@ -143,7 +143,7 @@ public sealed class ExtractAssistantFileMarkdownHandler : JobHandlerBase<Extract
                 payload: new IndexAssistantFileMarkdownShadowJob(payload.AssistantFileId),
                 ct: ct);
 
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (Exception ex)
         {
@@ -152,7 +152,7 @@ public sealed class ExtractAssistantFileMarkdownHandler : JobHandlerBase<Extract
             shadow.ErrorMessage = ex.Message;
             shadow.ProcessedAt = DateTime.UtcNow;
             try { await context.SaveChangesAsync(ct); } catch { }
-            return false;
+            return JobExecutionResult.RetryableTransient(ex.Message);
         }
     }
 

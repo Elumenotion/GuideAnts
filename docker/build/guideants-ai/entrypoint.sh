@@ -187,6 +187,39 @@ PY
 
 normalize_router_image_min_tokens "$ROUTER_PRESET"
 
+materialize_router_runtime_preset() {
+    local canonical_path="$1"
+    if [ -z "$canonical_path" ] || [ ! -f "$canonical_path" ]; then
+        return
+    fi
+
+    local runtime_path
+    case "$canonical_path" in
+        *.ini) runtime_path="${canonical_path%.ini}.runtime.ini" ;;
+        *) runtime_path="${canonical_path}.runtime.ini" ;;
+    esac
+
+    PYTHONPATH="/app/lib:/app/llama-admin-service${PYTHONPATH:+:$PYTHONPATH}" python3 - "$canonical_path" "$runtime_path" <<'PY'
+import sys
+
+from guideants_hf.router_mmproj import materialize_router_ini_text
+import llama_router_ini as router_ini
+
+canonical_path, runtime_path = sys.argv[1], sys.argv[2]
+with open(canonical_path, "r", encoding="utf-8") as handle:
+    canonical = handle.read()
+runtime = materialize_router_ini_text(
+    canonical,
+    parse_router_ini=router_ini.parse_router_ini,
+    serialize_router_ini_for_runtime=router_ini.serialize_router_ini_for_runtime,
+)
+with open(runtime_path, "w", encoding="utf-8", newline="\n") as handle:
+    handle.write(runtime)
+PY
+}
+
+materialize_router_runtime_preset "$ROUTER_PRESET"
+
 SCRIPT_EXECUTION_REQUIRE_TOKEN="${SCRIPT_EXECUTION_REQUIRE_TOKEN:-true}"
 SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION="${SCRIPT_EXECUTION_ENABLE_IDENTITY_ISOLATION:-true}"
 

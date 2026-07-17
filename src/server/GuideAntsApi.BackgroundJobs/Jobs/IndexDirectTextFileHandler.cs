@@ -33,7 +33,7 @@ public sealed class IndexDirectTextFileHandler : JobHandlerBase<IndexDirectTextF
 
     public override string JobType => nameof(IndexDirectTextFileJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(IndexDirectTextFileJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(IndexDirectTextFileJob payload, CancellationToken cancellationToken)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
@@ -46,31 +46,31 @@ public sealed class IndexDirectTextFileHandler : JobHandlerBase<IndexDirectTextF
             if (version == null || string.IsNullOrEmpty(version.StoragePath))
             {
                 _log.LogWarning("ContentFileVersion {Id} not found or file missing", payload.FileId);
-                return false;
+                return JobExecutionResult.PermanentMissingInput("ContentFileVersion not found or file missing");
             }
 
             var storageRoot = _configuration["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured");
             if (!StoragePathCompatibility.TryResolveExistingFilePath(version.StoragePath, storageRoot, out var filePath))
             {
                 _log.LogWarning("ContentFileVersion {Id} not found or file missing", payload.FileId);
-                return false;
+                return JobExecutionResult.PermanentMissingInput("ContentFileVersion not found or file missing");
             }
 
             if (!IsDirectIndexable(version.FileName))
             {
                 _log.LogDebug("File {FileName} is not directly indexable", version.FileName);
-                return true;
+                return JobExecutionResult.Success();
             }
 
             try
             {
                 await _indexer.IndexContentFileAsync(payload.FileId, version.ContentFile.ProjectId, filePath, cancellationToken);
-                return true;
+                return JobExecutionResult.Success();
             }
             catch (Exception ex)
             {
                 _log.LogError(ex, "Direct indexing failed for ContentFileVersion {Id}", payload.FileId);
-                return false;
+                return JobExecutionResult.RetryableTransient(ex.Message);
             }
         }
         else
@@ -82,7 +82,7 @@ public sealed class IndexDirectTextFileHandler : JobHandlerBase<IndexDirectTextF
             if (notebookFile == null)
             {
                 _log.LogWarning("NotebookFile {Id} not found", payload.FileId);
-                return false;
+                return JobExecutionResult.PermanentMissingInput("NotebookFile not found");
             }
 
             var storageRoot = _configuration["FileStorage:Path"] ?? throw new InvalidOperationException("FileStorage:Path is not configured");
@@ -117,24 +117,24 @@ public sealed class IndexDirectTextFileHandler : JobHandlerBase<IndexDirectTextF
                     _log.LogWarning("Parent directory does not exist: {ParentDir}", LogValueSanitizer.Sanitize(parentDir));
                 }
                 
-                return false;
+                return JobExecutionResult.PermanentMissingInput("NotebookFile physical file not found");
             }
 
             if (!IsDirectIndexable(notebookFile.RelativePath))
             {
                 _log.LogDebug("File {FileName} is not directly indexable", notebookFile.RelativePath);
-                return true;
+                return JobExecutionResult.Success();
             }
 
             try
             {
                 await _indexer.IndexNotebookFileAsync(payload.FileId, notebookFile.NotebookId, notebookFile.Notebook.ProjectId, filePath, cancellationToken);
-                return true;
+                return JobExecutionResult.Success();
             }
             catch (Exception ex)
             {
                 _log.LogError(ex, "Direct indexing failed for NotebookFile {Id}", payload.FileId);
-                return false;
+                return JobExecutionResult.RetryableTransient(ex.Message);
             }
         }
     }

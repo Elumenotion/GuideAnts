@@ -1,5 +1,5 @@
 using FluentAssertions;
-using GuideAntsApi.Services.Scheduling;
+using GuideAntsApi.BackgroundJobs.Scheduling;
 
 namespace GuideAntsApi.Tests.Services.Scheduling;
 

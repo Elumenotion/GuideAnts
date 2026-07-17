@@ -10,25 +10,30 @@ public enum LimitEscalationPhase
     ForceCompleted,
 }
 
+[Flags]
+public enum ToolLimitHitKind
+{
+    None = 0,
+    ToolCalls = 1,
+}
+
 public sealed record ToolLimitState(
     int? MaxToolCalls,
-    int? MaxToolRounds,
     int ToolCallsUsed,
-    int ToolRoundsUsed,
-    LimitEscalationPhase Phase)
+    LimitEscalationPhase Phase,
+    ToolLimitHitKind LastHitKind = ToolLimitHitKind.None)
 {
+    public const string RuntimeOverrideMarker = "[Runtime:";
+
     public static ToolLimitState FromAssistantDefinition(AssistantDefinition assistant) =>
         new(
             assistant.MaxToolCallsPerTurn,
-            assistant.MaxToolRoundsPerTurn,
             ToolCallsUsed: 0,
-            ToolRoundsUsed: 0,
             Phase: LimitEscalationPhase.None);
 
     public static ToolLimitState ForNestedInvoke(
         ToolLimitState? parent,
         int? childMaxToolCalls,
-        int? childMaxToolRounds,
         int? memberOverride)
     {
         int? effectiveMax = memberOverride ?? childMaxToolCalls;
@@ -47,9 +52,7 @@ public sealed record ToolLimitState(
 
         return new ToolLimitState(
             effectiveMax,
-            childMaxToolRounds,
             ToolCallsUsed: 0,
-            ToolRoundsUsed: 0,
             Phase: LimitEscalationPhase.None);
     }
 
@@ -63,27 +66,78 @@ public sealed record ToolLimitState(
         return ToolCallsUsed + additionalCalls > MaxToolCalls.Value;
     }
 
-    public bool HasExceededToolRounds() =>
-        MaxToolRounds.HasValue && ToolRoundsUsed > MaxToolRounds.Value;
+    public ToolLimitHitKind EvaluateLimitHit(int pendingCalls)
+    {
+        return WouldExceedToolCalls(pendingCalls)
+            ? ToolLimitHitKind.ToolCalls
+            : ToolLimitHitKind.None;
+    }
 
     public ToolLimitState AddToolCalls(int count) =>
         this with { ToolCallsUsed = ToolCallsUsed + count };
 
-    public ToolLimitState AddToolRound() =>
-        this with { ToolRoundsUsed = ToolRoundsUsed + 1 };
-
-    public string BuildLimitToolResultMessage() =>
-        MaxToolCalls.HasValue
-            ? $"[Tool call limit reached ({ToolCallsUsed}/{MaxToolCalls.Value} configured for this assistant). " +
-              "No additional tool calls are permitted for this turn. " +
-              "Summarize what you have gathered and respond to the user.]"
-            : "[Tool call limit reached. No additional tool calls are permitted for this turn. " +
-              "Summarize what you have gathered and respond to the user.]";
+    public string BuildLimitToolResultMessage(int pendingCalls)
+    {
+        var hit = EvaluateLimitHit(pendingCalls);
+        var summary = DescribeLimitHit(hit, pendingCalls);
+        return $"[{summary} No additional tools may run for this turn. " +
+               "Summarize what you have gathered and respond to the user.]";
+    }
 
     public string BuildRuntimeOverrideSystemMessage() =>
-        "[Runtime: Tool call limit reached. Ignore prior instructions to retry tool calls for this turn.]";
+        $"{RuntimeOverrideMarker} {DescribeActiveLimitHit(LastHitKind, pastTense: true)} " +
+        "Ignore prior instructions to retry tool calls for this turn.]";
 
-    public static string BuildForceCompleteAssistantMessage() =>
-        "I have reached the maximum number of tool calls allowed for this turn and cannot run additional tools. " +
-        "Please review the tool results above for the information gathered so far.";
+    public string BuildSystemNudgeMessage(ToolLimitHitKind hit) =>
+        $"[System: {DescribeActiveLimitHit(hit, pastTense: true)} " +
+        "Summarize what you have gathered and respond to the user. Do not request additional tool calls.]";
+
+    public static string BuildForceCompleteAssistantMessage(ToolLimitHitKind hitKind)
+    {
+        return "I have reached the configured tool execution limit for this turn and cannot run additional tools. " +
+               "Please review the tool results above for the information gathered so far.";
+    }
+
+    public static string FormatLimitHitKinds(ToolLimitHitKind hitKind) =>
+        hitKind switch
+        {
+            ToolLimitHitKind.ToolCalls => "ToolCalls",
+            _ => string.Empty,
+        };
+
+    private string DescribeActiveLimitHit(ToolLimitHitKind hit, bool pastTense)
+    {
+        var verb = pastTense ? "was reached" : "reached";
+        return hit switch
+        {
+            ToolLimitHitKind.ToolCalls => $"Tool execution limit {verb} for this turn.",
+            _ => $"Execution limit {verb} for this turn.",
+        };
+    }
+
+    private string DescribeLimitHit(ToolLimitHitKind hit, int pendingCalls)
+    {
+        return hit switch
+        {
+            ToolLimitHitKind.ToolCalls => DescribeToolCallLimit(pendingCalls),
+            _ => "Execution limit reached for this turn.",
+        };
+    }
+
+    private string DescribeToolCallLimit(int pendingCalls, bool sentence = true)
+    {
+        if (!MaxToolCalls.HasValue)
+        {
+            return sentence
+                ? "Tool execution limit reached for this turn."
+                : "tool execution limit reached";
+        }
+
+        var projected = ToolCallsUsed + Math.Max(pendingCalls, 0);
+        var detail = $"tools {projected}/{MaxToolCalls.Value}";
+        return sentence
+            ? $"Tool execution limit reached ({detail} configured for this assistant)."
+            : detail;
+    }
+
 }

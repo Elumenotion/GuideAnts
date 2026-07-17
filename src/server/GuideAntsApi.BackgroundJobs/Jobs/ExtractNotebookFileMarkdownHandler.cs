@@ -34,7 +34,7 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
 
     public override string JobType => nameof(ExtractNotebookFileMarkdownJob).Replace("Job", string.Empty);
 
-    public override async Task<bool> HandleAsync(ExtractNotebookFileMarkdownJob payload, CancellationToken cancellationToken)
+    public override async Task<JobExecutionResult> HandleAsync(ExtractNotebookFileMarkdownJob payload, CancellationToken cancellationToken)
     {
         await using var context = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
@@ -57,7 +57,7 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
                 Logger.LogError(
                     "Cannot recover markdown extraction for NotebookFile {NotebookFileId} because the original NotebookFile record does not exist.",
                     payload.NotebookFileId);
-                return false;
+                return JobExecutionResult.PermanentMissingInput("NotebookFile record does not exist");
             }
 
             context.NotebookFileMarkdownShadows.Add(new NotebookFileMarkdownShadow
@@ -93,13 +93,13 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
                 Logger.LogError(
                     "Failed to recover missing markdown shadow for NotebookFile {NotebookFileId}; extraction cannot proceed.",
                     payload.NotebookFileId);
-                return false;
+                return JobExecutionResult.RetryableTransient();
             }
         }
 
         if (shadow.Status == MarkdownExtractionStatus.Completed)
         {
-            return true; // Idempotent
+            return JobExecutionResult.Success(); // Idempotent
         }
 
         var originalFile = shadow.OriginalFile;
@@ -113,7 +113,7 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
             shadow.ErrorMessage = "Original file missing";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Original file missing");
         }
 
         // Determine physical path based on storage layout
@@ -147,7 +147,7 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
             shadow.ErrorMessage = "Notebook file not found";
             shadow.ProcessedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(cancellationToken);
-            return false;
+            return JobExecutionResult.PermanentMissingInput("Notebook file not found");
         }
 
         shadow.Status = MarkdownExtractionStatus.Processing;
@@ -175,7 +175,7 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
                     shadow.ErrorMessage = null;
                     shadow.ProcessedAt = null;
                     await context.SaveChangesAsync(cancellationToken);
-                    return true; // dispatched to transcription
+                    return JobExecutionResult.Success(); // dispatched to transcription
                 }
 
                 markdownContent = await _docIntel.ExtractMarkdownAsync(fileStream, fileName, cancellationToken);
@@ -187,7 +187,7 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
                 shadow.ErrorMessage = "No content extracted";
                 shadow.ProcessedAt = DateTime.UtcNow;
                 await context.SaveChangesAsync(cancellationToken);
-                return true;
+                return JobExecutionResult.Success();
             }
 
             var contentHash = ComputeSha256(markdownContent);
@@ -213,7 +213,7 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
                 jobType: nameof(IndexNotebookMarkdownShadowJob).Replace("Job", string.Empty),
                 payload: new IndexNotebookMarkdownShadowJob(payload.NotebookFileId),
                 ct: cancellationToken);
-            return true;
+            return JobExecutionResult.Success();
         }
         catch (Exception ex)
         {
@@ -222,7 +222,7 @@ public sealed class ExtractNotebookFileMarkdownHandler : JobHandlerBase<ExtractN
             shadow.ErrorMessage = ex.Message;
             shadow.ProcessedAt = DateTime.UtcNow;
             try { await context.SaveChangesAsync(cancellationToken); } catch { }
-            return false;
+            return JobExecutionResult.RetryableTransient(ex.Message);
         }
     }
 

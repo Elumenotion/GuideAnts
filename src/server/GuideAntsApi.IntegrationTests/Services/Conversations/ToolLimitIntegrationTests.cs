@@ -72,8 +72,10 @@ public sealed class ToolLimitIntegrationTests : BaseEndpointTest
             .ToListAsync();
 
         toolMessages.Should().HaveCountGreaterThanOrEqualTo(2);
-        toolMessages[0].Content.Should().NotContain("Tool call limit reached");
-        toolMessages.Should().Contain(m => m.Content != null && m.Content.Contains("Tool call limit reached"));
+        toolMessages[0].Content.Should().NotContain("limit reached", because: "first tool should execute normally");
+        toolMessages.Should().Contain(m =>
+            m.Content != null &&
+            m.Content.Contains("limit reached", StringComparison.OrdinalIgnoreCase));
 
         var finalAssistant = await db2.NotebookConversationMessages
             .Where(m => m.NotebookConversationId == conversationId

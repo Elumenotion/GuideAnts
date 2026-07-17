@@ -15,7 +15,16 @@ from guideants_hf.preset_validation import (
     normalize_alias,
     normalize_preset_map,
 )
-from guideants_hf.vision_token_preset import apply_alias_vision_token_preset
+from guideants_hf.router_mmproj import (
+    materialize_router_extras_for_runtime,
+    materialize_router_ini_text,
+    preset_disables_mmproj,
+    resolve_router_runtime_config_path,
+)
+from guideants_hf.vision_token_preset import (
+    apply_alias_vision_token_preset,
+    strip_vision_token_extras,
+)
 
 ROUTER_CONFIG_PATH = "/models-local/router-models.ini"
 ROUTER_FILE_LOCK = threading.Lock()
@@ -97,6 +106,22 @@ def serialize_router_ini(entries: dict[str, RouterSection]) -> str:
     return "\n".join(lines)
 
 
+def serialize_router_ini_for_runtime(entries: dict[str, RouterSection]) -> str:
+    """Serialize INI for llama-router spawn (honors no-mmproj without emitting bare --mmproj)."""
+    lines: list[str] = ["version = 1", ""]
+    for alias in sorted(entries.keys()):
+        section = entries[alias]
+        lines.append(f"[{alias}]")
+        lines.append(f"model = {section.model}")
+        runtime_extras = materialize_router_extras_for_runtime(section.extras)
+        if not preset_disables_mmproj(section.extras):
+            lines.append(f"mmproj = {section.mmproj}")
+        for extra_key in sorted(runtime_extras.keys()):
+            lines.append(f"{extra_key} = {runtime_extras[extra_key]}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def try_int_from_extras(extras: dict[str, str], keys: tuple[str, ...]) -> int | None:
     for k in keys:
         for ek, ev in extras.items():
@@ -112,6 +137,68 @@ def _strip_extras_matching_incoming(extras: dict[str, str], allowed_lower: set[s
     for k in list(extras.keys()):
         if k.lower() in allowed_lower:
             del extras[k]
+
+
+def _strip_vision_token_extras(extras: dict[str, str]) -> None:
+    strip_vision_token_extras(extras)
+
+
+def write_router_config_pair(
+    entries: dict[str, RouterSection],
+    *,
+    canonical_path: str | None = None,
+    log_event: Callable[..., None] | None = None,
+) -> tuple[str, str]:
+    """Atomically write canonical router INI and router-facing runtime materialization."""
+    resolved_path = canonical_path or ROUTER_CONFIG_PATH
+    return write_router_config_text(
+        serialize_router_ini(entries),
+        canonical_path=resolved_path,
+        log_event=log_event,
+    )
+
+
+def write_router_config_text(
+    canonical_payload: str,
+    *,
+    canonical_path: str | None = None,
+    log_event: Callable[..., None] | None = None,
+) -> tuple[str, str]:
+    """Atomically write canonical router INI text and router-facing runtime materialization."""
+    resolved_path = canonical_path or ROUTER_CONFIG_PATH
+    runtime_payload = materialize_router_ini_text(
+        canonical_payload,
+        parse_router_ini=parse_router_ini,
+        serialize_router_ini_for_runtime=serialize_router_ini_for_runtime,
+    )
+    runtime_path = resolve_router_runtime_config_path(resolved_path)
+    directory = os.path.dirname(resolved_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+    for destination, payload in (
+        (resolved_path, canonical_payload),
+        (runtime_path, runtime_payload),
+    ):
+        temp_fd, temp_path = tempfile.mkstemp(
+            dir=directory if directory else None,
+            prefix="router-models-",
+            suffix=".ini.tmp",
+        )
+        try:
+            with os.fdopen(temp_fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            commit_router_ini_file(temp_path, destination, payload, log_event=log_event)
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+    return canonical_payload, runtime_payload
 
 
 def commit_router_ini_file(temp_path: str, destination: str, payload: str, *, log_event: Callable[..., None] | None = None) -> None:
@@ -168,7 +255,8 @@ def upsert_router_entry(
     _cache_l = {x.lower() for x in _CACHE_KEYS}
 
     incoming_preset = normalize_preset_map(preset or {})
-    incoming_preset = apply_alias_vision_token_preset(alias_trimmed, incoming_preset)
+    if not preset_disables_mmproj(incoming_preset):
+        incoming_preset = apply_alias_vision_token_preset(alias_trimmed, incoming_preset)
     if update_context:
         _strip_extras_matching_incoming(incoming_preset, _ctx_l)
         if context_size is not None:
@@ -194,37 +282,18 @@ def upsert_router_entry(
             _strip_extras_matching_incoming(extras, _ctx_l)
         if update_cache and cache_ram_mib is None:
             _strip_extras_matching_incoming(extras, _cache_l)
+        if preset_disables_mmproj(extras):
+            _strip_vision_token_extras(extras)
 
         entries[alias_trimmed] = RouterSection(
             model=model_path.strip(),
             mmproj=mmproj_path.strip(),
             extras=extras,
         )
-
-        directory = os.path.dirname(ROUTER_CONFIG_PATH)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
         payload = serialize_router_ini(entries)
         changed = payload != payload_before
         ini_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=directory if directory else None,
-            prefix="router-models-",
-            suffix=".ini.tmp",
-        )
-        try:
-            with os.fdopen(temp_fd, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            commit_router_ini_file(temp_path, ROUTER_CONFIG_PATH, payload, log_event=log_event)
-        finally:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+        write_router_config_pair(entries, log_event=log_event)
 
     if log_event is not None:
         log_event(

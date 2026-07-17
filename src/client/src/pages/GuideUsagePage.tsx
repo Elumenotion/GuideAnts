@@ -916,7 +916,7 @@ export default function GuideUsagePage() {
                 <div>
                   <h2 className="text-sm font-semibold text-gray-900">API Usage</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Grouped by source channel, endpoint, alias, provider mode, and status.
+                    Grouped by source channel and endpoint.
                   </p>
                 </div>
                 <select
@@ -947,21 +947,15 @@ export default function GuideUsagePage() {
                         <tr>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Endpoint</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alias</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Provider Mode</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Events</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Charge</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {apiUsageReport.rows.map((row, idx) => (
-                          <tr key={`${row.sourceChannel}-${row.endpoint}-${row.alias}-${row.providerServiceMode}-${row.statusFamily}-${idx}`} className="hover:bg-gray-50">
+                          <tr key={`${row.sourceChannel}-${row.endpoint}-${idx}`} className="hover:bg-gray-50">
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-800">{formatSourceLabel(row.sourceChannel)}</td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-800 font-mono">{row.endpoint}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 font-mono">{row.alias}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 font-mono">{row.providerServiceMode}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">{row.statusFamily}</td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">{row.events}</td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">{formatCurrency(row.chargeUsd)}</td>
                           </tr>
