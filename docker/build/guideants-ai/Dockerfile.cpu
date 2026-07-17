@@ -246,7 +246,6 @@ COPY admin-service/ /app/admin-service/
 COPY llama-admin-service/ /app/llama-admin-service/
 COPY asr-service/ /app/asr-service/
 COPY sd-service/ /app/sd-service/
-RUN find /app/sd-service -type f -name 'sd_service.cpython-*.pyc' -delete 2>/dev/null || true
 COPY tts-service/ /app/tts-service/
 COPY voice-pack/ /opt/guideants/voice-pack/
 COPY scripts/check-voice-pack-attribution.py /opt/guideants/scripts/check-voice-pack-attribution.py
