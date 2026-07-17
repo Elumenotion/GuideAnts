@@ -1744,8 +1744,7 @@ async def synthesize(request: Request, payload: SynthesizeRequest) -> Response:
                 content={
                     "requestId": request_id,
                     "error": "engine_restart_failed",
-                    "message": "TTS engine is not running and restart failed.",
-                    "detail": restart_error,
+                    "message": "TTS engine is not running and restart failed. Check service logs for details.",
                 },
             )
 

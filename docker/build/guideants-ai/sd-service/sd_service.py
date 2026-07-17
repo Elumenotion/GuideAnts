@@ -16,8 +16,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from guideants_hf.catalog_download import lookup_hf_file_size
-from guideants_hf.transport import download_hf_file
 from guideants_hf.operations import find_in_flight_operation
+from guideants_hf.path_safety import PathSafetyError, ensure_inside_root
+from guideants_hf.transport import download_hf_file
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -425,10 +426,13 @@ def role_asset_file_count(bundle_path: str) -> int:
     return total
 
 
+def _bundle_store_root(model_dir: str) -> str:
+    return os.path.realpath(bundle_root_dir(model_dir))
+
+
 def resolve_bundle_dir(model_dir: str, bundle_id: str) -> str:
     safe_bundle_id = validate_bundle_id(bundle_id)
-    root_real = os.path.realpath(bundle_root_dir(model_dir))
-    root_prefix = root_real if root_real.endswith(os.sep) else root_real + os.sep
+    root_real = _bundle_store_root(model_dir)
 
     candidates: list[str] = [os.path.join(root_real, safe_bundle_id)]
     legacy_name = LEGACY_BUNDLE_DIR_NAMES.get(safe_bundle_id)
@@ -439,15 +443,18 @@ def resolve_bundle_dir(model_dir: str, bundle_id: str) -> str:
     best_count = -1
     for candidate in candidates:
         candidate_real = os.path.realpath(candidate)
-        if not candidate_real.startswith(root_prefix) or not os.path.isdir(candidate_real):
+        if not os.path.isdir(candidate_real):
+            continue
+        try:
+            ensure_inside_root(root_real, candidate_real)
+        except PathSafetyError:
             continue
         count = role_asset_file_count(candidate_real)
         if count > best_count:
             best_count = count
             best_path = candidate_real
 
-    if not best_path.startswith(root_prefix):
-        raise ValueError("resolved bundle path escapes the permitted bundle directory")
+    ensure_inside_root(root_real, os.path.realpath(best_path))
     return best_path
 
 
@@ -612,7 +619,10 @@ def expected_bundle_paths(model_dir: str, bundle_id: str) -> dict[str, str]:
 
 def canonical_bundle_dir(model_dir: str, bundle_id: str) -> str:
     safe_id = validate_bundle_id(canonical_bundle_id(bundle_id))
-    return os.path.join(bundle_root_dir(model_dir), safe_id)
+    root_real = _bundle_store_root(model_dir)
+    candidate = os.path.realpath(os.path.join(root_real, safe_id))
+    ensure_inside_root(root_real, candidate)
+    return candidate
 
 
 def canonical_bundle_definition_path(model_dir: str, bundle_id: str) -> str:
@@ -620,10 +630,16 @@ def canonical_bundle_definition_path(model_dir: str, bundle_id: str) -> str:
 
 
 def bundle_definition_file(model_dir: str, bundle_id: str) -> str:
-    canonical_path = canonical_bundle_definition_path(model_dir, bundle_id)
+    root_real = _bundle_store_root(model_dir)
+    canonical_path = os.path.realpath(canonical_bundle_definition_path(model_dir, bundle_id))
+    ensure_inside_root(root_real, canonical_path)
     if os.path.isfile(canonical_path):
         return canonical_path
-    return os.path.join(resolve_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
+    legacy_path = os.path.realpath(
+        os.path.join(resolve_bundle_dir(model_dir, bundle_id), "bundle-definition.json")
+    )
+    ensure_inside_root(root_real, legacy_path)
+    return legacy_path
 
 
 def write_bundle_definition_payload(model_dir: str, bundle_id: str, payload: dict[str, Any]) -> None:
@@ -749,10 +765,13 @@ def _single_file_name(path: str) -> str | None:
 
 def read_bundle_definition(model_dir: str, bundle_id: str) -> dict[str, Any] | None:
     path = bundle_definition_file(model_dir, bundle_id)
-    if not os.path.isfile(path):
+    root_real = _bundle_store_root(model_dir)
+    safe_path = os.path.realpath(path)
+    ensure_inside_root(root_real, safe_path)
+    if not os.path.isfile(safe_path):
         return None
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(safe_path, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
             normalized = _normalize_bundle_definition(payload)
     except Exception:

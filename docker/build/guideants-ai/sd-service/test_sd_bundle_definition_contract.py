@@ -31,8 +31,32 @@ _operations = _install_module_stub(
     "guideants_hf.operations",
     {"find_in_flight_operation": lambda *args, **kwargs: None},
 )
+
+
+class _PathSafetyError(ValueError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _ensure_inside_root(root_abs: str, candidate_abs: str) -> None:
+    root_norm = os.path.normcase(os.path.abspath(root_abs))
+    candidate_norm = os.path.normcase(os.path.abspath(candidate_abs))
+    common = os.path.commonpath([root_norm, candidate_norm])
+    if common != root_norm:
+        raise _PathSafetyError("PATH_ESCAPE", "Target path escapes the model store root.")
+
+
+_path_safety = _install_module_stub(
+    "guideants_hf.path_safety",
+    {
+        "PathSafetyError": _PathSafetyError,
+        "ensure_inside_root": _ensure_inside_root,
+    },
+)
 _guideants_hf.catalog_download = _catalog_download
 _guideants_hf.operations = _operations
+_guideants_hf.path_safety = _path_safety
 
 _install_module_stub("uvicorn", {"run": lambda *args, **kwargs: None})
 
