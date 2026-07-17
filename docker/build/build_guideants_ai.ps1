@@ -58,7 +58,7 @@ function Write-DepsDockerfileSlice {
         $sliceLines.Add($line)
     }
 
-    $slice = [string]::Join([Environment]::NewLine, $sliceLines)
+    $slice = [string]::Join("`n", $sliceLines)
     if ($PSVersionTable.PSVersion.Major -ge 6) {
         Set-Content -Path $OutPath -Value $slice -Encoding utf8NoBOM -NoNewline
     }
