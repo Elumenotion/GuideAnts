@@ -17,14 +17,7 @@ from typing import Any
 
 from guideants_hf.catalog_download import lookup_hf_file_size
 from guideants_hf.operations import find_in_flight_operation
-from guideants_hf.path_safety import (
-    PathSafetyError,
-    ensure_inside_root,
-    merge_directory_contents_under_root,
-    remove_directory_under_root,
-    rename_directory_under_root,
-    resolve_path_under_dir,
-)
+from guideants_hf.path_safety import PathSafetyError, ensure_inside_root, resolve_path_under_dir
 from guideants_hf.transport import download_hf_file
 
 import uvicorn
@@ -407,14 +400,22 @@ def resolve_bundle_dir(model_dir: str, bundle_id: str) -> str:
 
 
 def migrate_bundle_folder(model_dir: str, from_bundle_id: str, to_bundle_id: str) -> dict[str, Any]:
-    from_id = validate_bundle_id(from_bundle_id)
-    to_id = validate_bundle_id(to_bundle_id)
+    from_id = (from_bundle_id or "").strip()
+    to_id = (to_bundle_id or "").strip()
+    if not BUNDLE_ID_RE.fullmatch(from_id):
+        raise ValueError("bundle_id must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    if not BUNDLE_ID_RE.fullmatch(to_id):
+        raise ValueError("bundle_id must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     if from_id == to_id:
         return {"fromBundleId": from_id, "toBundleId": to_id, "action": "noop"}
 
-    root_real = _bundle_store_root(model_dir)
-    from_path = resolve_bundle_dir(model_dir, from_id)
-    to_path = resolve_bundle_dir(model_dir, to_id)
+    root_real = os.path.realpath(bundle_root_dir(model_dir))
+    from_path = os.path.realpath(os.path.join(root_real, from_id))
+    if not from_path.startswith(root_real + os.sep):
+        raise ValueError("resolved bundle path escapes the permitted bundle directory.")
+    to_path = os.path.realpath(os.path.join(root_real, to_id))
+    if not to_path.startswith(root_real + os.sep):
+        raise ValueError("resolved bundle path escapes the permitted bundle directory.")
 
     if not os.path.isdir(from_path):
         return {
@@ -425,15 +426,40 @@ def migrate_bundle_folder(model_dir: str, from_bundle_id: str, to_bundle_id: str
         }
 
     if not os.path.isdir(to_path):
-        rename_directory_under_root(root_real, from_path, to_path)
+        os.rename(from_path, to_path)
         action = "renamed"
     else:
-        merge_directory_contents_under_root(
-            store_root=root_real,
-            source_dir=from_path,
-            dest_dir=to_path,
-        )
-        remove_directory_under_root(root_real, from_path)
+        pending: list[tuple[str, str]] = [(from_path, to_path)]
+        while pending:
+            source_root, dest_root = pending.pop()
+            for entry in os.listdir(source_root):
+                if entry.startswith("."):
+                    continue
+                if (
+                    entry in {".", ".."}
+                    or "/" in entry
+                    or "\\" in entry
+                    or os.path.isabs(entry)
+                ):
+                    continue
+                src_entry = os.path.realpath(os.path.join(source_root, entry))
+                dst_entry = os.path.realpath(os.path.join(dest_root, entry))
+                if not src_entry.startswith(root_real + os.sep):
+                    continue
+                if not dst_entry.startswith(root_real + os.sep):
+                    continue
+                if not src_entry.startswith(source_root + os.sep):
+                    continue
+                if not dst_entry.startswith(dest_root + os.sep):
+                    continue
+                if os.path.isdir(src_entry):
+                    if not os.path.isdir(dst_entry):
+                        shutil.move(src_entry, dst_entry)
+                    else:
+                        pending.append((src_entry, dst_entry))
+                elif os.path.isfile(src_entry) and not os.path.exists(dst_entry):
+                    shutil.move(src_entry, dst_entry)
+        shutil.rmtree(from_path)
         action = "merged"
 
     active = read_active_bundle(model_dir)
@@ -614,9 +640,17 @@ def bundle_definition_file(model_dir: str, bundle_id: str) -> str:
 
 
 def write_bundle_definition_payload(model_dir: str, bundle_id: str, payload: dict[str, Any]) -> None:
-    bundle_path = resolve_bundle_dir(model_dir, bundle_id)
+    safe_bundle_id = (bundle_id or "").strip()
+    if not BUNDLE_ID_RE.fullmatch(safe_bundle_id):
+        raise ValueError("bundle_id must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    root_real = os.path.realpath(bundle_root_dir(model_dir))
+    bundle_path = os.path.realpath(os.path.join(root_real, safe_bundle_id))
+    if not bundle_path.startswith(root_real + os.sep):
+        raise ValueError("resolved bundle path escapes the permitted bundle directory.")
     os.makedirs(bundle_path, exist_ok=True)
-    target = resolve_path_under_dir(bundle_path, "bundle-definition.json")
+    target = os.path.realpath(os.path.join(bundle_path, "bundle-definition.json"))
+    if not target.startswith(bundle_path + os.sep):
+        raise ValueError("resolved bundle definition path escapes the bundle directory.")
     temp = f"{target}.{uuid.uuid4().hex}.tmp"
     with open(temp, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=True, sort_keys=True)
