@@ -2558,18 +2558,18 @@ async def admin_unload() -> JSONResponse:
 @APP.delete("/admin/bundles/{bundle_id}")
 async def admin_delete_bundle(bundle_id: str) -> JSONResponse:
     model_dir = _require_model_dir()
-    bundle_id = require_valid_bundle_id(bundle_id)
-    if STATE.loaded_bundle_id == bundle_id:
+    safe_bundle_id = require_valid_bundle_id(bundle_id)
+    if STATE.loaded_bundle_id == safe_bundle_id:
         raise HTTPException(status_code=409, detail="cannot remove loaded bundle")
 
-    try:
-        target = resolve_bundle_dir(model_dir, bundle_id)
-    except ValueError:
+    root_real = _bundle_store_root(model_dir)
+    target = os.path.realpath(os.path.join(root_real, safe_bundle_id))
+    if not target.startswith(root_real + os.sep):
         raise HTTPException(status_code=400, detail="invalid bundle_id")
     if not os.path.exists(target):
         raise HTTPException(status_code=404, detail="bundle not found")
     shutil.rmtree(target)
-    return JSONResponse(status_code=200, content={"deleted": True, "bundleId": bundle_id})
+    return JSONResponse(status_code=200, content={"deleted": True, "bundleId": safe_bundle_id})
 
 
 @APP.post("/txt2img")
