@@ -91,6 +91,7 @@ services:
       - SCRIPT_EXECUTION_ADMIN_STATE_DIR=/var/lib/guideants/script-agent-admin
       - SCRIPT_EXECUTION_SCOPE_STATE_ROOT=/var/lib/guideants/script-agent-admin/scopes
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
       # Router aliases live on the named volume (with GGUF trees), not a host bind.
       # GuideAnts API + llama-admin HTTP update this file; optional seed on first boot in entrypoint.sh.
       - GA_LLAMA_MODELS_PRESET=/models-local/router-models.ini
@@ -286,6 +287,7 @@ services:
       - DocumentServer__JwtInBody=${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}
       - ScriptExecution__AgentToken=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - ScriptExecution__AdminToken=${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      - ScriptExecution__TimeoutSeconds=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
 
       - LlamaCpp__BaseUrl=http://guideants-ai:80/llama-cpp
       - LlamaCpp__TimeoutSeconds=${GA_LLAMA_CPP_TIMEOUT_SECONDS:-600}
@@ -311,6 +313,7 @@ services:
       - FILE_STORAGE_ROOT=/app/ContentFiles
       - SCRIPT_EXECUTION_AGENT_TOKEN=${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       - SCRIPT_EXECUTION_REQUIRE_TOKEN=true
+      - SCRIPT_EXECUTION_TIMEOUT_SECONDS=${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
       - PLANTUML_LIMIT_SIZE=8192
     ports:
       - "8111:80"

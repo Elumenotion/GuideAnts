@@ -805,6 +805,7 @@ public static class StartupConfiguration
         services.Configure<DocumentServerOptions>(configuration.GetSection(DocumentServerOptions.SectionName));
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
         services.Configure<GuideAntsApi.Options.SandboxWireApiOptions>(configuration.GetSection(GuideAntsApi.Options.SandboxWireApiOptions.SectionName));
+        services.Configure<ScriptExecutionOptions>(configuration.GetSection(ScriptExecutionOptions.SectionName));
     }
 
     private static void ValidateJwtOptions(JwtOptions jwtOptions)

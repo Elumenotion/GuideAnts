@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using GuideAntsApi.Options;
 
 namespace GuideAntsApi.Settings;
 
@@ -422,6 +423,14 @@ public sealed class SettingsSectionRegistry : ISettingsSectionRegistry
             Properties =
             [
                 new("BaseUrl", "LlamaCpp:BaseUrl")
+            ]
+        },
+        new()
+        {
+            SectionName = ScriptExecutionOptions.SectionName,
+            Properties =
+            [
+                new("TimeoutSeconds", "ScriptExecution:TimeoutSeconds", SettingsValueType.Int, DefaultValue: 600)
             ]
         },
         new()

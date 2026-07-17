@@ -1,5 +1,5 @@
 import type { IconType } from 'react-icons';
-import { FaDatabase, FaHome, FaMicrochip, FaSatelliteDish, FaSlidersH, FaThLarge, FaUserCog, FaUsers } from 'react-icons/fa';
+import { FaCube, FaDatabase, FaHome, FaMicrochip, FaSatelliteDish, FaSlidersH, FaThLarge, FaUserCog, FaUsers } from 'react-icons/fa';
 import { SettingsTab } from '../types';
 import type { AppRole } from '../../../types/user';
 
@@ -16,6 +16,7 @@ const tabs: Array<{ key: SettingsTab; label: string; icon: IconType; adminOnly?:
   { key: 'connections', label: 'Connections', icon: FaDatabase, adminOnly: true },
   { key: 'models-runtime', label: 'Models & Runtime', icon: FaMicrochip, adminOnly: true },
   { key: 'services', label: 'Services', icon: FaThLarge, adminOnly: true },
+  { key: 'sandbox', label: 'Sandbox', icon: FaCube, adminOnly: true },
   { key: 'infrastructure', label: 'Infrastructure', icon: FaSlidersH, adminOnly: true },
   { key: 'telemetry', label: 'Telemetry', icon: FaSatelliteDish, adminOnly: true },
 ];

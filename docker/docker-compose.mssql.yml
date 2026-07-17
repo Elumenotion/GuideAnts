@@ -45,6 +45,7 @@ services:
       DocumentServer__JwtInBody: "${GA_DOCUMENTSERVER_JWT_IN_BODY:-false}"
       ScriptExecution__AgentToken: ${GA_SCRIPT_AGENT_TOKEN:-dev-script-agent-token}
       ScriptExecution__AdminToken: ${GA_SCRIPT_AGENT_ADMIN_TOKEN:-dev-script-agent-admin-token}
+      ScriptExecution__TimeoutSeconds: ${GA_SCRIPT_EXECUTION_TIMEOUT_SECONDS:-600}
 
       SettingsSecrets__ActiveKeyId: local-dev
       "SettingsSecrets__Keys__local-dev": MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=
