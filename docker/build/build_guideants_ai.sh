@@ -120,6 +120,12 @@ get_combined_hash() {
   printf "%s" "$joined" | sha256sum | awk '{print $1}'
 }
 
+write_deps_dockerfile_slice() {
+  local dockerfile_path="$1"
+  local out_path="$2"
+  awk '/^FROM[[:space:]].+[[:space:]]AS[[:space:]]final-/ { exit } { print }' "$dockerfile_path" > "$out_path"
+}
+
 docker_image_exists() {
   local image_tag="$1"
   docker image inspect "$image_tag" >/dev/null 2>&1
@@ -251,8 +257,11 @@ echo "Build context staged."
 BUILD_STATE_DIR="$DOCKER_ROOT/.build-state"
 mkdir -p "$BUILD_STATE_DIR"
 
+DEPS_DOCKERFILE_SLICE_PATH="$BUILD_STATE_DIR/deps-dockerfile-slice.${BACKEND}.txt"
+write_deps_dockerfile_slice "$DOCKERFILE_PATH" "$DEPS_DOCKERFILE_SLICE_PATH"
+
 DEPS_HASH_INPUTS=(
-  "$DOCKERFILE_PATH"
+  "$DEPS_DOCKERFILE_SLICE_PATH"
   "$BUILD_CONTEXT/asr-requirements.txt"
   "$BUILD_CONTEXT/tts-requirements.txt"
   "$BUILD_CONTEXT/emb-requirements.txt"

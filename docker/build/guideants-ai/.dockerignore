@@ -1,0 +1,9 @@
+# Build context is guideants-ai/ (not docker/build/). Keep bytecode and test
+# artifacts out of COPY layers so bind-mounted .py sources are not shadowed.
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

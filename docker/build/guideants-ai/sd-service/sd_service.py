@@ -19,6 +19,7 @@ from guideants_hf.catalog_download import lookup_hf_file_size
 from guideants_hf.operations import find_in_flight_operation
 from guideants_hf.path_safety import PathSafetyError, ensure_inside_root, resolve_path_under_dir
 from guideants_hf.transport import download_hf_file
+from ga_blocking import await_blocking
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -2290,7 +2291,8 @@ async def admin_warmup(request: WarmupRequest | None = None) -> JSONResponse:
 
     try:
         payload = request or WarmupRequest()
-        result = run_startup_warmup(
+        result = await await_blocking(
+            run_startup_warmup,
             config=config,
             request_id_prefix="sd-admin-warmup",
             prompt=payload.prompt,
@@ -2481,7 +2483,7 @@ async def admin_load(payload: AdminLoadRequest | None = None) -> JSONResponse:
                     "engine": engine_state_dict(),
                 },
             )
-        ok, err = start_engine(bundle_id=bundle_id)
+        ok, err = await await_blocking(start_engine, bundle_id=bundle_id)
         if ok:
             return JSONResponse(
                 status_code=200,
@@ -2535,7 +2537,7 @@ async def admin_unload() -> JSONResponse:
                 },
             )
         unloaded_bundle_id = STATE.loaded_bundle_id
-        stop_engine()
+        await await_blocking(stop_engine)
         log_event(
             "sd_engine_unload",
             action="unloaded",
@@ -2596,7 +2598,8 @@ async def txt2img(request: Request, payload: Txt2ImgRequest) -> JSONResponse:
 
     try:
         output_format = normalize_output_format(payload.outputFormat, config.default_output_format)
-        image = run_sd_generation_via_engine(
+        image = await await_blocking(
+            run_sd_generation_via_engine,
             config=config,
             request_id=request_id,
             traceparent=traceparent,
@@ -2668,7 +2671,8 @@ async def img2img(
             **context,
         )
 
-        output_image = run_sd_edit_via_openai_endpoint(
+        output_image = await await_blocking(
+            run_sd_edit_via_openai_endpoint,
             config=config,
             request_id=request_id,
             traceparent=traceparent,

@@ -50,21 +50,9 @@ export GA_LLAMA_ADMIN_LOG_LEVEL="${GA_LLAMA_ADMIN_LOG_LEVEL:-$GA_ADMIN_LOG_LEVEL
 export GA_LLAMA_MODEL_DIR="${GA_LLAMA_MODEL_DIR:-/models-local/llama}"
 export GA_LLAMA_ROUTER_CONFIG_PATH="${GA_LLAMA_ROUTER_CONFIG_PATH:-${GA_LLAMA_MODELS_PRESET:-/models-local/router-models.ini}}"
 
+# Warmup orchestrator reaches the standalone SD control plane on this port.
 export GA_SD_HOST="${GA_SD_HOST:-127.0.0.1}"
 export GA_SD_PORT="${GA_SD_PORT:-8083}"
-export GA_SD_LOG_LEVEL="${GA_SD_LOG_LEVEL:-info}"
-export GA_SD_MODEL_DIR="${GA_SD_MODEL_DIR:-/models-local/sd}"
-export GA_SD_SERVER_PATH="${GA_SD_SERVER_PATH:-/usr/local/bin/sd-server}"
-export GA_SD_ENGINE_HOST="${GA_SD_ENGINE_HOST:-127.0.0.1}"
-export GA_SD_ENGINE_PORT="${GA_SD_ENGINE_PORT:-18083}"
-export GA_SD_ENGINE_READY_TIMEOUT_SECONDS="${GA_SD_ENGINE_READY_TIMEOUT_SECONDS:-1800}"
-export GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS="${GA_SD_ENGINE_REQUEST_TIMEOUT_SECONDS:-120}"
-export GA_SD_POLL_INTERVAL_SECONDS="${GA_SD_POLL_INTERVAL_SECONDS:-0.25}"
-export GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS="${GA_SD_WARMUP_REQUEST_TIMEOUT_SECONDS:-180}"
-export GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP="${GA_SD_WARMUP_FAIL_OPEN_ON_STARTUP:-1}"
-apply_cuda_visible_devices_override "GA_SD_CUDA_VISIBLE_DEVICES"
 
-# Stale sd_service bytecode must not shadow sd_service.py (bind mounts, image layer cache).
-find /app/sd-service -type f -name 'sd_service.cpython-*.pyc' -delete 2>/dev/null || true
-
-exec /opt/venv/bin/python /app/admin-service/ga_admin_service.py
+# -B: do not write/use .pyc (bind-mounted admin modules must not lose to image bytecode).
+exec /opt/venv/bin/python -B /app/admin-service/ga_admin_service.py
