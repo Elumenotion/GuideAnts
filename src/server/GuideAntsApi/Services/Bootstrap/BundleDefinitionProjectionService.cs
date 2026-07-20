@@ -59,8 +59,13 @@ public sealed class BundleDefinitionProjectionService : IBundleDefinitionProject
             }
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            throw new InvalidOperationException(
-                $"SD bundle folder migration failed for '{legacyId}' -> '{canonicalId}' with status {(int)response.StatusCode}: {body}");
+            _logger.LogWarning(
+                "Skipping ImageGeneration bundle folder migration for '{LegacyId}' -> '{CanonicalId}' "
+                + "with status {StatusCode}: {Body}",
+                legacyId,
+                canonicalId,
+                (int)response.StatusCode,
+                body);
         }
     }
 

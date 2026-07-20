@@ -7,6 +7,7 @@ set "STATE_FILE=%ROOT_DIR%\.installer_state.env"
 set "HEALTH_URL=http://localhost:5107/"
 set "HOST_MOUNT_OVERRIDE_FILE=docker-compose.host-mounts.generated.yml"
 set "ROCM_RUNTIME_OVERRIDE_FILE=docker-compose.rocm-runtime.generated.yml"
+set "VOICE_PACK_OVERRIDE_FILE=docker-compose.voice-pack.local.yml"
 set "START_COMMAND=start_windows.cmd"
 set "ENV_FILE=.env"
 
@@ -116,6 +117,15 @@ if exist "%ROCM_RUNTIME_OVERRIDE_FILE%" (
   ) else (
     set "COMPOSE_ARGS=%COMPOSE_ARGS% -f %ROCM_RUNTIME_OVERRIDE_FILE%"
     call :log Including ROCm runtime override: %ROCM_RUNTIME_OVERRIDE_FILE%
+  )
+)
+if exist "%VOICE_PACK_OVERRIDE_FILE%" (
+  docker compose -f "%COMPOSE_FILE%" -f "%VOICE_PACK_OVERRIDE_FILE%" --env-file "%ENV_FILE%" config >nul 2>nul
+  if errorlevel 1 (
+    call :warn Ignoring invalid voice pack override %DOCKER_DIRECTORY%\%VOICE_PACK_OVERRIDE_FILE%.
+  ) else (
+    set "COMPOSE_ARGS=%COMPOSE_ARGS% -f %VOICE_PACK_OVERRIDE_FILE%"
+    call :log Including voice pack override: %VOICE_PACK_OVERRIDE_FILE%
   )
 )
 docker compose %COMPOSE_ARGS% --env-file "%ENV_FILE%" up -d || (
@@ -274,6 +284,7 @@ goto wait_loop
   echo COMPOSE_MODE=%COMPOSE_MODE%
   echo COMPOSE_FILE=%COMPOSE_FILE%
   echo HOST_MOUNT_OVERRIDE_FILE=%HOST_MOUNT_OVERRIDE_FILE%
+  echo VOICE_PACK_OVERRIDE_FILE=%VOICE_PACK_OVERRIDE_FILE%
   echo DOCKER_DIRECTORY=%DOCKER_DIRECTORY%
   echo START_COMMAND=%START_COMMAND%
   for /f %%i in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"') do echo LAST_RUN_EPOCH=%%i

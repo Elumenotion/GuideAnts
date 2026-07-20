@@ -79,6 +79,146 @@ public sealed class LocalAiStartupWarmupServiceTests
     }
 
     [TestMethod]
+    public async Task SyncDesiredAndApplyAsync_SkipsImageGenerationBundleProjectionWhenServiceIsNotWarmDesired()
+    {
+        string? capturedIni = null;
+        var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
+        orchestration
+            .Setup(c => c.PutDesiredAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
+            .Callback<string, int?, CancellationToken>((ini, _, _) => capturedIni = ini)
+            .ReturnsAsync(new WarmupDesiredWriteResult(Revision: 1, Sha256: "abc", Changed: true));
+        orchestration
+            .Setup(c => c.ApplyAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WarmupApplyResult(
+                Ok: true,
+                Noop: false,
+                Continue: false,
+                Started: true,
+                DesiredRevision: 1,
+                AppliedRevision: 0,
+                ApplyStatus: "applying"));
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LlamaCpp:BaseUrl"] = "http://localhost:8080/llama-cpp",
+                ["LocalServiceHosts:ImageGenerationBaseUrl"] = "http://localhost:8080",
+            })
+            .Build();
+
+        var cloudImageGenerationMode = new ServiceMode(
+            ModeId: "cloud",
+            ProviderSection: "ImageGeneration.OpenAI",
+            ModelId: "dall-e-3",
+            RequestPresetJson: null,
+            Enabled: true,
+            IsDefault: true);
+        var modeResolver = new FakeServiceModeResolver(
+            (RoutedServiceNames.ImageGeneration, cloudImageGenerationMode));
+
+        var (settingsMock, _) = CreateSettingsMock(
+            (RoutedServiceNames.ImageGeneration, cloudImageGenerationMode));
+
+        var bundleBootstrapper = new Mock<IImageGenerationBundleDefinitionBootstrapper>(MockBehavior.Strict);
+
+        var builder = new LocalAiDesiredStateBuilder(
+            configuration,
+            new ServiceScopeFactoryStub(settingsMock.Object),
+            modeResolver,
+            CreateHttpClientFactory(),
+            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+
+        var service = new LocalAiStartupWarmupService(
+            configuration,
+            new ServiceScopeFactoryStub(settingsMock.Object, bundleBootstrapper.Object),
+            builder,
+            orchestration.Object,
+            modeResolver,
+            CreateHttpClientFactory(),
+            NullLogger<LocalAiStartupWarmupService>.Instance);
+
+        await service.SyncDesiredAndApplyAsync(waitForCompletion: false);
+
+        capturedIni.Should().NotBeNullOrWhiteSpace();
+        capturedIni.Should().Contain("[ImageGeneration]");
+        capturedIni.Should().Contain("enabled = off");
+        bundleBootstrapper.Verify(
+            b => b.ProjectAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
+        orchestration.VerifyAll();
+    }
+
+    [TestMethod]
+    public async Task SyncDesiredAndApplyAsync_ForceAuxiliaryIdle_SkipsImageGenerationBundleProjection()
+    {
+        string? capturedIni = null;
+        var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
+        orchestration
+            .Setup(c => c.PutDesiredAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
+            .Callback<string, int?, CancellationToken>((ini, _, _) => capturedIni = ini)
+            .ReturnsAsync(new WarmupDesiredWriteResult(Revision: 1, Sha256: "abc", Changed: true));
+        orchestration
+            .Setup(c => c.ApplyAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WarmupApplyResult(
+                Ok: true,
+                Noop: false,
+                Continue: false,
+                Started: true,
+                DesiredRevision: 1,
+                AppliedRevision: 0,
+                ApplyStatus: "applying"));
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["LlamaCpp:BaseUrl"] = "http://localhost:8080/llama-cpp",
+                ["LocalServiceHosts:ImageGenerationBaseUrl"] = "http://localhost:8080",
+            })
+            .Build();
+
+        var imageGenerationMode = new ServiceMode(
+            ModeId: "local",
+            ProviderSection: "LocalServiceHosts:ImageGenerationBaseUrl",
+            ModelId: "flux2-klein-4b",
+            RequestPresetJson: null,
+            Enabled: true,
+            IsDefault: true);
+        var modeResolver = new FakeServiceModeResolver(
+            (RoutedServiceNames.ImageGeneration, imageGenerationMode));
+
+        var (settingsMock, _) = CreateSettingsMock(
+            (RoutedServiceNames.ImageGeneration, imageGenerationMode));
+
+        var bundleBootstrapper = new Mock<IImageGenerationBundleDefinitionBootstrapper>(MockBehavior.Strict);
+
+        var builder = new LocalAiDesiredStateBuilder(
+            configuration,
+            new ServiceScopeFactoryStub(settingsMock.Object),
+            modeResolver,
+            CreateHttpClientFactory(),
+            NullLogger<LocalAiDesiredStateBuilder>.Instance);
+
+        var service = new LocalAiStartupWarmupService(
+            configuration,
+            new ServiceScopeFactoryStub(settingsMock.Object, bundleBootstrapper.Object),
+            builder,
+            orchestration.Object,
+            modeResolver,
+            CreateHttpClientFactory(),
+            NullLogger<LocalAiStartupWarmupService>.Instance);
+
+        await service.SyncDesiredAndApplyAsync(
+            new WarmupDesiredBuildOptions { ForceAuxiliaryIdle = true },
+            waitForCompletion: false);
+
+        capturedIni.Should().NotBeNullOrWhiteSpace();
+        bundleBootstrapper.Verify(
+            b => b.ProjectAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
+        orchestration.VerifyAll();
+    }
+
+    [TestMethod]
     public async Task ReconcileLocalServiceAsync_NotActiveProvider_ReturnsWithoutOrchestration()
     {
         var orchestration = new Mock<ILocalAiWarmupOrchestrationClient>(MockBehavior.Strict);
@@ -337,23 +477,34 @@ public sealed class LocalAiStartupWarmupServiceTests
     private sealed class ServiceScopeFactoryStub : IServiceScopeFactory
     {
         private readonly IApplicationSettingsService? _settingsService;
+        private readonly IImageGenerationBundleDefinitionBootstrapper? _bundleBootstrapper;
 
-        public ServiceScopeFactoryStub(IApplicationSettingsService? settingsService = null)
+        public ServiceScopeFactoryStub(
+            IApplicationSettingsService? settingsService = null,
+            IImageGenerationBundleDefinitionBootstrapper? bundleBootstrapper = null)
         {
             _settingsService = settingsService;
+            _bundleBootstrapper = bundleBootstrapper;
         }
 
-        public IServiceScope CreateScope() => new ServiceScopeStub(_settingsService);
+        public IServiceScope CreateScope() => new ServiceScopeStub(_settingsService, _bundleBootstrapper);
     }
 
     private sealed class ServiceScopeStub : IServiceScope
     {
-        public ServiceScopeStub(IApplicationSettingsService? settingsService)
+        public ServiceScopeStub(
+            IApplicationSettingsService? settingsService,
+            IImageGenerationBundleDefinitionBootstrapper? bundleBootstrapper = null)
         {
             var services = new ServiceCollection();
             if (settingsService != null)
             {
                 services.AddSingleton(settingsService);
+            }
+
+            if (bundleBootstrapper != null)
+            {
+                services.AddSingleton(bundleBootstrapper);
             }
 
             ServiceProvider = services.BuildServiceProvider();

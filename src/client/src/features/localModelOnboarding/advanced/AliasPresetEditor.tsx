@@ -64,7 +64,7 @@ export function AliasPresetEditor({
 
       <div className="space-y-2">
         {rows.map((row, index) => (
-          <div key={`${index}-${row.key}`} className="flex flex-wrap items-start gap-2">
+          <div key={index} className="flex flex-wrap items-start gap-2">
             <input
               type="text"
               value={row.key}
