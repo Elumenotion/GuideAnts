@@ -7,6 +7,7 @@ using FluentAssertions;
 namespace GuideAntsApi.Tests.ChatLayer;
 
 [TestClass]
+[DoNotParallelize]
 public sealed class AssistantUtilityCacheTests
 {
     [TestInitialize]
