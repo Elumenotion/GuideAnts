@@ -394,6 +394,7 @@ public sealed class PublishedOpenAiWireHandlersTests
         executed.Body.Should().Contain("event: response.output_text.delta");
         executed.Body.Should().Contain("event: response.completed");
         executed.Body.Should().Contain("\"delta\":\"Hello response stream\"");
+        executed.Body.Should().Contain($"\"conversation\":\"conv_{conversationId:N}\"");
     }
 
     [TestMethod]

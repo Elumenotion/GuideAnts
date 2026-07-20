@@ -256,6 +256,7 @@ internal static class WireStreamAdapter
         string responseId,
         string modelAlias,
         long created,
+        string conversationId,
         string? publicApiOrigin,
         OpenAiResponsesStreamState state,
         [EnumeratorCancellation] CancellationToken ct)
@@ -302,6 +303,7 @@ internal static class WireStreamAdapter
                              responseId,
                              modelAlias,
                              created,
+                             conversationId,
                              state,
                              deltaText))
                 {
@@ -324,6 +326,7 @@ internal static class WireStreamAdapter
                                      responseId,
                                      modelAlias,
                                      created,
+                                     conversationId,
                                      state,
                                      content))
                         {
@@ -334,7 +337,7 @@ internal static class WireStreamAdapter
             }
         }
 
-        foreach (var chunk in CompleteOpenAiResponsesStream(responseId, modelAlias, created, state))
+        foreach (var chunk in CompleteOpenAiResponsesStream(responseId, modelAlias, created, conversationId, state))
         {
             yield return chunk;
         }
@@ -437,10 +440,11 @@ internal static class WireStreamAdapter
         string responseId,
         string modelAlias,
         long created,
+        string conversationId,
         OpenAiResponsesStreamState state,
         string deltaText)
     {
-        EnsureOpenAiResponsesMessageItemStarted(responseId, modelAlias, created, state, out var startedChunks);
+        EnsureOpenAiResponsesMessageItemStarted(responseId, modelAlias, created, conversationId, state, out var startedChunks);
         foreach (var chunk in startedChunks)
         {
             yield return chunk;
@@ -461,6 +465,7 @@ internal static class WireStreamAdapter
         string responseId,
         string modelAlias,
         long created,
+        string conversationId,
         OpenAiResponsesStreamState state,
         out List<string> chunks)
     {
@@ -473,6 +478,7 @@ internal static class WireStreamAdapter
                 response = new
                 {
                     id = responseId,
+                    conversation = conversationId,
                     @object = "response",
                     created,
                     status = "in_progress",
@@ -525,6 +531,7 @@ internal static class WireStreamAdapter
         string responseId,
         string modelAlias,
         long created,
+        string conversationId,
         OpenAiResponsesStreamState state)
     {
         if (state.MessageItemStarted && !state.MessageItemCompleted)
@@ -653,6 +660,7 @@ internal static class WireStreamAdapter
                 response = new
                 {
                     id = responseId,
+                    conversation = conversationId,
                     @object = "response",
                     created,
                     status = "in_progress",
@@ -668,6 +676,7 @@ internal static class WireStreamAdapter
             response = new
             {
                 id = responseId,
+                conversation = conversationId,
                 @object = "response",
                 created,
                 status = "completed",
