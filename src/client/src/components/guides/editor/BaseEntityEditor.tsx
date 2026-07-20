@@ -866,7 +866,7 @@ export default function BaseEntityEditor({ entityType, entityId, projectId }: Ba
             environmentVariables: formData.environmentVariables,
             fileIdsToKeep,
             filesToAdd,
-            skills: skillsToSave,
+            skills: skillsToSave ?? [],
             conversationStarters: formData.conversationStarters,
             crewMemberIds: formData.crewMemberIds,
             sandboxWireApiConfig: formData.sandboxWireApiConfig,
