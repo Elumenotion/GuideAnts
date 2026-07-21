@@ -13,6 +13,7 @@ import type { LocalModelOnboardingMode } from '../../../../features/localModelOn
 import { CustomHfOnboardingForm } from '../../../../features/localModelOnboarding/advanced/CustomHfOnboardingForm';
 import { AttachAliasOnboardingForm } from '../../../../features/localModelOnboarding/advanced/AttachAliasOnboardingForm';
 import { api } from '../../../../services/api';
+import { stripPresetRowMetadata } from '../../../../features/localModelOnboarding/routerPreset';
 
 const ADD_STEPS = [
   { id: 'queued', label: 'Queued' },
@@ -220,7 +221,7 @@ export function LocalAiModelsStep({
       llamaHuggingFaceModelFiles: draft.huggingFaceModelFiles,
       llamaHuggingFaceMmprojFiles: draft.huggingFaceMmprojFiles,
       llamaHuggingFaceTargetDirectory: draft.huggingFaceTargetDirectory,
-      llamaHuggingFaceRouterPresetRows: draft.huggingFaceRouterPresetRows,
+      llamaHuggingFaceRouterPresetRows: stripPresetRowMetadata(draft.huggingFaceRouterPresetRows),
       llamaHuggingFacePresetMode: draft.huggingFacePresetMode,
       llamaExistingAliasRouterModelId: draft.existingAliasRouterModelId,
     });
@@ -245,7 +246,7 @@ export function LocalAiModelsStep({
       huggingFaceModelFiles: advancedForm.llamaHuggingFaceModelFiles,
       huggingFaceMmprojFiles: advancedForm.llamaHuggingFaceMmprojFiles,
       huggingFaceTargetDirectory: advancedForm.llamaHuggingFaceTargetDirectory,
-      huggingFaceRouterPresetRows: advancedForm.llamaHuggingFaceRouterPresetRows,
+      huggingFaceRouterPresetRows: stripPresetRowMetadata(advancedForm.llamaHuggingFaceRouterPresetRows),
       huggingFacePresetMode: advancedForm.llamaHuggingFacePresetMode,
       existingAliasRouterModelId: advancedForm.llamaExistingAliasRouterModelId,
       catalogModelId: advancedForm.catalogModelId,

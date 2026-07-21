@@ -1,6 +1,24 @@
 export interface PresetKeyValue {
+  /** Stable React row identity — not persisted to router INI. */
+  id?: string;
   key: string;
   value: string;
+}
+
+export function createPresetRow(key = '', value = ''): PresetKeyValue {
+  return { id: crypto.randomUUID(), key, value };
+}
+
+export function presetRowKey(row: PresetKeyValue, index: number): string {
+  return row.id ?? `preset-row-${index}`;
+}
+
+export function withStablePresetRowIds(rows: PresetKeyValue[]): PresetKeyValue[] {
+  return rows.map((row, index) => (row.id ? row : { ...row, id: `preset-row-${index}-${crypto.randomUUID()}` }));
+}
+
+export function stripPresetRowMetadata(rows: PresetKeyValue[]): Array<{ key: string; value: string }> {
+  return rows.map(({ key, value }) => ({ key, value }));
 }
 
 const INFRASTRUCTURE_KEYS = new Set(['model', 'mmproj', 'version']);
@@ -60,7 +78,11 @@ const CONTROL_CHAR_REGEX = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 const SHELL_FRAGMENT_REGEX = /[;&|`$<>]|\$\(|\$\{/;
 
 export function presetRowsFromRecord(record: Record<string, string>): PresetKeyValue[] {
-  return Object.entries(record).map(([key, value]) => ({ key, value }));
+  return Object.entries(record).map(([key, value], index) => ({
+    id: `preset-key-${index}-${key.trim().toLowerCase()}`,
+    key,
+    value,
+  }));
 }
 
 export function presetRecordFromRows(rows: PresetKeyValue[]): Record<string, string> {
