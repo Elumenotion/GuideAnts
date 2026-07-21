@@ -160,15 +160,29 @@ public sealed class LlamaNegativeContractTests
     }
 
     [TestMethod]
-    public void RouterPreset_ModelScopedParallel_AllowsPreset()
+    public void RouterPreset_ProcessScopedParallel_ThrowsPresetInvalid()
     {
-        var preset = RouterPresetValidator.ValidateAndNormalize(new Dictionary<string, string>
+        var act = () => RouterPresetValidator.ValidateAndNormalize(new Dictionary<string, string>
         {
             ["parallel"] = "2",
             ["ctx-size"] = "131072",
         });
 
-        preset["parallel"].Should().Be("2");
+        var ex = act.Should().Throw<AddModelException>();
+        ex.Which.Code.Should().Be(CuratedInstallErrorCodes.PresetInvalid);
+        ex.Which.Message.Should().Contain("process/env-owned");
+    }
+
+    [TestMethod]
+    public void RouterPreset_ModelScopedSpecType_AllowsPreset()
+    {
+        var preset = RouterPresetValidator.ValidateAndNormalize(new Dictionary<string, string>
+        {
+            ["spec-type"] = "draft-mtp",
+            ["ctx-size"] = "131072",
+        });
+
+        preset["spec-type"].Should().Be("draft-mtp");
         preset["ctx-size"].Should().Be("131072");
     }
 
@@ -347,6 +361,7 @@ public sealed class LlamaNegativeContractTests
             configuration,
             settingsService,
             Mock.Of<IChatTargetValidator>(),
+            Mock.Of<IRuntimeProfileResolver>(),
             Mock.Of<ILlamaRuntimeInventoryService>(),
             tokenResolver,
             CreateResolver(),
@@ -475,7 +490,10 @@ public sealed class LlamaNegativeContractTests
             ModelId = "qwen-local",
             DisplayName = "Qwen",
             Provider = "llama-cpp",
-            RuntimeConfigJson = """{"routerModelId":"qwen-local","runtimeProfileId":"qwen3_6"}""",
+            RuntimeConfigJson = """{"routerModelId":"qwen-local"}""",
+            ThinkingControlJson = """{"defaultChoice":"medium","choiceActions":{"medium":[]}}""",
+            SamplingParametersJson = "{}",
+            RequestFieldsWhenToolsPresentJson = "{}",
             Created = now,
             Updated = now,
         });
@@ -491,7 +509,6 @@ public sealed class LlamaNegativeContractTests
             QuantId = "q6_k_xl",
             QuantLabel = "Q6_K_XL",
             RouterModelId = "qwen-local",
-            RuntimeProfileId = "qwen3_6",
             TargetDirectory = "qwen-local",
             ModelArtifactsJson = InstallationArtifactRecords.SerializeFromPaths("qwen-local", ["model-q6.gguf"]),
             ProjectorArtifactsJson = "[]",

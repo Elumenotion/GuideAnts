@@ -172,7 +172,12 @@ const CATEGORIES: TelemetryCategory[] = [
   },
   { key: 'GuideAntsUsage', label: 'Usage records', category: 'GuideAnts.Usage', defaultLevel: 'Warning' },
   { key: 'AntRunner', label: 'AntRunner', category: 'AntRunner', defaultLevel: 'Warning' },
-  { key: 'AntRunnerChat', label: 'AntRunner chat', category: 'AntRunner.Chat', defaultLevel: 'Warning' },
+  {
+    key: 'AntRunnerChat',
+    label: 'AntRunner chat / ThreadRun',
+    category: 'AntRunner.Chat',
+    defaultLevel: 'Warning',
+  },
   {
     key: 'AntRunnerChatLlamaCpp',
     label: 'AntRunner llama client',
@@ -222,9 +227,11 @@ const SUBSYSTEMS: TelemetrySubsystem[] = [
   {
     id: 'chat-providers',
     label: 'Chat providers',
-    summary: 'Provider client outcomes for OpenAI, Anthropic, Gemini, Hugging Face, OpenRouter, and llama.',
+    summary:
+      'ThreadRun and provider client diagnostics for OpenAI, Anthropic, Gemini, Hugging Face, OpenRouter, and llama. Investigating/Verbose logs the full outbound chat request (messages + tools) on every model round.',
     categoryKeys: ['AntRunner', 'AntRunnerChat', 'AntRunnerChatLlamaCpp'],
-    presets: levelsFor(['AntRunner', 'AntRunnerChat', 'AntRunnerChatLlamaCpp'], 'Error', 'Warning', 'Information', 'Debug'),
+    // Investigating = Debug so full ThreadRun request bodies match Published wire / Local llama semantics.
+    presets: levelsFor(['AntRunner', 'AntRunnerChat', 'AntRunnerChatLlamaCpp'], 'Error', 'Warning', 'Debug', 'Trace'),
   },
   {
     id: 'llama',

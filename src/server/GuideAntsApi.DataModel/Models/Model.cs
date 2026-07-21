@@ -44,10 +44,41 @@ namespace GuideAntsApi.DataModel.Models
 
         /// <summary>
         /// Optional JSON string containing runtime configuration for this model.
-        /// For llama-cpp: { routerModelId, runtimeProfileId }.
-        /// For cloud models: { runtimeProfileId } — references the profile that defines sampling parameters.
+        /// For llama-cpp: { routerModelId }.
+        /// For cloud models: { runtimeProfileId } — references the profile used at setup time.
         /// </summary>
         public string? RuntimeConfigJson { get; set; }
+
+        /// <summary>
+        /// When true, system and developer messages are merged into a single system message
+        /// before sending to the model. Used by llama-cpp models at chat runtime.
+        /// </summary>
+        [Required]
+        public bool CombineSystemAndDeveloperMessages { get; set; } = true;
+
+        /// <summary>
+        /// Optional regex pattern to identify and strip thinking blocks from model output.
+        /// </summary>
+        [StringLength(256)]
+        public string? ThoughtBlockPattern { get; set; }
+
+        /// <summary>
+        /// JSON dictionary of sampling parameter definitions keyed by parameter name.
+        /// </summary>
+        [Required]
+        public string SamplingParametersJson { get; set; } = "{}";
+
+        /// <summary>
+        /// JSON object mapping reasoning choices to request actions.
+        /// </summary>
+        [Required]
+        public string ThinkingControlJson { get; set; } = "{}";
+
+        /// <summary>
+        /// JSON object of concrete chat request fields merged when tools are present.
+        /// </summary>
+        [Required]
+        public string RequestFieldsWhenToolsPresentJson { get; set; } = "{}";
 
         /// <summary>
         /// Whether this model is currently available for selection.

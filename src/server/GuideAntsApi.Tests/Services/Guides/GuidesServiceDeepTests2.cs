@@ -288,21 +288,14 @@ public sealed class GuidesServiceDeepTests2
             ModelId = "local-x",
             DisplayName = "Local X",
             Provider = "llama-cpp",
-            RuntimeConfigJson = """{"routerModelId":"router","runtimeProfileId":"profile-a"}"""
+            RuntimeConfigJson = """{"routerModelId":"router"}""",
+            ThinkingControlJson = """{"defaultChoice":"none","choiceActions":{"none":[]}}""",
+            SamplingParametersJson = "{}",
+            RequestFieldsWhenToolsPresentJson = "{}",
         });
         await context.SaveChangesAsync();
 
-        var resolver = new Mock<IRuntimeProfileResolver>();
-        resolver.Setup(r => r.ResolveAsync("profile-a", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RuntimeProfileData(
-                "profile-a",
-                CombineSystemAndDeveloperMessages: false,
-                ThoughtBlockPattern: null,
-                SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
-                ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
-                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
-
-        var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver.Object);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
 
         var result = await service.ValidateRuntimeCompatibilityAsync(new GuideRuntimeValidationRequest(
             new List<GuideRuntimeValidationMember>
@@ -310,11 +303,11 @@ public sealed class GuidesServiceDeepTests2
                 new("assistant", Guid.NewGuid(), "Local", "local-x")
             }));
 
-        result.Profiles.Should().Contain("profile-a");
+        result.Profiles.Should().Contain("local-x");
     }
 
     [TestMethod]
-    public async Task ValidateRuntimeCompatibilityAsync_AddsWarning_ForInvalidRuntimeConfig()
+    public async Task ValidateRuntimeCompatibilityAsync_AddsWarning_ForMissingChatBehavior()
     {
         await using var context = NewContext("runtime-local-bad");
         context.Models.Add(new Model
@@ -322,7 +315,8 @@ public sealed class GuidesServiceDeepTests2
             ModelId = "local-x",
             DisplayName = "Local X",
             Provider = "llama-cpp",
-            RuntimeConfigJson = null
+            RuntimeConfigJson = """{"routerModelId":"router"}""",
+            ThinkingControlJson = "{}",
         });
         await context.SaveChangesAsync();
 
@@ -335,7 +329,7 @@ public sealed class GuidesServiceDeepTests2
             }));
 
         result.Warnings.Should().ContainSingle()
-            .Which.Should().Contain("invalid local runtime configuration");
+            .Which.Should().Contain("missing model-owned chat behavior");
     }
 
     // ----- helpers -----

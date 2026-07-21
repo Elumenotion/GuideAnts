@@ -43,7 +43,7 @@ public sealed class CuratedInstallTests
         // A prior (e.g. text-only) install of the same curated definition exists and its catalog row
         // owns the router alias. Re-installing the current definition must reconcile, not throw.
         var runtimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
-            new LocalRuntimeConfiguration("Qwen3.6-35B-A3B-MTP-GGUF", "qwen3_6"));
+            new LocalRuntimeConfiguration("Qwen3.6-35B-A3B-MTP-GGUF"));
         var validator = CreateValidator(
             models:
             [
@@ -71,7 +71,7 @@ public sealed class CuratedInstallTests
         // Same catalogModelId but a different runtime configuration (different alias) is a genuine
         // conflict, not a reconcile.
         var runtimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
-            new LocalRuntimeConfiguration("some-other-alias", "qwen3_6"));
+            new LocalRuntimeConfiguration("some-other-alias"));
         var validator = CreateValidator(
             models:
             [
@@ -251,7 +251,11 @@ public sealed class CuratedInstallTests
             DisplayName = input.CatalogDisplayName,
             Provider = "llama-cpp",
             RuntimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
-                new LocalRuntimeConfiguration(input.RouterModelId, input.RuntimeProfileId)),
+                new LocalRuntimeConfiguration(input.RouterModelId)),
+            CombineSystemAndDeveloperMessages = true,
+            SamplingParametersJson = "{}",
+            ThinkingControlJson = """{"defaultChoice":"medium","choiceActions":{"medium":[]}}""",
+            RequestFieldsWhenToolsPresentJson = "{}",
             IsActive = true,
             Created = now,
             Updated = now,
@@ -267,7 +271,6 @@ public sealed class CuratedInstallTests
             QuantId = input.QuantId,
             QuantLabel = input.QuantLabel,
             RouterModelId = input.RouterModelId,
-            RuntimeProfileId = input.RuntimeProfileId,
             TargetDirectory = input.TargetDirectory,
             ModelArtifactsJson = "[]",
             ProjectorArtifactsJson = "[]",
@@ -496,10 +499,16 @@ public sealed class CuratedInstallTests
         var tokenResolver = new Mock<IHuggingFaceTokenResolver>();
         tokenResolver.Setup(x => x.Resolve()).Returns("hf_token");
 
+        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
+        runtimeProfileResolver
+            .Setup(x => x.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateRuntimeProfile());
+
         return new LocalModelOnboardingValidator(
             configuration,
             settingsService.Object,
             chatTargetValidator.Object,
+            runtimeProfileResolver.Object,
             inventoryService.Object,
             tokenResolver.Object,
             resolver ?? CreateResolver(CreateAdminClient()),

@@ -2,7 +2,12 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import { api } from '../../../../services/api';
 import { LlamaRuntimeInventoryItemDto, SettingsModelDto, SettingsRuntimeProfileDto } from '../../../../types/settings';
 import { CatalogEditState } from '../../types';
-import { buildCatalogEditRequest, createCatalogEditStateFromModel, getErrorMessage, parseRuntimeProfileId } from '../../utils';
+import {
+  buildCatalogEditRequest,
+  createCatalogEditStateFromModel,
+  getErrorMessage,
+  parseCanonicalLocalRuntimeJson,
+} from '../../utils';
 import { getCatalogProviderDisplayName } from '../../constants/displayLabels';
 import { TextActionButton } from '../shared/ActionButtons';
 import { SettingsModal } from '../shared/SettingsModal';
@@ -27,25 +32,12 @@ interface CatalogRowEditModalProps {
   onSaved: () => Promise<void>;
 }
 
-function countModelsSharingProfile(models: SettingsModelDto[], profileId: string): number {
-  if (!profileId) {
-    return 0;
-  }
-  return models.filter((candidate) => {
-    if (candidate.provider !== 'llama-cpp') {
-      return false;
-    }
-    return parseRuntimeProfileId(candidate.runtimeConfigJson) === profileId;
-  }).length;
-}
-
 function renderEditForm(
   value: CatalogEditState,
   onChange: (updates: Partial<CatalogEditState>) => void,
   profiles: SettingsRuntimeProfileDto[],
   profilesLoading: boolean,
   inventory: LlamaRuntimeInventoryItemDto[] | undefined,
-  sharedProfileModelCount: number,
   onDetailChanged?: () => Promise<void>,
   llamaFormRef?: RefObject<LlamaCppEditFormHandle | null>,
 ) {
@@ -68,14 +60,7 @@ function renderEditForm(
     case 'anthropic':
       return <AnthropicEditForm {...props} />;
     case 'llama-cpp':
-      return (
-        <LlamaCppEditForm
-          ref={llamaFormRef}
-          {...props}
-          sharedProfileModelCount={sharedProfileModelCount}
-          onDetailChanged={onDetailChanged}
-        />
-      );
+      return <LlamaCppEditForm ref={llamaFormRef} {...props} onDetailChanged={onDetailChanged} />;
     case 'google-gemini-chat':
       return <GoogleGeminiEditForm {...props} />;
     case 'hf-inference-chat':
@@ -85,6 +70,14 @@ function renderEditForm(
     default:
       return null;
   }
+}
+
+function buildLlamaRuntimeConfigJson(model: SettingsModelDto): string {
+  const parsed = parseCanonicalLocalRuntimeJson(model.runtimeConfigJson);
+  if (!parsed?.routerModelId) {
+    throw new Error(`Model '${model.modelId}' is missing routerModelId in RuntimeConfigJson.`);
+  }
+  return JSON.stringify({ routerModelId: parsed.routerModelId });
 }
 
 export function CatalogRowEditModal({
@@ -97,6 +90,7 @@ export function CatalogRowEditModal({
   onClose,
   onSaved,
 }: CatalogRowEditModalProps) {
+  void orderedModels;
   const [value, setValue] = useState<CatalogEditState | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,8 +120,20 @@ export function CatalogRowEditModal({
       }
       const selectedProfile = profiles.find((profile) => profile.profileId === value.runtimeProfileId.trim());
       const request = buildCatalogEditRequest(value, {
-        runtimeConfigJson: model.runtimeConfigJson ?? undefined,
+        runtimeConfigJson:
+          value.provider === 'llama-cpp' ? buildLlamaRuntimeConfigJson(model) : model.runtimeConfigJson ?? undefined,
         profileThinkingControlJson: value.provider === 'llama-cpp' ? undefined : selectedProfile?.thinkingControlJson,
+        preserveModelBehavior:
+          value.provider === 'llama-cpp'
+            ? {
+                combineSystemAndDeveloperMessages: model.combineSystemAndDeveloperMessages,
+                thoughtBlockPattern: model.thoughtBlockPattern,
+                samplingParametersJson: model.samplingParametersJson,
+                thinkingControlJson: model.thinkingControlJson,
+                requestFieldsWhenToolsPresentJson: model.requestFieldsWhenToolsPresentJson,
+                reasoningChoicesJson: model.reasoningChoicesJson,
+              }
+            : undefined,
       });
       await api.settings.updateModel(model.modelId, request);
       await onSaved();
@@ -223,10 +229,6 @@ export function CatalogRowEditModal({
               profiles,
               profilesLoading,
               inventory,
-              countModelsSharingProfile(
-                orderedModels,
-                parseRuntimeProfileId(model?.runtimeConfigJson) ?? value.runtimeProfileId,
-              ),
               onSaved,
               llamaFormRef,
             )}

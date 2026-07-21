@@ -60,26 +60,24 @@ services:
       - GA_LLAMA_MODELS_PRESET=/models-local/router-models.ini
       - GA_LLAMA_MODEL_DIR=/models-local/llama
       - GA_LLAMA_ADMIN_PORT=8086
-      - GA_LLAMA_MODELS_MAX=1
-      - GA_LLAMA_NO_AUTOLOAD=1
+      - GA_LLAMA_MODELS_MAX=${GA_LLAMA_MODELS_MAX:-1}
+      - GA_LLAMA_NO_AUTOLOAD=${GA_LLAMA_NO_AUTOLOAD:-1}
       - GA_LLAMA_CTX_SIZE=262144
       - GA_LLAMA_CACHE_RAM=8192
+      - GA_LLAMA_JINJA=${GA_LLAMA_JINJA:-1}
+      - GA_LLAMA_CONT_BATCH=${GA_LLAMA_CONT_BATCH:-1}
       - GA_LLAMA_KV_UNIFIED=${GA_LLAMA_KV_UNIFIED:-1}
-      - GA_LLAMA_JINJA=1
-      - GA_LLAMA_CONT_BATCH=1
-      - GA_LLAMA_NO_MMAP=0
-      # Global router knobs (propagate to every spawned child instance).
-      # q8_0 KV cache halves KV VRAM with ~no quality loss on 20B+ models;
-      # cache-type-v quantization requires flash attention to be enabled.
       - GA_LLAMA_FLASH_ATTN=${GA_LLAMA_FLASH_ATTN:-on}
-      - GA_LLAMA_CACHE_TYPE_K=${GA_LLAMA_CACHE_TYPE_K:-q8_0}
-      - GA_LLAMA_CACHE_TYPE_V=${GA_LLAMA_CACHE_TYPE_V:-q8_0}
-      - GA_LLAMA_THREADS=${GA_LLAMA_THREADS:-16}
+      - GA_LLAMA_NO_MMAP=${GA_LLAMA_NO_MMAP:-1}
+      - GA_LLAMA_THREADS=${GA_LLAMA_THREADS:-}
+      - GA_LLAMA_PARALLEL=${GA_LLAMA_PARALLEL:-}
+      - GA_LLAMA_GPU_LAYERS=${GA_LLAMA_GPU_LAYERS:-}
+      - GA_LLAMA_KV_OFFLOAD=${GA_LLAMA_KV_OFFLOAD:-}
+      - GA_LLAMA_CACHE_TYPE_K=${GA_LLAMA_CACHE_TYPE_K:-}
+      - GA_LLAMA_CACHE_TYPE_V=${GA_LLAMA_CACHE_TYPE_V:-}
+      - GA_LLAMA_TENSOR_SPLIT=${GA_LLAMA_TENSOR_SPLIT:-}
       # Qwen-VL grounding accuracy requires >=1024 image tokens.
       - GA_LLAMA_IMAGE_MIN_TOKENS=1024
-      # Per-GPU layer split (comma list, e.g. "7,1"). Hardware-specific, so it is
-      # sourced from .env; empty falls back to llama.cpp's free-VRAM heuristic.
-      - GA_LLAMA_TENSOR_SPLIT=${GA_LLAMA_TENSOR_SPLIT:-}
       - GA_ASR_HOST=127.0.0.1
       - GA_ASR_PORT=8082
       - GA_ASR_MODEL_DIR=/models-local/asr
@@ -116,6 +114,9 @@ services:
       - GA_EMB_MODEL_DIR=/models-local/emb
       - GA_EMB_DEFAULT_MODEL_PATH=${GA_EMB_DEFAULT_MODEL_PATH}
       - GA_EMB_DEVICE=${GA_EMB_DEVICE:-rocm}
+      # ROCm shared libs live under /opt/rocm/lib; required for libggml-hip.so.
+      - LD_LIBRARY_PATH=/opt/rocm/lib
+      - PATH=/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       - GA_EMB_FIX_MISTRAL_REGEX=${GA_EMB_FIX_MISTRAL_REGEX:-1}
       - GA_EMB_WARMUP_ON_LOAD=${GA_EMB_WARMUP_ON_LOAD}
       - GA_EMB_WAIT_FOR_READY_ON_STARTUP=${GA_EMB_WAIT_FOR_READY_ON_STARTUP:-0}

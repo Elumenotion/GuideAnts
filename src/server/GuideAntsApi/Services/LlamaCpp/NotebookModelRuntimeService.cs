@@ -692,10 +692,7 @@ public class NotebookModelRuntimeService : INotebookModelRuntimeService
     private ModelRuntimeConfigDto ToLocalRuntimeDescriptor(string modelId, string runtimeConfigJson)
     {
         var parsed = LocalRuntimeConfigurationParser.Parse(modelId, runtimeConfigJson);
-        _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
-        return new ModelRuntimeConfigDto(
-            parsed.RouterModelId,
-            parsed.RuntimeProfileId);
+        return new ModelRuntimeConfigDto(parsed.RouterModelId, null);
     }
 }
 

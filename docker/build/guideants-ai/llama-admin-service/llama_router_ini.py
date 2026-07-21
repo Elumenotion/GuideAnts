@@ -14,6 +14,7 @@ from guideants_hf.preset_validation import (
     apply_preset_mode,
     normalize_alias,
     normalize_preset_map,
+    strip_process_scoped_extras,
 )
 from guideants_hf.router_mmproj import (
     materialize_router_extras_for_runtime,
@@ -255,7 +256,10 @@ def upsert_router_entry(
     _cache_l = {x.lower() for x in _CACHE_KEYS}
 
     incoming_preset = normalize_preset_map(preset or {})
-    if not preset_disables_mmproj(incoming_preset):
+    # Only normalize vision-token defaults when the caller explicitly supplied a
+    # preset payload. Model-path/context sync calls intentionally omit preset and
+    # must preserve existing extras exactly as-is.
+    if preset is not None and not preset_disables_mmproj(incoming_preset):
         incoming_preset = apply_alias_vision_token_preset(alias_trimmed, incoming_preset)
     if update_context:
         _strip_extras_matching_incoming(incoming_preset, _ctx_l)
@@ -275,8 +279,17 @@ def upsert_router_entry(
         payload_before = serialize_router_ini(entries)
         prior = entries.get(alias_trimmed)
         extras: dict[str, str] = dict(prior.extras) if prior else {}
-        if incoming_preset or preset is not None or update_context or update_cache:
-            extras = apply_preset_mode(extras, incoming_preset, preset_mode)
+        # Context/cache-only updates are patch operations over existing extras.
+        # Force merge semantics when no explicit preset was sent so we don't
+        # accidentally replace unrelated alias keys (for example no-mmproj/spec-*).
+        effective_preset_mode = (
+            "merge"
+            if preset is None and (update_context or update_cache)
+            else preset_mode
+        )
+
+        if preset is not None or incoming_preset:
+            extras = apply_preset_mode(extras, incoming_preset, effective_preset_mode)
 
         if update_context and context_size is None:
             _strip_extras_matching_incoming(extras, _ctx_l)
@@ -284,6 +297,8 @@ def upsert_router_entry(
             _strip_extras_matching_incoming(extras, _cache_l)
         if preset_disables_mmproj(extras):
             _strip_vision_token_extras(extras)
+        # Always drop env/process knobs (n-gpu-layers, no-mmap, …) from alias INI.
+        extras = strip_process_scoped_extras(extras)
 
         entries[alias_trimmed] = RouterSection(
             model=model_path.strip(),

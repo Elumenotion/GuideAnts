@@ -187,17 +187,11 @@ public sealed class GuidesServiceDeepTests
     public async Task CreateGuideAsync_LocalModel_accepts_in_range_sampling_parameters()
     {
         await using var context = NewContext("local-sampling-ok");
-        context.Models.Add(new Model
-        {
-            ModelId = "local-x",
-            DisplayName = "Local X",
-            Provider = "llama-cpp",
-            RuntimeConfigJson = """{"routerModelId":"router","runtimeProfileId":"profile-a"}"""
-        });
+        context.Models.Add(CreateLocalModelWithTemperatureRange(min: 0, max: 2));
         await context.SaveChangesAsync();
 
-        var resolver = CreateResolverWithTemperatureRange("profile-a", min: 0, max: 2);
-        var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver);
+        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>(MockBehavior.Strict);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context, runtimeProfileResolver.Object);
 
         var dto = MinimalCreateGuideDto("Guide") with { ModelId = "local-x", Temperature = 0.7f };
 
@@ -205,23 +199,19 @@ public sealed class GuidesServiceDeepTests
 
         var details = await service.GetGuideAsync(created.Id);
         details!.Temperature.Should().BeApproximately(0.7f, 0.0001f);
+        runtimeProfileResolver.Verify(
+            r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [TestMethod]
     public async Task CreateGuideAsync_LocalModel_rejects_out_of_range_temperature()
     {
         await using var context = NewContext("local-sampling-bad");
-        context.Models.Add(new Model
-        {
-            ModelId = "local-x",
-            DisplayName = "Local X",
-            Provider = "llama-cpp",
-            RuntimeConfigJson = """{"routerModelId":"router","runtimeProfileId":"profile-a"}"""
-        });
+        context.Models.Add(CreateLocalModelWithTemperatureRange(min: 0, max: 1));
         await context.SaveChangesAsync();
 
-        var resolver = CreateResolverWithTemperatureRange("profile-a", min: 0, max: 1);
-        var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
 
         var dto = MinimalCreateGuideDto("Guide") with { ModelId = "local-x", Temperature = 5f };
 
@@ -235,17 +225,10 @@ public sealed class GuidesServiceDeepTests
     public async Task CreateGuideAsync_LocalModel_rejects_unsupported_sampling_parameter()
     {
         await using var context = NewContext("local-sampling-unsupported");
-        context.Models.Add(new Model
-        {
-            ModelId = "local-x",
-            DisplayName = "Local X",
-            Provider = "llama-cpp",
-            RuntimeConfigJson = """{"routerModelId":"router","runtimeProfileId":"profile-a"}"""
-        });
+        context.Models.Add(CreateLocalModelWithTemperatureRange(min: 0, max: 2));
         await context.SaveChangesAsync();
 
-        var resolver = CreateResolverWithTemperatureRange("profile-a", min: 0, max: 2);
-        var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
 
         var dto = MinimalCreateGuideDto("Guide") with
         {
@@ -482,6 +465,25 @@ public sealed class GuidesServiceDeepTests
 
     private static ApplicationDbContext NewContext(string name) =>
         new(BackgroundJobTestHelpers.CreateInMemoryOptions($"{name}-{Guid.NewGuid():N}"));
+
+    private static Model CreateLocalModelWithTemperatureRange(double min, double max) =>
+        new()
+        {
+            ModelId = "local-x",
+            DisplayName = "Local X",
+            Provider = "llama-cpp",
+            RuntimeConfigJson = """{"routerModelId":"router"}""",
+            SamplingParametersJson =
+                "{\"temperature\":{\"key\":\"temperature\",\"displayName\":\"Temperature\",\"description\":\"\",\"min\":" +
+                min.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"max\":" +
+                max.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                ",\"step\":0.1,\"defaultValue\":0.7,\"displayOrder\":0,\"enabled\":true}}",
+            ThinkingControlJson = """{"defaultChoice":"none","choiceActions":{"none":[]}}""",
+            RequestFieldsWhenToolsPresentJson = "{}",
+            IsActive = true,
+            Created = DateTime.UtcNow,
+        };
 
     private static IRuntimeProfileResolver CreateResolverWithTemperatureRange(string profileId, double min, double max)
     {

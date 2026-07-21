@@ -44,7 +44,7 @@ type LocalRuntimeClassification =
   | { state: 'n/a' }
   | { state: 'missing-json' }
   | { state: 'invalid-json'; detail: string }
-  | { state: 'ok'; routerModelId: string; runtimeProfileId: string };
+  | { state: 'ok'; routerModelId: string; runtimeProfileId?: string };
 
 function classifyLocalRuntime(model: SettingsModelDto): LocalRuntimeClassification {
   if (model.provider !== 'llama-cpp') {
@@ -57,7 +57,7 @@ function classifyLocalRuntime(model: SettingsModelDto): LocalRuntimeClassificati
   if (!parsed) {
     return {
       state: 'invalid-json',
-      detail: 'Missing required fields (routerModelId, runtimeProfileId).',
+      detail: 'Missing required field routerModelId.',
     };
   }
   return { state: 'ok', routerModelId: parsed.routerModelId, runtimeProfileId: parsed.runtimeProfileId };
@@ -210,7 +210,7 @@ export function ModelsTab({
     const map = new Map<string, string[]>();
     for (const model of orderedModels) {
       const cls = classifyLocalRuntime(model);
-      if (cls.state !== 'ok') continue;
+      if (cls.state !== 'ok' || !cls.runtimeProfileId) continue;
       const list = map.get(cls.runtimeProfileId) ?? [];
       list.push(model.modelId);
       map.set(cls.runtimeProfileId, list);

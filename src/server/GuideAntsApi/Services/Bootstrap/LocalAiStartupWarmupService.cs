@@ -492,15 +492,18 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
         {
             cancellationToken.ThrowIfCancellationRequested();
             var status = await _orchestrationClient.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+
+            // Terminal failure must unblock waiters even when appliedRevision never
+            // catches desiredRevision (partial reconcile / missing aux weights).
+            if (string.Equals(status.ApplyStatus, "failed", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(status.ApplyError ?? "Warmup apply failed.");
+            }
+
             if (status.DesiredRevision <= status.AppliedRevision
                 && !string.Equals(status.ApplyStatus, "applying", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(status.ApplyStatus, "pending", StringComparison.OrdinalIgnoreCase))
             {
-                if (string.Equals(status.ApplyStatus, "failed", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException(status.ApplyError ?? "Warmup apply failed.");
-                }
-
                 return;
             }
 
@@ -576,9 +579,15 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
             return false;
         }
 
-        var shouldEnsure = routing == LocalRoutingDesiredState.Unknown
-            || (routing == LocalRoutingDesiredState.Idle && !string.IsNullOrWhiteSpace(requestedModelRef));
-        if (!shouldEnsure)
+        // Only switch routing when the operator explicitly requested a model/bundle.
+        // Unknown-with-no-selection must not invent an active local provider.
+        var requested = requestedModelRef?.Trim();
+        if (string.IsNullOrWhiteSpace(requested))
+        {
+            return false;
+        }
+
+        if (routing is not (LocalRoutingDesiredState.Unknown or LocalRoutingDesiredState.Idle))
         {
             return false;
         }
@@ -589,18 +598,22 @@ public sealed class LocalAiStartupWarmupService : ILocalAiStartupWarmupService, 
             var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
             await settings.EnsureServiceModeExistsAsync(serviceId, localProviderId, cancellationToken)
                 .ConfigureAwait(false);
+            await settings
+                .SetServiceModeModelIdAsync(serviceId, requested, cancellationToken)
+                .ConfigureAwait(false);
             await settings.SetServiceActiveProviderAsync(serviceId, localProviderId, cancellationToken)
                 .ConfigureAwait(false);
             _logger.LogInformation(
-                "Auto-activated local provider for '{ServiceId}' before local model reconcile.",
-                LogValueSanitizer.Sanitize(serviceId));
+                "Activated local provider for '{ServiceId}' for explicit model selection '{ModelRef}'.",
+                LogValueSanitizer.Sanitize(serviceId),
+                LogValueSanitizer.Sanitize(requested));
             return true;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Could not auto-activate local provider for '{ServiceId}' before local model reconcile.",
+                "Could not activate local provider for '{ServiceId}' for explicit model selection.",
                 LogValueSanitizer.Sanitize(serviceId));
             return false;
         }

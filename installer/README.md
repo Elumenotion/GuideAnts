@@ -132,7 +132,7 @@ each run).
 
 | Host | GPU path | What the override adds |
 |------|----------|------------------------|
-| Native Linux | `/dev/kfd` + `/dev/dri` (kernel fusion driver) | `devices`, `group_add: [video, render]` |
+| Native Linux | `/dev/kfd` + `/dev/dri` (kernel fusion driver) | `devices`, `group_add` with host GIDs for `video`/`render` |
 | Windows / Docker Desktop | ROCDXG via `/dev/dxg` (DXCore bridge) | `/dev/dxg`, `librocdxg` binds, `HSA_ENABLE_DXG_DETECTION=1`, `SYS_PTRACE`, `seccomp:unconfined` |
 
 Full design notes: [`docs/rocm-container-runtime-and-wsl-setup.md`](../docs/rocm-container-runtime-and-wsl-setup.md).

@@ -15,7 +15,6 @@ public static class RouterPresetValidator
     /// <summary>
     /// Router shell bootstrap keys belong on the llama-server process CLI
     /// (<c>start-llama.sh</c>), not in per-alias <c>router-models.ini</c> presets.
-    /// All other llama-server switches are model-scoped and editable on the alias preset.
     /// </summary>
     private static readonly HashSet<string> RouterShellKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -23,6 +22,27 @@ public static class RouterPresetValidator
         "models-max",
         "no-models-autoload",
         "no-autoload",
+    };
+
+    /// <summary>
+    /// Process/env-owned knobs (<c>GA_LLAMA_*</c> / <c>start-llama.sh</c> router base preset).
+    /// These apply to every child via CLI and must not be authored on alias presets.
+    /// </summary>
+    private static readonly HashSet<string> ProcessScopedKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "n-gpu-layers",
+        "no-mmap",
+        "threads",
+        "parallel",
+        "kv-unified",
+        "kv-offload",
+        "no-kv-offload",
+        "jinja",
+        "cont-batching",
+        "flash-attn",
+        "cache-type-k",
+        "cache-type-v",
+        "tensor-split",
     };
 
     private static readonly Regex ControlCharRegex = new(@"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", RegexOptions.Compiled);
@@ -80,6 +100,15 @@ public static class RouterPresetValidator
                     step: "validation",
                     message: $"Preset key '{key}' is router-shell infrastructure and cannot be set on a model alias.",
                     remediation: "Remove router-shell keys from the alias preset.");
+            }
+
+            if (ProcessScopedKeys.Contains(key))
+            {
+                throw new AddModelException(
+                    CuratedInstallErrorCodes.PresetInvalid,
+                    step: "validation",
+                    message: $"Preset key '{key}' is process/env-owned (GA_LLAMA_* / start-llama.sh) and cannot be set on a model alias.",
+                    remediation: "Set this value via container env / compose, not the per-model router preset.");
             }
 
             if (seenLower.TryGetValue(key, out var prior) && !string.Equals(prior, key, StringComparison.Ordinal))

@@ -3,9 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace GuideAntsApi.Services.LlamaCpp;
 
-public sealed record LocalRuntimeConfiguration(
-    string RouterModelId,
-    string RuntimeProfileId);
+public sealed record LocalRuntimeConfiguration(string RouterModelId);
 
 public static class LocalRuntimeConfigurationParser
 {
@@ -52,49 +50,33 @@ public static class LocalRuntimeConfigurationParser
                 $"Model '{modelId}' RuntimeConfigJson must be a JSON object.");
         }
 
-        var missingFields = new List<string>();
         if (string.IsNullOrWhiteSpace(parsed.RouterModelId))
         {
-            missingFields.Add("routerModelId");
-        }
-
-        if (string.IsNullOrWhiteSpace(parsed.RuntimeProfileId))
-        {
-            missingFields.Add("runtimeProfileId");
-        }
-
-        if (missingFields.Count > 0)
-        {
             throw new InvalidOperationException(
-                $"Model '{modelId}' RuntimeConfigJson is missing required field(s): {string.Join(", ", missingFields)}.");
+                $"Model '{modelId}' RuntimeConfigJson is missing required field(s): routerModelId.");
         }
 
-        var routerModelId = parsed.RouterModelId!.Trim();
+        var routerModelId = parsed.RouterModelId.Trim();
         if (routerModelId.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
                 $"Model '{modelId}' RuntimeConfigJson field 'routerModelId' must not include '.gguf' suffix.");
         }
 
-        return new LocalRuntimeConfiguration(
-            routerModelId,
-            parsed.RuntimeProfileId!.Trim());
+        return new LocalRuntimeConfiguration(routerModelId);
     }
 
     public static string SerializeCanonical(LocalRuntimeConfiguration configuration)
     {
         var root = new JsonObject
         {
-            ["routerModelId"] = configuration.RouterModelId,
-            ["runtimeProfileId"] = configuration.RuntimeProfileId
+            ["routerModelId"] = configuration.RouterModelId
         };
 
         return root.ToJsonString(CanonicalJsonOptions);
     }
 
-    private sealed record LocalRuntimeConfigurationPayload(
-        string? RouterModelId,
-        string? RuntimeProfileId);
+    private sealed record LocalRuntimeConfigurationPayload(string? RouterModelId);
 }
 
 /// <summary>

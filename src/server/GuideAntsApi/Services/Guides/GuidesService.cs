@@ -1214,19 +1214,15 @@ public class GuidesService(
 
         foreach (var model in localModels)
         {
-            try
+            if (!ModelChatBehavior.HasConfiguredBehavior(model))
             {
-                var runtime = LocalRuntimeConfigurationParser.ParseRequired(model.ModelId, model.RuntimeConfigJson);
-                var runtimeProfile = await _runtimeProfileResolver.ResolveAsync(runtime.RuntimeProfileId);
-
-                if (!result.Profiles.Contains(runtimeProfile.ProfileId, StringComparer.OrdinalIgnoreCase))
-                {
-                    result.Profiles.Add(runtimeProfile.ProfileId);
-                }
+                result.Warnings.Add($"Model {model.DisplayName} is missing model-owned chat behavior configuration.");
+                continue;
             }
-            catch (InvalidOperationException ex)
+
+            if (!result.Profiles.Contains(model.ModelId, StringComparer.OrdinalIgnoreCase))
             {
-                result.Warnings.Add($"Model {model.DisplayName} has invalid local runtime configuration: {ex.Message}");
+                result.Profiles.Add(model.ModelId);
             }
         }
 
@@ -1280,14 +1276,7 @@ public class GuidesService(
         var model = await _context.Models
             .AsNoTracking()
             .Where(m => m.ModelId == modelId)
-            .Select(m => new
-            {
-                m.ModelId,
-                m.Provider,
-                m.ReasoningChoicesJson,
-                m.RuntimeConfigJson
-            })
-            .FirstOrDefaultAsync();
+            .SingleOrDefaultAsync();
 
         if (model == null)
         {
@@ -1296,8 +1285,8 @@ public class GuidesService(
 
         if (string.Equals(model.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
         {
-            var runtime = LocalRuntimeConfigurationParser.ParseRequired(model.ModelId, model.RuntimeConfigJson);
-            var profile = await _runtimeProfileResolver.ResolveAsync(runtime.RuntimeProfileId);
+            LocalRuntimeConfigurationParser.ParseRequired(model.ModelId, model.RuntimeConfigJson);
+            var profile = ModelChatBehavior.ToRuntimeProfileData(model);
 
             ValidateSamplingParameters(model.ModelId, profile, temperature, topP, samplingOverrides);
 

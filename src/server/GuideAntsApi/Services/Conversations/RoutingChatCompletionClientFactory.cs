@@ -13,10 +13,6 @@ namespace GuideAntsApi.Services.Conversations;
 
 public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFactory
 {
-    // DI keys for the four OpenAI-family factory registrations. Each key pairs
-    // with the provider section it draws credentials from: "openai-platform"
-    // reads OpenAI:*, "azure-openai" reads AzureOpenAI:*. Catalog rows are
-    // dispatched to exactly one of these based on the Provider column.
     public const string OpenAiPlatformFactoryKey = "openai-platform";
     public const string AzureOpenAiFactoryKey = "azure-openai";
 
@@ -31,7 +27,6 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
     private readonly LlamaCppChatClientFactory _llamaCppFactory;
     private readonly IChatTargetResolver _chatTargetResolver;
     private readonly IChatTargetValidator _chatTargetValidator;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly ILogger<RoutingChatCompletionClientFactory> _logger;
 
     public RoutingChatCompletionClientFactory(
@@ -46,7 +41,6 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         LlamaCppChatClientFactory llamaCppFactory,
         IChatTargetResolver chatTargetResolver,
         IChatTargetValidator chatTargetValidator,
-        IRuntimeProfileResolver runtimeProfileResolver,
         ILogger<RoutingChatCompletionClientFactory>? logger = null)
     {
         _openAiPlatformChatFactory = openAiPlatformChatFactory ?? throw new ArgumentNullException(nameof(openAiPlatformChatFactory));
@@ -60,7 +54,6 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         _llamaCppFactory = llamaCppFactory ?? throw new ArgumentNullException(nameof(llamaCppFactory));
         _chatTargetResolver = chatTargetResolver ?? throw new ArgumentNullException(nameof(chatTargetResolver));
         _chatTargetValidator = chatTargetValidator ?? throw new ArgumentNullException(nameof(chatTargetValidator));
-        _runtimeProfileResolver = runtimeProfileResolver ?? throw new ArgumentNullException(nameof(runtimeProfileResolver));
         _logger = logger ?? NullLogger<RoutingChatCompletionClientFactory>.Instance;
     }
 
@@ -68,8 +61,6 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
 
     public IChatCompletionClient CreateClient(string? deploymentId, HttpClient? httpClient = null)
     {
-        // Chat dispatch is assistant-driven (R-1.1). Resolution + validation both fail-fast
-        // with a RoutingException; there is no provider fallback (R-1.7, R-9.1).
         var target = _chatTargetResolver.Resolve(deploymentId);
         _chatTargetValidator.Validate(target);
 
@@ -83,11 +74,18 @@ public sealed class RoutingChatCompletionClientFactory : IChatCompletionClientFa
         if (provider == Provider.LlamaCpp)
         {
             var localRuntime = LocalRuntimeConfigurationParser.ParseRequired(target.ModelId, target.RuntimeConfigJson);
-            var profileData = _runtimeProfileResolver
-                .ResolveAsync(localRuntime.RuntimeProfileId)
-                .GetAwaiter().GetResult();
+            if (target.LlamaChatBehavior?.ThinkingControl?.ChoiceActions is not { Count: > 0 })
+            {
+                throw new RoutingException(
+                    RoutingErrorCodes.ModelNotReady,
+                    $"Model '{target.ModelId}' is missing model-owned chat behavior configuration.",
+                    action: $"Open Settings → Models & Runtime and configure chat behavior for '{target.ModelId}'.",
+                    serviceId: "Chat",
+                    modelId: target.ModelId,
+                    providerSection: "LlamaCpp");
+            }
 
-            var llamaProfile = ToLlamaCppProfileData(profileData);
+            var llamaProfile = ToLlamaCppProfileData(target.LlamaChatBehavior);
 
             return _llamaCppFactory.CreateClientForProfile(
                 localRuntime.RouterModelId,

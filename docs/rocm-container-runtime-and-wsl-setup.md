@@ -47,16 +47,20 @@ services:
       - /dev/kfd
       - /dev/dri
     group_add:
-      - video
-      - render
+      - "44"    # host GID for video (resolved at generate time)
+      - "992"   # host GID for render (resolved at generate time)
   docling-serve:
     devices:
       - /dev/kfd
       - /dev/dri
     group_add:
-      - video
-      - render
+      - "44"
+      - "992"
 ```
+
+Numeric host GIDs are required: Docker resolves `group_add` *names* against the
+container image's `/etc/group`, and `guideants-ai-rocm` has `video` but not
+`render`. Emitting GIDs avoids that lookup.
 
 ### WSL ROCDXG override (written under Docker Desktop / WSL)
 
@@ -198,7 +202,7 @@ cd installer
 ./guideants.sh --backend rocm
 ```
 
-The launcher detects native Linux (no Docker Desktop, no `/dev/dxg`) and writes the KFD override with `group_add: [video, render]`.
+The launcher detects native Linux (no Docker Desktop, no `/dev/dxg`) and writes the KFD override with `group_add` set to the host GIDs for `video` and `render` (not the names).
 
 ## 8. How detection and mode selection work
 
@@ -221,7 +225,7 @@ The launcher detects native Linux (no Docker Desktop, no `/dev/dxg`) and writes 
 | Version probe failed | Embedded double-quotes broke under PowerShell | Simplified probe string. |
 | `Cannot bind parameter 'Encoding' ... utf8NoBOM` | `-Encoding utf8NoBOM` is PowerShell 7+ only; launcher runs on Windows PowerShell 5.1 | Write files via .NET `UTF8Encoding($false)` (`Write-Utf8NoBomFile`). |
 | Garbled comment bytes in generated YAML | Em dash in heredoc under PS 5.1 | Use ASCII hyphen in generated headers. |
-| `unable to find group render` on container start | `group_add: [video, render]` in static compose; Docker Desktop VM has no `render` group | Move `group_add` into the **native Linux** override only. |
+| `unable to find group render` on container start | `group_add` names are resolved in the **container** `/etc/group`; Desktop VM and `guideants-ai-rocm` both lack `render` | WSL override omits `group_add`; native override emits host **GIDs** for `video`/`render`. |
 | `librocdxg.so ... Is a directory` | Docker Desktop can't bind a single file via `//wsl.localhost/...`; it makes an empty dir | Stage the real `.so` to a Windows path under `volumes/rocm-wsl/lib` and bind that. |
 | `hsaKmtOpenKFD` undefined / segfault | ROCm fell back to the native KFD path because `librocdxg` wasn't loadable | Correct staged bind to `/lib` and `/usr/lib`, set `HSA_ENABLE_DXG_DETECTION=1`, add `SYS_PTRACE` + `seccomp:unconfined`. |
 | `dids.conf` warning blocked launch | `dids.conf` treated as required | Made it optional; only bound when present. |

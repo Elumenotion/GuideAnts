@@ -15,7 +15,7 @@ FROM rocm/dev-ubuntu-24.04:latest AS sd-cli-rocm-builder
 ARG SDCPP_REF
 ARG SD_GPU_TARGETS
 ARG GA_UBUNTU_MIRROR_URL
-ARG ROCM_VERSION=7.2.1
+ARG ROCM_VERSION=7.2.4
 ARG AMDGPU_VERSION=30.30.1
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
         sed -i \
@@ -37,6 +37,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         | tee /etc/apt/sources.list.d/rocm.list \
     && printf "deb [arch=amd64] https://repo.radeon.com/amdgpu/%s/ubuntu noble main" "$AMDGPU_VERSION" \
         | tee /etc/apt/sources.list.d/amdgpu.list \
+    && printf "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n" \
+        | tee /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update \
     && apt-get install -y --no-install-recommends build-essential cmake git hipblas-dev rocblas-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -66,7 +68,7 @@ RUN git clone --recursive --depth 1 --shallow-submodules --branch ${SDCPP_REF} h
 FROM rocm/dev-ubuntu-24.04:latest AS audiocpp-rocm-builder
 ARG SD_GPU_TARGETS
 ARG GA_UBUNTU_MIRROR_URL
-ARG ROCM_VERSION=7.2.1
+ARG ROCM_VERSION=7.2.4
 ARG AMDGPU_VERSION=30.30.1
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
         sed -i \
@@ -88,6 +90,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         | tee /etc/apt/sources.list.d/rocm.list \
     && printf "deb [arch=amd64] https://repo.radeon.com/amdgpu/%s/ubuntu noble main" "$AMDGPU_VERSION" \
         | tee /etc/apt/sources.list.d/amdgpu.list \
+    && printf "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n" \
+        | tee /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update \
     && apt-get install -y --no-install-recommends build-essential cmake git hipblas-dev rocblas-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -145,7 +149,7 @@ FROM ghcr.io/ggml-org/llama.cpp:server-rocm AS llama-rocm-upstream
 
 FROM ubuntu:24.04 AS runtime-rocm-base
 ARG GA_UBUNTU_MIRROR_URL
-ARG ROCM_VERSION=7.2.1
+ARG ROCM_VERSION=7.2.4
 ARG AMDGPU_VERSION=30.30.1
 ENV DEBIAN_FRONTEND=noninteractive
 RUN if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
@@ -175,13 +179,24 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         | tee /etc/apt/sources.list.d/rocm.list \
     && printf "deb [arch=amd64] https://repo.radeon.com/amdgpu/%s/ubuntu noble main" "$AMDGPU_VERSION" \
         | tee /etc/apt/sources.list.d/amdgpu.list \
+    && printf "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n" \
+        | tee /etc/apt/preferences.d/rocm-pin-600 \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         libelf1 \
         hip-runtime-amd rocblas rocsolver hipblas hipblaslt \
-        rocprofiler-register roctracer comgr hsa-rocr \
+        rocprofiler-register roctracer comgr hsa-rocr rocminfo \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && printf "/opt/rocm/lib\n" > /etc/ld.so.conf.d/rocm.conf \
+    && ldconfig
+
+# ROCm packages install shared libs under /opt/rocm/lib. Without the ldconfig
+# entry above (and this env for processes that do not re-read ld.so.cache),
+# libggml-hip.so fails to resolve libamdhip64/libhipblas/librocblas and llama
+# reports "no usable GPU found".
+ENV LD_LIBRARY_PATH=/opt/rocm/lib
+ENV PATH="/opt/rocm/bin:${PATH}"
 
 # The llama.cpp release binaries resolve their sibling libllama*.so/libggml*.so via
 # a $ORIGIN-relative rpath (verified via `ldd` run from within /app), so copying the

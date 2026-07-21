@@ -34,7 +34,6 @@ public sealed class LocalModelPersistencePhase1BTests
             QuantId = "q6_k_xl",
             QuantLabel = "Q6_K_XL",
             RouterModelId = "Qwen3.6-35B-A3B-MTP-GGUF",
-            RuntimeProfileId = "qwen3_6",
             TargetDirectory = "Qwen3.6-35B-A3B-MTP-GGUF",
             ModelArtifactsJson = """[{"repositoryPath":"a.gguf","installedRelativePath":"a/a.gguf","byteSize":1}]""",
             ProjectorArtifactsJson = "[]",

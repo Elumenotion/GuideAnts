@@ -3,7 +3,6 @@ using System.Text.Json;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using Microsoft.Extensions.Configuration;
-using Moq;
 
 namespace GuideAntsApi.Tests.Services.Routing;
 
@@ -184,21 +183,13 @@ public sealed class ChatTargetValidatorTests
     }
 
     [TestMethod]
-    public void Validate_Throws_RuntimeNotReady_WhenRuntimeProfileResolutionFails()
+    public void Validate_Throws_RuntimeNotReady_WhenLlamaChatBehaviorMissing()
     {
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-        runtimeProfileResolver
-            .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("profile missing"));
-
-        var validator = new ChatTargetValidator(
-            BuildConfiguration(new Dictionary<string, string?>()),
-            runtimeProfileResolver.Object);
+        var validator = CreateValidator(new Dictionary<string, string?>());
 
         var runtimeJson = """
         {
-            "routerModelId": "qwen-model",
-            "runtimeProfileId": "qwen3_5"
+            "routerModelId": "qwen-model"
         }
         """;
 
@@ -213,83 +204,67 @@ public sealed class ChatTargetValidatorTests
     /// Phase H.2 (R-12.5): the chat-dispatch validator must NOT inspect live
     /// llama runtime state. If a load is in flight for the alias, the
     /// validator must still succeed provided the static inputs (provider,
-    /// RuntimeConfigJson, runtime profile) are well-formed — the runtime
+    /// RuntimeConfigJson, model-owned chat behavior) are well-formed — the runtime
     /// readiness snapshot lives on <c>IRoutingReadinessService.ProbeChatTargetAsync</c>,
     /// not on this path.
-    ///
-    /// Structurally this is already true: the validator's constructor accepts
-    /// only <c>IConfiguration</c> + <c>IRuntimeProfileResolver</c>, so it
-    /// cannot check load state even if it wanted to. This test pins the
-    /// behavior against a future refactor that might add a coordinator
-    /// dependency and inadvertently start blocking chat on load state.
     /// </summary>
     [TestMethod]
     public void Validate_DoesNotCheckLlamaLoadState_PerR12p5()
     {
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-        runtimeProfileResolver
-            .Setup(r => r.ResolveAsync("concurrency-profile", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RuntimeProfileData(
-                "concurrency-profile",
-                CombineSystemAndDeveloperMessages: true,
-                ThoughtBlockPattern: null,
-                SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
-                ThinkingControl: new ThinkingControl("disabled", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
-                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
-
-        var validator = new ChatTargetValidator(
-            BuildConfiguration(new Dictionary<string, string?>()),
-            runtimeProfileResolver.Object);
+        var validator = CreateValidator(new Dictionary<string, string?>());
 
         var runtimeJson = """
         {
-            "routerModelId": "qwen-mid-load",
-            "runtimeProfileId": "concurrency-profile"
+            "routerModelId": "qwen-mid-load"
         }
         """;
 
-        Action act = () => validator.Validate(new ChatTarget("qwen-local", "llama-cpp", runtimeJson));
+        var behavior = new RuntimeProfileData(
+            "qwen-local",
+            CombineSystemAndDeveloperMessages: true,
+            ThoughtBlockPattern: null,
+            SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
+            ThinkingControl: new ThinkingControl("disabled", new Dictionary<string, IReadOnlyList<ThinkingAction>>
+            {
+                ["disabled"] = new List<ThinkingAction>()
+            }),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>());
+
+        Action act = () => validator.Validate(new ChatTarget("qwen-local", "llama-cpp", runtimeJson, behavior));
         act.Should().NotThrow(
             "R-12.5: while the alias is mid-load the chat dispatch path validates static inputs only; " +
             "live load state is not inspected here (that's the readiness snapshot's job).");
     }
 
     [TestMethod]
-    public void Validate_AcceptsLlamaCpp_WhenRuntimeProfileResolves()
+    public void Validate_AcceptsLlamaCpp_WhenModelOwnedBehaviorPresent()
     {
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-        runtimeProfileResolver
-            .Setup(r => r.ResolveAsync("qwen3_5", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RuntimeProfileData(
-                "qwen3_5",
-                CombineSystemAndDeveloperMessages: true,
-                ThoughtBlockPattern: @"<think>[\s\S]*?</think>",
-                SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
-                ThinkingControl: new ThinkingControl("enabled", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
-                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
-
-        var validator = new ChatTargetValidator(
-            BuildConfiguration(new Dictionary<string, string?>()),
-            runtimeProfileResolver.Object);
+        var validator = CreateValidator(new Dictionary<string, string?>());
 
         var runtimeJson = """
         {
-            "routerModelId": "qwen-model",
-            "runtimeProfileId": "qwen3_5"
+            "routerModelId": "qwen-model"
         }
         """;
 
-        Action act = () => validator.Validate(new ChatTarget("qwen-local", "llama-cpp", runtimeJson));
+        var behavior = new RuntimeProfileData(
+            "qwen-local",
+            CombineSystemAndDeveloperMessages: true,
+            ThoughtBlockPattern: @"<think>[\s\S]*?</think>",
+            SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
+            ThinkingControl: new ThinkingControl("enabled", new Dictionary<string, IReadOnlyList<ThinkingAction>>
+            {
+                ["enabled"] = new List<ThinkingAction>()
+            }),
+            RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>());
+
+        Action act = () => validator.Validate(new ChatTarget("qwen-local", "llama-cpp", runtimeJson, behavior));
         act.Should().NotThrow();
     }
 
-    private static ChatTargetValidator CreateValidator(Dictionary<string, string?> settings)
-    {
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-        return new ChatTargetValidator(BuildConfiguration(settings), runtimeProfileResolver.Object);
-    }
+    private static ChatTargetValidator CreateValidator(Dictionary<string, string?> settings) =>
+        new ChatTargetValidator(BuildConfiguration(settings));
 
     private static IConfiguration BuildConfiguration(Dictionary<string, string?> values) =>
         new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 }
-

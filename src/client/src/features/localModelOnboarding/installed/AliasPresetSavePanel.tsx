@@ -4,6 +4,7 @@ import type { LlamaRouterEntryDto } from '../../../types/settings';
 import { AliasPresetEditor } from '../advanced/AliasPresetEditor';
 import {
   buildEffectivePresetRecord,
+  filterProcessScopedPresetRecord,
   isManagedPresetKey,
   splitManagedPresetFromRecord,
   validateAliasPresetRows,
@@ -75,10 +76,13 @@ export interface AliasPresetSavePanelProps {
 export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, AliasPresetSavePanelProps>(
   function AliasPresetSavePanel({ alias, routerEntry, fallbackPreset = {} }, ref) {
     const authoritativePreset = useMemo(() => {
-      if (routerEntry?.preset && Object.keys(routerEntry.preset).length > 0) {
-        return routerEntry.preset;
-      }
-      return fallbackPreset;
+      const raw =
+        routerEntry?.preset && Object.keys(routerEntry.preset).length > 0
+          ? routerEntry.preset
+          : fallbackPreset;
+      // Env/process knobs (n-gpu-layers, no-mmap, …) come from GA_LLAMA_* — never show
+      // stale alias-INI copies as if they were model-specific overrides.
+      return filterProcessScopedPresetRecord(raw);
     }, [fallbackPreset, routerEntry?.preset]);
 
     const [rows, setRows] = useState<PresetKeyValue[]>(() =>
@@ -156,8 +160,11 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
         <div>
           <h3 className="text-sm font-semibold text-gray-900">Router preset</h3>
           <p className="mt-1 text-xs text-gray-600">
-            llama-server switches for <span className="font-mono">{alias}</span>. Use Save below to apply this
-            model&apos;s preset to the router.
+            Model-specific llama-server switches for <span className="font-mono">{alias}</span>
+            (context, cache, vision, MTP, …). Process-wide knobs such as{" "}
+            <span className="font-mono">n-gpu-layers</span> and <span className="font-mono">no-mmap</span> come
+            from container env (<span className="font-mono">GA_LLAMA_*</span>), not this preset. Use Save below
+            to apply.
           </p>
         </div>
 

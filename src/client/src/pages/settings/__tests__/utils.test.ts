@@ -119,7 +119,7 @@ describe('buildAddModelRequest', () => {
 });
 
 describe('buildCatalogEditRequest', () => {
-  it('preserves existing runtimeConfigJson for llama-cpp presentation-only edits', () => {
+  it('preserves existing runtimeConfigJson and model-owned behavior for llama-cpp edits', () => {
     const request = buildCatalogEditRequest(
       {
         modelId: 'qwen-local',
@@ -131,13 +131,22 @@ describe('buildCatalogEditRequest', () => {
         runtimeProfileId: '',
       },
       {
-        runtimeConfigJson: '{"routerModelId":"QwenAlias","runtimeProfileId":"qwen3_5"}',
+        runtimeConfigJson: '{"routerModelId":"QwenAlias"}',
+        preserveModelBehavior: {
+          combineSystemAndDeveloperMessages: true,
+          thoughtBlockPattern: '',
+          samplingParametersJson: '{"temperature":0.7}',
+          thinkingControlJson: '{"defaultChoice":"none","choiceActions":{"none":[]}}',
+          requestFieldsWhenToolsPresentJson: '{"parallel_tool_calls":false}',
+          reasoningChoicesJson: '["none"]',
+        },
       },
     );
 
     expect(request.modelId).toBe('qwen-local');
-    expect(request.runtimeConfigJson).toBe('{"routerModelId":"QwenAlias","runtimeProfileId":"qwen3_5"}');
-    expect(request.runtimeConfigJson).not.toContain('loadParams');
+    expect(request.runtimeConfigJson).toBe('{"routerModelId":"QwenAlias"}');
+    expect(request.samplingParametersJson).toBe('{"temperature":0.7}');
+    expect(request.reasoningChoicesJson).toBe('["none"]');
   });
 });
 
@@ -278,7 +287,7 @@ describe('catalog edit helpers', () => {
     });
   });
 
-  it('derives reasoning choices json when editing llama-cpp catalog rows', () => {
+  it('preserves model-owned reasoning choices when editing llama-cpp catalog rows', () => {
     const request = buildCatalogEditRequest(
       {
         modelId: 'qwen-local',
@@ -287,11 +296,18 @@ describe('catalog edit helpers', () => {
         description: '',
         displayOrder: '',
         isActive: true,
-        runtimeProfileId: 'qwen3_5',
+        runtimeProfileId: '',
       },
       {
-        profileThinkingControlJson: '{"choiceActions":{"low":[],"high":[]}}',
-      }
+        preserveModelBehavior: {
+          combineSystemAndDeveloperMessages: true,
+          thoughtBlockPattern: '',
+          samplingParametersJson: '{}',
+          thinkingControlJson: '{"choiceActions":{"low":[],"high":[]}}',
+          requestFieldsWhenToolsPresentJson: '{}',
+          reasoningChoicesJson: '["low","high"]',
+        },
+      },
     );
 
     expect(request.reasoningChoicesJson).toBe('["low","high"]');
@@ -477,8 +493,14 @@ describe('parseRuntimeProfileId and parseCanonicalLocalRuntimeJson', () => {
   it('returns null for invalid canonical local runtime json', () => {
     expect(parseCanonicalLocalRuntimeJson('')).toBeNull();
     expect(parseCanonicalLocalRuntimeJson('[]')).toBeNull();
-    expect(parseCanonicalLocalRuntimeJson('{"routerModelId":"a"}')).toBeNull();
+    expect(parseCanonicalLocalRuntimeJson('{"runtimeProfileId":"qwen3_5"}')).toBeNull();
     expect(parseCanonicalLocalRuntimeJson('bad-json')).toBeNull();
+  });
+
+  it('accepts router-only canonical local runtime json', () => {
+    expect(parseCanonicalLocalRuntimeJson('{"routerModelId":"a"}')).toEqual({
+      routerModelId: 'a',
+    });
   });
 
   it('parses optional router cache and parallel tool call fields', () => {
@@ -594,13 +616,13 @@ describe('buildCatalogEditRequest edge cases', () => {
   it('omits reasoning choices when thinking control json has no choice actions object', () => {
     const request = buildCatalogEditRequest(
       {
-        modelId: 'qwen-local',
-        provider: 'llama-cpp',
-        displayName: 'Qwen Local',
+        modelId: 'gpt-4.1',
+        provider: 'openai-chat',
+        displayName: 'GPT-4.1',
         description: '',
         displayOrder: '',
         isActive: true,
-        runtimeProfileId: 'qwen3_5',
+        runtimeProfileId: 'openai_default',
       },
       { profileThinkingControlJson: '{}' }
     );
@@ -610,13 +632,13 @@ describe('buildCatalogEditRequest edge cases', () => {
   it('ignores malformed profile thinking control json when deriving reasoning choices', () => {
     const request = buildCatalogEditRequest(
       {
-        modelId: 'qwen-local',
-        provider: 'llama-cpp',
-        displayName: 'Qwen Local',
+        modelId: 'gpt-4.1',
+        provider: 'openai-chat',
+        displayName: 'GPT-4.1',
         description: '',
         displayOrder: '',
         isActive: true,
-        runtimeProfileId: 'qwen3_5',
+        runtimeProfileId: 'openai_default',
       },
       { profileThinkingControlJson: '{' }
     );
@@ -626,13 +648,13 @@ describe('buildCatalogEditRequest edge cases', () => {
   it('omits reasoning choices when choice actions are empty', () => {
     const request = buildCatalogEditRequest(
       {
-        modelId: 'qwen-local',
-        provider: 'llama-cpp',
-        displayName: 'Qwen Local',
+        modelId: 'gpt-4.1',
+        provider: 'openai-chat',
+        displayName: 'GPT-4.1',
         description: '',
         displayOrder: '',
         isActive: true,
-        runtimeProfileId: 'qwen3_5',
+        runtimeProfileId: 'openai_default',
       },
       { profileThinkingControlJson: '{"choiceActions":{"  ":[]}}' }
     );
@@ -642,13 +664,13 @@ describe('buildCatalogEditRequest edge cases', () => {
   it('omits reasoning choices when profile thinking control is invalid', () => {
     const request = buildCatalogEditRequest(
       {
-        modelId: 'qwen-local',
-        provider: 'llama-cpp',
-        displayName: 'Qwen Local',
+        modelId: 'gpt-4.1',
+        provider: 'openai-chat',
+        displayName: 'GPT-4.1',
         description: '',
         displayOrder: '',
         isActive: true,
-        runtimeProfileId: 'qwen3_5',
+        runtimeProfileId: 'openai_default',
       },
       { profileThinkingControlJson: '{bad-json' }
     );

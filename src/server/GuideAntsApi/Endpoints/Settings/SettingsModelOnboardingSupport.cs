@@ -80,19 +80,43 @@ internal static class SettingsModelOnboardingSupport
     public static CreateSettingsModelRequest BuildModelCreateRequest(
         AddModelRequest request,
         string? reasoningChoicesJson,
-        string? runtimeConfigJson)
+        string? runtimeConfigJson,
+        RuntimeProfileData? behaviorTemplate = null)
     {
-        return new CreateSettingsModelRequest(
-            ModelId: request.Catalog.ModelId.Trim(),
-            DisplayName: request.Catalog.DisplayName.Trim(),
-            Provider: request.Provider.Trim(),
-            Description: string.IsNullOrWhiteSpace(request.Catalog.Description)
-                ? null
-                : request.Catalog.Description.Trim(),
-            ReasoningChoicesJson: reasoningChoicesJson,
-            RuntimeConfigJson: runtimeConfigJson,
-            IsActive: request.Catalog.IsActive,
-            DisplayOrder: request.Catalog.DisplayOrder);
+        if (behaviorTemplate is not null)
+        {
+            return ModelChatBehavior.BuildCreateRequest(
+                request.Catalog,
+                request.Provider.Trim(),
+                reasoningChoicesJson,
+                runtimeConfigJson,
+                behaviorTemplate);
+        }
+
+        return ModelChatBehavior.BuildCreateRequestWithDefaults(
+            request.Catalog,
+            request.Provider.Trim(),
+            reasoningChoicesJson,
+            runtimeConfigJson);
+    }
+
+    public static async Task<CreateSettingsModelRequest> BuildCloudModelCreateRequestAsync(
+        AddModelRequest request,
+        string? reasoningChoicesJson,
+        string? runtimeConfigJson,
+        IRuntimeProfileResolver runtimeProfileResolver,
+        CancellationToken cancellationToken)
+    {
+        var runtimeProfileId = GetProviderConfigString(request.ProviderConfig, "runtimeProfileId");
+        if (string.IsNullOrWhiteSpace(runtimeProfileId))
+        {
+            return BuildModelCreateRequest(request, reasoningChoicesJson, runtimeConfigJson);
+        }
+
+        var profile = await runtimeProfileResolver.ResolveAsync(runtimeProfileId.Trim(), cancellationToken)
+            .ConfigureAwait(false);
+
+        return BuildModelCreateRequest(request, reasoningChoicesJson, runtimeConfigJson, profile);
     }
 
     public static string? BuildCloudRuntimeConfigJson(AddModelRequest request)

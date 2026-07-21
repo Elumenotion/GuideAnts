@@ -1,6 +1,6 @@
 # GuideAnts Telemetry and Visibility Configuration
 
-Last updated: 2026-05-18
+Last updated: 2026-07-21
 
 This document summarizes current telemetry controls and investigation paths.
 
@@ -26,6 +26,18 @@ Use targeted category overrides instead of globally raising `Default` to verbose
 Keep framework noise lower than product-domain categories in normal operations.
 
 ## 4. Investigation playbooks
+
+### Full outbound chat provider requests
+
+To print the full ThreadRun request bound for chat providers (messages, tools, model, sampling) in the API console:
+
+1. Open `Settings → Telemetry`
+2. Set **Chat providers** to **Investigating** (`Debug`) or **Verbose** (`Trace`)
+3. Save — applies without restart
+
+Look for: `ThreadRun outbound chat request. Round=… Request={…}` under category `AntRunner.Chat.ThreadRun` (controlled by Telemetry key `AntRunnerChat` → `Logging:LogLevel:AntRunner.Chat`).
+
+This is provider-agnostic (same log for OpenAI, Anthropic, Gemini, Hugging Face, OpenRouter, and llama). Prompt Trace in Usage remains the persisted UI drill-down for the same round payloads.
 
 ### Chat routing issues
 

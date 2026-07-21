@@ -183,7 +183,12 @@ public sealed record SettingsModelDto(
     bool IsActive,
     int? DisplayOrder,
     DateTime Created,
-    DateTime? Updated);
+    DateTime? Updated,
+    bool CombineSystemAndDeveloperMessages = true,
+    string? ThoughtBlockPattern = null,
+    string SamplingParametersJson = "{}",
+    string ThinkingControlJson = "{}",
+    string RequestFieldsWhenToolsPresentJson = "{}");
 
 public sealed record CreateSettingsModelRequest(
     string ModelId,
@@ -193,7 +198,12 @@ public sealed record CreateSettingsModelRequest(
     string? ReasoningChoicesJson,
     string? RuntimeConfigJson,
     bool IsActive,
-    int? DisplayOrder);
+    int? DisplayOrder,
+    bool CombineSystemAndDeveloperMessages = true,
+    string? ThoughtBlockPattern = null,
+    string SamplingParametersJson = "{}",
+    string ThinkingControlJson = "{}",
+    string RequestFieldsWhenToolsPresentJson = "{}");
 
 public sealed record UpdateSettingsModelRequest(
     string ModelId,
@@ -203,7 +213,12 @@ public sealed record UpdateSettingsModelRequest(
     string? ReasoningChoicesJson,
     string? RuntimeConfigJson,
     bool IsActive,
-    int? DisplayOrder);
+    int? DisplayOrder,
+    bool CombineSystemAndDeveloperMessages = true,
+    string? ThoughtBlockPattern = null,
+    string SamplingParametersJson = "{}",
+    string ThinkingControlJson = "{}",
+    string RequestFieldsWhenToolsPresentJson = "{}");
 
 public sealed record AddModelCatalogDto(
     string ModelId,

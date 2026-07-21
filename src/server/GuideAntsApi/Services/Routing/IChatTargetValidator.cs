@@ -9,7 +9,7 @@ public interface IChatTargetValidator
     /// Validates that the resolved chat target can actually dispatch:
     ///   - provider is supported
     ///   - required provider-section fields are populated in configuration
-    ///   - llama-cpp targets have valid <c>RuntimeConfigJson</c> with a known runtime profile
+    ///   - llama-cpp targets have valid <c>RuntimeConfigJson</c> and model-owned chat behavior
     ///
     /// Per R-12.5/12.6 this method must NOT be called while a
     /// <c>NotebookModelRuntimeService</c> load is in flight: run it at chat dispatch
@@ -20,14 +20,6 @@ public interface IChatTargetValidator
 
 public sealed class ChatTargetValidator : IChatTargetValidator
 {
-    // Each provider string resolves to exactly one provider section. The
-    // Azure-prefixed strings target the AzureOpenAI section; the unprefixed
-    // strings target the OpenAI (platform) section. The set is closed; the
-    // UI constrains input to these values (ModelsTab provider select) and the
-    // RenameOpenAiChatProvidersToAzure migration rewrites any pre-split bare
-    // "openai" / "openai-chat" / "openai-responses" rows to the canonical
-    // azure-prefixed variants, so an unrecognized value here is a data bug
-    // and must fail fast rather than being silently aliased.
     internal static readonly HashSet<string> KnownProviders = new(StringComparer.OrdinalIgnoreCase)
     {
         "openai-chat",
@@ -42,14 +34,10 @@ public sealed class ChatTargetValidator : IChatTargetValidator
     };
 
     private readonly IConfiguration _configuration;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
 
-    public ChatTargetValidator(
-        IConfiguration configuration,
-        IRuntimeProfileResolver runtimeProfileResolver)
+    public ChatTargetValidator(IConfiguration configuration)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        _runtimeProfileResolver = runtimeProfileResolver ?? throw new ArgumentNullException(nameof(runtimeProfileResolver));
     }
 
     public void Validate(ChatTarget target)
@@ -196,10 +184,9 @@ public sealed class ChatTargetValidator : IChatTargetValidator
                 providerSection: "LlamaCpp");
         }
 
-        LocalRuntimeConfiguration parsed;
         try
         {
-            parsed = LocalRuntimeConfigurationParser.ParseRequired(target.ModelId, target.RuntimeConfigJson);
+            _ = LocalRuntimeConfigurationParser.ParseRequired(target.ModelId, target.RuntimeConfigJson);
         }
         catch (Exception ex)
         {
@@ -213,20 +200,15 @@ public sealed class ChatTargetValidator : IChatTargetValidator
                 innerException: ex);
         }
 
-        try
-        {
-            _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
-        }
-        catch (Exception ex)
+        if (target.LlamaChatBehavior?.ThinkingControl?.ChoiceActions is not { Count: > 0 })
         {
             throw new RoutingException(
                 RoutingErrorCodes.RuntimeNotReady,
-                $"Runtime profile '{parsed.RuntimeProfileId}' for model '{target.ModelId}' is unavailable: {ex.Message}",
-                action: $"Ensure runtime profile '{parsed.RuntimeProfileId}' exists in Settings → Models & Runtime → Runtime Profiles.",
+                $"Model '{target.ModelId}' is missing model-owned chat behavior configuration.",
+                action: $"Configure chat behavior for '{target.ModelId}' in Settings → Models & Runtime.",
                 serviceId: "Chat",
                 modelId: target.ModelId,
-                providerSection: "LlamaCpp",
-                innerException: ex);
+                providerSection: "LlamaCpp");
         }
     }
 }

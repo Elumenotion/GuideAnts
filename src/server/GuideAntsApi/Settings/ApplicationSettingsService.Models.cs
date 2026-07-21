@@ -33,6 +33,7 @@ public sealed partial class ApplicationSettingsService
         var normalizedReasoningChoices = NormalizeReasoningChoicesJson(modelId, request.ReasoningChoicesJson);
         var normalizedRuntimeConfigJson = NormalizeRuntimeConfigJson(modelId, provider, request.RuntimeConfigJson);
         ValidateProviderReasoningChoices(modelId, provider, normalizedReasoningChoices);
+        ValidateLlamaBehavior(modelId, provider, request.ThinkingControlJson);
 
         var model = new Model
         {
@@ -42,6 +43,11 @@ public sealed partial class ApplicationSettingsService
             Description = request.Description,
             ReasoningChoicesJson = normalizedReasoningChoices,
             RuntimeConfigJson = normalizedRuntimeConfigJson,
+            CombineSystemAndDeveloperMessages = request.CombineSystemAndDeveloperMessages,
+            ThoughtBlockPattern = request.ThoughtBlockPattern,
+            SamplingParametersJson = NormalizeJsonObject(request.SamplingParametersJson, "{}"),
+            ThinkingControlJson = NormalizeJsonObject(request.ThinkingControlJson, "{}"),
+            RequestFieldsWhenToolsPresentJson = NormalizeJsonObject(request.RequestFieldsWhenToolsPresentJson, "{}"),
             IsActive = request.IsActive,
             DisplayOrder = request.DisplayOrder,
             Created = DateTime.UtcNow,
@@ -71,12 +77,20 @@ public sealed partial class ApplicationSettingsService
         var normalizedReasoningChoices = NormalizeReasoningChoicesJson(routeModelId, request.ReasoningChoicesJson);
         var normalizedRuntimeConfigJson = NormalizeRuntimeConfigJson(routeModelId, provider, request.RuntimeConfigJson);
         ValidateProviderReasoningChoices(routeModelId, provider, normalizedReasoningChoices);
+        ValidateLlamaBehavior(routeModelId, provider, request.ThinkingControlJson);
 
         model.DisplayName = request.DisplayName.Trim();
         model.Provider = provider;
         model.Description = request.Description;
         model.ReasoningChoicesJson = normalizedReasoningChoices;
         model.RuntimeConfigJson = normalizedRuntimeConfigJson;
+        model.CombineSystemAndDeveloperMessages = request.CombineSystemAndDeveloperMessages;
+        model.ThoughtBlockPattern = request.ThoughtBlockPattern;
+        model.SamplingParametersJson = NormalizeJsonObject(request.SamplingParametersJson, model.SamplingParametersJson);
+        model.ThinkingControlJson = NormalizeJsonObject(request.ThinkingControlJson, model.ThinkingControlJson);
+        model.RequestFieldsWhenToolsPresentJson = NormalizeJsonObject(
+            request.RequestFieldsWhenToolsPresentJson,
+            model.RequestFieldsWhenToolsPresentJson);
         model.IsActive = request.IsActive;
         model.DisplayOrder = request.DisplayOrder;
         model.Updated = DateTime.UtcNow;
@@ -126,8 +140,32 @@ public sealed partial class ApplicationSettingsService
         }
 
         var parsed = LocalRuntimeConfigurationParser.ParseRequired(modelId, runtimeConfigJson);
-        _runtimeProfileResolver.ResolveAsync(parsed.RuntimeProfileId).GetAwaiter().GetResult();
         return LocalRuntimeConfigurationParser.SerializeCanonical(parsed);
+    }
+
+    private static void ValidateLlamaBehavior(string modelId, string provider, string thinkingControlJson)
+    {
+        if (!string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(thinkingControlJson)
+            || string.Equals(thinkingControlJson.Trim(), "{}", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Model '{modelId}' is configured as llama-cpp but is missing ThinkingControlJson.");
+        }
+    }
+
+    private static string NormalizeJsonObject(string? json, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return fallback;
+        }
+
+        return json.Trim();
     }
 
     private static string? NormalizeReasoningChoicesJson(string modelId, string? reasoningChoicesJson)
@@ -203,6 +241,11 @@ public sealed partial class ApplicationSettingsService
             model.IsActive,
             model.DisplayOrder,
             model.Created,
-            model.Updated);
+            model.Updated,
+            model.CombineSystemAndDeveloperMessages,
+            model.ThoughtBlockPattern,
+            model.SamplingParametersJson,
+            model.ThinkingControlJson,
+            model.RequestFieldsWhenToolsPresentJson);
     }
 }

@@ -391,7 +391,6 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
             installation.QuantId = immutableInput.QuantId;
             installation.QuantLabel = immutableInput.QuantLabel;
             installation.RouterModelId = immutableInput.RouterModelId;
-            installation.RuntimeProfileId = immutableInput.RuntimeProfileId;
             installation.TargetDirectory = immutableInput.TargetDirectory;
             installation.ModelArtifactsJson = BuildModelArtifactsJson(immutableInput);
             installation.ProjectorArtifactsJson = BuildProjectorArtifactsJson(immutableInput);
@@ -418,24 +417,16 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
         CancellationToken cancellationToken)
     {
             var runtimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
-                new LocalRuntimeConfiguration(
-                    immutableInput.RouterModelId,
-                    immutableInput.RuntimeProfileId));
+                new LocalRuntimeConfiguration(immutableInput.RouterModelId));
 
             var profile = await _runtimeProfileResolver
                 .ResolveAsync(immutableInput.RuntimeProfileId, cancellationToken)
                 .ConfigureAwait(false);
-            var reasoningChoices = profile.ThinkingControl.ChoiceActions.Keys
-                .Where(choice => !string.IsNullOrWhiteSpace(choice))
-                .Select(choice => choice.Trim())
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
-            string? reasoningChoicesJson = reasoningChoices.Count == 0
-                ? null
-                : JsonSerializer.Serialize(reasoningChoices);
+            var reasoningChoicesJson = ModelChatBehavior.DeriveReasoningChoicesJson(
+                JsonSerializer.Serialize(profile.ThinkingControl));
 
             var now = DateTime.UtcNow;
-            _db.Models.Add(new Model
+            var model = new Model
             {
                 ModelId = immutableInput.CatalogModelId,
                 DisplayName = immutableInput.CatalogDisplayName,
@@ -443,11 +434,17 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
                 Description = immutableInput.CatalogDescription,
                 ReasoningChoicesJson = reasoningChoicesJson,
                 RuntimeConfigJson = runtimeConfigJson,
+                CombineSystemAndDeveloperMessages = profile.CombineSystemAndDeveloperMessages,
+                ThoughtBlockPattern = profile.ThoughtBlockPattern,
+                SamplingParametersJson = JsonSerializer.Serialize(profile.SamplingParameters),
+                ThinkingControlJson = JsonSerializer.Serialize(profile.ThinkingControl),
+                RequestFieldsWhenToolsPresentJson = JsonSerializer.Serialize(profile.RequestFieldsWhenToolsPresent),
                 IsActive = immutableInput.CatalogIsActive,
                 DisplayOrder = immutableInput.CatalogDisplayOrder,
                 Created = now,
                 Updated = now,
-            });
+            };
+            _db.Models.Add(model);
 
             _db.LocalModelInstallations.Add(new LocalModelInstallation
             {
@@ -461,7 +458,6 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
                 QuantId = immutableInput.QuantId,
                 QuantLabel = immutableInput.QuantLabel,
                 RouterModelId = immutableInput.RouterModelId,
-                RuntimeProfileId = immutableInput.RuntimeProfileId,
                 TargetDirectory = immutableInput.TargetDirectory,
                 ModelArtifactsJson = BuildModelArtifactsJson(immutableInput),
                 ProjectorArtifactsJson = BuildProjectorArtifactsJson(immutableInput),
@@ -597,9 +593,7 @@ public sealed class LocalModelOperationService : ILocalModelOperationService
                 Description: immutableInput.CatalogDescription,
                 ReasoningChoicesJson: null,
                 RuntimeConfigJson: LocalRuntimeConfigurationParser.SerializeCanonical(
-                    new LocalRuntimeConfiguration(
-                        immutableInput.RouterModelId,
-                        immutableInput.RuntimeProfileId)),
+                    new LocalRuntimeConfiguration(immutableInput.RouterModelId)),
                 IsActive: immutableInput.CatalogIsActive,
                 DisplayOrder: immutableInput.CatalogDisplayOrder,
                 Created: operation.CompletedUtc ?? operation.CreatedUtc,

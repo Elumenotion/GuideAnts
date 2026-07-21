@@ -449,12 +449,6 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
         }
 
         var profile = await _runtimeProfileResolver.ResolveAsync(input.RuntimeProfileId, cancellationToken).ConfigureAwait(false);
-        var reasoningChoices = profile.ThinkingControl.ChoiceActions.Keys
-            .Where(choice => !string.IsNullOrWhiteSpace(choice))
-            .Select(choice => choice.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
         var now = DateTime.UtcNow;
         _db.Models.Add(new Model
         {
@@ -462,9 +456,15 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
             DisplayName = input.CatalogDisplayName,
             Provider = "llama-cpp",
             Description = input.CatalogDescription,
-            ReasoningChoicesJson = reasoningChoices.Count == 0 ? null : JsonSerializer.Serialize(reasoningChoices),
+            ReasoningChoicesJson = ModelChatBehavior.DeriveReasoningChoicesJson(
+                JsonSerializer.Serialize(profile.ThinkingControl)),
             RuntimeConfigJson = LocalRuntimeConfigurationParser.SerializeCanonical(
-                new LocalRuntimeConfiguration(input.RouterModelId, input.RuntimeProfileId)),
+                new LocalRuntimeConfiguration(input.RouterModelId)),
+            CombineSystemAndDeveloperMessages = profile.CombineSystemAndDeveloperMessages,
+            ThoughtBlockPattern = profile.ThoughtBlockPattern,
+            SamplingParametersJson = JsonSerializer.Serialize(profile.SamplingParameters),
+            ThinkingControlJson = JsonSerializer.Serialize(profile.ThinkingControl),
+            RequestFieldsWhenToolsPresentJson = JsonSerializer.Serialize(profile.RequestFieldsWhenToolsPresent),
             IsActive = input.CatalogIsActive,
             DisplayOrder = input.CatalogDisplayOrder,
             Created = now,
@@ -479,7 +479,6 @@ public sealed class LocalModelLifecycleOperationService : ILocalModelLifecycleOp
             RequestedRevision = input.RequestedRevision,
             ResolvedRevision = input.ResolvedRevision,
             RouterModelId = input.RouterModelId,
-            RuntimeProfileId = input.RuntimeProfileId,
             TargetDirectory = input.TargetDirectory,
             ModelArtifactsJson = InstallationArtifactRecords.SerializeFromPaths(input.TargetDirectory, input.ModelFiles),
             ProjectorArtifactsJson = InstallationArtifactRecords.SerializeFromPaths(input.TargetDirectory, input.MmprojFiles),

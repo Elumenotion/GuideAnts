@@ -18,6 +18,10 @@ class FleetProjectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_preset({"ctx-size": "8192"})
 
+    def test_preset_to_fleet_env_maps_no_mmap(self) -> None:
+        env = preset_to_fleet_env({"noMmap": True})
+        self.assertEqual(env["GA_LLAMA_NO_MMAP"], "1")
+
     def test_preset_to_fleet_env_maps_fixture_keys(self) -> None:
         preset = {
             "jinja": True,

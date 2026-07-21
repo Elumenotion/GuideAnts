@@ -9,9 +9,11 @@ set -e
 # the router CLI when --models-preset is active.
 #
 # Alias-controlled knobs (not set on router CLI when models-preset is in use):
-#   All llama-server switches except router shell bootstrap (models-preset,
-#   models-max, no-autoload, host, port). Per-alias values live in
-#   router-models.ini and must not be passed here or they clobber INI.
+#   --ctx-size  (alias key: ctx-size)
+#   --cache-ram (alias key: cache-ram)
+#
+# Global env/compose knobs (GA_LLAMA_*) propagate from the router base preset
+# into every spawned child instance. Per-alias ctx/cache live in router-models.ini.
 
 FLEET_PROJECTION_DIR="${GA_LLAMA_FLEET_PROJECTION_DIR:-/models-local/llama/runtime/fleet}"
 FLEET_PROJECTION_FILE="${FLEET_PROJECTION_DIR}/fleet-projection.json"
@@ -134,21 +136,23 @@ fi
 ARGS+=(--host "${GA_LLAMA_HOST:-127.0.0.1}")
 ARGS+=(--port "${GA_LLAMA_PORT:-8080}")
 if [ "$ROUTER_MODE" = "0" ]; then
-    # Standalone mode (no preset INI). Process-level GA_LLAMA_* apply to the single model.
+    # Standalone mode (no preset INI). Alias-scoped knobs apply to the single model.
     [ -n "$GA_LLAMA_CTX_SIZE" ] && ARGS+=(--ctx-size "$GA_LLAMA_CTX_SIZE")
     [ -n "$GA_LLAMA_CACHE_RAM" ] && ARGS+=(--cache-ram "$GA_LLAMA_CACHE_RAM")
-    [ -n "$GA_LLAMA_THREADS" ] && ARGS+=(--threads "$GA_LLAMA_THREADS")
-    [ -n "$GA_LLAMA_PARALLEL" ] && ARGS+=(--parallel "$GA_LLAMA_PARALLEL")
-    [ -n "$GA_LLAMA_GPU_LAYERS" ] && ARGS+=(--n-gpu-layers "$GA_LLAMA_GPU_LAYERS")
-    [ "$GA_LLAMA_KV_OFFLOAD" = "0" ] && ARGS+=(--no-kv-offload)
-    [ "$GA_LLAMA_KV_OFFLOAD" = "1" ] && ARGS+=(--kv-offload)
-    [ "$GA_LLAMA_KV_UNIFIED" = "1" ] && ARGS+=(--kv-unified)
-    [ -n "$GA_LLAMA_JINJA" ] && [ "$GA_LLAMA_JINJA" != "0" ] && ARGS+=(--jinja)
-    [ "$GA_LLAMA_CONT_BATCH" = "1" ] && ARGS+=(--cont-batching)
-    [ "$GA_LLAMA_NO_MMAP" = "1" ] && ARGS+=(--no-mmap)
-    [ -n "$GA_LLAMA_FLASH_ATTN" ] && ARGS+=(--flash-attn "$GA_LLAMA_FLASH_ATTN")
-    [ -n "$GA_LLAMA_CACHE_TYPE_K" ] && ARGS+=(--cache-type-k "$GA_LLAMA_CACHE_TYPE_K")
-    [ -n "$GA_LLAMA_CACHE_TYPE_V" ] && ARGS+=(--cache-type-v "$GA_LLAMA_CACHE_TYPE_V")
-    [ -n "$GA_LLAMA_TENSOR_SPLIT" ] && ARGS+=(--tensor-split "$GA_LLAMA_TENSOR_SPLIT")
 fi
+# Global runtime knobs intentionally propagate from the router base preset into
+# every spawned child instance (unlike ctx-size/cache-ram, which are per-alias).
+[ -n "$GA_LLAMA_THREADS" ] && ARGS+=(--threads "$GA_LLAMA_THREADS")
+[ -n "$GA_LLAMA_PARALLEL" ] && ARGS+=(--parallel "$GA_LLAMA_PARALLEL")
+[ -n "$GA_LLAMA_GPU_LAYERS" ] && ARGS+=(--n-gpu-layers "$GA_LLAMA_GPU_LAYERS")
+[ "$GA_LLAMA_KV_OFFLOAD" = "0" ] && ARGS+=(--no-kv-offload)
+[ "$GA_LLAMA_KV_OFFLOAD" = "1" ] && ARGS+=(--kv-offload)
+[ "$GA_LLAMA_KV_UNIFIED" = "1" ] && ARGS+=(--kv-unified)
+[ -n "$GA_LLAMA_JINJA" ] && [ "$GA_LLAMA_JINJA" != "0" ] && ARGS+=(--jinja)
+[ "$GA_LLAMA_CONT_BATCH" = "1" ] && ARGS+=(--cont-batching)
+[ "$GA_LLAMA_NO_MMAP" = "1" ] && ARGS+=(--no-mmap)
+[ -n "$GA_LLAMA_FLASH_ATTN" ] && ARGS+=(--flash-attn "$GA_LLAMA_FLASH_ATTN")
+[ -n "$GA_LLAMA_CACHE_TYPE_K" ] && ARGS+=(--cache-type-k "$GA_LLAMA_CACHE_TYPE_K")
+[ -n "$GA_LLAMA_CACHE_TYPE_V" ] && ARGS+=(--cache-type-v "$GA_LLAMA_CACHE_TYPE_V")
+[ -n "$GA_LLAMA_TENSOR_SPLIT" ] && ARGS+=(--tensor-split "$GA_LLAMA_TENSOR_SPLIT")
 exec /app/llama-server "${ARGS[@]}"

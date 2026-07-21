@@ -71,7 +71,12 @@ public sealed class LocalModelInstallationService : ILocalModelInstallationServi
             IsActive: model.IsActive,
             DisplayOrder: model.DisplayOrder,
             Created: model.Created,
-            Updated: model.Updated);
+            Updated: model.Updated,
+            CombineSystemAndDeveloperMessages: model.CombineSystemAndDeveloperMessages,
+            ThoughtBlockPattern: model.ThoughtBlockPattern,
+            SamplingParametersJson: model.SamplingParametersJson,
+            ThinkingControlJson: model.ThinkingControlJson,
+            RequestFieldsWhenToolsPresentJson: model.RequestFieldsWhenToolsPresentJson);
 
     private async Task<LlamaInstallationDetailDto> MapDetailAsync(
         Model model,
@@ -93,7 +98,7 @@ public sealed class LocalModelInstallationService : ILocalModelInstallationServi
             QuantId: installation.QuantId,
             QuantLabel: installation.QuantLabel,
             RouterModelId: installation.RouterModelId ?? string.Empty,
-            RuntimeProfileId: installation.RuntimeProfileId ?? string.Empty,
+            RuntimeProfileId: string.Empty,
             TargetDirectory: installation.TargetDirectory ?? string.Empty,
             ModelArtifacts: InstallationArtifactRecords.Parse(installation.ModelArtifactsJson),
             ProjectorArtifacts: InstallationArtifactRecords.Parse(installation.ProjectorArtifactsJson),

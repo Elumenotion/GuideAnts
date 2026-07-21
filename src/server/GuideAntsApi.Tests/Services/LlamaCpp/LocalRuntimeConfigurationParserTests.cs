@@ -9,18 +9,18 @@ public sealed class LocalRuntimeConfigurationParserTests
     [TestMethod]
     public void Parse_Throws_WhenMissingRequiredField()
     {
-        const string json = """{"routerModelId":"qwen-router"}""";
+        const string json = """{}""";
 
         Action act = () => LocalRuntimeConfigurationParser.Parse("qwen3.5-27b", json);
 
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*missing required field(s): runtimeProfileId*");
+            .WithMessage("*missing required field(s): routerModelId*");
     }
 
     [TestMethod]
     public void Parse_Throws_WhenRouterModelIncludesGgufSuffix()
     {
-        const string json = """{"routerModelId":"qwen-router.gguf","runtimeProfileId":"qwen3_5"}""";
+        const string json = """{"routerModelId":"qwen-router.gguf"}""";
 
         Action act = () => LocalRuntimeConfigurationParser.Parse("qwen3.5-27b", json);
 
@@ -31,14 +31,13 @@ public sealed class LocalRuntimeConfigurationParserTests
     [TestMethod]
     public void Parse_AcceptsCanonicalShape()
     {
-        const string json = """{"routerModelId":"qwen-router","runtimeProfileId":"qwen3_5"}""";
+        const string json = """{"routerModelId":"qwen-router"}""";
 
         var parsed = LocalRuntimeConfigurationParser.Parse("qwen3.5-27b", json);
 
         parsed.RouterModelId.Should().Be("qwen-router");
-        parsed.RuntimeProfileId.Should().Be("qwen3_5");
         LocalRuntimeConfigurationParser.SerializeCanonical(parsed)
-            .Should().Be("""{"routerModelId":"qwen-router","runtimeProfileId":"qwen3_5"}""");
+            .Should().Be("""{"routerModelId":"qwen-router"}""");
     }
 
     [TestMethod]
@@ -58,6 +57,7 @@ public sealed class LocalRuntimeConfigurationParserTests
         var legacy = LocalRuntimeConfigurationMigrationReader.ReadLegacy("qwen3.5-27b", json);
 
         legacy.RouterModelId.Should().Be("qwen-router");
+        legacy.RuntimeProfileId.Should().Be("qwen3_5");
         legacy.LoadParams.Should().NotBeNull();
         legacy.LoadParams!["foo"]!.GetValue<string>().Should().Be("bar");
         legacy.ParallelToolCalls.Should().BeTrue();

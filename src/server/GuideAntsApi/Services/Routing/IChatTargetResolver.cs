@@ -10,7 +10,8 @@ namespace GuideAntsApi.Services.Routing;
 public sealed record ChatTarget(
     string ModelId,
     string Provider,
-    string? RuntimeConfigJson);
+    string? RuntimeConfigJson,
+    GuideAntsApi.Services.LlamaCpp.RuntimeProfileData? LlamaChatBehavior = null);
 
 public interface IChatTargetResolver
 {
@@ -35,9 +36,6 @@ public sealed class ChatTargetResolver : IChatTargetResolver
     {
         if (string.IsNullOrWhiteSpace(modelId))
         {
-            // R-1.5: chat has no modes — blank modelId is a caller-side contract
-            // violation, surfaced as ModelNotReady (the model we'd need simply
-            // doesn't exist yet because none was specified).
             throw new RoutingException(
                 RoutingErrorCodes.ModelNotReady,
                 "Chat model id is required. No provider fallback is configured.",
@@ -50,7 +48,19 @@ public sealed class ChatTargetResolver : IChatTargetResolver
         var row = db.Models
             .AsNoTracking()
             .Where(m => m.ModelId == modelId)
-            .Select(m => new { m.ModelId, m.Provider, m.RuntimeConfigJson })
+            .Select(m => new
+            {
+                m.ModelId,
+                m.Provider,
+                m.RuntimeConfigJson,
+                m.DisplayName,
+                m.Description,
+                m.CombineSystemAndDeveloperMessages,
+                m.ThoughtBlockPattern,
+                m.SamplingParametersJson,
+                m.ThinkingControlJson,
+                m.RequestFieldsWhenToolsPresentJson
+            })
             .FirstOrDefault();
 
         if (row == null)
@@ -70,6 +80,20 @@ public sealed class ChatTargetResolver : IChatTargetResolver
                 serviceId: "Chat");
         }
 
-        return new ChatTarget(row.ModelId, row.Provider.Trim(), row.RuntimeConfigJson);
+        GuideAntsApi.Services.LlamaCpp.RuntimeProfileData? llamaBehavior = null;
+        if (string.Equals(row.Provider.Trim(), "llama-cpp", StringComparison.OrdinalIgnoreCase))
+        {
+            llamaBehavior = GuideAntsApi.Services.LlamaCpp.RuntimeProfileDataJson.FromJsonStrings(
+                row.ModelId,
+                row.CombineSystemAndDeveloperMessages,
+                row.ThoughtBlockPattern,
+                row.SamplingParametersJson,
+                row.ThinkingControlJson,
+                row.RequestFieldsWhenToolsPresentJson,
+                row.DisplayName,
+                row.Description);
+        }
+
+        return new ChatTarget(row.ModelId, row.Provider.Trim(), row.RuntimeConfigJson, llamaBehavior);
     }
 }
