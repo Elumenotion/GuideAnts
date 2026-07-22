@@ -69,11 +69,48 @@ describe('AliasPresetSavePanel', () => {
         'Qwen3.5-9B-GGUF',
         expect.objectContaining({
           alias: 'Qwen3.5-9B-GGUF',
-          presetMode: 'merge',
+          presetMode: 'replace',
           contextSize: 65536,
           preset: expect.objectContaining({ 'ctx-size': '65536' }),
         }),
       );
+    });
+  });
+
+  it('saves removed preset keys with replace so they do not survive reload', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.putLlamaRouterEntry).mockResolvedValue(undefined as never);
+    const panelRef = createRef<AliasPresetSavePanelHandle>();
+
+    render(
+      <AliasPresetSavePanel
+        ref={panelRef}
+        alias="Qwen3.6-27B-MTP-GGUF"
+        routerEntry={mtpRouterEntry}
+        fallbackPreset={{}}
+      />,
+    );
+
+    const keyInputs = screen.getAllByPlaceholderText('ctx-size');
+    const specTypeIndex = keyInputs.findIndex(
+      (input) => (input as HTMLInputElement).value === 'spec-type',
+    );
+    expect(specTypeIndex).toBeGreaterThanOrEqual(0);
+    await user.click(screen.getAllByRole('button', { name: 'Remove' })[specTypeIndex]!);
+    expect(screen.queryByDisplayValue('spec-type')).not.toBeInTheDocument();
+
+    await panelRef.current?.saveRouterPreset();
+
+    await waitFor(() => {
+      expect(api.settings.putLlamaRouterEntry).toHaveBeenCalledTimes(1);
+    });
+
+    const [, request] = vi.mocked(api.settings.putLlamaRouterEntry).mock.calls[0]!;
+    expect(request.presetMode).toBe('replace');
+    expect(request.preset).not.toHaveProperty('spec-type');
+    expect(request.preset).toMatchObject({
+      'image-min-tokens': '1024',
+      'spec-draft-n-max': '2',
     });
   });
 

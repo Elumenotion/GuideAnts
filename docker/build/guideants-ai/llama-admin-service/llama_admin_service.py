@@ -31,7 +31,6 @@ from guideants_hf.preset_validation import (
     apply_preset_mode,
     normalize_alias,
     normalize_preset_map,
-    strip_process_scoped_extras,
 )
 from guideants_hf.router_mmproj import preset_disables_mmproj
 from guideants_hf.vision_token_preset import apply_alias_vision_token_preset, strip_vision_token_extras
@@ -632,8 +631,6 @@ def upsert_router_entry(
             _strip_extras_matching_incoming(extras, _cache_l)
         if preset_disables_mmproj(extras):
             strip_vision_token_extras(extras)
-        # Always drop env/process knobs (n-gpu-layers, no-mmap, …) from alias INI.
-        extras = strip_process_scoped_extras(extras)
 
         entries[alias_trimmed] = _RouterSection(
             model=model_path.strip(),
@@ -1349,34 +1346,13 @@ def put_runtime_fleet_preset(request: FleetPresetPutRequest) -> dict[str, Any]:
 
 @APP.get("/router/entries")
 def get_router_entries() -> RouterEntriesResponse:
-    """Return alias presets with process/env-owned keys stripped.
-
-    Stale copies of GA_LLAMA_* knobs (n-gpu-layers, no-mmap, …) are removed from
-    the on-disk INI when present so the catalog editor only shows model-scoped
-    switches.
-    """
+    """Return alias presets as stored in canonical router-models.ini."""
     with ROUTER_FILE_LOCK:
         if not os.path.exists(ROUTER_CONFIG_PATH):
             entries: dict[str, _RouterSection] = {}
         else:
             with open(ROUTER_CONFIG_PATH, "r", encoding="utf-8") as handle:
                 entries = parse_router_ini(handle.read())
-
-        cleaned: dict[str, _RouterSection] = {}
-        dirty = False
-        for alias, sec in entries.items():
-            cleaned_extras = strip_process_scoped_extras(sec.extras)
-            if cleaned_extras != sec.extras:
-                dirty = True
-            cleaned[alias] = _RouterSection(
-                model=sec.model,
-                mmproj=sec.mmproj,
-                extras=cleaned_extras,
-            )
-        if dirty:
-            router_ini.write_router_config_text(serialize_router_ini(cleaned))
-            log_event("router_entries_stripped_process_scoped_keys")
-        entries = cleaned
 
     result: list[RouterEntryDto] = []
     for alias in sorted(entries.keys()):
@@ -1426,12 +1402,17 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
     set_fields = _pydantic_set_fields(request)
     update_context = "contextSize" in set_fields
     update_cache = "cacheRamMib" in set_fields
+    # Explicit preset maps are WYSIWYG (catalog editor Save). Path-only syncs omit
+    # preset and keep merge for context/cache patches. Honoring client "merge" when
+    # a preset body is present makes removed keys appear to resurrect after reload.
+    effective_preset_mode = "replace" if request.preset is not None else request.presetMode
     log_event(
         "router_entry_upsert_requested",
         alias=request.alias.strip(),
         request={
             "setFields": sorted(list(set_fields)),
             "presetMode": request.presetMode,
+            "effectivePresetMode": effective_preset_mode,
             "contextSize": request.contextSize,
             "cacheRamMib": request.cacheRamMib,
             "modelPath": request.modelPath.strip(),
@@ -1447,7 +1428,7 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
             request.modelPath,
             request.mmprojPath,
             preset=request.preset,
-            preset_mode=request.presetMode,
+            preset_mode=effective_preset_mode,
             context_size=request.contextSize,
             cache_ram_mib=request.cacheRamMib,
             update_context=update_context,

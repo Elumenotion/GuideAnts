@@ -7,7 +7,7 @@ from typing import Any
 
 INFRASTRUCTURE_KEYS = frozenset({"model", "mmproj", "version"})
 
-# Router shell bootstrap keys belong on the llama-server process CLI (start-llama.sh),
+# Router shell bootstrap keys belong on the llama-server parent process CLI (start-llama.sh),
 # not in per-alias router-models.ini presets.
 ROUTER_SHELL_KEYS = frozenset(
     {
@@ -17,37 +17,6 @@ ROUTER_SHELL_KEYS = frozenset(
         "no-autoload",
     }
 )
-
-# Process/env-owned knobs (compose GA_LLAMA_* / start-llama.sh router base preset).
-# These must not appear on per-alias presets — they apply to every child via CLI.
-# Alias presets are for model-specific switches (ctx-size, cache-ram, vision, MTP, …).
-PROCESS_SCOPED_KEYS = frozenset(
-    {
-        "n-gpu-layers",
-        "no-mmap",
-        "threads",
-        "parallel",
-        "kv-unified",
-        "kv-offload",
-        "no-kv-offload",
-        "jinja",
-        "cont-batching",
-        "flash-attn",
-        "cache-type-k",
-        "cache-type-v",
-        "tensor-split",
-    }
-)
-
-
-def is_process_scoped_key(key: str) -> bool:
-    lower = key.strip().lower()
-    return lower in ROUTER_SHELL_KEYS or lower in PROCESS_SCOPED_KEYS
-
-
-def strip_process_scoped_extras(extras: dict[str, str]) -> dict[str, str]:
-    """Drop env/process-owned keys from alias extras (stale INI copies)."""
-    return {key: value for key, value in extras.items() if not is_process_scoped_key(key)}
 
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _SHELL_FRAGMENT_RE = re.compile(r"[;&|`$<>]|\$\(|\${")
@@ -88,12 +57,6 @@ def validate_preset_key(key: str) -> str:
         raise PresetValidationError(
             "PRESET_ROUTER_SHELL_KEY",
             f"Preset key '{normalized}' is router-shell infrastructure and cannot be set on a model alias.",
-        )
-    if lower in PROCESS_SCOPED_KEYS:
-        raise PresetValidationError(
-            "PRESET_PROCESS_SCOPED_KEY",
-            f"Preset key '{normalized}' is process/env-owned (GA_LLAMA_* / start-llama.sh) "
-            "and cannot be set on a model alias.",
         )
     return normalized
 

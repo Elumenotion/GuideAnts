@@ -266,7 +266,7 @@ public sealed class LlamaCppChatClientTests
     }
 
     [TestMethod]
-    public async Task GetCompletionAsync_StripsLeadingEmptyThinkBlocks_Only()
+    public async Task GetCompletionAsync_StripsLeadingEmptyThinkBlocks()
     {
         const string responseJson = """
             {
@@ -294,7 +294,7 @@ public sealed class LlamaCppChatClientTests
     }
 
     [TestMethod]
-    public async Task GetCompletionAsync_DoesNotStripNonEmptyThinkBlocks()
+    public async Task GetCompletionAsync_ExtractsLeadingThinkBlocksIntoThinkingContent()
     {
         const string responseJson = """
             {
@@ -318,7 +318,10 @@ public sealed class LlamaCppChatClientTests
             model: "qwen3.5-27b"));
 
         response.FirstChoice.Should().NotBeNull();
-        response.FirstChoice!.Message.GetText().Should().Be("<think>internal reasoning</think> After");
+        response.FirstChoice!.Message.GetText().Should().Be("After");
+        response.FirstChoice.Message.ThinkingBlocks.Should().NotBeNull();
+        response.FirstChoice.Message.ThinkingBlocks!.Should().HaveCount(1);
+        response.FirstChoice.Message.ThinkingBlocks[0].Thinking.Should().Be("internal reasoning");
     }
 
     [TestMethod]
@@ -476,6 +479,57 @@ public sealed class LlamaCppChatClientTests
         streamedText.ToString().Should().Be("After");
         response.FirstChoice.Should().NotBeNull();
         response.FirstChoice!.Message.GetText().Should().Be("After");
+    }
+
+    [TestMethod]
+    public async Task StreamCompletionAsync_ExtractsLeadingThinkBlocksIntoThinkingDeltas()
+    {
+        const string sse = """
+            data: {"choices":[{"delta":{"content":"<th"}}]}
+
+            data: {"choices":[{"delta":{"content":"ink>internal "}}]}
+
+            data: {"choices":[{"delta":{"content":"reasoning</think> A"}}]}
+
+            data: {"choices":[{"delta":{"content":"fter"}}]}
+
+            data: {"choices":[{"finish_reason":"stop","delta":{}}]}
+
+            data: [DONE]
+
+            """;
+
+        var handler = new StaticResponseHandler(_ => SseResponse(sse));
+        var client = CreateClient(handler);
+        var streamedAnswer = new StringBuilder();
+        var streamedThinking = new StringBuilder();
+
+        var response = await client.StreamCompletionAsync(
+            new ChatCompletionRequest(messages: [new ChatMessage(ChatRole.User, "test")], model: "qwen3.5-27b"),
+            chunk =>
+            {
+                var delta = chunk.FirstChoice?.Delta?.Content;
+                if (string.IsNullOrEmpty(delta))
+                {
+                    return;
+                }
+
+                if (string.Equals(chunk.FirstChoice?.FinishReason, "thinking", StringComparison.OrdinalIgnoreCase))
+                {
+                    streamedThinking.Append(delta);
+                    return;
+                }
+
+                streamedAnswer.Append(delta);
+            });
+
+        streamedAnswer.ToString().Should().Be("After");
+        streamedThinking.ToString().Should().Be("internal reasoning");
+        response.FirstChoice.Should().NotBeNull();
+        response.FirstChoice!.Message.GetText().Should().Be("After");
+        response.FirstChoice.Message.ThinkingBlocks.Should().NotBeNull();
+        response.FirstChoice.Message.ThinkingBlocks!.Should().HaveCount(1);
+        response.FirstChoice.Message.ThinkingBlocks[0].Thinking.Should().Be("internal reasoning");
     }
 
     [TestMethod]

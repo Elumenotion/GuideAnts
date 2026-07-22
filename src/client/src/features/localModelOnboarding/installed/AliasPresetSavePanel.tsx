@@ -4,7 +4,6 @@ import type { LlamaRouterEntryDto } from '../../../types/settings';
 import { AliasPresetEditor } from '../advanced/AliasPresetEditor';
 import {
   buildEffectivePresetRecord,
-  filterProcessScopedPresetRecord,
   isManagedPresetKey,
   splitManagedPresetFromRecord,
   validateAliasPresetRows,
@@ -73,16 +72,19 @@ export interface AliasPresetSavePanelProps {
   fallbackPreset?: Record<string, string>;
 }
 
+/**
+ * Catalog-row editor for one alias preset.
+ *
+ * Save always uses presetMode=replace: the rows shown are the full desired
+ * extras map. Merge mode is intentionally not offered here — it preserves
+ * removed keys and makes Delete appear to fail after reload.
+ */
 export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, AliasPresetSavePanelProps>(
   function AliasPresetSavePanel({ alias, routerEntry, fallbackPreset = {} }, ref) {
     const authoritativePreset = useMemo(() => {
-      const raw =
-        routerEntry?.preset && Object.keys(routerEntry.preset).length > 0
-          ? routerEntry.preset
-          : fallbackPreset;
-      // Env/process knobs (n-gpu-layers, no-mmap, …) come from GA_LLAMA_* — never show
-      // stale alias-INI copies as if they were model-specific overrides.
-      return filterProcessScopedPresetRecord(raw);
+      return routerEntry?.preset && Object.keys(routerEntry.preset).length > 0
+        ? routerEntry.preset
+        : fallbackPreset;
     }, [fallbackPreset, routerEntry?.preset]);
 
     const [rows, setRows] = useState<PresetKeyValue[]>(() =>
@@ -94,7 +96,6 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
     const [cacheRamDraft, setCacheRamDraft] = useState(
       () => resolveManagedDrafts(authoritativePreset, routerEntry).cacheRamDraft,
     );
-    const [presetMode, setPresetMode] = useState<'replace' | 'merge'>('merge');
 
     const authoritativeDraftKey = useMemo(
       () => serverDraftKey(alias, authoritativePreset, routerEntry),
@@ -138,21 +139,14 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
             modelPath: routerEntry.modelPath,
             mmprojPath: routerEntry.mmprojPath ?? '',
             preset: effectivePreset,
-            presetMode,
+            // WYSIWYG: removed rows must leave the INI, not survive via merge.
+            presetMode: 'replace',
             contextSize: parseOptionalPositiveInt(ctxSizeDraft),
             cacheRamMib: parseOptionalPositiveInt(cacheRamDraft),
           });
         },
       }),
-      [
-        alias,
-        cacheRamDraft,
-        ctxSizeDraft,
-        effectivePreset,
-        presetMode,
-        routerEntry,
-        validationErrors,
-      ],
+      [alias, cacheRamDraft, ctxSizeDraft, effectivePreset, routerEntry, validationErrors],
     );
 
     return (
@@ -160,11 +154,8 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
         <div>
           <h3 className="text-sm font-semibold text-gray-900">Router preset</h3>
           <p className="mt-1 text-xs text-gray-600">
-            Model-specific llama-server switches for <span className="font-mono">{alias}</span>
-            (context, cache, vision, MTP, …). Process-wide knobs such as{" "}
-            <span className="font-mono">n-gpu-layers</span> and <span className="font-mono">no-mmap</span> come
-            from container env (<span className="font-mono">GA_LLAMA_*</span>), not this preset. Use Save below
-            to apply.
+            Model-specific llama-server switches for <span className="font-mono">{alias}</span>. Save replaces
+            this alias&apos;s extras with the rows below (removed keys are deleted).
           </p>
         </div>
 
@@ -200,8 +191,6 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
           onChange={handlePresetRowsChange}
           alias={alias}
           previewPreset={managedPreviewExtras}
-          presetMode={presetMode}
-          onPresetModeChange={setPresetMode}
         />
 
         {!routerEntry ? (
@@ -211,4 +200,3 @@ export const AliasPresetSavePanel = forwardRef<AliasPresetSavePanelHandle, Alias
     );
   },
 );
-

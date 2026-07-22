@@ -16,13 +16,14 @@ describe('routerPreset', () => {
     expect(errors.some((error) => error.includes('router-shell'))).toBe(true);
   });
 
-  it('rejects process/env-owned keys on the alias row', () => {
+  it('accepts env-default override keys on the alias row', () => {
     const errors = validateAliasPresetRows([
       { key: 'n-gpu-layers', value: '999' },
       { key: 'no-mmap', value: 'true' },
       { key: 'parallel', value: '2' },
+      { key: 'jinja', value: 'true' },
     ]);
-    expect(errors.some((error) => error.includes('process/env-owned'))).toBe(true);
+    expect(errors).toEqual([]);
   });
 
   it('builds INI preview', () => {

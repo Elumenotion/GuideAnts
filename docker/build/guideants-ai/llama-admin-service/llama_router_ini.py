@@ -14,7 +14,6 @@ from guideants_hf.preset_validation import (
     apply_preset_mode,
     normalize_alias,
     normalize_preset_map,
-    strip_process_scoped_extras,
 )
 from guideants_hf.router_mmproj import (
     materialize_router_extras_for_runtime,
@@ -297,8 +296,6 @@ def upsert_router_entry(
             _strip_extras_matching_incoming(extras, _cache_l)
         if preset_disables_mmproj(extras):
             _strip_vision_token_extras(extras)
-        # Always drop env/process knobs (n-gpu-layers, no-mmap, …) from alias INI.
-        extras = strip_process_scoped_extras(extras)
 
         entries[alias_trimmed] = RouterSection(
             model=model_path.strip(),

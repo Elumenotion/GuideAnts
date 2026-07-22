@@ -160,17 +160,18 @@ public sealed class LlamaNegativeContractTests
     }
 
     [TestMethod]
-    public void RouterPreset_ProcessScopedParallel_ThrowsPresetInvalid()
+    public void RouterPreset_EnvDefaultParallel_AllowsPreset()
     {
-        var act = () => RouterPresetValidator.ValidateAndNormalize(new Dictionary<string, string>
+        var preset = RouterPresetValidator.ValidateAndNormalize(new Dictionary<string, string>
         {
             ["parallel"] = "2",
             ["ctx-size"] = "131072",
+            ["jinja"] = "true",
         });
 
-        var ex = act.Should().Throw<AddModelException>();
-        ex.Which.Code.Should().Be(CuratedInstallErrorCodes.PresetInvalid);
-        ex.Which.Message.Should().Contain("process/env-owned");
+        preset["parallel"].Should().Be("2");
+        preset["ctx-size"].Should().Be("131072");
+        preset["jinja"].Should().Be("true");
     }
 
     [TestMethod]

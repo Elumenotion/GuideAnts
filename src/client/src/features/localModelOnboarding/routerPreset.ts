@@ -27,10 +27,10 @@ const INFRASTRUCTURE_KEYS = new Set(['model', 'mmproj', 'version']);
 const MANAGED_PRESET_KEYS = new Set(['ctx-size', 'cache-ram']);
 
 /**
- * Process/env-owned knobs (compose GA_LLAMA_* / start-llama.sh). These apply via the
- * router base CLI preset and must not appear as per-model alias preset rows.
+ * Env-default knobs (compose GA_LLAMA_*). May be saved on the alias as overrides.
+ * The UI does not auto-show these from env — only when already on the alias or user-added.
  */
-const PROCESS_SCOPED_KEYS = new Set([
+export const ENV_DEFAULT_PRESET_KEYS = new Set([
   'n-gpu-layers',
   'no-mmap',
   'threads',
@@ -50,8 +50,8 @@ export function isManagedPresetKey(key: string): boolean {
   return MANAGED_PRESET_KEYS.has(key.trim().toLowerCase());
 }
 
-export function isProcessScopedPresetKey(key: string): boolean {
-  return PROCESS_SCOPED_KEYS.has(key.trim().toLowerCase());
+export function isEnvDefaultPresetKey(key: string): boolean {
+  return ENV_DEFAULT_PRESET_KEYS.has(key.trim().toLowerCase());
 }
 
 export function filterManagedPresetRows(rows: PresetKeyValue[]): PresetKeyValue[] {
@@ -97,12 +97,6 @@ const ROUTER_SHELL_KEYS = new Set([
   'no-models-autoload',
   'no-autoload',
 ]);
-
-export function filterProcessScopedPresetRecord(record: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(record).filter(([key]) => !isProcessScopedPresetKey(key) && !ROUTER_SHELL_KEYS.has(key.trim().toLowerCase())),
-  );
-}
 
 const CONTROL_CHAR_REGEX = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 const SHELL_FRAGMENT_REGEX = /[;&|`$<>]|\$\(|\$\{/;
@@ -152,12 +146,6 @@ export function validateAliasPresetRows(rows: PresetKeyValue[]): string[] {
 
     if (ROUTER_SHELL_KEYS.has(key.toLowerCase())) {
       errors.push(`Preset key '${key}' is router-shell infrastructure and cannot be set on a model alias.`);
-    }
-
-    if (isProcessScopedPresetKey(key)) {
-      errors.push(
-        `Preset key '${key}' is process/env-owned (GA_LLAMA_* / start-llama.sh) and cannot be set on a model alias.`,
-      );
     }
 
     const prior = seenLower.get(key.toLowerCase());

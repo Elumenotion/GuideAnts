@@ -348,8 +348,11 @@ public static class SettingsLlamaEndpoints
 
             try
             {
-                var result = await adminClient.PutRouterEntryAsync(request, cancellationToken).ConfigureAwait(false);
-                await UpdateRouterPresetSnapshotAsync(db, request, cancellationToken).ConfigureAwait(false);
+                // Catalog editor Save is WYSIWYG: omitted preset keys must be deleted.
+                // Older clients still send presetMode=merge, which preserves removals.
+                var replaceRequest = request with { PresetMode = "replace" };
+                var result = await adminClient.PutRouterEntryAsync(replaceRequest, cancellationToken).ConfigureAwait(false);
+                await UpdateRouterPresetSnapshotAsync(db, replaceRequest, cancellationToken).ConfigureAwait(false);
                 if (result.RuntimeApply is { Applied: false })
                 {
                     return Results.Json(
