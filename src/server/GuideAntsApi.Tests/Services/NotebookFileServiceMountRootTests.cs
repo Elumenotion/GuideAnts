@@ -2,8 +2,8 @@ using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Components;
-using GuideAntsApi.Services.Core;
 using GuideAntsApi.Tests.TestUtils;
+using GuideAntsApi.Services.Core;
 using GuideAnts.Usage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -185,14 +185,7 @@ public sealed class NotebookFileServiceMountRootTests
     {
         var scopeFactory = new TestServiceScopeFactory(ctx);
 
-        var sync = new NotebookFileSyncService(
-            scopeFactory,
-            CreateConfig(storagePath),
-            NullLogger<NotebookFileSyncService>.Instance,
-            Mock.Of<IFileLineageService>(),
-            Mock.Of<IMarkdownExtractionService>(),
-            Mock.Of<IUsageRecorder>(),
-            Mock.Of<INotebookLockService>());
+        var sync = NotebookFileSyncTestFactory.Create(scopeFactory);
 
         return new NotebookFileService(
             scopeFactory,

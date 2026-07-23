@@ -9,6 +9,7 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Tests.TestUtils;
 using GuideAntsApi.Services.Core;
 using GuideAnts.Usage;
 
@@ -66,14 +67,7 @@ public class NotebookFileServiceTests
         var config = CreateConfig(storagePath, configOverrides);
         markdownExtractionService ??= Mock.Of<IMarkdownExtractionService>();
 
-        var sync = new NotebookFileSyncService(
-            scopeFactory,
-            config,
-            NullLogger<NotebookFileSyncService>.Instance,
-            CreateLineageMock(),
-            markdownExtractionService,
-            Mock.Of<IUsageRecorder>(),
-            Mock.Of<INotebookLockService>());
+        var sync = NotebookFileSyncTestFactory.Create(scopeFactory);
 
         return new NotebookFileService(
             scopeFactory,

@@ -192,8 +192,9 @@ namespace GuideAntsApi.Services
                         {
                             using var scope = _serviceProvider.CreateScope();
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                            await syncService.QueueNotebookSyncAsync(context.NotebookId);
-                            _logger?.LogInformation("Queued notebook sync for {NotebookId} after image generation", context.NotebookId);
+                            await syncService.RegisterFilesAsync(context.NotebookId, [relativePath]);
+                            await syncService.QueueReconcileAsync(context.NotebookId);
+                            _logger?.LogInformation("Registered and queued notebook sync for {NotebookId} after image generation", context.NotebookId);
                         }
                         catch (Exception syncEx)
                         {
@@ -500,8 +501,9 @@ namespace GuideAntsApi.Services
                         {
                             using var scope = _serviceProvider.CreateScope();
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                            await syncService.QueueNotebookSyncAsync(context.NotebookId);
-                            _logger?.LogInformation("Queued notebook sync for {NotebookId} after image edit", context.NotebookId);
+                            await syncService.RegisterFilesAsync(context.NotebookId, [relativePath]);
+                            await syncService.QueueReconcileAsync(context.NotebookId);
+                            _logger?.LogInformation("Registered and queued notebook sync for {NotebookId} after image edit", context.NotebookId);
                         }
                         catch (Exception syncEx)
                         {

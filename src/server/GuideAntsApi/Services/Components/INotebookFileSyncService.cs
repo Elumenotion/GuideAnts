@@ -7,26 +7,40 @@ namespace GuideAntsApi.Services.Components;
 public interface INotebookFileSyncService
 {
     /// <summary>
+    /// Fast register: stat + placeholder hash + immediate save. No index enqueue.
+    /// </summary>
+    Task RegisterFilesAsync(Guid notebookId, IReadOnlyList<string> dbRelativePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Scans the physical directory for the given notebook and reconciles it with the database.
     /// </summary>
-    /// <param name="notebookId">Notebook identifier.</param>
-    Task SyncNotebookAsync(Guid notebookId);
-    
+    Task ReconcileNotebookAsync(Guid notebookId, CancellationToken cancellationToken = default);
+
     /// <summary>
-    /// Performs an immediate sync with locking to prevent concurrent operations.
-    /// Safe to call frequently - skips if another sync is already running.
-    /// Never throws exceptions.
+    /// Performs an immediate full reconcile with locking to prevent concurrent operations.
     /// </summary>
-    /// <param name="notebookId">Notebook identifier.</param>
+    Task ReconcileNotebookImmediateAsync(Guid notebookId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Enqueues full notebook reconciliation for background processing.
+    /// </summary>
+    Task QueueReconcileAsync(Guid notebookId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Obsolete alias for <see cref="ReconcileNotebookAsync"/>.
+    /// </summary>
+    [Obsolete("Use ReconcileNotebookAsync")]
+    Task SyncNotebookAsync(Guid notebookId);
+
+    /// <summary>
+    /// Obsolete alias for <see cref="ReconcileNotebookImmediateAsync"/>.
+    /// </summary>
+    [Obsolete("Use ReconcileNotebookImmediateAsync")]
     Task SyncNotebookImmediateAsync(Guid notebookId);
 
     /// <summary>
-    /// Enqueues notebook reconciliation for background processing.
-    /// Use after tool, assistant, or wire writes so chat and HTTP handlers never block on a
-    /// full notebook walk. <see cref="SyncNotebookAsync"/> remains for explicit/manual sync
-    /// and background job handlers.
+    /// Obsolete alias for <see cref="QueueReconcileAsync"/>.
     /// </summary>
-    /// <param name="notebookId">Notebook identifier.</param>
-    /// <param name="cancellationToken">Cancellation token for the enqueue operation.</param>
+    [Obsolete("Use QueueReconcileAsync")]
     Task QueueNotebookSyncAsync(Guid notebookId, CancellationToken cancellationToken = default);
-} 
+}

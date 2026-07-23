@@ -1,4 +1,4 @@
-namespace GuideAntsApi.BackgroundJobs.Sync;
+namespace GuideAntsApi.Services.Components.Sync;
 
 /// <summary>
 /// Mount-aware notebook file enumeration shared by both sync paths (plan §14, D1).

@@ -1,5 +1,5 @@
 using FluentAssertions;
-using GuideAntsApi.BackgroundJobs.Sync;
+using GuideAntsApi.Services.Components.Sync;
 
 namespace GuideAntsApi.Tests.BackgroundJobs;
 

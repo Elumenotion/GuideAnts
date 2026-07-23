@@ -60,13 +60,12 @@ public sealed class WireAudioSpeechExecutorTests
         Path.GetFullPath(capturedOutputPath!).Should().StartWith(expectedOutputDir);
         Path.GetFileName(capturedOutputPath).Should().StartWith("wire-").And.EndWith(".wav");
         File.Exists(capturedOutputPath).Should().BeTrue();
-        syncService.Verify(s => s.SyncNotebookAsync(It.IsAny<Guid>()), Times.Never);
-        syncService.Verify(s => s.QueueNotebookSyncAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        syncService.Verify(s => s.QueueReconcileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         speechService.VerifyAll();
     }
 
     [TestMethod]
-    public async Task ExecuteAsync_PublishedPath_QueuesSyncAfterWrite()
+    public async Task ExecuteAsync_PublishedPath_RegistersAndQueuesSyncAfterWrite()
     {
         using var storage = new TempStorage();
         var configuration = BuildConfiguration(storage.Root);
@@ -92,7 +91,10 @@ public sealed class WireAudioSpeechExecutorTests
                 ProviderId: "SpeechProvider"));
 
         syncService
-            .Setup(s => s.QueueNotebookSyncAsync(notebookId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.RegisterFilesAsync(notebookId, It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        syncService
+            .Setup(s => s.QueueReconcileAsync(notebookId, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var http = new DefaultHttpContext();
@@ -108,7 +110,8 @@ public sealed class WireAudioSpeechExecutorTests
             syncDatabaseAfterWrite: true,
             recordUsageAsync: (_, _, _) => Task.CompletedTask);
 
-        syncService.Verify(s => s.QueueNotebookSyncAsync(notebookId, It.IsAny<CancellationToken>()), Times.Once);
+        syncService.Verify(s => s.RegisterFilesAsync(notebookId, It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Once);
+        syncService.Verify(s => s.QueueReconcileAsync(notebookId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static IConfiguration BuildConfiguration(string storageRoot)

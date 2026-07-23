@@ -159,8 +159,24 @@ namespace GuideAntsApi.Services
                         {
                             using var scope = _serviceProvider.CreateScope();
                             var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                            await syncService.QueueNotebookSyncAsync(context.NotebookId);
-                            _logger.LogInformation("Queued notebook sync for {NotebookId} after script execution", context.NotebookId);
+
+                            // Register known paths then queue full reconcile.
+                            var dbPaths = detectedNewFiles
+                                .Concat(detectedModifiedFiles)
+                                .Select(p => GuideAntsApi.Services.Components.Sync.NotebookPathResolver.ToDbRelative(
+                                    p,
+                                    context!.IsPublished,
+                                    context.RunId))
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToList();
+
+                            if (dbPaths.Count > 0)
+                            {
+                                await syncService.RegisterFilesAsync(context.NotebookId, dbPaths);
+                            }
+
+                            await syncService.QueueReconcileAsync(context.NotebookId);
+                            _logger.LogInformation("Registered and queued notebook sync for {NotebookId} after script execution", context.NotebookId);
                         }
                         catch (Exception syncEx)
                         {

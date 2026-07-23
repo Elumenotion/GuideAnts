@@ -1,11 +1,9 @@
 using FluentAssertions;
-using GuideAnts.Usage;
 using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
+using GuideAntsApi.BackgroundJobs.Sync;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services.Components;
-using GuideAntsApi.Services.Core;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -16,32 +14,24 @@ namespace GuideAntsApi.Tests.Services;
 public sealed class NotebookFileSyncServiceTests
 {
     [TestMethod]
-    public async Task QueueNotebookSyncAsync_EnqueuesSyncNotebookJob()
+    public async Task QueueReconcileAsync_EnqueuesSyncNotebookJob()
     {
         var queue = new CapturingJobQueueService();
         var services = new ServiceCollection();
         services.AddSingleton<IJobQueueService>(queue);
 
         await using var provider = services.BuildServiceProvider();
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["FileStorage:Path"] = Path.GetTempPath()
-            })
-            .Build();
-
+        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+        var reconciler = new Mock<INotebookFileReconciler>();
         var service = new NotebookFileSyncService(
-            provider.GetRequiredService<IServiceScopeFactory>(),
-            configuration,
-            NullLogger<NotebookFileSyncService>.Instance,
-            Mock.Of<IFileLineageService>(),
-            Mock.Of<IMarkdownExtractionService>(),
-            Mock.Of<IUsageRecorder>(),
-            Mock.Of<INotebookLockService>());
+            reconciler.Object,
+            scopeFactory,
+            Mock.Of<INotebookLockService>(),
+            NullLogger<NotebookFileSyncService>.Instance);
 
         var notebookId = Guid.NewGuid();
 
-        await service.QueueNotebookSyncAsync(notebookId);
+        await service.QueueReconcileAsync(notebookId);
 
         queue.LastJobType.Should().Be("SyncNotebook");
         queue.LastPayload.Should().BeOfType<SyncNotebookJob>()

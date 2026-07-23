@@ -55,7 +55,16 @@ internal static class WireAudioSpeechExecutor
                     "Notebook file sync is required when syncDatabaseAfterWrite is enabled.");
             }
 
-            await notebookFileSyncService.QueueNotebookSyncAsync(
+            var dbRelativePath = Path.Combine(
+                    GuideAntsApi.Services.NotebookPathHelper.GetRelativeRunFolder(request.RunContext),
+                    fileName)
+                .Replace('\\', '/');
+
+            await notebookFileSyncService.RegisterFilesAsync(
+                request.RunContext.NotebookId,
+                [dbRelativePath],
+                httpContext.RequestAborted);
+            await notebookFileSyncService.QueueReconcileAsync(
                 request.RunContext.NotebookId,
                 httpContext.RequestAborted);
         }
