@@ -1,4 +1,5 @@
 using GuideAntsApi.BackgroundJobs.Services.Embeddings;
+using GuideAntsApi.BackgroundJobs.Services.Indexing;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,6 @@ public sealed class RebuildEmbeddingsHandler(
     IEmbeddingService embeddingService,
     IJobQueueService jobQueueService) : JobHandlerBase<RebuildEmbeddingsJob>(logger)
 {
-    private const int BatchSize = 64;
     private const int VectorDimensions = 1536;
 
     private readonly IDbContextFactory<ApplicationDbContext> _dbFactory = dbFactory;
@@ -44,12 +44,12 @@ public sealed class RebuildEmbeddingsHandler(
 
         // First pass: clear vectors so a model change never leaves stale embeddings behind.
         var clearedCount = 0;
-        for (var offset = 0; offset < totalChunkCount; offset += BatchSize)
+        for (var offset = 0; offset < totalChunkCount; offset += EmbeddingIndexingBatches.MaxChunksPerBatch)
         {
             var clearBatch = await context.DocumentChunks
                 .OrderBy(c => c.Id)
                 .Skip(offset)
-                .Take(BatchSize)
+                .Take(EmbeddingIndexingBatches.MaxChunksPerBatch)
                 .ToListAsync(cancellationToken);
 
             if (clearBatch.Count == 0)
@@ -69,12 +69,12 @@ public sealed class RebuildEmbeddingsHandler(
 
         var regeneratedCount = 0;
 
-        for (var offset = 0; offset < totalChunkCount; offset += BatchSize)
+        for (var offset = 0; offset < totalChunkCount; offset += EmbeddingIndexingBatches.MaxChunksPerBatch)
         {
             var batch = await context.DocumentChunks
                 .OrderBy(c => c.Id)
                 .Skip(offset)
-                .Take(BatchSize)
+                .Take(EmbeddingIndexingBatches.MaxChunksPerBatch)
                 .ToListAsync(cancellationToken);
 
             if (batch.Count == 0)
@@ -82,16 +82,11 @@ public sealed class RebuildEmbeddingsHandler(
                 break;
             }
 
-            var embeddings = await _embeddingService.GetEmbeddingsAsync(
-                batch.Select(c => c.Content),
+            var embeddings = await EmbeddingIndexingBatches.EmbedAllAsync(
+                _embeddingService,
+                batch.Select(c => c.Content).ToList(),
                 EmbeddingPurpose.Document,
                 cancellationToken);
-
-            if (embeddings.Length != batch.Count)
-            {
-                throw new InvalidOperationException(
-                    $"Embedding service returned {embeddings.Length} vectors for batch size {batch.Count}.");
-            }
 
             for (var i = 0; i < batch.Count; i++)
             {
@@ -108,7 +103,7 @@ public sealed class RebuildEmbeddingsHandler(
             clearedCount,
             regeneratedCount,
             totalChunkCount,
-            BatchSize,
+            EmbeddingIndexingBatches.MaxChunksPerBatch,
             assistantQueued,
             notebookQueued,
             contentQueued);

@@ -47,6 +47,9 @@ public sealed partial class ApplicationSettingsService
             throw new InvalidOperationException($"Provider '{providerId}' is not valid for service '{serviceId}'.");
         }
 
+        await SeedFoundryServiceConnectionFromChatIfNeededAsync(provider, cancellationToken)
+            .ConfigureAwait(false);
+
         var (row, payload) = await LoadOrCreateServiceModesRowAsync(cancellationToken).ConfigureAwait(false);
         var canonicalService = CanonicalizeServiceName(contract.ServiceId);
         var modes = ServiceModesPayload.ReadModesFor(payload, canonicalService).ToList();
@@ -110,6 +113,9 @@ public sealed partial class ApplicationSettingsService
             throw new InvalidOperationException($"Provider '{providerId}' is not valid for service '{serviceId}'.");
         }
 
+        await SeedFoundryServiceConnectionFromChatIfNeededAsync(provider, cancellationToken)
+            .ConfigureAwait(false);
+
         var metadataProvider = ResolveMetadataProvider();
         var metadataByName = metadataProvider
             .GetProviderFields(contract.ServiceId, provider.ProviderId)
@@ -139,23 +145,11 @@ public sealed partial class ApplicationSettingsService
                     $"Field '{fieldName}' is diagnostic-only and cannot be updated through the service editor.");
             }
 
-            if (!IsServiceEditorEditableField(contract, meta))
+            if (!IsServiceEditorEditableField(contract, provider, meta))
             {
                 throw new InvalidOperationException(
                     $"Field '{fieldName}' belongs to provider connection configuration and cannot be updated through the service editor.");
             }
-        }
-
-        if (!hasExplicitMode)
-        {
-            var missingConnectionFields = BuildProviderConnectionMissingFields(provider).ToList();
-            if (missingConnectionFields.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    $"Provider '{providerId}' cannot be configured until its connection is ready: {string.Join(", ", missingConnectionFields)}.");
-            }
-
-            await CreateExplicitServiceModeAsync(contract, provider, cancellationToken).ConfigureAwait(false);
         }
 
         var updatesBySection = new Dictionary<string, JsonObject>(StringComparer.OrdinalIgnoreCase);
@@ -165,13 +159,18 @@ public sealed partial class ApplicationSettingsService
             var metadata = metadataByName[fieldName];
             ValidateProviderFieldUpdate(contract, provider, metadata, fieldValue);
 
-            if (TryResolveServiceModeField(contract, metadata.Name, out var modeField))
+            if (TryResolveServiceModeField(contract, provider, metadata.Name, out var modeField))
             {
                 modeFieldUpdates[modeField] = fieldValue;
                 continue;
             }
 
             if (!TryResolveServiceFieldSection(contract, metadata.Name, out var sectionName))
+            {
+                sectionName = ResolveFieldSection(provider, metadata.Name) ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(sectionName))
             {
                 throw new InvalidOperationException(
                     $"Field '{fieldName}' does not resolve to a settings section for provider '{providerId}'.");
@@ -208,6 +207,20 @@ public sealed partial class ApplicationSettingsService
                 throw new InvalidOperationException(
                     $"Validation failed for section '{sectionName}': {string.Join("; ", result.ValidationErrors)}");
             }
+        }
+
+        // Connection fields may have been written above. Create the explicit mode only after
+        // those updates so Foundry multi-endpoint setup can complete in one Services save.
+        if (!hasExplicitMode)
+        {
+            var missingConnectionFields = BuildProviderConnectionMissingFields(provider).ToList();
+            if (missingConnectionFields.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Provider '{providerId}' cannot be configured until its connection is ready: {string.Join(", ", missingConnectionFields)}.");
+            }
+
+            await CreateExplicitServiceModeAsync(contract, provider, cancellationToken).ConfigureAwait(false);
         }
 
         if (modeFieldUpdates.Count > 0)
@@ -300,7 +313,7 @@ public sealed partial class ApplicationSettingsService
         var metadataProvider = ResolveMetadataProvider();
         var metadata = metadataProvider
             .GetProviderFields(contract.ServiceId, provider.ProviderId)
-            .Where(field => IsServiceEditorVisibleField(contract, field))
+            .Where(field => IsServiceEditorVisibleField(contract, provider, field))
             .ToList();
         var matchingMode = modes.FirstOrDefault(mode =>
             string.Equals(mode.ProviderSection, provider.ProviderSectionKey, StringComparison.OrdinalIgnoreCase));
@@ -337,7 +350,9 @@ public sealed partial class ApplicationSettingsService
             RuntimeDependencies: runtimeDependencies,
             OperativeFields: metadata.Where(field => field.Operative).Select(field => field.Name).ToList(),
             DiagnosticFields: metadata.Where(field => !field.Operative).Select(field => field.Name).ToList(),
-            FieldMetadata: metadata);
+            FieldMetadata: metadata,
+            RelatedChatConnectionConfigured: IsFoundryServiceProvider(provider)
+                && TryGetFoundryChatConnection(out _, out _));
     }
 
     private ProviderFieldValueDto BuildProviderFieldValue(
@@ -346,7 +361,7 @@ public sealed partial class ApplicationSettingsService
         ProviderFieldMetadataDto field,
         ServiceModeDto? matchingMode)
     {
-        if (TryResolveServiceModeField(contract, field.Name, out var modeField))
+        if (TryResolveServiceModeField(contract, provider, field.Name, out var modeField))
         {
             var modeValue = ResolveServiceModeFieldValue(modeField, matchingMode);
 
@@ -360,8 +375,9 @@ public sealed partial class ApplicationSettingsService
         var sectionName = TryResolveServiceFieldSection(contract, field.Name, out var serviceSectionName)
             ? serviceSectionName
             : ResolveFieldSection(provider, field.Name);
-        var key = string.IsNullOrWhiteSpace(sectionName) ? null : $"{sectionName}:{field.Name}";
-        var rawValue = key == null ? null : _configuration[key];
+        var rawValue = string.IsNullOrWhiteSpace(sectionName)
+            ? null
+            : ResolveProviderConnectionFieldValue(provider, sectionName, field.Name);
         var value = string.Equals(field.Kind, "url", StringComparison.OrdinalIgnoreCase)
             ? RuntimeConfigurationPlaceholders.NormalizeUrlOrNull(rawValue)
             : rawValue;
@@ -382,16 +398,49 @@ public sealed partial class ApplicationSettingsService
             return requiredSection.SectionName;
         }
 
+        if (IsFoundryConnectionSectionField(provider, fieldName))
+        {
+            return provider.ProviderSectionKey;
+        }
+
         return provider.ProviderSettingsSection;
     }
 
-    private static bool IsServiceEditorVisibleField(ServiceContract contract, ProviderFieldMetadataDto field) =>
-        IsServiceEditorEditableField(contract, field);
+    private static bool IsServiceEditorVisibleField(
+        ServiceContract contract,
+        ProviderContract provider,
+        ProviderFieldMetadataDto field) =>
+        IsServiceEditorEditableField(contract, provider, field);
 
-    private static bool IsServiceEditorEditableField(ServiceContract contract, ProviderFieldMetadataDto field) =>
+    private static bool IsServiceEditorEditableField(
+        ServiceContract contract,
+        ProviderContract provider,
+        ProviderFieldMetadataDto field) =>
         field.Operative
-        && (TryResolveServiceModeField(contract, field.Name, out _)
-            || TryResolveServiceFieldSection(contract, field.Name, out _));
+        && (TryResolveServiceModeField(contract, provider, field.Name, out _)
+            || TryResolveServiceFieldSection(contract, field.Name, out _)
+            || IsFoundryConnectionSectionField(provider, field.Name));
+
+    private static bool IsFoundryConnectionSectionField(ProviderContract provider, string fieldName)
+    {
+        if (!IsFoundryServiceProvider(provider))
+        {
+            return false;
+        }
+
+        if (provider.RequiredSectionFields.Any(field =>
+            string.Equals(field.FieldName, fieldName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // Extra Foundry connection-section fields that are not always in the
+        // per-service required list (Region on speech transcription, Endpoint on
+        // speech synthesis, ApiVersion on images).
+        return IsConnectionOwnedFieldName(fieldName)
+            || (string.Equals(fieldName, "ApiVersion", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(provider.ProviderSectionKey, "AzureOpenAiImages", StringComparison.OrdinalIgnoreCase));
+    }
 
     private static bool IsConnectionOwnedFieldName(string fieldName)
     {
@@ -426,7 +475,11 @@ public sealed partial class ApplicationSettingsService
         return false;
     }
 
-    private static bool TryResolveServiceModeField(ServiceContract contract, string fieldName, out string modeFieldName)
+    private static bool TryResolveServiceModeField(
+        ServiceContract contract,
+        ProviderContract provider,
+        string fieldName,
+        out string modeFieldName)
     {
         if (string.Equals(fieldName, "ModelId", StringComparison.Ordinal)
             || string.Equals(fieldName, "Deployment", StringComparison.Ordinal)
@@ -434,6 +487,15 @@ public sealed partial class ApplicationSettingsService
         {
             modeFieldName = "ModelId";
             return true;
+        }
+
+        // Foundry Images stores ApiVersion on AzureOpenAiImages; Document Intelligence
+        // keeps ApiVersion on the service-mode preset.
+        if (string.Equals(fieldName, "ApiVersion", StringComparison.Ordinal)
+            && IsFoundryConnectionSectionField(provider, fieldName))
+        {
+            modeFieldName = string.Empty;
+            return false;
         }
 
         if (string.Equals(fieldName, "VoiceName", StringComparison.Ordinal)
@@ -551,6 +613,9 @@ public sealed partial class ApplicationSettingsService
         ProviderContract provider,
         CancellationToken cancellationToken)
     {
+        await SeedFoundryServiceConnectionFromChatIfNeededAsync(provider, cancellationToken)
+            .ConfigureAwait(false);
+
         var (row, payload) = await LoadOrCreateServiceModesRowAsync(cancellationToken).ConfigureAwait(false);
         var canonicalService = CanonicalizeServiceName(contract.ServiceId);
         var modes = ServiceModesPayload.ReadModesFor(payload, canonicalService).ToList();
@@ -695,7 +760,7 @@ public sealed partial class ApplicationSettingsService
     {
         foreach (var field in provider.RequiredSectionFields)
         {
-            var value = _configuration[$"{field.SectionName}:{field.FieldName}"];
+            var value = ResolveProviderConnectionFieldValue(provider, field.SectionName, field.FieldName);
             if (string.IsNullOrWhiteSpace(value))
             {
                 yield return field.FieldName;
@@ -709,6 +774,170 @@ public sealed partial class ApplicationSettingsService
             {
                 yield return runtime.Key;
             }
+        }
+    }
+
+    /// <summary>
+    /// Resolves a required connection field, allowing Microsoft Foundry Images/Embeddings to
+    /// inherit Endpoint/ApiKey from the chat <c>AzureOpenAI</c> connection when their dedicated
+    /// service sections are still empty (chat-only wizard setup).
+    /// </summary>
+    private string? ResolveProviderConnectionFieldValue(
+        ProviderContract provider,
+        string sectionName,
+        string fieldName)
+    {
+        var direct = _configuration[$"{sectionName}:{fieldName}"];
+        if (!string.IsNullOrWhiteSpace(direct))
+        {
+            return direct;
+        }
+
+        if (!CanInheritFoundryChatConnection(sectionName))
+        {
+            return direct;
+        }
+
+        if (!TryGetFoundryChatConnection(out var endpoint, out var apiKey))
+        {
+            return direct;
+        }
+
+        if (string.Equals(fieldName, "Endpoint", StringComparison.OrdinalIgnoreCase))
+        {
+            return endpoint;
+        }
+
+        if (string.Equals(fieldName, "ApiKey", StringComparison.OrdinalIgnoreCase))
+        {
+            return apiKey;
+        }
+
+        return direct;
+    }
+
+    private static bool CanInheritFoundryChatConnection(string sectionName)
+    {
+        return string.Equals(sectionName, "AzureOpenAiImages", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sectionName, "AzureOpenAiEmbedding", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFoundryServiceProvider(ProviderContract provider)
+    {
+        return string.Equals(provider.ProviderSectionKey, "AzureOpenAiImages", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(provider.ProviderSectionKey, "AzureOpenAiEmbedding", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(provider.ProviderSectionKey, AzureSpeechServiceOptions.SectionName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(provider.ProviderSectionKey, AzureDocumentIntelligenceOptions.SectionName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TryGetFoundryChatConnection(out string endpoint, out string apiKey)
+    {
+        endpoint = string.Empty;
+        apiKey = string.Empty;
+
+        var resource = _configuration["AzureOpenAI:Resource"]?.Trim();
+        var key = _configuration["AzureOpenAI:ApiKey"];
+        if (string.IsNullOrWhiteSpace(resource) || string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        endpoint = DeriveFoundryEndpointFromResource(resource);
+        apiKey = key;
+        return !string.IsNullOrWhiteSpace(endpoint);
+    }
+
+    private static string DeriveFoundryEndpointFromResource(string resource)
+    {
+        var trimmed = resource.Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return string.Empty;
+        }
+
+        if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed.EndsWith('/') ? trimmed : trimmed + "/";
+        }
+
+        return $"https://{trimmed}.openai.azure.com/";
+    }
+
+    /// <summary>
+    /// Materializes AzureOpenAiImages / AzureOpenAiEmbedding connection values from the chat
+    /// AzureOpenAI connection so runtime readers that only look at the dedicated sections succeed
+    /// after a chat-only Foundry setup activates those service providers.
+    /// </summary>
+    private async Task SeedFoundryServiceConnectionFromChatIfNeededAsync(
+        ProviderContract provider,
+        CancellationToken cancellationToken)
+    {
+        var sectionName = provider.ProviderSectionKey;
+        if (!CanInheritFoundryChatConnection(sectionName))
+        {
+            return;
+        }
+
+        if (!TryGetFoundryChatConnection(out var endpoint, out var apiKey))
+        {
+            return;
+        }
+
+        var existing = await GetSectionAsync(sectionName, cancellationToken).ConfigureAwait(false);
+        if (existing == null)
+        {
+            return;
+        }
+
+        var patch = new JsonObject();
+        var endpointValue = existing.Payload.TryGetPropertyValue("Endpoint", out var endpointNode)
+            ? endpointNode?.GetValue<string>()
+            : null;
+        var apiKeyHasValue = existing.SecretHasValue.TryGetValue("ApiKey", out var hasApiKey) && hasApiKey;
+
+        if (string.IsNullOrWhiteSpace(endpointValue))
+        {
+            patch["Endpoint"] = endpoint;
+        }
+
+        if (!apiKeyHasValue)
+        {
+            patch["ApiKey"] = apiKey;
+        }
+
+        if (string.Equals(sectionName, "AzureOpenAiImages", StringComparison.OrdinalIgnoreCase))
+        {
+            var apiVersionValue = existing.Payload.TryGetPropertyValue("ApiVersion", out var apiVersionNode)
+                ? apiVersionNode?.GetValue<string>()
+                : null;
+            if (string.IsNullOrWhiteSpace(apiVersionValue))
+            {
+                var configuredVersion = _configuration["AzureOpenAI:ApiVersion"]?.Trim();
+                patch["ApiVersion"] = string.IsNullOrWhiteSpace(configuredVersion)
+                    ? "2025-04-01-preview"
+                    : configuredVersion;
+            }
+        }
+
+        if (patch.Count == 0)
+        {
+            return;
+        }
+
+        var result = await UpdateSectionAsync(
+            sectionName,
+            new UpdateSettingsSectionRequest(existing.RowVersion, patch),
+            cancellationToken).ConfigureAwait(false);
+        if (result.ConcurrencyConflict)
+        {
+            throw new InvalidOperationException($"Section '{sectionName}' was modified by another request.");
+        }
+
+        if (result.ValidationErrors.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Validation failed for section '{sectionName}': {string.Join("; ", result.ValidationErrors)}");
         }
     }
 
@@ -726,7 +955,7 @@ public sealed partial class ApplicationSettingsService
         foreach (var field in metadata.Where(field =>
             field.Required
             && field.Operative
-            && TryResolveServiceModeField(contract, field.Name, out _)))
+            && TryResolveServiceModeField(contract, provider, field.Name, out _)))
         {
             var value = BuildProviderFieldValue(contract, provider, field, matchingMode);
             if (!value.HasValue)
@@ -776,8 +1005,9 @@ public sealed partial class ApplicationSettingsService
         var sectionName = TryResolveServiceFieldSection(contract, metadata.Name, out var serviceSectionName)
             ? serviceSectionName
             : ResolveFieldSection(provider, metadata.Name);
-        var configKey = string.IsNullOrWhiteSpace(sectionName) ? null : $"{sectionName}:{metadata.Name}";
-        var existing = configKey == null ? null : _configuration[configKey];
+        var existing = string.IsNullOrWhiteSpace(sectionName)
+            ? null
+            : ResolveProviderConnectionFieldValue(provider, sectionName, metadata.Name);
         var hasExisting = !string.IsNullOrWhiteSpace(existing);
 
         if (string.Equals(metadata.Kind, "secret", StringComparison.OrdinalIgnoreCase))

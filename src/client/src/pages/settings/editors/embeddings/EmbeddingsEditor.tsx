@@ -8,6 +8,7 @@ import { OperationalDependencyRow } from '../../components/shared/OperationalDep
 import { ProviderFieldsSection } from '../../components/shared/ProviderFieldsSection';
 import { ProviderSelector } from '../../components/shared/ProviderSelector';
 import { ServiceEditorShell } from '../../components/shared/ServiceEditorShell';
+import { getServiceEditorSaveGate } from '../../state/serviceEditorConnectionFields';
 import { useServiceEditorController } from '../../state/useServiceEditorController';
 import { EmbRuntimeManager } from './EmbRuntimeManager';
 
@@ -52,6 +53,7 @@ export function EmbeddingsEditor() {
   }
 
   const isLocal = selectedProvider.providerKind !== 'Cloud';
+  const { saveDisabledByConnection, saveTitle } = getServiceEditorSaveGate(selectedProvider);
 
   const shouldPromptRebuildAfterSave = (): boolean => {
     if (!state) {
@@ -202,15 +204,9 @@ export function EmbeddingsEditor() {
           <TextActionButton
             tone="primary"
             icon={saving ? <FaSpinner className="animate-spin" /> : <FaSave />}
-            disabled={saving || !selectedProvider.connectionConfigured}
+            disabled={saving || saveDisabledByConnection}
             onClick={() => void saveWithRebuildPrompt()}
-            title={
-              !selectedProvider.connectionConfigured
-                  ? 'Configure the provider connection first.'
-                  : !selectedProvider.hasExplicitMode
-                    ? 'Save will create an explicit service mode and activate provider.'
-                    : 'Save and activate provider.'
-            }
+            title={saveTitle}
           >
             Save
           </TextActionButton>

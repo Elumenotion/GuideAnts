@@ -144,7 +144,10 @@ function buildLocalAiOptionalServicesForm(snapshot: WizardLoadSnapshot): LocalAi
   };
 }
 
-export type LocalAiInstallFormData = Omit<LocalAiModelDraft, 'localId' | 'persisted' | 'asyncOperationId' | 'asyncStatus' | 'asyncProgress' | 'asyncError'>;
+export type LocalAiInstallFormData = Omit<
+  LocalAiModelDraft,
+  'localId' | 'persisted' | 'asyncOperationId' | 'asyncStatus' | 'asyncProgress' | 'asyncLogLine' | 'asyncError'
+>;
 
 export interface UseLocalAiWizardStateResult {
   prereqsForm: LocalAiPrerequisitesFormState;
@@ -308,6 +311,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
               ...d,
               asyncStatus: normalizeLocalModelOnboardingStatus(op.status),
               asyncProgress: op.progress ?? null,
+              asyncLogLine: op.logLine ?? d.asyncLogLine,
               asyncError: op.errorMessage ?? null,
             };
           })
@@ -360,6 +364,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
       asyncOperationId: null,
       asyncStatus: 'submitted',
       asyncProgress: null,
+      asyncLogLine: null,
       asyncError: null,
     };
 
@@ -455,6 +460,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
       asyncOperationId: input.operationId,
       asyncStatus: 'queued',
       asyncProgress: null,
+      asyncLogLine: null,
       asyncError: null,
     };
     setDraftModels((prev) => [...prev, draft]);

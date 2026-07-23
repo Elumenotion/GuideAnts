@@ -266,13 +266,18 @@ describe('LocalAiModelsStep', () => {
       <LocalAiModelsStep
         {...defaultProps}
         existingModels={[{ modelId: 'qwen3-9b', displayName: 'Qwen3', provider: 'llama-cpp', isActive: true, created: '' }]}
-        draftModels={[createLocalAiModelDraft({ asyncStatus: 'downloading', asyncProgress: 0.42 })]}
+        draftModels={[createLocalAiModelDraft({
+          asyncStatus: 'downloading',
+          asyncProgress: 0.42,
+          asyncLogLine: 'Downloading model.gguf',
+        })]}
       />,
     );
 
     expect(screen.getAllByText('qwen3-9b').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Downloading')).toBeInTheDocument();
     expect(screen.getByText('42%')).toBeInTheDocument();
+    expect(screen.getByText('Downloading model.gguf')).toBeInTheDocument();
     expect(screen.queryByText(/At least one model must be installed/)).not.toBeInTheDocument();
   });
 

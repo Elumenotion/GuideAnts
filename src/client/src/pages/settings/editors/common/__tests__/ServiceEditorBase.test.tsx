@@ -160,6 +160,7 @@ describe('ServiceEditorBase', () => {
     const disconnected = makeProvider({
       connectionConfigured: false,
       connectionMissingFields: ['Endpoint'],
+      operativeFields: ['TimeoutSeconds'],
     });
     vi.mocked(useServiceEditorController).mockReturnValue({
       ...makeControllerValue(),
@@ -174,6 +175,34 @@ describe('ServiceEditorBase', () => {
 
     render(<ServiceEditorBase serviceId="SpeechSynthesis" title="Speech Synthesis" />);
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('enables save when Foundry connection fields are editable inline', () => {
+    const foundry = makeProvider({
+      providerId: 'SpeechSynthesis.AzureSpeech.Ssml',
+      connectionConfigured: false,
+      connectionMissingFields: ['ApiKey', 'Region'],
+      operativeFields: ['Endpoint', 'ApiKey', 'Region', 'TimeoutSeconds'],
+      relatedChatConnectionConfigured: true,
+    });
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeControllerValue(),
+      selectedProvider: foundry,
+      state: {
+        serviceId: 'SpeechSynthesis',
+        activeProviderId: foundry.providerId,
+        providers: [foundry],
+        readiness: { status: 'blocked', blockers: ['ApiKey missing'], warnings: [] },
+      },
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<ServiceEditorBase serviceId="SpeechSynthesis" title="Speech Synthesis" />);
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+    expect(saveButton).not.toBeDisabled();
+    expect(saveButton).toHaveAttribute(
+      'title',
+      'Save will write connection details and activate provider.'
+    );
   });
 
   it('invokes save when save button is clicked', () => {

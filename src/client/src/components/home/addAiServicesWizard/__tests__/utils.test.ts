@@ -486,6 +486,7 @@ describe('local model catalog helpers', () => {
         asyncOperationId: null,
         asyncStatus: 'submitted',
         asyncProgress: null,
+        asyncLogLine: null,
         asyncError: null,
         setAsGlobalDefault: false,
         installSource: 'huggingface',

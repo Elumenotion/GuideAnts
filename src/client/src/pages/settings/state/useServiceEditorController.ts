@@ -10,6 +10,7 @@ import {
   hasValidationErrors,
   validateOperativeProviderFields,
 } from './serviceEditorValidation';
+import { hasInlineConnectionFields } from './serviceEditorConnectionFields';
 
 function isHiddenCloudProvider(providerId: string): boolean {
   return Array.from(HIDDEN_CLOUD_PROVIDER_SECTIONS).some(
@@ -19,7 +20,14 @@ function isHiddenCloudProvider(providerId: string): boolean {
 
 function shouldHideProvider(p: ProviderEditorStateDto): boolean {
   if (isHiddenCloudProvider(p.providerId)) return true;
-  if (!p.connectionConfigured && p.providerKind === 'Cloud') return true;
+  if (
+    !p.connectionConfigured &&
+    p.providerKind === 'Cloud' &&
+    !p.relatedChatConnectionConfigured &&
+    !hasInlineConnectionFields(p.operativeFields)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -186,7 +194,7 @@ export function useServiceEditorController(
       return false;
     }
 
-    if (!selectedProvider.connectionConfigured) {
+    if (!selectedProvider.connectionConfigured && !hasInlineConnectionFields(selectedProvider.operativeFields)) {
       const selectedProviderLabel = getServiceProviderDisplayName(selectedProvider.providerId);
       setError(
         `Configure the provider connection before saving ${selectedProviderLabel}: ${selectedProvider.connectionMissingFields.join(', ')}.`

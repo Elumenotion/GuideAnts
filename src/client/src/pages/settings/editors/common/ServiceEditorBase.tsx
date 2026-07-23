@@ -6,6 +6,7 @@ import { OperationalDependencyRow } from '../../components/shared/OperationalDep
 import { ProviderFieldsSection } from '../../components/shared/ProviderFieldsSection';
 import { ProviderSelector } from '../../components/shared/ProviderSelector';
 import { ServiceEditorShell } from '../../components/shared/ServiceEditorShell';
+import { getServiceEditorSaveGate } from '../../state/serviceEditorConnectionFields';
 import { useServiceEditorController } from '../../state/useServiceEditorController';
 
 /**
@@ -53,6 +54,8 @@ export function ServiceEditorBase({
   if (!state || !selectedProvider) {
     return <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error ?? 'Not found.'}</div>;
   }
+
+  const { saveDisabledByConnection, saveTitle } = getServiceEditorSaveGate(selectedProvider);
 
   return (
     <ServiceEditorShell
@@ -107,15 +110,9 @@ export function ServiceEditorBase({
           <TextActionButton
             tone="primary"
             icon={saving ? <FaSpinner className="animate-spin" /> : <FaSave />}
-            disabled={saving || !selectedProvider.connectionConfigured}
+            disabled={saving || saveDisabledByConnection}
             onClick={() => void save()}
-            title={
-              !selectedProvider.connectionConfigured
-                  ? 'Configure the provider connection first.'
-                  : !selectedProvider.hasExplicitMode
-                    ? 'Save will create an explicit service mode and activate provider.'
-                    : 'Save and activate provider.'
-            }
+            title={saveTitle}
           >
             Save
           </TextActionButton>

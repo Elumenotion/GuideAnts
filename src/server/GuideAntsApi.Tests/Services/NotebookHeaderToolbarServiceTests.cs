@@ -766,6 +766,62 @@ public sealed class NotebookHeaderToolbarServiceTests
         image.Summary.Should().Contain(bundleId);
     }
 
+    [TestMethod]
+    public async Task GetToolbarAsync_CloudOnlyImage_DoesNotFailWhenSdReportsBundle()
+    {
+        await using var db = CreateDb();
+        var notebook = await SeedNotebookAsync(db);
+        const string bundleId = "FLUX.2-dev";
+
+        var settings = new Mock<IApplicationSettingsService>(MockBehavior.Strict);
+        SetupToolbarServiceModesDefaults(settings);
+        settings
+            .Setup(x => x.GetModelsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<SettingsModelDto>());
+        settings
+            .Setup(x => x.GetServiceEditorStateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string serviceId, CancellationToken _) =>
+                string.Equals(serviceId, RoutedServiceNames.ImageGeneration, StringComparison.Ordinal)
+                    ? CreateReadyServiceState(serviceId)
+                    : CreateReadyServiceState(serviceId));
+
+        var sut = CreateSut(
+            db,
+            notebook.Id,
+            settings.Object,
+            httpClientFactory: CreateHttpClientFactory(request =>
+            {
+                if (request.RequestUri?.AbsolutePath.Contains("/admin/bundles", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return JsonResponse(
+                        HttpStatusCode.OK,
+                        $$"""
+                        {
+                          "activeBundleMarkerId":"{{bundleId}}",
+                          "items": [
+                            {"bundleId":"{{bundleId}}","complete":true,"loaded":true}
+                          ]
+                        }
+                        """);
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }));
+
+        var toolbar = await sut.GetToolbarAsync(notebook.Id, conversationId: null);
+        var image = toolbar.Services.Single(service => service.Kind == "image");
+
+        image.LocalModelOptions.Should().BeEmpty();
+        image.Selection.Should().NotBeNull();
+        image.Selection!.ResourceId.Should().BeNull();
+        settings.Verify(
+            x => x.SetServiceModeModelIdAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private static void SetupToolbarServiceModesDefaults(Mock<IApplicationSettingsService> settings)
     {
         settings

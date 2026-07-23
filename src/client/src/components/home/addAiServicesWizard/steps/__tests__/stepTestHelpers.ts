@@ -171,6 +171,7 @@ export function createLocalAiModelDraft(overrides: Partial<LocalAiModelDraft> = 
     asyncOperationId: null,
     asyncStatus: 'queued',
     asyncProgress: null,
+    asyncLogLine: null,
     asyncError: null,
     ...overrides,
   };
