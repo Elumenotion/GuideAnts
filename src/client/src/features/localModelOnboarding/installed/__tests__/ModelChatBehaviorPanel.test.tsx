@@ -6,8 +6,7 @@ import { ModelChatBehaviorPanel } from '../ModelChatBehaviorPanel';
 vi.mock('../../../../services/api', () => ({
   api: {
     settings: {
-      getRuntimeProfile: vi.fn(),
-      updateRuntimeProfile: vi.fn(),
+      updateModel: vi.fn(),
     },
   },
 }));
@@ -23,9 +22,8 @@ vi.mock('../AdoptInstallationDialog', () => ({
 import { api } from '../../../../services/api';
 
 const detail = {
-  modelId: 'llama/qwen',
+  modelId: 'llama_qwen',
   routerModelId: 'Qwen3.5-9B-GGUF',
-  runtimeProfileId: 'qwen3_6',
   catalogId: 'qwen3.5-9b',
   catalogVersion: '1',
   runtimeState: 'unloaded',
@@ -34,91 +32,99 @@ const detail = {
   modelArtifacts: [],
   projectorArtifacts: [],
   routerPresetSnapshot: {},
+  catalogModel: {
+    modelId: 'llama_qwen',
+    displayName: 'Qwen 3.5 9B',
+    provider: 'llama-cpp',
+    description: '',
+    reasoningChoicesJson: '["medium"]',
+    runtimeConfigJson: '{"routerModelId":"Qwen3.5-9B-GGUF"}',
+    combineSystemAndDeveloperMessages: true,
+    thoughtBlockPattern: '',
+    samplingParametersJson: '{}',
+    thinkingControlJson: '{"defaultChoice":"medium","choiceActions":{"medium":[]}}',
+    requestFieldsWhenToolsPresentJson: '{}',
+    isActive: true,
+    displayOrder: 0,
+    created: '2026-01-01T00:00:00Z',
+  },
 } as const;
 
 describe('ModelChatBehaviorPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(api.settings.getRuntimeProfile).mockResolvedValue({
-      profileId: 'qwen3_6',
-      displayName: 'Qwen 3.6',
-      description: '',
-      combineSystemAndDeveloperMessages: true,
-      thoughtBlockPattern: '',
-      samplingParametersJson: '{}',
-      thinkingControlJson: '{}',
-      requestFieldsWhenToolsPresentJson: '{}',
-      providers: ['llama-cpp'],
-      created: '2026-01-01T00:00:00Z',
-    });
   });
 
-  it('renders bound profile id and repair affordance', async () => {
+  it('renders model identity and repair affordance', async () => {
     render(<ModelChatBehaviorPanel detail={detail as never} />);
 
-    expect(await screen.findByText('qwen3_6')).toBeInTheDocument();
+    expect(await screen.findByText('llama_qwen')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Repair' })).toBeInTheDocument();
     expect(screen.queryByLabelText(/top_k/i)).not.toBeInTheDocument();
   });
 
-  it('saves profile document through updateRuntimeProfile', async () => {
+  it('saves model-owned behavior through updateModel', async () => {
     const user = userEvent.setup();
-    vi.mocked(api.settings.updateRuntimeProfile).mockResolvedValue({
-      profileId: 'qwen3_6',
-      displayName: 'Qwen 3.6',
+    vi.mocked(api.settings.updateModel).mockResolvedValue({
+      modelId: 'llama_qwen',
+      displayName: 'Qwen 3.5 9B',
+      provider: 'llama-cpp',
       combineSystemAndDeveloperMessages: true,
       samplingParametersJson: '{"temperature":0.5}',
-      thinkingControlJson: '{}',
+      thinkingControlJson: '{"defaultChoice":"medium","choiceActions":{"medium":[]}}',
       requestFieldsWhenToolsPresentJson: '{}',
-      providers: ['llama-cpp'],
+      isActive: true,
       created: '2026-01-01T00:00:00Z',
     } as never);
 
     render(<ModelChatBehaviorPanel detail={detail as never} />);
-    await screen.findByText('Qwen 3.6');
+    await screen.findByText('Qwen 3.5 9B');
 
-    await user.click(screen.getByText('Edit profile document (advanced)'));
+    await user.click(screen.getByText('Edit chat behavior (advanced)'));
     const samplingField = screen.getAllByDisplayValue('{}')[0];
     fireEvent.change(samplingField, { target: { value: '{"temperature":0.5}' } });
-    await user.click(screen.getByRole('button', { name: 'Save profile document' }));
+    await user.click(screen.getByRole('button', { name: 'Save model behavior' }));
+    await user.click(screen.getByTestId('confirm'));
 
     await waitFor(() => {
-      expect(api.settings.updateRuntimeProfile).toHaveBeenCalledWith(
-        'qwen3_6',
+      expect(api.settings.updateModel).toHaveBeenCalledWith(
+        'llama_qwen',
         expect.objectContaining({
           samplingParametersJson: '{"temperature":0.5}',
+          runtimeConfigJson: '{"routerModelId":"Qwen3.5-9B-GGUF"}',
         }),
       );
     });
   });
 
-  it('confirms before saving a shared runtime profile', async () => {
+  it('confirms before saving model behavior', async () => {
     const user = userEvent.setup();
-    vi.mocked(api.settings.updateRuntimeProfile).mockResolvedValue({
-      profileId: 'qwen3_6',
-      displayName: 'Qwen 3.6',
+    vi.mocked(api.settings.updateModel).mockResolvedValue({
+      modelId: 'llama_qwen',
+      displayName: 'Qwen 3.5 9B',
+      provider: 'llama-cpp',
       combineSystemAndDeveloperMessages: true,
       samplingParametersJson: '{}',
-      thinkingControlJson: '{}',
+      thinkingControlJson: '{"defaultChoice":"medium","choiceActions":{"medium":[]}}',
       requestFieldsWhenToolsPresentJson: '{}',
-      providers: ['llama-cpp'],
+      isActive: true,
       created: '2026-01-01T00:00:00Z',
     } as never);
 
-    render(<ModelChatBehaviorPanel detail={detail as never} sharedProfileModelCount={2} />);
-    await screen.findByText('Qwen 3.6');
+    render(<ModelChatBehaviorPanel detail={detail as never} />);
+    await screen.findByText('Qwen 3.5 9B');
 
-    await user.click(screen.getByText('Edit profile document (advanced)'));
-    await user.click(screen.getByRole('button', { name: 'Save profile document' }));
+    await user.click(screen.getByText('Edit chat behavior (advanced)'));
+    await user.click(screen.getByRole('button', { name: 'Save model behavior' }));
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Update shared profile' })).toBeInTheDocument();
-    expect(api.settings.updateRuntimeProfile).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Save model behavior' })).toBeInTheDocument();
+    expect(api.settings.updateModel).not.toHaveBeenCalled();
 
     await user.click(screen.getByTestId('confirm'));
 
     await waitFor(() => {
-      expect(api.settings.updateRuntimeProfile).toHaveBeenCalledWith('qwen3_6', expect.any(Object));
+      expect(api.settings.updateModel).toHaveBeenCalledWith('llama_qwen', expect.any(Object));
     });
   });
 });

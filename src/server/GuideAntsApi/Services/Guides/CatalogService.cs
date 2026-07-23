@@ -32,10 +32,16 @@ public class CatalogService : ICatalogService
                 m.ModelId,
                 m.DisplayName,
                 m.Description,
+                m.Provider,
                 m.ReasoningChoicesJson,
                 m.IsActive,
                 m.DisplayOrder,
-                m.RuntimeConfigJson
+                m.RuntimeConfigJson,
+                m.CombineSystemAndDeveloperMessages,
+                m.ThoughtBlockPattern,
+                m.SamplingParametersJson,
+                m.ThinkingControlJson,
+                m.RequestFieldsWhenToolsPresentJson
             })
             .ToListAsync();
 
@@ -50,33 +56,76 @@ public class CatalogService : ICatalogService
             if (!string.IsNullOrEmpty(m.RuntimeConfigJson))
             {
                 runtimeConfig = JsonSerializer.Deserialize<ModelRuntimeConfigDto>(m.RuntimeConfigJson, JsonCaseInsensitive);
+            }
 
-                if (runtimeConfig != null && !string.IsNullOrWhiteSpace(runtimeConfig.RuntimeProfileId))
+            if (string.Equals(m.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(m.ThinkingControlJson)
+                && !string.Equals(m.ThinkingControlJson.Trim(), "{}", StringComparison.Ordinal))
+            {
+                var profile = RuntimeProfileDataJson.FromJsonStrings(
+                    m.ModelId,
+                    m.CombineSystemAndDeveloperMessages,
+                    m.ThoughtBlockPattern,
+                    m.SamplingParametersJson,
+                    m.ThinkingControlJson,
+                    m.RequestFieldsWhenToolsPresentJson,
+                    m.DisplayName,
+                    m.Description);
+
+                if (runtimeConfig is null && !string.IsNullOrWhiteSpace(m.RuntimeConfigJson))
                 {
                     try
                     {
-                        var profile = await _runtimeProfileResolver.ResolveAsync(runtimeConfig.RuntimeProfileId);
-
-                        samplingPolicy = profile.SamplingParameters
-                            .Values
-                            .Where(sp => sp.ExposedInGuideBuilder)
-                            .OrderBy(sp => sp.DisplayOrder)
-                            .Select(sp => new SamplingParameterPolicyDto(
-                                sp.Key, sp.Label, sp.Description,
-                                sp.Min, sp.Max, sp.Step, sp.Default, sp.DisplayOrder))
-                            .ToList();
-
-                        var profileChoices = profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? [];
-                        var modelChoices = ParseReasoningChoices(m.ReasoningChoicesJson);
-                        reasoningChoices = modelChoices.Count > 0
-                            ? profileChoices.Where(c => modelChoices.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList()
-                            : profileChoices;
-                        defaultReasoningChoice = profile.ThinkingControl.DefaultChoice;
+                        var localRuntime = LocalRuntimeConfigurationParser.ParseRequired(m.ModelId, m.RuntimeConfigJson);
+                        runtimeConfig = new ModelRuntimeConfigDto(localRuntime.RouterModelId, null);
                     }
                     catch
                     {
-                        // Profile not found; leave policy/choices null
+                        // Leave runtime config null when invalid.
                     }
+                }
+
+                samplingPolicy = profile.SamplingParameters
+                    .Values
+                    .Where(sp => sp.ExposedInGuideBuilder)
+                    .OrderBy(sp => sp.DisplayOrder)
+                    .Select(sp => new SamplingParameterPolicyDto(
+                        sp.Key, sp.Label, sp.Description,
+                        sp.Min, sp.Max, sp.Step, sp.Default, sp.DisplayOrder))
+                    .ToList();
+
+                var profileChoices = profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? [];
+                var modelChoices = ParseReasoningChoices(m.ReasoningChoicesJson);
+                reasoningChoices = modelChoices.Count > 0
+                    ? profileChoices.Where(c => modelChoices.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList()
+                    : profileChoices;
+                defaultReasoningChoice = profile.ThinkingControl.DefaultChoice;
+            }
+            else if (runtimeConfig != null && !string.IsNullOrWhiteSpace(runtimeConfig.RuntimeProfileId))
+            {
+                try
+                {
+                    var profile = await _runtimeProfileResolver.ResolveAsync(runtimeConfig.RuntimeProfileId);
+
+                    samplingPolicy = profile.SamplingParameters
+                        .Values
+                        .Where(sp => sp.ExposedInGuideBuilder)
+                        .OrderBy(sp => sp.DisplayOrder)
+                        .Select(sp => new SamplingParameterPolicyDto(
+                            sp.Key, sp.Label, sp.Description,
+                            sp.Min, sp.Max, sp.Step, sp.Default, sp.DisplayOrder))
+                        .ToList();
+
+                    var profileChoices = profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? [];
+                    var modelChoices = ParseReasoningChoices(m.ReasoningChoicesJson);
+                    reasoningChoices = modelChoices.Count > 0
+                        ? profileChoices.Where(c => modelChoices.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList()
+                        : profileChoices;
+                    defaultReasoningChoice = profile.ThinkingControl.DefaultChoice;
+                }
+                catch
+                {
+                    // Profile not found; leave policy/choices null
                 }
             }
 
@@ -132,7 +181,7 @@ public class CatalogService : ICatalogService
                 ga.Description ?? string.Empty,
                 ga.Instructions,
                 ga.ModelId,
-                ga.AvatarImageBytes != null ? $"/api/catalogs/global-assistants/{ga.Id}/avatar" : null, // AvatarUrl
+                ga.AvatarImageBytes != null ? $"/api/catalogs/global-assistants/{ga.Id}/avatar" : null,
                 true,
                 ga.DisplayOrder,
                 ga.Tools.Select(t => t.ToolId).ToList()

@@ -1,8 +1,10 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import type { PresetKeyValue } from '../routerPreset';
 import {
   buildAliasIniPreview,
+  createPresetRow,
   presetRecordFromRows,
+  presetRowKey,
   validateAliasPresetRows,
 } from '../routerPreset';
 
@@ -16,6 +18,63 @@ export interface AliasPresetEditorProps {
   presetMode?: 'replace' | 'merge';
   onPresetModeChange?: (mode: 'replace' | 'merge') => void;
 }
+
+interface PresetKeyRowProps {
+  row: PresetKeyValue;
+  readOnly: boolean;
+  onKeyChange: (key: string) => void;
+  onValueChange: (value: string) => void;
+  onRemove: () => void;
+}
+
+const PresetKeyRow = memo(function PresetKeyRow({
+  row,
+  readOnly,
+  onKeyChange,
+  onValueChange,
+  onRemove,
+}: PresetKeyRowProps) {
+  return (
+    <div className="flex flex-wrap items-start gap-2">
+      <input
+        type="text"
+        value={row.key}
+        disabled={readOnly}
+        onChange={(event) => onKeyChange(event.target.value)}
+        placeholder="ctx-size"
+        className="min-w-[8rem] flex-1 rounded border border-gray-300 px-2 py-1.5 font-mono text-xs"
+        spellCheck={false}
+      />
+      <input
+        type="text"
+        value={row.value}
+        disabled={readOnly}
+        onChange={(event) => onValueChange(event.target.value)}
+        placeholder="value"
+        className="min-w-[8rem] flex-[2] rounded border border-gray-300 px-2 py-1.5 font-mono text-xs"
+        spellCheck={false}
+      />
+      {!readOnly ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+        >
+          Remove
+        </button>
+      ) : null}
+    </div>
+  );
+});
+
+const IniPreview = memo(function IniPreview({ preview }: { preview: string }) {
+  return (
+    <div className="rounded border border-gray-200 bg-gray-50 p-3">
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">INI preview</div>
+      <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs text-gray-800">{preview}</pre>
+    </div>
+  );
+});
 
 export function AliasPresetEditor({
   rows,
@@ -36,7 +95,7 @@ export function AliasPresetEditor({
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   };
 
-  const addRow = () => onChange([...rows, { key: '', value: '' }]);
+  const addRow = () => onChange([...rows, createPresetRow()]);
   const removeRow = (index: number) => onChange(rows.filter((_, i) => i !== index));
 
   return (
@@ -64,35 +123,14 @@ export function AliasPresetEditor({
 
       <div className="space-y-2">
         {rows.map((row, index) => (
-          <div key={index} className="flex flex-wrap items-start gap-2">
-            <input
-              type="text"
-              value={row.key}
-              disabled={readOnly}
-              onChange={(event) => updateRow(index, { key: event.target.value })}
-              placeholder="ctx-size"
-              className="min-w-[8rem] flex-1 rounded border border-gray-300 px-2 py-1.5 font-mono text-xs"
-              spellCheck={false}
-            />
-            <input
-              type="text"
-              value={row.value}
-              disabled={readOnly}
-              onChange={(event) => updateRow(index, { value: event.target.value })}
-              placeholder="value"
-              className="min-w-[8rem] flex-[2] rounded border border-gray-300 px-2 py-1.5 font-mono text-xs"
-              spellCheck={false}
-            />
-            {!readOnly ? (
-              <button
-                type="button"
-                onClick={() => removeRow(index)}
-                className="rounded px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-              >
-                Remove
-              </button>
-            ) : null}
-          </div>
+          <PresetKeyRow
+            key={presetRowKey(row, index)}
+            row={row}
+            readOnly={readOnly}
+            onKeyChange={(key) => updateRow(index, { key })}
+            onValueChange={(value) => updateRow(index, { value })}
+            onRemove={() => removeRow(index)}
+          />
         ))}
       </div>
 
@@ -110,10 +148,7 @@ export function AliasPresetEditor({
         </ul>
       ) : null}
 
-      <div className="rounded border border-gray-200 bg-gray-50 p-3">
-        <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">INI preview</div>
-        <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs text-gray-800">{preview}</pre>
-      </div>
+      <IniPreview preview={preview} />
     </div>
   );
 }

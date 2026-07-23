@@ -1,6 +1,8 @@
-"""Per-alias mmproj override materialization for llama.cpp router spawn."""
+"""Per-alias mmproj override and env-default materialization for llama.cpp router spawn."""
 
 from __future__ import annotations
+
+from guideants_hf.env_default_preset import apply_env_defaults_to_extras
 
 NO_MMPROJ_KEYS = frozenset({"no-mmproj", "no_mmproj"})
 MMPROJ_AUTO_KEY = "mmproj-auto"
@@ -20,12 +22,13 @@ def resolve_router_runtime_config_path(canonical_path: str) -> str:
 
 
 def materialize_router_extras_for_runtime(extras: dict[str, str]) -> dict[str, str]:
-    """Translate user-facing no-mmproj override into llama.cpp preset keys."""
-    if not preset_disables_mmproj(extras):
-        return dict(extras)
+    """Build effective alias extras for child spawn (mmproj translation + env defaults)."""
+    effective = apply_env_defaults_to_extras(extras)
+    if not preset_disables_mmproj(effective):
+        return effective
     runtime_extras = {
         key: value
-        for key, value in extras.items()
+        for key, value in effective.items()
         if key.strip().lower() not in NO_MMPROJ_KEYS
     }
     runtime_extras[MMPROJ_AUTO_KEY] = MMPROJ_AUTO_DISABLED_VALUE

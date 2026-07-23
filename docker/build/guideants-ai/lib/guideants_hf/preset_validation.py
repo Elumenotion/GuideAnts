@@ -7,9 +7,8 @@ from typing import Any
 
 INFRASTRUCTURE_KEYS = frozenset({"model", "mmproj", "version"})
 
-# Router shell bootstrap keys belong on the llama-server process CLI (start-llama.sh),
-# not in per-alias router-models.ini presets. All other llama-server switches are
-# model-scoped and may be set on the alias preset.
+# Router shell bootstrap keys belong on the llama-server parent process CLI (start-llama.sh),
+# not in per-alias router-models.ini presets.
 ROUTER_SHELL_KEYS = frozenset(
     {
         "models-preset",

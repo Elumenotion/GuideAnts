@@ -1,4 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using GuideAntsApi.DataModel;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.LlamaCpp;
@@ -335,6 +338,7 @@ public static class SettingsLlamaEndpoints
             string alias,
             [FromBody] LlamaRouterEntryPutRequest request,
             ILlamaRuntimeAdminClient adminClient,
+            ApplicationDbContext db,
             CancellationToken cancellationToken) =>
         {
             if (!string.Equals(alias.Trim(), request.Alias.Trim(), StringComparison.Ordinal))
@@ -344,7 +348,11 @@ public static class SettingsLlamaEndpoints
 
             try
             {
-                var result = await adminClient.PutRouterEntryAsync(request, cancellationToken).ConfigureAwait(false);
+                // Catalog editor Save is WYSIWYG: omitted preset keys must be deleted.
+                // Older clients still send presetMode=merge, which preserves removals.
+                var replaceRequest = request with { PresetMode = "replace" };
+                var result = await adminClient.PutRouterEntryAsync(replaceRequest, cancellationToken).ConfigureAwait(false);
+                await UpdateRouterPresetSnapshotAsync(db, replaceRequest, cancellationToken).ConfigureAwait(false);
                 if (result.RuntimeApply is { Applied: false })
                 {
                     return Results.Json(
@@ -416,5 +424,43 @@ public static class SettingsLlamaEndpoints
         .ProducesProblem(StatusCodes.Status502BadGateway);
 
         llamaGroup.MapSettingsLlamaInstallationEndpoints();
+    }
+
+    private static async Task UpdateRouterPresetSnapshotAsync(
+        ApplicationDbContext db,
+        LlamaRouterEntryPutRequest request,
+        CancellationToken cancellationToken)
+    {
+        var preset = new Dictionary<string, string>(request.Preset ?? new Dictionary<string, string>(), StringComparer.Ordinal);
+        if (request.ContextSize is int contextSize)
+        {
+            preset["ctx-size"] = contextSize.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (request.CacheRamMib is int cacheRamMib)
+        {
+            preset["cache-ram"] = cacheRamMib.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            preset.Remove("cache-ram");
+        }
+
+        var now = DateTime.UtcNow;
+        var installations = await db.LocalModelInstallations
+            .Where(installation => installation.RouterModelId == request.Alias)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var installation in installations)
+        {
+            installation.RouterPresetSnapshotJson = JsonSerializer.Serialize(preset);
+            installation.UpdatedUtc = now;
+        }
+
+        if (installations.Count > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 }

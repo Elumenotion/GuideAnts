@@ -362,7 +362,10 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
         {
             ["alias"] = alias,
             ["modelPath"] = modelPath,
-            ["mmprojPath"] = mmprojPath
+            ["mmprojPath"] = mmprojPath,
+            // This call intentionally patches model/mmproj while preserving
+            // existing per-alias extras in router-models.ini.
+            ["presetMode"] = "merge",
         };
         await PostRouterEntryAsync(payload, alias, cancellationToken).ConfigureAwait(false);
     }
@@ -380,6 +383,9 @@ public sealed class LlamaRuntimeAdminClient : ILlamaRuntimeAdminClient
             ["alias"] = alias,
             ["modelPath"] = modelPath,
             ["mmprojPath"] = mmprojPath,
+            // Context/cache updates are patch operations over existing alias
+            // extras; merge mode prevents replacing unrelated keys.
+            ["presetMode"] = "merge",
             ["contextSize"] = contextSize,
             ["cacheRamMib"] = cacheRamMib
         };

@@ -347,6 +347,11 @@ export interface SettingsModelDto {
   description?: string;
   reasoningChoicesJson?: string;
   runtimeConfigJson?: string;
+  combineSystemAndDeveloperMessages: boolean;
+  thoughtBlockPattern?: string;
+  samplingParametersJson: string;
+  thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson: string;
   isActive: boolean;
   displayOrder?: number;
   created: string;
@@ -360,6 +365,11 @@ export interface CreateSettingsModelRequest {
   description?: string;
   reasoningChoicesJson?: string;
   runtimeConfigJson?: string;
+  combineSystemAndDeveloperMessages: boolean;
+  thoughtBlockPattern?: string;
+  samplingParametersJson: string;
+  thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson: string;
   isActive: boolean;
   displayOrder?: number;
 }
@@ -371,6 +381,11 @@ export interface UpdateSettingsModelRequest {
   description?: string;
   reasoningChoicesJson?: string;
   runtimeConfigJson?: string;
+  combineSystemAndDeveloperMessages: boolean;
+  thoughtBlockPattern?: string;
+  samplingParametersJson: string;
+  thinkingControlJson: string;
+  requestFieldsWhenToolsPresentJson: string;
   isActive: boolean;
   displayOrder?: number;
 }

@@ -297,6 +297,7 @@ public class LocalModelOnboardingValidatorDeep2Tests
             configuration,
             settingsService.Object,
             chatTargetValidator.Object,
+            new Mock<IRuntimeProfileResolver>(MockBehavior.Loose).Object,
             inventoryService.Object,
             tokenResolver.Object,
             curatedResolver.Object,

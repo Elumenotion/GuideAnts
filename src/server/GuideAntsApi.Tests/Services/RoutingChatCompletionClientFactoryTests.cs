@@ -27,6 +27,28 @@ namespace GuideAntsApi.Tests.Services;
 [TestClass]
 public sealed class RoutingChatCompletionClientFactoryTests
 {
+    private const string QwenThinkingControlJson = """
+        {"defaultChoice":"none","choiceActions":{"none":[],"enabled":[]}}
+        """;
+
+    private const string QwenRequestFieldsWhenToolsPresentJson = """{"parallel_tool_calls":true}""";
+
+    private static Model CreateLlamaModel(string modelId, string routerModelId, bool includeBehavior = true)
+    {
+        return new Model
+        {
+            ModelId = modelId,
+            DisplayName = "Qwen 3.5 27B",
+            Provider = "llama-cpp",
+            RuntimeConfigJson = $$"""{"routerModelId":"{{routerModelId}}"}""",
+            CombineSystemAndDeveloperMessages = includeBehavior,
+            ThoughtBlockPattern = includeBehavior ? @"<think>[\s\S]*?</think>" : null,
+            SamplingParametersJson = includeBehavior ? """{"temperature":{"key":"temperature","displayName":"Temperature","description":"Controls randomness","min":0,"max":2,"step":0.1,"defaultValue":0.7,"displayOrder":0,"enabled":true}}""" : "{}",
+            ThinkingControlJson = includeBehavior ? QwenThinkingControlJson : "{}",
+            RequestFieldsWhenToolsPresentJson = includeBehavior ? QwenRequestFieldsWhenToolsPresentJson : "{}",
+            IsActive = true
+        };
+    }
     [TestMethod]
     public void CreateClient_UsesAnthropic_ForAnthropicProvider()
     {
@@ -189,14 +211,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
     public void CreateClient_UsesLlamaCpp_ForLlamaProvider()
     {
         using var db = CreateDb();
-        db.Models.Add(new Model
-        {
-            ModelId = "qwen3.5-27b",
-            DisplayName = "Qwen 3.5 27B",
-            Provider = "llama-cpp",
-            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\"}",
-            IsActive = true
-        });
+        db.Models.Add(CreateLlamaModel("qwen3.5-27b", "Qwen3.5-27B-Q6_K"));
         db.SaveChanges();
 
         var factory = CreateFactory(db);
@@ -266,14 +281,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
     public async Task CreateClient_AppliesProfileToolFields_WhenToolsPresent()
     {
         using var db = CreateDb();
-        db.Models.Add(new Model
-        {
-            ModelId = "qwen3.5-27b",
-            DisplayName = "Qwen 3.5 27B",
-            Provider = "llama-cpp",
-            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"qwen3_5\"}",
-            IsActive = true
-        });
+        db.Models.Add(CreateLlamaModel("qwen3.5-27b", "Qwen3.5-27B-Q6_K"));
         db.SaveChanges();
 
         string? capturedBody = null;
@@ -326,24 +334,18 @@ public sealed class RoutingChatCompletionClientFactoryTests
     }
 
     [TestMethod]
-    public void CreateClient_Throws_ForUnknownLlamaRuntimeProfile()
+    public void CreateClient_Throws_ForLlamaModelMissingChatBehavior()
     {
         using var db = CreateDb();
-        db.Models.Add(new Model
-        {
-            ModelId = "qwen3.5-27b",
-            DisplayName = "Qwen 3.5 27B",
-            Provider = "llama-cpp",
-            RuntimeConfigJson = "{\"routerModelId\":\"Qwen3.5-27B-Q6_K\",\"runtimeProfileId\":\"unknown_profile\"}",
-            IsActive = true
-        });
+        db.Models.Add(CreateLlamaModel("qwen3.5-27b", "Qwen3.5-27B-Q6_K", includeBehavior: false));
         db.SaveChanges();
 
         var factory = CreateFactory(db);
 
         Action act = () => factory.CreateClient("qwen3.5-27b");
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*Unsupported runtimeProfileId*");
+        act.Should().Throw<RoutingException>()
+            .Where(ex => ex.Code == RoutingErrorCodes.ModelNotReady)
+            .WithMessage("*missing model-owned chat behavior*");
     }
 
     [TestMethod]
@@ -483,59 +485,6 @@ public sealed class RoutingChatCompletionClientFactoryTests
             });
         var scopeFactory = new TestServiceScopeFactory(db);
 
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
-        runtimeProfileResolver
-            .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string profileId, CancellationToken _) =>
-            {
-                if (profileId == "qwen3_5")
-                {
-                    return new RuntimeProfileData(
-                        "qwen3_5",
-                        true,
-                        @"<think>[\s\S]*?</think>",
-                        new Dictionary<string, SamplingParameterDefinition>
-                        {
-                            ["temperature"] = new("temperature", "Temperature", "Controls randomness", 0, 2, 0.1, 0.7, 0, true)
-                        },
-                        new ThinkingControl("medium", new Dictionary<string, IReadOnlyList<ThinkingAction>>
-                        {
-                            ["none"] = new List<ThinkingAction>
-                            {
-                                new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", false),
-                                new(ThinkingActionTarget.RequestField, "reasoning_format", "none")
-                            },
-                            ["enabled"] = new List<ThinkingAction>
-                            {
-                                new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
-                                new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 4096)
-                            },
-                            ["low"] = new List<ThinkingAction>
-                            {
-                                new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
-                                new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 1024)
-                            },
-                            ["medium"] = new List<ThinkingAction>
-                            {
-                                new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
-                                new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 4096)
-                            },
-                            ["high"] = new List<ThinkingAction>
-                            {
-                                new(ThinkingActionTarget.NestedRequestField, "chat_template_kwargs.enable_thinking", true),
-                                new(ThinkingActionTarget.RequestField, "thinking_budget_tokens", 8192)
-                            }
-                        }),
-                        new Dictionary<string, JsonElement>
-                        {
-                            ["parallel_tool_calls"] = JsonSerializer.SerializeToElement(true)
-                        });
-                }
-
-                throw new InvalidOperationException(
-                    $"Unsupported runtimeProfileId '{profileId}'. No runtime profile found in the database.");
-            });
-
         var chatTargetResolver = new ChatTargetResolver(scopeFactory);
         var chatTargetValidator = new Mock<IChatTargetValidator>();
         chatTargetValidator.Setup(v => v.Validate(It.IsAny<ChatTarget>()));
@@ -551,8 +500,7 @@ public sealed class RoutingChatCompletionClientFactoryTests
             openRouterFactory,
             llamaCppFactory,
             chatTargetResolver,
-            chatTargetValidator.Object,
-            runtimeProfileResolver.Object);
+            chatTargetValidator.Object);
     }
 
     private static ApplicationDbContext CreateDb()

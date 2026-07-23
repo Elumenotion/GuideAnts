@@ -46,15 +46,13 @@ export const LlamaCppEditForm = forwardRef<
   LlamaCppEditFormHandle,
   Omit<ProviderEditForm, 'profiles' | 'profilesLoading' | 'inventory'> & {
     onDetailChanged?: () => Promise<void>;
-    sharedProfileModelCount?: number;
   }
->(function LlamaCppEditForm({ value, onChange, onDetailChanged, sharedProfileModelCount }, ref) {
+>(function LlamaCppEditForm({ value, onChange, onDetailChanged }, ref) {
   void onChange;
   return (
     <LlamaInstalledSummary
       ref={ref}
       modelId={value.modelId}
-      sharedProfileModelCount={sharedProfileModelCount}
       onChanged={onDetailChanged}
     />
   );

@@ -590,7 +590,10 @@ def upsert_router_entry(
     _cache_l = {x.lower() for x in _CACHE_KEYS}
 
     incoming_preset = normalize_preset_map(preset or {})
-    if not preset_disables_mmproj(incoming_preset):
+    # Only normalize vision-token defaults when the caller explicitly supplied a
+    # preset payload. Model-path/context sync calls intentionally omit preset and
+    # must preserve existing extras exactly as-is.
+    if preset is not None and not preset_disables_mmproj(incoming_preset):
         incoming_preset = apply_alias_vision_token_preset(alias_trimmed, incoming_preset)
     if update_context:
         _strip_extras_matching_incoming(incoming_preset, _ctx_l)
@@ -610,8 +613,17 @@ def upsert_router_entry(
         payload_before = serialize_router_ini(entries)
         prior = entries.get(alias_trimmed)
         extras: dict[str, str] = dict(prior.extras) if prior else {}
-        if incoming_preset or preset is not None or update_context or update_cache:
-            extras = apply_preset_mode(extras, incoming_preset, preset_mode)
+        # Context/cache-only updates are patch operations over existing extras.
+        # Force merge semantics when no explicit preset was sent so we don't
+        # accidentally replace unrelated alias keys (for example no-mmproj/spec-*).
+        effective_preset_mode = (
+            "merge"
+            if preset is None and (update_context or update_cache)
+            else preset_mode
+        )
+
+        if preset is not None or incoming_preset:
+            extras = apply_preset_mode(extras, incoming_preset, effective_preset_mode)
 
         if update_context and context_size is None:
             _strip_extras_matching_incoming(extras, _ctx_l)
@@ -1334,7 +1346,14 @@ def put_runtime_fleet_preset(request: FleetPresetPutRequest) -> dict[str, Any]:
 
 @APP.get("/router/entries")
 def get_router_entries() -> RouterEntriesResponse:
-    entries = read_router_entries()
+    """Return alias presets as stored in canonical router-models.ini."""
+    with ROUTER_FILE_LOCK:
+        if not os.path.exists(ROUTER_CONFIG_PATH):
+            entries: dict[str, _RouterSection] = {}
+        else:
+            with open(ROUTER_CONFIG_PATH, "r", encoding="utf-8") as handle:
+                entries = parse_router_ini(handle.read())
+
     result: list[RouterEntryDto] = []
     for alias in sorted(entries.keys()):
         sec = entries[alias]
@@ -1383,12 +1402,17 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
     set_fields = _pydantic_set_fields(request)
     update_context = "contextSize" in set_fields
     update_cache = "cacheRamMib" in set_fields
+    # Explicit preset maps are WYSIWYG (catalog editor Save). Path-only syncs omit
+    # preset and keep merge for context/cache patches. Honoring client "merge" when
+    # a preset body is present makes removed keys appear to resurrect after reload.
+    effective_preset_mode = "replace" if request.preset is not None else request.presetMode
     log_event(
         "router_entry_upsert_requested",
         alias=request.alias.strip(),
         request={
             "setFields": sorted(list(set_fields)),
             "presetMode": request.presetMode,
+            "effectivePresetMode": effective_preset_mode,
             "contextSize": request.contextSize,
             "cacheRamMib": request.cacheRamMib,
             "modelPath": request.modelPath.strip(),
@@ -1404,7 +1428,7 @@ def post_router_entry(request: RouterEntryUpsertRequest) -> dict[str, Any]:
             request.modelPath,
             request.mmprojPath,
             preset=request.preset,
-            preset_mode=request.presetMode,
+            preset_mode=effective_preset_mode,
             context_size=request.contextSize,
             cache_ram_mib=request.cacheRamMib,
             update_context=update_context,

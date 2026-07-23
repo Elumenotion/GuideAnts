@@ -15,7 +15,6 @@ public static class RouterPresetValidator
     /// <summary>
     /// Router shell bootstrap keys belong on the llama-server process CLI
     /// (<c>start-llama.sh</c>), not in per-alias <c>router-models.ini</c> presets.
-    /// All other llama-server switches are model-scoped and editable on the alias preset.
     /// </summary>
     private static readonly HashSet<string> RouterShellKeys = new(StringComparer.OrdinalIgnoreCase)
     {

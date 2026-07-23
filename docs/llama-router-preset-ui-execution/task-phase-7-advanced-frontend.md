@@ -30,7 +30,7 @@ normal curated add/edit experience.
 ## Hard guardrails
 
 - Curated normal edit remains presentation + read-only technical/install state.
-- Router-process-scoped keys cannot be saved through the alias preset editor; errors point to `GA_LLAMA_*` in docker-compose.
+- Env-default keys (`jinja`, `n-gpu-layers`, `flash-attn`, …) may be saved on the alias as overrides; when absent, runtime materialization fills from `GA_LLAMA_*`. The UI does not auto-show env values.
 - Custom flow infers no profile, projector, context, preset, revision, or artifacts.
 - Attach does not offer to rewrite the alias preset.
 - Customize requires explicit confirmation and explains tracking consequences.

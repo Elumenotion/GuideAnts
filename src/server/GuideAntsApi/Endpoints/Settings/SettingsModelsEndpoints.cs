@@ -87,10 +87,12 @@ public static class SettingsModelsEndpoints
                     cancellationToken).ConfigureAwait(false);
 
                 var created = await settingsService.CreateModelAsync(
-                    SettingsModelOnboardingSupport.BuildModelCreateRequest(
+                    await SettingsModelOnboardingSupport.BuildCloudModelCreateRequestAsync(
                         request,
                         cloudReasoningChoicesJson,
-                        runtimeConfigJson: SettingsModelOnboardingSupport.BuildCloudRuntimeConfigJson(request)),
+                        runtimeConfigJson: SettingsModelOnboardingSupport.BuildCloudRuntimeConfigJson(request),
+                        runtimeProfileResolver,
+                        cancellationToken).ConfigureAwait(false),
                     cancellationToken).ConfigureAwait(false);
 
                 return Results.Ok(new AddModelResponse(

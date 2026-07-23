@@ -1,6 +1,7 @@
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.HuggingFace;
+using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Services.Routing;
 using GuideAntsApi.Settings;
 
@@ -19,6 +20,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
     private readonly IConfiguration _configuration;
     private readonly IApplicationSettingsService _settingsService;
     private readonly IChatTargetValidator _chatTargetValidator;
+    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly ILlamaRuntimeInventoryService _inventoryService;
     private readonly IHuggingFaceTokenResolver _huggingFaceTokenResolver;
     private readonly ICuratedInstallResolver _curatedInstallResolver;
@@ -28,6 +30,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         IConfiguration configuration,
         IApplicationSettingsService settingsService,
         IChatTargetValidator chatTargetValidator,
+        IRuntimeProfileResolver runtimeProfileResolver,
         ILlamaRuntimeInventoryService inventoryService,
         IHuggingFaceTokenResolver huggingFaceTokenResolver,
         ICuratedInstallResolver curatedInstallResolver,
@@ -36,6 +39,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         _configuration = configuration;
         _settingsService = settingsService;
         _chatTargetValidator = chatTargetValidator;
+        _runtimeProfileResolver = runtimeProfileResolver;
         _inventoryService = inventoryService;
         _huggingFaceTokenResolver = huggingFaceTokenResolver;
         _curatedInstallResolver = curatedInstallResolver;
@@ -92,10 +96,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
 
         try
         {
-            _chatTargetValidator.Validate(new ChatTarget(
-                ModelId: command.CatalogModelId,
-                Provider: "llama-cpp",
-                RuntimeConfigJson: LocalModelOnboardingOrchestrator.BuildLlamaLocalRuntimeJson(command)));
+            await ValidateLlamaInstallTargetAsync(command, cancellationToken).ConfigureAwait(false);
         }
         catch (RoutingException ex)
         {
@@ -198,17 +199,18 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
 
         try
         {
-            _chatTargetValidator.Validate(new ChatTarget(
-                ModelId: immutableInput.CatalogModelId,
-                Provider: "llama-cpp",
-                RuntimeConfigJson: LocalRuntimeConfigurationParser.SerializeCanonical(
-                    new LocalRuntimeConfiguration(
-                        immutableInput.RouterModelId,
-                        immutableInput.RuntimeProfileId))));
+            _ = LocalRuntimeConfigurationParser.ParseRequired(
+                immutableInput.CatalogModelId,
+                LocalRuntimeConfigurationParser.SerializeCanonical(
+                    new LocalRuntimeConfiguration(immutableInput.RouterModelId)));
         }
-        catch (RoutingException ex)
+        catch (InvalidOperationException ex)
         {
-            throw MapRoutingException(ex);
+            throw new AddModelException(
+                code: "INSTALL_STEP_FAILED",
+                step: "validation",
+                message: ex.Message,
+                remediation: "Fix the curated install configuration and retry.");
         }
 
         var inventory = await _inventoryService.GetInventoryAsync(cancellationToken).ConfigureAwait(false);
@@ -238,8 +240,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         try
         {
             var parsed = LocalRuntimeConfigurationParser.Parse(existing.ModelId, existing.RuntimeConfigJson);
-            return string.Equals(parsed.RouterModelId, immutableInput.RouterModelId, StringComparison.Ordinal)
-                && string.Equals(parsed.RuntimeProfileId, immutableInput.RuntimeProfileId, StringComparison.Ordinal);
+            return string.Equals(parsed.RouterModelId, immutableInput.RouterModelId, StringComparison.Ordinal);
         }
         catch
         {
@@ -410,10 +411,7 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
 
         try
         {
-            _chatTargetValidator.Validate(new ChatTarget(
-                ModelId: command.CatalogModelId,
-                Provider: "llama-cpp",
-                RuntimeConfigJson: LocalModelOnboardingOrchestrator.BuildLlamaLocalRuntimeJson(command)));
+            await ValidateLlamaInstallTargetAsync(command, cancellationToken).ConfigureAwait(false);
         }
         catch (RoutingException ex)
         {
@@ -431,6 +429,21 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
                 message: $"Router alias '{existingAlias.RouterModelId}' is already referenced by catalog rows: {string.Join(", ", existingAlias.CatalogModelIds)}.",
                 remediation: "Back up to Step 3 and choose a different alias.");
         }
+    }
+
+    private async Task ValidateLlamaInstallTargetAsync(
+        LocalModelOnboardingCommand command,
+        CancellationToken cancellationToken)
+    {
+        var profile = await _runtimeProfileResolver
+            .ResolveAsync(command.RuntimeProfileId.Trim(), cancellationToken)
+            .ConfigureAwait(false);
+
+        _chatTargetValidator.Validate(new ChatTarget(
+            ModelId: command.CatalogModelId,
+            Provider: "llama-cpp",
+            RuntimeConfigJson: LocalModelOnboardingOrchestrator.BuildLlamaLocalRuntimeJson(command),
+            LlamaChatBehavior: profile));
     }
 
     private static AddModelException MapRoutingException(RoutingException exception)

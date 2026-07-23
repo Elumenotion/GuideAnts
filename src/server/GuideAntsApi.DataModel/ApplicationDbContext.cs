@@ -479,6 +479,9 @@ namespace GuideAntsApi.DataModel
                 // Note: ModelId is already the primary key, no separate unique index needed
                 b.HasIndex(x => new { x.IsActive, x.DisplayOrder });
                 b.Property(x => x.ReasoningChoicesJson).HasColumnType("nvarchar(max)");
+                b.Property(x => x.SamplingParametersJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.ThinkingControlJson).HasColumnType("nvarchar(max)").IsRequired();
+                b.Property(x => x.RequestFieldsWhenToolsPresentJson).HasColumnType("nvarchar(max)").IsRequired().HasDefaultValue("{}");
             });
 
             modelBuilder.Entity<Tool>(b =>

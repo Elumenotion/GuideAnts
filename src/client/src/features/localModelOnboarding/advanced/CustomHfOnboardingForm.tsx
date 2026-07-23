@@ -2,6 +2,7 @@ import type { CreateRuntimeProfileRequest, LlamaRuntimeInventoryItemDto, Setting
 import type { AddModelWizardState } from '../../../pages/settings/types';
 import { ArtifactGroupPicker } from './ArtifactGroupPicker';
 import { AliasPresetEditor } from './AliasPresetEditor';
+import { stripPresetRowMetadata } from '../routerPreset';
 
 export interface CustomHfOnboardingFormProps {
   value: AddModelWizardState;
@@ -113,7 +114,7 @@ export function CustomHfOnboardingForm({
 
       <AliasPresetEditor
         rows={value.llamaHuggingFaceRouterPresetRows}
-        onChange={(rows) => onChange({ llamaHuggingFaceRouterPresetRows: rows })}
+        onChange={(rows) => onChange({ llamaHuggingFaceRouterPresetRows: stripPresetRowMetadata(rows) })}
         alias={chosenAlias}
         presetMode={value.llamaHuggingFacePresetMode}
         onPresetModeChange={(mode) => onChange({ llamaHuggingFacePresetMode: mode })}

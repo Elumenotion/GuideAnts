@@ -954,27 +954,29 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
             throw new InvalidOperationException("llama.cpp response did not include message.");
         }
 
-        var text = StripLeadingEmptyBlocks(
+        var extractedOutput = ExtractLeadingThinkingBlocks(
             ExtractText(messageEl.TryGetProperty("content", out var contentEl) ? contentEl : default),
             assistantOutputStripRules,
-            finalize: true,
-            out _);
+            finalize: true);
 
         var reasoningText = ExtractText(
             messageEl.TryGetProperty("reasoning_content", out var reasoningEl) ? reasoningEl : default);
+        var normalizedReasoningText = !string.IsNullOrWhiteSpace(reasoningText)
+            ? reasoningText
+            : extractedOutput.ThinkingText;
 
         var toolCalls = messageEl.TryGetProperty("tool_calls", out var toolCallsEl)
             ? ParseToolCalls(toolCallsEl)
             : [];
 
-        var content = string.IsNullOrWhiteSpace(text)
+        var content = string.IsNullOrWhiteSpace(extractedOutput.AssistantText)
             ? []
-            : new List<ChatContent> { new(text) };
+            : new List<ChatContent> { new(extractedOutput.AssistantText) };
 
         IReadOnlyList<ChatThinkingBlock>? thinkingBlocks = null;
-        if (!string.IsNullOrWhiteSpace(reasoningText))
+        if (!string.IsNullOrWhiteSpace(normalizedReasoningText))
         {
-            thinkingBlocks = [ChatThinkingBlock.ForThinking(reasoningText, string.Empty)];
+            thinkingBlocks = [ChatThinkingBlock.ForThinking(normalizedReasoningText, string.Empty)];
         }
 
         ChatMessage message;
@@ -998,20 +1000,19 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
             usage);
     }
 
-    private static string StripLeadingEmptyBlocks(
+    private static AssistantOutputExtraction ExtractLeadingThinkingBlocks(
         string text,
         IReadOnlyList<OutputStripRule> rules,
-        bool finalize,
-        out bool resolved)
+        bool finalize)
     {
         if (string.IsNullOrEmpty(text) || rules.Count == 0)
         {
-            resolved = true;
-            return text;
+            return new AssistantOutputExtraction(text, string.Empty, Resolved: true);
         }
 
         var cursor = 0;
         var removedAny = false;
+        var thinkingBuilder = new StringBuilder();
 
         while (true)
         {
@@ -1022,8 +1023,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
 
             if (cursor >= text.Length)
             {
-                resolved = true;
-                return string.Empty;
+                return new AssistantOutputExtraction(string.Empty, thinkingBuilder.ToString(), Resolved: true);
             }
 
             OutputStripRule? matchedRule = null;
@@ -1046,14 +1046,16 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
                         if (remaining > 0 && remaining < rule.StartToken.Length
                             && rule.StartToken.AsSpan(0, remaining).SequenceEqual(text.AsSpan(cursor, remaining)))
                         {
-                            resolved = false;
-                            return string.Empty;
+                            return new AssistantOutputExtraction(
+                                string.Empty,
+                                thinkingBuilder.ToString(),
+                                Resolved: false);
                         }
                     }
                 }
 
-                resolved = true;
-                return removedAny ? text[cursor..] : text;
+                var assistantText = removedAny ? text[cursor..] : text;
+                return new AssistantOutputExtraction(assistantText, thinkingBuilder.ToString(), Resolved: true);
             }
 
             var contentStart = cursor + matchedRule.StartToken.Length;
@@ -1062,28 +1064,20 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
             {
                 if (!finalize)
                 {
-                    resolved = false;
-                    return string.Empty;
+                    return new AssistantOutputExtraction(
+                        string.Empty,
+                        thinkingBuilder.ToString(),
+                        Resolved: false);
                 }
 
-                resolved = true;
-                return removedAny ? text[cursor..] : text;
+                var assistantText = removedAny ? text[cursor..] : text;
+                return new AssistantOutputExtraction(assistantText, thinkingBuilder.ToString(), Resolved: true);
             }
 
-            var emptyInnerBlock = true;
-            for (var i = contentStart; i < endIndex; i++)
+            var innerText = text[contentStart..endIndex];
+            if (!string.IsNullOrWhiteSpace(innerText))
             {
-                if (!char.IsWhiteSpace(text[i]))
-                {
-                    emptyInnerBlock = false;
-                    break;
-                }
-            }
-
-            if (!emptyInnerBlock)
-            {
-                resolved = true;
-                return removedAny ? text[cursor..] : text;
+                thinkingBuilder.Append(innerText);
             }
 
             removedAny = true;
@@ -1269,6 +1263,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
         private ChatCompletionUsage? _usage;
         private string? _finishReason;
         private int _assistantFilteredLength;
+        private int _thinkingFilteredLength;
 
         public StreamingAccumulator(IReadOnlyList<OutputStripRule> assistantOutputStripRules)
         {
@@ -1315,11 +1310,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
                     if (!string.IsNullOrEmpty(textDelta))
                     {
                         _assistantRawText.Append(textDelta);
-                        var filteredDelta = GetAssistantDelta(finalize: false);
-                        if (!string.IsNullOrEmpty(filteredDelta))
-                        {
-                            EmitDelta(onChunk, filteredDelta, finishReason: null);
-                        }
+                        EmitFilteredDeltas(finalize: false, onChunk);
                     }
                 }
 
@@ -1332,16 +1323,12 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
 
         public void FlushPendingAssistantText(Action<ChatCompletionChunk> onChunk)
         {
-            var filteredDelta = GetAssistantDelta(finalize: true);
-            if (!string.IsNullOrEmpty(filteredDelta))
-            {
-                EmitDelta(onChunk, filteredDelta, finishReason: null);
-            }
+            EmitFilteredDeltas(finalize: true, onChunk);
         }
 
         public ChatCompletionResponse ToResponse()
         {
-            _ = GetAssistantDelta(finalize: true);
+            EmitFilteredDeltas(finalize: true, _ => { });
 
             var text = _assistantText.ToString();
             var content = string.IsNullOrWhiteSpace(text)
@@ -1373,34 +1360,41 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
                 _usage);
         }
 
-        private string GetAssistantDelta(bool finalize)
+        private void EmitFilteredDeltas(bool finalize, Action<ChatCompletionChunk> onChunk)
         {
             var rawText = _assistantRawText.ToString();
             if (rawText.Length == 0)
             {
-                return string.Empty;
+                return;
             }
 
-            var filteredText = StripLeadingEmptyBlocks(
+            var extractedOutput = ExtractLeadingThinkingBlocks(
                 rawText,
                 _assistantOutputStripRules,
-                finalize,
-                out var resolved);
+                finalize);
 
-            if (!resolved && !finalize)
+            if (extractedOutput.ThinkingText.Length > _thinkingFilteredLength)
             {
-                return string.Empty;
+                var thinkingDelta = extractedOutput.ThinkingText[_thinkingFilteredLength..];
+                _thinkingFilteredLength = extractedOutput.ThinkingText.Length;
+                _reasoningText.Append(thinkingDelta);
+                EmitDelta(onChunk, thinkingDelta, finishReason: "thinking");
             }
 
-            if (filteredText.Length <= _assistantFilteredLength)
+            if (!extractedOutput.Resolved && !finalize)
             {
-                return string.Empty;
+                return;
             }
 
-            var delta = filteredText[_assistantFilteredLength..];
-            _assistantFilteredLength = filteredText.Length;
+            if (extractedOutput.AssistantText.Length <= _assistantFilteredLength)
+            {
+                return;
+            }
+
+            var delta = extractedOutput.AssistantText[_assistantFilteredLength..];
+            _assistantFilteredLength = extractedOutput.AssistantText.Length;
             _assistantText.Append(delta);
-            return delta;
+            EmitDelta(onChunk, delta, finishReason: null);
         }
 
         private void AppendToolCalls(JsonElement toolCallsEl)
@@ -1519,6 +1513,7 @@ public sealed class LlamaCppChatClient : IChatCompletionClient
     }
 
     private sealed record OutputStripRule(string StartToken, string EndToken);
+    private sealed record AssistantOutputExtraction(string AssistantText, string ThinkingText, bool Resolved);
 
     private sealed class LlamaMessage
     {

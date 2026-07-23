@@ -4,13 +4,26 @@ import { buildAliasIniPreview, buildEffectivePresetRecord, validateAliasPresetRo
 
 describe('routerPreset', () => {
   it('accepts model-scoped llama-server preset keys on the alias row', () => {
-    const errors = validateAliasPresetRows([{ key: 'parallel', value: '2' }]);
+    const errors = validateAliasPresetRows([
+      { key: 'spec-type', value: 'draft-mtp' },
+      { key: 'reasoning-budget', value: '4096' },
+    ]);
     expect(errors).toEqual([]);
   });
 
   it('rejects router-shell keys on the alias row', () => {
     const errors = validateAliasPresetRows([{ key: 'models-preset', value: '/ini/path' }]);
     expect(errors.some((error) => error.includes('router-shell'))).toBe(true);
+  });
+
+  it('accepts env-default override keys on the alias row', () => {
+    const errors = validateAliasPresetRows([
+      { key: 'n-gpu-layers', value: '999' },
+      { key: 'no-mmap', value: 'true' },
+      { key: 'parallel', value: '2' },
+      { key: 'jinja', value: 'true' },
+    ]);
+    expect(errors).toEqual([]);
   });
 
   it('builds INI preview', () => {

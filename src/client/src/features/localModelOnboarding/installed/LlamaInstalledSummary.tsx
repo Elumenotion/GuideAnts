@@ -14,12 +14,11 @@ export interface LlamaInstalledSummaryHandle {
 
 export interface LlamaInstalledSummaryProps {
   modelId: string;
-  sharedProfileModelCount?: number;
   onChanged?: () => Promise<void>;
 }
 
 export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, LlamaInstalledSummaryProps>(
-  function LlamaInstalledSummary({ modelId, sharedProfileModelCount, onChanged }, ref) {
+  function LlamaInstalledSummary({ modelId, onChanged }, ref) {
   const presetPanelRef = useRef<AliasPresetSavePanelHandle>(null);
   const [detail, setDetail] = useState<LlamaInstallationDetailDto | null>(null);
   const [routerEntry, setRouterEntry] = useState<LlamaRouterEntryDto | null>(null);
@@ -90,11 +89,7 @@ export const LlamaInstalledSummary = forwardRef<LlamaInstalledSummaryHandle, Lla
         fallbackPreset={detail.routerPresetSnapshot}
       />
 
-      <ModelChatBehaviorPanel
-        detail={detail}
-        sharedProfileModelCount={sharedProfileModelCount}
-        onChanged={handleChanged}
-      />
+      <ModelChatBehaviorPanel detail={detail} onChanged={handleChanged} />
 
       <div className="flex flex-wrap gap-2">
         {isCurated ? (

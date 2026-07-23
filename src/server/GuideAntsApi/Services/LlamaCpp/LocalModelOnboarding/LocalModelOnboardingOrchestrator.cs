@@ -1,3 +1,4 @@
+using System.Text.Json;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
@@ -146,13 +147,18 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
         CancellationToken cancellationToken)
     {
         var localRuntimeJson = BuildLlamaLocalRuntimeJson(command);
-        var reasoningChoicesJson = await DeriveReasoningChoicesJsonAsync(command.RuntimeProfileId, cancellationToken)
+        var profile = await _runtimeProfileResolver
+            .ResolveAsync(command.RuntimeProfileId.Trim(), cancellationToken)
             .ConfigureAwait(false);
+        var reasoningChoicesJson = ModelChatBehavior.DeriveReasoningChoicesJson(
+            JsonSerializer.Serialize(profile.ThinkingControl));
 
-        var createRequest = BuildModelCreateRequest(
-            request,
+        var createRequest = ModelChatBehavior.BuildCreateRequest(
+            request.Catalog,
+            request.Provider.Trim(),
             reasoningChoicesJson,
-            localRuntimeJson);
+            localRuntimeJson,
+            profile);
 
         if (string.Equals(command.InstallSource, LocalModelInstallSources.ExistingAlias, StringComparison.OrdinalIgnoreCase))
         {
@@ -172,7 +178,6 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
                 ModelId = attached.ModelId,
                 ManagementMode = "operatorManaged",
                 RouterModelId = command.RouterModelId,
-                RuntimeProfileId = command.RuntimeProfileId,
                 ModelArtifactsJson = InstallationArtifactRecords.Serialize(
                 [
                     new InstallationArtifactDto(
@@ -329,9 +334,7 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
 
     public static string BuildLlamaLocalRuntimeJson(LocalModelOnboardingCommand command)
     {
-        var config = new LocalRuntimeConfiguration(
-            RouterModelId: command.RouterModelId,
-            RuntimeProfileId: command.RuntimeProfileId);
+        var config = new LocalRuntimeConfiguration(RouterModelId: command.RouterModelId);
 
         return LocalRuntimeConfigurationParser.SerializeCanonical(config);
     }
@@ -354,38 +357,6 @@ public sealed class LocalModelOnboardingOrchestrator : ILocalModelOnboardingOrch
             CatalogParallelToolCalls: false,
             CatalogRouterContextSize: command.RouterContextSize,
             CatalogRouterCacheRamMib: command.RouterCacheRamMib);
-    }
-
-    private static CreateSettingsModelRequest BuildModelCreateRequest(
-        AddModelRequest request,
-        string? reasoningChoicesJson,
-        string? runtimeConfigJson)
-    {
-        return new CreateSettingsModelRequest(
-            ModelId: request.Catalog.ModelId.Trim(),
-            DisplayName: request.Catalog.DisplayName.Trim(),
-            Provider: request.Provider.Trim(),
-            Description: string.IsNullOrWhiteSpace(request.Catalog.Description)
-                ? null
-                : request.Catalog.Description.Trim(),
-            ReasoningChoicesJson: reasoningChoicesJson,
-            RuntimeConfigJson: runtimeConfigJson,
-            IsActive: request.Catalog.IsActive,
-            DisplayOrder: request.Catalog.DisplayOrder);
-    }
-
-    private async Task<string?> DeriveReasoningChoicesJsonAsync(string runtimeProfileId, CancellationToken cancellationToken)
-    {
-        var profile = await _runtimeProfileResolver.ResolveAsync(runtimeProfileId.Trim(), cancellationToken)
-            .ConfigureAwait(false);
-
-        var choices = profile.ThinkingControl.ChoiceActions.Keys
-            .Where(choice => !string.IsNullOrWhiteSpace(choice))
-            .Select(choice => choice.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        return choices.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(choices);
     }
 
     private void QueueBackgroundWork(

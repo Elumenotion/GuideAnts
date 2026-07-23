@@ -67,6 +67,101 @@ class RouterPresetTests(unittest.TestCase):
         self.assertEqual(entries["alias"].extras["ctx-size"], "8192")
         self.assertEqual(entries["alias"].extras["cache-ram"], "1024")
 
+    def test_replace_deletes_keys_omitted_from_explicit_preset(self) -> None:
+        """Catalog Save omits removed rows; those keys must leave the INI."""
+        with open(router.ROUTER_CONFIG_PATH, "w", encoding="utf-8") as handle:
+            handle.write(
+                "version = 1\n\n"
+                "[alias]\n"
+                "model = /m/a.gguf\n"
+                "mmproj = \n"
+                "ctx-size = 131072\n"
+                "n-gpu-layers = 999\n"
+                "no-mmap = true\n"
+                "spec-type = draft-mtp\n"
+            )
+        router.upsert_router_entry(
+            "alias",
+            "/m/a.gguf",
+            "",
+            preset={"ctx-size": "131072", "spec-type": "draft-mtp"},
+            preset_mode="replace",
+            trigger_reload=False,
+        )
+        entries = router.read_router_entries()
+        self.assertEqual(entries["alias"].extras, {"ctx-size": "131072", "spec-type": "draft-mtp"})
+        self.assertNotIn("n-gpu-layers", entries["alias"].extras)
+        self.assertNotIn("no-mmap", entries["alias"].extras)
+
+    def test_upsert_without_preset_preserves_existing_extras_for_qwen_alias(self) -> None:
+        alias = "qwen3.6-35b-a3b"
+        with open(router.ROUTER_CONFIG_PATH, "w", encoding="utf-8") as handle:
+            handle.write(
+                "version = 1\n\n"
+                f"[{alias}]\n"
+                "model = /m/a.gguf\n"
+                "mmproj = /m/mmproj.gguf\n"
+                "ctx-size = 4096\n"
+                "no-mmproj = \n"
+                "spec-type = draft-mtp\n"
+                "reasoning-budget = 4096\n"
+                "n-gpu-layers = 999\n"
+            )
+
+        router.upsert_router_entry(
+            alias,
+            "/m/a-updated.gguf",
+            "/m/mmproj-updated.gguf",
+            trigger_reload=False,
+        )
+
+        entries = router.read_router_entries()
+        self.assertEqual(entries[alias].model, "/m/a-updated.gguf")
+        self.assertEqual(entries[alias].mmproj, "/m/mmproj-updated.gguf")
+        self.assertEqual(
+            entries[alias].extras,
+            {
+                "ctx-size": "4096",
+                "no-mmproj": "",
+                "spec-type": "draft-mtp",
+                "reasoning-budget": "4096",
+                "n-gpu-layers": "999",
+            },
+        )
+        self.assertNotIn("image-min-tokens", entries[alias].extras)
+
+    def test_context_only_update_without_preset_preserves_unrelated_extras(self) -> None:
+        alias = "qwen3.6-35b-a3b"
+        with open(router.ROUTER_CONFIG_PATH, "w", encoding="utf-8") as handle:
+            handle.write(
+                "version = 1\n\n"
+                f"[{alias}]\n"
+                "model = /m/a.gguf\n"
+                "mmproj = /m/mmproj.gguf\n"
+                "ctx-size = 4096\n"
+                "no-mmproj = \n"
+                "spec-type = draft-mtp\n"
+                "reasoning-budget = 4096\n"
+                "n-gpu-layers = 999\n"
+            )
+
+        router.upsert_router_entry(
+            alias,
+            "/m/a.gguf",
+            "/m/mmproj.gguf",
+            context_size=131072,
+            update_context=True,
+            trigger_reload=False,
+        )
+
+        entries = router.read_router_entries()
+        self.assertEqual(entries[alias].extras["ctx-size"], "131072")
+        self.assertEqual(entries[alias].extras["no-mmproj"], "")
+        self.assertEqual(entries[alias].extras["spec-type"], "draft-mtp")
+        self.assertEqual(entries[alias].extras["reasoning-budget"], "4096")
+        self.assertEqual(entries[alias].extras["n-gpu-layers"], "999")
+        self.assertNotIn("image-min-tokens", entries[alias].extras)
+
     def test_merge_mode_clears_context_size_when_explicitly_null(self) -> None:
         with open(router.ROUTER_CONFIG_PATH, "w", encoding="utf-8") as handle:
             handle.write(
@@ -117,11 +212,15 @@ class RouterPresetTests(unittest.TestCase):
         with self.assertRaises(PresetValidationError):
             normalize_preset_map({"models-preset": "/models-local/router-models.ini"})
 
-    def test_accepts_parallel_in_alias_preset(self) -> None:
+    def test_allows_env_default_keys_on_alias_preset(self) -> None:
         from guideants_hf.preset_validation import normalize_preset_map
 
-        preset = normalize_preset_map({"parallel": "2", "ctx-size": "131072"})
+        preset = normalize_preset_map(
+            {"parallel": "2", "ctx-size": "131072", "n-gpu-layers": "999", "jinja": "true"},
+        )
         self.assertEqual(preset["parallel"], "2")
+        self.assertEqual(preset["n-gpu-layers"], "999")
+        self.assertEqual(preset["jinja"], "true")
 
     def test_fixture_preset_shape(self) -> None:
         fixture = json.loads((CONTRACTS_ROOT / "admin-router-entries-post-request.fixture.json").read_text(encoding="utf-8"))
@@ -135,7 +234,9 @@ class RouterPresetTests(unittest.TestCase):
             trigger_reload=False,
         )
         entries = router.read_router_entries()
-        self.assertEqual(entries[fixture["alias"]].extras, preset)
+        # Vision-token defaults may be added for applicable aliases; fixture keys must remain.
+        for key, value in preset.items():
+            self.assertEqual(entries[fixture["alias"]].extras[key], value)
 
     def test_reload_failure_surfaces_runtime_apply(self) -> None:
         with open(router.ROUTER_CONFIG_PATH, "w", encoding="utf-8") as handle:

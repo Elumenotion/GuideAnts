@@ -308,7 +308,6 @@ public sealed class LocalModelLifecycleTests
             QuantId = "q6_k_xl",
             QuantLabel = "Q6_K_XL",
             RouterModelId = "qwen-local",
-            RuntimeProfileId = "qwen3_6",
             TargetDirectory = "qwen-local",
             ModelArtifactsJson = InstallationArtifactRecords.SerializeFromPaths("qwen-local", ["model-q6.gguf"]),
             ProjectorArtifactsJson = "[]",

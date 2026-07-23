@@ -1,49 +1,31 @@
 # Example only — launcher writes docker-compose.rocm-runtime.generated.yml at runtime.
-
+#
 # Native Linux:
-
 #   devices: /dev/kfd + /dev/dri
-
-#   group_add: video + render
-
+#   group_add: host GIDs for video + render (resolved at generate time; not names —
+#   Docker looks up names inside the container image, which may lack "render")
+#
 # WSL ROCDXG (Windows / Docker Desktop):
-
 #   device: /dev/dxg
-
 #   binds: libdxcore.so, staged librocdxg.so (host ./volumes/rocm-wsl/lib)
-
 #   env: HSA_ENABLE_DXG_DETECTION=1
-
 #   security_opt: seccomp=unconfined
-
+#   (no group_add)
+#
 # Applies to guideants-ai and docling-serve when backend=rocm.
 
 services:
-
   guideants-ai:
-
     devices:
-
       - /dev/kfd
-
       - /dev/dri
-
     group_add:
-
-      - video
-
-      - render
-
+      - "44"
+      - "992"
   docling-serve:
-
     devices:
-
       - /dev/kfd
-
       - /dev/dri
-
     group_add:
-
-      - video
-
-      - render
+      - "44"
+      - "992"

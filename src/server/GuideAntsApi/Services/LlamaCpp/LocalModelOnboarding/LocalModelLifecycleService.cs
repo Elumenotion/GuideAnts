@@ -175,7 +175,7 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             ModelFiles: modelFiles,
             MmprojFiles: mmprojFiles,
             RouterModelId: installation.RouterModelId!,
-            RuntimeProfileId: installation.RuntimeProfileId!,
+            RuntimeProfileId: definition.Defaults.RuntimeProfileId,
             TargetDirectory: installation.TargetDirectory!,
             RouterPreset: routerPreset,
             ObsoleteRepositoryPaths: obsoletePaths,
@@ -239,6 +239,11 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
                 statusCode: 422);
         }
 
+        var catalog = await _adminClient.GetCatalogAsync(cancellationToken).ConfigureAwait(false);
+        var definition = string.IsNullOrWhiteSpace(installation.CatalogId)
+            ? null
+            : catalog.Models.FirstOrDefault(m => string.Equals(m.Id, installation.CatalogId, StringComparison.Ordinal));
+
         var preset = InstallationArtifactRecords.ParsePresetSnapshot(installation.RouterPresetSnapshotJson);
         var immutableInput = new RepairImmutableInput(
             ModelId: installation.ModelId,
@@ -247,7 +252,7 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
             ModelFiles: modelFiles,
             MmprojFiles: mmprojFiles,
             RouterModelId: installation.RouterModelId,
-            RuntimeProfileId: installation.RuntimeProfileId ?? string.Empty,
+            RuntimeProfileId: definition?.Defaults.RuntimeProfileId ?? string.Empty,
             TargetDirectory: installation.TargetDirectory,
             RouterPreset: preset);
 
@@ -287,7 +292,6 @@ public sealed class LocalModelLifecycleService : ILocalModelLifecycleService
         }
 
         CompareField(differences, blockers, "routerModelId", installation.RouterModelId, definition.Defaults.RouterModelId, verifiable: true);
-        CompareField(differences, blockers, "runtimeProfileId", installation.RuntimeProfileId, definition.Defaults.RuntimeProfileId, verifiable: true);
 
         if (string.IsNullOrWhiteSpace(installation.Repository))
         {

@@ -339,17 +339,16 @@ export function parseCanonicalLocalRuntimeJson(localRuntimeJson?: string): Canon
 
     const routerModelId = getCaseInsensitive(parsed, 'routerModelId');
     const runtimeProfileId = getCaseInsensitive(parsed, 'runtimeProfileId');
-    if (
-      typeof routerModelId !== 'string' ||
-      typeof runtimeProfileId !== 'string'
-    ) {
+    if (typeof routerModelId !== 'string') {
       return null;
     }
 
     const normalized: CanonicalLocalRuntimeConfig = {
       routerModelId,
-      runtimeProfileId,
     };
+    if (typeof runtimeProfileId === 'string') {
+      normalized.runtimeProfileId = runtimeProfileId;
+    }
 
     const loadParams = getCaseInsensitive(parsed, 'loadParams');
     if (loadParams && typeof loadParams === 'object' && !Array.isArray(loadParams)) {
@@ -458,7 +457,19 @@ function deriveReasoningChoicesJsonFromProfile(profileThinkingControlJson?: stri
 
 export function buildCatalogEditRequest(
   state: CatalogEditState,
-  options?: { runtimeConfigJson?: string; profileThinkingControlJson?: string }
+  options?: {
+    runtimeConfigJson?: string;
+    profileThinkingControlJson?: string;
+    preserveModelBehavior?: Pick<
+      SettingsModelDto,
+      | 'combineSystemAndDeveloperMessages'
+      | 'thoughtBlockPattern'
+      | 'samplingParametersJson'
+      | 'thinkingControlJson'
+      | 'requestFieldsWhenToolsPresentJson'
+      | 'reasoningChoicesJson'
+    >;
+  },
 ): UpdateSettingsModelRequest {
   const modelId = state.modelId.trim();
   const provider = state.provider.trim();
@@ -473,7 +484,10 @@ export function buildCatalogEditRequest(
     throw new Error('Display name is required.');
   }
 
-  const reasoningChoicesJson = deriveReasoningChoicesJsonFromProfile(options?.profileThinkingControlJson);
+  const reasoningChoicesJson =
+    provider === 'llama-cpp'
+      ? options?.preserveModelBehavior?.reasoningChoicesJson
+      : deriveReasoningChoicesJsonFromProfile(options?.profileThinkingControlJson);
 
   let runtimeConfigJson = options?.runtimeConfigJson;
   if (provider !== 'llama-cpp' && state.runtimeProfileId.trim()) {
@@ -487,6 +501,13 @@ export function buildCatalogEditRequest(
     description: normalizeOptionalString(state.description),
     reasoningChoicesJson,
     runtimeConfigJson,
+    combineSystemAndDeveloperMessages:
+      options?.preserveModelBehavior?.combineSystemAndDeveloperMessages ?? true,
+    thoughtBlockPattern: options?.preserveModelBehavior?.thoughtBlockPattern,
+    samplingParametersJson: options?.preserveModelBehavior?.samplingParametersJson ?? '{}',
+    thinkingControlJson: options?.preserveModelBehavior?.thinkingControlJson ?? '{}',
+    requestFieldsWhenToolsPresentJson:
+      options?.preserveModelBehavior?.requestFieldsWhenToolsPresentJson ?? '{}',
     isActive: state.isActive,
     displayOrder: normalizeDisplayOrder(state.displayOrder),
   };

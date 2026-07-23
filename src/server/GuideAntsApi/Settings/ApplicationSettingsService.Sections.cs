@@ -5,6 +5,7 @@ using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Guides;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
+using GuideAntsApi.Services.LlamaCpp;
 
 namespace GuideAntsApi.Settings;
 
@@ -456,6 +457,13 @@ public sealed partial class ApplicationSettingsService
         if (modelChoices.Count > 0)
         {
             return modelChoices;
+        }
+
+        if (string.Equals(model.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
+            && ModelChatBehavior.HasConfiguredBehavior(model))
+        {
+            var profile = ModelChatBehavior.ToRuntimeProfileData(model);
+            return profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? [];
         }
 
         if (string.IsNullOrEmpty(model.RuntimeConfigJson))

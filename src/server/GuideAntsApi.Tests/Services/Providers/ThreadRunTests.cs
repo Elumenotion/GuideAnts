@@ -1,10 +1,13 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AntRunner.Chat;
 using AntRunner.Chat.Abstractions;
 using AntRunner.Chat.LlamaCpp;
 using AntRunner.ToolCalling;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GuideAntsApi.Tests.Services.Providers;
 
@@ -306,6 +309,152 @@ public sealed class ThreadRunTests
     {
         Invoke<string>("ExtractSandboxInitFilename", "sandbox://init.py").Should().Be("init.py");
         Invoke<string>("ExtractSandboxInitFilename", "sandbox://folder/start.py").Should().Be("start.py");
+    }
+
+    [TestMethod]
+    public void BuildOutboundChatRequestLogPayload_IncludesMessagesToolsAndSampling()
+    {
+        var request = new ChatCompletionRequest(
+            messages: [new ChatMessage(ChatRole.User, "visibility-probe-xyz")],
+            tools:
+            [
+                new ChatToolDefinition(
+                    new ChatFunctionDefinition(
+                        "lookup",
+                        "Lookup something",
+                        JsonNode.Parse("""{"type":"object"}""")))
+            ],
+            model: "test-model",
+            reasoningEffort: "medium",
+            samplingParameters: new Dictionary<string, double> { ["temperature"] = 0.2 },
+            toolChoice: "none");
+
+        var payload = Invoke<string>("BuildOutboundChatRequestLogPayload", request);
+
+        payload.Should().Contain("visibility-probe-xyz");
+        payload.Should().Contain("test-model");
+        payload.Should().Contain("lookup");
+        payload.Should().Contain("sampling_parameters");
+        payload.Should().Contain("temperature");
+        payload.Should().Contain("tool_choice");
+    }
+
+    private static readonly object ChatDiagnosticsGate = new();
+
+    [TestMethod]
+    public void LogOutboundChatRequest_EmitsFullRequest_WhenDebugEnabled()
+    {
+        lock (ChatDiagnosticsGate)
+        {
+            var factory = new CapturingLoggerFactory(LogLevel.Debug);
+            ChatDiagnostics.Initialize(factory);
+
+            try
+            {
+                var request = new ChatCompletionRequest(
+                    messages: [new ChatMessage(ChatRole.User, "visibility-probe-debug-xyz")],
+                    model: "test-model");
+
+                Invoke<object?>("LogOutboundChatRequest", 3, request);
+
+                var debug = factory.Entries
+                    .Where(e => e.Category == ThreadRun.DiagnosticsCategory && e.Level == LogLevel.Debug)
+                    .Select(e => e.Message)
+                    .ToList();
+                debug.Should().ContainSingle(m =>
+                    m.Contains("ThreadRun outbound chat request.", StringComparison.Ordinal)
+                    && m.Contains("Round=3", StringComparison.Ordinal)
+                    && m.Contains("visibility-probe-debug-xyz", StringComparison.Ordinal));
+            }
+            finally
+            {
+                ChatDiagnostics.Initialize(NullLoggerFactory.Instance);
+            }
+        }
+    }
+
+    [TestMethod]
+    public void LogOutboundChatRequest_IsSilent_WhenOnlyInformationEnabled()
+    {
+        lock (ChatDiagnosticsGate)
+        {
+            var factory = new CapturingLoggerFactory(LogLevel.Information);
+            ChatDiagnostics.Initialize(factory);
+
+            try
+            {
+                var request = new ChatCompletionRequest(
+                    messages: [new ChatMessage(ChatRole.User, "visibility-probe-info-xyz")],
+                    model: "test-model");
+
+                Invoke<object?>("LogOutboundChatRequest", 1, request);
+
+                factory.Entries.Should().BeEmpty();
+            }
+            finally
+            {
+                ChatDiagnostics.Initialize(NullLoggerFactory.Instance);
+            }
+        }
+    }
+
+    private sealed class CapturingLoggerFactory : ILoggerFactory
+    {
+        private readonly LogLevel _minimumLevel;
+
+        public CapturingLoggerFactory(LogLevel minimumLevel)
+        {
+            _minimumLevel = minimumLevel;
+        }
+
+        public List<(string Category, LogLevel Level, string Message)> Entries { get; } = [];
+
+        public void AddProvider(ILoggerProvider provider)
+        {
+        }
+
+        public ILogger CreateLogger(string categoryName) =>
+            new CapturingLogger(categoryName, _minimumLevel, Entries);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class CapturingLogger : ILogger
+        {
+            private readonly string _category;
+            private readonly LogLevel _minimumLevel;
+            private readonly List<(string Category, LogLevel Level, string Message)> _entries;
+
+            public CapturingLogger(
+                string category,
+                LogLevel minimumLevel,
+                List<(string Category, LogLevel Level, string Message)> entries)
+            {
+                _category = category;
+                _minimumLevel = minimumLevel;
+                _entries = entries;
+            }
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= _minimumLevel;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                if (!IsEnabled(logLevel))
+                {
+                    return;
+                }
+
+                _entries.Add((_category, logLevel, formatter(state, exception)));
+            }
+        }
     }
 
     [TestMethod]

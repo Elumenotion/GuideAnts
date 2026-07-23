@@ -17,8 +17,21 @@ namespace AntRunner.Chat
     /// </summary>
     public static class ThreadRun
     {
+        /// <summary>
+        /// Must stay under the <c>AntRunner.Chat</c> prefix so Settings → Telemetry
+        /// (<c>AntRunnerChat</c>) controls these logs.
+        /// </summary>
+        public const string DiagnosticsCategory = "AntRunner.Chat.ThreadRun";
+
         static readonly HttpClient _httpClient = HttpClientUtility.Get();
-        private static ILogger Logger => ChatDiagnostics.CreateLogger(nameof(ThreadRun));
+        private static ILogger Logger => ChatDiagnostics.CreateLogger(DiagnosticsCategory);
+
+        private static readonly JsonSerializerOptions OutboundRequestLogJsonOptions = new()
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            WriteIndented = false,
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+        };
 
         private static readonly ConcurrentDictionary<string, Dictionary<string, ToolCaller>> RequestBuilderCache = new();
 
@@ -579,6 +592,7 @@ namespace AntRunner.Chat
                         reasoningEffort: reasoningEffortParam,
                         samplingParameters: samplingParams,
                         toolChoice: toolChoice);
+                    LogOutboundChatRequest(roundIndex, chatRequest);
                     traceCollector?.CaptureRoundRequest(
                         roundIndex,
                         options.DeploymentId,
@@ -900,6 +914,44 @@ namespace AntRunner.Chat
 
         private static string ResolveToolTraceSource(string toolName) =>
             toolName is "skills.list" or "skills.read" ? "skills" : "guide";
+
+        /// <summary>
+        /// Emits the full provider-bound chat request (messages, tools, sampling) when
+        /// Telemetry raises <c>AntRunner.Chat</c> to Debug/Trace (Chat providers → Investigating/Verbose).
+        /// </summary>
+        private static void LogOutboundChatRequest(int roundIndex, ChatCompletionRequest chatRequest)
+        {
+            if (!Logger.IsEnabled(LogLevel.Debug))
+            {
+                return;
+            }
+
+            Logger.LogDebug(
+                "ThreadRun outbound chat request. Round={RoundIndex}. Request={RequestJson}",
+                roundIndex,
+                LogValueSanitizer.Sanitize(BuildOutboundChatRequestLogPayload(chatRequest)));
+        }
+
+        internal static string BuildOutboundChatRequestLogPayload(ChatCompletionRequest chatRequest)
+        {
+            ArgumentNullException.ThrowIfNull(chatRequest);
+
+            var root = JsonSerializer.SerializeToNode(chatRequest, OutboundRequestLogJsonOptions) as JsonObject
+                ?? new JsonObject();
+
+            if (chatRequest.SamplingParameters is { Count: > 0 })
+            {
+                var sampling = new JsonObject();
+                foreach (var (key, value) in chatRequest.SamplingParameters)
+                {
+                    sampling[key] = value;
+                }
+
+                root["sampling_parameters"] = sampling;
+            }
+
+            return root.ToJsonString(OutboundRequestLogJsonOptions);
+        }
 
         private static IReadOnlyList<ThreadRunTraceMessageSnapshot> BuildTraceMessageSnapshots(IEnumerable<ChatMessage> messages)
         {

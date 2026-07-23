@@ -1,10 +1,9 @@
 # Curated Local Llama — Phase 8A Operator Guide
 
-> **Per-model server args:** In router mode (`--models-preset`), every llama-server switch
-> for a loaded model (`parallel`, `threads`, `jinja`, `ctx-size`, `flash-attn`, …) belongs
-> in that model's alias preset (`router-models.ini`). Edit via Settings → Models & Runtime →
-> Catalog → llama-cpp row → **Router preset**. Compose `GA_LLAMA_*` values apply only in
-> standalone mode (no router INI); they must not clobber per-alias INI in router mode.
+> **Per-model server args:** Every llama-server switch for a loaded model (`parallel`, `threads`,
+> `jinja`, `ctx-size`, `flash-attn`, …) belongs in that model's alias preset (`router-models.ini`).
+> Edit via Settings → Models & Runtime → Catalog → llama-cpp row → **Router preset**. Compose
+> `GA_LLAMA_*` values are env defaults filled into runtime INI when the alias has no override.
 
 ## Authoritative stores
 

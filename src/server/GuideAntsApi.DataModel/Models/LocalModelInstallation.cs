@@ -43,9 +43,6 @@ public class LocalModelInstallation
     [StringLength(128)]
     public string? RouterModelId { get; set; }
 
-    [StringLength(64)]
-    public string? RuntimeProfileId { get; set; }
-
     [StringLength(512)]
     public string? TargetDirectory { get; set; }
 

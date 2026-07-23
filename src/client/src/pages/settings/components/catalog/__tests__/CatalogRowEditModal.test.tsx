@@ -57,6 +57,10 @@ const openAiModel: SettingsModelDto = {
   provider: 'openai-chat',
   displayOrder: 1,
   isActive: true,
+  combineSystemAndDeveloperMessages: true,
+  samplingParametersJson: '{}',
+  thinkingControlJson: '{}',
+  requestFieldsWhenToolsPresentJson: '{}',
   created: '2026-01-01T00:00:00Z',
   updated: '2026-01-02T00:00:00Z',
 };
@@ -68,7 +72,11 @@ const llamaModel: SettingsModelDto = {
   provider: 'llama-cpp',
   displayOrder: 2,
   isActive: true,
-  runtimeConfigJson: JSON.stringify({ runtimeProfileId: 'qwen3_6' }),
+  runtimeConfigJson: JSON.stringify({ routerModelId: 'qwen' }),
+  combineSystemAndDeveloperMessages: true,
+  samplingParametersJson: '{}',
+  thinkingControlJson: '{"defaultChoice":"none","choiceActions":{"none":[]}}',
+  requestFieldsWhenToolsPresentJson: '{}',
   created: '2026-01-01T00:00:00Z',
   updated: '2026-01-02T00:00:00Z',
 };

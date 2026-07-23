@@ -15,16 +15,41 @@ import { AdoptInstallationDialog } from './AdoptInstallationDialog';
 
 export interface ModelChatBehaviorPanelProps {
   detail: LlamaInstallationDetailDto;
-  sharedProfileModelCount?: number;
   onChanged?: () => Promise<void>;
 }
 
-export function ModelChatBehaviorPanel({
-  detail,
-  sharedProfileModelCount = 1,
-  onChanged,
-}: ModelChatBehaviorPanelProps) {
-  const [profileSummary, setProfileSummary] = useState<{ displayName: string; profileId: string } | null>(null);
+function createProfileFormFromModel(detail: LlamaInstallationDetailDto): ProfileFormState {
+  const model = detail.catalogModel;
+  return createProfileFormFromContractShape({
+    profileId: model.modelId,
+    displayName: model.displayName,
+    description: model.description ?? '',
+    combineSystemAndDeveloperMessages: model.combineSystemAndDeveloperMessages,
+    thoughtBlockPattern: model.thoughtBlockPattern ?? '',
+    samplingParametersJson: model.samplingParametersJson,
+    thinkingControlJson: model.thinkingControlJson,
+    requestFieldsWhenToolsPresentJson: model.requestFieldsWhenToolsPresentJson,
+    providers: ['llama-cpp'],
+  });
+}
+
+function deriveReasoningChoicesJson(thinkingControlJson: string): string | undefined {
+  try {
+    const parsed = JSON.parse(thinkingControlJson) as { choiceActions?: Record<string, unknown> };
+    const choices = Object.keys(parsed.choiceActions ?? {})
+      .map((choice) => choice.trim())
+      .filter((choice) => choice.length > 0);
+    return choices.length === 0 ? undefined : JSON.stringify(choices);
+  } catch {
+    return undefined;
+  }
+}
+
+function buildLocalRuntimeConfigJson(detail: LlamaInstallationDetailDto): string {
+  return JSON.stringify({ routerModelId: detail.routerModelId });
+}
+
+export function ModelChatBehaviorPanel({ detail, onChanged }: ModelChatBehaviorPanelProps) {
   const [profileForm, setProfileForm] = useState<ProfileFormState | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -33,7 +58,7 @@ export function ModelChatBehaviorPanel({
   const [documentError, setDocumentError] = useState<string | null>(null);
   const [repairOpen, setRepairOpen] = useState(false);
   const [adoptOpen, setAdoptOpen] = useState(false);
-  const [sharedProfileSaveConfirmOpen, setSharedProfileSaveConfirmOpen] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
 
   const isCurated = !!detail.catalogId;
 
@@ -41,17 +66,14 @@ export function ModelChatBehaviorPanel({
     setProfileLoading(true);
     setProfileError(null);
     try {
-      const profile = await api.settings.getRuntimeProfile(detail.runtimeProfileId);
-      setProfileSummary({ displayName: profile.displayName, profileId: profile.profileId });
-      setProfileForm(createProfileFormFromContractShape(profile));
+      setProfileForm(createProfileFormFromModel(detail));
     } catch (error) {
-      setProfileError(getErrorMessage(error, 'Failed to load runtime profile.'));
-      setProfileSummary({ displayName: detail.runtimeProfileId, profileId: detail.runtimeProfileId });
+      setProfileError(getErrorMessage(error, 'Failed to load model chat behavior.'));
       setProfileForm(null);
     } finally {
       setProfileLoading(false);
     }
-  }, [detail.runtimeProfileId]);
+  }, [detail]);
 
   useEffect(() => {
     void loadProfile();
@@ -71,11 +93,25 @@ export function ModelChatBehaviorPanel({
     setDocumentMessage(null);
     try {
       const payload = buildProfileUpdateRequest(profileForm);
-      await api.settings.updateRuntimeProfile(detail.runtimeProfileId, payload);
-      setDocumentMessage('Profile document saved.');
+      await api.settings.updateModel(detail.modelId, {
+        modelId: detail.modelId,
+        displayName: detail.catalogModel.displayName,
+        provider: detail.catalogModel.provider,
+        description: detail.catalogModel.description,
+        reasoningChoicesJson: deriveReasoningChoicesJson(payload.thinkingControlJson),
+        runtimeConfigJson: buildLocalRuntimeConfigJson(detail),
+        combineSystemAndDeveloperMessages: payload.combineSystemAndDeveloperMessages,
+        thoughtBlockPattern: payload.thoughtBlockPattern ?? '',
+        samplingParametersJson: payload.samplingParametersJson,
+        thinkingControlJson: payload.thinkingControlJson,
+        requestFieldsWhenToolsPresentJson: payload.requestFieldsWhenToolsPresentJson ?? '{}',
+        isActive: detail.catalogModel.isActive,
+        displayOrder: detail.catalogModel.displayOrder,
+      });
+      setDocumentMessage('Model chat behavior saved.');
       await onChanged?.();
     } catch (error) {
-      setDocumentError(getErrorMessage(error, 'Failed to save profile document.'));
+      setDocumentError(getErrorMessage(error, 'Failed to save model chat behavior.'));
     } finally {
       setDocumentSaving(false);
     }
@@ -85,11 +121,7 @@ export function ModelChatBehaviorPanel({
     if (!profileForm) {
       return;
     }
-    if (sharedProfileModelCount > 1) {
-      setSharedProfileSaveConfirmOpen(true);
-      return;
-    }
-    void saveProfileDocument();
+    setSaveConfirmOpen(true);
   };
 
   const handleLifecycleCompleted = async () => {
@@ -102,16 +134,16 @@ export function ModelChatBehaviorPanel({
       <div>
         <h3 className="text-sm font-semibold text-gray-900">Chat behavior</h3>
         <p className="mt-1 text-xs text-gray-600">
-          Recipe-bound runtime profile for this model. Re-apply curator defaults with Repair or Adopt when the manifest
-          changes.
+          Model-owned chat behavior for this installation. Re-apply curator defaults with Repair or Adopt when the
+          manifest changes.
         </p>
       </div>
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-gray-700">
-        <dt className="text-gray-500">Runtime profile</dt>
-        <dd className="font-mono">{detail.runtimeProfileId}</dd>
+        <dt className="text-gray-500">Model</dt>
+        <dd className="font-mono">{detail.modelId}</dd>
         <dt className="text-gray-500">Display name</dt>
-        <dd>{profileLoading ? 'Loading…' : profileSummary?.displayName ?? '—'}</dd>
+        <dd>{profileLoading ? 'Loading…' : profileForm?.displayName ?? detail.catalogModel.displayName}</dd>
       </dl>
 
       {profileError ? <p className="text-sm text-amber-800">{profileError}</p> : null}
@@ -128,13 +160,8 @@ export function ModelChatBehaviorPanel({
       </div>
 
       <details className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
-        <summary className="cursor-pointer text-sm font-medium text-gray-800">Edit profile document (advanced)</summary>
+        <summary className="cursor-pointer text-sm font-medium text-gray-800">Edit chat behavior (advanced)</summary>
         <div className="mt-3 space-y-3">
-          {sharedProfileModelCount > 1 ? (
-            <p className="text-xs text-amber-800">
-              This updates chat behavior for all models using profile {detail.runtimeProfileId}.
-            </p>
-          ) : null}
           {profileForm ? (
             <RuntimeProfileEditor
               mode="inline"
@@ -143,10 +170,10 @@ export function ModelChatBehaviorPanel({
               disableIdentityFields
               onSubmit={requestSaveProfileDocument}
               submitting={documentSaving}
-              submitLabel="Save profile document"
+              submitLabel="Save model behavior"
             />
           ) : (
-            <p className="text-sm text-gray-600">Profile document unavailable.</p>
+            <p className="text-sm text-gray-600">Chat behavior unavailable.</p>
           )}
           {documentMessage ? <p className="text-sm text-emerald-800">{documentMessage}</p> : null}
           {documentError ? <p className="text-sm text-red-700">{documentError}</p> : null}
@@ -172,15 +199,15 @@ export function ModelChatBehaviorPanel({
         }}
       />
       <ConfirmationDialog
-        isOpen={sharedProfileSaveConfirmOpen}
-        onClose={() => setSharedProfileSaveConfirmOpen(false)}
+        isOpen={saveConfirmOpen}
+        onClose={() => setSaveConfirmOpen(false)}
         onConfirm={() => {
-          setSharedProfileSaveConfirmOpen(false);
+          setSaveConfirmOpen(false);
           void saveProfileDocument();
         }}
-        title="Update shared profile"
-        message={`This updates chat behavior for all models using profile ${detail.runtimeProfileId}.`}
-        confirmText="Save profile document"
+        title="Save model behavior"
+        message="Save chat behavior on this model row."
+        confirmText="Save model behavior"
         confirmButtonClass="bg-blue-600 hover:bg-blue-700 text-white"
         isLoading={documentSaving}
       />

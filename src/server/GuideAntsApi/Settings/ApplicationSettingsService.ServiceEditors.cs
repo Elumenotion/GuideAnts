@@ -4,7 +4,6 @@ using System.Text.Json.Nodes;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Options;
-using GuideAntsApi.Services.Bootstrap;
 using GuideAntsApi.Services.Routing;
 
 namespace GuideAntsApi.Settings;
@@ -626,11 +625,13 @@ public sealed partial class ApplicationSettingsService
         }
 
         var modeId = BuildExplicitServiceModeId(provider, modes);
-        var initialModelId = ResolveInitialServiceModeModelId(contract.ServiceId, provider.ProviderId);
+        // ModelId stays null until the operator explicitly selects a model/bundle.
+        // Seeding catalog defaults here invents configuration and forces warmup to
+        // load services that were never configured.
         modes.Add(new ServiceMode(
             ModeId: modeId,
             ProviderSection: provider.ProviderSectionKey,
-            ModelId: initialModelId,
+            ModelId: null,
             RequestPresetJson: null,
             Enabled: false,
             IsDefault: false));
@@ -704,9 +705,6 @@ public sealed partial class ApplicationSettingsService
             RoutedServiceNames.ImageGeneration => $"{LocalServiceHostsOptions.SectionName}:ImageGenerationBaseUrl",
             _ => null,
         };
-
-    private static string? ResolveInitialServiceModeModelId(string serviceId, string providerId) =>
-        LocalAuxiliaryCatalogDefaults.TryGetDefaultCatalogModelId(serviceId, providerId);
 
     private static string BuildExplicitServiceModeId(
         ProviderContract provider,

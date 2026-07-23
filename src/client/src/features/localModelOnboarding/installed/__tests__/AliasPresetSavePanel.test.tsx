@@ -69,11 +69,48 @@ describe('AliasPresetSavePanel', () => {
         'Qwen3.5-9B-GGUF',
         expect.objectContaining({
           alias: 'Qwen3.5-9B-GGUF',
-          presetMode: 'merge',
+          presetMode: 'replace',
           contextSize: 65536,
           preset: expect.objectContaining({ 'ctx-size': '65536' }),
         }),
       );
+    });
+  });
+
+  it('saves removed preset keys with replace so they do not survive reload', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.settings.putLlamaRouterEntry).mockResolvedValue(undefined as never);
+    const panelRef = createRef<AliasPresetSavePanelHandle>();
+
+    render(
+      <AliasPresetSavePanel
+        ref={panelRef}
+        alias="Qwen3.6-27B-MTP-GGUF"
+        routerEntry={mtpRouterEntry}
+        fallbackPreset={{}}
+      />,
+    );
+
+    const keyInputs = screen.getAllByPlaceholderText('ctx-size');
+    const specTypeIndex = keyInputs.findIndex(
+      (input) => (input as HTMLInputElement).value === 'spec-type',
+    );
+    expect(specTypeIndex).toBeGreaterThanOrEqual(0);
+    await user.click(screen.getAllByRole('button', { name: 'Remove' })[specTypeIndex]!);
+    expect(screen.queryByDisplayValue('spec-type')).not.toBeInTheDocument();
+
+    await panelRef.current?.saveRouterPreset();
+
+    await waitFor(() => {
+      expect(api.settings.putLlamaRouterEntry).toHaveBeenCalledTimes(1);
+    });
+
+    const [, request] = vi.mocked(api.settings.putLlamaRouterEntry).mock.calls[0]!;
+    expect(request.presetMode).toBe('replace');
+    expect(request.preset).not.toHaveProperty('spec-type');
+    expect(request.preset).toMatchObject({
+      'image-min-tokens': '1024',
+      'spec-draft-n-max': '2',
     });
   });
 
@@ -120,12 +157,64 @@ describe('AliasPresetSavePanel', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Add preset key' }));
-    const newKeyInput = screen.getAllByPlaceholderText('ctx-size').at(-1)!;
-    await user.click(newKeyInput);
-    await user.type(newKeyInput, 'reasoning');
+    const getNewKeyInput = () => screen.getAllByPlaceholderText('ctx-size').at(-1)!;
 
-    expect(newKeyInput).toHaveValue('reasoning');
-    expect(newKeyInput).toHaveFocus();
+    await user.click(getNewKeyInput());
+    let typed = '';
+    for (const char of 'reasoning') {
+      await user.keyboard(char);
+      typed += char;
+      expect(getNewKeyInput()).toHaveFocus();
+      expect(getNewKeyInput()).toHaveValue(typed);
+    }
+
+    expect(getNewKeyInput()).toHaveValue('reasoning');
+    expect(getNewKeyInput()).toHaveFocus();
+  });
+
+  it('keeps focus while editing an existing preset key', async () => {
+    const user = userEvent.setup();
+    render(
+      <AliasPresetSavePanel
+        alias="Qwen3.6-27B-MTP-GGUF"
+        routerEntry={mtpRouterEntry}
+        fallbackPreset={{}}
+      />,
+    );
+
+    const specTypeKeyInput = screen.getAllByPlaceholderText('ctx-size')[2]!;
+    await user.click(specTypeKeyInput);
+    await user.keyboard('{Control>}a{/Control}{/Control}');
+    await user.keyboard('reasoning-budget');
+
+    expect(specTypeKeyInput).toHaveValue('reasoning-budget');
+    expect(specTypeKeyInput).toHaveFocus();
+  });
+
+  it('does not reset preset row edits when routerEntry reference changes with same content', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <AliasPresetSavePanel
+        alias="Qwen3.6-27B-MTP-GGUF"
+        routerEntry={mtpRouterEntry}
+        fallbackPreset={{}}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add preset key' }));
+    const newKeyInput = () => screen.getAllByPlaceholderText('ctx-size').at(-1)!;
+    await user.click(newKeyInput());
+    await user.type(newKeyInput(), 'reasoning');
+
+    rerender(
+      <AliasPresetSavePanel
+        alias="Qwen3.6-27B-MTP-GGUF"
+        routerEntry={{ ...mtpRouterEntry, preset: { ...mtpRouterEntry.preset } }}
+        fallbackPreset={{}}
+      />,
+    );
+
+    expect(newKeyInput()).toHaveValue('reasoning');
   });
 
   it('adds a new preset key row when Add preset key is clicked', async () => {

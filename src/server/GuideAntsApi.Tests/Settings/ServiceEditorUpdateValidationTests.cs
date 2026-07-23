@@ -396,7 +396,7 @@ public sealed class ServiceEditorUpdateValidationTests
     }
 
     [TestMethod]
-    public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForLocalSpeechTranscription()
+    public async Task EnsureServiceModeExistsAsync_DoesNotInventModelId_ForLocalSpeechTranscription()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
@@ -410,11 +410,13 @@ public sealed class ServiceEditorUpdateValidationTests
         var modes = await service.GetServiceModesAsync("SpeechTranscription", CancellationToken.None);
         modes.Should().Contain(mode =>
             string.Equals(mode.ProviderSection, "LocalServiceHosts:SpeechTranscriptionBaseUrl", StringComparison.Ordinal)
-            && string.Equals(mode.ModelId, "qwen3_asr_0_6b", StringComparison.Ordinal));
+            && mode.ModelId == null
+            && !mode.Enabled
+            && !mode.IsDefault);
     }
 
     [TestMethod]
-    public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForLocalSpeechSynthesis()
+    public async Task EnsureServiceModeExistsAsync_DoesNotInventModelId_ForLocalSpeechSynthesis()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
@@ -428,11 +430,13 @@ public sealed class ServiceEditorUpdateValidationTests
         var modes = await service.GetServiceModesAsync("SpeechSynthesis", CancellationToken.None);
         modes.Should().Contain(mode =>
             string.Equals(mode.ProviderSection, "LocalServiceHosts:SpeechSynthesisBaseUrl", StringComparison.Ordinal)
-            && string.Equals(mode.ModelId, "chatterbox", StringComparison.Ordinal));
+            && mode.ModelId == null
+            && !mode.Enabled
+            && !mode.IsDefault);
     }
 
     [TestMethod]
-    public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForHuggingFaceSpeechSynthesis()
+    public async Task EnsureServiceModeExistsAsync_DoesNotInventModelId_ForHuggingFaceSpeechSynthesis()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
@@ -446,11 +450,13 @@ public sealed class ServiceEditorUpdateValidationTests
         var modes = await service.GetServiceModesAsync("SpeechSynthesis", CancellationToken.None);
         modes.Should().Contain(mode =>
             string.Equals(mode.ProviderSection, "HuggingFace", StringComparison.Ordinal)
-            && string.Equals(mode.ModelId, "ResembleAI/chatterbox", StringComparison.Ordinal));
+            && mode.ModelId == null
+            && !mode.Enabled
+            && !mode.IsDefault);
     }
 
     [TestMethod]
-    public async Task EnsureServiceModeExistsAsync_SetsDefaultModel_ForLocalImageGeneration()
+    public async Task EnsureServiceModeExistsAsync_DoesNotInventModelId_ForLocalImageGeneration()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
@@ -464,7 +470,9 @@ public sealed class ServiceEditorUpdateValidationTests
         var modes = await service.GetServiceModesAsync("ImageGeneration", CancellationToken.None);
         modes.Should().Contain(mode =>
             string.Equals(mode.ProviderSection, "LocalServiceHosts:ImageGenerationBaseUrl", StringComparison.Ordinal)
-            && string.Equals(mode.ModelId, "flux2-klein-4b", StringComparison.Ordinal));
+            && mode.ModelId == null
+            && !mode.Enabled
+            && !mode.IsDefault);
     }
 
     [TestMethod]

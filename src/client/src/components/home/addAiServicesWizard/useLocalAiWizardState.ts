@@ -144,9 +144,27 @@ function buildLocalAiOptionalServicesForm(snapshot: WizardLoadSnapshot): LocalAi
   };
 }
 
-export type LocalAiInstallFormData = Omit<
+export type LocalAiInstallFormData = Pick<
   LocalAiModelDraft,
-  'localId' | 'persisted' | 'asyncOperationId' | 'asyncStatus' | 'asyncProgress' | 'asyncLogLine' | 'asyncError'
+  | 'installSource'
+  | 'routerModelId'
+  | 'runtimeProfileId'
+  | 'existingAliasRouterModelId'
+  | 'catalogModelId'
+  | 'catalogDisplayName'
+  | 'setAsGlobalDefault'
+> & Partial<
+  Pick<
+    LocalAiModelDraft,
+    | 'huggingFaceRepository'
+    | 'huggingFaceResolvedRevision'
+    | 'huggingFaceArtifactGroupId'
+    | 'huggingFaceModelFiles'
+    | 'huggingFaceMmprojFiles'
+    | 'huggingFaceTargetDirectory'
+    | 'huggingFaceRouterPresetRows'
+    | 'huggingFacePresetMode'
+  >
 >;
 
 export interface UseLocalAiWizardStateResult {
@@ -358,7 +376,21 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
 
     const localId = `draft-local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const draft: LocalAiModelDraft = {
-      ...formData,
+      installSource: formData.installSource,
+      routerModelId: formData.routerModelId,
+      runtimeProfileId: formData.runtimeProfileId,
+      huggingFaceRepository: formData.huggingFaceRepository ?? '',
+      huggingFaceResolvedRevision: formData.huggingFaceResolvedRevision ?? '',
+      huggingFaceArtifactGroupId: formData.huggingFaceArtifactGroupId ?? '',
+      huggingFaceModelFiles: formData.huggingFaceModelFiles ?? [],
+      huggingFaceMmprojFiles: formData.huggingFaceMmprojFiles ?? [],
+      huggingFaceTargetDirectory: formData.huggingFaceTargetDirectory ?? '',
+      huggingFaceRouterPresetRows: formData.huggingFaceRouterPresetRows ?? [],
+      huggingFacePresetMode: formData.huggingFacePresetMode ?? 'replace',
+      existingAliasRouterModelId: formData.existingAliasRouterModelId,
+      catalogModelId: formData.catalogModelId,
+      catalogDisplayName: formData.catalogDisplayName,
+      setAsGlobalDefault: formData.setAsGlobalDefault,
       localId,
       persisted: false,
       asyncOperationId: null,
