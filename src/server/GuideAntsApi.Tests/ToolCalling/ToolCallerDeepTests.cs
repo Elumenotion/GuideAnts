@@ -540,6 +540,87 @@ public sealed class ToolCallerDeepTests
     }
 
     [TestMethod]
+    public async Task ExecuteLocalFunctionAsync_IgnoresRuntimeInjectedCancellationTokenParameter()
+    {
+        var caller = new ToolCaller(
+            baseUrl: "tool://localhost",
+            path: $"{typeof(DeepTools).FullName}.WithCancellation",
+            method: "POST",
+            operation: "withCancellation",
+            methodSchema: ParseElement("""
+                {
+                  "requestBody": {
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "type": "object",
+                          "properties": {
+                            "value": { "type": "string" },
+                            "cancellationToken": { "type": "string" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                """),
+            contentType: "application/json",
+            authHeaders: [],
+            authQueryParams: [])
+        {
+            Params = new Dictionary<string, object>
+            {
+                ["value"] = "ok",
+                ["cancellationToken"] = ""
+            }
+        };
+
+        (await caller.ExecuteLocalFunctionAsync()).Should().Be("ok");
+    }
+
+    [TestMethod]
+    public void ValidateParamsAgainstSchema_IgnoresRuntimeInjectedCancellationTokenParameter()
+    {
+        var caller = new ToolCaller(
+            baseUrl: "tool://localhost",
+            path: $"{typeof(DeepTools).FullName}.WithCancellation",
+            method: "POST",
+            operation: "withCancellation",
+            methodSchema: ParseElement("""
+                {
+                  "requestBody": {
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "type": "object",
+                          "properties": {
+                            "value": { "type": "string" }
+                          },
+                          "required": ["value"]
+                        }
+                      }
+                    }
+                  }
+                }
+                """),
+            contentType: "application/json",
+            authHeaders: [],
+            authQueryParams: [])
+        {
+            Params = new Dictionary<string, object>
+            {
+                ["value"] = "ok",
+                ["cancellationToken"] = "stale-schema-leak"
+            }
+        };
+
+        var (isValid, errorMessage) = caller.ValidateParamsAgainstSchema();
+
+        isValid.Should().BeTrue();
+        errorMessage.Should().BeNull();
+    }
+
+    [TestMethod]
     public void AddMissingRequiredParamsFromSchema_ExtractsNumberBoolValues()
     {
         var caller = new ToolCaller(
@@ -610,6 +691,8 @@ public sealed class ToolCallerDeepTests
         public static int Sum(List<int> nums) => nums.Sum();
 
         public static string Optional(string a, int n = 3) => $"{a}{n}";
+
+        public static string WithCancellation(string value, CancellationToken cancellationToken = default) => value;
 
         public static string TakesDate(DateTime when) => when.ToString("o");
     }

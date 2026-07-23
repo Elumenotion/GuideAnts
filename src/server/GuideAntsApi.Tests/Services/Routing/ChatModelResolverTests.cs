@@ -105,6 +105,26 @@ public sealed class ChatModelResolverTests
     }
 
     [TestMethod]
+    public void Resolve_OverrideAll_IgnoresClearedTemperatureAndTopP()
+    {
+        var config = BuildConfig(new Dictionary<string, string?>
+        {
+            ["ChatDefaults:OverrideAllChatModels"] = "true",
+            ["ChatDefaults:DefaultModelId"] = "gpt-5.5",
+            ["ChatDefaults:Temperature"] = "",
+            ["ChatDefaults:TopP"] = "",
+            ["ChatDefaults:ReasoningEffort"] = "low",
+        });
+        var resolver = BuildResolver(config);
+
+        var result = resolver.Resolve("entity-model");
+
+        result.ExecutionPolicy.Parameters.Should().NotContainKey("temperature");
+        result.ExecutionPolicy.Parameters.Should().NotContainKey("top_p");
+        result.ExecutionPolicy.Parameters["reasoning_effort"].GetString().Should().Be("low");
+    }
+
+    [TestMethod]
     public void Resolve_NoEntity_NoDefault_ThrowsRoutingException()
     {
         var config = BuildConfig(new Dictionary<string, string?>

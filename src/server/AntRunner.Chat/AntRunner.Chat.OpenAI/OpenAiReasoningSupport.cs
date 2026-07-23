@@ -23,12 +23,26 @@ internal static class OpenAiReasoningSupport
             return null;
         }
 
-        return effort.Trim().ToLowerInvariant() switch
+        var normalizedEffort = effort.Trim().ToLowerInvariant();
+        if (string.Equals(normalizedEffort, "none", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        if (string.Equals(normalizedEffort, "minimal", StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(model)
+            && model.Trim().StartsWith("gpt-5.", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return normalizedEffort switch
         {
             "minimal" => ReasoningEffort.Minimal,
             "low" => ReasoningEffort.Low,
             "medium" => ReasoningEffort.Medium,
             "high" => ReasoningEffort.High,
+            "xhigh" => ReasoningEffort.High,
             _ => null
         };
     }

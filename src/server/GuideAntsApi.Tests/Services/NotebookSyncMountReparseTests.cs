@@ -270,12 +270,12 @@ public sealed class NotebookSyncMountReparseTests
             new BackgroundJobTestHelpers.CapturingJobQueueService(),
             Mock.Of<IFileLineageService>(),
             Mock.Of<IUsageRecorder>(),
+            new InMemoryNotebookLockService(),
             NullLogger<NotebookFileReconciler>.Instance);
 
         return new NotebookFileSyncService(
             reconciler,
             scopeFactoryMock.Object,
-            Mock.Of<INotebookLockService>(),
             NullLogger<NotebookFileSyncService>.Instance);
     }
 
@@ -306,6 +306,7 @@ public sealed class NotebookSyncMountReparseTests
             new BackgroundJobTestHelpers.CapturingJobQueueService(),
             Mock.Of<IFileLineageService>(),
             Mock.Of<IUsageRecorder>(),
+            new InMemoryNotebookLockService(),
             NullLogger<NotebookFileReconciler>.Instance);
     }
 

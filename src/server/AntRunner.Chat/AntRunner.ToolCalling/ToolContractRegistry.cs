@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using AntRunner.ToolCalling.Attributes;
 
 namespace AntRunner.ToolCalling;
@@ -173,6 +174,7 @@ public static class ToolContractRegistry
     /// </summary>
     public static void RefreshContracts()
     {
+        _schemaCache.Clear();
         InitializeContracts();
     }
     
@@ -221,11 +223,8 @@ public static class ToolContractRegistry
             // Skip hidden parameters (like InvocationContext)
             if (contract.ParameterMetadata.TryGetValue(parameter.Name!, out var paramAttr) && paramAttr.Hidden)
                 continue;
-                
-            // Skip InvocationContext parameters automatically
-            if (parameter.ParameterType == typeof(InvocationContext) || 
-                (parameter.ParameterType.IsGenericType && parameter.ParameterType.GetGenericTypeDefinition() == typeof(Nullable<>) && 
-                 Nullable.GetUnderlyingType(parameter.ParameterType) == typeof(InvocationContext)))
+
+            if (IsRuntimeInjectedParameter(parameter))
                 continue;
             
             var propertySchema = BuildParameterSchema(parameter, paramAttr);
@@ -349,4 +348,29 @@ public static class ToolContractRegistry
     {
         return Nullable.GetUnderlyingType(type) != null || !type.IsValueType;
     }
+
+    /// <summary>
+    /// Parameters injected by the runtime rather than supplied by the model tool call.
+    /// </summary>
+    internal static bool IsRuntimeInjectedParameter(ParameterInfo parameter)
+    {
+        var type = parameter.ParameterType;
+        if (type == typeof(CancellationToken))
+            return true;
+
+        if (type == typeof(InvocationContext))
+            return true;
+
+        if (type.IsGenericType
+            && type.GetGenericTypeDefinition() == typeof(Nullable<>)
+            && Nullable.GetUnderlyingType(type) == typeof(InvocationContext))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    internal static bool IsRuntimeInjectedParameterName(string? parameterName) =>
+        string.Equals(parameterName, "cancellationToken", StringComparison.OrdinalIgnoreCase);
 }

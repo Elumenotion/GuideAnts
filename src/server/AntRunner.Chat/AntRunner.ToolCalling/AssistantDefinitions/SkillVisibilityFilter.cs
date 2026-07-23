@@ -1,7 +1,7 @@
 namespace AntRunner.ToolCalling.AssistantDefinitions;
 
 /// <summary>
-/// Offer-time visibility filter for skill discovery and <c>skills.list</c> (S6).
+/// Offer-time visibility filter for skill discovery and <c>skills_list</c> (S6).
 /// </summary>
 public static class SkillVisibilityFilter
 {

@@ -913,7 +913,7 @@ namespace AntRunner.Chat
         }
 
         private static string ResolveToolTraceSource(string toolName) =>
-            toolName is "skills.list" or "skills.read" ? "skills" : "guide";
+            toolName is "skills_list" or "skills_read" ? "skills" : "guide";
 
         /// <summary>
         /// Emits the full provider-bound chat request (messages, tools, sampling) when
@@ -1448,7 +1448,7 @@ namespace AntRunner.Chat
                         }
 
                         // For SearchAssistantFiles and skills tools, inject the AssistantDefinition
-                        if (toolName is "SearchAssistantFiles" or "skills.list" or "skills.read")
+                        if (toolName is "SearchAssistantFiles" or "skills_list" or "skills_read")
                         {
                             builder.Params["assistantDefinition"] = assistantDef;
                         }

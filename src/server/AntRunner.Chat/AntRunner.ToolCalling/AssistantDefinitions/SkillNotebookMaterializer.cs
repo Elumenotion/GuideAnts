@@ -5,7 +5,7 @@ namespace AntRunner.ToolCalling.AssistantDefinitions;
 /// <summary>
 /// Maps skill <c>scripts/</c> and <c>assets/</c> payload files onto notebook
 /// <c>Resources/</c> and <c>Output/</c> paths (same materialization model as CodeInterpreter files).
-/// <c>SKILL.md</c> and <c>references/</c> stay on-demand via <c>skills.read</c>.
+/// <c>SKILL.md</c> and <c>references/</c> stay on-demand via <c>skills_read</c>.
 /// </summary>
 public static class SkillNotebookMaterializer
 {

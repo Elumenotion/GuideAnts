@@ -73,6 +73,34 @@ public sealed class OpenApiHelperTests
     }
 
     [TestMethod]
+    public void GetToolDefinitionsFromSchema_Sanitizes_operation_id_for_provider_wire_format()
+    {
+        const string spec = """
+            {
+              "openapi": "3.0.0",
+              "servers": [{ "url": "https://api.example.com" }],
+              "paths": {
+                "/skills": {
+                  "get": {
+                    "operationId": "skills.list",
+                    "summary": "List skills",
+                    "responses": { "200": { "description": "ok" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var validation = OpenApiHelper.ValidateAndParseOpenApiSpec(spec);
+        validation.Status.Should().BeTrue();
+
+        var tools = OpenApiHelper.GetToolDefinitionsFromSchema(validation.Spec!);
+
+        tools.Should().ContainSingle();
+        tools[0].Function!.AsObject!.Name.Should().Be("skills_list");
+    }
+
+    [TestMethod]
     public void ValidateAndParseOpenApiSpec_Accepts_yaml_spec()
     {
         const string yaml = """

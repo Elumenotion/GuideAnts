@@ -38,7 +38,7 @@ public sealed class ChatModelResolver : IChatModelResolver
                 defaultId,
                 ChatModelReferenceKind.OverriddenToDefault,
                 ParameterAuthority.GlobalOverride,
-                BuildDefaultParameters(defaultId));
+                ChatDefaultsExecutionParameters.FromConfiguration(_configuration, defaultId));
         }
 
         var trimmedEntity = (entityModelId ?? string.Empty).Trim();
@@ -57,7 +57,7 @@ public sealed class ChatModelResolver : IChatModelResolver
                 defaultId,
                 ChatModelReferenceKind.DefaultedTo,
                 ParameterAuthority.AssistantDefinition,
-                BuildDefaultParameters(defaultId));
+                ChatDefaultsExecutionParameters.FromConfiguration(_configuration, defaultId));
         }
 
         throw RoutingException.ModelNotReady(
@@ -76,82 +76,6 @@ public sealed class ChatModelResolver : IChatModelResolver
         var target = _chatTargetResolver.Resolve(modelId);
         var policy = new ResolvedExecutionPolicy(modelId, target.Provider, authority, parameters);
         return new ResolvedChatModel(modelId, referenceKind, policy);
-    }
-
-    private IReadOnlyDictionary<string, JsonElement> BuildDefaultParameters(string modelId)
-    {
-        var result = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-
-        var temperature = ReadOptionalFloat($"{SectionPrefix}Temperature");
-        if (temperature.HasValue)
-        {
-            result["temperature"] = JsonSerializer.SerializeToElement((double)temperature.Value);
-        }
-
-        var topP = ReadOptionalFloat($"{SectionPrefix}TopP");
-        if (topP.HasValue)
-        {
-            result["top_p"] = JsonSerializer.SerializeToElement((double)topP.Value);
-        }
-
-        var reasoningEffort = ReadOptionalString($"{SectionPrefix}ReasoningEffort");
-        if (!string.IsNullOrWhiteSpace(reasoningEffort))
-        {
-            result["reasoning_effort"] = JsonSerializer.SerializeToElement(reasoningEffort);
-        }
-
-        var samplingJson = _configuration[$"{SectionPrefix}SamplingParametersJson"];
-        if (string.IsNullOrWhiteSpace(samplingJson))
-        {
-            return result;
-        }
-
-        try
-        {
-            using var doc = JsonDocument.Parse(samplingJson);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                throw RoutingException.ModelNotReady(
-                    modelId,
-                    "ChatDefaults:SamplingParametersJson must be a JSON object.",
-                    serviceId: "Chat",
-                    action: "Open Settings \u2192 Overview \u2192 Default Chat Model and provide a valid sampling JSON object.");
-            }
-
-            foreach (var property in doc.RootElement.EnumerateObject())
-            {
-                result[property.Name] = property.Value.Clone();
-            }
-        }
-        catch (JsonException ex)
-        {
-            throw RoutingException.ModelNotReady(
-                modelId,
-                $"ChatDefaults:SamplingParametersJson is invalid JSON: {ex.Message}",
-                serviceId: "Chat",
-                action: "Open Settings \u2192 Overview \u2192 Default Chat Model and fix SamplingParametersJson.");
-        }
-
-        return result;
-    }
-
-    private float? ReadOptionalFloat(string key)
-    {
-        var raw = _configuration[key];
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return null;
-        }
-
-        return float.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)
-            ? v
-            : null;
-    }
-
-    private string? ReadOptionalString(string key)
-    {
-        var raw = _configuration[key];
-        return string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
     }
 
     private static readonly IReadOnlyDictionary<string, JsonElement> EmptyParameters =

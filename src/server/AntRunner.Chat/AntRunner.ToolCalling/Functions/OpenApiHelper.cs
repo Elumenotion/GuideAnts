@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using AntRunner.ToolCalling;
 using Microsoft.Extensions.Logging;
 using YamlDotNet.Serialization;
 
@@ -141,9 +142,10 @@ namespace AntRunner.ToolCalling.Functions
                     var operationObj = methodProperty.Value;
 
                     // Extract operation ID, or generate one if not present
-                    var operationId = operationObj.TryGetProperty("operationId", out var opId)
+                    var rawOperationId = operationObj.TryGetProperty("operationId", out var opId)
                         ? opId.GetString()
                         : $"{methodProperty.Name}_{pathProperty.Name}";
+                    var operationId = ToolOperationIdSanitizer.ToWireName(rawOperationId);
 
                     // Extract description, preferring 'summary' over 'description'
                     var description = operationObj.TryGetProperty("summary", out var summary)

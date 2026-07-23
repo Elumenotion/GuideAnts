@@ -8,10 +8,11 @@
   "thinkingControlJson": {
     "defaultChoice": "medium",
     "choiceActions": {
-      "minimal": [],
+      "none": [],
       "low": [],
       "medium": [],
-      "high": []
+      "high": [],
+      "xhigh": []
     }
   }
 }

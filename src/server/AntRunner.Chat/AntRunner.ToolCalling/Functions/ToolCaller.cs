@@ -1,3 +1,4 @@
+using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.AssistantDefinitions.Storage;
 using AntRunner.ToolCalling.HttpClient;
 using Microsoft.Extensions.Logging;
@@ -202,17 +203,19 @@ namespace AntRunner.ToolCalling.Functions
                 foreach (var methodProperty in pathProperty.Value.EnumerateObject())
                 {
                     var operationObj = methodProperty.Value;
-                    var operationId = operationObj.TryGetProperty("operationId", out var opId)
+                    var rawOperationId = operationObj.TryGetProperty("operationId", out var opId)
                         ? opId.GetString()
                         : $"{methodProperty.Name}_{pathProperty.Name}";
+                    var operationId = ToolOperationIdSanitizer.ToWireName(rawOperationId);
 
-                    var toolDefinition = OpenApiHelper.GetToolDefinitionsFromSchema(openApiSpec).FirstOrDefault(o => o.Function?.AsObject?.Name == operationId);
+                    var toolDefinition = OpenApiHelper.GetToolDefinitionsFromSchema(openApiSpec)
+                        .FirstOrDefault(o => o.Function?.AsObject?.Name == operationId);
 
                     var actionRequest = new ToolCaller(
                         baseUrl,
                         pathProperty.Name,
                         methodProperty.Name,
-                        operationId!,
+                        operationId,
                         operationObj,
                         toolDefinition?.Function?.AsObject?.ContentType ?? "application/json",
                         authHeaders,
@@ -221,7 +224,7 @@ namespace AntRunner.ToolCalling.Functions
                         authRequiredButMissing
                     );
 
-                    toolCallers[operationId!] = actionRequest;
+                    toolCallers[operationId] = actionRequest;
                 }
             }
             return toolCallers;
@@ -699,7 +702,7 @@ namespace AntRunner.ToolCalling.Functions
                     // Ensure every required parameter is present
                     foreach (var param in parameters)
                     {
-                        if (param.ParameterType == typeof(CancellationToken))
+                        if (ToolContractRegistry.IsRuntimeInjectedParameter(param))
                         {
                             // Implicitly provided by runtime, not by tool-call arguments
                             continue;
@@ -716,12 +719,15 @@ namespace AntRunner.ToolCalling.Functions
                     if (match)
                     {
                         var declaredParamNames = parameters
-                            .Where(p => p.ParameterType != typeof(CancellationToken))
+                            .Where(p => !ToolContractRegistry.IsRuntimeInjectedParameter(p))
                             .Select(p => p.Name)
                             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
                         foreach (var suppliedKey in Params.Keys)
                         {
+                            if (ToolContractRegistry.IsRuntimeInjectedParameterName(suppliedKey))
+                                continue;
+
                             if (!declaredParamNames.Contains(suppliedKey))
                             {
                                 match = false;
@@ -978,7 +984,10 @@ namespace AntRunner.ToolCalling.Functions
                 }
 
                 // Unknown parameters (extras not defined by the schema)
-                var unknown = supplied.Keys.Where(k => !declaredNames.Contains(k)).OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToArray();
+                var unknown = supplied.Keys
+                    .Where(k => !declaredNames.Contains(k) && !ToolContractRegistry.IsRuntimeInjectedParameterName(k))
+                    .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
 
                 // Missing required parameters
                 var missing = requiredNames.Where(r => !supplied.ContainsKey(r)).OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToArray();
