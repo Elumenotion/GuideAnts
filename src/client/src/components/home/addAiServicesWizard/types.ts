@@ -291,6 +291,7 @@ export interface LocalAiModelDraft {
   asyncOperationId: string | null;
   asyncStatus: LocalAiDraftStatus;
   asyncProgress: number | null;
+  asyncLogLine: string | null;
   asyncError: string | null;
 }
 

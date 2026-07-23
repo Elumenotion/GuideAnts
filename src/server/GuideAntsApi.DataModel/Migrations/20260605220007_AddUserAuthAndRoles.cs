@@ -99,12 +99,38 @@ namespace GuideAntsApi.DataModel.Migrations
                 principalColumn: "Id",
                 onDelete: ReferentialAction.Restrict);
 
+            // OssLiteSingleUserPrep retained this Id as the real single-user account.
+            // Only remove the placeholder admin@localhost seed; never wipe a retained user
+            // that still owns messages / edit history / context options.
             migrationBuilder.Sql(
                 """
                 DECLARE @SeedUserId uniqueidentifier = 'fd787545-ffae-4ea9-81fa-700db2fffccd';
 
-                IF EXISTS (SELECT 1 FROM dbo.Users WHERE Id = @SeedUserId)
+                IF EXISTS (
+                    SELECT 1
+                    FROM dbo.Users
+                    WHERE Id = @SeedUserId
+                      AND Email = N'admin@localhost')
                 BEGIN
+                    IF COL_LENGTH(N'dbo.MessageEditHistories', N'FirstEditedByUserId') IS NOT NULL
+                        UPDATE dbo.MessageEditHistories
+                        SET FirstEditedByUserId = NULL
+                        WHERE FirstEditedByUserId = @SeedUserId;
+
+                    IF COL_LENGTH(N'dbo.NotebookConversationMessages', N'LastEditedByUserId') IS NOT NULL
+                        UPDATE dbo.NotebookConversationMessages
+                        SET LastEditedByUserId = NULL
+                        WHERE LastEditedByUserId = @SeedUserId;
+
+                    IF COL_LENGTH(N'dbo.NotebookConversationMessages', N'UserId') IS NOT NULL
+                        UPDATE dbo.NotebookConversationMessages
+                        SET UserId = NULL
+                        WHERE UserId = @SeedUserId;
+
+                    IF OBJECT_ID(N'dbo.UserProjectContextOption', N'U') IS NOT NULL
+                        DELETE FROM dbo.UserProjectContextOption
+                        WHERE UserId = @SeedUserId;
+
                     DELETE FROM dbo.Users WHERE Id = @SeedUserId;
                 END;
                 """);

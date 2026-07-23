@@ -82,6 +82,9 @@ export function DraftProgress({ draft }: { draft: LocalAiModelDraft }) {
           </div>
         </div>
       ) : null}
+      {draft.asyncLogLine ? (
+        <div className="font-mono text-xs text-gray-500">{draft.asyncLogLine}</div>
+      ) : null}
     </div>
   );
 }

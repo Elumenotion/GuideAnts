@@ -120,6 +120,8 @@ export interface ProviderEditorStateDto {
   operativeFields: string[];
   diagnosticFields: string[];
   fieldMetadata: ProviderFieldMetadataDto[];
+  /** True when Foundry chat (AzureOpenAI) is connected; keeps Foundry service providers visible. */
+  relatedChatConnectionConfigured?: boolean;
 }
 
 export interface ServiceEditorReadinessDto {

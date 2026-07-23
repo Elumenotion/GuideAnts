@@ -22,7 +22,7 @@ internal sealed class HybridIndexer(
         var text = await File.ReadAllTextAsync(filePath, ct);
         text = SanitizeForEmbedding(text, $"content-file-version:{contentFileVersionId}");
         var chunks = ChunkText(text);
-        var embeddings = await _emb.GetEmbeddingsAsync(chunks, EmbeddingPurpose.Document, ct);
+        var embeddings = await EmbeddingIndexingBatches.EmbedAllAsync(_emb, chunks, EmbeddingPurpose.Document, ct);
 
         await using var ctx = await _dbFactory.CreateDbContextAsync(ct);
         
@@ -67,7 +67,7 @@ internal sealed class HybridIndexer(
         var text = await File.ReadAllTextAsync(filePath, ct);
         text = SanitizeForEmbedding(text, $"notebook-file:{notebookFileId}");
         var chunks = ChunkText(text);
-        var embeddings = await _emb.GetEmbeddingsAsync(chunks, EmbeddingPurpose.Document, ct);
+        var embeddings = await EmbeddingIndexingBatches.EmbedAllAsync(_emb, chunks, EmbeddingPurpose.Document, ct);
 
         await using var ctx = await _dbFactory.CreateDbContextAsync(ct);
         
@@ -129,7 +129,7 @@ internal sealed class HybridIndexer(
         var combinedText = string.Join("\n\n", allText);
         combinedText = SanitizeForEmbedding(combinedText, $"assistant-folder:{storeId}");
         var chunks = ChunkText(combinedText);
-        var embeddings = await _emb.GetEmbeddingsAsync(chunks, EmbeddingPurpose.Document, ct);
+        var embeddings = await EmbeddingIndexingBatches.EmbedAllAsync(_emb, chunks, EmbeddingPurpose.Document, ct);
 
         await using var ctx = await _dbFactory.CreateDbContextAsync(ct);
         
@@ -185,7 +185,11 @@ internal sealed class HybridIndexer(
             return;
         }
 
-        var embeddings = await _emb.GetEmbeddingsAsync(chunks, EmbeddingPurpose.Document, cancellationToken);
+        var embeddings = await EmbeddingIndexingBatches.EmbedAllAsync(
+            _emb,
+            chunks,
+            EmbeddingPurpose.Document,
+            cancellationToken);
 
         await using var ctx = await _dbFactory.CreateDbContextAsync(cancellationToken);
 

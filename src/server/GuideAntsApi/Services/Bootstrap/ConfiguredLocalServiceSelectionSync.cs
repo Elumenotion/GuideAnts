@@ -79,6 +79,15 @@ internal static class ConfiguredLocalServiceSelectionSync
             return null;
         }
 
+        if (!await HasLocalServiceModeAsync(
+                settings,
+                RoutedServiceNames.ImageGeneration,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            return null;
+        }
+
         await settings
             .SetServiceModeModelIdAsync(RoutedServiceNames.ImageGeneration, configured, cancellationToken)
             .ConfigureAwait(false);
@@ -108,26 +117,19 @@ internal static class ConfiguredLocalServiceSelectionSync
             return;
         }
 
-        try
+        using var client = httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(30);
+        using var response = await client
+            .GetAsync($"{adminBase.TrimEnd('/')}/admin/bundles", cancellationToken)
+            .ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
         {
-            using var client = httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(30);
-            using var response = await client
-                .GetAsync($"{adminBase.TrimEnd('/')}/admin/bundles", cancellationToken)
-                .ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                return;
-            }
+            return;
+        }
 
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var configured = ServiceLocalModelListEnricher.ReadConfiguredActiveBundleId(body);
-            await ResolveOrSyncImageBundleAsync(settings, configured, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            // Warmup build will fail loudly if routing is warm but nothing was synced.
-        }
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var configured = ServiceLocalModelListEnricher.ReadConfiguredActiveBundleId(body);
+        await ResolveOrSyncImageBundleAsync(settings, configured, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task SyncActiveModelFromAdminAsync(
@@ -149,33 +151,26 @@ internal static class ConfiguredLocalServiceSelectionSync
             return;
         }
 
-        try
+        using var client = httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(30);
+        using var response = await client
+            .GetAsync($"{adminBase.TrimEnd('/')}/admin/models", cancellationToken)
+            .ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
         {
-            using var client = httpClientFactory.CreateClient();
-            client.Timeout = TimeSpan.FromSeconds(30);
-            using var response = await client
-                .GetAsync($"{adminBase.TrimEnd('/')}/admin/models", cancellationToken)
-                .ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                return;
-            }
-
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var configured = ReadActiveModelRefFromModelsBody(body);
-            if (string.IsNullOrWhiteSpace(configured))
-            {
-                return;
-            }
-
-            await settings
-                .SetServiceModeModelIdAsync(serviceId, configured, cancellationToken)
-                .ConfigureAwait(false);
+            return;
         }
-        catch (Exception)
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        var configured = ReadActiveModelRefFromModelsBody(body);
+        if (string.IsNullOrWhiteSpace(configured))
         {
-            // Warmup build will fail loudly if routing is warm but nothing was synced.
+            return;
         }
+
+        await settings
+            .SetServiceModeModelIdAsync(serviceId, configured, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     internal static string? ReadActiveModelRefFromModelsBody(string upstreamBody)
@@ -214,6 +209,22 @@ internal static class ConfiguredLocalServiceSelectionSync
         }
 
         return null;
+    }
+
+    public static async Task<bool> HasLocalServiceModeAsync(
+        IApplicationSettingsService settings,
+        string serviceId,
+        CancellationToken cancellationToken)
+    {
+        var localSection = ResolveLocalProviderSection(serviceId);
+        if (localSection is null)
+        {
+            return false;
+        }
+
+        var modes = await settings.GetServiceModesAsync(serviceId, cancellationToken).ConfigureAwait(false);
+        return modes.Any(mode =>
+            string.Equals(mode.ProviderSection, localSection, StringComparison.OrdinalIgnoreCase));
     }
 
     public static async Task<string?> TryReadPersistedLocalModelRefAsync(
