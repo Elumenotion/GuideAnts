@@ -86,6 +86,17 @@ describe('ProviderFieldsSection', () => {
         provider={createProvider({
           connectionConfigured: false,
           connectionMissingFields: ['ApiKey', 'Endpoint'],
+          operativeFields: ['TimeoutSeconds', 'ModelId'],
+          fieldMetadata: [
+            { name: 'TimeoutSeconds', kind: 'int', required: false, operative: true },
+            {
+              name: 'ModelId',
+              kind: 'enum',
+              required: true,
+              operative: true,
+              enumOptions: ['gpt-4', 'gpt-4o'],
+            },
+          ],
         })}
         draft={{}}
         fieldErrors={{}}
@@ -95,6 +106,24 @@ describe('ProviderFieldsSection', () => {
 
     expect(screen.getByText(/Configure this provider connection first/i)).toBeInTheDocument();
     expect(screen.getByText(/ApiKey, Endpoint/)).toBeInTheDocument();
+  });
+
+  it('shows inline Foundry connection guidance when connection fields are editable', () => {
+    render(
+      <ProviderFieldsSection
+        provider={createProvider({
+          connectionConfigured: false,
+          connectionMissingFields: ['Endpoint', 'ApiKey'],
+          relatedChatConnectionConfigured: true,
+        })}
+        draft={{}}
+        fieldErrors={{}}
+        onPatch={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/Enter the connection details below/i)).toBeInTheDocument();
+    expect(screen.getByText(/Missing: Endpoint, ApiKey/i)).toBeInTheDocument();
   });
 
   it('shows explicit mode notice when provider has no explicit mode', () => {

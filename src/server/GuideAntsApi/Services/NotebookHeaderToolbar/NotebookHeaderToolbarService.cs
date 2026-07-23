@@ -552,38 +552,51 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
             status = "degraded";
         }
 
-        var inventory = await TryLoadLocalModelInventoryAsync(
-            serviceId,
-            localListPath,
-            isImage,
-            cancellationToken).ConfigureAwait(false);
-        var localModels = inventory.Models;
+        var localProviderState = state.Providers.FirstOrDefault(provider =>
+            string.Equals(provider.ProviderId, localProviderId, StringComparison.Ordinal));
+        var hasLocalServiceMode = localProviderState?.HasExplicitMode ?? false;
 
+        IReadOnlyList<NotebookToolbarLocalModelOptionDto> localModels;
         string? selectedLocalRef;
-        if (isImage)
+        if (hasLocalServiceMode)
         {
-            selectedLocalRef = await ConfiguredLocalServiceSelectionSync.ResolveOrSyncImageBundleAsync(
-                    _settings,
-                    inventory.Root is null
-                        ? null
-                        : ServiceLocalModelListEnricher.ReadConfiguredActiveBundleId(inventory.Root.ToJsonString()),
-                    cancellationToken)
-                .ConfigureAwait(false);
-            localModels = MarkImageBundleSelection(localModels, selectedLocalRef);
+            var inventory = await TryLoadLocalModelInventoryAsync(
+                serviceId,
+                localListPath,
+                isImage,
+                cancellationToken).ConfigureAwait(false);
+            localModels = inventory.Models;
+
+            if (isImage)
+            {
+                selectedLocalRef = await ConfiguredLocalServiceSelectionSync.ResolveOrSyncImageBundleAsync(
+                        _settings,
+                        inventory.Root is null
+                            ? null
+                            : ServiceLocalModelListEnricher.ReadConfiguredActiveBundleId(inventory.Root.ToJsonString()),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                localModels = MarkImageBundleSelection(localModels, selectedLocalRef);
+            }
+            else
+            {
+                selectedLocalRef = await ConfiguredLocalServiceSelectionSync.TryReadPersistedLocalModelRefAsync(
+                        _settings,
+                        serviceId,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(selectedLocalRef))
+                {
+                    selectedLocalRef = ResolveSelectedLocalModelRef(state, localProviderId);
+                }
+
+                localModels = MarkVoiceModelSelection(localModels, selectedLocalRef);
+            }
         }
         else
         {
-            selectedLocalRef = await ConfiguredLocalServiceSelectionSync.TryReadPersistedLocalModelRefAsync(
-                    _settings,
-                    serviceId,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(selectedLocalRef))
-            {
-                selectedLocalRef = ResolveSelectedLocalModelRef(state, localProviderId);
-            }
-
-            localModels = MarkVoiceModelSelection(localModels, selectedLocalRef);
+            localModels = Array.Empty<NotebookToolbarLocalModelOptionDto>();
+            selectedLocalRef = null;
         }
 
         var selection = BuildSelectionForService(state, isImage, localModels, selectedLocalRef);

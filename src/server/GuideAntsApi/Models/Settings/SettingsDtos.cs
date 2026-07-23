@@ -94,7 +94,11 @@ public sealed record ProviderEditorStateDto(
     IReadOnlyList<RuntimeKeyDto> RuntimeDependencies,
     IReadOnlyList<string> OperativeFields,
     IReadOnlyList<string> DiagnosticFields,
-    IReadOnlyList<ProviderFieldMetadataDto> FieldMetadata);
+    IReadOnlyList<ProviderFieldMetadataDto> FieldMetadata,
+    // True when Microsoft Foundry chat (AzureOpenAI) is connected. Foundry service
+    // providers stay selectable in Services even when their dedicated connection
+    // section is still empty, so chat-only Foundry setup can continue into services.
+    bool RelatedChatConnectionConfigured = false);
 
 public sealed record ServiceEditorReadinessDto(
     string Status,

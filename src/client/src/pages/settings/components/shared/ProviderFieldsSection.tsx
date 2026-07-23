@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { ProviderEditorStateDto, ProviderFieldMetadataDto } from '../../../../types/settings';
 import { getProviderFieldHelpText, getProviderFieldLabel } from '../../constants/displayLabels';
+import { hasInlineConnectionFields } from '../../state/serviceEditorConnectionFields';
 import { EnumSelect } from '../inputs/EnumSelect';
 import { IntInput } from '../inputs/IntInput';
 import { SecretInput } from '../inputs/SecretInput';
@@ -27,7 +28,8 @@ export function ProviderFieldsSection({
   const operativeMetadata = provider.fieldMetadata.filter((field) =>
     provider.operativeFields.includes(field.name)
   );
-  const blocked = !provider.connectionConfigured;
+  const inlineConnection = hasInlineConnectionFields(provider.operativeFields);
+  const blocked = !provider.connectionConfigured && !inlineConnection;
 
   const renderField = (metadata: ProviderFieldMetadataDto) => {
     const fieldDto = provider.fields[metadata.name];
@@ -125,6 +127,13 @@ export function ProviderFieldsSection({
       {blocked ? (
         <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           Configure this provider connection first: {provider.connectionMissingFields.join(', ')}.
+        </div>
+      ) : inlineConnection && !provider.connectionConfigured ? (
+        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Enter the connection details below, then save to configure and activate this Foundry provider.
+          {provider.connectionMissingFields.length > 0
+            ? ` Missing: ${provider.connectionMissingFields.join(', ')}.`
+            : null}
         </div>
       ) : !provider.hasExplicitMode ? (
         <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">

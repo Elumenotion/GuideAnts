@@ -18,6 +18,8 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
             {
                 [ServiceProviderIds.EmbeddingsAzureOpenAiEmbedding] =
                 [
+                    Field("Endpoint", "url", true, operative: true),
+                    Field("ApiKey", "secret", true, operative: true),
                     Field("Deployment", "text", true, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                 ],
@@ -52,6 +54,9 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
             {
                 [ServiceProviderIds.ImageGenerationAzureOpenAiImages] =
                 [
+                    Field("Endpoint", "url", true, operative: true),
+                    Field("ApiKey", "secret", true, operative: true),
+                    Field("ApiVersion", "text", false, operative: true),
                     Field("Deployment", "text", true, operative: true),
                     Field("EditModelDeployment", "text", true, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
@@ -91,6 +96,8 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
             {
                 [ServiceProviderIds.DocumentIntelligenceAzure] =
                 [
+                    Field("Endpoint", "url", true, operative: true),
+                    Field("ApiKey", "secret", true, operative: true),
                     Field("ApiVersion", "text", false, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                     Field("MaxRetries", "int", true, operative: true),
@@ -121,6 +128,9 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
             {
                 [ServiceProviderIds.SpeechTranscriptionAzureSpeechBatch] =
                 [
+                    Field("Endpoint", "url", true, operative: true),
+                    Field("ApiKey", "secret", true, operative: true),
+                    Field("Region", "text", true, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                     Field("MaxRetries", "int", false, operative: true),
                     Field("language", "text", false, operative: false),
@@ -156,6 +166,9 @@ public sealed class ServiceEditorMetadataProvider : IServiceEditorMetadataProvid
             {
                 [ServiceProviderIds.SpeechSynthesisAzureSpeechSsml] =
                 [
+                    Field("Endpoint", "url", false, operative: true),
+                    Field("ApiKey", "secret", true, operative: true),
+                    Field("Region", "text", true, operative: true),
                     Field("TimeoutSeconds", "int", true, operative: true),
                     Field("MaxRetries", "int", false, operative: true),
                     Field("voice", "text", false, operative: false),

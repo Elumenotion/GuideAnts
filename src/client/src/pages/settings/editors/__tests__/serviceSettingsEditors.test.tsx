@@ -577,6 +577,9 @@ describe('service settings editors', () => {
       ...makeController('ImageGeneration', {
         providerId: 'ImageGeneration.Local.Sd',
         connectionConfigured: false,
+        // No inline connection fields — save stays gated until connection is configured elsewhere.
+        operativeFields: ['TimeoutSeconds'],
+        connectionMissingFields: ['Endpoint'],
       }),
     } as ReturnType<typeof useServiceEditorController>);
 
@@ -584,6 +587,26 @@ describe('service settings editors', () => {
     const saveButton = screen.getByRole('button', { name: 'Save' });
     expect(saveButton).toBeDisabled();
     expect(saveButton).toHaveAttribute('title', 'Configure the provider connection first.');
+  });
+
+  it('ImageGenerationEditor enables save when Foundry connection fields are editable inline', () => {
+    vi.mocked(useServiceEditorController).mockReturnValue({
+      ...makeController('ImageGeneration', {
+        providerId: 'ImageGeneration.AzureOpenAI.Images',
+        providerKind: 'Cloud',
+        connectionConfigured: false,
+        connectionMissingFields: ['ApiKey', 'Endpoint'],
+        operativeFields: ['Endpoint', 'ApiKey', 'Deployment', 'TimeoutSeconds'],
+      }),
+    } as ReturnType<typeof useServiceEditorController>);
+
+    render(<ImageGenerationEditor />);
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+    expect(saveButton).not.toBeDisabled();
+    expect(saveButton).toHaveAttribute(
+      'title',
+      'Save will write connection details and activate provider.',
+    );
   });
 
   it('ImageGenerationEditor saves and surfaces controller errors', async () => {

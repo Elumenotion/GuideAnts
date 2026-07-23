@@ -264,27 +264,61 @@ public sealed class ServiceEditorUpdateValidationTests
     }
 
     [TestMethod]
-    public async Task UpdateServiceProviderFieldsAsync_RejectsConnectionFields()
+    public async Task UpdateServiceProviderFieldsAsync_AllowsFoundryConnectionFields()
+    {
+        await using var db = CreateDbContext();
+        SeedEmptyProviderSection(db, "AzureOpenAiEmbedding");
+        SeedEmptyProviderSection(db, "Embeddings");
+        var configuration = BuildChatOnlyFoundryConfiguration();
+        var service = CreateService(db, configuration);
+
+        await service.UpdateServiceProviderFieldsAsync(
+            "Embeddings",
+            ServiceProviderIds.EmbeddingsAzureOpenAiEmbedding,
+            new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
+            {
+                ["Endpoint"] = "https://embeddings.example.openai.azure.com/",
+                ["ApiKey"] = "foundry-embedding-key",
+                ["Deployment"] = "text-embedding-3-small",
+                ["TimeoutSeconds"] = "300",
+            })),
+            CancellationToken.None);
+
+        var embeddingSection = await service.GetSectionAsync("AzureOpenAiEmbedding", CancellationToken.None);
+        embeddingSection.Should().NotBeNull();
+        embeddingSection!.Payload["Endpoint"]!.GetValue<string>()
+            .Should().Be("https://embeddings.example.openai.azure.com/");
+        embeddingSection.SecretHasValue["ApiKey"].Should().BeTrue();
+
+        var modes = await service.GetServiceModesAsync("Embeddings", CancellationToken.None);
+        modes.Should().Contain(mode =>
+            string.Equals(mode.ProviderSection, "AzureOpenAiEmbedding", StringComparison.Ordinal)
+            && string.Equals(mode.ModelId, "text-embedding-3-small", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task UpdateServiceProviderFieldsAsync_RejectsSharedCloudConnectionFields()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
         var service = CreateService(db, configuration);
-        SeedServiceModes(db, "Embeddings",
+        SeedServiceModes(db, "SpeechTranscription",
         [
-            new ServiceMode("azure", "AzureOpenAiEmbedding", null, null, true, true)
+            new ServiceMode("openai", "OpenAI", "whisper-1", null, true, true)
         ]);
 
         var act = async () => await service.UpdateServiceProviderFieldsAsync(
-            "Embeddings",
-            ServiceProviderIds.EmbeddingsAzureOpenAiEmbedding,
+            "SpeechTranscription",
+            ServiceProviderIds.SpeechTranscriptionOpenAiAudio,
             new ProviderFieldsUpdateRequest(JF(new Dictionary<string, string?>
-                {
-                    ["Endpoint"] = "https://embedding-api.example.com/"
-                })),
+            {
+                ["ApiKey"] = "should-not-write"
+            })),
             CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .Where(e => e.Message.Contains("provider connection configuration", StringComparison.OrdinalIgnoreCase));
+            .Where(e => e.Message.Contains("provider connection configuration", StringComparison.OrdinalIgnoreCase)
+                || e.Message.Contains("Unknown field", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -306,6 +340,59 @@ public sealed class ServiceEditorUpdateValidationTests
             string.Equals(mode.ProviderSection, "AzureSpeechService", StringComparison.Ordinal)
             && mode.Enabled
             && mode.IsDefault);
+    }
+
+    [TestMethod]
+    public async Task GetServiceEditorState_FoundryChatOnly_SurfacesFoundryServiceProviders()
+    {
+        await using var db = CreateDbContext();
+        var configuration = BuildChatOnlyFoundryConfiguration();
+        var service = CreateService(db, configuration);
+
+        var images = await service.GetServiceEditorStateAsync("ImageGeneration", CancellationToken.None);
+        var foundryImages = images.Providers.Should().ContainSingle(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.ImageGenerationAzureOpenAiImages, StringComparison.Ordinal))
+            .Subject;
+        foundryImages.ConnectionConfigured.Should().BeTrue(
+            "Images/Embeddings inherit Endpoint/ApiKey from chat AzureOpenAI when dedicated sections are empty.");
+        foundryImages.RelatedChatConnectionConfigured.Should().BeTrue();
+        foundryImages.ConnectionMissingFields.Should().BeEmpty();
+
+        var embeddings = await service.GetServiceEditorStateAsync("Embeddings", CancellationToken.None);
+        var foundryEmbeddings = embeddings.Providers.Should().ContainSingle(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.EmbeddingsAzureOpenAiEmbedding, StringComparison.Ordinal))
+            .Subject;
+        foundryEmbeddings.ConnectionConfigured.Should().BeTrue();
+        foundryEmbeddings.RelatedChatConnectionConfigured.Should().BeTrue();
+
+        var speech = await service.GetServiceEditorStateAsync("SpeechTranscription", CancellationToken.None);
+        var foundrySpeech = speech.Providers.Should().ContainSingle(provider =>
+            string.Equals(provider.ProviderId, ServiceProviderIds.SpeechTranscriptionAzureSpeechBatch, StringComparison.Ordinal))
+            .Subject;
+        foundrySpeech.ConnectionConfigured.Should().BeFalse(
+            "Speech still needs AzureSpeechService credentials; chat Foundry alone is not enough to activate.");
+        foundrySpeech.RelatedChatConnectionConfigured.Should().BeTrue(
+            "Chat-only Foundry setup must still surface Foundry speech so the user can continue configuration.");
+    }
+
+    [TestMethod]
+    public async Task EnsureServiceModeExistsAsync_SeedsImagesConnectionFromFoundryChat()
+    {
+        await using var db = CreateDbContext();
+        SeedEmptyProviderSection(db, "AzureOpenAiImages");
+        var configuration = BuildChatOnlyFoundryConfiguration();
+        var service = CreateService(db, configuration);
+
+        await service.EnsureServiceModeExistsAsync(
+            "ImageGeneration",
+            ServiceProviderIds.ImageGenerationAzureOpenAiImages,
+            CancellationToken.None);
+
+        var imagesSection = await service.GetSectionAsync("AzureOpenAiImages", CancellationToken.None);
+        imagesSection.Should().NotBeNull();
+        imagesSection!.Payload["Endpoint"]!.GetValue<string>()
+            .Should().Be("https://my-foundry-resource.openai.azure.com/");
+        imagesSection.SecretHasValue["ApiKey"].Should().BeTrue();
     }
 
     [TestMethod]
@@ -467,6 +554,42 @@ public sealed class ServiceEditorUpdateValidationTests
             UpdatedUtc = DateTime.UtcNow
         });
         db.SaveChanges();
+    }
+
+    private static void SeedEmptyProviderSection(ApplicationDbContext db, string sectionName)
+    {
+        db.ApplicationSettings.Add(new ApplicationSetting
+        {
+            SectionName = sectionName,
+            SchemaVersion = 1,
+            JsonValue = "{}",
+            CreatedUtc = DateTime.UtcNow,
+            UpdatedUtc = DateTime.UtcNow
+        });
+        db.SaveChanges();
+    }
+
+    private static IConfiguration BuildChatOnlyFoundryConfiguration()
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["SettingsSecrets:ActiveKeyId"] = "tests",
+            ["SettingsSecrets:Keys:tests"] = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=",
+            ["Ui:RootPath"] = "./ui",
+            ["AzureOpenAI:Resource"] = "my-foundry-resource",
+            ["AzureOpenAI:ApiKey"] = "test-foundry-chat-key",
+            ["AzureOpenAI:ApiVersion"] = "2025-04-01-preview",
+            ["LocalServiceHosts:SpeechTranscriptionBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:SpeechSynthesisBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:ImageGenerationBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:EmbeddingsBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:MediaBaseUrl"] = "http://localhost:8110",
+            ["LocalServiceHosts:DocumentIntelligenceBaseUrl"] = "http://localhost:5001",
+        };
+
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
+            .Build();
     }
 
     private static IConfiguration BuildConfiguration()

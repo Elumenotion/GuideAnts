@@ -15,6 +15,7 @@ from typing import Any
 
 from guideants_hf.catalog_completeness import gguf_model_entry_is_complete
 from guideants_hf.catalog_download import download_catalog_entry_files
+from guideants_hf.engine_process import read_subprocess_stderr_tail
 from guideants_hf.operations import find_in_flight_operation
 from ga_blocking import await_blocking
 from guideants_http.request_timeout import clamp_request_timeout_seconds, resolve_request_timeout_seconds
@@ -449,6 +450,153 @@ def stop_engine() -> None:
     STATE.warmup_completed_at_utc = None
 
 
+def restart_engine_on_failure_enabled() -> bool:
+    return env_flag("GA_EMB_RESTART_ON_FAILURE", default=True)
+
+
+def embedding_error_is_recoverable(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, RuntimeError):
+        message = str(exc).lower()
+        return (
+            "timed out" in message
+            or "failed to reach llama-server" in message
+            or "connection refused" in message
+            or "remote end closed connection" in message
+            or "remote disconnected" in message
+            or "broken pipe" in message
+        )
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        if isinstance(reason, (TimeoutError, OSError)):
+            return True
+        message = str(reason).lower()
+        return "timed out" in message or "connection refused" in message
+    return False
+
+
+def _apply_warmup_state(warmup: dict[str, Any]) -> None:
+    with STATE.lock:
+        STATE.warmup_ran = bool(warmup.get("warmupRan"))
+        STATE.warmup_succeeded = bool(warmup.get("warmupSucceeded"))
+        STATE.warmup_latency_ms = int(warmup.get("warmupLatencyMs") or 0)
+        STATE.warmup_error = warmup.get("warmupError")
+        STATE.warmup_completed_at_utc = warmup.get("warmupCompletedAtUtc")
+        if warmup.get("warmupSucceeded"):
+            STATE.dimension = int(warmup.get("dimensions") or STATE.dimension)
+
+
+def _spawn_engine_subprocess(config: EmbRuntimeConfig) -> None:
+    command = build_llama_server_command(config)
+    log_event("emb_engine_start", command=command, modelRef=config.model_ref)
+    STATE.engine_process = subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=os.environ.copy(),
+    )
+    STATE.engine_started_at_utc = utc_now_iso()
+    wait_for_engine_ready(config)
+
+
+def _verify_engine_dimension(config: EmbRuntimeConfig) -> int:
+    actual_dim = probe_embedding_dimension(config)
+    expected_dim = config.produced_dimension
+    if actual_dim != expected_dim:
+        stop_engine_process()
+        raise RuntimeError(
+            f"GGUF produced dimension {actual_dim} != catalog declared {expected_dim}."
+        )
+    return actual_dim
+
+
+def _restart_engine_process_locked(config: EmbRuntimeConfig, *, reason: str) -> None:
+    """Kill and respawn llama-server. Caller must hold ENGINE_LOCK."""
+    previous = STATE.engine_process
+    previous_pid = previous.pid if previous is not None else None
+    stderr_tail = read_subprocess_stderr_tail(previous)
+    log_event(
+        "emb_engine_restart_start",
+        modelRef=config.model_ref,
+        reason=reason,
+        previousPid=previous_pid,
+        engineStderrTail=stderr_tail or None,
+    )
+    stop_engine_process()
+    _spawn_engine_subprocess(config)
+    STATE.dimension = _verify_engine_dimension(config)
+    warmup = run_model_warmup(force=True)
+    if not warmup.get("warmupSucceeded", False):
+        raise RuntimeError(str(warmup.get("warmupError") or "Embeddings warmup failed after engine restart."))
+    _apply_warmup_state(warmup)
+    log_event(
+        "emb_engine_restart_success",
+        modelRef=config.model_ref,
+        reason=reason,
+        previousPid=previous_pid,
+        enginePid=STATE.engine_process.pid if STATE.engine_process is not None else None,
+    )
+
+
+def restart_engine_process(config: EmbRuntimeConfig, *, reason: str) -> None:
+    with ENGINE_LOCK:
+        _restart_engine_process_locked(config, reason=reason)
+
+
+def recover_dead_engine_before_embed() -> str | None:
+    """Restart a dead engine when model config is still loaded. Returns error text on failure."""
+    config = STATE.config
+    if config is None or is_engine_process_alive() or not restart_engine_on_failure_enabled():
+        return None
+    try:
+        with ENGINE_LOCK:
+            config = STATE.config
+            if config is None or is_engine_process_alive():
+                return None
+            _restart_engine_process_locked(config, reason="engine_not_alive_before_embed")
+    except Exception as exc:
+        log_event(
+            "emb_engine_restart_failed",
+            modelRef=config.model_ref if config is not None else None,
+            reason="engine_not_alive_before_embed",
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        return str(exc)
+    return None
+
+
+def embed_via_engine_with_recovery(
+    inputs: list[str],
+    purpose: str,
+    request_timeout_seconds: int | None = None,
+) -> list[list[float]]:
+    config = STATE.config
+    if config is None:
+        raise RuntimeError("Embeddings engine is not loaded.")
+    try:
+        return embed_via_engine(inputs, purpose, request_timeout_seconds)
+    except Exception as exc:
+        if not restart_engine_on_failure_enabled() or not embedding_error_is_recoverable(exc):
+            raise
+        log_event(
+            "emb_inference_recovering",
+            modelRef=config.model_ref,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        with ENGINE_LOCK:
+            active_config = STATE.config
+            if active_config is None:
+                raise
+            _restart_engine_process_locked(
+                active_config,
+                reason=f"inference_failure:{type(exc).__name__}",
+            )
+        return embed_via_engine(inputs, purpose, request_timeout_seconds)
+
+
 def probe_embedding_dimension(config: EmbRuntimeConfig) -> int:
     status_code, parsed = llama_json_request(
         config,
@@ -482,23 +630,8 @@ def start_engine(request: LoadModelRequest) -> dict[str, Any]:
         }
 
     stop_engine()
-    command = build_llama_server_command(config)
-    log_event("emb_engine_start", command=command, modelRef=model_ref)
-    STATE.engine_process = subprocess.Popen(
-        command,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        env=os.environ.copy(),
-    )
-    STATE.engine_started_at_utc = utc_now_iso()
-    wait_for_engine_ready(config)
-    actual_dim = probe_embedding_dimension(config)
-    expected_dim = config.produced_dimension
-    if actual_dim != expected_dim:
-        stop_engine()
-        raise RuntimeError(
-            f"GGUF produced dimension {actual_dim} != catalog declared {expected_dim}."
-        )
+    _spawn_engine_subprocess(config)
+    actual_dim = _verify_engine_dimension(config)
 
     STATE.config = config
     STATE.model_ref = model_ref
@@ -628,12 +761,7 @@ def load_model_serialized(request: LoadModelRequest, force_warmup: bool = False)
             warmup = run_model_warmup(force=force_warmup)
             if force_warmup and not warmup.get("warmupSucceeded", False):
                 raise RuntimeError(str(warmup.get("warmupError") or "Embeddings warmup failed."))
-            with STATE.lock:
-                STATE.warmup_ran = bool(warmup.get("warmupRan"))
-                STATE.warmup_succeeded = bool(warmup.get("warmupSucceeded"))
-                STATE.warmup_latency_ms = int(warmup.get("warmupLatencyMs") or 0)
-                STATE.warmup_error = warmup.get("warmupError")
-                STATE.warmup_completed_at_utc = warmup.get("warmupCompletedAtUtc")
+            _apply_warmup_state(warmup)
             return {**details, **warmup}
         except Exception as exc:
             with STATE.lock:
@@ -923,6 +1051,64 @@ async def admin_unload(request: Request) -> JSONResponse:
         ENGINE_LOCK.release()
 
 
+@APP.post("/admin/restart")
+async def admin_restart(request: Request) -> JSONResponse:
+    request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    if not ENGINE_LOCK.acquire(blocking=False):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "requestId": request_id,
+                "ok": False,
+                "error": "model lifecycle operation already in progress",
+                **STATE.snapshot(),
+            },
+        )
+    try:
+        config = STATE.config
+        snapshot = STATE.snapshot()
+        if config is None or not snapshot.get("loaded"):
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "requestId": request_id,
+                    "ok": True,
+                    "action": "noop-not-loaded",
+                    **snapshot,
+                },
+            )
+        await await_blocking(_restart_engine_process_locked, config, reason="admin_restart")
+        log_event("emb_admin_restart_success", requestId=request_id, modelRef=config.model_ref)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "requestId": request_id,
+                "ok": True,
+                "action": "restarted",
+                **STATE.snapshot(),
+            },
+        )
+    except Exception as exc:
+        log_event(
+            "emb_admin_restart_failed",
+            requestId=request_id,
+            errorType=type(exc).__name__,
+            error=str(exc),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "requestId": request_id,
+                "ok": False,
+                "error": "engine_restart_failed",
+                "message": "Embeddings engine restart failed. Check service logs for details.",
+                **STATE.snapshot(),
+            },
+        )
+    finally:
+        ENGINE_LOCK.release()
+
+
 @APP.get("/admin/models")
 async def admin_list_models() -> JSONResponse:
     return JSONResponse(
@@ -1045,6 +1231,18 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
 
     started = time.perf_counter()
     try:
+        restart_error = await await_blocking(recover_dead_engine_before_embed)
+        if restart_error is not None:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "requestId": request_id,
+                    "error": "engine_restart_failed",
+                    "message": "Embeddings engine is not running and restart failed. Check service logs for details.",
+                    **STATE.snapshot(),
+                },
+            )
+
         with STATE.lock:
             config_for_timeout = STATE.config
         request_timeout_seconds = resolve_request_timeout_seconds(
@@ -1052,7 +1250,7 @@ async def embed(request: Request, payload: EmbedRequest) -> JSONResponse:
             config_for_timeout.request_timeout_seconds if config_for_timeout is not None else 120,
         )
         vectors = await await_blocking(
-            embed_via_engine,
+            embed_via_engine_with_recovery,
             payload.inputs,
             purpose,
             request_timeout_seconds,

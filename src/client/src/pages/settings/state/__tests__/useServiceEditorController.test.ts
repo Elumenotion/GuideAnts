@@ -94,10 +94,66 @@ describe('useServiceEditorController', () => {
     expect(result.current.error).toBe('network down');
   });
 
+  it('allows save when Foundry connection fields are editable inline', async () => {
+    const foundry = makeProvider({
+      providerId: 'SpeechTranscription.AzureSpeech.Batch',
+      providerKind: 'Cloud',
+      connectionConfigured: false,
+      connectionMissingFields: ['Endpoint', 'ApiKey'],
+      relatedChatConnectionConfigured: true,
+      operativeFields: ['Endpoint', 'ApiKey', 'Region', 'TimeoutSeconds'],
+      fields: {
+        Endpoint: { name: 'Endpoint', value: '', isSecret: false, hasValue: false },
+        ApiKey: { name: 'ApiKey', value: '', isSecret: true, hasValue: false },
+        Region: { name: 'Region', value: '', isSecret: false, hasValue: false },
+        TimeoutSeconds: { name: 'TimeoutSeconds', value: '300', isSecret: false, hasValue: true },
+      },
+      fieldMetadata: [
+        { name: 'Endpoint', kind: 'url', required: true, enumOptions: null, operative: true },
+        { name: 'ApiKey', kind: 'secret', required: true, enumOptions: null, operative: true },
+        { name: 'Region', kind: 'text', required: true, enumOptions: null, operative: true },
+        { name: 'TimeoutSeconds', kind: 'int', required: true, enumOptions: null, operative: true },
+      ],
+    });
+    const state = makeServiceState({ providers: [foundry], activeProviderId: foundry.providerId });
+    (api.settings.services.get as any).mockResolvedValue(state);
+    (api.settings.services.updateProviderFields as any).mockResolvedValue(undefined);
+    (api.settings.services.updateActiveProvider as any).mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useServiceEditorController('SpeechTranscription'));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    act(() => {
+      result.current.draft.patchActiveDraft({
+        Endpoint: 'https://speech.example.com/',
+        ApiKey: 'speech-key',
+        Region: 'eastus',
+      });
+    });
+
+    let saved = false;
+    await act(async () => {
+      saved = await result.current.save();
+    });
+
+    expect(saved).toBe(true);
+    expect(api.settings.services.updateProviderFields).toHaveBeenCalled();
+  });
+
   it('blocks save when provider connection is not configured', async () => {
     const disconnected = makeProvider({
       connectionConfigured: false,
       connectionMissingFields: ['ApiKey'],
+      operativeFields: ['TimeoutSeconds'],
+      fields: {
+        TimeoutSeconds: { name: 'TimeoutSeconds', value: '30', isSecret: false, hasValue: true },
+      },
+      fieldMetadata: [
+        { name: 'TimeoutSeconds', kind: 'int', required: true, enumOptions: null, operative: true },
+      ],
     });
     const state = makeServiceState({ providers: [disconnected], activeProviderId: disconnected.providerId });
     (api.settings.services.get as any).mockResolvedValue(state);
@@ -253,12 +309,14 @@ describe('useServiceEditorController', () => {
   it('hides unconfigured cloud providers from providerOptions', async () => {
     const local = makeProvider({ providerId: 'SpeechSynthesis.Local.Tts', providerKind: 'Local' });
     const hiddenCloud = makeProvider({
-      providerId: 'SpeechSynthesis.AzureSpeechService.Cloud',
+      providerId: 'SpeechSynthesis.OpenAI.Tts',
       providerKind: 'Cloud',
       connectionConfigured: false,
-      connectionMissingFields: ['SubscriptionKey'],
+      connectionMissingFields: ['ApiKey'],
       canActivate: false,
       activationBlockers: ['Connection not configured'],
+      operativeFields: ['TimeoutSeconds', 'VoiceName'],
+      relatedChatConnectionConfigured: false,
     });
     const state = makeServiceState({
       providers: [local, hiddenCloud],
@@ -274,6 +332,36 @@ describe('useServiceEditorController', () => {
 
     expect(result.current.providerOptions).toHaveLength(1);
     expect(result.current.providerOptions[0].providerId).toBe('SpeechSynthesis.Local.Tts');
+  });
+
+  it('keeps Foundry cloud providers visible when related chat connection is configured', async () => {
+    const local = makeProvider({ providerId: 'SpeechSynthesis.Local.Tts', providerKind: 'LocalHttp' });
+    const foundry = makeProvider({
+      providerId: 'SpeechSynthesis.AzureSpeech.Ssml',
+      providerKind: 'Cloud',
+      providerSection: 'AzureSpeechService',
+      connectionConfigured: false,
+      connectionMissingFields: ['ApiKey', 'Region'],
+      relatedChatConnectionConfigured: true,
+      canActivate: false,
+      activationBlockers: ['Missing provider connection value: ApiKey.'],
+    });
+    const state = makeServiceState({
+      providers: [local, foundry],
+      activeProviderId: local.providerId,
+    });
+    (api.settings.services.get as any).mockResolvedValue(state);
+
+    const { result } = renderHook(() => useServiceEditorController('SpeechSynthesis'));
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.providerOptions.map((p) => p.providerId)).toEqual([
+      'SpeechSynthesis.Local.Tts',
+      'SpeechSynthesis.AzureSpeech.Ssml',
+    ]);
   });
 
   it('clearFieldError removes a field error entry', async () => {

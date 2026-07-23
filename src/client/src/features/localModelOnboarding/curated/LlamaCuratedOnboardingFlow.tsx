@@ -127,7 +127,8 @@ export function LlamaCuratedOnboardingFlow({
         />
       ) : null}
 
-      {state.step === 'progress' ? (
+      {/* Wizard hosts install progress in LocalAiModelsStep's Installing list; avoid a second copy here. */}
+      {state.step === 'progress' && onboardingUi !== 'wizard' ? (
         <LlamaCuratedProgress
           status={state.operation?.status ?? 'queued'}
           progress={state.operation?.progress ?? null}
