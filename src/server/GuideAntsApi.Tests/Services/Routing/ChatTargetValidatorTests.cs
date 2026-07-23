@@ -183,7 +183,7 @@ public sealed class ChatTargetValidatorTests
     }
 
     [TestMethod]
-    public void Validate_Throws_RuntimeNotReady_WhenLlamaChatBehaviorMissing()
+    public void Validate_Throws_ModelNotReady_WhenLlamaChatBehaviorMissing()
     {
         var validator = CreateValidator(new Dictionary<string, string?>());
 
@@ -196,7 +196,7 @@ public sealed class ChatTargetValidatorTests
         var target = new ChatTarget("qwen-local", "llama-cpp", runtimeJson);
         Action act = () => validator.Validate(target);
         act.Should().Throw<RoutingException>()
-            .Where(ex => ex.Code == RoutingErrorCodes.RuntimeNotReady
+            .Where(ex => ex.Code == RoutingErrorCodes.ModelNotReady
                          && ex.ModelId == "qwen-local");
     }
 

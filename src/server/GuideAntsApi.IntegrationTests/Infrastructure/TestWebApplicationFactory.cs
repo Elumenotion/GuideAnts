@@ -7,6 +7,8 @@ using GuideAntsApi.DataModel;
 using GuideAntsApi.Options;
 using GuideAntsApi.Services.Auth;
 using GuideAntsApi.Services.Bootstrap;
+using GuideAntsApi.Services.LlamaCpp;
+using GuideAntsApi.IntegrationTests.TestUtils;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using AntRunner.Chat.Abstractions;
@@ -15,8 +17,13 @@ namespace GuideAntsApi.IntegrationTests.Infrastructure;
 
 public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncDisposable
 {
+    private const string ConnectionStringEnvColon = "ConnectionStrings:DefaultConnection";
+    private const string ConnectionStringEnvDoubleUnderscore = "ConnectionStrings__DefaultConnection";
+
     private bool _initialized = false;
     private string? _connectionString;
+    private string? _priorConnectionStringColon;
+    private string? _priorConnectionStringDoubleUnderscore;
 
     public async Task InitializeAsync()
     {
@@ -42,7 +49,12 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
         }
 
         // Force test container connection string to win in every config access path.
-        Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", _connectionString);
+        // Capture priors so DisposeAsync can restore and not leak into unit-test
+        // processes that share the VS Test host (DatabaseStorage reads the colon key).
+        _priorConnectionStringColon ??= Environment.GetEnvironmentVariable(ConnectionStringEnvColon);
+        _priorConnectionStringDoubleUnderscore ??= Environment.GetEnvironmentVariable(ConnectionStringEnvDoubleUnderscore);
+        Environment.SetEnvironmentVariable(ConnectionStringEnvDoubleUnderscore, _connectionString);
+        Environment.SetEnvironmentVariable(ConnectionStringEnvColon, _connectionString);
 
         builder.ConfigureAppConfiguration((context, config) =>
         {
@@ -102,6 +114,15 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
             services.RemoveAll<ILocalAiStartupWarmupService>();
             services.AddSingleton<ILocalAiStartupWarmupService, NoOpLocalAiStartupWarmupService>();
 
+            // appsettings.test.json points LlamaCpp / LocalServiceHosts at localhost:8110.
+            // The real admin + warmup orchestration HttpClients use a 4-hour timeout; when
+            // something accepts TCP but never answers, overview / llama auth-gate tests hang
+            // until the test HttpClient aborts (~100s). Stub both to keep the suite hermetic.
+            services.RemoveAll<ILlamaRuntimeAdminClient>();
+            services.AddSingleton<ILlamaRuntimeAdminClient, StubLlamaRuntimeAdminClient>();
+            services.RemoveAll<ILocalAiWarmupOrchestrationClient>();
+            services.AddSingleton<ILocalAiWarmupOrchestrationClient, StubLocalAiWarmupOrchestrationClient>();
+
             services
                 .AddAuthentication(options =>
                 {
@@ -160,6 +181,8 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncD
 
     public override async ValueTask DisposeAsync()
     {
+        Environment.SetEnvironmentVariable(ConnectionStringEnvColon, _priorConnectionStringColon);
+        Environment.SetEnvironmentVariable(ConnectionStringEnvDoubleUnderscore, _priorConnectionStringDoubleUnderscore);
         await base.DisposeAsync();
     }
 

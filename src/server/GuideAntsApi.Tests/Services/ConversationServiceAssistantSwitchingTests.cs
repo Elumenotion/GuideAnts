@@ -21,6 +21,9 @@ namespace GuideAntsApi.Tests.Services;
 [TestClass]
 public class ConversationServiceAssistantSwitchingTests
 {
+    private const string ConnectionStringEnvColon = "ConnectionStrings:DefaultConnection";
+    private const string ConnectionStringEnvDoubleUnderscore = "ConnectionStrings__DefaultConnection";
+
     private ApplicationDbContext _dbContext = null!;
     private ConversationService _service = null!;
     private ConversationHistoryBuilder _historyBuilder = null!;
@@ -32,10 +35,21 @@ public class ConversationServiceAssistantSwitchingTests
     private Guid _notebookId;
     private Guid _conversationId;
     private Guid _templateId;
+    private string? _priorConnectionStringColon;
+    private string? _priorConnectionStringDoubleUnderscore;
 
     [TestInitialize]
     public void TestInitialize()
     {
+        // PrepareMessagesForAssistantAsync loads assistants via DatabaseStorage, which
+        // opens SQL using these env vars. When integration tests share the VS Test host
+        // they leave a container connection string behind; if that SQL is gone, each
+        // call hangs for ~15s (Connect Timeout). Keep this suite hermetic.
+        _priorConnectionStringColon = Environment.GetEnvironmentVariable(ConnectionStringEnvColon);
+        _priorConnectionStringDoubleUnderscore = Environment.GetEnvironmentVariable(ConnectionStringEnvDoubleUnderscore);
+        Environment.SetEnvironmentVariable(ConnectionStringEnvColon, null);
+        Environment.SetEnvironmentVariable(ConnectionStringEnvDoubleUnderscore, null);
+
         // Create in-memory database
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
@@ -148,6 +162,9 @@ public class ConversationServiceAssistantSwitchingTests
         AssistantUtility.ClearAllCache();
 
         _dbContext.Dispose();
+
+        Environment.SetEnvironmentVariable(ConnectionStringEnvColon, _priorConnectionStringColon);
+        Environment.SetEnvironmentVariable(ConnectionStringEnvDoubleUnderscore, _priorConnectionStringDoubleUnderscore);
     }
 
     #region New Conversation Tests
