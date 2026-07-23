@@ -1,8 +1,11 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using AntRunner.ToolCalling;
+using AntRunner.ToolCalling.AssistantDefinitions;
 using AntRunner.ToolCalling.Functions;
 using FluentAssertions;
+using GuideAntsApi.Services;
 
 namespace GuideAntsApi.Tests.ToolCalling;
 
@@ -576,6 +579,50 @@ public sealed class ToolCallerDeepTests
         };
 
         (await caller.ExecuteLocalFunctionAsync()).Should().Be("ok");
+    }
+
+    [TestMethod]
+    public async Task ExecuteLocalFunctionAsync_IgnoresRuntimeInjectedContextParameter()
+    {
+        var methodPath = $"{typeof(SkillTools).FullName}.ListSkills";
+        var caller = new ToolCaller(
+            baseUrl: "tool://localhost",
+            path: methodPath,
+            method: "POST",
+            operation: "skills_list",
+            methodSchema: ParseElement("""
+                {
+                  "requestBody": {
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "type": "object",
+                          "properties": {},
+                          "additionalProperties": false
+                        }
+                      }
+                    }
+                  }
+                }
+                """),
+            contentType: "application/json",
+            authHeaders: [],
+            authQueryParams: [])
+        {
+            Params = new Dictionary<string, object>
+            {
+                ["context"] = new InvocationContext(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+                ["assistantDefinition"] = new AssistantDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    Skills = []
+                }
+            }
+        };
+
+        var result = await caller.ExecuteLocalFunctionAsync();
+        result.Should().NotBeNull();
+        result!.ToString().Should().Be("[]");
     }
 
     [TestMethod]

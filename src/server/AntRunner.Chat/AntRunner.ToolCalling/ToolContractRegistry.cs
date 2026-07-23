@@ -372,5 +372,6 @@ public static class ToolContractRegistry
     }
 
     internal static bool IsRuntimeInjectedParameterName(string? parameterName) =>
-        string.Equals(parameterName, "cancellationToken", StringComparison.OrdinalIgnoreCase);
+        string.Equals(parameterName, "cancellationToken", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(parameterName, "context", StringComparison.OrdinalIgnoreCase);
 }
