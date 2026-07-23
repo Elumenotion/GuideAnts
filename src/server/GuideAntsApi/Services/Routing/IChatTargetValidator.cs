@@ -203,7 +203,7 @@ public sealed class ChatTargetValidator : IChatTargetValidator
         if (target.LlamaChatBehavior?.ThinkingControl?.ChoiceActions is not { Count: > 0 })
         {
             throw new RoutingException(
-                RoutingErrorCodes.RuntimeNotReady,
+                RoutingErrorCodes.ModelNotReady,
                 $"Model '{target.ModelId}' is missing model-owned chat behavior configuration.",
                 action: $"Configure chat behavior for '{target.ModelId}' in Settings → Models & Runtime.",
                 serviceId: "Chat",

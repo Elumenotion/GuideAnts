@@ -261,21 +261,12 @@ public sealed class GuidesServiceTests
             ModelId = "local-model",
             DisplayName = "Local Model",
             Provider = "llama-cpp",
-            RuntimeConfigJson = """{"routerModelId":"router","runtimeProfileId":"profile-a"}"""
+            RuntimeConfigJson = """{"routerModelId":"router"}""",
+            ThinkingControlJson = """{"defaultChoice":"none","choiceActions":{"none":[]}}""",
         });
         await context.SaveChangesAsync();
 
-        var resolver = new Mock<IRuntimeProfileResolver>();
-        resolver.Setup(r => r.ResolveAsync("profile-a", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RuntimeProfileData(
-                "profile-a",
-                CombineSystemAndDeveloperMessages: false,
-                ThoughtBlockPattern: null,
-                SamplingParameters: new Dictionary<string, SamplingParameterDefinition>(),
-                ThinkingControl: new ThinkingControl("None", new Dictionary<string, IReadOnlyList<ThinkingAction>>()),
-                RequestFieldsWhenToolsPresent: new Dictionary<string, JsonElement>()));
-
-        var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver.Object);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
         var request = new GuideRuntimeValidationRequest([
             new GuideRuntimeValidationMember("guide", null, "Guide", "local-model")
         ]);
@@ -283,11 +274,11 @@ public sealed class GuidesServiceTests
         var result = await service.ValidateRuntimeCompatibilityAsync(request);
 
         result.IsValid.Should().BeTrue();
-        result.Profiles.Should().ContainSingle().Which.Should().Be("profile-a");
+        result.Profiles.Should().ContainSingle().Which.Should().Be("local-model");
     }
 
     [TestMethod]
-    public async Task ValidateRuntimeCompatibilityAsync_Adds_warning_for_invalid_runtime_config()
+    public async Task ValidateRuntimeCompatibilityAsync_Adds_warning_for_missing_chat_behavior()
     {
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"guides-runtime-warn-{Guid.NewGuid():N}");
         await using var context = new ApplicationDbContext(options);
@@ -296,7 +287,8 @@ public sealed class GuidesServiceTests
             ModelId = "broken-local",
             DisplayName = "Broken Local",
             Provider = "llama-cpp",
-            RuntimeConfigJson = null
+            RuntimeConfigJson = """{"routerModelId":"router"}""",
+            ThinkingControlJson = "{}",
         });
         await context.SaveChangesAsync();
 
@@ -307,7 +299,7 @@ public sealed class GuidesServiceTests
 
         var result = await service.ValidateRuntimeCompatibilityAsync(request);
 
-        result.Warnings.Should().ContainSingle(w => w.Contains("invalid local runtime configuration"));
+        result.Warnings.Should().ContainSingle(w => w.Contains("missing model-owned chat behavior"));
     }
 
     [TestMethod]

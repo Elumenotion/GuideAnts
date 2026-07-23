@@ -151,15 +151,27 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
         await db.Database.ExecuteSqlRawAsync("DELETE FROM RuntimeProfiles;");
     }
 
+    /// <summary>
+    /// Minimal valid model-owned thinking control for llama-cpp routing/chat dispatch.
+    /// ChoiceActions must be non-empty or ChatTargetValidator rejects the model.
+    /// </summary>
+    protected const string DefaultLlamaThinkingControlJson =
+        """{"defaultChoice":"none","choiceActions":{"none":[],"enabled":[]}}""";
+
     protected static async Task<Model> SeedCatalogModelAsync(
         string modelId,
         string provider,
         string? RuntimeConfigJson = null,
         string displayName = "Test Model",
-        bool isActive = true)
+        bool isActive = true,
+        string? ThinkingControlJson = null)
     {
         using var scope = SharedFactory!.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var isLlama = string.Equals(provider, "llama-cpp", StringComparison.OrdinalIgnoreCase);
+        var thinkingControlJson = ThinkingControlJson
+            ?? (isLlama ? DefaultLlamaThinkingControlJson : "{}");
 
         var existing = await db.Models.FirstOrDefaultAsync(m => m.ModelId == modelId);
         if (existing != null)
@@ -168,6 +180,11 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
             existing.RuntimeConfigJson = RuntimeConfigJson;
             existing.IsActive = isActive;
             existing.DisplayName = displayName;
+            existing.ThinkingControlJson = thinkingControlJson;
+            if (isLlama)
+            {
+                existing.ReasoningChoicesJson = """["none","enabled"]""";
+            }
         }
         else
         {
@@ -177,7 +194,9 @@ public abstract class SettingsRoutingIntegrationTestBase : IAsyncDisposable
                 DisplayName = displayName,
                 Provider = provider,
                 IsActive = isActive,
-                RuntimeConfigJson = RuntimeConfigJson
+                RuntimeConfigJson = RuntimeConfigJson,
+                ThinkingControlJson = thinkingControlJson,
+                ReasoningChoicesJson = isLlama ? """["none","enabled"]""" : null,
             };
             db.Models.Add(existing);
         }
