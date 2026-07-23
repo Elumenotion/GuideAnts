@@ -34,6 +34,14 @@ Useful options:
 
 If the launcher gets you to `http://localhost:5107/`, skip to section 5 for first-user auth bootstrap and initial wizard flow.
 
+## 1b. Cloud deployment (Azure)
+
+To run GuideAnts on **Azure Container Apps** with **Azure SQL** (cloud AI via Settings, no local GPU containers), see the consumer deploy guide:
+
+- **[deploy/azure/README.md](../deploy/azure/README.md)** — prerequisites, `deploy.ps1` / `deploy.sh`, custom domain, post-deploy steps.
+
+This path uses the **azure-slim** profile: same service graph as `docker-compose.ghcr-slim.yml` but with Azure SQL instead of embedded SQL Server.
+
 ## 2. What you are setting up
 
 GuideAnts runs as a Docker Compose stack on a single host. Pick the stack by deciding two things:

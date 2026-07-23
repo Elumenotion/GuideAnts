@@ -20,7 +20,7 @@ public static class SkillTools
     }
 
     [Tool(
-        OperationId = "skills.list",
+        OperationId = "skills_list",
         Summary = "List the skills available to this assistant (name, description, locator, files)."
     )]
     [RequiresNotebookContext]
@@ -43,7 +43,7 @@ public static class SkillTools
     }
 
     [Tool(
-        OperationId = "skills.read",
+        OperationId = "skills_read",
         Summary = "Read a skill's SKILL.md body, or a specific reference/script/asset file."
     )]
     [RequiresNotebookContext]

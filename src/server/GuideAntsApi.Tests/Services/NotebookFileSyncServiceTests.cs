@@ -26,7 +26,6 @@ public sealed class NotebookFileSyncServiceTests
         var service = new NotebookFileSyncService(
             reconciler.Object,
             scopeFactory,
-            Mock.Of<INotebookLockService>(),
             NullLogger<NotebookFileSyncService>.Instance);
 
         var notebookId = Guid.NewGuid();

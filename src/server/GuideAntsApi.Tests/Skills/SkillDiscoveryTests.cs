@@ -25,7 +25,7 @@ public sealed class SkillDiscoveryTests
         block.Should().Contain("pptx-author");
         block.Should().Contain("Build decks");
         block.Should().Contain("skill://abc/pptx-author");
-        block.Should().Contain("skills.read");
+        block.Should().Contain("skills_read");
         block.Should().NotContain("SECRET_BODY_TEXT");
     }
 

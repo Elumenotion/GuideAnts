@@ -9,18 +9,15 @@ public class NotebookFileSyncService : INotebookFileSyncService
 {
     private readonly INotebookFileReconciler _reconciler;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly INotebookLockService _lockService;
     private readonly ILogger<NotebookFileSyncService> _logger;
 
     public NotebookFileSyncService(
         INotebookFileReconciler reconciler,
         IServiceScopeFactory scopeFactory,
-        INotebookLockService lockService,
         ILogger<NotebookFileSyncService> logger)
     {
         _reconciler = reconciler;
         _scopeFactory = scopeFactory;
-        _lockService = lockService;
         _logger = logger;
     }
 
@@ -37,15 +34,6 @@ public class NotebookFileSyncService : INotebookFileSyncService
     {
         try
         {
-            await using var lockHandle = await _lockService.TryAcquireAsync(notebookId, TimeSpan.FromSeconds(2));
-            if (!lockHandle.Acquired)
-            {
-                _logger.LogDebug(
-                    "Skipping immediate reconcile for notebook {NotebookId} - another sync is already running",
-                    notebookId);
-                return;
-            }
-
             await _reconciler.ReconcileNotebookAsync(notebookId, ReconcileMode.Full, cancellationToken);
         }
         catch (Exception ex)

@@ -3,6 +3,7 @@ using GuideAnts.Usage;
 using GuideAntsApi.BackgroundJobs.Jobs;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.Services;
+using GuideAntsApi.Services.Components;
 using GuideAntsApi.Services.Components.Sync;
 using GuideAntsApi.Services.Core;
 using GuideAntsApi.Tests.BackgroundJobs;
@@ -115,6 +116,7 @@ public sealed class SyncNotebookHandlerTests
             queue,
             Mock.Of<IFileLineageService>(),
             Mock.Of<IUsageRecorder>(),
+            new InMemoryNotebookLockService(),
             NullLogger<NotebookFileReconciler>.Instance);
     }
 }

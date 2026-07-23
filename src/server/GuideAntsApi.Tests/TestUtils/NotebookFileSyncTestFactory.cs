@@ -16,7 +16,6 @@ internal static class NotebookFileSyncTestFactory
         return new NotebookFileSyncService(
             reconciler,
             scopeFactory,
-            Mock.Of<INotebookLockService>(),
             NullLogger<NotebookFileSyncService>.Instance);
     }
 }

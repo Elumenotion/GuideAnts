@@ -1,0 +1,849 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "4287102463654328006"
+    }
+  },
+  "parameters": {
+    "environmentName": {
+      "type": "string",
+      "defaultValue": "dev",
+      "metadata": {
+        "description": "Environment name (dev, staging, prod)"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "East US 2",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    },
+    "appNamePrefix": {
+      "type": "string",
+      "defaultValue": "guideants",
+      "metadata": {
+        "description": "Application name prefix"
+      }
+    },
+    "ghcrOwner": {
+      "type": "string",
+      "defaultValue": "elumenotion",
+      "metadata": {
+        "description": "GHCR organization for GuideAnts images"
+      }
+    },
+    "imageTag": {
+      "type": "string",
+      "defaultValue": "main",
+      "metadata": {
+        "description": "Image tag (main, latest, semver, sha-*)"
+      }
+    },
+    "customDomain": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Custom domain for public HTTPS URL (empty = ACA default FQDN)"
+      }
+    },
+    "documentServerEnabled": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy DocumentServer sidecar"
+      }
+    }
+  },
+  "variables": {
+    "tags": {
+      "environment": "[parameters('environmentName')]",
+      "project": "guideants",
+      "deployedBy": "bicep",
+      "profile": "azure-slim"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "container-apps",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "environmentName": {
+            "value": "[parameters('environmentName')]"
+          },
+          "appNamePrefix": {
+            "value": "[parameters('appNamePrefix')]"
+          },
+          "containerAppsEnvironmentId": {
+            "value": "[resourceId('Microsoft.App/managedEnvironments', format('cae-{0}-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+          },
+          "containerAppsEnvironmentDefaultDomain": {
+            "value": "[reference(resourceId('Microsoft.App/managedEnvironments', format('cae-{0}-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-05-01').defaultDomain]"
+          },
+          "keyVaultName": {
+            "value": "[format('kv-{0}-{1}-{2}', take(parameters('appNamePrefix'), 4), take(parameters('environmentName'), 3), take(uniqueString(resourceGroup().id), 8))]"
+          },
+          "keyVaultUri": {
+            "value": "[reference(resourceId('Microsoft.KeyVault/vaults', format('kv-{0}-{1}-{2}', take(parameters('appNamePrefix'), 4), take(parameters('environmentName'), 3), take(uniqueString(resourceGroup().id), 8))), '2023-07-01').vaultUri]"
+          },
+          "storageAccountName": {
+            "value": "[format('st{0}{1}{2}', take(parameters('appNamePrefix'), 4), take(parameters('environmentName'), 3), take(uniqueString(resourceGroup().id), 10))]"
+          },
+          "ghcrOwner": {
+            "value": "[parameters('ghcrOwner')]"
+          },
+          "imageTag": {
+            "value": "[parameters('imageTag')]"
+          },
+          "customDomain": {
+            "value": "[parameters('customDomain')]"
+          },
+          "documentServerEnabled": {
+            "value": "[parameters('documentServerEnabled')]"
+          },
+          "appInsightsConnectionString": {
+            "value": "[reference(resourceId('Microsoft.Insights/components', format('appi-{0}-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2020-02-02').ConnectionString]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "9641136442627672225"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "environmentName": {
+              "type": "string"
+            },
+            "appNamePrefix": {
+              "type": "string"
+            },
+            "containerAppsEnvironmentId": {
+              "type": "string"
+            },
+            "containerAppsEnvironmentDefaultDomain": {
+              "type": "string"
+            },
+            "keyVaultName": {
+              "type": "string"
+            },
+            "keyVaultUri": {
+              "type": "string"
+            },
+            "storageAccountName": {
+              "type": "string"
+            },
+            "ghcrOwner": {
+              "type": "string"
+            },
+            "imageTag": {
+              "type": "string"
+            },
+            "customDomain": {
+              "type": "string"
+            },
+            "documentServerEnabled": {
+              "type": "bool"
+            },
+            "appInsightsConnectionString": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            }
+          },
+          "variables": {
+            "webApiAppName": "guideants-webapi-ui",
+            "aiAppName": "guideants-ai",
+            "doclingAppName": "docling-serve",
+            "plantumlAppName": "plantuml",
+            "searxngAppName": "searxng",
+            "documentServerAppName": "documentserver",
+            "publicApiUrl": "[if(not(equals(parameters('customDomain'), '')), format('https://{0}', parameters('customDomain')), format('https://{0}.{1}', variables('webApiAppName'), parameters('containerAppsEnvironmentDefaultDomain')))]",
+            "allowedOrigins": "[if(not(equals(parameters('customDomain'), '')), format('https://{0}', parameters('customDomain')), '*')]",
+            "webApiImage": "[format('ghcr.io/{0}/guideants-webapi-ui-slim:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
+            "aiImage": "[format('ghcr.io/{0}/guideants-ai-slim:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
+            "plantumlImage": "[format('ghcr.io/{0}/guideants-plantuml:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
+            "searxngImage": "[format('ghcr.io/{0}/guideants-searxng:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
+            "doclingImage": "quay.io/docling-project/docling-serve-cpu:v1.21.0",
+            "documentServerImage": "ghcr.io/euro-office/documentserver:latest",
+            "sharedSecrets": [
+              {
+                "name": "jwt-signing-key",
+                "keyVaultUrl": "[format('{0}secrets/jwt-signing-key', parameters('keyVaultUri'))]",
+                "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+              },
+              {
+                "name": "settings-secrets-key-azure-deploy",
+                "keyVaultUrl": "[format('{0}secrets/settings-secrets-key-azure-deploy', parameters('keyVaultUri'))]",
+                "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+              },
+              {
+                "name": "script-agent-token",
+                "keyVaultUrl": "[format('{0}secrets/script-agent-token', parameters('keyVaultUri'))]",
+                "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+              },
+              {
+                "name": "script-agent-admin-token",
+                "keyVaultUrl": "[format('{0}secrets/script-agent-admin-token', parameters('keyVaultUri'))]",
+                "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+              },
+              {
+                "name": "sql-connection-string",
+                "keyVaultUrl": "[format('{0}secrets/sql-connection-string', parameters('keyVaultUri'))]",
+                "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+              },
+              {
+                "name": "documentserver-jwt-secret",
+                "keyVaultUrl": "[format('{0}secrets/documentserver-jwt-secret', parameters('keyVaultUri'))]",
+                "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+              }
+            ]
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[format('Microsoft.KeyVault/vaults/{0}', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsUser')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[format('Microsoft.Storage/storageAccounts/{0}', parameters('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'StorageFileDataSMBShareContributor')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb')]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.App/managedEnvironments/storages",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', split(parameters('containerAppsEnvironmentId'), '/')[8], 'contentfiles-storage')]",
+              "properties": {
+                "azureFile": {
+                  "accountName": "[parameters('storageAccountName')]",
+                  "accountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').keys[0].value]",
+                  "shareName": "contentfiles",
+                  "accessMode": "ReadWrite"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.App/managedEnvironments/storages",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', split(parameters('containerAppsEnvironmentId'), '/')[8], 'searxng-config-storage')]",
+              "properties": {
+                "azureFile": {
+                  "accountName": "[parameters('storageAccountName')]",
+                  "accountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').keys[0].value]",
+                  "shareName": "searxng-config",
+                  "accessMode": "ReadWrite"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.App/managedEnvironments/storages",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', split(parameters('containerAppsEnvironmentId'), '/')[8], 'searxng-data-storage')]",
+              "properties": {
+                "azureFile": {
+                  "accountName": "[parameters('storageAccountName')]",
+                  "accountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').keys[0].value]",
+                  "shareName": "searxng-data",
+                  "accessMode": "ReadWrite"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.App/managedEnvironments/storages",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', split(parameters('containerAppsEnvironmentId'), '/')[8], 'script-agent-state-storage')]",
+              "properties": {
+                "azureFile": {
+                  "accountName": "[parameters('storageAccountName')]",
+                  "accountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').keys[0].value]",
+                  "shareName": "script-agent-state",
+                  "accessMode": "ReadWrite"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('webApiAppName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))))]": {}
+                }
+              },
+              "properties": {
+                "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
+                "workloadProfileName": "consumption",
+                "configuration": {
+                  "activeRevisionsMode": "Single",
+                  "ingress": {
+                    "external": true,
+                    "targetPort": 8080,
+                    "allowInsecure": false,
+                    "traffic": [
+                      {
+                        "weight": 100,
+                        "latestRevision": true
+                      }
+                    ]
+                  },
+                  "secrets": "[variables('sharedSecrets')]"
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "[variables('webApiAppName')]",
+                      "image": "[variables('webApiImage')]",
+                      "resources": {
+                        "cpu": "[json('2.0')]",
+                        "memory": "4Gi"
+                      },
+                      "env": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', 'Production'), createObject('name', 'ASPNETCORE_URLS', 'value', 'http://+:8080'), createObject('name', 'ASPNETCORE_FORWARDEDHEADERS_ENABLED', 'value', 'true'), createObject('name', 'AZURE_CLIENT_ID', 'value', reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').clientId), createObject('name', 'API_RUNTIME_CONTEXT', 'value', 'azure-slim'), createObject('name', 'ALLOWED_ORIGINS', 'value', variables('allowedOrigins')), createObject('name', 'ConnectionStrings__DefaultConnection', 'secretRef', 'sql-connection-string'), createObject('name', 'Jwt__SigningKey', 'secretRef', 'jwt-signing-key'), createObject('name', 'SettingsSecrets__ActiveKeyId', 'value', 'azure-deploy'), createObject('name', 'SettingsSecrets__Keys__azure-deploy', 'secretRef', 'settings-secrets-key-azure-deploy'), createObject('name', 'FileStorage__Path', 'value', '/app/ContentFiles'), createObject('name', 'Ui__RootPath', 'value', '/app/ui'), createObject('name', 'Ui__DevServerUrl', 'value', ''), createObject('name', 'SearXngSearch__BaseUrl', 'value', format('http://{0}', variables('searxngAppName'))), createObject('name', 'BrowserRendering__BaseUrl', 'value', format('http://{0}', variables('searxngAppName'))), createObject('name', 'LocalServiceHosts__SpeechTranscriptionBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__SpeechSynthesisBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__ImageGenerationBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__EmbeddingsBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__MediaBaseUrl', 'value', format('http://{0}', variables('aiAppName'))), createObject('name', 'LocalServiceHosts__DocumentIntelligenceBaseUrl', 'value', format('http://{0}', variables('doclingAppName'))), createObject('name', 'DocumentServer__Enabled', 'value', string(parameters('documentServerEnabled'))), createObject('name', 'DocumentServer__InternalUrl', 'value', format('http://{0}', variables('documentServerAppName'))), createObject('name', 'DocumentServer__ApiBaseUrl', 'value', variables('publicApiUrl')), createObject('name', 'DocumentServer__JwtEnabled', 'value', string(parameters('documentServerEnabled'))), createObject('name', 'DocumentServer__JwtSecret', 'secretRef', 'documentserver-jwt-secret'), createObject('name', 'DocumentServer__JwtHeader', 'value', 'Authorization'), createObject('name', 'DocumentServer__JwtInBody', 'value', 'false'), createObject('name', 'ScriptExecution__AgentToken', 'secretRef', 'script-agent-token'), createObject('name', 'ScriptExecution__AdminToken', 'secretRef', 'script-agent-admin-token'), createObject('name', 'ScriptExecution__TimeoutSeconds', 'value', '600'), createObject('name', 'LlamaCpp__BaseUrl', 'value', 'http://127.0.0.1:9/llama-cpp'), createObject('name', 'LlamaCpp__TimeoutSeconds', 'value', '600'), createObject('name', 'ServiceRouting__Containers__guideants-ai__BaseUrl', 'value', format('http://{0}/sandbox', variables('aiAppName'))), createObject('name', 'ServiceRouting__Containers__plantuml__BaseUrl', 'value', format('http://{0}', variables('plantumlAppName')))), createArray())]",
+                      "volumeMounts": [
+                        {
+                          "volumeName": "contentfiles-volume",
+                          "mountPath": "/app/ContentFiles"
+                        }
+                      ]
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": 1,
+                    "maxReplicas": 3
+                  },
+                  "volumes": [
+                    {
+                      "name": "contentfiles-volume",
+                      "storageType": "AzureFile",
+                      "storageName": "contentfiles-storage"
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]",
+                "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'contentfiles-storage')]",
+                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsUser'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('aiAppName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))))]": {}
+                }
+              },
+              "properties": {
+                "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
+                "workloadProfileName": "consumption",
+                "configuration": {
+                  "activeRevisionsMode": "Single",
+                  "ingress": {
+                    "external": false,
+                    "targetPort": 80,
+                    "allowInsecure": true
+                  },
+                  "secrets": [
+                    {
+                      "name": "script-agent-token",
+                      "keyVaultUrl": "[format('{0}secrets/script-agent-token', parameters('keyVaultUri'))]",
+                      "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+                    },
+                    {
+                      "name": "script-agent-admin-token",
+                      "keyVaultUrl": "[format('{0}secrets/script-agent-admin-token', parameters('keyVaultUri'))]",
+                      "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+                    }
+                  ]
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "[variables('aiAppName')]",
+                      "image": "[variables('aiImage')]",
+                      "resources": {
+                        "cpu": "[json('1.0')]",
+                        "memory": "2Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "FILE_STORAGE_ROOT",
+                          "value": "/app/ContentFiles"
+                        },
+                        {
+                          "name": "SCRIPT_EXECUTION_AGENT_TOKEN",
+                          "secretRef": "script-agent-token"
+                        },
+                        {
+                          "name": "SCRIPT_EXECUTION_ADMIN_TOKEN",
+                          "secretRef": "script-agent-admin-token"
+                        },
+                        {
+                          "name": "SCRIPT_EXECUTION_ADMIN_STATE_DIR",
+                          "value": "/var/lib/guideants/script-agent-admin"
+                        },
+                        {
+                          "name": "SCRIPT_EXECUTION_SCOPE_STATE_ROOT",
+                          "value": "/var/lib/guideants/script-agent-admin/scopes"
+                        },
+                        {
+                          "name": "SCRIPT_EXECUTION_REQUIRE_TOKEN",
+                          "value": "true"
+                        },
+                        {
+                          "name": "SCRIPT_EXECUTION_TIMEOUT_SECONDS",
+                          "value": "600"
+                        }
+                      ],
+                      "volumeMounts": [
+                        {
+                          "volumeName": "contentfiles-volume",
+                          "mountPath": "/app/ContentFiles"
+                        },
+                        {
+                          "volumeName": "script-agent-state-volume",
+                          "mountPath": "/var/lib/guideants/script-agent-admin"
+                        }
+                      ]
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": 1,
+                    "maxReplicas": 2
+                  },
+                  "volumes": [
+                    {
+                      "name": "contentfiles-volume",
+                      "storageType": "AzureFile",
+                      "storageName": "contentfiles-storage"
+                    },
+                    {
+                      "name": "script-agent-state-volume",
+                      "storageType": "AzureFile",
+                      "storageName": "script-agent-state-storage"
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]",
+                "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'contentfiles-storage')]",
+                "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'script-agent-state-storage')]"
+              ]
+            },
+            {
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('doclingAppName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
+                "workloadProfileName": "consumption",
+                "configuration": {
+                  "activeRevisionsMode": "Single",
+                  "ingress": {
+                    "external": false,
+                    "targetPort": 5001,
+                    "allowInsecure": true
+                  }
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "[variables('doclingAppName')]",
+                      "image": "[variables('doclingImage')]",
+                      "resources": {
+                        "cpu": "[json('2.0')]",
+                        "memory": "4Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "DOCLING_SERVE_MAX_SYNC_WAIT",
+                          "value": "600"
+                        },
+                        {
+                          "name": "DOCLING_SERVE_MAX_FILE_SIZE",
+                          "value": "524288000"
+                        },
+                        {
+                          "name": "DOCLING_SERVE_ENG_LOC_NUM_WORKERS",
+                          "value": "2"
+                        },
+                        {
+                          "name": "DOCLING_SERVE_ENG_LOC_SHARE_MODELS",
+                          "value": "false"
+                        },
+                        {
+                          "name": "DOCLING_NUM_THREADS",
+                          "value": "4"
+                        },
+                        {
+                          "name": "DOCLING_SERVE_LOAD_MODELS_AT_BOOT",
+                          "value": "true"
+                        },
+                        {
+                          "name": "DOCLING_SERVE_OPTIONS_CACHE_SIZE",
+                          "value": "2"
+                        },
+                        {
+                          "name": "DOCLING_SERVE_LOG_LEVEL",
+                          "value": "WARNING"
+                        },
+                        {
+                          "name": "DOCLING_SERVE_LOG_FORMAT",
+                          "value": "text"
+                        },
+                        {
+                          "name": "DOCLING_SERVE_OTEL_ENABLE_METRICS",
+                          "value": "true"
+                        },
+                        {
+                          "name": "DOCLING_SERVE_OTEL_ENABLE_TRACES",
+                          "value": "false"
+                        },
+                        {
+                          "name": "DOCLING_DEBUG_PROFILE_PIPELINE_TIMINGS",
+                          "value": "false"
+                        }
+                      ]
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": 1,
+                    "maxReplicas": 2
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('plantumlAppName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))))]": {}
+                }
+              },
+              "properties": {
+                "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
+                "workloadProfileName": "consumption",
+                "configuration": {
+                  "activeRevisionsMode": "Single",
+                  "ingress": {
+                    "external": false,
+                    "targetPort": 80,
+                    "allowInsecure": true
+                  },
+                  "secrets": [
+                    {
+                      "name": "script-agent-token",
+                      "keyVaultUrl": "[format('{0}secrets/script-agent-token', parameters('keyVaultUri'))]",
+                      "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+                    }
+                  ]
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "[variables('plantumlAppName')]",
+                      "image": "[variables('plantumlImage')]",
+                      "resources": {
+                        "cpu": "[json('0.5')]",
+                        "memory": "1Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "FILE_STORAGE_ROOT",
+                          "value": "/app/ContentFiles"
+                        },
+                        {
+                          "name": "SCRIPT_EXECUTION_AGENT_TOKEN",
+                          "secretRef": "script-agent-token"
+                        },
+                        {
+                          "name": "SCRIPT_EXECUTION_REQUIRE_TOKEN",
+                          "value": "true"
+                        },
+                        {
+                          "name": "SCRIPT_EXECUTION_TIMEOUT_SECONDS",
+                          "value": "600"
+                        },
+                        {
+                          "name": "PLANTUML_LIMIT_SIZE",
+                          "value": "8192"
+                        }
+                      ],
+                      "volumeMounts": [
+                        {
+                          "volumeName": "contentfiles-volume",
+                          "mountPath": "/app/ContentFiles"
+                        }
+                      ]
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": 1,
+                    "maxReplicas": 2
+                  },
+                  "volumes": [
+                    {
+                      "name": "contentfiles-volume",
+                      "storageType": "AzureFile",
+                      "storageName": "contentfiles-storage"
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]",
+                "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'contentfiles-storage')]"
+              ]
+            },
+            {
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('searxngAppName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
+                "workloadProfileName": "consumption",
+                "configuration": {
+                  "activeRevisionsMode": "Single",
+                  "ingress": {
+                    "external": false,
+                    "targetPort": 8080,
+                    "allowInsecure": true
+                  }
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "[variables('searxngAppName')]",
+                      "image": "[variables('searxngImage')]",
+                      "resources": {
+                        "cpu": "[json('1.0')]",
+                        "memory": "2Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "FORCE_OWNERSHIP",
+                          "value": "true"
+                        },
+                        {
+                          "name": "BROWSER_RENDER_PORT",
+                          "value": "3001"
+                        }
+                      ],
+                      "volumeMounts": [
+                        {
+                          "volumeName": "searxng-config-volume",
+                          "mountPath": "/etc/searxng"
+                        },
+                        {
+                          "volumeName": "searxng-data-volume",
+                          "mountPath": "/var/cache/searxng"
+                        }
+                      ]
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": 1,
+                    "maxReplicas": 2
+                  },
+                  "volumes": [
+                    {
+                      "name": "searxng-config-volume",
+                      "storageType": "AzureFile",
+                      "storageName": "searxng-config-storage"
+                    },
+                    {
+                      "name": "searxng-data-volume",
+                      "storageType": "AzureFile",
+                      "storageName": "searxng-data-storage"
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'searxng-config-storage')]",
+                "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'searxng-data-storage')]"
+              ]
+            },
+            {
+              "condition": "[parameters('documentServerEnabled')]",
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('documentServerAppName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))))]": {}
+                }
+              },
+              "properties": {
+                "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
+                "workloadProfileName": "consumption",
+                "configuration": {
+                  "activeRevisionsMode": "Single",
+                  "ingress": {
+                    "external": false,
+                    "targetPort": 8000,
+                    "allowInsecure": true
+                  },
+                  "secrets": [
+                    {
+                      "name": "documentserver-jwt-secret",
+                      "keyVaultUrl": "[format('{0}secrets/documentserver-jwt-secret', parameters('keyVaultUri'))]",
+                      "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+                    }
+                  ]
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "[variables('documentServerAppName')]",
+                      "image": "[variables('documentServerImage')]",
+                      "resources": {
+                        "cpu": "[json('2.0')]",
+                        "memory": "4Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "JWT_ENABLED",
+                          "value": "true"
+                        },
+                        {
+                          "name": "JWT_SECRET",
+                          "secretRef": "documentserver-jwt-secret"
+                        },
+                        {
+                          "name": "JWT_HEADER",
+                          "value": "Authorization"
+                        },
+                        {
+                          "name": "JWT_IN_BODY",
+                          "value": "false"
+                        },
+                        {
+                          "name": "ALLOW_PRIVATE_IP_ADDRESS",
+                          "value": "true"
+                        }
+                      ]
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": 1,
+                    "maxReplicas": 2
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "webApiUiFqdn": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.App/containerApps', variables('webApiAppName')), '2023-05-01').configuration.ingress.fqdn]"
+            },
+            "webApiUiUrl": {
+              "type": "string",
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.App/containerApps', variables('webApiAppName')), '2023-05-01').configuration.ingress.fqdn)]"
+            },
+            "containerAppsManagedIdentityId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+            },
+            "containerAppsManagedIdentityClientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').clientId]"
+            },
+            "managedIdentityPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "webApiUiUrl": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-apps'), '2025-04-01').outputs.webApiUiUrl.value]"
+    },
+    "webApiUiFqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-apps'), '2025-04-01').outputs.webApiUiFqdn.value]"
+    },
+    "containerAppsDeployed": {
+      "type": "bool",
+      "value": true
+    }
+  }
+}

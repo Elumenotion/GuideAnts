@@ -12,11 +12,14 @@ namespace GuideAntsApi.Services.Components.Sync;
 
 public sealed class NotebookFileReconciler : INotebookFileReconciler
 {
+    private static readonly TimeSpan ReconcileLockTimeout = TimeSpan.FromSeconds(2);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IStoragePathResolver _pathResolver;
     private readonly IJobQueueService _jobQueueService;
     private readonly IFileLineageService _lineageService;
     private readonly IUsageRecorder _usageRecorder;
+    private readonly INotebookLockService _lockService;
     private readonly ILogger<NotebookFileReconciler> _logger;
 
     public NotebookFileReconciler(
@@ -25,6 +28,7 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
         IJobQueueService jobQueueService,
         IFileLineageService lineageService,
         IUsageRecorder usageRecorder,
+        INotebookLockService lockService,
         ILogger<NotebookFileReconciler> logger)
     {
         _scopeFactory = scopeFactory;
@@ -32,6 +36,7 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
         _jobQueueService = jobQueueService;
         _lineageService = lineageService;
         _usageRecorder = usageRecorder;
+        _lockService = lockService;
         _logger = logger;
     }
 
@@ -134,7 +139,7 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
         {
             await context.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException dbEx) when (dbEx.InnerException?.Message?.Contains("IX_NotebookFiles_RelativePath_NotebookId") == true)
+        catch (DbUpdateException dbEx) when (IsDuplicateNotebookFileConstraint(dbEx))
         {
             _logger.LogDebug("Concurrent register insert for notebook {NotebookId}; treating as success", notebookId);
         }
@@ -148,6 +153,15 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
         if (mode != ReconcileMode.Full)
         {
             throw new ArgumentOutOfRangeException(nameof(mode), mode, "Only Full reconcile is supported.");
+        }
+
+        await using var lockHandle = await _lockService.TryAcquireAsync(notebookId, ReconcileLockTimeout);
+        if (!lockHandle.Acquired)
+        {
+            _logger.LogDebug(
+                "Skipping reconcile for notebook {NotebookId} - another sync is already running",
+                notebookId);
+            return new ReconcileResult();
         }
 
         using var scope = _scopeFactory.CreateScope();
@@ -304,7 +318,7 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
         {
             await context.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException dbEx) when (dbEx.InnerException?.Message?.Contains("IX_NotebookFiles_RelativePath_NotebookId") == true)
+        catch (DbUpdateException dbEx) when (IsDuplicateNotebookFileConstraint(dbEx))
         {
             _logger.LogWarning("Constraint violation during reconcile for notebook {NotebookId}", notebookId);
             return new ReconcileResult();
@@ -356,6 +370,10 @@ public sealed class NotebookFileReconciler : INotebookFileReconciler
             IndexJobsEnqueued = indexJobsEnqueued,
         };
     }
+
+    private static bool IsDuplicateNotebookFileConstraint(DbUpdateException exception) =>
+        exception.InnerException?.Message?.Contains("IX_NotebookFiles_RelativePath_NotebookId", StringComparison.Ordinal) == true
+        || exception.InnerException?.Message?.Contains("IX_NotebookFiles_DocumentId", StringComparison.Ordinal) == true;
 
     private async Task EnqueueIndexingJobForFileAsync(
         ApplicationDbContext context,

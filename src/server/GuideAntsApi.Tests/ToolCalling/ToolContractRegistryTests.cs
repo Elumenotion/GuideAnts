@@ -1,8 +1,10 @@
 using System.Text.Json;
+using AntRunner.Chat;
 using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.Attributes;
 using AntRunner.ToolCalling.Functions;
 using FluentAssertions;
+using GuideAntsApi.Services;
 
 namespace GuideAntsApi.Tests.ToolCalling;
 
@@ -71,5 +73,37 @@ public sealed class ToolContractRegistryTests
             .Select(x => x.GetString())
             .ToArray();
         required.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void GenerateOpenApiSchema_ExcludesRuntimeInjectedParameters()
+    {
+        ToolContractRegistry.RefreshContracts();
+
+        foreach (var methodName in new[]
+                 {
+                     $"{typeof(SkillTools).FullName}.ReadSkill",
+                     $"{typeof(Agent).FullName}.Invoke",
+                     $"{typeof(ReadWebTools).FullName}.GetContentFromUrl",
+                 })
+        {
+            var schemaJson = ToolContractRegistry.GenerateOpenApiSchema(methodName);
+            using var doc = JsonDocument.Parse(schemaJson);
+            var post = doc.RootElement
+                .GetProperty("paths")
+                .GetProperty(methodName)
+                .GetProperty("post");
+
+            var requestSchema = post
+                .GetProperty("requestBody")
+                .GetProperty("content")
+                .GetProperty("application_json")
+                .GetProperty("schema");
+
+            var properties = requestSchema.GetProperty("properties");
+            properties.TryGetProperty("cancellationToken", out _).Should().BeFalse($"schema for {methodName}");
+            properties.TryGetProperty("context", out _).Should().BeFalse($"schema for {methodName}");
+            properties.TryGetProperty("assistantDefinition", out _).Should().BeFalse($"schema for {methodName}");
+        }
     }
 }

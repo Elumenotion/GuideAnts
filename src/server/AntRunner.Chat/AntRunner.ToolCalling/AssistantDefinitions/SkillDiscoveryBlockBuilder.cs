@@ -18,7 +18,7 @@ public static class SkillDiscoveryBlockBuilder
         sb.AppendLine("## Skills");
         sb.AppendLine(
             "A skill is a set of instructions provided through a SKILL.md source. If the task " +
-            "matches a skill's description, call skills.read on its locator and follow it " +
+            "matches a skill's description, call skills_read on its locator and follow it " +
             "before acting.");
         sb.AppendLine();
         sb.AppendLine("### Available skills");
@@ -36,15 +36,15 @@ public static class SkillDiscoveryBlockBuilder
 
         sb.AppendLine();
         sb.AppendLine("### How to use skills");
-        sb.AppendLine("- Call skills.list to see available skills for this assistant.");
+        sb.AppendLine("- Call skills_list to see available skills for this assistant.");
         sb.AppendLine(
-            "- Call skills.read with a locator (and optional file_path for references/foo.md) " +
+            "- Call skills_read with a locator (and optional file_path for references/foo.md) " +
             "to load the full instructions.");
         sb.AppendLine("- Only proceed without loading a skill if none are relevant.");
         sb.AppendLine(
             "- Skill scripts and assets are copied into the notebook at creation under " +
             "Output/Skills/<name>/ (from sandbox CWD). Run them with sandbox/terminal tools; " +
-            "load SKILL.md and references on demand via skills.read.");
+            "load SKILL.md and references on demand via skills_read.");
 
         return sb.ToString().TrimEnd();
     }
