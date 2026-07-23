@@ -182,7 +182,8 @@ public sealed class NotebookImageServiceTests
             .Returns(Task.CompletedTask);
 
         var syncService = new Mock<INotebookFileSyncService>();
-        syncService.Setup(service => service.QueueNotebookSyncAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        syncService.Setup(service => service.RegisterFilesAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        syncService.Setup(service => service.QueueReconcileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         var fileService = new Mock<INotebookFileService>();
 
         var services = new ServiceCollection()

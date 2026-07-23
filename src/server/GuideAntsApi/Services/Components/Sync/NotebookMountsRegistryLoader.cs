@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace GuideAntsApi.BackgroundJobs.Sync;
+namespace GuideAntsApi.Services.Components.Sync;
 
 internal sealed record NotebookMountRegistryEntry(
     Guid MountId,

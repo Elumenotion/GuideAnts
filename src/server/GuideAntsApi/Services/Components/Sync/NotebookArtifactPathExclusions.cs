@@ -1,4 +1,4 @@
-namespace GuideAntsApi.BackgroundJobs.Sync;
+namespace GuideAntsApi.Services.Components.Sync;
 
 /// <summary>
 /// Paths under these directory names are tooling caches/artifacts — not user-facing notebook content.

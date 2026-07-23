@@ -7,6 +7,7 @@ using AntRunner.Chat.Abstractions;
 using GuideAnts.Usage;
 using GuideAntsApi.Models.Conversations;
 using GuideAntsApi.Services.Components;
+using GuideAntsApi.Services.Components.Sync;
 using GuideAntsApi.Services.Conversations.Persistence;
 using GuideAntsApi.Services.Conversations.Tracing;
 
@@ -451,7 +452,7 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
                     }
                 }
 
-                await QueueNotebookSyncIfNeededAsync(context, output);
+                await RegisterAndQueueNotebookSyncIfNeededAsync(context, output);
                 await PersistTraceSegmentAsync("completed", ct: noneCt);
             }
             catch (OperationCanceledException ex)
@@ -820,22 +821,36 @@ public sealed class ConversationStreamEngine : IConversationStreamEngine
             ct);
     }
 
-    private async Task QueueNotebookSyncIfNeededAsync(ConversationStreamRunContext context, ChatRunOutput? output)
+    private async Task RegisterAndQueueNotebookSyncIfNeededAsync(ConversationStreamRunContext context, ChatRunOutput? output)
     {
         var turnReportedFileChanges =
             (output?.NewFiles?.Count > 0) ||
             (output?.ModifiedFiles?.Count > 0);
 
-        if (_notebookFileSyncService != null && context.Conversation.Notebook != null && turnReportedFileChanges)
+        if (_notebookFileSyncService == null || context.Conversation.Notebook == null || !turnReportedFileChanges)
         {
-            try
+            return;
+        }
+
+        try
+        {
+            var isPublished = context.Policy.UsageMode != ConversationUsageMode.Private;
+            var runId = NotebookPathResolver.TryExtractRunIdFromWorkingDirectory(context.DbTurn.WorkingDirectory);
+            var dbPaths = NotebookFileChangeReporter.GetDbRelativePaths(output, isPublished, runId);
+
+            if (dbPaths.Count > 0)
             {
-                await _notebookFileSyncService.QueueNotebookSyncAsync(context.Conversation.Notebook.Id, CancellationToken.None);
+                await _notebookFileSyncService.RegisterFilesAsync(
+                    context.Conversation.Notebook.Id,
+                    dbPaths,
+                    CancellationToken.None);
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to queue notebook sync after turn completion");
-            }
+
+            await _notebookFileSyncService.QueueReconcileAsync(context.Conversation.Notebook.Id, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to register/queue notebook sync after turn completion");
         }
     }
 

@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
+using GuideAntsApi.Services.Components.Sync;
 
 namespace GuideAntsApi.Services.Components;
 
@@ -375,7 +376,7 @@ using var scope = CreateDbScope();
     private static IEnumerable<string> EnumerateAlternativeLinkedCandidates(string normalizedPath)
     {
         yield return normalizedPath;
-        foreach (var alternative in GetAlternativePaths(normalizedPath))
+        foreach (var alternative in NotebookPathResolver.GetAlternativePaths(normalizedPath))
         {
             if (string.Equals(alternative, normalizedPath, StringComparison.Ordinal))
             {
@@ -576,7 +577,7 @@ using var scope = CreateDbScope();
             return (file, normalizedPath);
         }
 
-        foreach (var altPath in GetAlternativePaths(normalizedPath))
+        foreach (var altPath in NotebookPathResolver.GetAlternativePaths(normalizedPath))
         {
             file = await context.NotebookFiles.FirstOrDefaultAsync(
                 f => f.NotebookId == notebookId && f.RelativePath == altPath);
@@ -618,86 +619,6 @@ using var scope = CreateDbScope();
         && !path.StartsWith("../", StringComparison.Ordinal)
         && !path.StartsWith("Runs/", StringComparison.OrdinalIgnoreCase)
         && !path.StartsWith("Output/", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Generates alternative paths to try when a relative file path is not found.
-    /// Handles cases where LLM references files relative to a working directory (e.g., Output/)
-    /// but the client doesn't know the working directory context.
-    /// </summary>
-    private static IEnumerable<string> GetAlternativePaths(string originalPath)
-    {
-        var alternatives = new List<string>();
-        
-        // Common working directories where LLM scripts run
-        var workingDirs = new[] { "Output", "Runs" };
-        
-        // Case 1: Path starts with ../ - resolve relative to common working directories
-        // e.g., "../Resources/image.png" from Output/ becomes "Resources/image.png"
-        if (originalPath.StartsWith("../"))
-        {
-            // Resolve the ../ path as if we're in each working directory
-            foreach (var workDir in workingDirs)
-            {
-                var resolved = ResolveRelativePath(workDir, originalPath);
-                if (!string.IsNullOrEmpty(resolved) && resolved != originalPath)
-                {
-                    alternatives.Add(resolved);
-                }
-            }
-            
-            // Also try removing just the leading ../
-            var withoutParent = originalPath;
-            while (withoutParent.StartsWith("../"))
-            {
-                withoutParent = withoutParent.Substring(3);
-            }
-            if (!string.IsNullOrEmpty(withoutParent) && withoutParent != originalPath)
-            {
-                alternatives.Add(withoutParent);
-            }
-        }
-        // Case 2: Simple filename or relative path without ../ 
-        // e.g., "image.png" should also try "Output/image.png"
-        else if (!originalPath.Contains("/") || !originalPath.StartsWith("Output/"))
-        {
-            foreach (var workDir in workingDirs)
-            {
-                var prefixed = $"{workDir}/{originalPath}";
-                alternatives.Add(prefixed);
-            }
-        }
-        
-        return alternatives.Distinct();
-    }
-
-    /// <summary>
-    /// Resolves a relative path (with ../) from a base directory.
-    /// Returns the normalized path from the notebook root.
-    /// </summary>
-    private static string ResolveRelativePath(string baseDir, string relativePath)
-    {
-        var baseParts = baseDir.Split('/', StringSplitOptions.RemoveEmptyEntries).ToList();
-        var pathParts = relativePath.Split('/').ToList();
-        
-        // Process each segment
-        foreach (var segment in pathParts)
-        {
-            if (segment == "..")
-            {
-                if (baseParts.Count > 0)
-                {
-                    baseParts.RemoveAt(baseParts.Count - 1);
-                }
-                // If we've gone above root, just continue (will be from root)
-            }
-            else if (segment != "." && !string.IsNullOrEmpty(segment))
-            {
-                baseParts.Add(segment);
-            }
-        }
-        
-        return string.Join("/", baseParts);
-    }
 
     public async Task<(Stream Stream, string ContentType, string FileName)?> GetFileContentStreamAsync(Guid notebookFileId, CancellationToken cancellationToken = default)
     {
@@ -1328,7 +1249,7 @@ using var scope = CreateDbScope();
     {
         try
         {
-            await _syncService.QueueNotebookSyncAsync(notebookId);
+            await _syncService.QueueReconcileAsync(notebookId);
         }
         catch (Exception ex)
         {

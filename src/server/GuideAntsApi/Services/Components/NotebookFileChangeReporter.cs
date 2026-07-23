@@ -1,6 +1,8 @@
+using AntRunner.Chat;
 using AntRunner.ToolCalling;
 using Microsoft.EntityFrameworkCore;
 using GuideAntsApi.DataModel;
+using GuideAntsApi.Services.Components.Sync;
 
 namespace GuideAntsApi.Services.Components;
 
@@ -116,6 +118,12 @@ public static class NotebookFileChangeReporter
 
         return (newFiles, modifiedFiles);
     }
+
+    /// <summary>
+    /// Collects DB-relative paths from turn output for fast register.
+    /// </summary>
+    public static IReadOnlyList<string> GetDbRelativePaths(ChatRunOutput? output, bool isPublished, string? runId) =>
+        NotebookPathResolver.GetDbRelativePaths(output, isPublished, runId);
 
     /// <summary>
     /// Converts a specific file's relative path to CWD-relative format.

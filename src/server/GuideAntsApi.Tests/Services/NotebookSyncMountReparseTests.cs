@@ -1,8 +1,9 @@
 using System.Text.Json;
 using FluentAssertions;
 using GuideAnts.Usage;
+using GuideAntsApi.BackgroundJobs;
 using GuideAntsApi.BackgroundJobs.Jobs;
-using GuideAntsApi.BackgroundJobs.Sync;
+using GuideAntsApi.Services.Components.Sync;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Services;
@@ -122,9 +123,9 @@ public sealed class NotebookSyncMountReparseTests
             pathResolver.Setup(r => r.GetNotebookRootPath(projectId, notebookId)).Returns(notebookRoot);
 
             await using var context = new ApplicationDbContext(options);
-            var service = CreateNotebookFileSyncService(context, tempRoot, pathResolver.Object);
+            var service = CreateNotebookFileSyncService(context, tempRoot, pathResolver);
 
-            await service.SyncNotebookAsync(notebookId);
+            await service.ReconcileNotebookAsync(notebookId);
 
             var files = await context.NotebookFiles.Where(f => f.NotebookId == notebookId).ToListAsync();
             files.Should().ContainSingle(f => f.RelativePath == "local.txt");
@@ -149,10 +150,11 @@ public sealed class NotebookSyncMountReparseTests
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"sync-mount-handler-{Guid.NewGuid():N}");
         try
         {
+            Guid projectId;
             Guid notebookId;
             await using (var seed = new ApplicationDbContext(options))
             {
-                (_, notebookId) = await BackgroundJobTestHelpers.SeedProjectNotebookAsync(seed);
+                (projectId, notebookId) = await BackgroundJobTestHelpers.SeedProjectNotebookAsync(seed);
             }
 
             var notebookRoot = Path.Combine(tempRoot, "test-project", "test-notebook");
@@ -165,11 +167,11 @@ public sealed class NotebookSyncMountReparseTests
             Directory.CreateSymbolicLink(Path.Combine(notebookRoot, "Shared"), hostSource);
             WriteMountsRegistry(notebookRoot, "Shared");
 
+            var reconciler = CreateReconciler(options, projectId, notebookId, notebookRoot);
+
             var handler = new SyncNotebookHandler(
                 NullLogger<SyncNotebookHandler>.Instance,
-                BackgroundJobTestHelpers.CreateFactory(options),
-                BackgroundJobTestHelpers.CreateConfiguration(tempRoot),
-                new BackgroundJobTestHelpers.CapturingJobQueueService());
+                reconciler);
 
             var result = await handler.HandleAsync(new SyncNotebookJob(notebookId), CancellationToken.None);
             result.IsSuccess.Should().BeTrue();
@@ -198,10 +200,11 @@ public sealed class NotebookSyncMountReparseTests
         var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"sync-mount-stale-{Guid.NewGuid():N}");
         try
         {
+            Guid projectId;
             Guid notebookId;
             await using (var seed = new ApplicationDbContext(options))
             {
-                (_, notebookId) = await BackgroundJobTestHelpers.SeedProjectNotebookAsync(seed);
+                (projectId, notebookId) = await BackgroundJobTestHelpers.SeedProjectNotebookAsync(seed);
                 seed.NotebookFiles.Add(new NotebookFile
                 {
                     Id = Guid.NewGuid(),
@@ -225,11 +228,11 @@ public sealed class NotebookSyncMountReparseTests
             Directory.CreateSymbolicLink(Path.Combine(notebookRoot, "Shared"), hostSource);
             WriteMountsRegistry(notebookRoot, "Shared");
 
+            var reconciler = CreateReconciler(options, projectId, notebookId, notebookRoot);
+
             var handler = new SyncNotebookHandler(
                 NullLogger<SyncNotebookHandler>.Instance,
-                BackgroundJobTestHelpers.CreateFactory(options),
-                BackgroundJobTestHelpers.CreateConfiguration(tempRoot),
-                new BackgroundJobTestHelpers.CapturingJobQueueService());
+                reconciler);
 
             await handler.HandleAsync(new SyncNotebookJob(notebookId), CancellationToken.None);
 
@@ -248,10 +251,12 @@ public sealed class NotebookSyncMountReparseTests
     private static NotebookFileSyncService CreateNotebookFileSyncService(
         ApplicationDbContext context,
         string storageRoot,
-        IStoragePathResolver pathResolver)
+        Mock<IStoragePathResolver> pathResolver)
     {
         var providerMock = new Mock<IServiceProvider>();
         providerMock.Setup(p => p.GetService(typeof(ApplicationDbContext))).Returns(context);
+        providerMock.Setup(p => p.GetService(typeof(IJobQueueService)))
+            .Returns(new BackgroundJobTestHelpers.CapturingJobQueueService());
 
         var scopeMock = new Mock<IServiceScope>();
         scopeMock.SetupGet(s => s.ServiceProvider).Returns(providerMock.Object);
@@ -259,22 +264,49 @@ public sealed class NotebookSyncMountReparseTests
         var scopeFactoryMock = new Mock<IServiceScopeFactory>();
         scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
 
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["FileStorage:Path"] = storageRoot
-            })
-            .Build();
+        var reconciler = new NotebookFileReconciler(
+            scopeFactoryMock.Object,
+            pathResolver.Object,
+            new BackgroundJobTestHelpers.CapturingJobQueueService(),
+            Mock.Of<IFileLineageService>(),
+            Mock.Of<IUsageRecorder>(),
+            NullLogger<NotebookFileReconciler>.Instance);
 
         return new NotebookFileSyncService(
+            reconciler,
             scopeFactoryMock.Object,
-            configuration,
-            NullLogger<NotebookFileSyncService>.Instance,
-            Mock.Of<IFileLineageService>(),
-            Mock.Of<IMarkdownExtractionService>(),
-            Mock.Of<IUsageRecorder>(),
             Mock.Of<INotebookLockService>(),
-            pathResolver);
+            NullLogger<NotebookFileSyncService>.Instance);
+    }
+
+    private static NotebookFileReconciler CreateReconciler(
+        DbContextOptions<ApplicationDbContext> options,
+        Guid projectId,
+        Guid notebookId,
+        string notebookRoot)
+    {
+        var providerMock = new Mock<IServiceProvider>();
+        providerMock.Setup(p => p.GetService(typeof(ApplicationDbContext)))
+            .Returns(() => new ApplicationDbContext(options));
+        providerMock.Setup(p => p.GetService(typeof(IJobQueueService)))
+            .Returns(new BackgroundJobTestHelpers.CapturingJobQueueService());
+
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.SetupGet(s => s.ServiceProvider).Returns(providerMock.Object);
+
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+
+        var pathResolver = new Mock<IStoragePathResolver>();
+        pathResolver.Setup(r => r.GetNotebookRootPath(projectId, notebookId)).Returns(notebookRoot);
+
+        return new NotebookFileReconciler(
+            scopeFactoryMock.Object,
+            pathResolver.Object,
+            new BackgroundJobTestHelpers.CapturingJobQueueService(),
+            Mock.Of<IFileLineageService>(),
+            Mock.Of<IUsageRecorder>(),
+            NullLogger<NotebookFileReconciler>.Instance);
     }
 
     private static void WriteMountsRegistry(string notebookRoot, string linkRelativePath)

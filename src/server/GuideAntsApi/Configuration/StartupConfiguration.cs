@@ -223,6 +223,7 @@ public static class StartupConfiguration
         services.AddScoped<GuideAntsApi.Services.UserProjectContextOptions.IUserProjectContextOptionsService, GuideAntsApi.Services.UserProjectContextOptions.UserProjectContextOptionsService>();
         services.AddScoped<GuideAnts.Usage.IUsageRecorder, GuideAnts.Usage.EfUsageRecorder>();
         services.AddScoped<INotebookCopyService, NotebookCopyService>();
+        services.AddScoped<GuideAntsApi.BackgroundJobs.Sync.INotebookFileReconciler, GuideAntsApi.Services.Components.Sync.NotebookFileReconciler>();
         services.AddScoped<INotebookFileSyncService, NotebookFileSyncService>();
         services.AddSingleton<INotebookLockService, InMemoryNotebookLockService>();
         services.AddScoped<INotebookFileService, NotebookFileService>();

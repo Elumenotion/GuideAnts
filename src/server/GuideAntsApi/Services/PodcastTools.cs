@@ -150,8 +150,9 @@ public class NotebookPodcastService : INotebookPodcastService
                             StandardError = "Service provider not available"
                         };
                         var syncService = scope.ServiceProvider.GetRequiredService<INotebookFileSyncService>();
-                        await syncService.QueueNotebookSyncAsync(context.NotebookId);
-                        _logger?.LogInformation("Queued notebook sync for {NotebookId} after podcast generation", context.NotebookId);
+                        await syncService.RegisterFilesAsync(context.NotebookId, [relativePath]);
+                        await syncService.QueueReconcileAsync(context.NotebookId);
+                        _logger?.LogInformation("Registered and queued notebook sync for {NotebookId} after podcast generation", context.NotebookId);
 
                         // Record TTS usage and storage
                         var recorder = scope.ServiceProvider.GetRequiredService<GuideAnts.Usage.IUsageRecorder>();

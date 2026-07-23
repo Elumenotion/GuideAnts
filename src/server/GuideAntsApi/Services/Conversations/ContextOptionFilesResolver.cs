@@ -1,4 +1,4 @@
-using GuideAntsApi.BackgroundJobs.Sync;
+using GuideAntsApi.Services.Components.Sync;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using Microsoft.EntityFrameworkCore;
