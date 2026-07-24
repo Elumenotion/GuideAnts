@@ -109,6 +109,125 @@ metadata:
     }
 
     [TestMethod]
+    public void ShouldPruneGuideSkillFiles_metadata_only_save_does_not_prune()
+    {
+        var skills = new List<AssistantSkillSaveDto>
+        {
+            new("alpha", "Alpha", true, 0, "Imported", [], null),
+            new("beta", "Beta", true, 1, "Imported", [], null),
+        };
+
+        SkillDtoBuilder.ShouldPruneGuideSkillFiles(skills).Should().BeFalse();
+        SkillDtoBuilder.ShouldPruneGuideSkillFiles(null).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public void ShouldPruneGuideSkillFiles_prunes_when_file_ids_or_uploads_present()
+    {
+        var keepId = Guid.NewGuid();
+        SkillDtoBuilder.ShouldPruneGuideSkillFiles([
+            new("alpha", "Alpha", true, 0, "Imported", [keepId], null),
+        ]).Should().BeTrue();
+
+        SkillDtoBuilder.ShouldPruneGuideSkillFiles([
+            new(
+                "alpha",
+                "Alpha",
+                true,
+                0,
+                "Imported",
+                null,
+                [new FileUploadDto("Skill", null, "Skills/alpha/SKILL.md", [1], "text/markdown")]),
+        ]).Should().BeTrue();
+
+        SkillDtoBuilder.ShouldPruneGuideSkillFiles([]).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task UpdateGuideAsync_metadata_only_skill_save_does_not_delete_skill_files()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"guide-skill-prune-{Guid.NewGuid():N}")
+            .Options;
+
+        var guideId = Guid.NewGuid();
+        var skillFileId = Guid.NewGuid();
+        await using (var seed = new ApplicationDbContext(options))
+        {
+            seed.Assistants.Add(new Assistant
+            {
+                Id = guideId,
+                Name = "SOX Guide",
+                Kind = AssistantKind.Guide,
+                Description = "desc",
+                Created = DateTime.UtcNow,
+            });
+            seed.AssistantFiles.Add(new AssistantFile
+            {
+                Id = skillFileId,
+                AssistantId = guideId,
+                FolderKind = "Skill",
+                RelativePath = "Skills/roundtrip-skill/SKILL.md",
+                ContentBytes = Encoding.UTF8.GetBytes(SkillMarkdown),
+                Created = DateTime.UtcNow,
+            });
+            seed.AssistantSkillMetas.Add(new AssistantSkillMeta
+            {
+                AssistantId = guideId,
+                SkillName = "roundtrip-skill",
+                Description = "Round-trip test skill.",
+                Enabled = true,
+                DisplayOrder = 0,
+                ContentHash = "hash",
+                Created = DateTime.UtcNow,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var context = new ApplicationDbContext(options);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
+        await service.UpdateGuideAsync(
+            guideId,
+            new UpdateGuideDto(
+                Name: "SOX Guide",
+                Description: "desc",
+                Instructions: "",
+                HomePageMarkdown: "",
+                ModelId: null,
+                Temperature: null,
+                TopP: null,
+                ReasoningEffort: null,
+                SamplingParametersJson: null,
+                AvatarImageBytes: null,
+                AvatarContentType: null,
+                ToolIds: null,
+                CustomTools: null,
+                ContextOptions: null,
+                AuthProviders: null,
+                FileIdsToKeep: [],
+                FilesToAdd: null,
+                ConversationStarters: null,
+                CrewMemberIds: null)
+            {
+                Skills =
+                [
+                    new AssistantSkillSaveDto(
+                        "roundtrip-skill",
+                        "Round-trip test skill.",
+                        true,
+                        0,
+                        "Imported",
+                        [],
+                        null),
+                ],
+            });
+
+        await using var verify = new ApplicationDbContext(options);
+        (await verify.AssistantFiles.CountAsync(f => f.AssistantId == guideId && f.FolderKind == "Skill"))
+            .Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task CreateAssistantAsync_FromSkillPayload_PersistsScriptsWithoutSkillPackage()
     {
         const string skillMarkdown = """

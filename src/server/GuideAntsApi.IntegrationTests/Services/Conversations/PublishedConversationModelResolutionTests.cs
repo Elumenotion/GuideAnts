@@ -1,12 +1,13 @@
+using System.Text.Json.Nodes;
 using FluentAssertions;
 using GuideAntsApi.DataModel;
 using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.IntegrationTests.Infrastructure;
 using GuideAntsApi.Models.Conversations;
+using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.Conversations;
-using Microsoft.AspNetCore.Hosting;
+using GuideAntsApi.Settings;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using DataModelChatRole = GuideAntsApi.DataModel.Models.ChatRole;
 
@@ -15,7 +16,7 @@ namespace GuideAntsApi.IntegrationTests.Services.Conversations;
 /// <summary>
 /// Regression coverage for published model resolution. A published guide assistant that declares
 /// no model of its own must resolve through <c>IChatModelResolver</c> (honoring the global
-/// <c>ChatDefaults:OverrideAllChatModels</c> / <c>DefaultModelId</c> settings) rather than being
+/// persisted <c>ChatDefaults</c> settings via <c>IChatDefaultsStore</c>) rather than being
 /// rejected by the service. This locks the behavior that was broken when an
 /// <c>InvalidOperationException("…does not specify a model")</c> guard was added ahead of the resolver,
 /// which both broke model-less bootstrap assistants and ignored the global override setting.
@@ -29,8 +30,9 @@ public sealed class PublishedConversationModelResolutionTests : BaseEndpointTest
     [ClassInitialize]
     public static async Task ClassInitialize(TestContext context)
     {
-        SharedFactory = new GlobalOverrideChatModelFactory();
+        SharedFactory = new TestWebApplicationFactory();
         await SharedFactory.InitializeAsync();
+        await SeedGlobalChatDefaultsOverrideAsync();
     }
 
     [ClassCleanup]
@@ -150,18 +152,29 @@ public sealed class PublishedConversationModelResolutionTests : BaseEndpointTest
     }
 
     /// <summary>
-    /// Standard integration host with the global chat-model override enabled, mirroring a deployment
-    /// where an operator has set "override all chat models" with a configured default.
+    /// Persist global chat-model override in application settings (same path as Settings API).
+    /// In-memory <c>ChatDefaults:*</c> configuration is not authoritative after PR #97:
+    /// <see cref="IChatDefaultsStore"/> reads the DB row, which may already exist from earlier
+    /// tests sharing the SQL container.
     /// </summary>
-    private sealed class GlobalOverrideChatModelFactory : TestWebApplicationFactory
+    private static async Task SeedGlobalChatDefaultsOverrideAsync()
     {
-        protected override void ConfigureTestAppConfiguration(IConfigurationBuilder config, WebHostBuilderContext context)
-        {
-            config.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["ChatDefaults:OverrideAllChatModels"] = "true",
-                ["ChatDefaults:DefaultModelId"] = DefaultModelId
-            });
-        }
+        using var scope = SharedFactory!.Services.CreateScope();
+        var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
+        var section = await settings.GetSectionAsync("ChatDefaults");
+        section.Should().NotBeNull();
+
+        var result = await settings.UpdateSectionAsync(
+            "ChatDefaults",
+            new UpdateSettingsSectionRequest(
+                section!.RowVersion,
+                new JsonObject
+                {
+                    ["DefaultModelId"] = DefaultModelId,
+                    ["OverrideAllChatModels"] = true
+                }));
+
+        result.ValidationErrors.Should().BeEmpty();
+        result.Section.Should().NotBeNull();
     }
 }

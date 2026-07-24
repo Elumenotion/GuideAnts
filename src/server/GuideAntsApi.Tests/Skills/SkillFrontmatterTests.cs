@@ -114,6 +114,21 @@ body
     }
 
     [TestMethod]
+    public void Parse_InvalidYaml_ThrowsInvalidOperationException()
+    {
+        var act = () => SkillFrontmatter.Parse("""
+---
+name: broken
+description: [unclosed
+---
+body
+""");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*not valid YAML*");
+    }
+
+    [TestMethod]
     public void ExtractBody_ReturnsMarkdownAfterFrontmatter()
     {
         SkillFrontmatter.ExtractBody(AgentskillsYaml).Should().Contain("# Body");
