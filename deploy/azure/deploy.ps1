@@ -103,7 +103,6 @@ function Deploy-Infrastructure {
             sqlAdminPassword=$script:SqlAdminPassword `
             sqlAadAdminObjectId=$SqlAadAdminObjectId `
             deployerObjectId=$($deployer.ObjectId) `
-            deployerPrincipalType=$($deployer.PrincipalType) `
             jwtSigningKey=$script:JwtSigningKey `
             settingsSecretsKey=$script:SettingsSecretsKey `
             scriptAgentToken=$script:ScriptAgentToken `
@@ -282,47 +281,11 @@ function Invoke-AzChecked {
     }
 }
 
-function Ensure-DeployerKeyVaultAccess {
-    param([string]$KeyVaultName)
-    $deployer = Get-DeployerIdentity
-    $vaultScope = "/subscriptions/$($script:SubscriptionId)/resourceGroups/$($script:ResourceGroupName)/providers/Microsoft.KeyVault/vaults/$KeyVaultName"
-    $existing = az role assignment list `
-        --scope $vaultScope `
-        --assignee-object-id $deployer.ObjectId `
-        --role "Key Vault Secrets Officer" `
-        --query "[0].id" -o tsv 2>$null
-    if ($existing) {
-        Write-Success "Deployer already has Key Vault Secrets Officer on '$KeyVaultName'."
-        return
-    }
-
-    Write-Status "Granting deployer Key Vault Secrets Officer on '$KeyVaultName'..."
-    $createOutput = az role assignment create `
-        --role "Key Vault Secrets Officer" `
-        --assignee-object-id $deployer.ObjectId `
-        --assignee-principal-type $deployer.PrincipalType `
-        --scope $vaultScope 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err @"
-Failed to grant Key Vault Secrets Officer to the deployer.
-Azure CLI output: $createOutput
-
-The signed-in principal needs Owner or User Access Administrator on the subscription/resource group
-to create this assignment during deploy. After an admin grants the role, re-run with -OnlyApps -SkipMigrations.
-"@
-        exit 1
-    }
-    Write-Success "Key Vault Secrets Officer assigned. Waiting 30s for RBAC propagation..."
-    Start-Sleep -Seconds 30
-}
-
 function Update-KeyVaultConnectionString {
     param([string]$SqlServerName)
     Write-Status "Updating Key Vault SQL connection string with managed identity client ID..."
     $kvName = az keyvault list --resource-group $script:ResourceGroupName --query "[0].name" -o tsv
     if (-not $kvName) { Write-Err "Key Vault not found in resource group $($script:ResourceGroupName)."; exit 1 }
-
-    Ensure-DeployerKeyVaultAccess -KeyVaultName $kvName
 
     $identityName = "id-$AppNamePrefix-containers-$EnvironmentName"
     $clientId = az identity show --resource-group $script:ResourceGroupName --name $identityName --query "clientId" -o tsv

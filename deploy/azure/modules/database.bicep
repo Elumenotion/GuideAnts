@@ -57,22 +57,6 @@ resource sqlServerFirewallRuleAzure 'Microsoft.Sql/servers/firewallRules@2023-05
   }
 }
 
-resource sqlManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: 'id-${appNamePrefix}-sql-${environmentName}'
-  location: location
-  tags: tags
-}
-
-resource sqlDatabaseContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: sqlServer
-  name: guid(sqlServer.id, sqlManagedIdentity.id, 'SqlDbContributor')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '9b7fa17d-e63e-47b0-bb0a-15c516ac86ec')
-    principalId: sqlManagedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 resource sqlAdAdmin 'Microsoft.Sql/servers/administrators@2023-05-01-preview' = if (length(sqlAadAdminObjectId) > 0) {
   parent: sqlServer
   name: 'activeDirectory'
@@ -100,7 +84,4 @@ output sqlServerName string = sqlServer.name
 output sqlServerFqdn string = sqlServer.properties.fullyQualifiedDomainName
 output sqlDatabaseId string = sqlDatabase.id
 output sqlDatabaseName string = sqlDatabase.name
-output sqlManagedIdentityId string = sqlManagedIdentity.id
-output sqlManagedIdentityClientId string = sqlManagedIdentity.properties.clientId
-output sqlManagedIdentityPrincipalId string = sqlManagedIdentity.properties.principalId
 output sqlConnectionStringTemplate string = 'Server=tcp:${sqlServer.properties.fullyQualifiedDomainName},1433;Initial Catalog=${sqlDatabaseName};Authentication=Active Directory Managed Identity;TrustServerCertificate=False;Encrypt=True;'

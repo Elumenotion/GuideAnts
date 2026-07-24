@@ -108,34 +108,6 @@ resolve_deployer_identity() {
   die "Could not resolve deployer object ID. Sign in with 'az login' or 'az login --service-principal'."
 }
 
-ensure_deployer_keyvault_access() {
-  local kv_name="$1"
-  resolve_deployer_identity
-  local subscription_id vault_scope existing create_output
-  subscription_id="$(az account show --query id -o tsv)"
-  vault_scope="/subscriptions/${subscription_id}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.KeyVault/vaults/${kv_name}"
-  existing="$(az role assignment list --scope "$vault_scope" --assignee-object-id "$DEPLOYER_OBJECT_ID" --role "Key Vault Secrets Officer" --query "[0].id" -o tsv 2>/dev/null || true)"
-  if [[ -n "$existing" ]]; then
-    ok "Deployer already has Key Vault Secrets Officer on '$kv_name'."
-    return 0
-  fi
-
-  log "Granting deployer Key Vault Secrets Officer on '$kv_name'..."
-  create_output="$(az role assignment create \
-    --role "Key Vault Secrets Officer" \
-    --assignee-object-id "$DEPLOYER_OBJECT_ID" \
-    --assignee-principal-type "$DEPLOYER_PRINCIPAL_TYPE" \
-    --scope "$vault_scope" 2>&1)" || {
-    die "Failed to grant Key Vault Secrets Officer to the deployer.
-Azure CLI output: ${create_output}
-
-The signed-in principal needs Owner or User Access Administrator on the subscription/resource group
-to create this assignment during deploy. After an admin grants the role, re-run with --only-apps --skip-migrations."
-  }
-  ok "Key Vault Secrets Officer assigned. Waiting 30s for RBAC propagation..."
-  sleep 30
-}
-
 if [[ "$ONLY_APPS" -eq 0 ]]; then
   resolve_deployer_identity
   log "Deploying infrastructure (Phase 1)..."
@@ -152,7 +124,6 @@ if [[ "$ONLY_APPS" -eq 0 ]]; then
       sqlAdminPassword="$SQL_ADMIN_PASSWORD" \
       sqlAadAdminObjectId="$SQL_AAD_ADMIN_OBJECT_ID" \
       deployerObjectId="$DEPLOYER_OBJECT_ID" \
-      deployerPrincipalType="$DEPLOYER_PRINCIPAL_TYPE" \
       jwtSigningKey="$JWT_SIGNING_KEY" \
       settingsSecretsKey="$SETTINGS_SECRETS_KEY" \
       scriptAgentToken="$SCRIPT_AGENT_TOKEN" \
@@ -205,7 +176,6 @@ if [[ "$ONLY_INFRA" -eq 0 ]]; then
     IDENTITY_NAME="id-${APP_NAME_PREFIX}-containers-${ENVIRONMENT_NAME}"
     CLIENT_ID="$(az identity show --resource-group "$RESOURCE_GROUP" --name "$IDENTITY_NAME" --query clientId -o tsv)"
     KV_NAME="$(az keyvault list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)"
-    ensure_deployer_keyvault_access "$KV_NAME"
     CONNECTION_STRING="Server=tcp:${SQL_SERVER_NAME}.database.windows.net,1433;Initial Catalog=${SQL_DATABASE_NAME};Authentication=Active Directory Managed Identity;User ID=${CLIENT_ID};TrustServerCertificate=False;Encrypt=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;"
     az keyvault secret set --vault-name "$KV_NAME" --name sql-connection-string --value "$CONNECTION_STRING" --output none \
       || die "Failed to update Key Vault secret 'sql-connection-string' on '$KV_NAME'."

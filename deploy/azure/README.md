@@ -10,7 +10,7 @@ no local llama/ASR/TTS/SD containers.
 
 | Requirement | Notes |
 |-------------|-------|
-| Azure subscription | Owner or Contributor on the target subscription (Contributor can deploy; role assignments for Key Vault require **User Access Administrator** or Owner) |
+| Azure subscription | **Contributor** on the target subscription/resource group is sufficient |
 | [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) | `az login` completed |
 | PowerShell 7+ **or** Bash | Windows: `pwsh`; Linux/macOS: `bash` |
 | `dotnet ef` global tool | Installed automatically by deploy script if missing |
@@ -137,8 +137,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 | Image pull 401/404 | Wrong tag or private GHCR package | Verify tag exists; confirm package is public |
 | SQL connection fail | MI user not created or wrong connection string | Re-run deploy; check Key Vault `sql-connection-string` has `User ID={clientId}` |
 | Port 8080 already in use | `ASPNETCORE_URLS` set to `:8080` conflicts with nginx in `webapi-ui-slim` image | Use `ASPNETCORE_URLS=http://127.0.0.1:8081`; ACA ingress stays on 8080 |
-| Key Vault `setSecret` Forbidden | Deployer lacks Key Vault Secrets Officer (pre-fix env) | Re-run deploy (Phase 1 adds deployer RBAC); wait 1–2 min for propagation |
-| File share mount fail | SMB role not propagated | Wait 2–5 min; redeploy apps |
+| Key Vault `setSecret` Forbidden | Deployer not in vault access policies (re-run Phase 1 with deployer signed in) | Re-run full deploy; confirm `az ad signed-in-user show` matches deployer passed to Bicep |
+| File share mount fail | Storage account key mount not ready | Wait 2–5 min; redeploy apps |
 | docling CrashLoop | Insufficient memory | Increase CPU/memory in `modules/container-apps.bicep` |
 | documentserver unhealthy | JWT mismatch | Ensure secrets generated once; force new revision |
 | searxng empty | Config not seeded | Run `scripts/upload-searxng-config.ps1 -ResourceGroupName rg-guideants-dev` |
@@ -149,6 +149,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 ```bash
 az group delete --name rg-guideants-dev --yes --no-wait
 ```
+
+**Failed partial deploy:** if Phase 1 failed on an older template that used Key Vault RBAC role assignments, delete the resource group and redeploy with the current templates. Key Vault permission model cannot be switched from RBAC to access policies in place.
 
 ## Cost notes
 

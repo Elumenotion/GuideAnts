@@ -52,6 +52,11 @@ SearXNG config is seeded from `docker/volumes/searxng/config/` on first deploy.
 
 ## Secrets (Key Vault)
 
+Key Vault uses **access policies** (not RBAC role assignments) so deployment works with **Contributor** only. Phase 1 grants:
+
+- **Deployer** — full secrets access (bootstrap + post-deploy `az keyvault secret set`)
+- **Container apps managed identity** (`id-{prefix}-containers-{env}`) — `get`/`list` for ACA secret references
+
 | Secret name | Used by |
 |-------------|---------|
 | `jwt-signing-key` | webapi-ui |
@@ -63,7 +68,7 @@ SearXNG config is seeded from `docker/volumes/searxng/config/` on first deploy.
 
 ## Deployment phases
 
-1. **Phase 1** (`main.bicep`): RG, VNet, Log Analytics, App Insights, SQL, storage, Key Vault, CAE.
+1. **Phase 1** (`main.bicep`): RG, VNet, Log Analytics, App Insights, SQL, storage, Key Vault (access policies), container apps MI, CAE.
 2. **Phase 2** (`apps.bicep`): 6 container apps with env wiring from slim compose.
 3. **Phase 3** (`deploy.ps1`): secrets, migrations, SearXNG seed, connection string update.
 

@@ -82,38 +82,9 @@ resource scriptAgentStateShare 'Microsoft.Storage/storageAccounts/fileServices/s
   }
 }
 
-resource storageManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: 'id-${appNamePrefix}-storage-${environmentName}'
-  location: location
-  tags: tags
-}
-
-resource storageBlobDataContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: storageAccount
-  name: guid(storageAccount.id, storageManagedIdentity.id, 'StorageBlobDataContributor')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
-    principalId: storageManagedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource storageFileDataSMBShareContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: storageAccount
-  name: guid(storageAccount.id, storageManagedIdentity.id, 'StorageFileDataSMBShareContributor')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb')
-    principalId: storageManagedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 output storageAccountId string = storageAccount.id
 output storageAccountName string = storageAccount.name
 output contentFilesShareName string = contentFilesShare.name
 output searxngConfigShareName string = searxngConfigShare.name
 output searxngDataShareName string = searxngDataShare.name
 output scriptAgentStateShareName string = scriptAgentStateShare.name
-output storageManagedIdentityId string = storageManagedIdentity.id
-output storageManagedIdentityClientId string = storageManagedIdentity.properties.clientId
-output storageManagedIdentityPrincipalId string = storageManagedIdentity.properties.principalId
