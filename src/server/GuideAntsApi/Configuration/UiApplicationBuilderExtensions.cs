@@ -95,6 +95,7 @@ public static class UiApplicationBuilderExtensions
         return !path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase)
             && !path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase)
             && !path.StartsWithSegments("/chat", StringComparison.OrdinalIgnoreCase)
-            && !path.StartsWithSegments("/sandbox", StringComparison.OrdinalIgnoreCase);
+            && !path.StartsWithSegments("/sandbox", StringComparison.OrdinalIgnoreCase)
+            && !DocumentServerUrlResolver.IsVersionedRuntimePath(path);
     }
 }
