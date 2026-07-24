@@ -10,7 +10,7 @@ no local llama/ASR/TTS/SD containers.
 
 | Requirement | Notes |
 |-------------|-------|
-| Azure subscription | Owner or Contributor on the target subscription |
+| Azure subscription | Owner or Contributor on the target subscription (Contributor can deploy; role assignments for Key Vault require **User Access Administrator** or Owner) |
 | [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) | `az login` completed |
 | PowerShell 7+ **or** Bash | Windows: `pwsh`; Linux/macOS: `bash` |
 | `dotnet ef` global tool | Installed automatically by deploy script if missing |
@@ -61,7 +61,7 @@ When complete, the script prints your application URL.
 | `-GhcrOwner` | `elumenotion` | GHCR organization for GuideAnts images |
 | `-ImageTag` | `main` | Image tag (see below) |
 | `-CustomDomain` | `""` | Public HTTPS domain (optional) |
-| `-SqlAdminPassword` | *(required)* | SQL admin — migrations only; runtime uses managed identity |
+| `-SqlAdminPassword` | *(required)* | SQL admin — migrations only; omit with `-OnlyApps -SkipMigrations` |
 | `-SkipMigrations` | false | Skip `dotnet ef database update` |
 | `-OnlyInfra` | false | Phase 1 only (no container apps) |
 | `-OnlyApps` | false | Phase 2 only (infra must already exist) |
@@ -136,6 +136,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for details.
 |---------|--------------|-----|
 | Image pull 401/404 | Wrong tag or private GHCR package | Verify tag exists; confirm package is public |
 | SQL connection fail | MI user not created or wrong connection string | Re-run deploy; check Key Vault `sql-connection-string` has `User ID={clientId}` |
+| Port 8080 already in use | `ASPNETCORE_URLS` set to `:8080` conflicts with nginx in `webapi-ui-slim` image | Use `ASPNETCORE_URLS=http://127.0.0.1:8081`; ACA ingress stays on 8080 |
+| Key Vault `setSecret` Forbidden | Deployer lacks Key Vault Secrets Officer (pre-fix env) | Re-run deploy (Phase 1 adds deployer RBAC); wait 1–2 min for propagation |
 | File share mount fail | SMB role not propagated | Wait 2–5 min; redeploy apps |
 | docling CrashLoop | Insufficient memory | Increase CPU/memory in `modules/container-apps.bicep` |
 | documentserver unhealthy | JWT mismatch | Ensure secrets generated once; force new revision |

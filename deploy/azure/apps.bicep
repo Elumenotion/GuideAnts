@@ -61,6 +61,7 @@ module containerApps 'modules/container-apps.bicep' = {
     customDomain: customDomain
     documentServerEnabled: documentServerEnabled
     appInsightsConnectionString: appInsights.properties.ConnectionString
+    sqlDatabaseName: 'guideants'
     tags: tags
   }
 }
