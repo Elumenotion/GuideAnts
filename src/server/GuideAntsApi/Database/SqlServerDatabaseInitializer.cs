@@ -104,8 +104,11 @@ public static class SqlServerDatabaseInitializer
     /// </summary>
     private static bool ShouldBootstrapCatalogOnMaster(SqlConnectionStringBuilder builder)
     {
-        var auth = builder.Authentication;
-        return string.IsNullOrWhiteSpace(auth)
-            || !auth.Contains("Active Directory", StringComparison.OrdinalIgnoreCase);
+        return builder.Authentication switch
+        {
+            SqlAuthenticationMethod.NotSpecified => true,
+            SqlAuthenticationMethod.SqlPassword => true,
+            _ => false,
+        };
     }
 }
