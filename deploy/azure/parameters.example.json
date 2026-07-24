@@ -16,6 +16,12 @@
     },
     "sqlAadAdminObjectId": {
       "value": ""
+    },
+    "deployerObjectId": {
+      "value": ""
+    },
+    "deployerPrincipalType": {
+      "value": "User"
     }
   }
 }

@@ -98,7 +98,7 @@ public static class DocumentServerEndpoints
         {
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             var documentServerOptions = options.Value;
-            var publicUrl = ResolveDocumentServerPublicUrl(httpContext);
+            var publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(documentServerOptions, httpContext);
             var sanitizedPublicUrl = LogValueSanitizer.Sanitize(publicUrl);
             logger.LogInformation(
                 "DocumentServer capabilities requested. enabled={Enabled} publicUrl={PublicUrl}",
@@ -312,7 +312,7 @@ public static class DocumentServerEndpoints
                 documentServer.Enabled,
                 documentServer.ApiBaseUrl,
                 documentServer.InternalUrl,
-                LogValueSanitizer.Sanitize(ResolveDocumentServerPublicUrl(httpContext)),
+                LogValueSanitizer.Sanitize(DocumentServerUrlResolver.ResolvePublicUrl(documentServer, httpContext)),
                 "aspnet-data-protection",
                 documentServer.JwtEnabled,
                 documentServerReachable,
@@ -326,7 +326,7 @@ public static class DocumentServerEndpoints
                 enabled = documentServer.Enabled,
                 apiBaseUrl = documentServer.ApiBaseUrl,
                 internalUrl = documentServer.InternalUrl,
-                publicUrl = ResolveDocumentServerPublicUrl(httpContext),
+                publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(documentServer, httpContext),
                 tokenProtection = "aspnet-data-protection",
                 jwtEnabled = documentServer.JwtEnabled,
                 documentServer = new
@@ -398,17 +398,6 @@ public static class DocumentServerEndpoints
         return $"{internalUri.Scheme}://{internalUri.Authority}{basePath}";
     }
 
-    private static string ResolveDocumentServerPublicUrl(HttpContext httpContext)
-    {
-        var scheme = httpContext.Request.Scheme?.Trim();
-        if (string.IsNullOrWhiteSpace(scheme) || !httpContext.Request.Host.HasValue)
-        {
-            return "/api/documentserver/ds";
-        }
-
-        return $"{scheme}://{httpContext.Request.Host.Value.TrimEnd('/')}/api/documentserver/ds";
-    }
-
     private sealed class DocumentServerProxyHttpTransformer : HttpTransformer
     {
         public override async ValueTask TransformRequestAsync(
@@ -435,10 +424,8 @@ public static class DocumentServerEndpoints
                 : string.Empty;
             proxyRequest.RequestUri = new Uri($"{destinationPrefix.TrimEnd('/')}{normalizedPath}{queryString}", UriKind.Absolute);
 
-            if (httpContext.Request.Host.HasValue)
-            {
-                proxyRequest.Headers.Host = httpContext.Request.Host.Value;
-            }
+            var destinationUri = proxyRequest.RequestUri;
+            proxyRequest.Headers.Host = DocumentServerUrlResolver.ResolveUpstreamHost(destinationUri);
 
             if (httpContext.Request.Host.HasValue)
             {
@@ -446,14 +433,30 @@ public static class DocumentServerEndpoints
                 proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-Host", httpContext.Request.Host.Value);
             }
 
+            var forwardedProto = ResolveForwardedProto(httpContext);
             proxyRequest.Headers.Remove("X-Forwarded-Proto");
-            proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-Proto", httpContext.Request.Scheme);
+            proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-Proto", forwardedProto);
 
             proxyRequest.Headers.Remove("X-Forwarded-Prefix");
             proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", DocumentServerProxyPublicPrefix);
 
             proxyRequest.Headers.Remove("X-Forwarded-PathBase");
             proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-PathBase", DocumentServerProxyPublicPrefix);
+        }
+
+        private static string ResolveForwardedProto(HttpContext httpContext)
+        {
+            if (httpContext.RequestServices.GetService(typeof(IOptions<DocumentServerOptions>)) is IOptions<DocumentServerOptions> options)
+            {
+                var configured = options.Value.ApiBaseUrl?.Trim();
+                if (!string.IsNullOrWhiteSpace(configured)
+                    && Uri.TryCreate(configured, UriKind.Absolute, out var apiBaseUri))
+                {
+                    return apiBaseUri.Scheme;
+                }
+            }
+
+            return httpContext.Request.Scheme;
         }
     }
 }

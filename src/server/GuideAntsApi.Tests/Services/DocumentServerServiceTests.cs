@@ -58,7 +58,7 @@ public sealed class DocumentServerServiceTests
                 UserName: "Test User"),
             CancellationToken.None);
 
-        result.DocumentServerUrl.Should().Be("http://localhost:5107/api/documentserver/ds");
+        result.DocumentServerUrl.Should().Be("http://host.docker.internal:5106/api/documentserver/ds");
         result.Config.Should().NotBeNull();
         var config = (Dictionary<string, object?>)result.Config;
         var editorConfig = (Dictionary<string, object?>)config["editorConfig"]!;

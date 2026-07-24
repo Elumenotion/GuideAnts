@@ -6,8 +6,7 @@ param(
     [string]$GhcrOwner = "elumenotion",
     [string]$ImageTag = "main",
     [string]$CustomDomain = "",
-    [Parameter(Mandatory = $true)]
-    [string]$SqlAdminPassword,
+    [string]$SqlAdminPassword = "",
     [string]$SubscriptionId = "",
     [switch]$SkipMigrations,
     [switch]$OnlyInfra,
@@ -32,8 +31,9 @@ function Test-Prerequisites {
     Write-Status "Checking prerequisites..."
     try { az --version | Out-Null } catch { Write-Err "Azure CLI is not installed."; exit 1 }
     try { az account show | Out-Null } catch { Write-Err "Not logged in to Azure. Run 'az login' first."; exit 1 }
-    if ([string]::IsNullOrWhiteSpace($SqlAdminPassword)) {
-        Write-Err "SqlAdminPassword is required."
+    $passwordRequired = -not ($OnlyApps -and $SkipMigrations)
+    if ($passwordRequired -and [string]::IsNullOrWhiteSpace($SqlAdminPassword)) {
+        Write-Err "SqlAdminPassword is required unless both -OnlyApps and -SkipMigrations are set."
         exit 1
     }
     Write-Success "Prerequisites check passed"
@@ -51,6 +51,29 @@ function Set-Variables {
     Write-Success "Using subscription $($script:SubscriptionId), resource group $($script:ResourceGroupName)"
 }
 
+function Get-DeployerIdentity {
+    $signedInUserId = az ad signed-in-user show --query id -o tsv 2>$null
+    if ($signedInUserId) {
+        return @{
+            ObjectId = $signedInUserId
+            PrincipalType = 'User'
+        }
+    }
+
+    $accountUser = az account show --query user -o json | ConvertFrom-Json
+    if ($accountUser.type -eq 'servicePrincipal') {
+        $spId = az ad sp show --id $accountUser.name --query id -o tsv
+        if (-not $spId) { Write-Err "Could not resolve service principal object ID for deployer."; exit 1 }
+        return @{
+            ObjectId = $spId
+            PrincipalType = 'ServicePrincipal'
+        }
+    }
+
+    Write-Err "Could not resolve deployer object ID. Sign in with 'az login' or 'az login --service-principal'."
+    exit 1
+}
+
 function New-DeploymentSecrets {
     Write-Status "Generating deployment secrets..."
     $json = & (Join-Path $script:DeployRoot "scripts" "generate-secrets.ps1") -Quiet
@@ -65,6 +88,7 @@ function New-DeploymentSecrets {
 
 function Deploy-Infrastructure {
     Write-Status "Deploying Azure infrastructure (Phase 1)..."
+    $deployer = Get-DeployerIdentity
     $deploymentName = "guideants-$EnvironmentName-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
     az deployment sub create `
         --name $deploymentName `
@@ -78,6 +102,8 @@ function Deploy-Infrastructure {
             sqlDatabaseName=$script:SqlDatabaseName `
             sqlAdminPassword=$script:SqlAdminPassword `
             sqlAadAdminObjectId=$SqlAadAdminObjectId `
+            deployerObjectId=$($deployer.ObjectId) `
+            deployerPrincipalType=$($deployer.PrincipalType) `
             jwtSigningKey=$script:JwtSigningKey `
             settingsSecretsKey=$script:SettingsSecretsKey `
             scriptAgentToken=$script:ScriptAgentToken `
@@ -190,12 +216,25 @@ GO
     Import-Module SqlServer -ErrorAction Stop
 
     try {
+        $masterBootstrapScript = @"
+IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = '$identityName')
+BEGIN
+    CREATE USER [$identityName] FROM EXTERNAL PROVIDER;
+END
+"@
+        Invoke-Sqlcmd -ServerInstance "${sqlServerName}.database.windows.net" `
+            -Database "master" `
+            -AccessToken $accessToken `
+            -Query $masterBootstrapScript `
+            -ErrorAction Stop
+        Write-Success "SQL managed identity principal ensured in master (startup catalog check)."
+
         Invoke-Sqlcmd -ServerInstance "${sqlServerName}.database.windows.net" `
             -Database $script:SqlDatabaseName `
             -AccessToken $accessToken `
             -InputFile $sqlScriptPath `
             -ErrorAction Stop
-        Write-Success "SQL managed identity user configured."
+        Write-Success "SQL managed identity user configured in $($script:SqlDatabaseName)."
     } catch {
         Write-Err "Failed to configure SQL user: $_"
         exit 1
@@ -229,23 +268,87 @@ function Apply-DatabaseMigrations {
     }
 }
 
+function Invoke-AzChecked {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Command,
+        [string]$FailureMessage
+    )
+    & az @Command
+    if ($LASTEXITCODE -ne 0) {
+        if ($FailureMessage) { Write-Err $FailureMessage }
+        else { Write-Err "Azure CLI command failed: az $($Command -join ' ')" }
+        exit 1
+    }
+}
+
+function Ensure-DeployerKeyVaultAccess {
+    param([string]$KeyVaultName)
+    $deployer = Get-DeployerIdentity
+    $vaultScope = "/subscriptions/$($script:SubscriptionId)/resourceGroups/$($script:ResourceGroupName)/providers/Microsoft.KeyVault/vaults/$KeyVaultName"
+    $existing = az role assignment list `
+        --scope $vaultScope `
+        --assignee-object-id $deployer.ObjectId `
+        --role "Key Vault Secrets Officer" `
+        --query "[0].id" -o tsv 2>$null
+    if ($existing) {
+        Write-Success "Deployer already has Key Vault Secrets Officer on '$KeyVaultName'."
+        return
+    }
+
+    Write-Status "Granting deployer Key Vault Secrets Officer on '$KeyVaultName'..."
+    $createOutput = az role assignment create `
+        --role "Key Vault Secrets Officer" `
+        --assignee-object-id $deployer.ObjectId `
+        --assignee-principal-type $deployer.PrincipalType `
+        --scope $vaultScope 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err @"
+Failed to grant Key Vault Secrets Officer to the deployer.
+Azure CLI output: $createOutput
+
+The signed-in principal needs Owner or User Access Administrator on the subscription/resource group
+to create this assignment during deploy. After an admin grants the role, re-run with -OnlyApps -SkipMigrations.
+"@
+        exit 1
+    }
+    Write-Success "Key Vault Secrets Officer assigned. Waiting 30s for RBAC propagation..."
+    Start-Sleep -Seconds 30
+}
+
 function Update-KeyVaultConnectionString {
     param([string]$SqlServerName)
     Write-Status "Updating Key Vault SQL connection string with managed identity client ID..."
     $kvName = az keyvault list --resource-group $script:ResourceGroupName --query "[0].name" -o tsv
+    if (-not $kvName) { Write-Err "Key Vault not found in resource group $($script:ResourceGroupName)."; exit 1 }
+
+    Ensure-DeployerKeyVaultAccess -KeyVaultName $kvName
+
     $identityName = "id-$AppNamePrefix-containers-$EnvironmentName"
     $clientId = az identity show --resource-group $script:ResourceGroupName --name $identityName --query "clientId" -o tsv
     if (-not $clientId) { Write-Err "Could not find managed identity client ID."; exit 1 }
 
     $connectionString = "Server=tcp:${SqlServerName}.database.windows.net,1433;Initial Catalog=$($script:SqlDatabaseName);Authentication=Active Directory Managed Identity;User ID=${clientId};TrustServerCertificate=False;Encrypt=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;"
-    az keyvault secret set --vault-name $kvName --name "sql-connection-string" --value $connectionString --output none
+    Invoke-AzChecked -Command @(
+        'keyvault', 'secret', 'set',
+        '--vault-name', $kvName,
+        '--name', 'sql-connection-string',
+        '--value', $connectionString,
+        '--output', 'none'
+    ) -FailureMessage "Failed to update Key Vault secret 'sql-connection-string' on '$kvName'."
     Write-Success "Key Vault connection string updated."
 }
 
 function Force-NewRevision-WebApiApp {
     Write-Status "Forcing new revision for guideants-webapi-ui..."
     $timestamp = (Get-Date -UFormat %s)
-    az containerapp update --name "guideants-webapi-ui" --resource-group $script:ResourceGroupName --set-env-vars "DEPLOYMENT_TRIGGER=$timestamp" --output none
+    Invoke-AzChecked -Command @(
+        'containerapp', 'update',
+        '--name', 'guideants-webapi-ui',
+        '--resource-group', $script:ResourceGroupName,
+        '--set-env-vars', "DEPLOYMENT_TRIGGER=$timestamp",
+        '--output', 'none'
+    ) -FailureMessage "Failed to force a new revision for guideants-webapi-ui."
     Write-Success "New revision triggered."
 }
 
@@ -304,8 +407,10 @@ function Main {
         }
 
         $sqlServerName = Set-SqlDatabase
-        if ($sqlServerName -and -not $SkipMigrations) {
-            Apply-DatabaseMigrations
+        if ($sqlServerName) {
+            if (-not $SkipMigrations) {
+                Apply-DatabaseMigrations
+            }
             Update-KeyVaultConnectionString -SqlServerName $sqlServerName
             Force-NewRevision-WebApiApp
         }

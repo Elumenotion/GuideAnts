@@ -12,7 +12,10 @@ param imageTag string
 param customDomain string
 param documentServerEnabled bool
 param appInsightsConnectionString string
+param sqlDatabaseName string = 'guideants'
 param tags object
+
+var sqlServerFqdn = '${appNamePrefix}-sql-${environmentName}.${environment().suffixes.sqlServerHostname}'
 
 var webApiAppName = 'guideants-webapi-ui'
 var aiAppName = 'guideants-ai'
@@ -23,6 +26,13 @@ var documentServerAppName = 'documentserver'
 
 var publicApiUrl = customDomain != '' ? 'https://${customDomain}' : 'https://${webApiAppName}.${containerAppsEnvironmentDefaultDomain}'
 var allowedOrigins = customDomain != '' ? 'https://${customDomain}' : '*'
+
+// ACA internal ingress requires {app}.internal.{envDefaultDomain} — bare short names do not resolve.
+var searxngInternalUrl = 'http://${searxngAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
+var aiInternalUrl = 'http://${aiAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
+var doclingInternalUrl = 'http://${doclingAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
+var documentServerInternalUrl = 'http://${documentServerAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
+var plantumlInternalUrl = 'http://${plantumlAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
 
 var webApiImage = 'ghcr.io/${ghcrOwner}/guideants-webapi-ui-slim:${imageTag}'
 var aiImage = 'ghcr.io/${ghcrOwner}/guideants-ai-slim:${imageTag}'
@@ -67,6 +77,18 @@ resource storageFileDataSMBShareContributorRoleAssignment 'Microsoft.Authorizati
     principalId: containerAppsManagedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
+}
+
+resource sqlConnectionStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'sql-connection-string'
+  properties: {
+    value: 'Server=tcp:${sqlServerFqdn},1433;Initial Catalog=${sqlDatabaseName};Authentication=Active Directory Managed Identity;User ID=${containerAppsManagedIdentity.properties.clientId};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;'
+    contentType: 'text/plain'
+  }
+  dependsOn: [
+    containerAppsManagedIdentity
+  ]
 }
 
 resource contentFilesStorage 'Microsoft.App/managedEnvironments/storages@2023-05-01' = {
@@ -202,7 +224,7 @@ resource webApiApp 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'ASPNETCORE_URLS'
-              value: 'http://+:8080'
+              value: 'http://127.0.0.1:8081'
             }
             {
               name: 'ASPNETCORE_FORWARDEDHEADERS_ENABLED'
@@ -250,11 +272,11 @@ resource webApiApp 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'SearXngSearch__BaseUrl'
-              value: 'http://${searxngAppName}'
+              value: searxngInternalUrl
             }
             {
               name: 'BrowserRendering__BaseUrl'
-              value: 'http://${searxngAppName}'
+              value: searxngInternalUrl
             }
             {
               name: 'LocalServiceHosts__SpeechTranscriptionBaseUrl'
@@ -274,11 +296,11 @@ resource webApiApp 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'LocalServiceHosts__MediaBaseUrl'
-              value: 'http://${aiAppName}'
+              value: aiInternalUrl
             }
             {
               name: 'LocalServiceHosts__DocumentIntelligenceBaseUrl'
-              value: 'http://${doclingAppName}'
+              value: doclingInternalUrl
             }
             {
               name: 'DocumentServer__Enabled'
@@ -286,7 +308,7 @@ resource webApiApp 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'DocumentServer__InternalUrl'
-              value: 'http://${documentServerAppName}'
+              value: documentServerInternalUrl
             }
             {
               name: 'DocumentServer__ApiBaseUrl'
@@ -330,11 +352,11 @@ resource webApiApp 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'ServiceRouting__Containers__guideants-ai__BaseUrl'
-              value: 'http://${aiAppName}/sandbox'
+              value: '${aiInternalUrl}/sandbox'
             }
             {
               name: 'ServiceRouting__Containers__plantuml__BaseUrl'
-              value: 'http://${plantumlAppName}'
+              value: plantumlInternalUrl
             }
           ], [])
           volumeMounts: [
@@ -361,6 +383,7 @@ resource webApiApp 'Microsoft.App/containerApps@2023-05-01' = {
   dependsOn: [
     contentFilesStorage
     keyVaultSecretsUserRoleAssignment
+    sqlConnectionStringSecret
   ]
 }
 

@@ -205,7 +205,7 @@ public sealed class DocumentServerService : IDocumentServerService
         }
 
         return new DocumentServerEditorConfigResult(
-            DocumentServerUrl: ResolveDocumentServerPublicUrl(httpContext),
+            DocumentServerUrl: $"{ResolveDocumentServerApiBaseUrl()}{DocumentServerProxyPublicPrefix}",
             Config: config);
     }
 
@@ -661,22 +661,6 @@ public sealed class DocumentServerService : IDocumentServerService
             LogValueSanitizer.Sanitize(internalUri.Authority));
 
         return rewrittenUrl;
-    }
-
-    private static string ResolveDocumentServerPublicUrl(HttpContext httpContext)
-    {
-        var scheme = httpContext.Request.Scheme?.Trim();
-        if (string.IsNullOrWhiteSpace(scheme))
-        {
-            throw new InvalidOperationException("Unable to resolve DocumentServer public URL because request scheme is missing.");
-        }
-
-        if (!httpContext.Request.Host.HasValue)
-        {
-            throw new InvalidOperationException("Unable to resolve DocumentServer public URL because request host is missing.");
-        }
-
-        return $"{scheme}://{httpContext.Request.Host.Value.TrimEnd('/')}{DocumentServerProxyPublicPrefix}";
     }
 
     private string InferContentType(string fileName)

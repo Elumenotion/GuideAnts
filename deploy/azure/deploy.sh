@@ -67,7 +67,7 @@ ok() { echo "[SUCCESS] $*"; }
 warn() { echo "[WARNING] $*" >&2; }
 die() { echo "[ERROR] $*" >&2; exit 1; }
 
-[[ -n "$SQL_ADMIN_PASSWORD" ]] || die "SqlAdminPassword is required (--sql-admin-password)"
+[[ -n "$SQL_ADMIN_PASSWORD" || ( "$ONLY_APPS" -eq 1 && "$SKIP_MIGRATIONS" -eq 1 ) ]] || die "SqlAdminPassword is required unless both --only-apps and --skip-migrations are set"
 command -v az >/dev/null || die "Azure CLI is not installed"
 az account show >/dev/null 2>&1 || die "Not logged in to Azure. Run 'az login' first."
 
@@ -84,7 +84,60 @@ SCRIPT_AGENT_ADMIN_TOKEN="$(echo "$SECRETS_JSON" | python -c "import json,sys; p
 DOCUMENTSERVER_JWT_SECRET="$(echo "$SECRETS_JSON" | python -c "import json,sys; print(json.load(sys.stdin)['documentServerJwtSecret'])")"
 ok "Secrets generated"
 
+resolve_deployer_identity() {
+  local signed_in_user_id
+  signed_in_user_id="$(az ad signed-in-user show --query id -o tsv 2>/dev/null || true)"
+  if [[ -n "$signed_in_user_id" ]]; then
+    DEPLOYER_OBJECT_ID="$signed_in_user_id"
+    DEPLOYER_PRINCIPAL_TYPE="User"
+    return 0
+  fi
+
+  local account_type account_name sp_id
+  account_type="$(az account show --query user.type -o tsv)"
+  account_name="$(az account show --query user.name -o tsv)"
+  if [[ "$account_type" == "servicePrincipal" ]]; then
+    sp_id="$(az ad sp show --id "$account_name" --query id -o tsv)"
+    if [[ -n "$sp_id" ]]; then
+      DEPLOYER_OBJECT_ID="$sp_id"
+      DEPLOYER_PRINCIPAL_TYPE="ServicePrincipal"
+      return 0
+    fi
+  fi
+
+  die "Could not resolve deployer object ID. Sign in with 'az login' or 'az login --service-principal'."
+}
+
+ensure_deployer_keyvault_access() {
+  local kv_name="$1"
+  resolve_deployer_identity
+  local subscription_id vault_scope existing create_output
+  subscription_id="$(az account show --query id -o tsv)"
+  vault_scope="/subscriptions/${subscription_id}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.KeyVault/vaults/${kv_name}"
+  existing="$(az role assignment list --scope "$vault_scope" --assignee-object-id "$DEPLOYER_OBJECT_ID" --role "Key Vault Secrets Officer" --query "[0].id" -o tsv 2>/dev/null || true)"
+  if [[ -n "$existing" ]]; then
+    ok "Deployer already has Key Vault Secrets Officer on '$kv_name'."
+    return 0
+  fi
+
+  log "Granting deployer Key Vault Secrets Officer on '$kv_name'..."
+  create_output="$(az role assignment create \
+    --role "Key Vault Secrets Officer" \
+    --assignee-object-id "$DEPLOYER_OBJECT_ID" \
+    --assignee-principal-type "$DEPLOYER_PRINCIPAL_TYPE" \
+    --scope "$vault_scope" 2>&1)" || {
+    die "Failed to grant Key Vault Secrets Officer to the deployer.
+Azure CLI output: ${create_output}
+
+The signed-in principal needs Owner or User Access Administrator on the subscription/resource group
+to create this assignment during deploy. After an admin grants the role, re-run with --only-apps --skip-migrations."
+  }
+  ok "Key Vault Secrets Officer assigned. Waiting 30s for RBAC propagation..."
+  sleep 30
+}
+
 if [[ "$ONLY_APPS" -eq 0 ]]; then
+  resolve_deployer_identity
   log "Deploying infrastructure (Phase 1)..."
   az deployment sub create \
     --name "guideants-${ENVIRONMENT_NAME}-$(date +%Y%m%d-%H%M%S)" \
@@ -98,6 +151,8 @@ if [[ "$ONLY_APPS" -eq 0 ]]; then
       sqlDatabaseName="$SQL_DATABASE_NAME" \
       sqlAdminPassword="$SQL_ADMIN_PASSWORD" \
       sqlAadAdminObjectId="$SQL_AAD_ADMIN_OBJECT_ID" \
+      deployerObjectId="$DEPLOYER_OBJECT_ID" \
+      deployerPrincipalType="$DEPLOYER_PRINCIPAL_TYPE" \
       jwtSigningKey="$JWT_SIGNING_KEY" \
       settingsSecretsKey="$SETTINGS_SECRETS_KEY" \
       scriptAgentToken="$SCRIPT_AGENT_TOKEN" \
@@ -145,15 +200,18 @@ if [[ "$ONLY_INFRA" -eq 0 ]]; then
         --connection "$MIGRATION_CS"
       popd >/dev/null
       ok "Migrations applied"
-
-      IDENTITY_NAME="id-${APP_NAME_PREFIX}-containers-${ENVIRONMENT_NAME}"
-      CLIENT_ID="$(az identity show --resource-group "$RESOURCE_GROUP" --name "$IDENTITY_NAME" --query clientId -o tsv)"
-      KV_NAME="$(az keyvault list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)"
-      CONNECTION_STRING="Server=tcp:${SQL_SERVER_NAME}.database.windows.net,1433;Initial Catalog=${SQL_DATABASE_NAME};Authentication=Active Directory Managed Identity;User ID=${CLIENT_ID};TrustServerCertificate=False;Encrypt=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;"
-      az keyvault secret set --vault-name "$KV_NAME" --name sql-connection-string --value "$CONNECTION_STRING" --output none
-      az containerapp update --name guideants-webapi-ui --resource-group "$RESOURCE_GROUP" --set-env-vars "DEPLOYMENT_TRIGGER=$(date +%s)" --output none
-      ok "Key Vault connection string updated and web API revision forced"
     fi
+
+    IDENTITY_NAME="id-${APP_NAME_PREFIX}-containers-${ENVIRONMENT_NAME}"
+    CLIENT_ID="$(az identity show --resource-group "$RESOURCE_GROUP" --name "$IDENTITY_NAME" --query clientId -o tsv)"
+    KV_NAME="$(az keyvault list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)"
+    ensure_deployer_keyvault_access "$KV_NAME"
+    CONNECTION_STRING="Server=tcp:${SQL_SERVER_NAME}.database.windows.net,1433;Initial Catalog=${SQL_DATABASE_NAME};Authentication=Active Directory Managed Identity;User ID=${CLIENT_ID};TrustServerCertificate=False;Encrypt=True;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;"
+    az keyvault secret set --vault-name "$KV_NAME" --name sql-connection-string --value "$CONNECTION_STRING" --output none \
+      || die "Failed to update Key Vault secret 'sql-connection-string' on '$KV_NAME'."
+    az containerapp update --name guideants-webapi-ui --resource-group "$RESOURCE_GROUP" --set-env-vars "DEPLOYMENT_TRIGGER=$(date +%s)" --output none \
+      || die "Failed to force a new revision for guideants-webapi-ui."
+    ok "Key Vault connection string updated and web API revision forced"
   fi
 
   pwsh -File "$DEPLOY_ROOT/scripts/upload-searxng-config.ps1" -ResourceGroupName "$RESOURCE_GROUP"

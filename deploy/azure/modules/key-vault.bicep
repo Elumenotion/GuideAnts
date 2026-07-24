@@ -15,6 +15,17 @@ param scriptAgentToken string
 param scriptAgentAdminToken string
 @secure()
 param documentServerJwtSecret string
+
+@description('Object ID of the deployer principal (user or service principal) for post-deploy Key Vault updates')
+param deployerObjectId string = ''
+
+@description('Principal type for deployerObjectId (User or ServicePrincipal)')
+@allowed([
+  'User'
+  'ServicePrincipal'
+])
+param deployerPrincipalType string = 'User'
+
 param tags object
 
 var keyVaultName = 'kv-${take(appNamePrefix, 4)}-${take(environmentName, 3)}-${take(uniqueString(resourceGroup().id), 8)}'
@@ -54,6 +65,16 @@ resource keyVaultSecretsOfficerRoleAssignment 'Microsoft.Authorization/roleAssig
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')
     principalId: keyVaultManagedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
+  }
+}
+
+resource deployerSecretsOfficerRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployerObjectId)) {
+  scope: keyVault
+  name: guid(keyVault.id, deployerObjectId, 'KeyVaultSecretsOfficer-Deployer')
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')
+    principalId: deployerObjectId
+    principalType: deployerPrincipalType
   }
 }
 
