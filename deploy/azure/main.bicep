@@ -1,14 +1,12 @@
 // GuideAnts Azure infrastructure (Phase 1) — no container apps
-targetScope = 'subscription'
+// Deploys to resource group scope (compatible with AZBuilder role)
+targetScope = 'resourceGroup'
 
 @description('Environment name (dev, staging, prod)')
 param environmentName string = 'dev'
 
 @description('Location for all resources')
 param location string = 'East US 2'
-
-@description('Resource group name')
-param resourceGroupName string = 'rg-guideants-${environmentName}'
 
 @description('Container Apps Environment name')
 param containerAppsEnvironmentName string = 'cae-guideants-${environmentName}'
@@ -56,15 +54,8 @@ var tags = {
   profile: 'azure-slim'
 }
 
-resource resourceGroup 'Microsoft.Resources/resourceGroups@2023-07-01' = {
-  name: resourceGroupName
-  location: location
-  tags: tags
-}
-
 module coreInfrastructure 'modules/core-infrastructure.bicep' = {
   name: 'core-infrastructure'
-  scope: resourceGroup
   params: {
     location: location
     environmentName: environmentName
@@ -75,7 +66,6 @@ module coreInfrastructure 'modules/core-infrastructure.bicep' = {
 
 module containerAppsIdentity 'modules/container-apps-identity.bicep' = {
   name: 'container-apps-identity'
-  scope: resourceGroup
   params: {
     location: location
     environmentName: environmentName
@@ -86,7 +76,6 @@ module containerAppsIdentity 'modules/container-apps-identity.bicep' = {
 
 module keyVault 'modules/key-vault.bicep' = {
   name: 'key-vault'
-  scope: resourceGroup
   params: {
     location: location
     environmentName: environmentName
@@ -106,7 +95,6 @@ module keyVault 'modules/key-vault.bicep' = {
 
 module storage 'modules/storage.bicep' = {
   name: 'storage'
-  scope: resourceGroup
   params: {
     location: location
     environmentName: environmentName
@@ -117,7 +105,6 @@ module storage 'modules/storage.bicep' = {
 
 module database 'modules/database.bicep' = {
   name: 'database'
-  scope: resourceGroup
   params: {
     location: location
     environmentName: environmentName
@@ -131,7 +118,6 @@ module database 'modules/database.bicep' = {
 
 module containerAppsEnvironment 'modules/container-apps-environment.bicep' = {
   name: 'container-apps-environment'
-  scope: resourceGroup
   params: {
     location: location
     containerAppsEnvironmentName: containerAppsEnvironmentName
@@ -141,7 +127,6 @@ module containerAppsEnvironment 'modules/container-apps-environment.bicep' = {
   }
 }
 
-output resourceGroupName string = resourceGroup.name
 output containerAppsEnvironmentId string = containerAppsEnvironment.outputs.containerAppsEnvironmentId
 output containerAppsEnvironmentName string = containerAppsEnvironment.outputs.containerAppsEnvironmentName
 output containerAppsEnvironmentDefaultDomain string = containerAppsEnvironment.outputs.containerAppsEnvironmentDefaultDomain
