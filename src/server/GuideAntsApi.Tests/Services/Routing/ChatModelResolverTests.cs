@@ -1,22 +1,22 @@
 using FluentAssertions;
-using GuideAntsApi.Services.Routing;
-using Microsoft.Extensions.Configuration;
-using Moq;
 using AntRunner.Chat.Abstractions;
+using GuideAntsApi.Services.Routing;
+using GuideAntsApi.Settings;
+using Moq;
 
 namespace GuideAntsApi.Tests.Services.Routing;
 
 [TestClass]
 public sealed class ChatModelResolverTests
 {
-    private static IConfiguration BuildConfig(IReadOnlyDictionary<string, string?> pairs)
+    private sealed class TestChatDefaultsStore(ChatDefaultsSnapshot snapshot) : IChatDefaultsStore
     {
-        return new ConfigurationBuilder()
-            .AddInMemoryCollection(pairs!)
-            .Build();
+        public ChatDefaultsSnapshot Current { get; } = snapshot;
+
+        public Task RefreshAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
-    private static ChatModelResolver BuildResolver(IConfiguration configuration)
+    private static ChatModelResolver BuildResolver(ChatDefaultsSnapshot snapshot)
     {
         var targetResolver = new Mock<IChatTargetResolver>();
         targetResolver
@@ -25,22 +25,20 @@ public sealed class ChatModelResolverTests
                 modelId,
                 modelId.Contains("gemini", StringComparison.OrdinalIgnoreCase) ? "google-gemini-chat" : "openai-responses",
                 null));
-        return new ChatModelResolver(configuration, targetResolver.Object);
+        return new ChatModelResolver(new TestChatDefaultsStore(snapshot), targetResolver.Object);
     }
 
     [TestMethod]
     public void Resolve_OverrideAll_UsesDefault_IgnoresEntity_AndSetsGlobalAuthority()
     {
-        var config = BuildConfig(new Dictionary<string, string?>
-        {
-            ["ChatDefaults:OverrideAllChatModels"] = "true",
-            ["ChatDefaults:DefaultModelId"] = "global-default",
-            ["ChatDefaults:Temperature"] = "0.42",
-            ["ChatDefaults:TopP"] = "0.9",
-            ["ChatDefaults:ReasoningEffort"] = "high",
-            ["ChatDefaults:SamplingParametersJson"] = """{"min_p":0.05}"""
-        });
-        var resolver = BuildResolver(config);
+        var snapshot = new ChatDefaultsSnapshot(
+            DefaultModelId: "global-default",
+            OverrideAllChatModels: true,
+            Temperature: 0.42,
+            TopP: 0.9,
+            ReasoningEffort: "high",
+            SamplingParametersJson: """{"min_p":0.05}""");
+        var resolver = BuildResolver(snapshot);
 
         var result = resolver.Resolve("entity-model");
 
@@ -56,12 +54,14 @@ public sealed class ChatModelResolverTests
     [TestMethod]
     public void Resolve_EntityModel_WhenOverrideOff_IsAssistantDefinition_WithEmptyParameterBag()
     {
-        var config = BuildConfig(new Dictionary<string, string?>
-        {
-            ["ChatDefaults:OverrideAllChatModels"] = "false",
-            ["ChatDefaults:DefaultModelId"] = "ignored-when-entity-set",
-        });
-        var resolver = BuildResolver(config);
+        var snapshot = new ChatDefaultsSnapshot(
+            DefaultModelId: "ignored-when-entity-set",
+            OverrideAllChatModels: false,
+            Temperature: null,
+            TopP: null,
+            ReasoningEffort: null,
+            SamplingParametersJson: null);
+        var resolver = BuildResolver(snapshot);
 
         var result = resolver.Resolve("my-model");
 
@@ -74,13 +74,14 @@ public sealed class ChatModelResolverTests
     [TestMethod]
     public void Resolve_BlankEntity_WithDefaultConfigured_IsAssistantDefinition_WithDefaultParameterBag()
     {
-        var config = BuildConfig(new Dictionary<string, string?>
-        {
-            ["ChatDefaults:OverrideAllChatModels"] = "false",
-            ["ChatDefaults:DefaultModelId"] = "def",
-            ["ChatDefaults:Temperature"] = "0.7",
-        });
-        var resolver = BuildResolver(config);
+        var snapshot = new ChatDefaultsSnapshot(
+            DefaultModelId: "def",
+            OverrideAllChatModels: false,
+            Temperature: 0.7,
+            TopP: null,
+            ReasoningEffort: null,
+            SamplingParametersJson: null);
+        var resolver = BuildResolver(snapshot);
 
         var result = resolver.Resolve("  ");
 
@@ -93,12 +94,14 @@ public sealed class ChatModelResolverTests
     [TestMethod]
     public void Resolve_OverrideAll_WithoutDefault_ThrowsRoutingException()
     {
-        var config = BuildConfig(new Dictionary<string, string?>
-        {
-            ["ChatDefaults:OverrideAllChatModels"] = "true",
-            ["ChatDefaults:DefaultModelId"] = "",
-        });
-        var resolver = BuildResolver(config);
+        var snapshot = new ChatDefaultsSnapshot(
+            DefaultModelId: null,
+            OverrideAllChatModels: true,
+            Temperature: null,
+            TopP: null,
+            ReasoningEffort: null,
+            SamplingParametersJson: null);
+        var resolver = BuildResolver(snapshot);
 
         var act = () => resolver.Resolve(null);
         act.Should().Throw<RoutingException>();
@@ -107,15 +110,14 @@ public sealed class ChatModelResolverTests
     [TestMethod]
     public void Resolve_OverrideAll_IgnoresClearedTemperatureAndTopP()
     {
-        var config = BuildConfig(new Dictionary<string, string?>
-        {
-            ["ChatDefaults:OverrideAllChatModels"] = "true",
-            ["ChatDefaults:DefaultModelId"] = "gpt-5.5",
-            ["ChatDefaults:Temperature"] = "",
-            ["ChatDefaults:TopP"] = "",
-            ["ChatDefaults:ReasoningEffort"] = "low",
-        });
-        var resolver = BuildResolver(config);
+        var snapshot = new ChatDefaultsSnapshot(
+            DefaultModelId: "gpt-5.5",
+            OverrideAllChatModels: true,
+            Temperature: null,
+            TopP: null,
+            ReasoningEffort: "low",
+            SamplingParametersJson: null);
+        var resolver = BuildResolver(snapshot);
 
         var result = resolver.Resolve("entity-model");
 
@@ -127,12 +129,8 @@ public sealed class ChatModelResolverTests
     [TestMethod]
     public void Resolve_NoEntity_NoDefault_ThrowsRoutingException()
     {
-        var config = BuildConfig(new Dictionary<string, string?>
-        {
-            ["ChatDefaults:OverrideAllChatModels"] = "false",
-            ["ChatDefaults:DefaultModelId"] = "",
-        });
-        var resolver = BuildResolver(config);
+        var snapshot = ChatDefaultsSnapshot.Empty;
+        var resolver = BuildResolver(snapshot);
 
         var act = () => resolver.Resolve(null);
         act.Should().Throw<RoutingException>();

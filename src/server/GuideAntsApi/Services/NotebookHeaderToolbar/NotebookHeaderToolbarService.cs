@@ -22,6 +22,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
     private readonly IChatModelResolver _chatModelResolver;
     private readonly IConversationManager _conversations;
     private readonly INotebookModelRuntimeService _llamaRuntime;
+    private readonly IChatDefaultsStore _chatDefaultsStore;
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILocalAiStartupWarmupService _warmupService;
@@ -34,6 +35,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         IChatModelResolver chatModelResolver,
         IConversationManager conversations,
         INotebookModelRuntimeService llamaRuntime,
+        IChatDefaultsStore chatDefaultsStore,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
         ILocalAiStartupWarmupService warmupService,
@@ -45,6 +47,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         _chatModelResolver = chatModelResolver;
         _conversations = conversations;
         _llamaRuntime = llamaRuntime;
+        _chatDefaultsStore = chatDefaultsStore;
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
         _warmupService = warmupService;
@@ -190,7 +193,7 @@ public sealed class NotebookHeaderToolbarService : INotebookHeaderToolbarService
         string chatSummary = "Chat model unavailable";
         ChatTargetReadinessDto? chatReadiness = null;
         ChatModelReferenceKind chatReferenceKind = ChatModelReferenceKind.Direct;
-        var overrideAllChatModels = _configuration.GetValue<bool>("ChatDefaults:OverrideAllChatModels");
+        var overrideAllChatModels = _chatDefaultsStore.Current.OverrideAllChatModels;
         Guid? assistantId = null;
         string? selectedAssistantModelId = null;
         if (conversationId is { } convId)

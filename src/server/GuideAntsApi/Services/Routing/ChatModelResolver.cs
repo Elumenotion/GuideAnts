@@ -1,27 +1,29 @@
 using System.Text.Json;
 using AntRunner.Chat.Abstractions;
+using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Services.Routing;
 
 /// <summary>
-/// Reads <c>ChatDefaults</c> from configuration (DB-backed application settings + reload).
+/// Resolves effective chat models from entity configuration and persisted <c>ChatDefaults</c>
+/// (via <see cref="IChatDefaultsStore"/>, same backing as the Settings API).
 /// </summary>
 public sealed class ChatModelResolver : IChatModelResolver
 {
-    private const string SectionPrefix = "ChatDefaults:";
-    private readonly IConfiguration _configuration;
+    private readonly IChatDefaultsStore _chatDefaultsStore;
     private readonly IChatTargetResolver _chatTargetResolver;
 
-    public ChatModelResolver(IConfiguration configuration, IChatTargetResolver chatTargetResolver)
+    public ChatModelResolver(IChatDefaultsStore chatDefaultsStore, IChatTargetResolver chatTargetResolver)
     {
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _chatDefaultsStore = chatDefaultsStore ?? throw new ArgumentNullException(nameof(chatDefaultsStore));
         _chatTargetResolver = chatTargetResolver ?? throw new ArgumentNullException(nameof(chatTargetResolver));
     }
 
     public ResolvedChatModel Resolve(string? entityModelId)
     {
-        var overrideAll = _configuration.GetValue<bool>($"{SectionPrefix}OverrideAllChatModels");
-        var defaultId = (_configuration[$"{SectionPrefix}DefaultModelId"] ?? string.Empty).Trim();
+        var chatDefaults = _chatDefaultsStore.Current;
+        var overrideAll = chatDefaults.OverrideAllChatModels;
+        var defaultId = (chatDefaults.DefaultModelId ?? string.Empty).Trim();
 
         if (overrideAll)
         {
@@ -38,7 +40,7 @@ public sealed class ChatModelResolver : IChatModelResolver
                 defaultId,
                 ChatModelReferenceKind.OverriddenToDefault,
                 ParameterAuthority.GlobalOverride,
-                ChatDefaultsExecutionParameters.FromConfiguration(_configuration, defaultId));
+                ChatDefaultsExecutionParameters.FromSnapshot(chatDefaults, defaultId));
         }
 
         var trimmedEntity = (entityModelId ?? string.Empty).Trim();
@@ -57,7 +59,7 @@ public sealed class ChatModelResolver : IChatModelResolver
                 defaultId,
                 ChatModelReferenceKind.DefaultedTo,
                 ParameterAuthority.AssistantDefinition,
-                ChatDefaultsExecutionParameters.FromConfiguration(_configuration, defaultId));
+                ChatDefaultsExecutionParameters.FromSnapshot(chatDefaults, defaultId));
         }
 
         throw RoutingException.ModelNotReady(

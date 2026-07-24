@@ -136,6 +136,7 @@ public sealed partial class ApplicationSettingsService
         }
 
         ReloadConfiguration();
+        await SyncChatDefaultsStoreAsync(definition.SectionName, cancellationToken).ConfigureAwait(false);
         await TrySyncTtsReadyTimeoutAfterSectionSaveAsync(definition.SectionName, merged, cancellationToken)
             .ConfigureAwait(false);
 
