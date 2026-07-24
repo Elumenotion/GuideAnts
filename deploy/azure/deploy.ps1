@@ -88,16 +88,35 @@ function New-DeploymentSecrets {
 
 function Deploy-Infrastructure {
     Write-Status "Deploying Azure infrastructure (Phase 1)..."
+
+    # Check if resource group exists; if not, request admin to create it
+    Write-Status "Checking resource group: $($script:ResourceGroupName)..."
+    $rgExists = az group exists --name $script:ResourceGroupName --output tsv 2>$null
+    if ($rgExists -ne "true") {
+        Write-Err @"
+Resource group '$($script:ResourceGroupName)' does not exist.
+
+AZBuilder roles typically don't have permission to create resource groups.
+Ask your Azure admin to create it with:
+
+    az group create --name $($script:ResourceGroupName) --location "$Location"
+
+Then re-run this script.
+"@
+        exit 1
+    }
+    Write-Success "Resource group exists"
+
     $deployer = Get-DeployerIdentity
     $deploymentName = "guideants-$EnvironmentName-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-    az deployment sub create `
+    # main.bicep now uses targetScope = 'resourceGroup', so deploy at resource group level
+    az deployment group create `
         --name $deploymentName `
-        --location $Location `
+        --resource-group $script:ResourceGroupName `
         --template-file (Join-Path $script:DeployRoot "main.bicep") `
         --parameters `
             environmentName=$EnvironmentName `
             location=$Location `
-            resourceGroupName=$script:ResourceGroupName `
             appNamePrefix=$AppNamePrefix `
             sqlDatabaseName=$script:SqlDatabaseName `
             sqlAdminPassword=$script:SqlAdminPassword `
@@ -256,6 +275,11 @@ function Apply-DatabaseMigrations {
 
     Push-Location (Join-Path $script:RepoRoot "src" "server")
     try {
+        Write-Status "Restoring NuGet packages..."
+        dotnet restore
+        if ($LASTEXITCODE -ne 0) { Throw "dotnet restore failed with exit code $LASTEXITCODE" }
+        Write-Success "NuGet packages restored."
+
         dotnet ef database update `
             --project GuideAntsApi.DataModel/GuideAntsApi.DataModel.csproj `
             --startup-project GuideAntsApi/GuideAntsApi.csproj `
