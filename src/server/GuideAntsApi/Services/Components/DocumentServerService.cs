@@ -204,8 +204,16 @@ public sealed class DocumentServerService : IDocumentServerService
             config["token"] = token;
         }
 
+        var documentServerUrl = DocumentServerUrlResolver.ResolvePublicUrl(httpContext);
+        if (string.Equals(documentServerUrl, DocumentServerUrlResolver.ProxyPublicPrefix, StringComparison.Ordinal)
+            || documentServerUrl.StartsWith('/'))
+        {
+            throw new InvalidOperationException(
+                "Unable to resolve DocumentServer public URL because request scheme or host is missing.");
+        }
+
         return new DocumentServerEditorConfigResult(
-            DocumentServerUrl: $"{ResolveDocumentServerApiBaseUrl()}{DocumentServerProxyPublicPrefix}",
+            DocumentServerUrl: documentServerUrl,
             Config: config);
     }
 
