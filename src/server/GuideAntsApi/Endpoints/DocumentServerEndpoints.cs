@@ -98,7 +98,7 @@ public static class DocumentServerEndpoints
         {
             var logger = loggerFactory.CreateLogger("DocumentServerEndpoints");
             var documentServerOptions = options.Value;
-            var publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(httpContext);
+            var publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(documentServerOptions, httpContext);
             var sanitizedPublicUrl = LogValueSanitizer.Sanitize(publicUrl);
             logger.LogInformation(
                 "DocumentServer capabilities requested. enabled={Enabled} publicUrl={PublicUrl}",
@@ -312,7 +312,7 @@ public static class DocumentServerEndpoints
                 documentServer.Enabled,
                 documentServer.ApiBaseUrl,
                 documentServer.InternalUrl,
-                LogValueSanitizer.Sanitize(DocumentServerUrlResolver.ResolvePublicUrl(httpContext)),
+                LogValueSanitizer.Sanitize(DocumentServerUrlResolver.ResolvePublicUrl(documentServer, httpContext)),
                 "aspnet-data-protection",
                 documentServer.JwtEnabled,
                 documentServerReachable,
@@ -326,7 +326,7 @@ public static class DocumentServerEndpoints
                 enabled = documentServer.Enabled,
                 apiBaseUrl = documentServer.ApiBaseUrl,
                 internalUrl = documentServer.InternalUrl,
-                publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(httpContext),
+                publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(documentServer, httpContext),
                 tokenProtection = "aspnet-data-protection",
                 jwtEnabled = documentServer.JwtEnabled,
                 documentServer = new
@@ -485,7 +485,10 @@ public static class DocumentServerEndpoints
                 proxyRequest.Headers.TryAddWithoutValidation("X-Forwarded-Host", httpContext.Request.Host.Value);
             }
 
-            var forwardedProto = DocumentServerUrlResolver.ResolveRequestScheme(httpContext);
+            var options = httpContext.RequestServices.GetService(typeof(IOptions<DocumentServerOptions>)) as IOptions<DocumentServerOptions>;
+            var forwardedProto = options != null
+                ? DocumentServerUrlResolver.ResolvePublicScheme(options.Value, httpContext)
+                : httpContext.Request.Scheme;
             if (string.IsNullOrWhiteSpace(forwardedProto))
             {
                 forwardedProto = httpContext.Request.Scheme;

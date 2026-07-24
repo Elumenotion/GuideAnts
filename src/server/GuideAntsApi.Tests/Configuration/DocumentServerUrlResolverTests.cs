@@ -8,26 +8,34 @@ namespace GuideAntsApi.Tests.Configuration;
 public sealed class DocumentServerUrlResolverTests
 {
     [TestMethod]
-    public void ResolvePublicUrl_UsesRequestOrigin_NotApiBaseUrl()
+    public void ResolvePublicUrl_UsesRequestHost_AndApiBaseUrlScheme_LocalDocker()
     {
+        var options = new DocumentServerOptions
+        {
+            ApiBaseUrl = "http://guideants-webapi-ui:8080"
+        };
         var httpContext = new DefaultHttpContext();
         httpContext.Request.Scheme = "http";
         httpContext.Request.Host = new HostString("localhost:5107");
 
-        var publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(httpContext);
+        var publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(options, httpContext);
 
         publicUrl.Should().Be("http://localhost:5107/api/documentserver/ds");
     }
 
     [TestMethod]
-    public void ResolvePublicUrl_WhenXForwardedProtoHttps_UsesHttpsWithRequestHost()
+    public void ResolvePublicUrl_UsesRequestHost_AndApiBaseUrlHttpsScheme_Azure()
     {
+        var options = new DocumentServerOptions
+        {
+            ApiBaseUrl = "https://guideants-webapi-ui.example.azurecontainerapps.io"
+        };
         var httpContext = new DefaultHttpContext();
+        // ACA terminates TLS; the container still sees http.
         httpContext.Request.Scheme = "http";
         httpContext.Request.Host = new HostString("guideants-webapi-ui.example.azurecontainerapps.io");
-        httpContext.Request.Headers["X-Forwarded-Proto"] = "https";
 
-        var publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(httpContext);
+        var publicUrl = DocumentServerUrlResolver.ResolvePublicUrl(options, httpContext);
 
         publicUrl.Should().Be("https://guideants-webapi-ui.example.azurecontainerapps.io/api/documentserver/ds");
     }
