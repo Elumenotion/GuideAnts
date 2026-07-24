@@ -204,7 +204,7 @@ public sealed class DocumentServerService : IDocumentServerService
             config["token"] = token;
         }
 
-        var documentServerUrl = DocumentServerUrlResolver.ResolvePublicUrl(httpContext);
+        var documentServerUrl = DocumentServerUrlResolver.ResolvePublicUrl(options, httpContext);
         if (string.Equals(documentServerUrl, DocumentServerUrlResolver.ProxyPublicPrefix, StringComparison.Ordinal)
             || documentServerUrl.StartsWith('/'))
         {
