@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "12011745692085914792"
+      "templateHash": "10937480497450819496"
     }
   },
   "parameters": {
@@ -69,17 +69,6 @@
       "defaultValue": "",
       "metadata": {
         "description": "Deployer object ID for Key Vault secret updates during/after deploy"
-      }
-    },
-    "deployerPrincipalType": {
-      "type": "string",
-      "defaultValue": "User",
-      "allowedValues": [
-        "User",
-        "ServicePrincipal"
-      ],
-      "metadata": {
-        "description": "Deployer principal type (User or ServicePrincipal)"
       }
     },
     "jwtSigningKey": {
@@ -291,6 +280,87 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
+      "name": "container-apps-identity",
+      "resourceGroup": "[parameters('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "environmentName": {
+            "value": "[parameters('environmentName')]"
+          },
+          "appNamePrefix": {
+            "value": "[parameters('appNamePrefix')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "5467826616162264380"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "environmentName": {
+              "type": "string"
+            },
+            "appNamePrefix": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))]"
+            },
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]"
+            },
+            "clientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').clientId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
       "name": "key-vault",
       "resourceGroup": "[parameters('resourceGroupName')]",
       "properties": {
@@ -332,8 +402,8 @@
           "deployerObjectId": {
             "value": "[parameters('deployerObjectId')]"
           },
-          "deployerPrincipalType": {
-            "value": "[parameters('deployerPrincipalType')]"
+          "containerAppsPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'container-apps-identity'), '2025-04-01').outputs.principalId.value]"
           },
           "tags": {
             "value": "[variables('tags')]"
@@ -346,7 +416,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.39.26.7824",
-              "templateHash": "18020335523601572267"
+              "templateHash": "1943742661067068814"
             }
           },
           "parameters": {
@@ -384,18 +454,13 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Object ID of the deployer principal (user or service principal) for post-deploy Key Vault updates"
+                "description": "Object ID of the deployer principal for post-deploy Key Vault secret updates"
               }
             },
-            "deployerPrincipalType": {
+            "containerAppsPrincipalId": {
               "type": "string",
-              "defaultValue": "User",
-              "allowedValues": [
-                "User",
-                "ServicePrincipal"
-              ],
               "metadata": {
-                "description": "Principal type for deployerObjectId (User or ServicePrincipal)"
+                "description": "Object ID of the container apps user-assigned managed identity"
               }
             },
             "tags": {
@@ -403,7 +468,20 @@
             }
           },
           "variables": {
-            "keyVaultName": "[format('kv-{0}-{1}-{2}', take(parameters('appNamePrefix'), 4), take(parameters('environmentName'), 3), take(uniqueString(resourceGroup().id), 8))]"
+            "keyVaultName": "[format('kv-{0}-{1}-{2}', take(parameters('appNamePrefix'), 4), take(parameters('environmentName'), 3), take(uniqueString(resourceGroup().id), 8))]",
+            "deployerAccessPolicy": "[if(not(empty(parameters('deployerObjectId'))), createArray(createObject('tenantId', subscription().tenantId, 'objectId', parameters('deployerObjectId'), 'permissions', createObject('secrets', createArray('get', 'list', 'set', 'delete', 'backup', 'restore', 'recover', 'purge')))), createArray())]",
+            "containerAppsAccessPolicy": [
+              {
+                "tenantId": "[subscription().tenantId]",
+                "objectId": "[parameters('containerAppsPrincipalId')]",
+                "permissions": {
+                  "secrets": [
+                    "get",
+                    "list"
+                  ]
+                }
+              }
+            ]
           },
           "resources": [
             {
@@ -418,7 +496,7 @@
                   "name": "standard"
                 },
                 "tenantId": "[subscription().tenantId]",
-                "enableRbacAuthorization": true,
+                "enableRbacAuthorization": false,
                 "enableSoftDelete": true,
                 "enablePurgeProtection": true,
                 "softDeleteRetentionInDays": 7,
@@ -426,45 +504,9 @@
                   "bypass": "AzureServices",
                   "defaultAction": "Allow"
                 },
-                "publicNetworkAccess": "Enabled"
+                "publicNetworkAccess": "Enabled",
+                "accessPolicies": "[concat(variables('deployerAccessPolicy'), variables('containerAppsAccessPolicy'))]"
               }
-            },
-            {
-              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
-              "apiVersion": "2023-01-31",
-              "name": "[format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]"
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.KeyVault/vaults/{0}', variables('keyVaultName'))]",
-              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsOfficer')]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
-                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('deployerObjectId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.KeyVault/vaults/{0}', variables('keyVaultName'))]",
-              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), parameters('deployerObjectId'), 'KeyVaultSecretsOfficer-Deployer')]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
-                "principalId": "[parameters('deployerObjectId')]",
-                "principalType": "[parameters('deployerPrincipalType')]"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
-              ]
             },
             {
               "type": "Microsoft.KeyVault/vaults/secrets",
@@ -475,8 +517,7 @@
                 "contentType": "text/plain"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsOfficer'))]"
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
               ]
             },
             {
@@ -488,8 +529,7 @@
                 "contentType": "text/plain"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsOfficer'))]"
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
               ]
             },
             {
@@ -501,8 +541,7 @@
                 "contentType": "text/plain"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsOfficer'))]"
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
               ]
             },
             {
@@ -514,8 +553,7 @@
                 "contentType": "text/plain"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsOfficer'))]"
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
               ]
             },
             {
@@ -527,8 +565,7 @@
                 "contentType": "text/plain"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsOfficer'))]"
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
               ]
             },
             {
@@ -540,8 +577,7 @@
                 "contentType": "text/plain"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsOfficer'))]"
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
               ]
             },
             {
@@ -553,8 +589,7 @@
                 "contentType": "text/plain"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsOfficer'))]"
+                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
               ]
             }
           ],
@@ -570,23 +605,12 @@
             "keyVaultUri": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri]"
-            },
-            "keyVaultManagedIdentityId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-            },
-            "keyVaultManagedIdentityClientId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').clientId]"
-            },
-            "keyVaultManagedIdentityPrincipalId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-kv-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]"
             }
           }
         }
       },
       "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'container-apps-identity')]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
       ]
     },
@@ -621,7 +645,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.39.26.7824",
-              "templateHash": "9953563356239888400"
+              "templateHash": "14309061596696612925"
             }
           },
           "parameters": {
@@ -733,43 +757,6 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Storage/storageAccounts/fileServices', variables('storageAccountName'), 'default')]"
               ]
-            },
-            {
-              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
-              "apiVersion": "2023-01-31",
-              "name": "[format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName'))]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]"
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.Storage/storageAccounts/{0}', variables('storageAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'StorageBlobDataContributor')]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
-                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.Storage/storageAccounts/{0}', variables('storageAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'StorageFileDataSMBShareContributor')]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb')]",
-                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-              ]
             }
           ],
           "outputs": {
@@ -796,18 +783,6 @@
             "scriptAgentStateShareName": {
               "type": "string",
               "value": "script-agent-state"
-            },
-            "storageManagedIdentityId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-            },
-            "storageManagedIdentityClientId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').clientId]"
-            },
-            "storageManagedIdentityPrincipalId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-storage-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]"
             }
           }
         }
@@ -856,7 +831,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.39.26.7824",
-              "templateHash": "14297854672592383882"
+              "templateHash": "16439399657129405204"
             }
           },
           "parameters": {
@@ -943,28 +918,6 @@
               ]
             },
             {
-              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
-              "apiVersion": "2023-01-31",
-              "name": "[format('id-{0}-sql-{1}', parameters('appNamePrefix'), parameters('environmentName'))]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]"
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.Sql/servers/{0}', variables('sqlServerName'))]",
-              "name": "[guid(resourceId('Microsoft.Sql/servers', variables('sqlServerName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-sql-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'SqlDbContributor')]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '9b7fa17d-e63e-47b0-bb0a-15c516ac86ec')]",
-                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-sql-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-sql-{1}', parameters('appNamePrefix'), parameters('environmentName')))]",
-                "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
-              ]
-            },
-            {
               "condition": "[greater(length(parameters('sqlAadAdminObjectId')), 0)]",
               "type": "Microsoft.Sql/servers/administrators",
               "apiVersion": "2023-05-01-preview",
@@ -1014,18 +967,6 @@
             "sqlDatabaseName": {
               "type": "string",
               "value": "[parameters('sqlDatabaseName')]"
-            },
-            "sqlManagedIdentityId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-sql-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-            },
-            "sqlManagedIdentityClientId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-sql-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').clientId]"
-            },
-            "sqlManagedIdentityPrincipalId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-sql-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]"
             },
             "sqlConnectionStringTemplate": {
               "type": "string",

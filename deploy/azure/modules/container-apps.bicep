@@ -53,30 +53,8 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2023-05-01'
   name: split(containerAppsEnvironmentId, '/')[8]
 }
 
-resource containerAppsManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+resource containerAppsManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
   name: 'id-${appNamePrefix}-containers-${environmentName}'
-  location: location
-  tags: tags
-}
-
-resource keyVaultSecretsUserRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: keyVault
-  name: guid(keyVault.id, containerAppsManagedIdentity.id, 'KeyVaultSecretsUser')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
-    principalId: containerAppsManagedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource storageFileDataSMBShareContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: storageAccount
-  name: guid(storageAccount.id, containerAppsManagedIdentity.id, 'StorageFileDataSMBShareContributor')
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb')
-    principalId: containerAppsManagedIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
 }
 
 resource sqlConnectionStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
@@ -86,9 +64,6 @@ resource sqlConnectionStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01
     value: 'Server=tcp:${sqlServerFqdn},1433;Initial Catalog=${sqlDatabaseName};Authentication=Active Directory Managed Identity;User ID=${containerAppsManagedIdentity.properties.clientId};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;'
     contentType: 'text/plain'
   }
-  dependsOn: [
-    containerAppsManagedIdentity
-  ]
 }
 
 resource contentFilesStorage 'Microsoft.App/managedEnvironments/storages@2023-05-01' = {
@@ -382,7 +357,6 @@ resource webApiApp 'Microsoft.App/containerApps@2023-05-01' = {
   }
   dependsOn: [
     contentFilesStorage
-    keyVaultSecretsUserRoleAssignment
     sqlConnectionStringSecret
   ]
 }

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "2132853227578627803"
+      "templateHash": "15932455032497244812"
     }
   },
   "parameters": {
@@ -131,7 +131,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.39.26.7824",
-              "templateHash": "6171566999700079248"
+              "templateHash": "2680766342079353619"
             }
           },
           "parameters": {
@@ -192,6 +192,11 @@
             "documentServerAppName": "documentserver",
             "publicApiUrl": "[if(not(equals(parameters('customDomain'), '')), format('https://{0}', parameters('customDomain')), format('https://{0}.{1}', variables('webApiAppName'), parameters('containerAppsEnvironmentDefaultDomain')))]",
             "allowedOrigins": "[if(not(equals(parameters('customDomain'), '')), format('https://{0}', parameters('customDomain')), '*')]",
+            "searxngInternalUrl": "[format('http://{0}.internal.{1}', variables('searxngAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
+            "aiInternalUrl": "[format('http://{0}.internal.{1}', variables('aiAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
+            "doclingInternalUrl": "[format('http://{0}.internal.{1}', variables('doclingAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
+            "documentServerInternalUrl": "[format('http://{0}.internal.{1}', variables('documentServerAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
+            "plantumlInternalUrl": "[format('http://{0}.internal.{1}', variables('plantumlAppName'), parameters('containerAppsEnvironmentDefaultDomain'))]",
             "webApiImage": "[format('ghcr.io/{0}/guideants-webapi-ui-slim:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
             "aiImage": "[format('ghcr.io/{0}/guideants-ai-slim:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
             "plantumlImage": "[format('ghcr.io/{0}/guideants-plantuml:{1}', parameters('ghcrOwner'), parameters('imageTag'))]",
@@ -233,51 +238,13 @@
           },
           "resources": [
             {
-              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
-              "apiVersion": "2023-01-31",
-              "name": "[format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]"
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.KeyVault/vaults/{0}', parameters('keyVaultName'))]",
-              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsUser')]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
-                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[format('Microsoft.Storage/storageAccounts/{0}', parameters('storageAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'StorageFileDataSMBShareContributor')]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0c867c2a-1d8c-454a-a3db-ab2ea1bdc8bb')]",
-                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-              ]
-            },
-            {
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
               "name": "[format('{0}/{1}', parameters('keyVaultName'), 'sql-connection-string')]",
               "properties": {
                 "value": "[format('Server=tcp:{0},1433;Initial Catalog={1};Authentication=Active Directory Managed Identity;User ID={2};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;ConnectRetryCount=3;ConnectRetryInterval=5;', variables('sqlServerFqdn'), parameters('sqlDatabaseName'), reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').clientId)]",
                 "contentType": "text/plain"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-              ]
+              }
             },
             {
               "type": "Microsoft.App/managedEnvironments/storages",
@@ -370,7 +337,7 @@
                         "cpu": "[json('2.0')]",
                         "memory": "4Gi"
                       },
-                      "env": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', 'Production'), createObject('name', 'ASPNETCORE_URLS', 'value', 'http://127.0.0.1:8081'), createObject('name', 'ASPNETCORE_FORWARDEDHEADERS_ENABLED', 'value', 'true'), createObject('name', 'AZURE_CLIENT_ID', 'value', reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').clientId), createObject('name', 'API_RUNTIME_CONTEXT', 'value', 'azure-slim'), createObject('name', 'ALLOWED_ORIGINS', 'value', variables('allowedOrigins')), createObject('name', 'ConnectionStrings__DefaultConnection', 'secretRef', 'sql-connection-string'), createObject('name', 'Jwt__SigningKey', 'secretRef', 'jwt-signing-key'), createObject('name', 'SettingsSecrets__ActiveKeyId', 'value', 'azure-deploy'), createObject('name', 'SettingsSecrets__Keys__azure-deploy', 'secretRef', 'settings-secrets-key-azure-deploy'), createObject('name', 'FileStorage__Path', 'value', '/app/ContentFiles'), createObject('name', 'Ui__RootPath', 'value', '/app/ui'), createObject('name', 'Ui__DevServerUrl', 'value', ''), createObject('name', 'SearXngSearch__BaseUrl', 'value', format('http://{0}', variables('searxngAppName'))), createObject('name', 'BrowserRendering__BaseUrl', 'value', format('http://{0}', variables('searxngAppName'))), createObject('name', 'LocalServiceHosts__SpeechTranscriptionBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__SpeechSynthesisBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__ImageGenerationBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__EmbeddingsBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__MediaBaseUrl', 'value', format('http://{0}', variables('aiAppName'))), createObject('name', 'LocalServiceHosts__DocumentIntelligenceBaseUrl', 'value', format('http://{0}', variables('doclingAppName'))), createObject('name', 'DocumentServer__Enabled', 'value', string(parameters('documentServerEnabled'))), createObject('name', 'DocumentServer__InternalUrl', 'value', format('http://{0}', variables('documentServerAppName'))), createObject('name', 'DocumentServer__ApiBaseUrl', 'value', variables('publicApiUrl')), createObject('name', 'DocumentServer__JwtEnabled', 'value', string(parameters('documentServerEnabled'))), createObject('name', 'DocumentServer__JwtSecret', 'secretRef', 'documentserver-jwt-secret'), createObject('name', 'DocumentServer__JwtHeader', 'value', 'Authorization'), createObject('name', 'DocumentServer__JwtInBody', 'value', 'false'), createObject('name', 'ScriptExecution__AgentToken', 'secretRef', 'script-agent-token'), createObject('name', 'ScriptExecution__AdminToken', 'secretRef', 'script-agent-admin-token'), createObject('name', 'ScriptExecution__TimeoutSeconds', 'value', '600'), createObject('name', 'LlamaCpp__BaseUrl', 'value', 'http://127.0.0.1:9/llama-cpp'), createObject('name', 'LlamaCpp__TimeoutSeconds', 'value', '600'), createObject('name', 'ServiceRouting__Containers__guideants-ai__BaseUrl', 'value', format('http://{0}/sandbox', variables('aiAppName'))), createObject('name', 'ServiceRouting__Containers__plantuml__BaseUrl', 'value', format('http://{0}', variables('plantumlAppName')))), createArray())]",
+                      "env": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', 'Production'), createObject('name', 'ASPNETCORE_URLS', 'value', 'http://127.0.0.1:8081'), createObject('name', 'ASPNETCORE_FORWARDEDHEADERS_ENABLED', 'value', 'true'), createObject('name', 'AZURE_CLIENT_ID', 'value', reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), '2023-01-31').clientId), createObject('name', 'API_RUNTIME_CONTEXT', 'value', 'azure-slim'), createObject('name', 'ALLOWED_ORIGINS', 'value', variables('allowedOrigins')), createObject('name', 'ConnectionStrings__DefaultConnection', 'secretRef', 'sql-connection-string'), createObject('name', 'Jwt__SigningKey', 'secretRef', 'jwt-signing-key'), createObject('name', 'SettingsSecrets__ActiveKeyId', 'value', 'azure-deploy'), createObject('name', 'SettingsSecrets__Keys__azure-deploy', 'secretRef', 'settings-secrets-key-azure-deploy'), createObject('name', 'FileStorage__Path', 'value', '/app/ContentFiles'), createObject('name', 'Ui__RootPath', 'value', '/app/ui'), createObject('name', 'Ui__DevServerUrl', 'value', ''), createObject('name', 'SearXngSearch__BaseUrl', 'value', variables('searxngInternalUrl')), createObject('name', 'BrowserRendering__BaseUrl', 'value', variables('searxngInternalUrl')), createObject('name', 'LocalServiceHosts__SpeechTranscriptionBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__SpeechSynthesisBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__ImageGenerationBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__EmbeddingsBaseUrl', 'value', 'http://127.0.0.1:9'), createObject('name', 'LocalServiceHosts__MediaBaseUrl', 'value', variables('aiInternalUrl')), createObject('name', 'LocalServiceHosts__DocumentIntelligenceBaseUrl', 'value', variables('doclingInternalUrl')), createObject('name', 'DocumentServer__Enabled', 'value', string(parameters('documentServerEnabled'))), createObject('name', 'DocumentServer__InternalUrl', 'value', variables('documentServerInternalUrl')), createObject('name', 'DocumentServer__ApiBaseUrl', 'value', variables('publicApiUrl')), createObject('name', 'DocumentServer__JwtEnabled', 'value', string(parameters('documentServerEnabled'))), createObject('name', 'DocumentServer__JwtSecret', 'secretRef', 'documentserver-jwt-secret'), createObject('name', 'DocumentServer__JwtHeader', 'value', 'Authorization'), createObject('name', 'DocumentServer__JwtInBody', 'value', 'false'), createObject('name', 'ScriptExecution__AgentToken', 'secretRef', 'script-agent-token'), createObject('name', 'ScriptExecution__AdminToken', 'secretRef', 'script-agent-admin-token'), createObject('name', 'ScriptExecution__TimeoutSeconds', 'value', '600'), createObject('name', 'LlamaCpp__BaseUrl', 'value', 'http://127.0.0.1:9/llama-cpp'), createObject('name', 'LlamaCpp__TimeoutSeconds', 'value', '600'), createObject('name', 'ServiceRouting__Containers__guideants-ai__BaseUrl', 'value', format('{0}/sandbox', variables('aiInternalUrl'))), createObject('name', 'ServiceRouting__Containers__plantuml__BaseUrl', 'value', variables('plantumlInternalUrl'))), createArray())]",
                       "volumeMounts": [
                         {
                           "volumeName": "contentfiles-volume",
@@ -393,9 +360,7 @@
                 }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]",
                 "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'contentfiles-storage')]",
-                "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName'))), 'KeyVaultSecretsUser'))]",
                 "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), 'sql-connection-string')]"
               ]
             },
@@ -504,7 +469,6 @@
                 }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]",
                 "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'contentfiles-storage')]",
                 "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'script-agent-state-storage')]"
               ]
@@ -677,7 +641,6 @@
                 }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]",
                 "[resourceId('Microsoft.App/managedEnvironments/storages', split(parameters('containerAppsEnvironmentId'), '/')[8], 'contentfiles-storage')]"
               ]
             },
@@ -821,10 +784,7 @@
                     "maxReplicas": 2
                   }
                 }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-{0}-containers-{1}', parameters('appNamePrefix'), parameters('environmentName')))]"
-              ]
+              }
             }
           ],
           "outputs": {
