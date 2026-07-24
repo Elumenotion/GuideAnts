@@ -47,7 +47,7 @@ public static class AssistantsEndpoints
                 var assistant = await guidesService.CreateAssistantAsync(dto);
                 return Results.Created($"/api/assistants/{assistant.Id}", assistant);
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
@@ -67,7 +67,11 @@ public static class AssistantsEndpoints
                 var assistant = await guidesService.UpdateAssistantAsync(assistantId, dto);
                 return Results.Ok(assistant);
             }
-            catch (InvalidOperationException ex)
+            catch (KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
                 return Results.BadRequest(new { error = ex.Message });
             }

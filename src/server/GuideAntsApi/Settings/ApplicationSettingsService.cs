@@ -88,7 +88,8 @@ public sealed partial class ApplicationSettingsService(
     IRuntimeProfileResolver runtimeProfileResolver,
     IServiceEditorMetadataProvider? metadataProvider = null,
     ILlamaRouterIniSyncService? llamaRouterIniSync = null,
-    ITtsRuntimeTimeoutSyncService? ttsRuntimeTimeoutSync = null) : IApplicationSettingsService
+    ITtsRuntimeTimeoutSyncService? ttsRuntimeTimeoutSync = null,
+    IChatDefaultsStore? chatDefaultsStore = null) : IApplicationSettingsService
 {
     private readonly ApplicationDbContext _db = db;
     private readonly ISettingsSectionRegistry _registry = registry;
@@ -99,6 +100,7 @@ public sealed partial class ApplicationSettingsService(
     private readonly IServiceEditorMetadataProvider? _injectedMetadataProvider = metadataProvider;
     private readonly ILlamaRouterIniSyncService? _llamaRouterIniSync = llamaRouterIniSync;
     private readonly ITtsRuntimeTimeoutSyncService? _ttsRuntimeTimeoutSync = ttsRuntimeTimeoutSync;
+    private readonly IChatDefaultsStore? _chatDefaultsStore = chatDefaultsStore;
     private IServiceEditorMetadataProvider? _metadataProvider;
     private ILegacyProtectorAccessor? _protectorAccessor;
     private static readonly HashSet<string> RuntimeOverrideSections = new(StringComparer.OrdinalIgnoreCase)
@@ -203,6 +205,7 @@ public sealed partial class ApplicationSettingsService(
         // with canonical provider-section values. This is idempotent and only
         // mutates narrow transitional shapes.
         await NormalizeLegacySingleModeRowsAsync(cancellationToken).ConfigureAwait(false);
+        await SyncChatDefaultsStoreAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public void ReloadConfiguration()
@@ -249,6 +252,27 @@ public sealed partial class ApplicationSettingsService(
     {
         _protectorAccessor ??= new ILegacyProtectorAccessor(ApplicationSettingsJson.CreateLegacyProtector(_environment.ContentRootPath));
         return _protectorAccessor;
+    }
+
+    private Task SyncChatDefaultsStoreAsync(string sectionName, CancellationToken cancellationToken)
+    {
+        if (_chatDefaultsStore is null
+            || !string.Equals(sectionName, ChatDefaultsStore.SectionName, StringComparison.Ordinal))
+        {
+            return Task.CompletedTask;
+        }
+
+        return _chatDefaultsStore.RefreshAsync(cancellationToken);
+    }
+
+    private async Task SyncChatDefaultsStoreAsync(CancellationToken cancellationToken)
+    {
+        if (_chatDefaultsStore is null)
+        {
+            return;
+        }
+
+        await _chatDefaultsStore.RefreshAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private sealed class ILegacyProtectorAccessor(Microsoft.AspNetCore.DataProtection.IDataProtector protect)

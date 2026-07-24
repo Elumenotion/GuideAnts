@@ -101,6 +101,7 @@ public static class StartupConfiguration
         services.AddSingleton<IProviderConfigurationResolver, ProviderConfigurationResolver>();
         services.AddSingleton<IRuntimeProfileResolver, RuntimeProfileResolver>();
         services.AddSingleton<IServiceEditorMetadataProvider, ServiceEditorMetadataProvider>();
+        services.AddSingleton<IChatDefaultsStore, ChatDefaultsStore>();
         services.AddScoped<IApplicationSettingsService, ApplicationSettingsService>();
         services.AddScoped<IEmbeddingsRebuildService, EmbeddingsRebuildService>();
         services.AddScoped<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder, GuideAntsApi.Services.Bootstrap.RequiredGuidesAssistantsSeeder>();

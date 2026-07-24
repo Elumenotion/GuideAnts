@@ -61,7 +61,7 @@ public static class GuidesEndpoints
                 var guide = await guidesService.CreateGuideAsync(dto);
                 return Results.Created($"/api/guides/{guide.Id}", guide);
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
                 logger.LogError(ex, "CreateGuide failed");
                 return Results.BadRequest(new { error = ex.Message });
@@ -82,7 +82,12 @@ public static class GuidesEndpoints
                 var guide = await guidesService.UpdateGuideAsync(guideId, dto);
                 return Results.Ok(guide);
             }
-            catch (InvalidOperationException ex)
+            catch (KeyNotFoundException ex)
+            {
+                logger.LogWarning(ex, "UpdateGuide guide {GuideId} not found", guideId);
+                return Results.NotFound(new { error = ex.Message });
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
                 logger.LogError(ex, "UpdateGuide failed for guide {GuideId}", guideId);
                 return Results.BadRequest(new { error = ex.Message });

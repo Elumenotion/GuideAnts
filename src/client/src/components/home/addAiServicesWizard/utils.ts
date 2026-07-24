@@ -929,6 +929,11 @@ export async function persistGlobalDefaultModel(modelId: string): Promise<void> 
     reasoningEffort: chatDefaults.reasoningEffort ?? null,
     samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
   });
+  try {
+    window.dispatchEvent(new Event('refresh-notebook-toolbar'));
+  } catch {
+    // Non-browser contexts (tests) have no window.
+  }
 }
 
 export async function updateWizardSection(

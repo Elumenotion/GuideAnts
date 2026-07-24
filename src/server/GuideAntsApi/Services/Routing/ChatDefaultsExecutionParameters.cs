@@ -1,38 +1,34 @@
 using System.Text.Json;
+using GuideAntsApi.Settings;
 
 namespace GuideAntsApi.Services.Routing;
 
 /// <summary>
-/// Maps persisted <c>ChatDefaults</c> configuration keys to the execution parameter bag.
-/// Empty or whitespace configuration values are treated as absent.
+/// Maps persisted <c>ChatDefaults</c> to the execution parameter bag.
+/// Empty or whitespace values are treated as absent.
 /// </summary>
 internal static class ChatDefaultsExecutionParameters
 {
-    private const string SectionPrefix = "ChatDefaults:";
-
-    public static IReadOnlyDictionary<string, JsonElement> FromConfiguration(IConfiguration configuration, string modelId)
+    public static IReadOnlyDictionary<string, JsonElement> FromSnapshot(ChatDefaultsSnapshot snapshot, string modelId)
     {
         var result = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
 
-        var temperature = ReadOptionalFloat(configuration, $"{SectionPrefix}Temperature");
-        if (temperature.HasValue)
+        if (snapshot.Temperature is { } temperature)
         {
-            result["temperature"] = JsonSerializer.SerializeToElement((double)temperature.Value);
+            result["temperature"] = JsonSerializer.SerializeToElement((double)temperature);
         }
 
-        var topP = ReadOptionalFloat(configuration, $"{SectionPrefix}TopP");
-        if (topP.HasValue)
+        if (snapshot.TopP is { } topP)
         {
-            result["top_p"] = JsonSerializer.SerializeToElement(topP.Value);
+            result["top_p"] = JsonSerializer.SerializeToElement(topP);
         }
 
-        var reasoningEffort = ReadOptionalString(configuration, $"{SectionPrefix}ReasoningEffort");
-        if (!string.IsNullOrWhiteSpace(reasoningEffort))
+        if (!string.IsNullOrWhiteSpace(snapshot.ReasoningEffort))
         {
-            result["reasoning_effort"] = JsonSerializer.SerializeToElement(reasoningEffort);
+            result["reasoning_effort"] = JsonSerializer.SerializeToElement(snapshot.ReasoningEffort);
         }
 
-        var samplingJson = configuration[$"{SectionPrefix}SamplingParametersJson"];
+        var samplingJson = snapshot.SamplingParametersJson;
         if (string.IsNullOrWhiteSpace(samplingJson))
         {
             return result;
@@ -65,24 +61,5 @@ internal static class ChatDefaultsExecutionParameters
         }
 
         return result;
-    }
-
-    private static float? ReadOptionalFloat(IConfiguration configuration, string key)
-    {
-        var raw = configuration[key];
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return null;
-        }
-
-        return float.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)
-            ? v
-            : null;
-    }
-
-    private static string? ReadOptionalString(IConfiguration configuration, string key)
-    {
-        var raw = configuration[key];
-        return string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
     }
 }

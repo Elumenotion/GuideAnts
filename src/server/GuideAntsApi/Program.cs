@@ -207,6 +207,10 @@ public class Program
             settingsService.ReloadConfiguration();
             LogPhase("Settings reload");
 
+            var chatDefaultsStore = scope.ServiceProvider.GetRequiredService<IChatDefaultsStore>();
+            chatDefaultsStore.RefreshAsync().GetAwaiter().GetResult();
+            LogPhase("ChatDefaults store refresh");
+
             var requiredSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder>();
             requiredSeeder.SeedAsync().GetAwaiter().GetResult();
             LogPhase("RequiredGuidesAssistantsSeeder");

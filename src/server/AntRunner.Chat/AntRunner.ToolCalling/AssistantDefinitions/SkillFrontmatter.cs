@@ -1,4 +1,5 @@
 using System.Text;
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -39,7 +40,15 @@ public sealed class SkillFrontmatter
         }
 
         var yaml = ExtractFrontmatterYaml(skillMarkdown);
-        var root = DeserializeYaml(yaml);
+        Dictionary<string, object?> root;
+        try
+        {
+            root = DeserializeYaml(yaml);
+        }
+        catch (YamlException ex)
+        {
+            throw new InvalidOperationException("SKILL.md frontmatter is not valid YAML.", ex);
+        }
 
         var name = GetString(root, "name")
                    ?? GetMetadataString(root, "guideants", "name")

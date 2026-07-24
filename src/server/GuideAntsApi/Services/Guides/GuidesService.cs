@@ -2061,7 +2061,12 @@ public class GuidesService(
                                 return fileIdsToKeep != null && !fileIdsToKeep.Contains(f.Id);
                             }
 
-                            return skills != null && !skillFileIdsToKeep.Contains(f.Id);
+                            if (!SkillDtoBuilder.ShouldPruneGuideSkillFiles(skills))
+                            {
+                                return false;
+                            }
+
+                            return !skillFileIdsToKeep.Contains(f.Id);
                         }
 
                         return fileIdsToKeep != null && !fileIdsToKeep.Contains(f.Id);
