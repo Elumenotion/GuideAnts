@@ -253,6 +253,11 @@ export function useOpenRouterWizardState(): UseOpenRouterWizardStateResult {
       try {
         await persistGlobalDefaultModel(targetDefaultModelId);
       } catch (error) {
+        if (forcedDefaultModelId) {
+          throw error instanceof Error
+            ? error
+            : new Error(`Setting '${targetDefaultModelId}' as global default failed.`);
+        }
         const detail = error instanceof Error ? error.message : 'Unknown error.';
         onWarning?.(`Model was added, but setting '${targetDefaultModelId}' as global default failed: ${detail}`);
       }

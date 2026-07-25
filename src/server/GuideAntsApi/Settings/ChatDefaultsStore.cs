@@ -1,12 +1,16 @@
 namespace GuideAntsApi.Settings;
 
+/// <summary>
+/// Reads <c>ChatDefaults</c> from application settings (DB) on every access.
+/// Process-local caching is intentionally not used: Azure scales the API to multiple
+/// replicas, and a warmed singleton would leave non-writing replicas with an empty snapshot
+/// after another replica persisted a successful Settings save.
+/// </summary>
 public sealed class ChatDefaultsStore : IChatDefaultsStore
 {
     public const string SectionName = "ChatDefaults";
 
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly object _sync = new();
-    private ChatDefaultsSnapshot _current = ChatDefaultsSnapshot.Empty;
 
     public ChatDefaultsStore(IServiceScopeFactory scopeFactory)
     {
@@ -17,23 +21,24 @@ public sealed class ChatDefaultsStore : IChatDefaultsStore
     {
         get
         {
-            lock (_sync)
-            {
-                return _current;
-            }
+            // ASP.NET Core has no SynchronizationContext; ConfigureAwait(false) avoids
+            // capturing a request context if one is introduced later.
+            return LoadSnapshotAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
     }
 
-    public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    public Task RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        // Kept for startup/settings-save call sites. Current always loads from DB, so this
+        // does not warm a cache — it verifies the section is readable.
+        return LoadSnapshotAsync(cancellationToken);
+    }
+
+    private async Task<ChatDefaultsSnapshot> LoadSnapshotAsync(CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var settings = scope.ServiceProvider.GetRequiredService<IApplicationSettingsService>();
         var section = await settings.GetSectionAsync(SectionName, cancellationToken).ConfigureAwait(false);
-        var snapshot = ChatDefaultsSnapshot.FromSection(section);
-
-        lock (_sync)
-        {
-            _current = snapshot;
-        }
+        return ChatDefaultsSnapshot.FromSection(section);
     }
 }

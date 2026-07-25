@@ -262,6 +262,8 @@ public sealed partial class ApplicationSettingsService(
             return Task.CompletedTask;
         }
 
+        // ChatDefaultsStore.Current always reads the DB; this keeps startup/save call sites
+        // and any future caching-friendly refresh hooks intact.
         return _chatDefaultsStore.RefreshAsync(cancellationToken);
     }
 

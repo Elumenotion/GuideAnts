@@ -1,6 +1,5 @@
 using FluentAssertions;
 using GuideAntsApi.DataModel;
-using GuideAntsApi.DataModel.Models;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.LlamaCpp;
 using GuideAntsApi.Settings;
@@ -18,7 +17,7 @@ namespace GuideAntsApi.Tests.Settings;
 public sealed class ChatDefaultsStoreTests
 {
     [TestMethod]
-    public async Task UpdateSectionAsync_RefreshesInjectedChatDefaultsStore()
+    public async Task UpdateSectionAsync_IsVisibleToStoreCurrentImmediately()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
@@ -61,11 +60,25 @@ public sealed class ChatDefaultsStoreTests
     }
 
     [TestMethod]
-    public async Task RefreshAsync_LoadsPersistedChatDefaultsFromDatabase()
+    public async Task Current_ReadsDatabaseWithoutPriorRefresh_AcrossStoreInstances()
     {
         await using var db = CreateDbContext();
         var configuration = BuildConfiguration();
-        var settings = CreateSettingsService(db, configuration);
+
+        var writerServices = new ServiceCollection();
+        writerServices.AddSingleton(db);
+        writerServices.AddSingleton<IConfiguration>(configuration);
+        writerServices.AddSingleton<IChatDefaultsStore, ChatDefaultsStore>();
+        writerServices.AddSingleton(sp =>
+            CreateSettingsService(
+                db,
+                configuration,
+                sp.GetRequiredService<IChatDefaultsStore>()));
+        writerServices.AddSingleton<IApplicationSettingsService>(sp =>
+            sp.GetRequiredService<ApplicationSettingsService>());
+
+        await using var writerProvider = writerServices.BuildServiceProvider();
+        var settings = writerProvider.GetRequiredService<IApplicationSettingsService>();
 
         await settings.BootstrapAsync(configuration);
         var section = await settings.GetSectionAsync("ChatDefaults");
@@ -81,23 +94,21 @@ public sealed class ChatDefaultsStoreTests
                     ["OverrideAllChatModels"] = false
                 }));
 
-        var services = new ServiceCollection();
-        services.AddSingleton(db);
-        services.AddSingleton<IConfiguration>(configuration);
-        services.AddSingleton(settings);
-        services.AddSingleton<IApplicationSettingsService>(sp =>
+        // Simulate a second API replica: a brand-new store that never received RefreshAsync
+        // from the write path must still see the persisted default.
+        var readerServices = new ServiceCollection();
+        readerServices.AddSingleton(db);
+        readerServices.AddSingleton<IConfiguration>(configuration);
+        readerServices.AddSingleton(sp => CreateSettingsService(db, configuration));
+        readerServices.AddSingleton<IApplicationSettingsService>(sp =>
             sp.GetRequiredService<ApplicationSettingsService>());
-        services.AddSingleton<IChatDefaultsStore, ChatDefaultsStore>();
+        readerServices.AddSingleton<IChatDefaultsStore, ChatDefaultsStore>();
 
-        await using var provider = services.BuildServiceProvider();
-        var store = provider.GetRequiredService<IChatDefaultsStore>();
+        await using var readerProvider = readerServices.BuildServiceProvider();
+        var otherReplicaStore = readerProvider.GetRequiredService<IChatDefaultsStore>();
 
-        store.Current.DefaultModelId.Should().BeNull();
-
-        await store.RefreshAsync();
-
-        store.Current.DefaultModelId.Should().Be("gemini-2.5-flash");
-        store.Current.OverrideAllChatModels.Should().BeFalse();
+        otherReplicaStore.Current.DefaultModelId.Should().Be("gemini-2.5-flash");
+        otherReplicaStore.Current.OverrideAllChatModels.Should().BeFalse();
     }
 
     private static ApplicationDbContext CreateDbContext()
