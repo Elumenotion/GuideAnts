@@ -4,6 +4,7 @@ import {
   parseSkillFrontmatter,
   updateSkillFrontmatterFlags,
 } from '../skillFrontmatter';
+import { SkillFrontmatterParseError } from '../skillFrontmatterErrors';
 
 const sampleMarkdown = `---
 name: demo-skill
@@ -119,7 +120,7 @@ Body
     expect(() => parseSkillFrontmatter(`---\nname: big\n---\n${oversizedBody}`)).toThrow(
       /maximum length/i,
     );
-    expect(() => parseSkillFrontmatter('---\n---\n')).toThrow(/frontmatter is empty/i);
+    expect(() => parseSkillFrontmatter('---\n---\n')).toThrow(SkillFrontmatterParseError);
     expect(() => parseSkillFrontmatter('---\ndescription: missing name\n---\n')).toThrow(
       /missing required field 'name'/i,
     );

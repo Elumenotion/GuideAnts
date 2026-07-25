@@ -52,7 +52,14 @@ export interface SkillImportResult {
   descriptionWarnings: string[];
 }
 
-export async function buildSkillUploadsFromFolder(files: FileList | File[]): Promise<SkillImportResult> {
+export interface SkillImportOptions {
+  skillMarkdownOverride?: string;
+}
+
+export async function buildSkillUploadsFromFolder(
+  files: FileList | File[],
+  options?: SkillImportOptions,
+): Promise<SkillImportResult> {
   const entries = new Map<string, File>();
   for (const file of Array.from(files)) {
     const path = normalizePath((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name);
@@ -71,7 +78,7 @@ export async function buildSkillUploadsFromFolder(files: FileList | File[]): Pro
     throw new Error('Skill package must contain a SKILL.md file.');
   }
 
-  const originalMarkdown = await manifestFile.text();
+  const originalMarkdown = options?.skillMarkdownOverride ?? await manifestFile.text();
   const parsed = parseSkillFrontmatter(originalMarkdown);
   const normalizedDescription = normalizeSkillDescription(parsed.frontmatter.description);
   const canonicalMarkdown = normalizedDescription.truncated
@@ -122,7 +129,10 @@ export async function buildSkillUploadsFromFolder(files: FileList | File[]): Pro
   };
 }
 
-export async function buildSkillUploadsFromZip(file: File): Promise<SkillImportResult> {
+export async function buildSkillUploadsFromZip(
+  file: File,
+  options?: SkillImportOptions,
+): Promise<SkillImportResult> {
   const zip = await JSZip.loadAsync(file);
   const files: File[] = [];
 
@@ -141,7 +151,7 @@ export async function buildSkillUploadsFromZip(file: File): Promise<SkillImportR
     }),
   );
 
-  return buildSkillUploadsFromFolder(files);
+  return buildSkillUploadsFromFolder(files, options);
 }
 
 export function toSkillSaveDto(skill: AssistantSkillDto): AssistantSkillSaveDto {

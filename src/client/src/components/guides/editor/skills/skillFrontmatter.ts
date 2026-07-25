@@ -3,6 +3,10 @@ import yaml from 'js-yaml';
 import {
   normalizeSkillDescription,
 } from './skillDescriptionLimits';
+import {
+  buildSimpleFrontmatterError,
+  toSkillFrontmatterParseError,
+} from './skillFrontmatterErrors';
 
 export interface ParsedSkillFrontmatter {
   name: string;
@@ -128,9 +132,19 @@ export function parseSkillFrontmatter(markdown: string): SkillFrontmatterParseRe
   }
 
   const yamlText = extractFrontmatterYaml(markdown);
-  const root = asRecord(yaml.load(yamlText));
+  let root: Record<string, unknown> | null;
+  try {
+    root = asRecord(yaml.load(yamlText));
+  } catch (error) {
+    throw toSkillFrontmatterParseError(error, markdown, yamlText);
+  }
+
   if (!root) {
-    throw new Error('SKILL.md frontmatter is empty.');
+    throw buildSimpleFrontmatterError(
+      'Empty SKILL.md frontmatter',
+      'SKILL.md frontmatter is empty.',
+      'Add required fields such as name and description between the --- delimiters.',
+    );
   }
 
   const guideants = getMetadataSection(root, 'guideants');
