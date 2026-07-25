@@ -20,6 +20,7 @@ import type {
 } from './types';
 import {
   buildLocalAiModelRequest,
+  persistGlobalDefaultModel,
   toExistingLocalModels,
 } from './utils';
 import {
@@ -29,39 +30,6 @@ import {
   isLocalModelOnboardingInFlight,
   normalizeLocalModelOnboardingStatus,
 } from '../../../features/localModelOnboarding/status';
-
-async function persistGlobalDefault(catalogModelId: string): Promise<void> {
-  const chatDefaults = await api.settings.chatDefaults.get();
-  const request = {
-    rowVersion: chatDefaults.rowVersion,
-    defaultModelId: catalogModelId,
-    overrideAllChatModels: chatDefaults.overrideAllChatModels,
-    temperature: chatDefaults.temperature ?? null,
-    topP: chatDefaults.topP ?? null,
-    reasoningEffort: chatDefaults.reasoningEffort ?? null,
-    samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
-  };
-
-  try {
-    await api.settings.chatDefaults.update(request);
-  } catch (error) {
-    const body = (error as { body?: unknown })?.body;
-    const errors = body && typeof body === 'object'
-      ? (body as { errors?: unknown }).errors
-      : undefined;
-    const hasReasoningEffortError = Array.isArray(errors)
-      && errors.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('reasoningeffort'));
-
-    if (!hasReasoningEffortError) {
-      throw error;
-    }
-
-    await api.settings.chatDefaults.update({
-      ...request,
-      reasoningEffort: null,
-    });
-  }
-}
 
 function getServiceProviderFieldValue(
   snapshot: WizardLoadSnapshot,
@@ -340,7 +308,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
         if (op.status === 'completed' && shouldSetDefault) {
           void (async () => {
             try {
-              await persistGlobalDefault(catalogModelId);
+              await persistGlobalDefaultModel(catalogModelId);
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Unknown error.';
               setInstallError(
@@ -426,7 +394,7 @@ export function useLocalAiWizardState(): UseLocalAiWizardStateResult {
         );
         if (formData.setAsGlobalDefault) {
           try {
-            await persistGlobalDefault(draft.catalogModelId);
+            await persistGlobalDefaultModel(draft.catalogModelId);
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error.';
             setInstallError(

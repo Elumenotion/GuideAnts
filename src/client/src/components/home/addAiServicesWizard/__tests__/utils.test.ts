@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderEditorStateDto, ServiceEditorStateDto } from '../../../../types/settings';
+import { api } from '../../../../services/api';
 import {
   GEMINI_FLASH_RUNTIME_PROFILE_ID,
   GEMINI_PRO_RUNTIME_PROFILE_ID,
@@ -33,6 +34,7 @@ import {
   hasModelTuple,
   mapModelProviderIdToLabel,
   mapProviderLabelToModelProviderId,
+  persistGlobalDefaultModel,
   summarizeGeminiOptionalServiceWarnings,
   summarizeHuggingFaceOptionalServiceWarnings,
   summarizeOptionalServiceWarnings,
@@ -49,6 +51,17 @@ import {
   toExistingFoundryModels,
 } from '../utils';
 import type { OptionalServiceKey, WizardLoadSnapshot } from '../types';
+
+vi.mock('../../../../services/api', () => ({
+  api: {
+    settings: {
+      chatDefaults: {
+        get: vi.fn(),
+        update: vi.fn(),
+      },
+    },
+  },
+}));
 
 function createProvider(providerId: string, canActivate = true): ProviderEditorStateDto {
   return {
@@ -464,6 +477,48 @@ describe('shared wizard form helpers', () => {
   it('rejects non-positive integer timeout strings', () => {
     expect(isPositiveIntegerValue('0')).toBe(false);
     expect(isPositiveIntegerValue('12')).toBe(true);
+  });
+});
+
+describe('persistGlobalDefaultModel', () => {
+  beforeEach(() => {
+    vi.mocked(api.settings.chatDefaults.get).mockResolvedValue({
+      rowVersion: '1',
+      defaultModelId: null,
+      overrideAllChatModels: false,
+      temperature: null,
+      topP: null,
+      reasoningEffort: 'high',
+      samplingParametersJson: null,
+    });
+    vi.mocked(api.settings.chatDefaults.update).mockReset();
+  });
+
+  it('retries without reasoning effort when the API rejects it', async () => {
+    const reasoningError = Object.assign(new Error('validation failed'), {
+      body: { errors: ['ReasoningEffort is not supported'] },
+    });
+    vi.mocked(api.settings.chatDefaults.update)
+      .mockRejectedValueOnce(reasoningError)
+      .mockResolvedValueOnce({
+        rowVersion: '2',
+        defaultModelId: 'gpt-4.1-mini',
+        overrideAllChatModels: false,
+        temperature: null,
+        topP: null,
+        reasoningEffort: null,
+        samplingParametersJson: null,
+      });
+
+    await persistGlobalDefaultModel('gpt-4.1-mini');
+
+    expect(api.settings.chatDefaults.update).toHaveBeenCalledTimes(2);
+    expect(api.settings.chatDefaults.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        defaultModelId: 'gpt-4.1-mini',
+        reasoningEffort: null,
+      })
+    );
   });
 });
 

@@ -12,8 +12,8 @@ import { LlamaLocalModelOnboardingPanel } from '../../../../features/localModelO
 import type { LocalModelOnboardingMode } from '../../../../features/localModelOnboarding/curated/types';
 import { CustomHfOnboardingForm } from '../../../../features/localModelOnboarding/advanced/CustomHfOnboardingForm';
 import { AttachAliasOnboardingForm } from '../../../../features/localModelOnboarding/advanced/AttachAliasOnboardingForm';
-import { api } from '../../../../services/api';
 import { stripPresetRowMetadata } from '../../../../features/localModelOnboarding/routerPreset';
+import { persistGlobalDefaultModel } from '../utils';
 
 const ADD_STEPS = [
   { id: 'queued', label: 'Queued' },
@@ -424,16 +424,7 @@ export function LocalAiModelsStep({
           resetForm();
         }}
         onSetDefault={async (catalogModelIdValue) => {
-          const chatDefaults = await api.settings.chatDefaults.get();
-          await api.settings.chatDefaults.update({
-            rowVersion: chatDefaults.rowVersion,
-            defaultModelId: catalogModelIdValue,
-            overrideAllChatModels: chatDefaults.overrideAllChatModels,
-            temperature: chatDefaults.temperature ?? null,
-            topP: chatDefaults.topP ?? null,
-            reasoningEffort: chatDefaults.reasoningEffort ?? null,
-            samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
-          });
+          await persistGlobalDefaultModel(catalogModelIdValue);
         }}
         advancedForm={advancedFormNode}
       />

@@ -248,12 +248,11 @@ describe('useFoundryWizardState', () => {
     expect(result.current.modelAddError).toBe('Model is required.');
   });
 
-  it('surfaces global default warning without failing model persistence', async () => {
+  it('fails hard when the first model cannot become the global default', async () => {
     const snapshot = createWizardSnapshot();
     const refreshed = createWizardSnapshot({
       models: [{ modelId: 'gpt-4o-mini', displayName: 'gpt-4o-mini', provider: 'azure-openai-chat', isActive: true, created: '2026-04-29T00:00:00Z' }],
     });
-    const onWarning = vi.fn();
     vi.mocked(api.settings.chatDefaults.update).mockRejectedValueOnce(new Error('Default update failed.'));
     const { result } = renderHook(() => useFoundryWizardState());
 
@@ -262,6 +261,35 @@ describe('useFoundryWizardState', () => {
     });
     act(() => {
       result.current.addDraftModel(snapshot, 0, 0);
+    });
+
+    await act(async () => {
+      await expect(
+        result.current.persistModels(snapshot, createLoadSnapshot(refreshed), createSetSnapshot())
+      ).rejects.toThrow('Default update failed.');
+    });
+  });
+
+  it('surfaces global default warning without failing when additional models are added', async () => {
+    const snapshot = createWizardSnapshot({
+      models: [{ modelId: 'gpt-4o', displayName: 'gpt-4o', provider: 'azure-openai-chat', isActive: true, created: '2026-04-29T00:00:00Z' }],
+    });
+    const refreshed = createWizardSnapshot({
+      models: [
+        { modelId: 'gpt-4o', displayName: 'gpt-4o', provider: 'azure-openai-chat', isActive: true, created: '2026-04-29T00:00:00Z' },
+        { modelId: 'gpt-4o-mini', displayName: 'gpt-4o-mini', provider: 'azure-openai-chat', isActive: true, created: '2026-04-29T00:00:00Z' },
+      ],
+    });
+    const onWarning = vi.fn();
+    vi.mocked(api.settings.chatDefaults.update).mockRejectedValueOnce(new Error('Default update failed.'));
+    const { result } = renderHook(() => useFoundryWizardState());
+
+    act(() => {
+      result.current.setDraftModelId('gpt-4o-mini');
+      result.current.setDraftAsGlobalDefault(true);
+    });
+    act(() => {
+      result.current.addDraftModel(snapshot, 1, 0);
     });
 
     await act(async () => {
