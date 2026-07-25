@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react';
-import type { AssistantSkillSaveDto } from '../../../../types/guides';
-import { buildSkillUploadsFromFolder, buildSkillUploadsFromZip } from './skillImportHelpers';
+import {
+  buildSkillUploadsFromFolder,
+  buildSkillUploadsFromZip,
+} from './skillImportHelpers';
 
 export function useSkillImport() {
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +47,4 @@ export function useSkillImport() {
   };
 }
 
-export type ImportedSkillPackage = {
-  skill: AssistantSkillSaveDto;
-  originalMarkdown: string;
-};
+export type { SkillImportResult as ImportedSkillPackage } from './skillImportHelpers';

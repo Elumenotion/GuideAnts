@@ -36,7 +36,7 @@ rectangle "Host (localhost)" as host {
 
     package "Document Services" #E8F5E9 {
       component "**docling-serve**\nDocument Intelligence\n:5001" as docling #C8E6C9
-      component "**documentserver**\nONLYOFFICE\n127.0.0.1:8082 → :80" as docserver #A5D6A7
+      component "**documentserver**\nEuroOffice DocumentServer\n127.0.0.1:8082 → :80" as docserver #A5D6A7
     }
 
     package "Search & Rendering" #FFFDE7 {
@@ -69,7 +69,7 @@ mssql -down-> dnet
 webapi --> mssql : SQL\n:1433 (depends_on: healthy)
 webapi --> ai : ASR, TTS, SD,\nembeddings, media,\nllama-cpp, sandbox
 webapi --> docling : Document\nIntelligence :5001
-webapi ..> docserver : ONLYOFFICE\n(when enabled)
+webapi ..> docserver : DocumentServer\n(when enabled)
 webapi --> searxng : Search +\nBrowser Render :8080
 webapi --> plantuml : Diagram\ngeneration :80
 

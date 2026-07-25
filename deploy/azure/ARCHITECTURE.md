@@ -14,7 +14,7 @@ flowchart TB
         Docling["docling-serve\n(internal :5001)"]
         PlantUML["plantuml\n(internal)"]
         SearXNG["searxng\n(internal :8080)"]
-        DocServer["documentserver\n(internal :8000)"]
+        DocServer["documentserver\n(internal :80)"]
     end
 
     subgraph Platform["Azure Platform Services"]

@@ -1,17 +1,26 @@
 import { useRef, useState } from 'react';
 import LexicalEditor from '../../../notebook/conversations/LexicalEditor';
 import type { LexicalEditorRef } from '../../../notebook/conversations/LexicalEditor';
-import type { AssistantSkillSaveDto } from '../../../../types/guides';
-import { buildAuthoredSkillSave } from './skillImportHelpers';
+import { useToast } from '../../../common/Toast';
+import { buildAuthoredSkillSave, type SkillImportResult } from './skillImportHelpers';
+import {
+  buildSkillDescriptionImportWarnings,
+  getSkillDescriptionWarning,
+  normalizeSkillDescription,
+  SKILL_DESCRIPTION_LIMITS_HINT,
+  SKILL_DESCRIPTION_MAX_LENGTH,
+  SKILL_DESCRIPTION_RECOMMENDED_LENGTH,
+} from './skillDescriptionLimits';
 
 interface AuthorSkillEditorProps {
   isOpen: boolean;
   nextDisplayOrder: number;
   onClose: () => void;
-  onAuthored: (skill: AssistantSkillSaveDto) => void;
+  onAuthored: (result: SkillImportResult) => void;
 }
 
 export function AuthorSkillEditor({ isOpen, nextDisplayOrder, onClose, onAuthored }: AuthorSkillEditorProps) {
+  const { showToast } = useToast();
   const editorRef = useRef<LexicalEditorRef>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -21,6 +30,9 @@ export function AuthorSkillEditor({ isOpen, nextDisplayOrder, onClose, onAuthore
   if (!isOpen) {
     return null;
   }
+
+  const descriptionLength = description.length;
+  const descriptionWarning = getSkillDescriptionWarning(descriptionLength);
 
   const handleSave = async () => {
     setError(null);
@@ -34,17 +46,31 @@ export function AuthorSkillEditor({ isOpen, nextDisplayOrder, onClose, onAuthore
       return;
     }
 
+    const normalizedDescription = normalizeSkillDescription(description);
+    const descriptionWarnings = buildSkillDescriptionImportWarnings(normalizedDescription);
+
     setSaving(true);
     try {
       const body = editorRef.current?.getValue() ?? '';
       const skill = await buildAuthoredSkillSave({
         name: name.trim(),
-        description: description.trim(),
+        description: normalizedDescription.description,
         body,
         enabled: true,
         displayOrder: nextDisplayOrder,
       });
-      onAuthored(skill);
+      if (descriptionWarnings.length > 0) {
+        showToast({
+          type: 'warning',
+          title: `Saved "${skill.name}" with description adjustments`,
+          message: descriptionWarnings.join(' '),
+        });
+      }
+      onAuthored({
+        skill,
+        originalMarkdown: '',
+        descriptionWarnings,
+      });
       setName('');
       setDescription('');
       editorRef.current?.setValue('');
@@ -88,12 +114,29 @@ export function AuthorSkillEditor({ isOpen, nextDisplayOrder, onClose, onAuthore
             <label className="block text-sm font-medium text-gray-700" htmlFor="skill-description">
               Description
             </label>
-            <input
+            <textarea
               id="skill-description"
               value={description}
+              maxLength={SKILL_DESCRIPTION_MAX_LENGTH}
+              rows={3}
               onChange={(event) => setDescription(event.target.value)}
               className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
             />
+            <div className="mt-1 flex flex-col gap-1">
+              <p className="text-xs text-gray-500">{SKILL_DESCRIPTION_LIMITS_HINT}</p>
+              <p
+                className={`text-xs ${
+                  descriptionLength > SKILL_DESCRIPTION_MAX_LENGTH
+                    ? 'text-red-700'
+                    : descriptionLength > SKILL_DESCRIPTION_RECOMMENDED_LENGTH
+                      ? 'text-amber-700'
+                      : 'text-gray-500'
+                }`}
+              >
+                {descriptionLength}/{SKILL_DESCRIPTION_MAX_LENGTH}
+                {descriptionWarning ? ` — ${descriptionWarning}` : ''}
+              </p>
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Body</label>

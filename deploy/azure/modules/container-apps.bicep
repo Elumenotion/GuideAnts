@@ -31,7 +31,11 @@ var allowedOrigins = customDomain != '' ? 'https://${customDomain}' : '*'
 var searxngInternalUrl = 'http://${searxngAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
 var aiInternalUrl = 'http://${aiAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
 var doclingInternalUrl = 'http://${doclingAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
-var documentServerInternalUrl = 'http://${documentServerAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
+// HTTPS on purpose: ACA terminates TLS at the ingress and forwards to the container as
+// plain http, so ONLYOFFICE only learns the external scheme from X-Forwarded-Proto, which
+// Envoy stamps from how the caller connected. Reaching DocumentServer over https makes it
+// emit https asset/cache URLs (e.g. Editor.bin); http here causes mixed-content -4 failures.
+var documentServerInternalUrl = 'https://${documentServerAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
 var plantumlInternalUrl = 'http://${plantumlAppName}.internal.${containerAppsEnvironmentDefaultDomain}'
 
 var webApiImage = 'ghcr.io/${ghcrOwner}/guideants-webapi-ui-slim:${imageTag}'
@@ -725,7 +729,7 @@ resource documentServerApp 'Microsoft.App/containerApps@2023-05-01' = if (docume
       activeRevisionsMode: 'Single'
       ingress: {
         external: false
-        targetPort: 8000
+        targetPort: 80
         allowInsecure: true
       }
       secrets: [

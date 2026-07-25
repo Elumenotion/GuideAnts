@@ -129,6 +129,32 @@ body
     }
 
     [TestMethod]
+    public void Parse_LongDescription_TruncatesToDatabaseLimit()
+    {
+        var longDescription = new string('x', SkillFrontmatter.MaxDescriptionLength + 50);
+        var markdown = $"""
+---
+name: long-desc
+description: {longDescription}
+---
+body
+""";
+
+        var fm = SkillFrontmatter.Parse(markdown);
+
+        fm.Description.Should().HaveLength(SkillFrontmatter.MaxDescriptionLength);
+        fm.Description.Should().Be(longDescription[..SkillFrontmatter.MaxDescriptionLength]);
+    }
+
+    [TestMethod]
+    public void NormalizeDescription_TrimsAndTruncates()
+    {
+        SkillFrontmatter.NormalizeDescription("  hello  ").Should().Be("hello");
+        SkillFrontmatter.NormalizeDescription(new string('a', 2000))
+            .Should().HaveLength(SkillFrontmatter.MaxDescriptionLength);
+    }
+
+    [TestMethod]
     public void ExtractBody_ReturnsMarkdownAfterFrontmatter()
     {
         SkillFrontmatter.ExtractBody(AgentskillsYaml).Should().Contain("# Body");

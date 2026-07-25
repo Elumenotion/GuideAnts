@@ -47,6 +47,13 @@ describe('skillFrontmatter', () => {
     expect(() => parseSkillFrontmatter(`---\nname: x\n---\n`)).toThrow(/missing required field 'description'/i);
   });
 
+  it('truncates long descriptions to the database limit', () => {
+    const longDescription = 'x'.repeat(1100);
+    const parsed = parseSkillFrontmatter(`---\nname: long-desc\ndescription: ${longDescription}\n---\nbody\n`);
+
+    expect(parsed.frontmatter.description).toHaveLength(1024);
+  });
+
   it('builds canonical markdown with optional prerequisite lists', () => {
     const markdown = buildCanonicalSkillMarkdown({
       name: 'built-skill',

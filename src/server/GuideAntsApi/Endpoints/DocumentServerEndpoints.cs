@@ -12,6 +12,7 @@ public static class DocumentServerEndpoints
     private const string DocumentServerProxyPathItemKey = "__DocumentServerProxyPath";
     private const string DocumentServerProxyForwardedPrefixItemKey = "__DocumentServerProxyForwardedPrefix";
     private const string DocumentServerProxyPublicPrefix = "/api/documentserver/ds";
+    private const string DocumentServerProxyApiPrefix = "/api/documentserver";
     private const string DocumentServerVersionRouteConstraint = "regex(^\\d+\\.\\d+\\.\\d+-[0-9a-f]+$)";
 
     private static readonly string[] DocumentServerProxyMethods =
@@ -82,6 +83,31 @@ public static class DocumentServerEndpoints
                 loggerFactory.CreateLogger("DocumentServerEndpoints"));
         })
         .WithName("DocumentServerVersionedRuntimeProxy")
+        .AllowAnonymous()
+        .ExcludeFromDescription();
+
+        // DocumentServer inline asset loaders (e.g. sdkjs/common/device_scale.js?__inline=true)
+        // treat the trailing "/ds" mount segment as a version and strip it, so those requests
+        // land at /api/documentserver/<asset> instead of /api/documentserver/ds/<asset>.
+        // Proxy the shortened paths to DocumentServer as well. Route precedence keeps the
+        // literal API endpoints below (capabilities, editor-config, download, callback,
+        // diagnostics/probe) matching first, so this only catches otherwise-unmatched assets.
+        app.MapMethods($"/api/documentserver/{{**path}}", DocumentServerProxyMethods, async (
+            HttpContext httpContext,
+            string? path,
+            IOptions<DocumentServerOptions> options,
+            IHttpForwarder forwarder,
+            ILoggerFactory loggerFactory) =>
+        {
+            return await ProxyToDocumentServerAsync(
+                httpContext,
+                NormalizeProxyPath(path),
+                DocumentServerProxyApiPrefix,
+                options.Value,
+                forwarder,
+                loggerFactory.CreateLogger("DocumentServerEndpoints"));
+        })
+        .WithName("DocumentServerApiRootProxy")
         .AllowAnonymous()
         .ExcludeFromDescription();
 

@@ -5,7 +5,7 @@ import { useSkillImport } from './useSkillImport';
 interface ImportSkillDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onImported: (skill: import('../../../../types/guides').AssistantSkillSaveDto) => void;
+  onImported: (result: import('./skillImportHelpers').SkillImportResult) => void;
 }
 
 export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDialogProps) {
@@ -25,7 +25,7 @@ export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDi
 
     try {
       const result = await importFolder(files);
-      onImported(result.skill);
+      onImported(result);
       onClose();
     } catch {
       // error state handled by hook
@@ -42,7 +42,7 @@ export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDi
 
     try {
       const result = await importZip(file);
-      onImported(result.skill);
+      onImported(result);
       onClose();
     } catch {
       // error state handled by hook
