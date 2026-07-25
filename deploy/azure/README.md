@@ -107,7 +107,7 @@ Internet → guideants-webapi-ui (external :8080)
               ├── docling-serve (internal :5001)
               ├── plantuml (internal)
               ├── searxng (internal :8080)
-              └── documentserver (internal :8000)
+              └── documentserver (internal :80)
 Azure SQL (guideants) ← managed identity via Key Vault
 Azure Files: contentfiles, searxng-config, searxng-data, script-agent-state
 ```

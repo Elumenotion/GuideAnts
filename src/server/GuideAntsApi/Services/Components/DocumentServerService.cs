@@ -188,7 +188,13 @@ public sealed class DocumentServerService : IDocumentServerService
                 ["customization"] = new Dictionary<string, object?>
                 {
                     ["autosave"] = true,
-                    ["forcesave"] = true
+                    ["forcesave"] = true,
+                    ["about"] = false,
+                    ["customer"] = new Dictionary<string, object?>
+                    {
+                        ["name"] = _options.Value.EditorProductName,
+                        ["www"] = "github.com/Euro-Office/DocumentServer",
+                    },
                 },
                 ["user"] = new Dictionary<string, object?>
                 {

@@ -131,7 +131,15 @@ export function SkillsTab({
     }
   };
 
-  const handleImported = (skill: AssistantSkillSaveDto) => {
+  const handleImported = ({ skill, descriptionWarnings }: import('./skillImportHelpers').SkillImportResult) => {
+    if (descriptionWarnings.length > 0) {
+      showToast({
+        type: 'warning',
+        title: `Imported "${skill.name}" with description adjustments`,
+        message: descriptionWarnings.join(' '),
+      });
+    }
+
     const displayOrder = nextSkillDisplayOrder(skills);
     const skillWithOrder = { ...skill, displayOrder };
     onPendingSkillUploadsChange(mergeImportedSkill(skillWithOrder, pendingSkillUploads));

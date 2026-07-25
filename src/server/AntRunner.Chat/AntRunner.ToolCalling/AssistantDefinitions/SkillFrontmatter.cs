@@ -13,6 +13,12 @@ public sealed class SkillFrontmatter
 {
     public const int MaxSkillMarkdownChars = 100_000;
 
+    /// <summary>Recommended skill description length per the agentskills.io specification.</summary>
+    public const int RecommendedDescriptionLength = 60;
+
+    /// <summary>Hard database limit for <see cref="Description"/>.</summary>
+    public const int MaxDescriptionLength = 1024;
+
     public string Name { get; init; } = "";
     public string Description { get; init; } = "";
     public bool Enabled { get; init; } = true;
@@ -67,6 +73,8 @@ public sealed class SkillFrontmatter
             throw new InvalidOperationException("SKILL.md frontmatter is missing required field 'description'.");
         }
 
+        var normalizedDescription = NormalizeDescription(description);
+
         var guideants = GetMetadataSection(root, "guideants");
         var hermes = GetMetadataSection(root, "hermes");
 
@@ -98,7 +106,7 @@ public sealed class SkillFrontmatter
         return new SkillFrontmatter
         {
             Name = name.Trim(),
-            Description = description.Trim(),
+            Description = normalizedDescription,
             Enabled = enabled,
             DisplayOrder = displayOrder,
             RequiresToolsets = requiresToolsets,
@@ -107,6 +115,17 @@ public sealed class SkillFrontmatter
             FallbackForTools = fallbackForTools,
             Platforms = platforms,
         };
+    }
+
+    /// <summary>
+    /// Trims and truncates a skill description to <see cref="MaxDescriptionLength"/>.
+    /// </summary>
+    public static string NormalizeDescription(string description)
+    {
+        var trimmed = description.Trim();
+        return trimmed.Length <= MaxDescriptionLength
+            ? trimmed
+            : trimmed[..MaxDescriptionLength];
     }
 
     /// <summary>

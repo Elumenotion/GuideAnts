@@ -224,7 +224,7 @@ Required rules:
 1. Keep naming neutral in compose and config (`documentserver`, `DocumentServer:*`) regardless of which compatible image you select.
 1. Example image values:
    - `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest`
-   - `GA_DOCUMENTSERVER_IMAGE=onlyoffice/documentserver:latest`
+   - `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest` (default; ONLYOFFICE DocumentServer is also supported)
 1. After changing `GA_DOCUMENTSERVER_IMAGE`, restart the `documentserver` service with your selected compose file so Docker Compose pulls/runs that specific image.
 2. `DocumentServer:ApiBaseUrl` is dedicated to DocumentServer callback/download URLs; do not use `ANTRUNNER_SERVICES_HOST_URL` for this.
 3. JWT for DocumentServer is optional and disabled by default (`GA_DOCUMENTSERVER_JWT_ENABLED=false`, `DocumentServer:JwtEnabled=false`).

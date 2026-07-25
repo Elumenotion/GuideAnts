@@ -1,5 +1,8 @@
 // @ts-expect-error js-yaml ships without bundled types in this project
 import yaml from 'js-yaml';
+import {
+  normalizeSkillDescription,
+} from './skillDescriptionLimits';
 
 export interface ParsedSkillFrontmatter {
   name: string;
@@ -155,7 +158,7 @@ export function parseSkillFrontmatter(markdown: string): SkillFrontmatterParseRe
 
   const frontmatter: ParsedSkillFrontmatter = {
     name: name.trim(),
-    description: description.trim(),
+    description: normalizeSkillDescription(description.trim()).description,
     enabled,
     displayOrder,
     requiresToolsets: coalesceLists(
@@ -195,6 +198,7 @@ export function buildCanonicalSkillMarkdown(input: {
   requiresToolsets?: string[];
   requiresTools?: string[];
 }): string {
+  const normalizedDescription = normalizeSkillDescription(input.description).description;
   const metadata: Record<string, unknown> = {
     guideants: {
       enabled: input.enabled,
@@ -213,7 +217,7 @@ export function buildCanonicalSkillMarkdown(input: {
 
   const frontmatter = {
     name: input.name,
-    description: input.description,
+    description: normalizedDescription,
     metadata,
   };
 
