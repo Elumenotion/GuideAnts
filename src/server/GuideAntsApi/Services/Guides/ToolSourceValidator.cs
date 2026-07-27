@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AntRunner.ToolCalling;
 using AntRunner.ToolCalling.AssistantDefinitions;
 using AntRunner.ToolCalling.Functions;
 using GuideAntsApi.Models.Guides;
@@ -392,6 +393,15 @@ public static class ToolSourceValidator
 
                 var operationId = opId.GetString()!;
                 var location = $"{pathProperty.Name} {methodProperty.Name.ToUpperInvariant()}";
+                if (!ToolOperationIdSanitizer.IsWireCompatible(operationId))
+                {
+                    var wireName = ToolOperationIdSanitizer.ToWireName(operationId);
+                    messages.Add(Warning(
+                        "operation_id_sanitized",
+                        $"operationId '{operationId}' is not provider-safe and will be exposed to models as '{wireName}'.",
+                        $"openApiSpec.paths.{location}.operationId"));
+                }
+
                 if (seen.TryGetValue(operationId, out var firstLocation))
                 {
                     messages.Add(Error(

@@ -17,4 +17,7 @@ public sealed class DocumentServerOptions
     public string JwtHeader { get; set; } = "Authorization";
 
     public bool JwtInBody { get; set; } = false;
+
+    /// <summary>Product name shown in the embedded DocumentServer editor chrome.</summary>
+    public string EditorProductName { get; set; } = "EuroOffice";
 }

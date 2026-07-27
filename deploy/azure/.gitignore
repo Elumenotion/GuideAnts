@@ -1,0 +1,5 @@
+parameters.local.json
+parameters-container-apps.local.json
+secrets.env
+*.secret.json
+setup_sql_user.sql

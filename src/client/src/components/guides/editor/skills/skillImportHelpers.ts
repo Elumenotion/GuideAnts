@@ -1,6 +1,10 @@
 import JSZip from 'jszip';
 import type { AssistantSkillDto, AssistantSkillSaveDto, FileUploadDto } from '../../../../types/guides';
 import { parseSkillFrontmatter, buildCanonicalSkillMarkdown } from './skillFrontmatter';
+import {
+  buildSkillDescriptionImportWarnings,
+  normalizeSkillDescription,
+} from './skillDescriptionLimits';
 
 async function fileToBase64(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
@@ -42,10 +46,20 @@ function resolveSkillRoot(paths: string[]): string {
   return slashIndex < 0 ? '' : manifestPath.slice(0, slashIndex);
 }
 
-export async function buildSkillUploadsFromFolder(files: FileList | File[]): Promise<{
+export interface SkillImportResult {
   skill: AssistantSkillSaveDto;
   originalMarkdown: string;
-}> {
+  descriptionWarnings: string[];
+}
+
+export interface SkillImportOptions {
+  skillMarkdownOverride?: string;
+}
+
+export async function buildSkillUploadsFromFolder(
+  files: FileList | File[],
+  options?: SkillImportOptions,
+): Promise<SkillImportResult> {
   const entries = new Map<string, File>();
   for (const file of Array.from(files)) {
     const path = normalizePath((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name);
@@ -64,8 +78,21 @@ export async function buildSkillUploadsFromFolder(files: FileList | File[]): Pro
     throw new Error('Skill package must contain a SKILL.md file.');
   }
 
-  const originalMarkdown = await manifestFile.text();
+  const originalMarkdown = options?.skillMarkdownOverride ?? await manifestFile.text();
   const parsed = parseSkillFrontmatter(originalMarkdown);
+  const normalizedDescription = normalizeSkillDescription(parsed.frontmatter.description);
+  const canonicalMarkdown = normalizedDescription.truncated
+    ? buildCanonicalSkillMarkdown({
+        name: parsed.frontmatter.name,
+        description: normalizedDescription.description,
+        enabled: parsed.frontmatter.enabled,
+        displayOrder: parsed.frontmatter.displayOrder,
+        body: parsed.body,
+        source: parsed.frontmatter.source ?? 'Imported',
+        requiresToolsets: parsed.frontmatter.requiresToolsets,
+        requiresTools: parsed.frontmatter.requiresTools,
+      })
+    : originalMarkdown;
   const skillFolder = `Skills/${parsed.frontmatter.name}`;
   const uploads: FileUploadDto[] = [];
 
@@ -77,7 +104,7 @@ export async function buildSkillUploadsFromFolder(files: FileList | File[]): Pro
     const packageRelative = stripRoot(path, root);
     const relativePath = `${skillFolder}/${packageRelative}`;
     const contentBytes = relativePath.endsWith('/SKILL.md') || relativePath.endsWith('SKILL.md')
-      ? btoa(unescape(encodeURIComponent(originalMarkdown)))
+      ? btoa(unescape(encodeURIComponent(canonicalMarkdown)))
       : await fileToBase64(file);
 
     uploads.push({
@@ -89,10 +116,11 @@ export async function buildSkillUploadsFromFolder(files: FileList | File[]): Pro
   }
 
   return {
-    originalMarkdown,
+    originalMarkdown: canonicalMarkdown,
+    descriptionWarnings: buildSkillDescriptionImportWarnings(normalizedDescription),
     skill: {
       name: parsed.frontmatter.name,
-      description: parsed.frontmatter.description,
+      description: normalizedDescription.description,
       enabled: parsed.frontmatter.enabled,
       displayOrder: parsed.frontmatter.displayOrder,
       source: 'Imported',
@@ -101,10 +129,10 @@ export async function buildSkillUploadsFromFolder(files: FileList | File[]): Pro
   };
 }
 
-export async function buildSkillUploadsFromZip(file: File): Promise<{
-  skill: AssistantSkillSaveDto;
-  originalMarkdown: string;
-}> {
+export async function buildSkillUploadsFromZip(
+  file: File,
+  options?: SkillImportOptions,
+): Promise<SkillImportResult> {
   const zip = await JSZip.loadAsync(file);
   const files: File[] = [];
 
@@ -123,7 +151,7 @@ export async function buildSkillUploadsFromZip(file: File): Promise<{
     }),
   );
 
-  return buildSkillUploadsFromFolder(files);
+  return buildSkillUploadsFromFolder(files, options);
 }
 
 export function toSkillSaveDto(skill: AssistantSkillDto): AssistantSkillSaveDto {
@@ -145,9 +173,10 @@ export function buildAuthoredSkillSave(input: {
   displayOrder: number;
   referenceFiles?: File[];
 }): Promise<AssistantSkillSaveDto> {
+  const normalizedDescription = normalizeSkillDescription(input.description);
   const markdown = buildCanonicalSkillMarkdown({
     name: input.name,
-    description: input.description,
+    description: normalizedDescription.description,
     enabled: input.enabled,
     displayOrder: input.displayOrder,
     body: input.body,
@@ -172,7 +201,7 @@ export function buildAuthoredSkillSave(input: {
 
   return Promise.all(addReferences).then(() => ({
     name: input.name,
-    description: input.description,
+    description: normalizedDescription.description,
     enabled: input.enabled,
     displayOrder: input.displayOrder,
     source: 'Authored' as const,

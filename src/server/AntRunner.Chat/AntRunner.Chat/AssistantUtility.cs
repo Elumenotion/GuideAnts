@@ -227,8 +227,8 @@ namespace AntRunner.Chat
 
             if (options.Skills is { Count: > 0 })
             {
-                TryInjectRegisteredTool(options, "skills.list");
-                TryInjectRegisteredTool(options, "skills.read");
+                TryInjectRegisteredTool(options, "skills_list");
+                TryInjectRegisteredTool(options, "skills_read");
             }
 
             var requestedPlaceholders = options.Tools?
@@ -255,7 +255,8 @@ namespace AntRunner.Chat
 
                             foreach (var def in toolDefinitions)
                             {
-                                if (def.Function?.AsObject?.Name == matchingOperation.Key)
+                                if (def.Function?.AsObject?.Name ==
+                                    ToolOperationIdSanitizer.ToWireName(matchingOperation.Key))
                                 {
                                     options.Tools!.Add(def);
                                 }
@@ -297,7 +298,7 @@ namespace AntRunner.Chat
 
                 foreach (var def in toolDefinitions)
                 {
-                    if (def.Function?.AsObject?.Name == operationId)
+                    if (def.Function?.AsObject?.Name == ToolOperationIdSanitizer.ToWireName(operationId))
                     {
                         options.Tools!.Add(def);
                     }

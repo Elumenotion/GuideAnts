@@ -425,6 +425,10 @@ FodyWeavers.xsd
 # also covers installer/docker/. The .example.yml template is intentionally NOT matched.
 docker-compose.host-mounts.generated.yml
 docker-compose.rocm-runtime.generated.yml
+docker-compose.voice-pack.local.yml
+# Local custom TTS voice pack (personal recordings; never commit).
+/doug.wav
+/docker/volumes/voice-pack/
 /_hf_test
 /.codeql
 /scan-recs

@@ -357,7 +357,7 @@ The stack runs the following containers:
 | `guideants-ai` | AI services (LLM, ASR, TTS, embeddings, image generation) |
 | `mssql-express` | SQL Server database |
 | `docling-serve` | Document intelligence / conversion |
-| `documentserver` | Office document editing (OnlyOffice) |
+| `documentserver` | Office document editing (DocumentServer, EuroOffice by default) |
 | `plantuml` | PlantUML diagram rendering |
 | `searxng` | Web search and browser rendering |
 

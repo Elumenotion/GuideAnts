@@ -16,8 +16,8 @@ public sealed class SkillTraceSourceTests
             BindingFlags.Static | BindingFlags.NonPublic);
 
         method.Should().NotBeNull();
-        method!.Invoke(null, ["skills.list"]).Should().Be("skills");
-        method.Invoke(null, ["skills.read"]).Should().Be("skills");
+        method!.Invoke(null, ["skills_list"]).Should().Be("skills");
+        method.Invoke(null, ["skills_read"]).Should().Be("skills");
         method.Invoke(null, ["WebSearch"]).Should().Be("guide");
     }
 

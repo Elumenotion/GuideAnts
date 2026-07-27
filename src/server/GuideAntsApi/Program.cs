@@ -207,6 +207,10 @@ public class Program
             settingsService.ReloadConfiguration();
             LogPhase("Settings reload");
 
+            var chatDefaultsStore = scope.ServiceProvider.GetRequiredService<IChatDefaultsStore>();
+            chatDefaultsStore.RefreshAsync().GetAwaiter().GetResult();
+            LogPhase("ChatDefaults store refresh");
+
             var requiredSeeder = scope.ServiceProvider.GetRequiredService<GuideAntsApi.Services.Bootstrap.IRequiredGuidesAssistantsSeeder>();
             requiredSeeder.SeedAsync().GetAwaiter().GetResult();
             LogPhase("RequiredGuidesAssistantsSeeder");
@@ -287,7 +291,7 @@ public class Program
         // Initialize static service provider for MemoryTools (KM queries)
         GuideAntsApi.Services.MemoryTools.InitializeServiceProvider(app.Services);
 
-        // Initialize static service provider for SkillTools (skills.list/skills.read)
+        // Initialize static service provider for SkillTools (skills_list/skills_read)
         GuideAntsApi.Services.SkillTools.InitializeServiceProvider(app.Services);
 
         // Initialize static service provider for ReadWeb tools

@@ -1,5 +1,12 @@
 // @ts-expect-error js-yaml ships without bundled types in this project
 import yaml from 'js-yaml';
+import {
+  normalizeSkillDescription,
+} from './skillDescriptionLimits';
+import {
+  buildSimpleFrontmatterError,
+  toSkillFrontmatterParseError,
+} from './skillFrontmatterErrors';
 
 export interface ParsedSkillFrontmatter {
   name: string;
@@ -125,9 +132,19 @@ export function parseSkillFrontmatter(markdown: string): SkillFrontmatterParseRe
   }
 
   const yamlText = extractFrontmatterYaml(markdown);
-  const root = asRecord(yaml.load(yamlText));
+  let root: Record<string, unknown> | null;
+  try {
+    root = asRecord(yaml.load(yamlText));
+  } catch (error) {
+    throw toSkillFrontmatterParseError(error, markdown, yamlText);
+  }
+
   if (!root) {
-    throw new Error('SKILL.md frontmatter is empty.');
+    throw buildSimpleFrontmatterError(
+      'Empty SKILL.md frontmatter',
+      'SKILL.md frontmatter is empty.',
+      'Add required fields such as name and description between the --- delimiters.',
+    );
   }
 
   const guideants = getMetadataSection(root, 'guideants');
@@ -155,7 +172,7 @@ export function parseSkillFrontmatter(markdown: string): SkillFrontmatterParseRe
 
   const frontmatter: ParsedSkillFrontmatter = {
     name: name.trim(),
-    description: description.trim(),
+    description: normalizeSkillDescription(description.trim()).description,
     enabled,
     displayOrder,
     requiresToolsets: coalesceLists(
@@ -195,6 +212,7 @@ export function buildCanonicalSkillMarkdown(input: {
   requiresToolsets?: string[];
   requiresTools?: string[];
 }): string {
+  const normalizedDescription = normalizeSkillDescription(input.description).description;
   const metadata: Record<string, unknown> = {
     guideants: {
       enabled: input.enabled,
@@ -213,7 +231,7 @@ export function buildCanonicalSkillMarkdown(input: {
 
   const frontmatter = {
     name: input.name,
-    description: input.description,
+    description: normalizedDescription,
     metadata,
   };
 

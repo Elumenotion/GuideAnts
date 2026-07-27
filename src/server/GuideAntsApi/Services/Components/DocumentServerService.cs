@@ -188,7 +188,13 @@ public sealed class DocumentServerService : IDocumentServerService
                 ["customization"] = new Dictionary<string, object?>
                 {
                     ["autosave"] = true,
-                    ["forcesave"] = true
+                    ["forcesave"] = true,
+                    ["about"] = false,
+                    ["customer"] = new Dictionary<string, object?>
+                    {
+                        ["name"] = _options.Value.EditorProductName,
+                        ["www"] = "github.com/Euro-Office/DocumentServer",
+                    },
                 },
                 ["user"] = new Dictionary<string, object?>
                 {
@@ -204,8 +210,16 @@ public sealed class DocumentServerService : IDocumentServerService
             config["token"] = token;
         }
 
+        var documentServerUrl = DocumentServerUrlResolver.ResolvePublicUrl(options, httpContext);
+        if (string.Equals(documentServerUrl, DocumentServerUrlResolver.ProxyPublicPrefix, StringComparison.Ordinal)
+            || documentServerUrl.StartsWith('/'))
+        {
+            throw new InvalidOperationException(
+                "Unable to resolve DocumentServer public URL because request scheme or host is missing.");
+        }
+
         return new DocumentServerEditorConfigResult(
-            DocumentServerUrl: ResolveDocumentServerPublicUrl(httpContext),
+            DocumentServerUrl: documentServerUrl,
             Config: config);
     }
 
@@ -661,22 +675,6 @@ public sealed class DocumentServerService : IDocumentServerService
             LogValueSanitizer.Sanitize(internalUri.Authority));
 
         return rewrittenUrl;
-    }
-
-    private static string ResolveDocumentServerPublicUrl(HttpContext httpContext)
-    {
-        var scheme = httpContext.Request.Scheme?.Trim();
-        if (string.IsNullOrWhiteSpace(scheme))
-        {
-            throw new InvalidOperationException("Unable to resolve DocumentServer public URL because request scheme is missing.");
-        }
-
-        if (!httpContext.Request.Host.HasValue)
-        {
-            throw new InvalidOperationException("Unable to resolve DocumentServer public URL because request host is missing.");
-        }
-
-        return $"{scheme}://{httpContext.Request.Host.Value.TrimEnd('/')}{DocumentServerProxyPublicPrefix}";
     }
 
     private string InferContentType(string fileName)

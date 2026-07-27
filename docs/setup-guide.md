@@ -34,6 +34,14 @@ Useful options:
 
 If the launcher gets you to `http://localhost:5107/`, skip to section 5 for first-user auth bootstrap and initial wizard flow.
 
+## 1b. Cloud deployment (Azure)
+
+To run GuideAnts on **Azure Container Apps** with **Azure SQL** (cloud AI via Settings, no local GPU containers), see the consumer deploy guide:
+
+- **[deploy/azure/README.md](../deploy/azure/README.md)** — prerequisites, `deploy.ps1` / `deploy.sh`, custom domain, post-deploy steps.
+
+This path uses the **azure-slim** profile: same service graph as `docker-compose.ghcr-slim.yml` but with Azure SQL instead of embedded SQL Server.
+
 ## 2. What you are setting up
 
 GuideAnts runs as a Docker Compose stack on a single host. Pick the stack by deciding two things:
@@ -216,7 +224,7 @@ Required rules:
 1. Keep naming neutral in compose and config (`documentserver`, `DocumentServer:*`) regardless of which compatible image you select.
 1. Example image values:
    - `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest`
-   - `GA_DOCUMENTSERVER_IMAGE=onlyoffice/documentserver:latest`
+   - `GA_DOCUMENTSERVER_IMAGE=ghcr.io/euro-office/documentserver:latest` (default; ONLYOFFICE DocumentServer is also supported)
 1. After changing `GA_DOCUMENTSERVER_IMAGE`, restart the `documentserver` service with your selected compose file so Docker Compose pulls/runs that specific image.
 2. `DocumentServer:ApiBaseUrl` is dedicated to DocumentServer callback/download URLs; do not use `ANTRUNNER_SERVICES_HOST_URL` for this.
 3. JWT for DocumentServer is optional and disabled by default (`GA_DOCUMENTSERVER_JWT_ENABLED=false`, `DocumentServer:JwtEnabled=false`).

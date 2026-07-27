@@ -34,43 +34,52 @@ public static class SqlServerDatabaseInitializer
         }
 
         var createdCatalog = false;
-        builder.InitialCatalog = "master";
-        using (var connection = new SqlConnection(builder.ConnectionString))
+        if (ShouldBootstrapCatalogOnMaster(builder))
         {
-            connection.Open();
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                DECLARE @created bit = 0;
+            builder.InitialCatalog = "master";
+            using (var connection = new SqlConnection(builder.ConnectionString))
+            {
+                connection.Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    DECLARE @created bit = 0;
 
-                IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = @dbName)
-                BEGIN
-                    DECLARE @createSql nvarchar(max) = N'CREATE DATABASE ' + QUOTENAME(@dbName);
-                    EXEC (@createSql);
+                    IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = @dbName)
+                    BEGIN
+                        DECLARE @createSql nvarchar(max) = N'CREATE DATABASE ' + QUOTENAME(@dbName);
+                        EXEC (@createSql);
 
-                    -- New installs default to SIMPLE so transaction logs auto-truncate and do not require log backups.
-                    DECLARE @recoverySql nvarchar(max) = N'ALTER DATABASE ' + QUOTENAME(@dbName) + N' SET RECOVERY SIMPLE WITH NO_WAIT';
-                    EXEC (@recoverySql);
+                        -- New installs default to SIMPLE so transaction logs auto-truncate and do not require log backups.
+                        DECLARE @recoverySql nvarchar(max) = N'ALTER DATABASE ' + QUOTENAME(@dbName) + N' SET RECOVERY SIMPLE WITH NO_WAIT';
+                        EXEC (@recoverySql);
 
-                    SET @created = 1;
-                END
+                        SET @created = 1;
+                    END
 
-                SELECT @created;
-                """;
-            var p = command.CreateParameter();
-            p.ParameterName = "@dbName";
-            p.Value = catalog;
-            command.Parameters.Add(p);
-            var scalarResult = command.ExecuteScalar();
-            createdCatalog = Convert.ToInt32(scalarResult) == 1;
-        }
+                    SELECT @created;
+                    """;
+                var p = command.CreateParameter();
+                p.ParameterName = "@dbName";
+                p.Value = catalog;
+                command.Parameters.Add(p);
+                var scalarResult = command.ExecuteScalar();
+                createdCatalog = Convert.ToInt32(scalarResult) == 1;
+            }
 
-        if (createdCatalog)
-        {
-            logger.LogInformation("Created SQL Server catalog '{Catalog}' and set recovery model to SIMPLE.", catalog);
+            if (createdCatalog)
+            {
+                logger.LogInformation("Created SQL Server catalog '{Catalog}' and set recovery model to SIMPLE.", catalog);
+            }
+            else
+            {
+                logger.LogInformation("SQL Server catalog '{Catalog}' already exists; keeping current recovery model.", catalog);
+            }
         }
         else
         {
-            logger.LogInformation("SQL Server catalog '{Catalog}' already exists; keeping current recovery model.", catalog);
+            logger.LogInformation(
+                "Skipping master catalog bootstrap for external authentication; using pre-provisioned catalog '{Catalog}'.",
+                catalog);
         }
 
         logger.LogInformation("SQL Server catalog '{Catalog}' is ready; applying EF Core migrations.", catalog);
@@ -86,5 +95,20 @@ public static class SqlServerDatabaseInitializer
 
         using var context = new ApplicationDbContext(optionsBuilder.Options);
         context.Database.Migrate();
+    }
+
+    /// <summary>
+    /// Azure SQL managed-identity users are contained in the target database. Connecting through
+    /// <c>master</c> requires a separate principal there and is unnecessary when infra already
+    /// provisioned the catalog (azure-slim / production SQL).
+    /// </summary>
+    private static bool ShouldBootstrapCatalogOnMaster(SqlConnectionStringBuilder builder)
+    {
+        return builder.Authentication switch
+        {
+            SqlAuthenticationMethod.NotSpecified => true,
+            SqlAuthenticationMethod.SqlPassword => true,
+            _ => false,
+        };
     }
 }

@@ -236,6 +236,11 @@ export function OverviewTab({
       if (updated.overrideAllChatModels) {
         setShowOverrideSavedBanner(true);
       }
+      try {
+        window.dispatchEvent(new Event('refresh-notebook-toolbar'));
+      } catch {
+        // Non-browser contexts (tests) have no window.
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Save failed.';
       showToast({ type: 'error', title: 'Could not save default chat model', message });

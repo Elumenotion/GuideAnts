@@ -31,7 +31,7 @@ public sealed class OpenApiHelperDeepTests
         var tools = ToolsFor(spec);
 
         tools.Should().ContainSingle();
-        tools[0].Function!.AsObject!.Name.Should().Be("get_/widgets");
+        tools[0].Function!.AsObject!.Name.Should().Be("get__widgets");
     }
 
     [TestMethod]
