@@ -130,6 +130,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                 ["ChatDefaults:OverrideAllChatModels"] = "true"
             })
             .Build();
+        var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: true);
 
         var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
         warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
@@ -141,6 +142,7 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatModelResolver.Object,
             conversations.Object,
             llamaRuntime.Object,
+            chatDefaults,
             configuration,
             Mock.Of<IHttpClientFactory>(),
             warmup.Object,
@@ -237,6 +239,7 @@ public sealed class NotebookHeaderToolbarServiceTests
             });
 
         var configuration = new ConfigurationBuilder().Build();
+        var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: false);
 
         var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
         warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
@@ -248,6 +251,7 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatModelResolver.Object,
             conversations.Object,
             llamaRuntime.Object,
+            chatDefaults,
             configuration,
             Mock.Of<IHttpClientFactory>(),
             warmup.Object,
@@ -380,6 +384,7 @@ public sealed class NotebookHeaderToolbarServiceTests
             });
 
         var configuration = new ConfigurationBuilder().Build();
+        var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: false);
 
         var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
         warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
@@ -391,6 +396,7 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatModelResolver.Object,
             conversations.Object,
             llamaRuntime.Object,
+            chatDefaults,
             configuration,
             Mock.Of<IHttpClientFactory>(),
             warmup.Object,
@@ -503,6 +509,7 @@ public sealed class NotebookHeaderToolbarServiceTests
             });
 
         var configuration = new ConfigurationBuilder().Build();
+        var chatDefaults = CreateDefaultChatDefaultsStore(overrideAllChatModels: false);
 
         var warmup = new Mock<ILocalAiStartupWarmupService>(MockBehavior.Strict);
         warmup.SetupGet(x => x.IsWarmupInProgress).Returns(false);
@@ -514,6 +521,7 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatModelResolver.Object,
             conversations.Object,
             llamaRuntime.Object,
+            chatDefaults,
             configuration,
             Mock.Of<IHttpClientFactory>(),
             warmup.Object,
@@ -858,6 +866,7 @@ public sealed class NotebookHeaderToolbarServiceTests
         IConversationManager? conversations = null,
         INotebookModelRuntimeService? llamaRuntime = null,
         IConfiguration? configuration = null,
+        IChatDefaultsStore? chatDefaultsStore = null,
         IHttpClientFactory? httpClientFactory = null,
         ILocalAiStartupWarmupService? warmupService = null)
     {
@@ -874,6 +883,7 @@ public sealed class NotebookHeaderToolbarServiceTests
                 ["LocalServiceHosts:ImageGenerationBaseUrl"] = "http://localhost:8112",
             })
             .Build();
+        var chatDefaults = chatDefaultsStore ?? CreateDefaultChatDefaultsStore(overrideAllChatModels: true);
         var warmup = warmupService ?? CreateDefaultWarmupService().Object;
 
         return new NotebookHeaderToolbarService(
@@ -883,6 +893,7 @@ public sealed class NotebookHeaderToolbarServiceTests
             chatModelResolverMock,
             conversationsMock,
             llamaRuntimeMock,
+            chatDefaults,
             config,
             httpClientFactory ?? Mock.Of<IHttpClientFactory>(),
             warmup,
@@ -920,6 +931,20 @@ public sealed class NotebookHeaderToolbarServiceTests
                     ParameterAuthority.AssistantDefinition,
                     new Dictionary<string, System.Text.Json.JsonElement>())));
         return chatModelResolver;
+    }
+
+    private static IChatDefaultsStore CreateDefaultChatDefaultsStore(bool overrideAllChatModels)
+    {
+        var store = new Mock<IChatDefaultsStore>();
+        store.Setup(x => x.Current).Returns(new ChatDefaultsSnapshot(
+            DefaultModelId: null,
+            OverrideAllChatModels: overrideAllChatModels,
+            Temperature: null,
+            TopP: null,
+            ReasoningEffort: null,
+            SamplingParametersJson: null));
+        store.Setup(x => x.RefreshAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        return store.Object;
     }
 
     private static Mock<INotebookModelRuntimeService> CreateDefaultLlamaRuntime(Guid notebookId)

@@ -1,17 +1,27 @@
 import { useRef } from 'react';
 import { FaFolderOpen, FaFileArchive } from 'react-icons/fa';
+import { SKILL_IMPORT_GUIDANCE } from './skillFrontmatterErrors';
+import { SkillImportErrorPanel } from './SkillImportErrorPanel';
 import { useSkillImport } from './useSkillImport';
 
 interface ImportSkillDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onImported: (skill: import('../../../../types/guides').AssistantSkillSaveDto) => void;
+  onImported: (result: import('./skillImportHelpers').SkillImportResult) => void;
 }
 
 export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDialogProps) {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
-  const { error, isImporting, importFolder, importZip, clearError } = useSkillImport();
+  const {
+    error,
+    isImporting,
+    repairContext,
+    importFolder,
+    importZip,
+    importRepaired,
+    clearError,
+  } = useSkillImport();
 
   if (!isOpen) {
     return null;
@@ -25,7 +35,7 @@ export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDi
 
     try {
       const result = await importFolder(files);
-      onImported(result.skill);
+      onImported(result);
       onClose();
     } catch {
       // error state handled by hook
@@ -42,12 +52,29 @@ export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDi
 
     try {
       const result = await importZip(file);
-      onImported(result.skill);
+      onImported(result);
       onClose();
     } catch {
       // error state handled by hook
     } finally {
       event.target.value = '';
+    }
+  };
+
+  const handleRepair = async () => {
+    if (!repairContext) {
+      return;
+    }
+
+    try {
+      const result = await importRepaired();
+      if (!result) {
+        return;
+      }
+      onImported(result);
+      onClose();
+    } catch {
+      // error state handled by hook
     }
   };
 
@@ -60,7 +87,7 @@ export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDi
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
+        className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-6 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <h2 id="import-skill-title" className="text-lg font-semibold text-gray-900">
@@ -71,10 +98,30 @@ export function ImportSkillDialog({ isOpen, onClose, onImported }: ImportSkillDi
           references, scripts, and assets.
         </p>
 
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-gray-600">
+          {SKILL_IMPORT_GUIDANCE.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+
+        <p className="mt-3 text-xs text-gray-500">
+          Format reference:{' '}
+          <a
+            href="https://agentskills.io/specification"
+            target="_blank"
+            rel="noreferrer"
+            className="text-blue-600 underline hover:text-blue-700"
+          >
+            agentskills.io specification
+          </a>
+        </p>
+
         {error && (
-          <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
-            {error}
-          </p>
+          <SkillImportErrorPanel
+            error={error}
+            isRepairing={isImporting}
+            onRepair={repairContext ? handleRepair : undefined}
+          />
         )}
 
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">

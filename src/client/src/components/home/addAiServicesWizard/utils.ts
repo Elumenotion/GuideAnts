@@ -920,7 +920,7 @@ export function getSchemaDefault(
 
 export async function persistGlobalDefaultModel(modelId: string): Promise<void> {
   const chatDefaults = await api.settings.chatDefaults.get();
-  await api.settings.chatDefaults.update({
+  const request = {
     rowVersion: chatDefaults.rowVersion,
     defaultModelId: modelId,
     overrideAllChatModels: chatDefaults.overrideAllChatModels,
@@ -928,7 +928,33 @@ export async function persistGlobalDefaultModel(modelId: string): Promise<void> 
     topP: chatDefaults.topP ?? null,
     reasoningEffort: chatDefaults.reasoningEffort ?? null,
     samplingParametersJson: chatDefaults.samplingParametersJson ?? null,
-  });
+  };
+
+  try {
+    await api.settings.chatDefaults.update(request);
+  } catch (error) {
+    const body = (error as { body?: unknown })?.body;
+    const errors = body && typeof body === 'object'
+      ? (body as { errors?: unknown }).errors
+      : undefined;
+    const hasReasoningEffortError = Array.isArray(errors)
+      && errors.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('reasoningeffort'));
+
+    if (!hasReasoningEffortError) {
+      throw error;
+    }
+
+    await api.settings.chatDefaults.update({
+      ...request,
+      reasoningEffort: null,
+    });
+  }
+
+  try {
+    window.dispatchEvent(new Event('refresh-notebook-toolbar'));
+  } catch {
+    // Non-browser contexts (tests) have no window.
+  }
 }
 
 export async function updateWizardSection(

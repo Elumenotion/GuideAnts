@@ -65,6 +65,8 @@ public sealed class DocumentServerServiceTests
         var customization = (Dictionary<string, object?>)editorConfig["customization"]!;
         customization["forcesave"].Should().Be(true);
         customization["autosave"].Should().Be(true);
+        var customer = (Dictionary<string, object?>)customization["customer"]!;
+        customer["name"].Should().Be("EuroOffice");
     }
 
     [TestMethod]

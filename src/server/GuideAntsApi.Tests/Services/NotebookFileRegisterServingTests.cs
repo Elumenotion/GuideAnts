@@ -64,12 +64,12 @@ public sealed class NotebookFileRegisterServingTests
                 new BackgroundJobTestHelpers.CapturingJobQueueService(),
                 Mock.Of<IFileLineageService>(),
                 Mock.Of<IUsageRecorder>(),
+                new InMemoryNotebookLockService(),
                 NullLogger<NotebookFileReconciler>.Instance);
 
             var syncService = new NotebookFileSyncService(
                 reconciler,
                 scopeFactoryMock.Object,
-                Mock.Of<INotebookLockService>(),
                 NullLogger<NotebookFileSyncService>.Instance);
 
             await syncService.RegisterFilesAsync(notebookId, [relativePath]);
@@ -161,12 +161,73 @@ public sealed class NotebookFileRegisterServingTests
             new BackgroundJobTestHelpers.CapturingJobQueueService(),
             Mock.Of<IFileLineageService>(),
             Mock.Of<IUsageRecorder>(),
+            new InMemoryNotebookLockService(),
             NullLogger<NotebookFileReconciler>.Instance);
 
         await reconciler.RegisterFilesAsync(notebookId, ["Output/missing.png"]);
 
         await using var verify = new ApplicationDbContext(options);
         (await verify.NotebookFiles.CountAsync(f => f.NotebookId == notebookId)).Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task RegisterAndReconcileConcurrently_DoNotThrow_WhenInsertingSameFile()
+    {
+        var options = BackgroundJobTestHelpers.CreateInMemoryOptions($"register-reconcile-race-{Guid.NewGuid():N}");
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"register-reconcile-race-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        Guid projectId;
+        Guid notebookId;
+        try
+        {
+            await using (var seed = new ApplicationDbContext(options))
+            {
+                (projectId, notebookId) = await BackgroundJobTestHelpers.SeedProjectNotebookAsync(seed);
+            }
+
+            var notebookRoot = Path.Combine(tempRoot, "test-project", "test-notebook");
+            Directory.CreateDirectory(notebookRoot);
+            var relativePath = "Output/race.png";
+            var fullPath = Path.Combine(notebookRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            await File.WriteAllBytesAsync(fullPath, [0x89, 0x50, 0x4E, 0x47]);
+
+            var pathResolver = new Mock<IStoragePathResolver>();
+            pathResolver.Setup(r => r.GetNotebookRootPath(projectId, notebookId)).Returns(notebookRoot);
+
+            var providerMock = new Mock<IServiceProvider>();
+            providerMock.Setup(p => p.GetService(typeof(ApplicationDbContext)))
+                .Returns(() => new ApplicationDbContext(options));
+
+            var scopeMock = new Mock<IServiceScope>();
+            scopeMock.SetupGet(s => s.ServiceProvider).Returns(providerMock.Object);
+            var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+            scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+
+            var reconciler = new NotebookFileReconciler(
+                scopeFactoryMock.Object,
+                pathResolver.Object,
+                new BackgroundJobTestHelpers.CapturingJobQueueService(),
+                Mock.Of<IFileLineageService>(),
+                Mock.Of<IUsageRecorder>(),
+                new InMemoryNotebookLockService(),
+                NullLogger<NotebookFileReconciler>.Instance);
+
+            await Task.WhenAll(
+                reconciler.RegisterFilesAsync(notebookId, [relativePath]),
+                reconciler.ReconcileNotebookAsync(notebookId));
+
+            await using var verify = new ApplicationDbContext(options);
+            var files = await verify.NotebookFiles
+                .Where(f => f.NotebookId == notebookId && f.RelativePath == relativePath)
+                .ToListAsync();
+            files.Should().ContainSingle();
+        }
+        finally
+        {
+            TryDeleteDirectory(tempRoot);
+        }
     }
 
     private static IEnumerable<NotebookFileDto> EnumerateFilesRecursively(NotebookFolderTreeDto node)

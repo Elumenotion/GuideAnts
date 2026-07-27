@@ -44,20 +44,17 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
                 {
                     ["DefaultModelId"] = "gemini-2.5-flash",
                     ["OverrideAllChatModels"] = true,
-                    ["Temperature"] = 0.7,
-                    ["TopP"] = 0.9,
-                    ["ReasoningEffort"] = "enabled",
-                    ["SamplingParametersJson"] = null
+                    ["ReasoningEffort"] = "enabled"
                 }));
 
         result.Section.Should().BeNull();
         result.ConcurrencyConflict.Should().BeFalse();
-        result.ValidationErrors.Should().ContainSingle(error =>
+        result.ValidationErrors.Should().Contain(error =>
             error.Contains("does not declare any reasoning choices", StringComparison.Ordinal));
     }
 
     [TestMethod]
-    public async Task UpdateSectionAsync_AllowsReasoningEffort_WhenDefaultModelDeclaresMatchingChoices()
+    public async Task UpdateSectionAsync_PersistsSubmittedPayload_WithoutRewritingFields()
     {
         await using var db = CreateDbContext();
         db.Models.Add(new Model
@@ -88,13 +85,16 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
                     ["Temperature"] = 0.7,
                     ["TopP"] = 0.9,
                     ["ReasoningEffort"] = "high",
-                    ["SamplingParametersJson"] = null
+                    ["SamplingParametersJson"] = """{"min_p":0.05}"""
                 }));
 
         result.ConcurrencyConflict.Should().BeFalse();
         result.ValidationErrors.Should().BeEmpty();
         result.Section.Should().NotBeNull();
         result.Section!.Payload["ReasoningEffort"]!.GetValue<string>().Should().Be("high");
+        result.Section.Payload["Temperature"]!.GetValue<double>().Should().BeApproximately(0.7, 0.001);
+        result.Section.Payload["TopP"]!.GetValue<double>().Should().BeApproximately(0.9, 0.001);
+        result.Section.Payload["SamplingParametersJson"]!.GetValue<string>().Should().Be("""{"min_p":0.05}""");
     }
 
     private static ApplicationDbContext CreateDbContext()
@@ -129,7 +129,10 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
             .Build();
     }
 
-    private static ApplicationSettingsService CreateService(ApplicationDbContext db, IConfiguration configuration)
+    private static ApplicationSettingsService CreateService(
+        ApplicationDbContext db,
+        IConfiguration configuration,
+        Mock<IRuntimeProfileResolver>? runtimeProfileResolver = null)
     {
         var environment = new Mock<IWebHostEnvironment>();
         environment.SetupGet(value => value.ContentRootPath).Returns(AppContext.BaseDirectory);
@@ -144,7 +147,7 @@ public sealed class ApplicationSettingsServiceChatDefaultsTests
             }
         });
 
-        var runtimeProfileResolver = new Mock<IRuntimeProfileResolver>();
+        runtimeProfileResolver ??= new Mock<IRuntimeProfileResolver>();
 
         return new ApplicationSettingsService(
             db,

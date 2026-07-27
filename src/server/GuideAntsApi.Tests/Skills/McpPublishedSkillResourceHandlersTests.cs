@@ -69,8 +69,8 @@ public sealed class McpPublishedSkillResourceHandlersTests
     public void SkillTools_AreLocalFunction_NotClientHandled()
     {
         var registry = AntRunner.ToolCalling.ToolContractRegistry.GetAllToolOperations();
-        registry.Should().ContainKey("skills.list");
-        registry.Should().ContainKey("skills.read");
+        registry.Should().ContainKey("skills_list");
+        registry.Should().ContainKey("skills_read");
     }
 
     [TestMethod]
@@ -84,8 +84,8 @@ public sealed class McpPublishedSkillResourceHandlersTests
         foreach (var file in Directory.EnumerateFiles(wireDir, "*.cs"))
         {
             var text = File.ReadAllText(file);
-            text.Should().NotContain("skills.list", because: file);
-            text.Should().NotContain("skills.read", because: file);
+            text.Should().NotContain("skills_list", because: file);
+            text.Should().NotContain("skills_read", because: file);
             text.Should().NotContain("SkillTools", because: file);
             text.Should().NotContain("SkillDiscovery", because: file);
         }

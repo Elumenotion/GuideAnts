@@ -168,6 +168,39 @@ internal static class SkillDtoBuilder
         return ids;
     }
 
+    /// <summary>
+    /// Guide skill-file pruning runs only when the client explicitly names files to keep,
+    /// uploads replacements, or clears the entire skills list. Metadata-only saves must not
+    /// wipe skill payloads when every <see cref="AssistantSkillSaveDto.FileIdsToKeep"/> is empty.
+    /// </summary>
+    public static bool ShouldPruneGuideSkillFiles(IReadOnlyList<AssistantSkillSaveDto>? skills)
+    {
+        if (skills is null)
+        {
+            return false;
+        }
+
+        if (skills.Count == 0)
+        {
+            return true;
+        }
+
+        foreach (var skill in skills)
+        {
+            if (skill.FileIdsToKeep is { Count: > 0 })
+            {
+                return true;
+            }
+
+            if (skill.FilesToAdd is { Count: > 0 })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static string DetectSource(string markdown)
     {
         try

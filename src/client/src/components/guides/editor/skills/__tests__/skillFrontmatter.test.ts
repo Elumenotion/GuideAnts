@@ -4,6 +4,7 @@ import {
   parseSkillFrontmatter,
   updateSkillFrontmatterFlags,
 } from '../skillFrontmatter';
+import { SkillFrontmatterParseError } from '../skillFrontmatterErrors';
 
 const sampleMarkdown = `---
 name: demo-skill
@@ -45,6 +46,13 @@ describe('skillFrontmatter', () => {
     expect(() => parseSkillFrontmatter('# No frontmatter')).toThrow(/missing yaml frontmatter/i);
     expect(() => parseSkillFrontmatter('---\nname: only-open')).toThrow(/not closed/i);
     expect(() => parseSkillFrontmatter(`---\nname: x\n---\n`)).toThrow(/missing required field 'description'/i);
+  });
+
+  it('truncates long descriptions to the database limit', () => {
+    const longDescription = 'x'.repeat(1100);
+    const parsed = parseSkillFrontmatter(`---\nname: long-desc\ndescription: ${longDescription}\n---\nbody\n`);
+
+    expect(parsed.frontmatter.description).toHaveLength(1024);
   });
 
   it('builds canonical markdown with optional prerequisite lists', () => {
@@ -112,7 +120,7 @@ Body
     expect(() => parseSkillFrontmatter(`---\nname: big\n---\n${oversizedBody}`)).toThrow(
       /maximum length/i,
     );
-    expect(() => parseSkillFrontmatter('---\n---\n')).toThrow(/frontmatter is empty/i);
+    expect(() => parseSkillFrontmatter('---\n---\n')).toThrow(SkillFrontmatterParseError);
     expect(() => parseSkillFrontmatter('---\ndescription: missing name\n---\n')).toThrow(
       /missing required field 'name'/i,
     );
