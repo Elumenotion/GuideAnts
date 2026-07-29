@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type { MessageDto, StreamingMessage, StreamingToolActivity } from '../../types/conversation';
 import { api } from '../../services/api';
 import type { ActionType, ExtendedConversationState } from './types';
@@ -21,6 +21,15 @@ export function useStreamingEventHandler(
     loadNotebookFiles, showToast,
     projectId, notebookId, conversationId, setCurrentStreamController,
   } = deps;
+
+  // Tracks which conversations we've already made an auto-title decision for in this
+  // session, so the decision is only ever made once per conversation (on its first
+  // completed turn) instead of on every turn — this callback closes over a `state` that
+  // goes stale once its dependency array stops changing, so re-deriving "is this the
+  // first turn" from `state.messages` on every event isn't reliable. The server is still
+  // the source of truth for whether the title actually gets applied (it no-ops once the
+  // conversation already has a non-default title).
+  const titleGenAttemptedRef = useRef<Set<string>>(new Set());
 
   return useCallback((event: { type: string; data: any }) => {
     if (['user_message', 'tool_result', 'assistant_message'].includes(event.type)) {
@@ -92,16 +101,19 @@ export function useStreamingEventHandler(
           try { window.dispatchEvent(new Event('refresh-notebook-files')); } catch {}
 
           try {
-            const hasPriorCompletedAssistantTurn = (state.messages || []).some(
-              m => m.role?.toLowerCase() === 'assistant' && !m.id.startsWith('streaming-')
-            );
-            if (!hasPriorCompletedAssistantTurn) {
-              api.projects.notebooks.conversations
-                .generateTitle(projectId, notebookId, conversationId)
-                .then(() => {
-                  try { window.dispatchEvent(new Event('refresh-conversations')); } catch {}
-                })
-                .catch(err => console.warn('Auto title generation failed:', err));
+            if (!titleGenAttemptedRef.current.has(conversationId)) {
+              titleGenAttemptedRef.current.add(conversationId);
+              const hasPriorCompletedAssistantTurn = (state.messages || []).some(
+                m => m.role?.toLowerCase() === 'assistant' && !m.id.startsWith('streaming-')
+              );
+              if (!hasPriorCompletedAssistantTurn) {
+                api.projects.notebooks.conversations
+                  .generateTitle(projectId, notebookId, conversationId)
+                  .then(() => {
+                    try { window.dispatchEvent(new Event('refresh-conversations')); } catch {}
+                  })
+                  .catch(err => console.warn('Auto title generation failed:', err));
+              }
             }
           } catch (e) {
             // Best-effort

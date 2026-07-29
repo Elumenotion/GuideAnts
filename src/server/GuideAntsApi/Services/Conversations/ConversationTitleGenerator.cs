@@ -9,6 +9,12 @@ public static class ConversationTitleGenerator
 {
     public sealed record Result(bool Found, string Title);
 
+    private static readonly string[] DefaultTitles = { "New Conversation", "Untitled" };
+
+    private static bool IsDefaultTitle(string? title) =>
+        string.IsNullOrWhiteSpace(title) ||
+        DefaultTitles.Any(t => string.Equals(t, title.Trim(), StringComparison.OrdinalIgnoreCase));
+
     public static async Task<Result> GenerateAndApplyAsync(
         ApplicationDbContext db,
         Guid conversationId,
@@ -23,6 +29,13 @@ public static class ConversationTitleGenerator
         if (conversation == null)
         {
             return new Result(false, string.Empty);
+        }
+
+        if (!IsDefaultTitle(conversation.Title))
+        {
+            // Conversation already has a user-set or previously generated title — never
+            // clobber it on subsequent turns.
+            return new Result(true, conversation.Title);
         }
 
         var dialogBuilder = new StringBuilder();
