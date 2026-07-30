@@ -445,52 +445,29 @@ public sealed partial class ApplicationSettingsService
     };
 
     /// <summary>
-    /// Returns the effective reasoning choices for a model: the model's own
-    /// <c>ReasoningChoicesJson</c> when present, otherwise the choices declared
-    /// by the model's assigned runtime profile's ThinkingControl (e.g. Gemini).
-    /// This mirrors the same resolution logic used by <c>CatalogService</c>.
+    /// Returns the effective reasoning choices for a model from row-owned ReasoningChoicesJson.
+    /// Llama-cpp models may derive choices from model-owned ThinkingControlJson when the array is absent.
     /// </summary>
-    private async Task<IReadOnlyList<string>> ResolveEffectiveReasoningChoicesAsync(
+    private Task<IReadOnlyList<string>> ResolveEffectiveReasoningChoicesAsync(
         DataModel.Models.Model model,
         CancellationToken cancellationToken)
     {
+        _ = cancellationToken;
         var modelChoices = ParseReasoningChoices(model.ReasoningChoicesJson);
         if (modelChoices.Count > 0)
         {
-            return modelChoices;
+            return Task.FromResult<IReadOnlyList<string>>(modelChoices);
         }
 
         if (string.Equals(model.Provider, "llama-cpp", StringComparison.OrdinalIgnoreCase)
             && ModelChatBehavior.HasConfiguredBehavior(model))
         {
             var profile = ModelChatBehavior.ToRuntimeProfileData(model);
-            return profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? [];
+            return Task.FromResult<IReadOnlyList<string>>(
+                profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? []);
         }
 
-        if (string.IsNullOrEmpty(model.RuntimeConfigJson))
-        {
-            return [];
-        }
-
-        try
-        {
-            var runtimeConfig = JsonSerializer.Deserialize<ModelRuntimeConfigDto>(
-                model.RuntimeConfigJson, SectionsJsonCaseInsensitive);
-
-            if (string.IsNullOrWhiteSpace(runtimeConfig?.RuntimeProfileId))
-            {
-                return [];
-            }
-
-            var profile = await _runtimeProfileResolver.ResolveAsync(
-                runtimeConfig.RuntimeProfileId, cancellationToken);
-
-            return profile.ThinkingControl.ChoiceActions?.Keys.ToList() ?? [];
-        }
-        catch
-        {
-            return [];
-        }
+        return Task.FromResult<IReadOnlyList<string>>([]);
     }
 
 }

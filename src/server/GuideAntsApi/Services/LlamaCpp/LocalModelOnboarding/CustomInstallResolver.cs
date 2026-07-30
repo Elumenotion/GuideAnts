@@ -14,20 +14,17 @@ public interface ICustomInstallResolver
 public sealed class CustomInstallResolver : ICustomInstallResolver
 {
     private readonly IHuggingFaceTokenResolver _tokenResolver;
-    private readonly IRuntimeProfileResolver _runtimeProfileResolver;
     private readonly ILlamaRuntimeAdminClient _adminClient;
 
     public CustomInstallResolver(
         IHuggingFaceTokenResolver tokenResolver,
-        IRuntimeProfileResolver runtimeProfileResolver,
         ILlamaRuntimeAdminClient adminClient)
     {
         _tokenResolver = tokenResolver;
-        _runtimeProfileResolver = runtimeProfileResolver;
         _adminClient = adminClient;
     }
 
-    public async Task<CustomInstallImmutableInput> ResolveAsync(
+    public Task<CustomInstallImmutableInput> ResolveAsync(
         AddModelRequest request,
         LocalModelOnboardingCommand command,
         CancellationToken cancellationToken = default)
@@ -60,13 +57,12 @@ public sealed class CustomInstallResolver : ICustomInstallResolver
                 remediation: "Open Connections → Hugging Face and save a token before retrying.");
         }
 
-        await _runtimeProfileResolver.ResolveAsync(command.RuntimeProfileId, cancellationToken).ConfigureAwait(false);
         var routerPreset = RouterPresetValidator.ValidateAndNormalize(explicitInput.RouterPreset);
 
         var mmprojFiles = explicitInput.MmprojFiles?.Where(p => !string.IsNullOrWhiteSpace(p)).ToList()
             ?? new List<string>();
 
-        return new CustomInstallImmutableInput(
+        return Task.FromResult(new CustomInstallImmutableInput(
             CatalogModelId: command.CatalogModelId,
             CatalogDisplayName: command.CatalogDisplayName,
             CatalogDescription: command.CatalogDescription,
@@ -78,8 +74,13 @@ public sealed class CustomInstallResolver : ICustomInstallResolver
             ModelFiles: explicitInput.ModelFiles.Select(p => p.Trim()).ToList(),
             MmprojFiles: mmprojFiles.Select(p => p.Trim()).ToList(),
             RouterModelId: command.RouterModelId,
-            RuntimeProfileId: command.RuntimeProfileId,
+            SamplingParametersJson: command.SamplingParametersJson,
+            ReasoningChoicesJson: command.ReasoningChoicesJson,
+            ThinkingControlJson: command.ThinkingControlJson,
+            RequestFieldsWhenToolsPresentJson: command.RequestFieldsWhenToolsPresentJson,
+            CombineSystemAndDeveloperMessages: command.CombineSystemAndDeveloperMessages,
+            ThoughtBlockPattern: command.ThoughtBlockPattern,
             TargetDirectory: explicitInput.TargetDirectory.Trim(),
-            RouterPreset: routerPreset);
+            RouterPreset: routerPreset));
     }
 }

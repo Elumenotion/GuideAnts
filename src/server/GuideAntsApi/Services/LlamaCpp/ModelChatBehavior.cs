@@ -19,6 +19,25 @@ public static class ModelChatBehavior
             model.Description);
     }
 
+    public static RuntimeProfileData ToRowOwnedSamplingProfile(Model model)
+    {
+        return RuntimeProfileDataJson.FromJsonStrings(
+            model.ModelId,
+            model.CombineSystemAndDeveloperMessages,
+            model.ThoughtBlockPattern,
+            model.SamplingParametersJson,
+            "{}",
+            "{}",
+            model.DisplayName,
+            model.Description);
+    }
+
+    public static bool HasRowOwnedSamplingSurface(Model model)
+    {
+        return !string.IsNullOrWhiteSpace(model.SamplingParametersJson)
+            && !string.Equals(model.SamplingParametersJson.Trim(), "{}", StringComparison.Ordinal);
+    }
+
     public static bool HasConfiguredBehavior(Model model)
     {
         return !string.IsNullOrWhiteSpace(model.ThinkingControlJson)

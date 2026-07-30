@@ -1,5 +1,6 @@
-import type { CreateRuntimeProfileRequest, LlamaRuntimeInventoryItemDto, SettingsRuntimeProfileDto } from '../../../types/settings';
+import type { LlamaRuntimeInventoryItemDto } from '../../../types/settings';
 import type { AddModelWizardState } from '../../../pages/settings/types';
+import { LlamaModelChatBehaviorEditor } from '../../../pages/settings/components/catalog/LlamaModelChatBehaviorEditor';
 import { ArtifactGroupPicker } from './ArtifactGroupPicker';
 import { AliasPresetEditor } from './AliasPresetEditor';
 import { stripPresetRowMetadata } from '../routerPreset';
@@ -7,18 +8,10 @@ import { stripPresetRowMetadata } from '../routerPreset';
 export interface CustomHfOnboardingFormProps {
   value: AddModelWizardState;
   onChange: (updates: Partial<AddModelWizardState>) => void;
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   inventory: LlamaRuntimeInventoryItemDto[];
 }
 
-export function CustomHfOnboardingForm({
-  value,
-  onChange,
-  profiles,
-  profilesLoading,
-  inventory,
-}: CustomHfOnboardingFormProps) {
+export function CustomHfOnboardingForm({ value, onChange, inventory }: CustomHfOnboardingFormProps) {
   const chosenAlias = value.llamaRouterModelId.trim();
   const chosenAliasTaken = inventory.some(
     (row) => row.routerModelId === chosenAlias && row.catalogModelIds.length > 0
@@ -27,8 +20,8 @@ export function CustomHfOnboardingForm({
   return (
     <div className="space-y-4">
       <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-        Custom Hugging Face install requires explicit revision, complete artifact group, alias, profile, target directory,
-        and alias preset. Nothing is inferred from catalog defaults.
+        Custom Hugging Face install requires explicit revision, complete artifact group, alias, target directory, alias
+        preset, and model chat behavior. Nothing is inferred from runtime profiles.
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -53,37 +46,29 @@ export function CustomHfOnboardingForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div className="space-y-1">
-          <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Router alias</label>
-          <input
-            type="text"
-            value={value.llamaRouterModelId}
-            onChange={(event) => onChange({ llamaRouterModelId: event.target.value })}
-            className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm"
-            spellCheck={false}
-          />
-          {chosenAliasTaken ? (
-            <p className="text-xs text-amber-700">Alias already has catalog rows.</p>
-          ) : null}
-        </div>
-        <div className="space-y-1">
-          <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Runtime profile</label>
-          <select
-            value={value.runtimeProfileId}
-            onChange={(event) => onChange({ runtimeProfileId: event.target.value })}
-            disabled={profilesLoading}
-            className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
-          >
-            <option value="">{profilesLoading ? 'Loading profiles…' : 'Select runtime profile'}</option>
-            {profiles.map((profile) => (
-              <option key={profile.profileId} value={profile.profileId}>
-                {profile.displayName} ({profile.profileId})
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="space-y-1">
+        <label className="block text-xs font-medium uppercase tracking-wide text-gray-600">Router alias</label>
+        <input
+          type="text"
+          value={value.llamaRouterModelId}
+          onChange={(event) => onChange({ llamaRouterModelId: event.target.value })}
+          className="w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm"
+          spellCheck={false}
+        />
+        {chosenAliasTaken ? <p className="text-xs text-amber-700">Alias already has catalog rows.</p> : null}
       </div>
+
+      <LlamaModelChatBehaviorEditor
+        value={{
+          samplingParametersJson: value.samplingParametersJson,
+          reasoningChoicesJson: value.reasoningChoicesJson,
+          thinkingControlJson: value.thinkingControlJson,
+          requestFieldsWhenToolsPresentJson: value.requestFieldsWhenToolsPresentJson,
+          combineSystemAndDeveloperMessages: value.combineSystemAndDeveloperMessages,
+          thoughtBlockPattern: value.thoughtBlockPattern,
+        }}
+        onChange={onChange}
+      />
 
       <ArtifactGroupPicker
         repository={value.llamaHuggingFaceRepository}
@@ -122,5 +107,3 @@ export function CustomHfOnboardingForm({
     </div>
   );
 }
-
-export type { CreateRuntimeProfileRequest };

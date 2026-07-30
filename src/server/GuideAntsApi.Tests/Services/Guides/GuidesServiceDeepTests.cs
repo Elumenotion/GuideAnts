@@ -184,20 +184,24 @@ public sealed class GuidesServiceDeepTests
     }
 
     [TestMethod]
-    public async Task CreateGuideAsync_CatalogModelWithRuntimeProfile_persists_temperature_and_topP()
+    public async Task CreateGuideAsync_CatalogModelWithRowOwnedSampling_persists_temperature_and_topP()
     {
-        await using var context = NewContext("catalog-profile-temp");
+        await using var context = NewContext("catalog-row-temp");
         context.Models.Add(new Model
         {
             ModelId = "gpt-x",
             DisplayName = "GPT X",
             Provider = "openai-chat",
-            RuntimeConfigJson = """{"runtimeProfileId":"openai_chat_standard"}"""
+            SamplingParametersJson = """
+                {
+                  "temperature": { "key": "temperature", "label": "Temperature", "description": "", "min": 0, "max": 2, "step": 0.1, "default": 1, "displayOrder": 0, "exposedInGuideBuilder": true },
+                  "top_p": { "key": "top_p", "label": "Top P", "description": "", "min": 0, "max": 1, "step": 0.05, "default": 1, "displayOrder": 1, "exposedInGuideBuilder": true }
+                }
+                """
         });
         await context.SaveChangesAsync();
 
-        var resolver = CreateResolverWithOpenAiChatStandardProfile("openai_chat_standard");
-        var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
 
         var dto = MinimalCreateGuideDto("Guide") with { ModelId = "gpt-x", Temperature = 0.6f, TopP = 0.7 };
 
@@ -209,20 +213,24 @@ public sealed class GuidesServiceDeepTests
     }
 
     [TestMethod]
-    public async Task UpdateGuideAsync_CatalogModelWithRuntimeProfile_persists_temperature_and_topP()
+    public async Task UpdateGuideAsync_CatalogModelWithRowOwnedSampling_persists_temperature_and_topP()
     {
-        await using var context = NewContext("catalog-profile-update-temp");
+        await using var context = NewContext("catalog-row-update-temp");
         context.Models.Add(new Model
         {
             ModelId = "gpt-x",
             DisplayName = "GPT X",
             Provider = "openai-chat",
-            RuntimeConfigJson = """{"runtimeProfileId":"openai_chat_standard"}"""
+            SamplingParametersJson = """
+                {
+                  "temperature": { "key": "temperature", "label": "Temperature", "description": "", "min": 0, "max": 2, "step": 0.1, "default": 1, "displayOrder": 0, "exposedInGuideBuilder": true },
+                  "top_p": { "key": "top_p", "label": "Top P", "description": "", "min": 0, "max": 1, "step": 0.05, "default": 1, "displayOrder": 1, "exposedInGuideBuilder": true }
+                }
+                """
         });
         await context.SaveChangesAsync();
 
-        var resolver = CreateResolverWithOpenAiChatStandardProfile("openai_chat_standard");
-        var service = GuidesServiceTestHelper.CreateGuidesService(context, resolver);
+        var service = GuidesServiceTestHelper.CreateGuidesService(context);
 
         var created = await service.CreateGuideAsync(
             MinimalCreateGuideDto("Guide") with { ModelId = "gpt-x", Temperature = 0.5f, TopP = 0.8 });

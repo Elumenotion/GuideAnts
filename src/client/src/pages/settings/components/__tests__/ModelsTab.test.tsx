@@ -27,7 +27,6 @@ const llamaModel: SettingsModelDto = {
   provider: 'llama-cpp',
   runtimeConfigJson: JSON.stringify({
     routerModelId: 'alias-1',
-    runtimeProfileId: 'profile-1',
   }),
   isActive: true,
   created: '2026-01-01T00:00:00Z',
@@ -53,8 +52,6 @@ function renderModelsTab(overrides: Partial<React.ComponentProps<typeof ModelsTa
         deletingModelId={null}
         onRetryLoadModels={vi.fn()}
         onRequestDeleteModel={vi.fn()}
-        profiles={[]}
-        profilesLoading={false}
         onCatalogEdited={vi.fn().mockResolvedValue(undefined)}
         onOpenAddModel={vi.fn()}
         activeAddOperation={null}
@@ -115,8 +112,6 @@ describe('ModelsTab', () => {
           deletingModelId={null}
           onRetryLoadModels={onRetryLoadModels}
           onRequestDeleteModel={vi.fn()}
-          profiles={[]}
-          profilesLoading={false}
           onCatalogEdited={vi.fn()}
           onOpenAddModel={vi.fn()}
           activeAddOperation={null}
@@ -145,7 +140,6 @@ describe('ModelsTab', () => {
       displayName: 'Loaded Llama',
       runtimeConfigJson: JSON.stringify({
         routerModelId: 'alias-loaded',
-        runtimeProfileId: 'profile-1',
       }),
     };
     const invalidLlama: SettingsModelDto = {

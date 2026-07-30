@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../services/api';
 import type { ServiceEditorStateDto, SettingsSectionDto } from '../../types/settings';
-import { SettingsModal } from '../../pages/settings/components/shared/SettingsModal';
+import { SettingsModal, type SettingsModalSize } from '../../pages/settings/components/shared/SettingsModal';
 import {
   FOUNDRY_CORE_SECTION,
   FOUNDRY_DOCUMENT_INTELLIGENCE_SECTION,
@@ -725,12 +725,15 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
   const nonHuggingFaceDraftCount = foundry.draftModels.length + gemini.draftModels.length + openai.draftModels.length + openRouter.draftModels.length;
   const nonOpenRouterDraftCount = foundry.draftModels.length + gemini.draftModels.length + openai.draftModels.length + huggingFace.draftModels.length;
 
+  const modalSize: SettingsModalSize =
+    step === 'provider' ? 'sm' : step === 'models' ? 'xl' : step === 'finish' ? 'md' : 'lg';
+
   return (
     <SettingsModal
       isOpen={isOpen}
       title="Add AI Services Wizard"
       onClose={closeWizard}
-      maxWidthClass="max-w-4xl"
+      size={modalSize}
       disableDismiss={saving}
       disableOverlayDismiss
       footer={(
@@ -952,8 +955,6 @@ export default function AddAiServicesWizard({ isOpen, onDismiss, onOpenSettings 
             <LocalAiModelsStep
               draftModels={localAi.draftModels}
               existingModels={existingLocalModels}
-              profiles={localAi.profiles}
-              profilesLoading={localAi.profilesLoading}
               inventory={localAi.inventory}
               inventoryLoading={localAi.inventoryLoading}
               installError={localAi.installError}

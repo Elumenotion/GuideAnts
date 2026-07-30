@@ -45,7 +45,7 @@ namespace GuideAntsApi.DataModel.Models
         /// <summary>
         /// Optional JSON string containing runtime configuration for this model.
         /// For llama-cpp: { routerModelId }.
-        /// For cloud models: { runtimeProfileId } — references the profile used at setup time.
+        /// Non-local providers do not persist runtime config; parameter surfaces live on the model row.
         /// </summary>
         public string? RuntimeConfigJson { get; set; }
 

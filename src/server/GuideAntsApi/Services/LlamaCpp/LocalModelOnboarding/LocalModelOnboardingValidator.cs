@@ -1,3 +1,4 @@
+using System.Text.Json;
 using GuideAntsApi.Configuration;
 using GuideAntsApi.Models.Settings;
 using GuideAntsApi.Services.HuggingFace;
@@ -64,6 +65,13 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         {
             await ValidateCuratedAsync(request, command, cancellationToken).ConfigureAwait(false);
             return;
+        }
+
+        var usesRowOwnedChatBehavior = command.ExplicitHuggingFace is not null
+            || string.Equals(command.InstallSource, LocalModelInstallSources.ExistingAlias, StringComparison.OrdinalIgnoreCase);
+        if (usesRowOwnedChatBehavior)
+        {
+            ValidateRowOwnedChatBehavior(command);
         }
 
         if (command.ExplicitHuggingFace is not null)
@@ -327,15 +335,6 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
                 remediation: "Enter a display name in Step 2.");
         }
 
-        if (string.IsNullOrWhiteSpace(command.RuntimeProfileId))
-        {
-            throw new AddModelException(
-                code: "RUNTIME_PROFILE_NOT_FOUND",
-                step: "validation",
-                message: "Runtime profile is required.",
-                remediation: "Pick a runtime profile in Step 3.");
-        }
-
         if (string.IsNullOrWhiteSpace(command.RouterModelId))
         {
             throw new AddModelException(
@@ -343,6 +342,17 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
                 step: "validation",
                 message: "Router alias is required.",
                 remediation: "Pick a valid router alias in Step 3.");
+        }
+
+        if (command.ExplicitHuggingFace is null
+            && string.Equals(command.InstallSource, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(command.RuntimeProfileId))
+        {
+            throw new AddModelException(
+                code: "RUNTIME_PROFILE_NOT_FOUND",
+                step: "validation",
+                message: "Runtime profile is required for legacy Hugging Face onboarding.",
+                remediation: "Pick a runtime profile in Step 3.");
         }
 
         if (string.Equals(command.InstallSource, LocalModelInstallSources.HuggingFace, StringComparison.OrdinalIgnoreCase))
@@ -380,6 +390,47 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
                 step: "validation",
                 message: "Prompt cache RAM (MiB) must be a whole number from 0 to 262144.",
                 remediation: "Enter a valid cache value or leave it blank to use container defaults.");
+        }
+    }
+
+    private static void ValidateRowOwnedChatBehavior(LocalModelOnboardingCommand command)
+    {
+        if (!command.HasProviderConfigChatBehavior)
+        {
+            throw new AddModelException(
+                code: "INSTALL_STEP_FAILED",
+                step: "validation",
+                message: "Model chat behavior is required for custom and existing-alias onboarding.",
+                remediation: "Submit providerConfig.thinkingControlJson and the model chat behavior fields.");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(command.ThinkingControlJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                throw new JsonException("thinkingControlJson must be a JSON object.");
+            }
+
+            _ = command.ToRowOwnedRuntimeProfileData();
+        }
+        catch (JsonException ex)
+        {
+            throw new AddModelException(
+                code: "INSTALL_STEP_FAILED",
+                step: "validation",
+                message: $"Model chat behavior is invalid: {ex.Message}",
+                remediation: "Submit a valid providerConfig.thinkingControlJson object.",
+                innerException: ex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new AddModelException(
+                code: "INSTALL_STEP_FAILED",
+                step: "validation",
+                message: $"Model chat behavior is invalid: {ex.Message}",
+                remediation: "Correct the providerConfig chat behavior JSON fields.",
+                innerException: ex);
         }
     }
 
@@ -435,15 +486,16 @@ public sealed class LocalModelOnboardingValidator : ILocalModelOnboardingValidat
         LocalModelOnboardingCommand command,
         CancellationToken cancellationToken)
     {
-        var profile = await _runtimeProfileResolver
-            .ResolveAsync(command.RuntimeProfileId.Trim(), cancellationToken)
-            .ConfigureAwait(false);
+        var chatBehavior = command.ExplicitHuggingFace is not null
+            || string.Equals(command.InstallSource, LocalModelInstallSources.ExistingAlias, StringComparison.OrdinalIgnoreCase)
+            ? command.ToRowOwnedRuntimeProfileData()
+            : await _runtimeProfileResolver.ResolveAsync(command.RuntimeProfileId.Trim(), cancellationToken).ConfigureAwait(false);
 
         _chatTargetValidator.Validate(new ChatTarget(
             ModelId: command.CatalogModelId,
             Provider: "llama-cpp",
             RuntimeConfigJson: LocalModelOnboardingOrchestrator.BuildLlamaLocalRuntimeJson(command),
-            LlamaChatBehavior: profile));
+            LlamaChatBehavior: chatBehavior));
     }
 
     private static AddModelException MapRoutingException(RoutingException exception)

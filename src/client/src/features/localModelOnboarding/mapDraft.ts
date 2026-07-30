@@ -3,12 +3,20 @@ import type { AddModelWizardState } from '../../pages/settings/types';
 import type { LocalModelOnboardingDraft } from './contracts';
 import { stripPresetRowMetadata } from './routerPreset';
 
+const EMPTY_CHAT_BEHAVIOR = {
+  samplingParametersJson: '{}',
+  reasoningChoicesJson: '',
+  thinkingControlJson: '{}',
+  requestFieldsWhenToolsPresentJson: '{}',
+  combineSystemAndDeveloperMessages: true,
+  thoughtBlockPattern: '',
+} as const;
+
 export function mapSettingsAddModelStateToOnboardingDraft(
   state: AddModelWizardState
 ): LocalModelOnboardingDraft {
   return {
     installSource: state.llamaInstallSource,
-    runtimeProfileId: state.runtimeProfileId,
     routerModelId: state.llamaRouterModelId,
     huggingFaceRepository: state.llamaHuggingFaceRepository,
     huggingFaceResolvedRevision: state.llamaHuggingFaceResolvedRevision,
@@ -24,6 +32,12 @@ export function mapSettingsAddModelStateToOnboardingDraft(
     catalogDescription: state.catalogDescription,
     catalogDisplayOrder: state.catalogDisplayOrder,
     catalogIsActive: state.catalogIsActive,
+    samplingParametersJson: state.samplingParametersJson,
+    reasoningChoicesJson: state.reasoningChoicesJson,
+    thinkingControlJson: state.thinkingControlJson,
+    requestFieldsWhenToolsPresentJson: state.requestFieldsWhenToolsPresentJson,
+    combineSystemAndDeveloperMessages: state.combineSystemAndDeveloperMessages,
+    thoughtBlockPattern: state.thoughtBlockPattern,
   };
 }
 
@@ -32,7 +46,6 @@ export function mapLocalAiModelDraftToOnboardingDraft(
 ): LocalModelOnboardingDraft {
   return {
     installSource: draft.installSource,
-    runtimeProfileId: draft.runtimeProfileId,
     routerModelId: draft.routerModelId,
     huggingFaceRepository: draft.huggingFaceRepository,
     huggingFaceResolvedRevision: draft.huggingFaceResolvedRevision,
@@ -46,5 +59,13 @@ export function mapLocalAiModelDraftToOnboardingDraft(
     catalogModelId: draft.catalogModelId,
     catalogDisplayName: draft.catalogDisplayName,
     catalogIsActive: true,
+    samplingParametersJson: draft.samplingParametersJson ?? EMPTY_CHAT_BEHAVIOR.samplingParametersJson,
+    reasoningChoicesJson: draft.reasoningChoicesJson ?? EMPTY_CHAT_BEHAVIOR.reasoningChoicesJson,
+    thinkingControlJson: draft.thinkingControlJson ?? EMPTY_CHAT_BEHAVIOR.thinkingControlJson,
+    requestFieldsWhenToolsPresentJson:
+      draft.requestFieldsWhenToolsPresentJson ?? EMPTY_CHAT_BEHAVIOR.requestFieldsWhenToolsPresentJson,
+    combineSystemAndDeveloperMessages:
+      draft.combineSystemAndDeveloperMessages ?? EMPTY_CHAT_BEHAVIOR.combineSystemAndDeveloperMessages,
+    thoughtBlockPattern: draft.thoughtBlockPattern ?? EMPTY_CHAT_BEHAVIOR.thoughtBlockPattern,
   };
 }

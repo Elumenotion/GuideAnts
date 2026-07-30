@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FaEdit, FaPlus, FaRedo, FaSpinner, FaTrash } from 'react-icons/fa';
 import LoadingSpinner from '../../../components/LoadingSpinner';
 import { api } from '../../../services/api';
@@ -6,11 +6,10 @@ import {
   ChatTargetReadinessDto,
   LlamaRuntimeInventoryItemDto,
   SettingsModelDto,
-  SettingsRuntimeProfileDto,
 } from '../../../types/settings';
 import { ActiveAddOperationState } from '../types';
 import { getCatalogProviderDisplayName } from '../constants/displayLabels';
-import { formatDateTime, parseCanonicalLocalRuntimeJson, parseRuntimeProfileId } from '../utils';
+import { formatDateTime, parseCanonicalLocalRuntimeJson } from '../utils';
 import { IconActionButton, TextActionButton } from './shared/ActionButtons';
 import { CatalogRowEditModal } from './catalog/CatalogRowEditModal';
 
@@ -23,8 +22,6 @@ interface ModelsTabProps {
   onRequestDeleteModel: (modelId: string) => void;
   llamaInventory?: LlamaRuntimeInventoryItemDto[];
   llamaInventoryLoading?: boolean;
-  profiles: SettingsRuntimeProfileDto[];
-  profilesLoading: boolean;
   onCatalogEdited: () => Promise<void>;
   onOpenAddModel: (providerPreselect?: string) => void;
   activeAddOperation: ActiveAddOperationState | null;
@@ -44,7 +41,7 @@ type LocalRuntimeClassification =
   | { state: 'n/a' }
   | { state: 'missing-json' }
   | { state: 'invalid-json'; detail: string }
-  | { state: 'ok'; routerModelId: string; runtimeProfileId?: string };
+  | { state: 'ok'; routerModelId: string };
 
 function classifyLocalRuntime(model: SettingsModelDto): LocalRuntimeClassification {
   if (model.provider !== 'llama-cpp') {
@@ -60,14 +57,14 @@ function classifyLocalRuntime(model: SettingsModelDto): LocalRuntimeClassificati
       detail: 'Missing required field routerModelId.',
     };
   }
-  return { state: 'ok', routerModelId: parsed.routerModelId, runtimeProfileId: parsed.runtimeProfileId };
+  return { state: 'ok', routerModelId: parsed.routerModelId };
 }
 
 /**
  * An llama-cpp alias that is merely `unloaded` is not a configuration problem —
  * chat dispatch and the notebook preload path auto-load aliases on demand.
  * Labelling it "Blocked" confuses operators with the real blocker cases
- * (missing credentials, missing runtime profile, missing artifacts). Detect
+ * (missing credentials, missing model chat behavior, missing artifacts). Detect
  * the "only blocker is RUNTIME_STATE unloaded" shape and render it as a
  * neutral "Not loaded" pill instead.
  */
@@ -139,8 +136,6 @@ export function ModelsTab({
   onRequestDeleteModel,
   llamaInventory,
   llamaInventoryLoading,
-  profiles,
-  profilesLoading,
   onCatalogEdited,
   onOpenAddModel,
   activeAddOperation,
@@ -200,22 +195,6 @@ export function ModelsTab({
     return () => {
       cancelled = true;
     };
-  }, [orderedModels]);
-
-  // Phase F (R-6.*): precompute per-profile usage ("Used by: m1, m2, …")
-  // from the catalog's declared runtime profile ids. Only llama-cpp rows
-  // contribute. If a model references an unknown profile, the counter still
-  // shows the id — we don't want to silently drop misconfigurations.
-  const profileUsage = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const model of orderedModels) {
-      const cls = classifyLocalRuntime(model);
-      if (cls.state !== 'ok' || !cls.runtimeProfileId) continue;
-      const list = map.get(cls.runtimeProfileId) ?? [];
-      list.push(model.modelId);
-      map.set(cls.runtimeProfileId, list);
-    }
-    return map;
   }, [orderedModels]);
 
   function localLlamaBadge(model: SettingsModelDto): { label: string; tone: 'ok' | 'warn' | 'err' | 'pending' | 'neutral' } | null {
@@ -299,15 +278,14 @@ export function ModelsTab({
           <div className="overflow-hidden">
             <table className="w-full table-fixed divide-y divide-gray-200 text-sm">
               <colgroup>
-                <col className="w-[18%]" />
+                <col className="w-[20%]" />
+                <col className="w-[14%]" />
                 <col className="w-[12%]" />
-                <col className="w-[11%]" />
-                <col className="w-[5%]" />
-                <col className="w-[12%]" />
-                <col className="w-[8%]" />
+                <col className="w-[6%]" />
+                <col className="w-[14%]" />
                 <col className="w-[9%]" />
-                <col className="w-[12%]" />
-                <col className="w-[13%]" />
+                <col className="w-[10%]" />
+                <col className="w-[15%]" />
               </colgroup>
               <thead className="bg-gray-50">
                 <tr>
@@ -318,7 +296,6 @@ export function ModelsTab({
                   <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Updated</th>
                   <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Readiness</th>
                   <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Local runtime</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Profile</th>
                   <th className="px-3 py-3 text-right text-xs font-medium uppercase tracking-wide text-gray-500">Actions</th>
                 </tr>
               </thead>
@@ -326,9 +303,6 @@ export function ModelsTab({
                 {orderedModels.map((model) => {
                   const llamaBadge = localLlamaBadge(model);
                   const runtimeClassification = classifyLocalRuntime(model);
-                  const profileId = parseRuntimeProfileId(model.runtimeConfigJson) || null;
-                  const usedBy = profileId ? profileUsage.get(profileId) ?? [] : [];
-                  const othersUsing = usedBy.filter((id) => id !== model.modelId);
                   const highlighted = highlightedModelId === model.modelId;
                   return (
                   <tr
@@ -377,20 +351,6 @@ export function ModelsTab({
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-gray-700">
-                      {profileId ? (
-                        <div className="flex min-w-0 flex-col gap-0.5">
-                          <span className="truncate font-mono text-xs text-gray-900" title={profileId}>{profileId}</span>
-                          {othersUsing.length > 0 && (
-                            <span className="text-xs text-gray-500" title={othersUsing.join(', ')}>
-                              Also used by {othersUsing.length} model(s)
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
                     <td className="whitespace-nowrap px-3 py-3 text-right">
                       <div
                         className="flex items-center justify-end gap-1.5"
@@ -419,7 +379,7 @@ export function ModelsTab({
                 })}
                 {orderedModels.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-3 py-8 text-center text-gray-600">
+                    <td colSpan={8} className="px-3 py-8 text-center text-gray-600">
                       No models configured yet.
                     </td>
                   </tr>
@@ -432,8 +392,6 @@ export function ModelsTab({
       <CatalogRowEditModal
         model={editingModel}
         orderedModels={orderedModels}
-        profiles={profiles}
-        profilesLoading={profilesLoading}
         inventory={llamaInventory}
         isOpen={editingModel !== null}
         onClose={() => setEditingModel(null)}
